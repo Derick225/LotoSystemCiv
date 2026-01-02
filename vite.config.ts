@@ -18,14 +18,16 @@ export default defineConfig(({ mode }) => {
 
   // MAPPING SPÉCIFIQUE :
   // Permet d'utiliser process.env.API_KEY dans le code (standard Google GenAI SDK)
-  // tout en utilisant VITE_API_KEY dans le .env pour la compatibilité Vite.
+  // tout en utilisant VITE_API_KEY ou VITE_PUBLIC_API_KEY dans le .env pour la compatibilité Vite.
   if (env.VITE_API_KEY) {
     clientEnv['API_KEY'] = env.VITE_API_KEY;
+  } else if (env.VITE_PUBLIC_API_KEY) {
+    clientEnv['API_KEY'] = env.VITE_PUBLIC_API_KEY;
   }
 
   return {
     plugins: [react()],
-    // Expose les variables filtrées au code client via `process.env` pour compatibilité SDK
+    // Expose les variables filtrées au code client via `process.env`
     define: {
       'process.env': JSON.stringify(clientEnv)
     },
@@ -36,9 +38,9 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      target: 'esnext', // Cible moderne pour meilleures perfs
-      sourcemap: false, // Désactivé en prod pour sécurité
-      minify: 'esbuild',
+      target: 'esnext',
+      sourcemap: false, // Désactivé pour la production (Sécurité & Taille)
+      minify: 'esbuild', // Minification rapide et efficace
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {

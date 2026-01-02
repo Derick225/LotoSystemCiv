@@ -15,9 +15,9 @@ const getEnv = (key: string): string => {
   return (val || '').trim();
 };
 
-// Récupération explicite des variables du .env
-const SUPABASE_URL = getEnv('VITE_SUPABASE_URL');
-const SUPABASE_ANON_KEY = getEnv('VITE_SUPABASE_ANON_KEY');
+// Récupération explicite des variables du .env (Support VITE_ et VITE_PUBLIC_)
+const SUPABASE_URL = getEnv('VITE_SUPABASE_URL') || getEnv('VITE_PUBLIC_SUPABASE_URL');
+const SUPABASE_ANON_KEY = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('VITE_PUBLIC_SUPABASE_ANON_KEY');
 
 // Validation de la configuration
 const isValidUrl = (url: string) => {
@@ -32,16 +32,12 @@ const isValidUrl = (url: string) => {
 const isConfigured = isValidUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 
 if (!isConfigured) {
-  console.error(
-    "%c[Nexus Critical] Configuration Supabase invalide ou manquante.", 
-    "color: #ef4444; font-weight: bold; font-size: 14px;"
+  // En production, on avertit clairement que la configuration manque
+  console.warn(
+    "[Nexus System] Configuration Supabase manquante ou invalide. L'application fonctionnera en mode local/restreint."
   );
-  console.info("Assurez-vous que le fichier .env contient VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.");
 } else {
-  console.log(
-    "%c[Nexus Core] Connexion Supabase initialisée", 
-    "color: #10b981; font-weight: bold;"
-  );
+  console.log("[Nexus System] Connexion Supabase établie.");
 }
 
 /**
@@ -50,8 +46,8 @@ if (!isConfigured) {
  * plutôt que de tenter de joindre une URL fictive.
  */
 export const supabase = createClient(
-  isConfigured ? SUPABASE_URL : '',
-  isConfigured ? SUPABASE_ANON_KEY : '',
+  isConfigured ? SUPABASE_URL : 'https://placeholder.supabase.co',
+  isConfigured ? SUPABASE_ANON_KEY : 'placeholder',
   {
     auth: {
       persistSession: true,
