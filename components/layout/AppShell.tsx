@@ -14,7 +14,7 @@ interface AppShellProps {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   theme: string;
-  setTheme: (theme: string) => void;
+  setTheme: (theme: 'light' | 'dark') => void;
   onReset: () => void;
   showWallet: boolean;
   setShowWallet: (show: boolean) => void;

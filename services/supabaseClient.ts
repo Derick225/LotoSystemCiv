@@ -1,110 +1,117 @@
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-import { createClient } from '@supabase/supabase-js';
-
-// Fonction utilitaire pour lire les variables d'environnement de manière robuste
-const getEnv = (key: string): string => {
-  let val = '';
-  // 1. Essai via Vite (import.meta.env) - Standard moderne
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-    val = import.meta.env[key];
-  } 
-  // 2. Fallback via process.env (Compatible avec certaines configs de build ou tests)
-  else if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    val = process.env[key];
-  }
-  return (val || '').trim();
+/**
+ * Récupère une variable d'environnement Vite.
+ * ⚠️ Dans Vite, seules les variables commençant par `VITE_` sont exposées via `import.meta.env`.
+ */
+const getViteEnv = (key: string): string => {
+  const value = import.meta.env[key];
+  return typeof value === 'string' ? value.trim() : '';
 };
 
-// Récupération explicite des variables du .env (Support VITE_ et VITE_PUBLIC_)
-const urlSource = getEnv('VITE_SUPABASE_URL') ? 'VITE_' : getEnv('VITE_PUBLIC_SUPABASE_URL') ? 'VITE_PUBLIC_' : null;
-const keySource = getEnv('VITE_SUPABASE_ANON_KEY') ? 'VITE_' : getEnv('VITE_PUBLIC_SUPABASE_ANON_KEY') ? 'VITE_PUBLIC_' : null;
+// Récupération directe (pas de fallback ni de "VITE_PUBLIC_" redondant)
+const SUPABASE_URL = getViteEnv('VITE_SUPABASE_URL');
+const SUPABASE_ANON_KEY = getViteEnv('VITE_SUPABASE_ANON_KEY');
 
-const SUPABASE_URL = getEnv('VITE_SUPABASE_URL') || getEnv('VITE_PUBLIC_SUPABASE_URL');
-const SUPABASE_ANON_KEY = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('VITE_PUBLIC_SUPABASE_ANON_KEY');
-
-// Validation de la configuration
-const isValidUrl = (url: string) => {
+/**
+ * Vérifie que l’URL est valide (doit être une URL Supabase en HTTPS).
+ */
+const isValidSupabaseUrl = (url: string): boolean => {
   try {
     const u = new URL(url);
-    return u.protocol === 'https:' && (u.hostname.endsWith('.supabase.co') || u.hostname.endsWith('.supabase.com') || u.hostname === 'localhost');
+    return (
+      u.protocol === 'https:' &&
+      (u.hostname.endsWith('.supabase.co') || u.hostname.endsWith('.supabase.com'))
+    );
   } catch {
     return false;
   }
 };
 
-const isConfigured = isValidUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
+/**
+ * Indique si la configuration minimale est présente.
+ */
+export const isSupabaseConfigured = (): boolean => {
+  return isValidSupabaseUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
+};
 
-if (!isConfigured) {
-  // En production, on avertit clairement que la configuration manque
-  console.warn(
-    "[Nexus System] Configuration Supabase manquante ou invalide. L'application fonctionnera en mode local/restreint."
+// Validation stricte au démarrage
+if (!isSupabaseConfigured()) {
+  console.error(
+    '[Nexus System] ❌ Configuration Supabase manquante ou invalide.',
+    '\nAssurez-vous que VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sont définies dans .env.local et sur Vercel.',
+    '\nDocumentation : https://supabase.com/docs/guides/getting-started/tutorials/with-vite'
   );
-} else {
-  // Masquage de l'URL pour la sécurité dans les logs, mais confirmation de la cible
-  const maskedUrl = SUPABASE_URL.replace(/^(https:\/\/)([^.]+)(.+)$/, '$1****$3');
-  console.log(`[Nexus System] Connexion Supabase établie vers ${maskedUrl} (Source: URL=${urlSource}, KEY=${keySource}).`);
 }
 
 /**
- * Client Supabase Singleton
- * En production, on ne met PAS de fallback. Si la config manque, l'app doit échouer explicitement sur les appels réseau
- * plutôt que de tenter de joindre une URL fictive.
+ * Client Supabase singleton.
+ * ⚠️ Si la config est manquante, on lance quand même le client avec des valeurs vides,
+ * mais toute requête échouera clairement (pas de fallback silencieux).
  */
-export const supabase = createClient(
-  isConfigured ? SUPABASE_URL : 'https://placeholder.supabase.co',
-  isConfigured ? SUPABASE_ANON_KEY : 'placeholder',
+export const supabase: SupabaseClient = createClient(
+  isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co',
+  isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder',
   {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     },
     global: {
-      headers: { 'x-nexus-client': 'platinum-v11-prod' }
-    }
+      headers: { 'x-nexus-client': 'platinum-v11-prod' },
+    },
   }
 );
 
 /**
- * Vérifie si le service est correctement configuré pour les opérations critiques
- */
-export const isSupabaseConfigured = () => isConfigured;
-
-/**
- * Diagnostic de connexion à la base de données.
- * Vérifie la latence et l'accès à la table principale.
+ * Test de connexion : effectue une requête HEAD légère sur une table existante.
+ * ⚠️ À n’utiliser qu’en dev/debug – pas en production courante.
  */
 export const testDatabaseConnection = async () => {
-    if (!isConfigured) {
-        return { success: false, error: "Configuration .env manquante (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)." };
-    }
-    
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      error: "Configuration manquante : VITE_SUPABASE_URL ou VITE_SUPABASE_ANON_KEY absentes.",
+    };
+  }
+
+  try {
     const start = performance.now();
-    try {
-        // Ping léger sur la table principale (HEAD request)
-        const { error, count, status } = await supabase
-            .from('draw_results')
-            .select('*', { count: 'exact', head: true });
+    const { error, count } = await supabase
+      .from('draw_results')
+      .select('*', { count: 'exact', head: true });
 
-        const latency = Math.round(performance.now() - start);
+    const latency = Math.round(performance.now() - start);
 
-        if (error) {
-            console.error("[Supabase Diagnostic] Error:", error);
-            // Gestion des erreurs spécifiques pour guider l'utilisateur
-            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL dans Supabase." };
-            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité dans Supabase." };
-            
-            // Gestion générique améliorée pour éviter "undefined"
-            const msg = (error.message && error.message.trim()) ? error.message : "Erreur de connexion (Serveur injoignable ou URL invalide)";
-            // Force code to string or generic string to prevent "undefined" display in UI
-            const code = (error.code) ? String(error.code) : "NETWORK_ERR";
-            
-            return { success: false, error: `Erreur API: ${msg} (Code: ${code})` };
-        }
-        
-        return { success: true, count, latency, status };
-    } catch (e: any) {
-        return { success: false, error: e.message || "Erreur réseau inconnue." };
+    if (error) {
+      let userMessage = "Erreur inconnue lors de la connexion à la base de données.";
+      if (error.code === '42P01') {
+        userMessage = "Table 'draw_results' introuvable. Créez-la dans Supabase ou mettez à jour le nom.";
+      } else if (error.code === '42501') {
+        userMessage = "Accès refusé. Vérifiez les RLS (Row Level Security) dans Supabase.";
+      } else if (error.message) {
+        userMessage = error.message;
+      }
+
+      return {
+        success: false,
+        error: userMessage,
+        code: error.code || 'UNKNOWN',
+        latency,
+      };
     }
+
+    return {
+      success: true,
+      count: count ?? 0,
+      latency,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Erreur réseau ou CORS. Vérifiez l’URL et les règles CORS dans Supabase.",
+    };
+  }
 };
