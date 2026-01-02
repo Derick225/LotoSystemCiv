@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
+import { NEXUS_DATABASE_SCHEMA } from '../../services/databaseSchema';
 import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save } from 'lucide-react';
 
 export const DatabaseControl: React.FC = () => {
@@ -62,39 +63,8 @@ export const DatabaseControl: React.FC = () => {
     };
 
     const copySqlToClipboard = () => {
-        const sql = `
--- OPTIMISATION NEXUS v12.0 - SÉCURITÉ & PERFORMANCE
-alter table public.draw_results enable row level security;
-drop policy if exists "Public Draw Read" on public.draw_results;
-create policy "Public Draw Read" on public.draw_results for select using (true);
-create policy "Service Write" on public.draw_results for insert with check (auth.role() = 'service_role' OR auth.role() = 'authenticated');
-create policy "Service Update" on public.draw_results for update using (auth.role() = 'service_role' OR auth.role() = 'authenticated');
-create policy "Service Delete" on public.draw_results for delete using (auth.role() = 'service_role' OR auth.role() = 'authenticated');
-
-create table if not exists public.draw_analytics (
-  id uuid default gen_random_uuid() primary key,
-  draw_name text not null,
-  date date not null,
-  spectral jsonb, fractal jsonb, volatility jsonb, audit jsonb, correlations jsonb,
-  updated_at timestamptz default now(),
-  unique(draw_name, date)
-);
-alter table public.draw_analytics enable row level security;
-create policy "Public Analytics Read" on public.draw_analytics for select using (true);
-create policy "Service Write Analytics" on public.draw_analytics for insert with check (true);
-create policy "Service Update Analytics" on public.draw_analytics for update using (true);
-
-create table if not exists public.algo_weights (
-  draw_name text primary key,
-  weights jsonb not null,
-  updated_at timestamptz default now()
-);
-alter table public.algo_weights enable row level security;
-create policy "Public Weights Read" on public.algo_weights for select using (true);
-create policy "Admin Weights Write" on public.algo_weights for all using (auth.role() = 'authenticated');
-`;
-        navigator.clipboard.writeText(sql);
-        showToast("Script SQL copié dans le presse-papier.", "success");
+        navigator.clipboard.writeText(NEXUS_DATABASE_SCHEMA);
+        showToast("Script SQL de production copié.", "success");
     };
 
     return (
@@ -147,7 +117,7 @@ create policy "Admin Weights Write" on public.algo_weights for all using (auth.r
                     </div>
                     <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 mb-6">
                         <p className="text-[10px] font-mono text-slate-500 leading-relaxed">
-                            Ce script initialise les tables, active le RLS (Row Level Security) et configure les index de performance. À exécuter dans le dashboard Supabase.
+                            Initialise l'infrastructure complète (Tables, RLS, Indexes). À exécuter une seule fois dans l'éditeur SQL de votre projet Supabase.
                         </p>
                     </div>
                     <button onClick={copySqlToClipboard} className="w-full py-4 bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">

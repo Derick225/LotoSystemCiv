@@ -2,23 +2,21 @@
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * NEXUS PLATINUM - Supabase Client Configuration
- * Detects environment variables from Vite (import.meta.env) or Process (process.env)
+ * NEXUS PLATINUM - Configuration Client Supabase
+ * Gestion agnostique de l'environnement (Vite vs Next vs Standard)
  */
 const getEnvVar = (key: string): string => {
   try {
-    // Attempt Vite-style access
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-      const val = (import.meta as any).env[key];
-      if (val) return val.trim();
+    // 1. Vite Environment
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+      return import.meta.env[key];
     }
-    // Attempt process.env access (defined in vite.config.ts)
-    if (typeof process !== 'undefined' && process.env) {
-      const val = process.env[key];
-      if (val) return val.trim();
+    // 2. Process Environment (Node/Legacy)
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
     }
   } catch (e) {
-    console.warn(`[Nexus Config] Failed to read ${key}:`, e);
+    console.warn(`[Nexus Config] Erreur lecture var ${key}`, e);
   }
   return '';
 };
@@ -26,40 +24,20 @@ const getEnvVar = (key: string): string => {
 const envUrl = getEnvVar('VITE_SUPABASE_URL');
 const envKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
-const isValidSupabaseUrl = (url: string): boolean => {
-  try {
-    const u = new URL(url);
-    // On valide le protocole et le fait que ce soit bien une URL supabase ou self-hosted valide
-    return u.protocol === 'https:' && u.hostname.includes('.');
-  } catch {
-    return false;
-  }
+const isValidUrl = (url: string) => {
+    try { return new URL(url).protocol.startsWith('http'); } catch { return false; }
 };
 
 export const isSupabaseConfigured = () => {
-    // Check strict : pas de placeholder, URL valide, clé présente
     return !!envUrl && 
            !!envKey && 
-           !envUrl.includes('placeholder') && 
-           !envKey.includes('placeholder') &&
-           isValidSupabaseUrl(envUrl);
+           isValidUrl(envUrl) &&
+           !envUrl.includes('placeholder');
 };
 
-// Safe check for DEV environment
-const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-
-if (!isSupabaseConfigured()) {
-    if (isDev) {
-         console.warn(`[Supabase] Mode Hors-Ligne (Config manquante ou invalide). URL: ${envUrl}`);
-    } else {
-         console.error("🚨 NEXUS CRITICAL: Supabase configuration missing or invalid. App running in offline mode.");
-    }
-}
-
-// Fallback sûr pour éviter le crash du client JS si la config est manquante
-// createClient crash si l'URL est invalide, donc on utilise une URL valide même en fallback
+// Initialisation du client avec Fallback "Safe Mode" pour éviter le crash au démarrage si config absente
 const clientUrl = isSupabaseConfigured() ? envUrl : 'https://placeholder.supabase.co';
-const clientKey = isSupabaseConfigured() ? envKey : 'placeholder-key';
+const clientKey = isSupabaseConfigured() ? envKey : 'placeholder';
 
 export const supabase = createClient(clientUrl, clientKey, {
     auth: {
@@ -68,36 +46,36 @@ export const supabase = createClient(clientUrl, clientKey, {
       detectSessionInUrl: true,
       storage: typeof window !== 'undefined' ? window.localStorage : undefined
     },
+    db: {
+      schema: 'public',
+    },
     global: {
-      headers: { 'x-nexus-version': '11.6' }
+      headers: { 'x-nexus-version': '11.0.5-platinum' }
     }
 });
 
 /**
- * Teste la connexion réelle à la base de données.
- * Retourne { success: true } ou { success: false, error: string }
+ * Diagnostic de connexion à la base de données.
  */
 export const testDatabaseConnection = async () => {
     if (!isSupabaseConfigured()) {
-        return { success: false, error: "Configuration Supabase invalide (URL/KEY)." };
+        return { success: false, error: "Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / ANON_KEY)." };
     }
     try {
-        // Tentative de lecture légère (head) sur la table principale
+        // Ping léger sur la table principale (HEAD request)
         const { error, count } = await supabase
             .from('draw_results')
             .select('*', { count: 'exact', head: true });
 
         if (error) {
-            console.error("[Supabase Connection Test] Failed:", error);
-            // Détection spécifique des erreurs RLS ou 404
-            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS Policy manquante). Vérifiez que la politique 'Public Read Results' est active." };
-            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' introuvable. Avez-vous exécuté le script SQL ?" };
-            if (error.message.includes('FetchError')) return { success: false, error: "Erreur réseau. Vérifiez votre connexion internet." };
-            return { success: false, error: `${error.message} (Code: ${error.code})` };
+            console.error("[Supabase Diagnostic]", error);
+            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL d'initialisation." };
+            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité." };
+            return { success: false, error: error.message };
         }
         
         return { success: true, count };
     } catch (e: any) {
-        return { success: false, error: e.message };
+        return { success: false, error: e.message || "Erreur réseau inconnue." };
     }
 };
