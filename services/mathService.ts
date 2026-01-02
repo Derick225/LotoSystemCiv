@@ -353,6 +353,9 @@ export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => 
 export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
     const matrix: Record<number, Record<number, number>> = {};
     const totals: Record<number, number> = {};
+    
+    if (!history || history.length < 2) return { matrix, totals };
+
     for (let i = 0; i < history.length - 1; i++) {
         const current = history[i].gagnants;
         const prev = history[i+1].gagnants;

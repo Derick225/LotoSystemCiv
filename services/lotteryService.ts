@@ -3,10 +3,37 @@ import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
 import { supabase } from './supabaseClient';
 
+const isValidDate = (d: number, m: number, y: number): boolean => {
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+};
+
 export const formatDate = (dateStr: string, isIsoOutput: boolean = false): string => {
   if (!dateStr) return '';
+  
+  // Format ISO YYYY-MM-DD
+  if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      if (!isValidDate(d, m, y)) return 'Invalid Date';
+      if (isIsoOutput) return dateStr;
+      return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+  }
+
+  // Format FR DD/MM/YYYY
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+        const [d, m, y] = parts.map(Number);
+        if (!isValidDate(d, m, y)) return 'Invalid Date';
+        if (isIsoOutput) return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        return dateStr;
+    }
+  }
+  
+  // Fallback Date Object
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
+  
   const d = date.getDate().toString().padStart(2, '0');
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
   const y = date.getFullYear();
@@ -111,10 +138,20 @@ export const getNextScheduledDraw = () => {
   if (!schedule) return null;
   
   const times = Object.keys(schedule).sort();
-  const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  const currentTimestamp = now.getTime();
   
-  const nextTime = times.find(t => t > currentTime) || times[0];
-  return { time: nextTime, name: schedule[nextTime] };
+  // Recherche précise incluant la date complète
+  const nextTime = times.find(t => {
+      const [h, m] = t.split(':').map(Number);
+      const drawDate = new Date(now);
+      drawDate.setHours(h, m, 0, 0);
+      return drawDate.getTime() > currentTimestamp;
+  });
+
+  // Si aucun tirage restant aujourd'hui, prendre le premier de la liste (logique de boucle simplifiée pour l'affichage)
+  const finalTime = nextTime || times[0];
+  
+  return { time: finalTime, name: schedule[finalTime] };
 };
 
 export const fetchGlobalStats = async () => {
@@ -171,7 +208,7 @@ export const deleteResult = async (drawName: string, id: string) => {
 };
 
 export const fetchNextDrawProjections = async (drawName: string, lastNumbers: number[], history: DrawResult[]): Promise<ProjectionItem[]> => {
-    if (history.length < 10) return [];
+    if (!history || history.length < 2 || !lastNumbers || lastNumbers.length === 0) return [];
     
     const transitions: Record<number, Record<number, number>> = {};
     for (let i = 0; i < history.length - 1; i++) {
@@ -201,7 +238,7 @@ export const fetchNextDrawProjections = async (drawName: string, lastNumbers: nu
 };
 
 export const fetchTopFollowersAnalysis = async (drawName: string, history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
-    if (history.length < 5) return [];
+    if (!history || history.length < 5) return [];
     const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
     
     return Object.entries(matrix).map(([leaderStr, followersMap]) => {
@@ -221,6 +258,8 @@ export const fetchTopFollowersAnalysis = async (drawName: string, history: DrawR
 };
 
 export const fetchAssociatedNumbers = async (num: number, drawName: string, history: DrawResult[]) => {
+    if (!history || history.length < 2) return { following: [] };
+    
     const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
     const followersMap = matrix[num] || {};
     const total = totals[num] || 1;
@@ -240,6 +279,9 @@ export const fetchAssociatedNumbers = async (num: number, drawName: string, hist
 const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
     const matrix: Record<number, Record<number, number>> = {};
     const totals: Record<number, number> = {};
+    
+    if (!history || history.length < 2) return { matrix, totals };
+
     for (let i = 0; i < history.length - 1; i++) {
         const current = history[i].gagnants;
         const prev = history[i+1].gagnants;

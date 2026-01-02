@@ -10,12 +10,12 @@ const getEnvVar = (key: string): string => {
     // Attempt Vite-style access
     if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
       const val = (import.meta as any).env[key];
-      if (val) return val;
+      if (val) return val.trim();
     }
     // Attempt process.env access (defined in vite.config.ts)
     if (typeof process !== 'undefined' && process.env) {
       const val = process.env[key];
-      if (val) return val;
+      if (val) return val.trim();
     }
   } catch (e) {
     console.warn(`[Nexus Config] Failed to read ${key}:`, e);
@@ -26,26 +26,52 @@ const getEnvVar = (key: string): string => {
 const envUrl = getEnvVar('VITE_SUPABASE_URL');
 const envKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
+const isValidSupabaseUrl = (url: string): boolean => {
+  try {
+    const u = new URL(url);
+    // On valide le protocole et le fait que ce soit bien une URL supabase ou self-hosted valide
+    return u.protocol === 'https:' && u.hostname.includes('.');
+  } catch {
+    return false;
+  }
+};
+
 export const isSupabaseConfigured = () => {
-    const isConfigured = !!envUrl && envUrl !== 'https://placeholder.supabase.co' && !!envKey;
-    if (!isConfigured) {
-        // Log discret en dev pour ne pas spammer
-        if ((import.meta.env as any).DEV) {
-             console.warn(`[Supabase Check] URL: ${envUrl ? 'OK' : 'MISSING'}, KEY: ${envKey ? 'OK (Masked)' : 'MISSING'}`);
-        }
-    }
-    return isConfigured;
+    // Check strict : pas de placeholder, URL valide, clé présente
+    return !!envUrl && 
+           !!envKey && 
+           !envUrl.includes('placeholder') && 
+           !envKey.includes('placeholder') &&
+           isValidSupabaseUrl(envUrl);
 };
 
 if (!isSupabaseConfigured()) {
-    console.error("🚨 NEXUS CRITICAL: Supabase environment variables are missing! Check your deployment settings (Vercel/Netlify) or .env file.");
+    // Safe check for DEV environment to prevent crashes if import.meta.env is undefined
+    const isDev = import.meta?.env?.DEV;
+    
+    if (isDev) {
+         console.warn(`[Supabase] Mode Hors-Ligne (Config manquante ou invalide). URL: ${envUrl}`);
+    } else {
+         console.error("🚨 NEXUS CRITICAL: Supabase configuration missing or invalid. App running in offline mode.");
+    }
 }
 
-// Fallback to placeholder only to prevent total JS crash, but isSupabaseConfigured will return false
-const clientUrl = envUrl || 'https://placeholder.supabase.co';
-const clientKey = envKey || 'placeholder-key';
+// Fallback sûr pour éviter le crash du client JS si la config est manquante
+// createClient crash si l'URL est invalide, donc on utilise une URL valide même en fallback
+const clientUrl = isSupabaseConfigured() ? envUrl : 'https://placeholder.supabase.co';
+const clientKey = isSupabaseConfigured() ? envKey : 'placeholder-key';
 
-export const supabase = createClient(clientUrl, clientKey);
+export const supabase = createClient(clientUrl, clientKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined
+    },
+    global: {
+      headers: { 'x-nexus-version': '11.6' }
+    }
+});
 
 /**
  * Teste la connexion réelle à la base de données.
@@ -53,7 +79,7 @@ export const supabase = createClient(clientUrl, clientKey);
  */
 export const testDatabaseConnection = async () => {
     if (!isSupabaseConfigured()) {
-        return { success: false, error: "Variables d'environnement manquantes (VITE_SUPABASE_URL)" };
+        return { success: false, error: "Configuration Supabase invalide (URL/KEY)." };
     }
     try {
         // Tentative de lecture légère (head) sur la table principale
