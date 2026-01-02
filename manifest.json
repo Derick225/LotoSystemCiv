@@ -1,0 +1,26 @@
+{
+  "name": "Analyse de Loterie Pro",
+  "short_name": "LotoPro",
+  "id": "lotopro-app-v1",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "description": "Analysez, prédisez et suivez les résultats de loterie avec l'IA et des algorithmes avancés.",
+  "categories": ["finance", "utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "orientation": "portrait"
+}

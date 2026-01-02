@@ -1,0 +1,36 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <radialGradient id="orange" cx="0.3" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </radialGradient>
+    <radialGradient id="green" cx="0.3" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </radialGradient>
+    <radialGradient id="white" cx="0.3" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </radialGradient>
+  </defs>
+  
+  <!-- Fond -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="230" fill="none" stroke="white" stroke-width="2" stroke-opacity="0.1"/>
+  
+  <!-- Boule Gauche (Orange) -->
+  <circle cx="150" cy="220" r="90" fill="url(#orange)"/>
+  
+  <!-- Boule Droite (Verte) -->
+  <circle cx="362" cy="220" r="90" fill="url(#green)"/>
+  
+  <!-- Boule Centrale (Blanche) -->
+  <circle cx="256" cy="320" r="110" fill="url(#white)"/>
+  
+  <!-- Numéro 7 -->
+  <text x="256" y="365" font-family="Arial, sans-serif" font-weight="bold" font-size="120" text-anchor="middle" fill="#312e81">7</text>
+</svg>

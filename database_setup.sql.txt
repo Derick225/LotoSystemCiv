@@ -1,0 +1,178 @@
+-- ==============================================================================
+-- NEXUS PLATINUM ELITE v11.0 - DATABASE SCHEMA (PRODUCTION READY)
+-- ==============================================================================
+
+-- 1. EXTENSIONS
+create extension if not exists "uuid-ossp";
+create extension if not exists "pg_cron";
+create extension if not exists "pg_net";
+
+-- ==============================================================================
+-- 2. TABLES PRINCIPALES
+-- ==============================================================================
+
+-- A. RÉSULTATS DES TIRAGES
+create table if not exists public.draw_results (
+  id uuid default uuid_generate_v4() primary key,
+  draw_name text not null,
+  date date not null,
+  gagnants integer[] not null,
+  machine integer[],
+  version integer default 1,
+  created_at timestamptz default now(),
+  constraint unique_draw_date unique (draw_name, date)
+);
+
+-- B. ANALYTIQUES HPC
+create table if not exists public.draw_analytics (
+  id uuid default uuid_generate_v4() primary key,
+  draw_name text not null,
+  date date not null,
+  spectral jsonb,
+  fractal jsonb,
+  volatility jsonb,
+  audit jsonb,
+  correlations jsonb,
+  updated_at timestamptz default now(),
+  constraint unique_analytics_draw_date unique (draw_name, date)
+);
+
+-- C. POIDS ALGORITHMIQUES (ADN IA)
+create table if not exists public.algo_weights (
+  draw_name text primary key,
+  weights jsonb not null,
+  updated_at timestamptz default now()
+);
+
+-- D. PRÉFÉRENCES UTILISATEURS
+create table if not exists public.user_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  watchlist integer[],
+  saved_tickets jsonb,
+  settings jsonb,
+  updated_at timestamptz default now()
+);
+
+-- E. FEEDBACK RLHF
+create table if not exists public.prediction_feedback (
+  id uuid default uuid_generate_v4() primary key,
+  prediction_id text,
+  draw_name text,
+  rating text,
+  actual_hits integer,
+  user_comment text,
+  created_at timestamptz default now()
+);
+
+-- ==============================================================================
+-- 3. SÉCURITÉ (ROW LEVEL SECURITY) - IDEMPOTENT
+-- ==============================================================================
+
+alter table public.draw_results enable row level security;
+alter table public.draw_analytics enable row level security;
+alter table public.algo_weights enable row level security;
+alter table public.user_preferences enable row level security;
+alter table public.prediction_feedback enable row level security;
+
+-- Nettoyage des anciennes politiques pour éviter les erreurs "policy already exists"
+do $$ 
+begin
+    -- Table: draw_results
+    drop policy if exists "Public Read Results" on public.draw_results;
+    drop policy if exists "Service Write Results" on public.draw_results;
+    drop policy if exists "Service Update Results" on public.draw_results;
+    drop policy if exists "Service Delete Results" on public.draw_results;
+    
+    -- Table: draw_analytics
+    drop policy if exists "Public Read Analytics" on public.draw_analytics;
+    drop policy if exists "Service Write Analytics" on public.draw_analytics;
+    
+    -- Table: algo_weights
+    drop policy if exists "Public Read Weights" on public.algo_weights;
+    drop policy if exists "Admin Write Weights" on public.algo_weights;
+    
+    -- Table: user_preferences
+    drop policy if exists "User View Own Prefs" on public.user_preferences;
+    drop policy if exists "User Update Own Prefs" on public.user_preferences;
+    drop policy if exists "User Insert Own Prefs" on public.user_preferences;
+    
+    -- Table: prediction_feedback
+    drop policy if exists "Public Insert Feedback" on public.prediction_feedback;
+    drop policy if exists "Admin Read Feedback" on public.prediction_feedback;
+end $$;
+
+-- Création des politiques
+
+-- DRAW_RESULTS
+create policy "Public Read Results" on public.draw_results for select using (true);
+create policy "Service Write Results" on public.draw_results for insert with check (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+create policy "Service Update Results" on public.draw_results for update using (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+create policy "Service Delete Results" on public.draw_results for delete using (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+-- DRAW_ANALYTICS
+create policy "Public Read Analytics" on public.draw_analytics for select using (true);
+create policy "Service Write Analytics" on public.draw_analytics for all using (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+
+-- ALGO_WEIGHTS
+create policy "Public Read Weights" on public.algo_weights for select using (true);
+create policy "Admin Write Weights" on public.algo_weights for all using (auth.role() = 'authenticated');
+
+-- USER_PREFERENCES
+create policy "User View Own Prefs" on public.user_preferences for select using (auth.uid() = user_id);
+create policy "User Update Own Prefs" on public.user_preferences for update using (auth.uid() = user_id);
+create policy "User Insert Own Prefs" on public.user_preferences for insert with check (auth.uid() = user_id);
+
+-- PREDICTION_FEEDBACK
+create policy "Public Insert Feedback" on public.prediction_feedback for insert with check (true);
+create policy "Admin Read Feedback" on public.prediction_feedback for select using (auth.role() = 'service_role');
+
+-- ==============================================================================
+-- 4. INDEXES
+-- ==============================================================================
+create index if not exists idx_results_draw_date on public.draw_results(draw_name, date);
+create index if not exists idx_results_gagnants on public.draw_results using gin(gagnants);
+create index if not exists idx_analytics_lookup on public.draw_analytics(draw_name, date);
+
+-- ==============================================================================
+-- 5. AUTOMATISATION SÉCURISÉE (PG_CRON + VAULT)
+-- ==============================================================================
+
+/* 
+   IMPORTANT: Pour que le scheduler fonctionne, vous devez :
+   1. Aller dans le dashboard Supabase > Vault.
+   2. Ajouter un secret nommé 'SERVICE_ROLE_KEY' avec votre clé service_role.
+   3. Remplacer 'YOUR_PROJECT_REF' par votre identifiant de projet ci-dessous.
+*/
+
+-- Suppression de l'ancienne tâche si elle existe (Correction de l'erreur XX000)
+do $$
+begin
+    if exists (select 1 from cron.job where jobname = 'nexus-sync-every-30m') then
+        perform cron.unschedule('nexus-sync-every-30m');
+    end if;
+end $$;
+
+-- Création de la tâche programmée utilisant les secrets du coffre-fort
+select cron.schedule(
+  'nexus-sync-every-30m',
+  '*/30 * * * *',
+  $$
+  declare
+    v_service_key text;
+  begin
+    -- Récupération sécurisée de la clé depuis le Vault
+    select decrypted_secret into v_service_key from vault.decrypted_secrets where name = 'SERVICE_ROLE_KEY';
+    
+    if v_service_key is not null then
+      perform net.http_post(
+        url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/cron-sync',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'Authorization', 'Bearer ' || v_service_key
+        ),
+        body := '{}'::jsonb
+      );
+    end if;
+  end;
+  $$
+);

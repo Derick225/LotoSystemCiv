@@ -1,0 +1,154 @@
+
+import React, { useState, useEffect } from 'react';
+import { LOTO_PAYOUTS } from '../constants';
+import { ChevronDown, Percent, Layers, Shuffle, Bot } from 'lucide-react';
+
+interface KellyCalculatorProps {
+    confidence: number;
+}
+
+type GameMode = 'STANDARD' | 'DOUBLE_CHANCE' | 'DOUBLE_CHANCE_MACHINE';
+
+export const KellyCalculator: React.FC<KellyCalculatorProps> = ({ confidence }) => {
+    const [bankroll, setBankroll] = useState<number>(5000); 
+    const [gameMode, setGameMode] = useState<GameMode>('STANDARD');
+    const [selectedBetType, setSelectedBetType] = useState<string>('2N');
+    const [bet, setBet] = useState<{ betAmount: number, percentage: number, advice: string } | null>(null);
+
+    // Extraction dynamique des types de paris selon le mode
+    const betOptions = [
+        ...Object.entries(LOTO_PAYOUTS[gameMode].SIMPLE).map(([key, val]: [string, any]) => ({ key, ...val, group: 'Simple' })),
+        ...Object.entries(LOTO_PAYOUTS[gameMode].TURBO).map(([key, val]: [string, any]) => ({ key, ...val, group: 'Turbo' })),
+    ];
+
+    // Reset selection quand on change de mode si la clé n'existe pas
+    useEffect(() => {
+        const exists = betOptions.some(opt => opt.key === selectedBetType);
+        if (!exists && betOptions.length > 0) {
+            setSelectedBetType(betOptions[0].key);
+        }
+    }, [gameMode]);
+
+    useEffect(() => {
+        const safeConf = isNaN(confidence) ? 50 : confidence;
+        
+        let odds = 240; 
+        const currentPayouts = LOTO_PAYOUTS[gameMode];
+
+        if (selectedBetType in currentPayouts.SIMPLE) odds = currentPayouts.SIMPLE[selectedBetType as keyof typeof currentPayouts.SIMPLE].odds;
+        else if (selectedBetType in currentPayouts.TURBO) odds = currentPayouts.TURBO[selectedBetType as keyof typeof currentPayouts.TURBO].odds;
+
+        // Probabilité ajustée selon le mode
+        // DC Machine (odds plus faibles = probabilité perçue plus haute)
+        let baseWinProb = 0.15;
+        if (gameMode === 'DOUBLE_CHANCE') baseWinProb = 0.22;
+        if (gameMode === 'DOUBLE_CHANCE_MACHINE') baseWinProb = 0.25;
+        
+        const b = odds; 
+        const p = (safeConf / 100) * baseWinProb;
+        const q = 1 - p;
+        
+        let f = (b * p - q) / b;
+        f = f * 0.5; // Kelly Fractionnel (Demi-Kelly) pour la sécurité
+        
+        let result;
+        if (f <= 0) {
+            result = { betAmount: 0, percentage: 0, advice: "Espérance négative. Ne pas parier sur ce type." };
+        } else {
+            const amount = Math.floor(bankroll * f);
+            const roundedAmount = Math.floor(amount / 100) * 100;
+            result = {
+                betAmount: Math.max(0, roundedAmount),
+                percentage: parseFloat((f * 100).toFixed(2)),
+                advice: `Mise Optimale (${selectedBetType})`
+            };
+        }
+        
+        setBet(result);
+    }, [confidence, bankroll, selectedBetType, gameMode]);
+
+    if (!bet) return null;
+
+    return (
+        <div className="bg-gradient-to-r from-emerald-900 to-teal-900 p-6 rounded-[2rem] text-white shadow-lg border border-emerald-700/50 mt-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-6 opacity-10"><Percent size={80} /></div>
+            
+            <div className="flex flex-col gap-6 mb-6 relative z-10">
+                <h4 className="flex items-center gap-2 font-bold text-lg">
+                    <span className="text-2xl">⚖️</span> Kelly Money Management
+                </h4>
+                
+                <div className="flex flex-wrap gap-2 bg-black/20 p-1.5 rounded-2xl">
+                    <button 
+                        onClick={() => setGameMode('STANDARD')}
+                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'STANDARD' ? 'bg-emerald-500 text-white shadow-lg' : 'text-emerald-300 hover:bg-white/5'}`}
+                    >
+                        <Layers size={12}/> Standard
+                    </button>
+                    <button 
+                        onClick={() => setGameMode('DOUBLE_CHANCE')}
+                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE' ? 'bg-indigo-500 text-white shadow-lg' : 'text-indigo-300 hover:bg-white/5'}`}
+                    >
+                        <Shuffle size={12}/> DC (G+M)
+                    </button>
+                    <button 
+                        onClick={() => setGameMode('DOUBLE_CHANCE_MACHINE')}
+                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE_MACHINE' ? 'bg-amber-500 text-white shadow-lg' : 'text-amber-300 hover:bg-white/5'}`}
+                    >
+                        <Bot size={12}/> DC Machine
+                    </button>
+                </div>
+            </div>
+            
+            <div className="flex flex-col md:flex-row gap-6 items-start relative z-10">
+                <div className="flex-1 w-full space-y-4">
+                    <div className="relative group">
+                        <select 
+                            value={selectedBetType}
+                            onChange={(e) => setSelectedBetType(e.target.value)}
+                            className="w-full appearance-none bg-black/30 border border-emerald-500/30 text-emerald-100 py-3 pl-4 pr-10 rounded-xl text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer hover:bg-black/40 transition-colors"
+                        >
+                            {betOptions.map(opt => (
+                                <option key={opt.key} value={opt.key} className="bg-slate-900 text-slate-300">
+                                    {opt.label} (x{opt.odds})
+                                </option>
+                            ))}
+                        </select>
+                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 pointer-events-none" />
+                    </div>
+
+                    <div>
+                        <label className="block text-[10px] font-black uppercase text-emerald-400/80 mb-2 tracking-widest">
+                            Capital Total (F CFA)
+                        </label>
+                        <input 
+                            type="number" 
+                            value={bankroll}
+                            onChange={(e) => setBankroll(Number(e.target.value))}
+                            className="w-full p-3 rounded-xl bg-black/20 border border-emerald-500/30 text-white font-mono font-bold text-lg focus:ring-2 focus:ring-emerald-400 outline-none transition-all placeholder-emerald-800"
+                            placeholder="Ex: 5000"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 w-full bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm flex flex-col justify-center min-h-[120px]">
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="text-[10px] font-black uppercase text-emerald-200 tracking-widest">Mise Conseillée</div>
+                        <div className="text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded text-emerald-100">
+                            Côte: x{betOptions.find(o => o.key === selectedBetType)?.odds}
+                        </div>
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-3xl font-black text-white tracking-tight">{isNaN(bet.betAmount) ? '...' : `${bet.betAmount.toLocaleString()} F`}</span>
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-900/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                            {isNaN(bet.percentage) ? '0' : bet.percentage}%
+                        </span>
+                    </div>
+                    <p className="text-[10px] text-emerald-100/60 mt-2 italic font-medium border-t border-white/5 pt-2">
+                        "{bet.advice}"
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
