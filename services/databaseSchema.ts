@@ -77,6 +77,16 @@ ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 
+-- NETTOYAGE PRÉVENTIF (DROP POLICIES)
+DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results;
+DROP POLICY IF EXISTS "Service Write Results" ON public.draw_results;
+DROP POLICY IF EXISTS "Public Read Analytics" ON public.draw_analytics;
+DROP POLICY IF EXISTS "Service Write Analytics" ON public.draw_analytics;
+DROP POLICY IF EXISTS "Public Read Weights" ON public.algo_weights;
+DROP POLICY IF EXISTS "Admin Write Weights" ON public.algo_weights;
+DROP POLICY IF EXISTS "User Own Data" ON public.user_preferences;
+DROP POLICY IF EXISTS "Public Feedback Insert" ON public.prediction_feedback;
+
 -- Politiques DRAW_RESULTS
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
 CREATE POLICY "Service Write Results" ON public.draw_results FOR ALL USING (
