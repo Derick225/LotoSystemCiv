@@ -1,10 +1,8 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@1.34.0";
 
-// Déclaration pour satisfaire le compilateur TypeScript
 declare const Deno: any;
-declare const process: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,16 +15,20 @@ serve(async (req: Request) => {
   try {
     const { task, drawName, history, metrics, report } = await req.json();
     
-    // Utilisation stricte de process.env.API_KEY selon les directives
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Initialisation Gemini avec la clé d'environnement Supabase
+    const apiKey = Deno.env.get('API_KEY');
+    if (!apiKey) throw new Error("API_KEY manquante dans les secrets Supabase");
+    
+    const ai = new GoogleGenAI({ apiKey });
     let resultData;
 
     if (task === 'narrative') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Génère un rapport de synthèse pour le tirage ${drawName}. Metrics: Entropy=${metrics?.entropy}, Hurst=${metrics?.hurst}.`,
+        contents: `Génère un rapport d'analyse stochastique pour le tirage ${drawName}. 
+                   Métriques: Entropie=${metrics?.entropy}, Hurst=${metrics?.hurst}, Chi2=${metrics?.chiSquare}.
+                   Ton: Expert Data Scientist, précis, sans fausses promesses.`,
         config: {
-          systemInstruction: "Tu es l'Oracle Nexus. Ton ton est technique et souverain. Analyse sans promettre de gain.",
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -45,9 +47,8 @@ serve(async (req: Request) => {
     } else if (task === 'analyze') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview', 
-        contents: `Analyse logique du flux ${drawName}. Data: ${JSON.stringify(history)}.`,
+        contents: `Analyse les patterns logiques pour ${drawName}. Historique récent: ${JSON.stringify(history)}.`,
         config: {
-          systemInstruction: "Expert cryptographe en systèmes stochastiques. Isole les vecteurs de convergence.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -69,8 +70,8 @@ serve(async (req: Request) => {
     } else if (task === 'simulation-audit') {
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Audit financier Nexus Simulation: ${JSON.stringify(report)}`,
-        config: { systemInstruction: "Tu es un gestionnaire de risque quantitatif. Critique la simulation." }
+        contents: `Audit de simulation financière: ${JSON.stringify(report)}`,
+        config: { systemInstruction: "Tu es un auditeur de risque financier. Critique la stratégie." }
       });
       resultData = { audit: response.text };
     }

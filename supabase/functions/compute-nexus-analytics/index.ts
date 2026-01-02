@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
-// Fix: Declare Deno to satisfy the compiler
 declare const Deno: any;
 
 const corsHeaders = {
@@ -15,11 +14,11 @@ serve(async (req: Request) => {
 
   try {
     const { drawName } = await req.json();
-    // Fix: Access Deno.env directly after declaration
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '', 
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    
+    // Initialisation Supabase Admin via Deno.env
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
     const { data: history } = await supabaseAdmin
       .from('draw_results')
@@ -28,16 +27,18 @@ serve(async (req: Request) => {
       .order('date', { ascending: false })
       .limit(100);
 
-    if (!history || history.length < 15) throw new Error("Insufficient data.");
+    if (!history || history.length < 15) throw new Error("Données insuffisantes pour le calcul.");
 
     const N = history.length;
     const spectral = [];
     const fractal = [];
 
+    // Calculs Mathématiques Intensifs
     for (let num = 1; num <= 90; num++) {
       const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
       const mean = signal.reduce((a, b) => a + b, 0) / N;
       
+      // FFT Simplifiée
       let maxPower = 0;
       for (let k = 1; k < N / 2; k++) {
         let re = 0, im = 0;
@@ -50,6 +51,7 @@ serve(async (req: Request) => {
       }
       spectral.push({ number: num, energy: Math.min(100, Math.round(maxPower * 600)) });
 
+      // Exposant de Hurst
       const x = signal.map(v => v - mean);
       let cumsum = 0;
       const y = x.map(v => (cumsum += v, cumsum));
@@ -60,6 +62,7 @@ serve(async (req: Request) => {
       fractal.push({ number: num, hurst: parseFloat(clampedH.toFixed(3)) });
     }
 
+    // Sauvegarde en base
     await supabaseAdmin.from('draw_analytics').upsert({
       draw_name: drawName,
       date: history[0].date,

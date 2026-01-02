@@ -1,4 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -13,8 +14,7 @@ interface State {
 /**
  * GlobalErrorBoundary v4.0 - Industrial Grade Error Interceptor
  */
-// FIX: Use named Component import to ensure setState and props are correctly inherited and recognized by the compiler
-export class GlobalErrorBoundary extends Component<Props, State> {
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -32,7 +32,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // FIX: Correctly inherited setState from Component
   handleReload = () => {
     this.setState({ hasError: false, error: null });
   };
@@ -61,7 +60,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // FIX: Correctly inherited props from Component
     return this.props.children;
   }
 }

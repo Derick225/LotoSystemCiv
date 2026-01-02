@@ -13,15 +13,15 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '', 
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     
     const monthNames = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
     const now = new Date();
     const monthsToFetch = [`${monthNames[now.getMonth()]} ${now.getFullYear()}`];
     
+    // Si on est en début de mois, on vérifie aussi le mois précédent
     if (now.getDate() < 7) {
       const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       monthsToFetch.push(`${monthNames[prev.getMonth()]} ${prev.getFullYear()}`);
