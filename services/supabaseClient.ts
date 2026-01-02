@@ -1,93 +1,102 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-/**
- * NEXUS PLATINUM - Configuration Client Supabase
- * Gestion agnostique de l'environnement avec logs de débogage.
- */
-const getEnvVar = (key: string): string => {
-  try {
-    // 1. Vite Environment (Standard moderne)
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-      return import.meta.env[key];
-    }
-    // 2. Process Environment (Polyfill Vite ou Node)
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-  } catch (e) {
-    console.warn(`[Nexus Config] Erreur lecture var ${key}`, e);
+// Fonction utilitaire pour lire les variables d'environnement de manière robuste
+const getEnv = (key: string): string => {
+  let val = '';
+  // 1. Essai via Vite (import.meta.env) - Standard moderne
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    val = import.meta.env[key];
+  } 
+  // 2. Fallback via process.env (Compatible avec certaines configs de build ou tests)
+  else if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    val = process.env[key];
   }
-  return '';
+  return (val || '').trim();
 };
 
-const envUrl = getEnvVar('VITE_SUPABASE_URL');
-const envKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
+// Récupération explicite des variables du .env
+const SUPABASE_URL = getEnv('VITE_SUPABASE_URL');
+const SUPABASE_ANON_KEY = getEnv('VITE_SUPABASE_ANON_KEY');
 
+// Validation de la configuration
 const isValidUrl = (url: string) => {
-    try { return new URL(url).protocol.startsWith('http'); } catch { return false; }
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && (u.hostname.endsWith('.supabase.co') || u.hostname.endsWith('.supabase.com') || u.hostname === 'localhost');
+  } catch {
+    return false;
+  }
 };
 
-export const isSupabaseConfigured = () => {
-    const hasUrl = !!envUrl && isValidUrl(envUrl) && !envUrl.includes('placeholder');
-    const hasKey = !!envKey && envKey !== 'placeholder';
-    
-    if (!hasUrl || !hasKey) {
-        // Log discret en développement pour aider à la configuration
-        if (import.meta.env.DEV) {
-            console.groupCollapsed("[Nexus Config] Supabase non connecté");
-            console.log("VITE_SUPABASE_URL:", hasUrl ? "OK" : "MANQUANT/INVALIDE");
-            console.log("VITE_SUPABASE_ANON_KEY:", hasKey ? "OK" : "MANQUANT");
-            console.log("Veuillez créer un fichier .env à la racine avec ces variables.");
-            console.groupEnd();
-        }
-        return false;
-    }
-    return true;
-};
+const isConfigured = isValidUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 
-// Initialisation du client avec Fallback "Safe Mode" pour éviter le crash au démarrage si config absente
-const clientUrl = isSupabaseConfigured() ? envUrl : 'https://placeholder.supabase.co';
-const clientKey = isSupabaseConfigured() ? envKey : 'placeholder';
+if (!isConfigured) {
+  console.warn(
+    "%c[Nexus Warning] Variables Supabase manquantes ou invalides dans le .env", 
+    "color: orange; font-weight: bold;"
+  );
+  console.info("Attendu: VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY");
+} else {
+  console.log(
+    "%c[Nexus Core] Connexion Supabase initialisée", 
+    "color: #10b981; font-weight: bold;"
+  );
+}
 
-export const supabase = createClient(clientUrl, clientKey, {
+/**
+ * Client Supabase Singleton
+ * Initialisé avec les variables d'environnement ou des valeurs placeholder pour éviter le crash au démarrage.
+ */
+export const supabase = createClient(
+  isConfigured ? SUPABASE_URL : 'https://placeholder.supabase.co',
+  isConfigured ? SUPABASE_ANON_KEY : 'placeholder-key',
+  {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
       storage: typeof window !== 'undefined' ? window.localStorage : undefined
     },
-    db: {
-      schema: 'public',
-    },
     global: {
-      headers: { 'x-nexus-version': '11.0.5-platinum' }
+      headers: { 'x-nexus-client': 'platinum-v11' }
     }
-});
+  }
+);
+
+/**
+ * Vérifie si le service est correctement configuré pour les opérations critiques
+ */
+export const isSupabaseConfigured = () => isConfigured;
 
 /**
  * Diagnostic de connexion à la base de données.
+ * Vérifie la latence et l'accès à la table principale.
  */
 export const testDatabaseConnection = async () => {
-    if (!isSupabaseConfigured()) {
-        return { success: false, error: "Variables d'environnement Supabase manquantes dans le fichier .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)." };
+    if (!isConfigured) {
+        return { success: false, error: "Configuration .env manquante (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)." };
     }
+    
+    const start = performance.now();
     try {
         // Ping léger sur la table principale (HEAD request)
-        const { error, count } = await supabase
+        const { error, count, status } = await supabase
             .from('draw_results')
             .select('*', { count: 'exact', head: true });
 
+        const latency = Math.round(performance.now() - start);
+
         if (error) {
-            console.error("[Supabase Diagnostic]", error);
-            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL dans 'Système > Infrastructure'." };
-            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité dans le script SQL." };
-            if (error.code === 'PGRST301') return { success: false, error: "Erreur REST. Vérifiez que l'API est active dans le dashboard Supabase." };
-            return { success: false, error: error.message };
+            console.error("[Supabase Diagnostic] Error:", error);
+            // Gestion des erreurs spécifiques pour guider l'utilisateur
+            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL dans Supabase." };
+            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité dans Supabase." };
+            return { success: false, error: `Erreur API: ${error.message} (Code: ${error.code})` };
         }
         
-        return { success: true, count };
+        return { success: true, count, latency, status };
     } catch (e: any) {
-        return { success: false, error: e.message || "Erreur réseau inconnue. Vérifiez votre connexion internet." };
+        return { success: false, error: e.message || "Erreur réseau inconnue." };
     }
 };

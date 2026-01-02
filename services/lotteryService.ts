@@ -1,7 +1,7 @@
 
 import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const isValidDate = (d: number, m: number, y: number): boolean => {
   const date = new Date(y, m - 1, d);
@@ -57,30 +57,48 @@ const normalizeDrawName = (name: string): string => {
 
 export const lotteryService = {
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
-    // On essaie de chercher avec le nom exact, ou une variante insensible à la casse
-    const { data, error } = await supabase
-      .from('draw_results')
-      .select('*')
-      .ilike('draw_name', drawName) // Insensible à la casse pour la robustesse
-      .order('date', { ascending: false });
-    
-    if (error) {
-      console.error(`[Supabase Error] fetchHistory(${drawName}):`, error.message);
-      throw error; 
+    // Évite les appels réseau inutiles si Supabase n'est pas configuré
+    if (!isSupabaseConfigured()) {
+        console.debug(`[Mode Hors-Ligne] Historique simulé pour ${drawName} (Pas de clés Supabase)`);
+        return [];
     }
-    
-    return (data || []).map(row => ({
-      id: row.id,
-      drawName: row.draw_name, // On garde le nom de la DB
-      date: formatDate(row.date),
-      gagnants: row.gagnants,
-      machine: row.machine || [],
-      version: row.version || 1
-    }));
+
+    try {
+        // On essaie de chercher avec le nom exact, ou une variante insensible à la casse
+        const { data, error } = await supabase
+          .from('draw_results')
+          .select('*')
+          .ilike('draw_name', drawName) // Insensible à la casse pour la robustesse
+          .order('date', { ascending: false });
+        
+        if (error) {
+          throw error; 
+        }
+        
+        return (data || []).map(row => ({
+          id: row.id,
+          drawName: row.draw_name, // On garde le nom de la DB
+          date: formatDate(row.date),
+          gagnants: row.gagnants,
+          machine: row.machine || [],
+          version: row.version || 1
+        }));
+    } catch (e: any) {
+        const msg = e.message || String(e);
+        // Gestion silencieuse des erreurs de connexion courantes
+        if (msg.includes('Failed to fetch') || msg.includes('Network request failed') || msg.includes('error parsing')) {
+            console.warn(`[Supabase Offline] Récupération historique ${drawName} ignorée (Problème réseau).`);
+        } else {
+            console.error(`[Supabase Error] fetchHistory(${drawName}):`, msg);
+        }
+        // On retourne un tableau vide pour ne pas crasher l'UI en cas d'erreur réseau
+        return [];
+    }
   }
 };
 
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
+  if (!isSupabaseConfigured()) return 0;
   try {
     const { data, error } = await supabase.functions.invoke('cron-sync', { 
       body: { drawName, manualTrigger: true } 
@@ -96,6 +114,7 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
 export const checkAndSyncRecentResults = syncDrawExternal;
 
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
+  if (!isSupabaseConfigured()) return false;
   try {
     const { error } = await supabase.functions.invoke('compute-nexus-analytics', {
       body: { drawName }
@@ -113,15 +132,16 @@ export const fetchResults = async (drawName: string): Promise<{ data: DrawResult
 
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
-  const results = await Promise.all(Object.entries(draws).map(async ([time, name]) => {
-    try {
-        const history = await lotteryService.fetchHistory(name);
-        return { time, name, result: history[0] || null };
-    } catch (e) {
-        console.warn(`Summary fetch failed for ${name}`);
-        return { time, name, result: null };
-    }
-  }));
+  const results = [];
+  for (const [time, name] of Object.entries(draws)) {
+      try {
+          const history = await lotteryService.fetchHistory(name);
+          results.push({ time, name, result: history[0] || null });
+      } catch (e) {
+          // Fail silent pour l'UI
+          results.push({ time, name, result: null });
+      }
+  }
   return results;
 };
 
@@ -148,6 +168,7 @@ export const getNextScheduledDraw = () => {
 };
 
 export const fetchGlobalStats = async () => {
+  if (!isSupabaseConfigured()) return [];
   try {
     const { data, error } = await supabase.from('draw_results').select('gagnants').limit(1000);
     if (error) throw error;
@@ -157,12 +178,13 @@ export const fetchGlobalStats = async () => {
       .map(([n, c]) => ({ number: Number(n), count: c }))
       .sort((a, b) => b.count - a.count);
   } catch (e: any) {
-    console.warn("[Nexus Engine] Global stats failed:", e?.message);
+    console.warn("[Nexus Engine] Global stats failed (Mode offline).");
     return [];
   }
 };
 
 export const bulkAddResults = async (drawName: string, results: any[]) => {
+  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const mapped = results.map(r => ({
     draw_name: r.draw_name || normalizeDrawName(drawName),
     date: normalizeDate(r.date),
@@ -175,6 +197,7 @@ export const bulkAddResults = async (drawName: string, results: any[]) => {
 };
 
 export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>) => {
+  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const { error } = await supabase.from('draw_results').insert({
     draw_name: normalizeDrawName(drawName),
     date: normalizeDate(result.date),
@@ -186,6 +209,7 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
 };
 
 export const updateResult = async (drawName: string, result: DrawResult) => {
+  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const { error } = await supabase.from('draw_results').update({
     date: normalizeDate(result.date),
     gagnants: result.gagnants,
@@ -196,6 +220,7 @@ export const updateResult = async (drawName: string, result: DrawResult) => {
 };
 
 export const deleteResult = async (drawName: string, id: string) => {
+  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Suppression impossible.");
   const { error } = await supabase.from('draw_results').delete().eq('id', id);
   if (error) throw error;
 };

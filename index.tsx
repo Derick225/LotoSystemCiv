@@ -4,19 +4,34 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-// Enregistrement du Service Worker pour la PWA
-// Utilisation de l'accès sécurisé pour éviter le crash si import.meta.env est indéfini
-const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+// Fonction de détection d'environnement ultra-sécurisée
+const getIsDev = () => {
+  try {
+    // Vérification explicite de chaque niveau pour éviter "reading 'DEV' of undefined"
+    if (typeof import.meta !== 'undefined' && import.meta && import.meta.env) {
+      return import.meta.env.DEV;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+};
+
+const isDev = getIsDev();
 
 if ('serviceWorker' in navigator && !isDev) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
-      .then((registration) => {
+  window.addEventListener('load', async () => {
+    try {
+        // Utilisation d'un chemin relatif et gestion d'erreur silencieuse
+        const registration = await navigator.serviceWorker.register('./service-worker.js', { scope: './' });
         console.log('Nexus Engine SW: Registered', registration.scope);
-      })
-      .catch((error) => {
-        console.error('Nexus Engine SW: Failed', error);
-      });
+    } catch (error: any) {
+        const msg = error?.message || String(error);
+        // Filtrage strict des erreurs d'origine (fréquentes dans les previews cloud)
+        if (!msg.includes('origin') && !msg.includes('scriptURL') && !msg.includes('import scripts')) {
+            console.warn('Nexus Engine SW: Failed', error);
+        }
+    }
   });
 }
 

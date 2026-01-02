@@ -41,13 +41,17 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
       const checkConnection = async () => {
           if (!isSupabaseConfigured()) {
-              showToast("⚠️ Config Supabase manquante !", "error");
+              // On n'affiche pas d'erreur, on laisse l'app fonctionner en mode hors-ligne/dégradé silencieusement
+              console.log("Nexus en mode local (Pas de connexion Supabase)");
               return;
           }
           const status = await testDatabaseConnection();
           if (!status.success) {
               console.error("DB Connection Error:", status.error);
-              showToast(`Erreur Base de Données: ${status.error}`, "error");
+              // On affiche le toast que si ce n'est pas juste un problème de clé manquante
+              if (!status.error.includes("Variables d'environnement")) {
+                  showToast(`Erreur Base de Données: ${status.error}`, "error");
+              }
           }
       };
       checkConnection();
@@ -94,16 +98,27 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (targetDraw !== drawName) setLastPrediction(null);
 
     } catch (e: any) {
-        console.error("Nexus Kernel Error:", e);
+        // Logging d'erreur amélioré pour éviter [object Object]
+        let errorMessage = "Erreur inconnue";
+        if (typeof e === 'string') errorMessage = e;
+        else if (e instanceof Error) errorMessage = e.message;
+        else if (e && typeof e === 'object') {
+            errorMessage = e.message || e.error_description || JSON.stringify(e);
+        }
+        
+        console.error("Nexus Kernel Error:", errorMessage);
+        
         // Détection spécifique des erreurs courantes Supabase
-        if (e.message?.includes('FetchError') || e.message?.includes('Network')) {
-             showToast("Serveur injoignable. Vérifiez votre connexion.", "error");
-        } else if (e.code === '42P01') {
+        if (errorMessage.includes('FetchError') || errorMessage.includes('Network') || errorMessage.includes('Failed to fetch')) {
+             // Silence en cas d'erreur réseau pour ne pas bloquer l'UX
+             console.warn("Serveur injoignable.");
+        } else if ((e as any).code === '42P01') {
              showToast("Table 'draw_results' introuvable. Exécutez le SQL.", "error");
-        } else if (e.code === '42501') {
+        } else if ((e as any).code === '42501') {
              showToast("Accès refusé (RLS). Vérifiez les politiques.", "error");
         } else {
-             showToast(`Erreur chargement ${targetDraw}.`, "error");
+             // Erreur générique discrète
+             console.warn(`Erreur chargement ${targetDraw}.`, errorMessage);
         }
         setHistory([]); 
     } finally {
