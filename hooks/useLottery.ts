@@ -1,6 +1,6 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult } from '../types';
 import { normalizeDate, fetchResults } from '../services/lotteryService';
 import { useEffect } from 'react';
@@ -38,31 +38,38 @@ const fetchHistory = async (drawName: string): Promise<DrawResult[]> => {
 };
 
 const fetchGlobalMarketHistory = async (): Promise<DrawResult[]> => {
-    const { data, error } = await supabase
-        .from('draw_results')
-        .select('*')
-        .order('date', { ascending: false })
-        .limit(500);
+    if (!isSupabaseConfigured()) return [];
+    
+    try {
+        const { data, error } = await supabase
+            .from('draw_results')
+            .select('*')
+            .order('date', { ascending: false })
+            .limit(500);
 
-    if (error) throw new Error(error.message);
+        if (error) throw new Error(error.message);
 
-    const mapped = (data || []).map(row => ({
-        id: row.id,
-        date: normalizeDate(row.date),
-        gagnants: row.gagnants,
-        machine: row.machine || [],
-        version: row.version || 1,
-        drawName: row.draw_name
-    }));
+        const mapped = (data || []).map(row => ({
+            id: row.id,
+            date: normalizeDate(row.date),
+            gagnants: row.gagnants,
+            machine: row.machine || [],
+            version: row.version || 1,
+            drawName: row.draw_name
+        }));
 
-    return mapped.sort(sortDrawsDesc);
+        return mapped.sort(sortDrawsDesc);
+    } catch (e) {
+        console.warn("Global market history fetch failed (Offline/Error):", e);
+        return [];
+    }
 };
 
 export const useDrawHistory = (drawName: string) => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!isSupabaseConfigured()) return;
     
     // Écoute Realtime des nouveaux résultats
     const channel = supabase
@@ -100,6 +107,8 @@ export const useDrawMutation = (drawName: string) => {
 
   return useMutation({
     mutationFn: async (newResult: Omit<DrawResult, 'id'>) => {
+      if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
+      
       const { data, error } = await supabase
         .from('draw_results')
         .upsert({
@@ -126,6 +135,7 @@ export const useDeleteDrawMutation = (drawName: string) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Suppression impossible.");
       const { error } = await supabase.from('draw_results').delete().eq('id', id);
       if (error) throw error;
     },

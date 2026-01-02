@@ -95,9 +95,11 @@ export const testDatabaseConnection = async () => {
             if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL dans Supabase." };
             if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité dans Supabase." };
             
-            // Gestion générique améliorée
-            const msg = error.message || "Erreur de connexion (Serveur injoignable ou URL invalide)";
-            const code = error.code || "NETWORK_ERR";
+            // Gestion générique améliorée pour éviter "undefined"
+            const msg = (error.message && error.message.trim()) ? error.message : "Erreur de connexion (Serveur injoignable ou URL invalide)";
+            // Force code to string or generic string to prevent "undefined" display in UI
+            const code = (error.code) ? String(error.code) : "NETWORK_ERR";
+            
             return { success: false, error: `Erreur API: ${msg} (Code: ${code})` };
         }
         

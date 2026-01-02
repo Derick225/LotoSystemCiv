@@ -1,6 +1,6 @@
 
 import { DrawResult, SpectralMetric, FractalMetric, NumberRegularity, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, EntropyMetric, ChiSquareMetric, ClusterPoint } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const calculateACValue = (numbers: number[]): number => {
   const diffs = new Set();
@@ -19,16 +19,22 @@ export const calculateDigitalRoot = (n: number): number => {
 
 export const mathService = {
   async fetchAnalytics(drawName: string, date: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
-    if (!supabase) return null;
-    const { data, error } = await supabase
-      .from('draw_analytics')
-      .select('spectral, fractal')
-      .eq('draw_name', drawName)
-      .eq('date', date)
-      .single();
+    if (!isSupabaseConfigured()) return null;
     
-    if (error || !data) return null;
-    return { spectral: data.spectral, fractal: data.fractal };
+    try {
+        const { data, error } = await supabase
+          .from('draw_analytics')
+          .select('spectral, fractal')
+          .eq('draw_name', drawName)
+          .eq('date', date)
+          .single();
+        
+        if (error || !data) return null;
+        return { spectral: data.spectral, fractal: data.fractal };
+    } catch (e) {
+        // En cas d'erreur réseau ou autre, on retourne null pour utiliser le calcul local
+        return null;
+    }
   },
 
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {

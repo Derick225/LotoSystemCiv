@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { supabase, testDatabaseConnection } from '../../services/supabaseClient';
+import { supabase, testDatabaseConnection, isSupabaseConfigured } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
 import { NEXUS_DATABASE_SCHEMA } from '../../services/databaseSchema';
 import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save, ShieldCheck } from 'lucide-react';
@@ -21,6 +20,11 @@ export const DatabaseControl: React.FC = () => {
     }, []);
 
     const refreshMetrics = async () => {
+        // Protection : ne rien faire si Supabase n'est pas configuré
+        if (!isSupabaseConfigured()) {
+            return;
+        }
+
         setLoading(true);
         try {
             // Requêtes parallèles légères (count exact)
@@ -33,9 +37,11 @@ export const DatabaseControl: React.FC = () => {
 
             // Calcul taille LocalStorage (approx)
             let total = 0;
-            for (const x in localStorage) {
-                if (localStorage.hasOwnProperty(x)) {
-                    total += ((localStorage[x].length + x.length) * 2);
+            if (typeof window !== 'undefined' && window.localStorage) {
+                for (const x in localStorage) {
+                    if (localStorage.hasOwnProperty(x)) {
+                        total += ((localStorage[x].length + x.length) * 2);
+                    }
                 }
             }
             
@@ -89,8 +95,10 @@ export const DatabaseControl: React.FC = () => {
                     <div>
                         <h3 className="text-xl font-black text-white uppercase tracking-tighter">Nexus Cloud Node</h3>
                         <div className="flex items-center gap-2 mt-1">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            <span className="text-xs font-mono text-emerald-400">PostgreSQL Actif</span>
+                            <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                            <span className="text-xs font-mono text-emerald-400">
+                                {isSupabaseConfigured() ? 'PostgreSQL Actif' : 'Mode Local (Offline)'}
+                            </span>
                         </div>
                     </div>
                 </div>
