@@ -32,11 +32,11 @@ const isValidUrl = (url: string) => {
 const isConfigured = isValidUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 
 if (!isConfigured) {
-  console.warn(
-    "%c[Nexus Warning] Variables Supabase manquantes ou invalides dans le .env", 
-    "color: orange; font-weight: bold;"
+  console.error(
+    "%c[Nexus Critical] Configuration Supabase invalide ou manquante.", 
+    "color: #ef4444; font-weight: bold; font-size: 14px;"
   );
-  console.info("Attendu: VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY");
+  console.info("Assurez-vous que le fichier .env contient VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.");
 } else {
   console.log(
     "%c[Nexus Core] Connexion Supabase initialisée", 
@@ -46,11 +46,12 @@ if (!isConfigured) {
 
 /**
  * Client Supabase Singleton
- * Initialisé avec les variables d'environnement ou des valeurs placeholder pour éviter le crash au démarrage.
+ * En production, on ne met PAS de fallback. Si la config manque, l'app doit échouer explicitement sur les appels réseau
+ * plutôt que de tenter de joindre une URL fictive.
  */
 export const supabase = createClient(
-  isConfigured ? SUPABASE_URL : 'https://placeholder.supabase.co',
-  isConfigured ? SUPABASE_ANON_KEY : 'placeholder-key',
+  isConfigured ? SUPABASE_URL : '',
+  isConfigured ? SUPABASE_ANON_KEY : '',
   {
     auth: {
       persistSession: true,
@@ -59,7 +60,7 @@ export const supabase = createClient(
       storage: typeof window !== 'undefined' ? window.localStorage : undefined
     },
     global: {
-      headers: { 'x-nexus-client': 'platinum-v11' }
+      headers: { 'x-nexus-client': 'platinum-v11-prod' }
     }
   }
 );

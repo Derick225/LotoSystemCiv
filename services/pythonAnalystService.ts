@@ -3,7 +3,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { DrawResult, PythonAnalysisResult } from "../types";
 
 export const runDeepPythonAnalysis = async (drawName: string, history: DrawResult[]): Promise<PythonAnalysisResult> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+    // La clé est injectée via vite.config.ts define: { 'process.env': ... }
+    const apiKey = process.env.API_KEY;
+    
+    if (!apiKey) {
+        throw new Error("Clé API Google Gemini manquante (VITE_API_KEY dans .env).");
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // Dataset allégé pour optimiser les tokens
     const dataset = history.slice(0, 50).map(d => ({ date: d.date, winners: d.gagnants }));
 
     const response = await ai.models.generateContent({
@@ -34,8 +43,10 @@ export const runDeepPythonAnalysis = async (drawName: string, history: DrawResul
     });
 
     try {
-        return JSON.parse(response.text || "{}") as PythonAnalysisResult;
+        if (!response.text) throw new Error("Réponse vide du modèle.");
+        return JSON.parse(response.text) as PythonAnalysisResult;
     } catch (e) {
-        throw new Error("Kernel Panic: Échec du parsing JSON.");
+        console.error("Python Kernel Parsing Error:", e);
+        throw new Error("Kernel Panic: Échec du parsing de la réponse IA.");
     }
 };

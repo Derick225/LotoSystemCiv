@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    // Expose les variables filtrées au code client via `process.env`
+    // Expose les variables filtrées au code client via `process.env` pour compatibilité SDK
     define: {
       'process.env': JSON.stringify(clientEnv)
     },
@@ -36,15 +36,17 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      target: 'esnext',
-      sourcemap: false,
+      target: 'esnext', // Cible moderne pour meilleures perfs
+      sourcemap: false, // Désactivé en prod pour sécurité
       minify: 'esbuild',
+      chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-is'],
-            'vendor-ui': ['lucide-react', 'recharts'],
-            'vendor-utils': ['jspdf', 'html2canvas', '@google/genai', '@supabase/supabase-js']
+            'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
+            'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
+            'vendor-utils': ['jspdf', 'html2canvas'],
+            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query']
           }
         }
       }
