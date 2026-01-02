@@ -4,31 +4,46 @@
 
 Système industriel de prédiction stochastique par ensemble de neurones pondérés et synchronisation tensorielle. Développé pour l'analyse haute performance des flux 5/90.
 
-## 🚀 Repository & Sync
-Dépôt Officiel : [https://github.com/Derick225/LotoSystem-](https://github.com/Derick225/LotoSystem-)
+## 🚀 Installation & Configuration Rapide
 
-### 1. Installation
+### 1. Installation des dépendances
 ```bash
 npm install
 ```
 
-### 2. Variables d'Environnement (.env)
+### 2. Configuration Environnement (.env)
+Créez un fichier nommé `.env` à la racine du projet et remplissez-le avec vos clés Supabase :
+
 ```env
-# Google Gemini API Key (Studio AI)
-API_KEY=votre_cle_gemini
-
-# Supabase Configuration
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+# Client (Vite)
+VITE_SUPABASE_URL=https://votre-projet.supabase.co
+VITE_SUPABASE_ANON_KEY=votre-cle-anon-publique
 ```
 
-### 3. Déploiement du Cerveau (Edge Functions)
-Pour synchroniser les algorithmes IA vers Supabase :
+*Pour obtenir ces clés : Allez dans votre Dashboard Supabase > Settings > API.*
+
+### 3. Démarrage
 ```bash
-supabase login
-supabase link --project-ref your-project-id
-supabase functions deploy --no-verify-jwt
+npm run dev
 ```
+
+### 4. Déploiement du Cerveau (Edge Functions)
+Pour activer l'IA (Gemini) et la synchronisation automatique :
+
+1.  Connectez la CLI :
+    ```bash
+    npx supabase login
+    npx supabase link --project-ref votre-project-id
+    ```
+2.  Envoyez les secrets serveurs (ne pas mettre dans le .env client !) :
+    ```bash
+    npx supabase secrets set API_KEY=votre_cle_google_gemini
+    npx supabase secrets set SUPABASE_SERVICE_ROLE_KEY=votre_cle_service_role
+    ```
+3.  Déployez les fonctions :
+    ```bash
+    npm run deploy:nexus
+    ```
 
 ## 🛠️ Architecture Nexus
 *   **Neural Kernel**: Moteur d'inférence basé sur Gemini 3 Pro pour le raisonnement narratif.
