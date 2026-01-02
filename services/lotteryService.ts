@@ -50,26 +50,28 @@ export const normalizeDate = (dateStr: string): string => {
   return dateStr;
 };
 
+// Normalisation du nom pour correspondre à la DB (Title Case)
+const normalizeDrawName = (name: string): string => {
+    return name.trim().charAt(0).toUpperCase() + name.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
+};
+
 export const lotteryService = {
-  /**
-   * Récupère l'historique. 
-   * NOTE: Ne catch pas les erreurs ici pour permettre au NexusProvider de détecter les pannes RLS/Réseau.
-   */
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
+    // On essaie de chercher avec le nom exact, ou une variante insensible à la casse
     const { data, error } = await supabase
       .from('draw_results')
       .select('*')
-      .eq('draw_name', drawName)
+      .ilike('draw_name', drawName) // Insensible à la casse pour la robustesse
       .order('date', { ascending: false });
     
     if (error) {
-      console.error(`[Supabase Error] fetchHistory(${drawName}):`, error.message, error.details);
-      throw error; // Propagation de l'erreur vers l'UI
+      console.error(`[Supabase Error] fetchHistory(${drawName}):`, error.message);
+      throw error; 
     }
     
     return (data || []).map(row => ({
       id: row.id,
-      drawName: row.draw_name,
+      drawName: row.draw_name, // On garde le nom de la DB
       date: formatDate(row.date),
       gagnants: row.gagnants,
       machine: row.machine || [],
@@ -78,9 +80,6 @@ export const lotteryService = {
   }
 };
 
-/**
- * Déclenche la synchronisation cloud immédiate via Edge Function.
- */
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   try {
     const { data, error } = await supabase.functions.invoke('cron-sync', { 
@@ -96,9 +95,6 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
 
 export const checkAndSyncRecentResults = syncDrawExternal;
 
-/**
- * Force le calcul des analyses spectrales/fractales sur le serveur.
- */
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
   try {
     const { error } = await supabase.functions.invoke('compute-nexus-analytics', {
@@ -122,7 +118,6 @@ export const getDailySummary = async (day: string) => {
         const history = await lotteryService.fetchHistory(name);
         return { time, name, result: history[0] || null };
     } catch (e) {
-        // Pour le sommaire, on tolère une erreur silencieuse (juste pas de résultat affiché)
         console.warn(`Summary fetch failed for ${name}`);
         return { time, name, result: null };
     }
@@ -140,7 +135,6 @@ export const getNextScheduledDraw = () => {
   const times = Object.keys(schedule).sort();
   const currentTimestamp = now.getTime();
   
-  // Recherche précise incluant la date complète
   const nextTime = times.find(t => {
       const [h, m] = t.split(':').map(Number);
       const drawDate = new Date(now);
@@ -148,7 +142,6 @@ export const getNextScheduledDraw = () => {
       return drawDate.getTime() > currentTimestamp;
   });
 
-  // Si aucun tirage restant aujourd'hui, prendre le premier de la liste (logique de boucle simplifiée pour l'affichage)
   const finalTime = nextTime || times[0];
   
   return { time: finalTime, name: schedule[finalTime] };
@@ -171,7 +164,7 @@ export const fetchGlobalStats = async () => {
 
 export const bulkAddResults = async (drawName: string, results: any[]) => {
   const mapped = results.map(r => ({
-    draw_name: r.draw_name || drawName,
+    draw_name: r.draw_name || normalizeDrawName(drawName),
     date: normalizeDate(r.date),
     gagnants: r.gagnants,
     machine: r.machine || [],
@@ -183,7 +176,7 @@ export const bulkAddResults = async (drawName: string, results: any[]) => {
 
 export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>) => {
   const { error } = await supabase.from('draw_results').insert({
-    draw_name: drawName,
+    draw_name: normalizeDrawName(drawName),
     date: normalizeDate(result.date),
     gagnants: result.gagnants,
     machine: result.machine || [],

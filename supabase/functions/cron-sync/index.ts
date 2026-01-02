@@ -9,6 +9,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Liste officielle des tirages à surveiller pour le filtrage
+const TARGET_DRAWS = [
+  'REVEIL', 'ETOILE', 'AKWABA', 'MONDAY SPECIAL',
+  'LA MATINALE', 'EMERGENCE', 'SIKA', 'LUCKY TUESDAY',
+  'PREMIERE HEURE', 'FORTUNE', 'BARAKA', 'MIDWEEK',
+  'KADO', 'PRIVILEGE', 'MONNI', 'FORTUNE THURSDAY',
+  'CASH', 'SOLUTION', 'WARI', 'FRIDAY BONANZA',
+  'SOUTRA', 'DIAMANT', 'MOAYE', 'NATIONAL',
+  'BENEDICTION', 'PRESTIGE', 'AWALE', 'ESPOIR'
+];
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -26,7 +37,7 @@ serve(async (req) => {
     const now = new Date();
     const monthsToFetch = [`${monthNames[now.getMonth()]} ${now.getFullYear()}`];
     
-    // Si on est en début de mois (avant le 7), on vérifie aussi le mois précédent pour être sûr
+    // Si on est en début de mois (avant le 7), on vérifie aussi le mois précédent
     if (now.getDate() < 7) {
       const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       monthsToFetch.push(`${monthNames[prev.getMonth()]} ${prev.getFullYear()}`);
@@ -51,17 +62,15 @@ serve(async (req) => {
 
       if (data.drawsResultsWeekly) {
         const drawsToUpsert = [];
+        
         for (const week of data.drawsResultsWeekly) {
-          // Extraction année
           const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
           const year = yearMatch ? yearMatch[0] : now.getFullYear().toString();
 
           for (const daily of week.drawResultsDaily) {
-            // Extraction date JJ/MM
             const dateMatch = daily.date.match(/(\d{2})\/(\d{2})/);
             if (!dateMatch) continue;
             
-            // Format ISO YYYY-MM-DD pour la base de données
             const isoDate = `${year}-${dateMatch[2]}-${dateMatch[1]}`;
 
             const allDayDraws = [
@@ -71,13 +80,35 @@ serve(async (req) => {
             ];
 
             for (const draw of allDayDraws) {
+              // Nettoyage et normalisation du nom
+              let drawName = (draw.drawName || "UNKNOWN").trim().toUpperCase();
+              
+              // Normalisation des noms pour correspondre aux constantes (ex: "TIRAGE REVEIL" -> "REVEIL")
+              // On cherche si le nom contient un de nos targets
+              const matchedTarget = TARGET_DRAWS.find(t => drawName.includes(t));
+              if (matchedTarget) {
+                  // On normalise le nom pour le mapping exact (ex: "Monday Special" au lieu de "MONDAY SPECIAL")
+                  // Pour l'instant on garde uppercase pour le match, le front gérera l'affichage
+                  // Dans une version plus avancée, on mapperait vers les clés exactes de DRAW_SCHEDULE
+              } else {
+                  // Si ce n'est pas un tirage cible, on peut l'ignorer ou le garder comme "Autre"
+                  // Pour l'instant on l'ignore pour garder la DB propre
+                  continue; 
+              }
+
               if (draw.winningNumbers && !draw.winningNumbers.includes('..') && !draw.winningNumbers.startsWith('.')) {
                 const win = (draw.winningNumbers.match(/\d+/g) || []).map(Number);
                 const mac = (draw.machineNumbers?.match(/\d+/g) || []).map(Number);
 
                 if (win.length === 5) {
+                  // On utilise le nom "Propre" (Casse Titre) si possible, sinon brut
+                  // Ici on normalise en Title Case pour correspondre au front (ex: 'Reveil')
+                  const formattedName = matchedTarget 
+                    ? matchedTarget.charAt(0).toUpperCase() + matchedTarget.slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase())
+                    : drawName;
+
                   drawsToUpsert.push({
-                    draw_name: (draw.drawName || "UNKNOWN").trim(),
+                    draw_name: formattedName, 
                     date: isoDate,
                     gagnants: win,
                     machine: mac.length === 5 ? mac : [],
@@ -90,7 +121,6 @@ serve(async (req) => {
         }
 
         if (drawsToUpsert.length > 0) {
-          // Upsert en masse (nécessite une contrainte unique sur draw_name + date dans la DB)
           const { error, data: inserted } = await supabaseAdmin
             .from('draw_results')
             .upsert(drawsToUpsert, { onConflict: 'draw_name, date' })

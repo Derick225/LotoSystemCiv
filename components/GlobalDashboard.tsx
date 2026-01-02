@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -11,13 +12,14 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, Database, 
-    Zap, Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Cpu, Monitor
+    Zap, Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Cpu, Monitor, ChevronRight
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useIsFetching } from '@tanstack/react-query';
 import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../utils/audioEngine';
+import { DRAW_SCHEDULE } from '../constants';
 
 interface SummaryItem {
     time: string;
@@ -153,6 +155,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean} | null>(null);
     const [globalHot, setGlobalHot] = useState<{number: number, count: number}[]>([]);
     const [fullSyncing, setFullSyncing] = useState(false);
+    const [displayDay, setDisplayDay] = useState<string>('');
 
     const isMounted = useRef(true);
 
@@ -161,6 +164,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         setLoadingSummary(true);
         const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
         const today = daysOrder[new Date().getDay()];
+        setDisplayDay(today);
         
         try {
             const summaryData = await getDailySummary(today);
@@ -213,7 +217,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         return () => { isMounted.current = false; clearInterval(syncTimer); };
     }, [loadDailySummary, loadHotStats]);
 
-    // FIX: Renamed implementation for clarity and usage consistency
     const handleManualSync = async () => {
         audioEngine.play('scan');
         setFullSyncing(true);
@@ -259,7 +262,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 </div>
                 
                 <button 
-                    // FIX: Changed from handleManualRefresh to handleManualSync
                     onClick={handleManualSync}
                     disabled={fullSyncing}
                     className="group px-10 py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center gap-4 active:scale-95 disabled:opacity-50"
@@ -343,11 +345,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
 
             {/* FLUX DU JOUR */}
             <section className="mt-20">
-                <div className="flex items-center gap-5 mb-12 px-6">
-                    <div className="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/20"><Calendar size={24}/></div>
-                    <div>
-                        <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Flux Séquentiel</h2>
-                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-1">Fenêtre temporelle active du jour</p>
+                <div className="flex items-center justify-between gap-5 mb-12 px-6">
+                    <div className="flex items-center gap-5">
+                        <div className="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/20"><Calendar size={24}/></div>
+                        <div>
+                            <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme {displayDay}</h2>
+                            <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-1">Fenêtre temporelle active</p>
+                        </div>
                     </div>
                 </div>
                 
@@ -357,18 +361,20 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     ) :
                     summary.map((item, idx) => {
                         const isCompleted = item.result !== null;
+                        const isNext = nextDraw?.name === item.name;
+                        
                         return (
                             <motion.div
                                 key={item.name}
                                 initial={{ opacity: 0, y: 30 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: idx * 0.1 }}
-                                onClick={() => onSelectDraw({ day: 'Today', time: item.time, name: item.name })}
-                                className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
+                                onClick={() => onSelectDraw({ day: displayDay, time: item.time, name: item.name })}
+                                className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
                             >
                                 <div className="flex justify-between items-start mb-8 relative z-10">
                                     <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-indigo-400'}`}>{item.time}</span>
-                                    {isCompleted && <Signal size={12} className="text-emerald-500 animate-pulse" />}
+                                    {isCompleted ? <Signal size={12} className="text-emerald-500 animate-pulse" /> : isNext && <Clock size={12} className="text-indigo-400 animate-spin"/>}
                                 </div>
 
                                 <h3 className="font-black text-2xl text-white mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">{item.name}</h3>
@@ -389,9 +395,15 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="py-8 bg-black/20 rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3">
-                                            <div className="w-2 h-2 bg-indigo-500/30 rounded-full animate-pulse shadow-[0_0_10px_#6366f1]"></div>
-                                            <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">Pending</span>
+                                        <div className="py-8 bg-black/20 rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3 group-hover:bg-black/40 transition-colors">
+                                            {isNext ? (
+                                                <>
+                                                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+                                                    <span className="text-[9px] text-indigo-400 font-black uppercase tracking-widest">En cours...</span>
+                                                </>
+                                            ) : (
+                                                <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">À venir</span>
+                                            )}
                                         </div>
                                     )}
                                 </div>
