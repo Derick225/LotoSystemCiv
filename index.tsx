@@ -5,8 +5,10 @@ import App from './App';
 import './index.css';
 
 // Enregistrement du Service Worker pour la PWA
-// Utilisation de l'accès sécurisé (optional chaining) pour éviter le crash si import.meta.env est indéfini
-if ('serviceWorker' in navigator && !import.meta.env?.DEV) {
+// Utilisation de l'accès sécurisé pour éviter le crash si import.meta.env est indéfini
+const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+
+if ('serviceWorker' in navigator && !isDev) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then((registration) => {

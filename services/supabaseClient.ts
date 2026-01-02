@@ -45,10 +45,10 @@ export const isSupabaseConfigured = () => {
            isValidSupabaseUrl(envUrl);
 };
 
+// Safe check for DEV environment
+const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+
 if (!isSupabaseConfigured()) {
-    // Safe check for DEV environment to prevent crashes if import.meta.env is undefined
-    const isDev = import.meta?.env?.DEV;
-    
     if (isDev) {
          console.warn(`[Supabase] Mode Hors-Ligne (Config manquante ou invalide). URL: ${envUrl}`);
     } else {
