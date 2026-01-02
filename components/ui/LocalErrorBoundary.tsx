@@ -17,23 +17,19 @@ export class LocalErrorBoundary extends Component<Props, State> {
     hasError: false,
   };
 
-  constructor(props: Props) {
-    super(props);
-  }
-
-  static getDerivedStateFromError(_: Error): State {
+  public static getDerivedStateFromError(_: Error): State {
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn("Module Failure Intercepted:", error, errorInfo);
   }
 
-  handleReload = () => {
+  public handleReload = () => {
     this.setState({ hasError: false });
   };
 
-  render() {
+  public render() {
     if (this.state.hasError) {
       return (
         <div className="p-6 bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-300 rounded-2xl border border-red-200 dark:border-red-800/30 text-center animate-fade-in flex flex-col items-center justify-center gap-3 h-full min-h-[150px]">

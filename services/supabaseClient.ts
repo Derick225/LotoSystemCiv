@@ -94,7 +94,11 @@ export const testDatabaseConnection = async () => {
             // Gestion des erreurs spécifiques pour guider l'utilisateur
             if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL dans Supabase." };
             if (error.code === '42501') return { success: false, error: "Accès refusé (RLS). Vérifiez les politiques de sécurité dans Supabase." };
-            return { success: false, error: `Erreur API: ${error.message} (Code: ${error.code})` };
+            
+            // Gestion générique améliorée
+            const msg = error.message || "Erreur de connexion (Serveur injoignable ou URL invalide)";
+            const code = error.code || "NETWORK_ERR";
+            return { success: false, error: `Erreur API: ${msg} (Code: ${code})` };
         }
         
         return { success: true, count, latency, status };
