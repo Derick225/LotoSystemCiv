@@ -27,11 +27,15 @@ const envUrl = getEnvVar('VITE_SUPABASE_URL');
 const envKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 export const isSupabaseConfigured = () => {
-    return !!envUrl && envUrl !== 'https://placeholder.supabase.co' && !!envKey;
+    const isConfigured = !!envUrl && envUrl !== 'https://placeholder.supabase.co' && !!envKey;
+    if (!isConfigured) {
+        console.warn(`[Supabase Check] URL: ${envUrl ? 'OK' : 'MISSING'}, KEY: ${envKey ? 'OK (Masked)' : 'MISSING'}`);
+    }
+    return isConfigured;
 };
 
 if (!isSupabaseConfigured()) {
-    console.error("🚨 NEXUS CRITICAL: Supabase environment variables are missing! Check your .env file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.");
+    console.error("🚨 NEXUS CRITICAL: Supabase environment variables are missing! Check your deployment settings (Vercel/Netlify) or .env file.");
 }
 
 // Fallback to placeholder only to prevent total JS crash, but isSupabaseConfigured will return false
@@ -39,3 +43,31 @@ const clientUrl = envUrl || 'https://placeholder.supabase.co';
 const clientKey = envKey || 'placeholder-key';
 
 export const supabase = createClient(clientUrl, clientKey);
+
+/**
+ * Teste la connexion réelle à la base de données.
+ * Retourne { success: true } ou { success: false, error: string }
+ */
+export const testDatabaseConnection = async () => {
+    if (!isSupabaseConfigured()) {
+        return { success: false, error: "Variables d'environnement manquantes (VITE_SUPABASE_URL)" };
+    }
+    try {
+        // Tentative de lecture légère (head) sur la table principale
+        const { error, count } = await supabase
+            .from('draw_results')
+            .select('*', { count: 'exact', head: true });
+
+        if (error) {
+            console.error("[Supabase Connection Test] Failed:", error);
+            // Détection spécifique des erreurs RLS ou 404
+            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS Policy manquante)" };
+            if (error.code === 'PGRST301') return { success: false, error: "Table introuvable ou permissions" };
+            return { success: false, error: error.message };
+        }
+        
+        return { success: true, count };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
+};

@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
@@ -13,10 +14,13 @@ import {
 import { getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { audioEngine } from '../utils/audioEngine';
+import { useToast } from './ui/Toast'; // Import du Toast
+import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; // Import du test
 
 const NexusContext = createContext<NexusContextType | null>(null);
 
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { showToast } = useToast(); // Hook pour les notifications
   const [drawName, setDrawName] = useState('Reveil');
   const [history, setHistory] = useState<DrawResult[]>([]);
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
@@ -33,10 +37,32 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [cliques, setCliques] = useState<any[]>([]);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
 
+  // Vérification initiale de la connexion
+  useEffect(() => {
+      const checkConnection = async () => {
+          if (!isSupabaseConfigured()) {
+              showToast("⚠️ Config Supabase manquante !", "error");
+              return;
+          }
+          const status = await testDatabaseConnection();
+          if (!status.success) {
+              console.error("DB Connection Error:", status.error);
+              showToast(`Erreur Base de Données: ${status.error}`, "error");
+          }
+      };
+      checkConnection();
+  }, []);
+
   const loadData = useCallback(async (targetDraw: string = drawName, forceSync: boolean = false) => {
     setLoading(true);
     try {
         const hist = await lotteryService.fetchHistory(targetDraw);
+        
+        if (hist.length === 0) {
+            // Pas d'erreur, mais pas de données : peut être normal (nouveau jeu) ou RLS bloquant
+            console.warn(`[Nexus] Aucun résultat trouvé pour ${targetDraw}. Vérifiez RLS si des données existent.`);
+        }
+
         setHistory(hist);
         
         // Synchronisation ADN IA
@@ -65,12 +91,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Clean-up si le tirage a changé
         if (targetDraw !== drawName) setLastPrediction(null);
 
-    } catch (e) {
+    } catch (e: any) {
         console.error("Nexus Kernel Error:", e);
+        showToast("Erreur chargement données.", "error");
     } finally {
         setLoading(false);
     }
-  }, [drawName]);
+  }, [drawName, showToast]);
 
   useEffect(() => { 
     loadData();
