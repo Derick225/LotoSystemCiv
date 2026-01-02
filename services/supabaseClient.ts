@@ -16,6 +16,9 @@ const getEnv = (key: string): string => {
 };
 
 // Récupération explicite des variables du .env (Support VITE_ et VITE_PUBLIC_)
+const urlSource = getEnv('VITE_SUPABASE_URL') ? 'VITE_' : getEnv('VITE_PUBLIC_SUPABASE_URL') ? 'VITE_PUBLIC_' : null;
+const keySource = getEnv('VITE_SUPABASE_ANON_KEY') ? 'VITE_' : getEnv('VITE_PUBLIC_SUPABASE_ANON_KEY') ? 'VITE_PUBLIC_' : null;
+
 const SUPABASE_URL = getEnv('VITE_SUPABASE_URL') || getEnv('VITE_PUBLIC_SUPABASE_URL');
 const SUPABASE_ANON_KEY = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('VITE_PUBLIC_SUPABASE_ANON_KEY');
 
@@ -37,7 +40,9 @@ if (!isConfigured) {
     "[Nexus System] Configuration Supabase manquante ou invalide. L'application fonctionnera en mode local/restreint."
   );
 } else {
-  console.log("[Nexus System] Connexion Supabase établie.");
+  // Masquage de l'URL pour la sécurité dans les logs, mais confirmation de la cible
+  const maskedUrl = SUPABASE_URL.replace(/^(https:\/\/)([^.]+)(.+)$/, '$1****$3');
+  console.log(`[Nexus System] Connexion Supabase établie vers ${maskedUrl} (Source: URL=${urlSource}, KEY=${keySource}).`);
 }
 
 /**

@@ -18,12 +18,14 @@ export default defineConfig(({ mode }) => {
 
   // MAPPING SPÉCIFIQUE :
   // Permet d'utiliser process.env.API_KEY dans le code (standard Google GenAI SDK)
-  // tout en utilisant VITE_API_KEY ou VITE_PUBLIC_API_KEY dans le .env pour la compatibilité Vite.
-  if (env.VITE_API_KEY) {
-    clientEnv['API_KEY'] = env.VITE_API_KEY;
-  } else if (env.VITE_PUBLIC_API_KEY) {
-    clientEnv['API_KEY'] = env.VITE_PUBLIC_API_KEY;
+  // tout en utilisant VITE_API_KEY ou VITE_PUBLIC_API_KEY dans le .env
+  let apiKey = env.VITE_API_KEY || env.VITE_PUBLIC_API_KEY;
+  if (apiKey) {
+    clientEnv['API_KEY'] = apiKey;
   }
+
+  // Ajout critique : NODE_ENV pour la compatibilité des libs React
+  clientEnv['NODE_ENV'] = mode;
 
   return {
     plugins: [react()],

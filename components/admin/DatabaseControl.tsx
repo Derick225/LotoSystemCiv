@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../services/supabaseClient';
+import { supabase, testDatabaseConnection } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
 import { NEXUS_DATABASE_SCHEMA } from '../../services/databaseSchema';
-import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save } from 'lucide-react';
+import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save, ShieldCheck } from 'lucide-react';
 
 export const DatabaseControl: React.FC = () => {
     const { showToast } = useToast();
@@ -67,6 +67,17 @@ export const DatabaseControl: React.FC = () => {
         showToast("Script SQL de production copié.", "success");
     };
 
+    const runRlsDiagnostic = async () => {
+        setLoading(true);
+        const res = await testDatabaseConnection();
+        setLoading(false);
+        if (res.success) {
+            showToast(`Connexion OK (${res.latency}ms). Table accessible.`, "success");
+        } else {
+            showToast(`Erreur Critique : ${res.error}`, "error");
+        }
+    };
+
     return (
         <div className="space-y-8 animate-fade-in">
             {/* Server Status Header */}
@@ -84,6 +95,9 @@ export const DatabaseControl: React.FC = () => {
                     </div>
                 </div>
                 <div className="flex gap-3 z-10">
+                    <button onClick={runRlsDiagnostic} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all text-emerald-400" title="Tester accès DB">
+                        <ShieldCheck size={20} />
+                    </button>
                     <button onClick={refreshMetrics} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all text-slate-300">
                         <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                     </button>

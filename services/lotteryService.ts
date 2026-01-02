@@ -64,18 +64,25 @@ export const lotteryService = {
     }
 
     try {
-        // On essaie de chercher avec le nom exact, ou une variante insensible à la casse
+        // Utilisation de jokers (%) pour une recherche flexible (ex: "REVEIL" trouvera "TIRAGE REVEIL")
         const { data, error } = await supabase
           .from('draw_results')
           .select('*')
-          .ilike('draw_name', drawName) // Insensible à la casse pour la robustesse
+          .ilike('draw_name', `%${drawName}%`) 
           .order('date', { ascending: false });
         
         if (error) {
+          console.error(`[Supabase Error] Fetch ${drawName}:`, error);
           throw error; 
         }
         
-        return (data || []).map(row => ({
+        if (!data || data.length === 0) {
+             // Log discret pour le développement sans spammer la prod si c'est juste vide
+             console.log(`[Supabase] Aucune donnée pour le filtre "%${drawName}%".`);
+             return [];
+        }
+        
+        return data.map(row => ({
           id: row.id,
           drawName: row.draw_name, // On garde le nom de la DB
           date: formatDate(row.date),
@@ -89,9 +96,8 @@ export const lotteryService = {
         if (msg.includes('Failed to fetch') || msg.includes('Network request failed') || msg.includes('error parsing')) {
             console.warn(`[Supabase Offline] Récupération historique ${drawName} ignorée (Problème réseau).`);
         } else {
-            console.error(`[Supabase Error] fetchHistory(${drawName}):`, msg);
+            console.error(`[Supabase Critical] fetchHistory(${drawName}):`, msg);
         }
-        // On retourne un tableau vide pour ne pas crasher l'UI en cas d'erreur réseau
         return [];
     }
   }
