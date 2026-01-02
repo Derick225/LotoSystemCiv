@@ -1,12 +1,13 @@
+
 {
-  "name": "Analyse de Loterie Pro",
-  "short_name": "LotoPro",
-  "id": "lotopro-app-v1",
+  "name": "LotoPro Platinum Elite",
+  "short_name": "NexusPro",
+  "id": "lotopro-platinum-v11",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#4f46e5",
-  "description": "Analysez, prédisez et suivez les résultats de loterie avec l'IA et des algorithmes avancés.",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "description": "Système industriel de prédiction stochastique par ensemble de neurones pondérés.",
   "categories": ["finance", "utilities", "productivity"],
   "icons": [
     {

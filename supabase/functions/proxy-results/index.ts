@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
@@ -10,9 +11,13 @@ serve(async (req: Request) => {
 
   try {
     const { month } = await req.json();
+    if (!month) throw new Error("Paramètre 'month' manquant.");
+
     // Appel direct à l'API cible
     const targetUrl = `https://lotobonheur.ci/api/results?month=${encodeURIComponent(month)}`;
     
+    console.log(`Proxying request to: ${targetUrl}`);
+
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (NexusEngine/11.0)',
@@ -29,8 +34,9 @@ serve(async (req: Request) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
+    // On renvoie 200 avec success: false pour que le client gère l'erreur proprement sans exception fetch
     return new Response(JSON.stringify({ success: false, error: error.message }), {
-      status: 200, // On renvoie 200 pour que le client gère l'erreur proprement
+      status: 200,
       headers: corsHeaders,
     });
   }

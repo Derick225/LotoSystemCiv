@@ -1,9 +1,8 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@0.1.1";
 
 declare const Deno: any;
-declare const process: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,26 +14,31 @@ serve(async (req: Request) => {
 
   try {
     const { imageBase64 } = await req.json();
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = Deno.env.get('API_KEY');
+    if (!apiKey) throw new Error("API_KEY not configured");
 
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Modèle Vision Performant
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash', 
       contents: {
         parts: [
           { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
-          { text: "Extrais la date, les 5 numéros gagnants et les 5 numéros machine du ticket." }
+          { text: "Analyse cette image de ticket de loto ou d'écran de résultats. Extrais la date, les 5 numéros gagnants et si présents, les 5 numéros machine." }
         ]
       },
       config: {
-        systemInstruction: "OCR Mode. Réponds uniquement en JSON.",
+        systemInstruction: "OCR Mode. Réponds UNIQUEMENT avec un JSON valide respectant le schéma.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            date: { type: Type.STRING },
+            date: { type: Type.STRING, description: "Format DD/MM/YYYY" },
             gagnants: { type: Type.ARRAY, items: { type: Type.INTEGER } },
             machine: { type: Type.ARRAY, items: { type: Type.INTEGER } }
-          }
+          },
+          required: ["gagnants"]
         }
       }
     });

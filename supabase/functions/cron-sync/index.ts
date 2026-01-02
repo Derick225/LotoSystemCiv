@@ -15,13 +15,18 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Configuration Supabase manquante (URL ou SERVICE_ROLE_KEY)");
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     
     const monthNames = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
     const now = new Date();
     const monthsToFetch = [`${monthNames[now.getMonth()]} ${now.getFullYear()}`];
     
-    // Si on est en début de mois, on vérifie aussi le mois précédent
+    // Si on est en début de mois (avant le 7), on vérifie aussi le mois précédent pour être sûr
     if (now.getDate() < 7) {
       const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       monthsToFetch.push(`${monthNames[prev.getMonth()]} ${prev.getFullYear()}`);
@@ -30,22 +35,33 @@ serve(async (req) => {
     let totalInserted = 0;
 
     for (const monthParam of monthsToFetch) {
-      const res = await fetch(`https://lotobonheur.ci/api/results?month=${encodeURIComponent(monthParam)}`, {
+      const targetUrl = `https://lotobonheur.ci/api/results?month=${encodeURIComponent(monthParam)}`;
+      console.log(`Fetching: ${targetUrl}`);
+      
+      const res = await fetch(targetUrl, {
         headers: { 'Accept': 'application/json', 'User-Agent': 'NexusEngine/11.0' }
       });
       
-      if (!res.ok) continue;
+      if (!res.ok) {
+          console.error(`Failed to fetch ${monthParam}: ${res.status}`);
+          continue;
+      }
+      
       const data = await res.json();
 
       if (data.drawsResultsWeekly) {
         const drawsToUpsert = [];
         for (const week of data.drawsResultsWeekly) {
+          // Extraction année
           const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
           const year = yearMatch ? yearMatch[0] : now.getFullYear().toString();
 
           for (const daily of week.drawResultsDaily) {
+            // Extraction date JJ/MM
             const dateMatch = daily.date.match(/(\d{2})\/(\d{2})/);
             if (!dateMatch) continue;
+            
+            // Format ISO YYYY-MM-DD pour la base de données
             const isoDate = `${year}-${dateMatch[2]}-${dateMatch[1]}`;
 
             const allDayDraws = [
@@ -74,11 +90,17 @@ serve(async (req) => {
         }
 
         if (drawsToUpsert.length > 0) {
+          // Upsert en masse (nécessite une contrainte unique sur draw_name + date dans la DB)
           const { error, data: inserted } = await supabaseAdmin
             .from('draw_results')
             .upsert(drawsToUpsert, { onConflict: 'draw_name, date' })
             .select('id');
-          if (!error) totalInserted += (inserted?.length || 0);
+            
+          if (error) {
+              console.error("Supabase Error:", error);
+          } else {
+              totalInserted += (inserted?.length || 0);
+          }
         }
       }
     }

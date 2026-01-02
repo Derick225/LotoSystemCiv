@@ -24,28 +24,30 @@ export const normalizeDate = (dateStr: string): string => {
 };
 
 export const lotteryService = {
+  /**
+   * Récupère l'historique. 
+   * NOTE: Ne catch pas les erreurs ici pour permettre au NexusProvider de détecter les pannes RLS/Réseau.
+   */
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
-    try {
-      const { data, error } = await supabase
-        .from('draw_results')
-        .select('*')
-        .eq('draw_name', drawName)
-        .order('date', { ascending: false });
-      
-      if (error) throw error;
-      
-      return (data || []).map(row => ({
-        id: row.id,
-        drawName: row.draw_name,
-        date: formatDate(row.date),
-        gagnants: row.gagnants,
-        machine: row.machine || [],
-        version: row.version || 1
-      }));
-    } catch (e: any) {
-      console.error(`[Nexus Engine] Critical data access error for ${drawName}:`, e?.message);
-      return []; 
+    const { data, error } = await supabase
+      .from('draw_results')
+      .select('*')
+      .eq('draw_name', drawName)
+      .order('date', { ascending: false });
+    
+    if (error) {
+      console.error(`[Supabase Error] fetchHistory(${drawName}):`, error.message, error.details);
+      throw error; // Propagation de l'erreur vers l'UI
     }
+    
+    return (data || []).map(row => ({
+      id: row.id,
+      drawName: row.draw_name,
+      date: formatDate(row.date),
+      gagnants: row.gagnants,
+      machine: row.machine || [],
+      version: row.version || 1
+    }));
   }
 };
 
@@ -88,10 +90,17 @@ export const fetchResults = async (drawName: string): Promise<{ data: DrawResult
 
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
-  return await Promise.all(Object.entries(draws).map(async ([time, name]) => {
-    const history = await lotteryService.fetchHistory(name);
-    return { time, name, result: history[0] || null };
+  const results = await Promise.all(Object.entries(draws).map(async ([time, name]) => {
+    try {
+        const history = await lotteryService.fetchHistory(name);
+        return { time, name, result: history[0] || null };
+    } catch (e) {
+        // Pour le sommaire, on tolère une erreur silencieuse (juste pas de résultat affiché)
+        console.warn(`Summary fetch failed for ${name}`);
+        return { time, name, result: null };
+    }
   }));
+  return results;
 };
 
 export const getNextScheduledDraw = () => {

@@ -29,7 +29,10 @@ const envKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 export const isSupabaseConfigured = () => {
     const isConfigured = !!envUrl && envUrl !== 'https://placeholder.supabase.co' && !!envKey;
     if (!isConfigured) {
-        console.warn(`[Supabase Check] URL: ${envUrl ? 'OK' : 'MISSING'}, KEY: ${envKey ? 'OK (Masked)' : 'MISSING'}`);
+        // Log discret en dev pour ne pas spammer
+        if ((import.meta.env as any).DEV) {
+             console.warn(`[Supabase Check] URL: ${envUrl ? 'OK' : 'MISSING'}, KEY: ${envKey ? 'OK (Masked)' : 'MISSING'}`);
+        }
     }
     return isConfigured;
 };
@@ -61,9 +64,10 @@ export const testDatabaseConnection = async () => {
         if (error) {
             console.error("[Supabase Connection Test] Failed:", error);
             // Détection spécifique des erreurs RLS ou 404
-            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS Policy manquante)" };
-            if (error.code === 'PGRST301') return { success: false, error: "Table introuvable ou permissions" };
-            return { success: false, error: error.message };
+            if (error.code === '42501') return { success: false, error: "Accès refusé (RLS Policy manquante). Vérifiez que la politique 'Public Read Results' est active." };
+            if (error.code === '42P01') return { success: false, error: "Table 'draw_results' introuvable. Avez-vous exécuté le script SQL ?" };
+            if (error.message.includes('FetchError')) return { success: false, error: "Erreur réseau. Vérifiez votre connexion internet." };
+            return { success: false, error: `${error.message} (Code: ${error.code})` };
         }
         
         return { success: true, count };

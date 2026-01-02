@@ -14,13 +14,13 @@ import {
 import { getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { audioEngine } from '../utils/audioEngine';
-import { useToast } from './ui/Toast'; // Import du Toast
-import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; // Import du test
+import { useToast } from './ui/Toast'; 
+import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; 
 
 const NexusContext = createContext<NexusContextType | null>(null);
 
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { showToast } = useToast(); // Hook pour les notifications
+  const { showToast } = useToast(); 
   const [drawName, setDrawName] = useState('Reveil');
   const [history, setHistory] = useState<DrawResult[]>([]);
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
@@ -57,43 +57,55 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
     try {
         const hist = await lotteryService.fetchHistory(targetDraw);
-        
-        if (hist.length === 0) {
-            // Pas d'erreur, mais pas de données : peut être normal (nouveau jeu) ou RLS bloquant
-            console.warn(`[Nexus] Aucun résultat trouvé pour ${targetDraw}. Vérifiez RLS si des données existent.`);
-        }
-
-        setHistory(hist);
+        setHistory(hist); // Historique vide [] est valide s'il n'y a pas d'erreur
         
         // Synchronisation ADN IA
         setGlobalWeights(getAlgoWeights(targetDraw));
 
-        // Pipeline HPC Parallèle (Web Worker simulation for main thread safety)
-        const [spec, frac, regData, corr, centrality] = await Promise.all([
-            Promise.resolve(mathService.calculateSpectral(hist)),
-            Promise.resolve(mathService.calculateFractal(hist)),
-            Promise.resolve(calculateRegularity(hist)),
-            calculateCorrelationMatrixAsync(hist),
-            calculateNetworkCentralityAsync(hist)
-        ]);
-        
-        setSpectral(spec);
-        setFractal(frac);
-        setRegularity(regData);
-        setCorrelationMatrix(corr);
-        setCliques(centrality);
+        // Pipeline HPC Parallèle
+        if (hist.length > 0) {
+            const [spec, frac, regData, corr, centrality] = await Promise.all([
+                Promise.resolve(mathService.calculateSpectral(hist)),
+                Promise.resolve(mathService.calculateFractal(hist)),
+                Promise.resolve(calculateRegularity(hist)),
+                calculateCorrelationMatrixAsync(hist),
+                calculateNetworkCentralityAsync(hist)
+            ]);
+            
+            setSpectral(spec);
+            setFractal(frac);
+            setRegularity(regData);
+            setCorrelationMatrix(corr);
+            setCliques(centrality);
 
-        // Analyse Cognitive (Insights)
-        const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
-        const insights = await generateSmartInsights(targetDraw, hist, spec, gaps, regData);
-        setSmartInsights(insights);
+            // Analyse Cognitive (Insights)
+            const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
+            const insights = await generateSmartInsights(targetDraw, hist, spec, gaps, regData);
+            setSmartInsights(insights);
+        } else {
+            // Reset des états si pas de données
+            setSpectral([]);
+            setFractal([]);
+            setRegularity([]);
+            setSmartInsights([]);
+        }
 
         // Clean-up si le tirage a changé
         if (targetDraw !== drawName) setLastPrediction(null);
 
     } catch (e: any) {
         console.error("Nexus Kernel Error:", e);
-        showToast("Erreur chargement données.", "error");
+        // Détection spécifique des erreurs courantes Supabase
+        if (e.message?.includes('FetchError') || e.message?.includes('Network')) {
+             showToast("Serveur injoignable. Vérifiez votre connexion.", "error");
+        } else if (e.code === '42P01') {
+             showToast("Table 'draw_results' introuvable. Exécutez le SQL.", "error");
+        } else if (e.code === '42501') {
+             showToast("Accès refusé (RLS). Vérifiez les politiques.", "error");
+        } else {
+             showToast(`Erreur chargement ${targetDraw}.`, "error");
+        }
+        setHistory([]); 
     } finally {
         setLoading(false);
     }
