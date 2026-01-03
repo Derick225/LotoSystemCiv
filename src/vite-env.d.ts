@@ -1,4 +1,4 @@
-// /// <reference types="vite/client" />
+/// <reference types="vite/client" />
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
@@ -14,8 +14,8 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-// Support pour process.env injecté par vite.config.ts
-// Augmentation de l'interface ProcessEnv existante au lieu de redéclarer process
+// Augmentation de l'interface ProcessEnv existante pour éviter les conflits de redéclaration
+// tout en assurant le typage pour le code qui utilise process.env.API_KEY
 declare namespace NodeJS {
   interface ProcessEnv {
     API_KEY?: string;

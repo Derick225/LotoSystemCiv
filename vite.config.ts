@@ -1,11 +1,10 @@
-
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   // Charge toutes les variables d'environnement du répertoire courant
   // @ts-ignore: process.cwd() is valid in Node context
-  const env = loadEnv(mode, (process as any).cwd(), '');
+  const env = loadEnv(mode, process.cwd(), '');
 
   // FILTRAGE DE SÉCURITÉ :
   // On ne transmet au client (process.env) QUE les variables préfixées par VITE_
@@ -16,12 +15,18 @@ export default defineConfig(({ mode }) => {
     return acc;
   }, {} as Record<string, string>);
 
-  // MAPPING SPÉCIFIQUE :
-  // Permet d'utiliser process.env.API_KEY dans le code (standard Google GenAI SDK)
-  // tout en utilisant VITE_API_KEY ou VITE_PUBLIC_API_KEY dans le .env
-  let apiKey = env.VITE_API_KEY || env.VITE_PUBLIC_API_KEY;
+  // 1. MAPPING API KEY (Google GenAI)
+  const apiKey = env.VITE_API_KEY || env.VITE_PUBLIC_API_KEY || env.API_KEY;
   if (apiKey) {
     clientEnv['API_KEY'] = apiKey;
+  }
+
+  // 2. MAPPING SUPABASE (Compatibilité Vercel/Supabase env vars)
+  if (!clientEnv['VITE_SUPABASE_URL'] && env.SUPABASE_URL) {
+    clientEnv['VITE_SUPABASE_URL'] = env.SUPABASE_URL;
+  }
+  if (!clientEnv['VITE_SUPABASE_ANON_KEY'] && (env.SUPABASE_ANON_KEY || env.SUPABASE_KEY)) {
+    clientEnv['VITE_SUPABASE_ANON_KEY'] = env.SUPABASE_ANON_KEY || env.SUPABASE_KEY;
   }
 
   // Ajout critique : NODE_ENV pour la compatibilité des libs React
@@ -41,8 +46,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       target: 'esnext',
-      sourcemap: false, // Désactivé pour la production (Sécurité & Taille)
-      minify: 'esbuild', // Minification rapide et efficace
+      sourcemap: false,
+      minify: 'esbuild',
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {

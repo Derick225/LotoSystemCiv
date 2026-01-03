@@ -37,7 +37,6 @@ serve(async (req) => {
     const now = new Date();
     const monthsToFetch = [`${monthNames[now.getMonth()]} ${now.getFullYear()}`];
     
-    // Si on est en début de mois, on vérifie aussi le mois précédent pour éviter les trous
     if (now.getDate() < 7) {
       const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       monthsToFetch.push(`${monthNames[prev.getMonth()]} ${prev.getFullYear()}`);
@@ -114,7 +113,7 @@ serve(async (req) => {
 
           const { error, data: insertedData } = await supabaseAdmin
             .from('draw_results')
-            .upsert(uniqueDraws, { onConflict: 'draw_name, date', ignoreDuplicates: true }) // ignoreDuplicates true pour ne compter que les nouveaux
+            .upsert(uniqueDraws, { onConflict: 'draw_name, date', ignoreDuplicates: true })
             .select('draw_name');
             
           if (error) {
@@ -127,15 +126,14 @@ serve(async (req) => {
       }
     }
 
-    // CHAÎNAGE INTELLIGENT : Si de nouvelles données ont été insérées, on lance les calculs d'analytiques immédiatement
     if (insertedDrawNames.size > 0) {
         console.log(`Triggering analytics for ${insertedDrawNames.size} games...`);
-        // Construction robuste de l'URL
-        const functionUrl = new URL(`${supabaseUrl}/functions/v1/compute-nexus-analytics`);
+        // Assure que l'URL de base ne finit pas par un slash pour éviter les doubles slashes
+        const baseUrl = supabaseUrl.replace(/\/+$/, "");
+        const functionUrl = `${baseUrl}/functions/v1/compute-nexus-analytics`;
         
         for (const drawName of insertedDrawNames) {
-            // Invocation asynchrone (fire and forget) pour ne pas bloquer le cron
-            fetch(functionUrl.toString(), {
+            fetch(functionUrl, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${supabaseKey}`,

@@ -1,17 +1,19 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Récupère une variable d'environnement Vite.
- * ⚠️ Dans Vite, seules les variables commençant par `VITE_` sont exposées via `import.meta.env`.
+ * Récupère une variable d'environnement Vite avec nettoyage.
  */
 const getViteEnv = (key: string): string => {
   const value = import.meta.env[key];
   return typeof value === 'string' ? value.trim() : '';
 };
 
-// Récupération directe (pas de fallback ni de "VITE_PUBLIC_" redondant)
+// Récupération des variables avec fallbacks pour différentes conventions de nommage
 const SUPABASE_URL = getViteEnv('VITE_SUPABASE_URL');
-const SUPABASE_ANON_KEY = getViteEnv('VITE_SUPABASE_ANON_KEY');
+const SUPABASE_ANON_KEY = 
+  getViteEnv('VITE_SUPABASE_ANON_KEY') || 
+  getViteEnv('VITE_SUPABASE_KEY') || 
+  getViteEnv('VITE_SUPABASE_PUBLISHABLE_KEY');
 
 /**
  * Vérifie que l’URL est valide (doit être une URL Supabase en HTTPS).
@@ -19,10 +21,7 @@ const SUPABASE_ANON_KEY = getViteEnv('VITE_SUPABASE_ANON_KEY');
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
     const u = new URL(url);
-    return (
-      u.protocol === 'https:' &&
-      (u.hostname.endsWith('.supabase.co') || u.hostname.endsWith('.supabase.com'))
-    );
+    return u.protocol === 'https:';
   } catch {
     return false;
   }
@@ -35,19 +34,16 @@ export const isSupabaseConfigured = (): boolean => {
   return isValidSupabaseUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 };
 
-// Validation stricte au démarrage
+// Validation au démarrage
 if (!isSupabaseConfigured()) {
-  console.error(
-    '[Nexus System] ❌ Configuration Supabase manquante ou invalide.',
-    '\nAssurez-vous que VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sont définies dans .env.local et sur Vercel.',
-    '\nDocumentation : https://supabase.com/docs/guides/getting-started/tutorials/with-vite'
+  console.warn(
+    '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incomplète.',
+    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.'
   );
 }
 
 /**
  * Client Supabase singleton.
- * ⚠️ Si la config est manquante, on lance quand même le client avec des valeurs vides,
- * mais toute requête échouera clairement (pas de fallback silencieux).
  */
 export const supabase: SupabaseClient = createClient(
   isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co',
@@ -66,14 +62,13 @@ export const supabase: SupabaseClient = createClient(
 );
 
 /**
- * Test de connexion : effectue une requête HEAD légère sur une table existante.
- * ⚠️ À n’utiliser qu’en dev/debug – pas en production courante.
+ * Test de connexion simple.
  */
 export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
-      error: "Configuration manquante : VITE_SUPABASE_URL ou VITE_SUPABASE_ANON_KEY absentes.",
+      error: "Configuration manquante : URL ou Clé API absente.",
     };
   }
 
@@ -86,18 +81,9 @@ export const testDatabaseConnection = async () => {
     const latency = Math.round(performance.now() - start);
 
     if (error) {
-      let userMessage = "Erreur inconnue lors de la connexion à la base de données.";
-      if (error.code === '42P01') {
-        userMessage = "Table 'draw_results' introuvable. Créez-la dans Supabase ou mettez à jour le nom.";
-      } else if (error.code === '42501') {
-        userMessage = "Accès refusé. Vérifiez les RLS (Row Level Security) dans Supabase.";
-      } else if (error.message) {
-        userMessage = error.message;
-      }
-
       return {
         success: false,
-        error: userMessage,
+        error: error.message || "Erreur d'accès à la base de données.",
         code: error.code || 'UNKNOWN',
         latency,
       };
@@ -111,7 +97,7 @@ export const testDatabaseConnection = async () => {
   } catch (err: any) {
     return {
       success: false,
-      error: err?.message || "Erreur réseau ou CORS. Vérifiez l’URL et les règles CORS dans Supabase.",
+      error: err?.message || "Erreur réseau ou CORS.",
     };
   }
 };
