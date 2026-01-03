@@ -34,7 +34,7 @@ const SUPABASE_ANON_KEY = cleanEnv(
  */
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
-    if (!url) return false;
+    if (!url || url.includes('your-project-url') || url.includes('placeholder')) return false;
     const u = new URL(url);
     return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
   } catch {
@@ -46,26 +46,28 @@ const isValidSupabaseUrl = (url: string): boolean => {
  * Vérifie le format basique d'une clé Supabase (JWT).
  */
 const isValidSupabaseKey = (key: string): boolean => {
-  return key && key.length > 20 && key !== 'placeholder';
+  return key && key.length > 20 && key !== 'placeholder' && !key.includes('your-anon-key');
 };
 
 /**
  * Indique si la configuration minimale est présente et valide.
  */
 export const isSupabaseConfigured = (): boolean => {
-  return isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
+  const urlValid = isValidSupabaseUrl(SUPABASE_URL);
+  const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
+  
+  if (!urlValid || !keyValid) {
+      if (process.env.NODE_ENV === 'development') {
+          console.debug("[Nexus Config] Supabase non configuré ou clés invalides.", { url: SUPABASE_URL, keyLength: SUPABASE_ANON_KEY?.length });
+      }
+      return false;
+  }
+  return true;
 };
 
 // Configuration Fallback Safe
 const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
 const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
-
-if (!isSupabaseConfigured()) {
-  console.warn(
-    '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incorrecte.',
-    'Vérifiez votre fichier .env (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
-  );
-}
 
 /**
  * Client Supabase singleton.
@@ -93,7 +95,7 @@ export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
-      error: "Configuration manquante. Vérifiez le fichier .env.",
+      error: "Configuration manquante. Avez-vous mis à jour le fichier .env avec les clés du nouveau projet ?",
     };
   }
 
@@ -109,8 +111,9 @@ export const testDatabaseConnection = async () => {
     if (error) {
       console.error("[DB Test] Connection Failed:", error);
       // Détection spécifique des erreurs courantes
-      if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL d'initialisation.", code: error.code };
-      if (error.code === '28P01' || error.code === '42501') return { success: false, error: "Authentification refusée. Vérifiez vos clés API ou les politiques RLS.", code: error.code };
+      if (error.code === '42P01') return { success: false, error: "La table 'draw_results' n'existe pas. Veuillez exécuter le script SQL dans Supabase.", code: error.code };
+      if (error.code === '28P01' || error.code === '42501') return { success: false, error: "Connexion refusée. Vérifiez vos clés API ou les politiques RLS.", code: error.code };
+      if (error.message.includes('fetch')) return { success: false, error: "Impossible de joindre Supabase. Vérifiez l'URL du projet.", code: 'NETWORK_ERROR' };
       
       return {
         success: false,
