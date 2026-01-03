@@ -14,12 +14,13 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-// Augmentation de l'interface ProcessEnv existante pour éviter les conflits de redéclaration
-// tout en assurant le typage pour le code qui utilise process.env.API_KEY
+// Augmentation de l'interface ProcessEnv existante
 declare namespace NodeJS {
   interface ProcessEnv {
     API_KEY?: string;
     NODE_ENV: string;
+    VITE_SUPABASE_URL?: string;
+    VITE_SUPABASE_ANON_KEY?: string;
     [key: string]: string | undefined;
   }
 }

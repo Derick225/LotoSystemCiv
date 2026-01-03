@@ -1,11 +1,25 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Récupère une variable d'environnement Vite avec nettoyage.
+ * Récupère une variable d'environnement avec stratégie de repli multiple.
+ * Supporte à la fois Vite (import.meta.env) et l'injection Node (process.env) via DefinePlugin.
  */
 const getViteEnv = (key: string): string => {
-  const value = import.meta.env[key];
-  return typeof value === 'string' ? value.trim() : '';
+  // 1. Stratégie Vite Standard (import.meta.env)
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    // @ts-ignore
+    return String(import.meta.env[key]).trim();
+  }
+  
+  // 2. Stratégie Polyfill (process.env injecté par vite.config.ts)
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    // @ts-ignore
+    return String(process.env[key]).trim();
+  }
+
+  return '';
 };
 
 // Récupération des variables avec fallbacks pour différentes conventions de nommage
@@ -21,6 +35,8 @@ const SUPABASE_ANON_KEY =
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
     const u = new URL(url);
+    // En production, HTTPS est requis. En local, HTTP peut passer si configuré, 
+    // mais pour Supabase Cloud c'est toujours HTTPS.
     return u.protocol === 'https:';
   } catch {
     return false;
@@ -31,14 +47,22 @@ const isValidSupabaseUrl = (url: string): boolean => {
  * Indique si la configuration minimale est présente.
  */
 export const isSupabaseConfigured = (): boolean => {
-  return isValidSupabaseUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
+  const isValid = isValidSupabaseUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
+  if (!isValid && typeof window !== 'undefined') {
+    // Log discret pour le débogage en production
+    console.debug("[Supabase Config Check] Missing or invalid keys", { 
+      hasUrl: !!SUPABASE_URL, 
+      keyLen: SUPABASE_ANON_KEY?.length 
+    });
+  }
+  return isValid;
 };
 
 // Validation au démarrage
 if (!isSupabaseConfigured()) {
   console.warn(
     '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incomplète.',
-    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.'
+    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans vos variables d\'environnement.'
   );
 }
 
@@ -81,6 +105,7 @@ export const testDatabaseConnection = async () => {
     const latency = Math.round(performance.now() - start);
 
     if (error) {
+      console.error("[DB Test] Connection Failed:", error);
       return {
         success: false,
         error: error.message || "Erreur d'accès à la base de données.",
@@ -95,6 +120,7 @@ export const testDatabaseConnection = async () => {
       latency,
     };
   } catch (err: any) {
+    console.error("[DB Test] Network Exception:", err);
     return {
       success: false,
       error: err?.message || "Erreur réseau ou CORS.",
