@@ -9,6 +9,61 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// --- MATH UTILS (Server Side) ---
+
+const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
+
+const calculateStandardDeviation = (data: number[]) => {
+    const mean = calculateMean(data);
+    const variance = data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / data.length;
+    return Math.sqrt(variance);
+};
+
+// Analyse Spectrale (Approximation FFT discrète)
+const calculateSpectralEnergy = (signal: number[]) => {
+    const N = signal.length;
+    let maxPower = 0;
+    // On limite aux 20 premières harmoniques significatives pour la performance
+    const harmonics = Math.min(N / 2, 20); 
+    
+    for (let k = 1; k < harmonics; k++) {
+        let re = 0, im = 0;
+        for (let t = 0; t < N; t++) {
+            const angle = (2 * Math.PI * k * t) / N;
+            re += (signal[t]) * Math.cos(angle);
+            im -= (signal[t]) * Math.sin(angle);
+        }
+        // Normalisation
+        const power = (re * re + im * im) / (N * N); 
+        maxPower = Math.max(maxPower, power);
+    }
+    // Echelle 0-100 arbitraire pour l'UI
+    return Math.min(100, Math.round(maxPower * 2000)); 
+};
+
+// Exposant de Hurst (R/S Analysis simplifié)
+const calculateHurst = (signal: number[]) => {
+    const N = signal.length;
+    if (N < 10) return 0.5;
+
+    const mean = calculateMean(signal);
+    const y = signal.map(x => x - mean);
+    
+    let currentSum = 0;
+    const cumDev = y.map(val => {
+        currentSum += val;
+        return currentSum;
+    });
+
+    const R = Math.max(...cumDev) - Math.min(...cumDev);
+    const S = calculateStandardDeviation(signal);
+
+    if (R === 0 || S === 0) return 0.5;
+
+    const hurst = Math.log(R / S) / Math.log(N);
+    return Math.max(0, Math.min(1, hurst));
+};
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -24,71 +79,74 @@ serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Récupération de l'historique (100 derniers tirages pour une analyse rapide mais pertinente)
-    const { data: history } = await supabaseAdmin
+    // 1. Récupération de l'historique (Optimisé: on ne prend que ce qui est nécessaire)
+    const { data: history, error: fetchError } = await supabaseAdmin
       .from('draw_results')
       .select('gagnants, date')
       .eq('draw_name', drawName)
       .order('date', { ascending: false })
-      .limit(100);
+      .limit(200); // Analyse sur 200 tirages pour plus de précision
 
-    if (!history || history.length < 10) {
+    if (fetchError || !history || history.length < 10) {
         return new Response(JSON.stringify({ message: "Insufficent data", drawName }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const N = history.length;
     const spectral = [];
     const fractal = [];
+    const volatilityScores = [];
 
     // 2. Calculs Mathématiques Intensifs (Backend-Side)
-    for (let num = 1; num <= 90; num++) {
-      const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
-      const mean = signal.reduce((a, b) => a + b, 0) / N;
-      
-      // FFT Simplifiée (Spectral Energy)
-      let maxPower = 0;
-      for (let k = 1; k < Math.min(N / 2, 20); k++) { // Optimisation: Limiter les harmoniques
-        let re = 0, im = 0;
-        for (let t = 0; t < N; t++) {
-          const angle = (2 * Math.PI * k * t) / N;
-          re += (signal[t] - mean) * Math.cos(angle);
-          im -= (signal[t] - mean) * Math.sin(angle);
-        }
-        maxPower = Math.max(maxPower, (re * re + im * im) / N);
-      }
-      spectral.push({ number: num, energy: Math.min(100, Math.round(maxPower * 600)) });
+    console.log(`Starting HPC calculations for ${drawName} on ${N} rows...`);
 
-      // Exposant de Hurst (R/S Analysis simplifié)
-      const x = signal.map(v => v - mean);
-      let cumsum = 0;
-      const y = x.map(v => (cumsum += v, cumsum));
-      const minY = Math.min(...y);
-      const maxY = Math.max(...y);
-      const R = maxY - minY;
-      const variance = x.reduce((a, v) => a + v * v, 0) / N;
-      const S = Math.sqrt(variance) || 1;
+    for (let num = 1; num <= 90; num++) {
+      // Transformation en signal binaire (1 = sorti, 0 = pas sorti)
+      const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
       
-      let h = 0.5;
-      if (R > 0 && S > 0) {
-          h = Math.log(R / S) / Math.log(N);
-      }
-      
-      const clampedH = Math.max(0, Math.min(1, isNaN(h) ? 0.5 : h));
-      fractal.push({ number: num, hurst: parseFloat(clampedH.toFixed(3)) });
+      // Spectral
+      const energy = calculateSpectralEnergy(signal);
+      spectral.push({ number: num, energy, resonance: energy > 70 });
+
+      // Fractal
+      const hurst = calculateHurst(signal);
+      fractal.push({ 
+          number: num, 
+          hurst: parseFloat(hurst.toFixed(3)),
+          regime: hurst > 0.6 ? 'PERSISTANT' : hurst < 0.4 ? 'ANTI-PERSISTANT' : 'RANDOM'
+      });
     }
 
+    // Volatilité Globale du jeu
+    const sums = history.map(d => d.gagnants.reduce((a:number, b:number) => a + b, 0));
+    const volScore = Math.min(100, Math.round(calculateStandardDeviation(sums) / 2));
+
+    const volatility = {
+        score: volScore,
+        status: volScore > 60 ? 'Chaos' : volScore > 35 ? 'Volatile' : 'Stable',
+        trend: sums[0] > calculateMean(sums) ? 'up' : 'down'
+    };
+
     // 3. Sauvegarde en base (Upsert dans draw_analytics)
+    // On utilise la date du dernier tirage comme clé de version
+    const lastDate = history[0].date;
+
     const { error } = await supabaseAdmin.from('draw_analytics').upsert({
       draw_name: drawName,
-      date: history[0].date, // Lié à la date du dernier tirage connu
+      date: lastDate, 
       spectral,
       fractal,
+      volatility,
       updated_at: new Date().toISOString()
     }, { onConflict: 'draw_name, date' });
 
     if (error) throw error;
 
-    return new Response(JSON.stringify({ success: true, drawName, count: 90 }), { 
+    return new Response(JSON.stringify({ 
+        success: true, 
+        drawName, 
+        processed: 90,
+        metrics: { volatility } 
+    }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
@@ -96,3 +154,4 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });
+    

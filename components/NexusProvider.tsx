@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
@@ -21,7 +21,9 @@ const NexusContext = createContext<NexusContextType | null>(null);
 
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast(); 
-  const [drawName, setDrawName] = useState('Reveil');
+  
+  // State
+  const [drawName, setDrawNameState] = useState('Reveil');
   const [history, setHistory] = useState<DrawResult[]>([]);
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
   const [fractal, setFractal] = useState<FractalMetric[]>([]);
@@ -30,12 +32,16 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [inspectingNumber, setInspectingNumber] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger pour forcer le reload
   
   // High-Level States
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
   const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [cliques, setCliques] = useState<any[]>([]);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
+
+  // Refs pour éviter les boucles dans les effects
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Vérification initiale de la connexion
   useEffect(() => {
@@ -55,20 +61,30 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       checkConnection();
   }, []);
 
-  const loadData = useCallback(async (targetDraw: string = drawName, forceSync: boolean = false) => {
+  const loadData = useCallback(async () => {
+    // Annulation de la requête précédente si elle existe
+    if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setLoading(true);
     try {
-        const hist = await lotteryService.fetchHistory(targetDraw);
+        // Chargement Historique
+        const hist = await lotteryService.fetchHistory(drawName);
+        
+        // Si le composant est démonté ou une nouvelle requête est partie, on arrête
+        if (abortControllerRef.current.signal.aborted) return;
+
         setHistory(hist); 
         
         // Synchronisation ADN IA
-        setGlobalWeights(getAlgoWeights(targetDraw));
+        setGlobalWeights(getAlgoWeights(drawName));
 
-        // Pipeline HPC Parallèle
+        // Pipeline HPC Parallèle (Optimisé pour éviter Stack Overflow)
         if (hist.length > 0) {
-            // OPTIMISATION CRITIQUE : Si mode 'ALL', on saute les calculs complexes intra-tirage
-            // car analyser la structure temporelle d'un mélange de jeux est mathématiquement invalide.
-            if (targetDraw === 'ALL') {
+            // OPTIMISATION CRITIQUE : Si mode 'ALL', on saute les calculs complexes
+            if (drawName === 'ALL') {
                  setSpectral([]);
                  setFractal([]);
                  setRegularity([]);
@@ -76,15 +92,20 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                  setCliques([]);
                  setSmartInsights([]);
             } else {
-                // Mode Jeu Unique : Analyse complète
+                // On limite l'échantillon pour les calculs lourds (Max 500 derniers tirages)
+                // Cela garde l'interface fluide tout en ayant une précision suffisante
+                const computeSample = hist.slice(0, 500);
+
                 const [spec, frac, regData, corr, centrality] = await Promise.all([
-                    Promise.resolve(mathService.calculateSpectral(hist)),
-                    Promise.resolve(mathService.calculateFractal(hist)),
-                    Promise.resolve(calculateRegularity(hist)),
-                    calculateCorrelationMatrixAsync(hist),
-                    calculateNetworkCentralityAsync(hist)
+                    Promise.resolve(mathService.calculateSpectral(computeSample)),
+                    Promise.resolve(mathService.calculateFractal(computeSample)),
+                    Promise.resolve(calculateRegularity(computeSample)),
+                    calculateCorrelationMatrixAsync(computeSample),
+                    calculateNetworkCentralityAsync(computeSample)
                 ]);
                 
+                if (abortControllerRef.current.signal.aborted) return;
+
                 setSpectral(spec);
                 setFractal(frac);
                 setRegularity(regData);
@@ -93,7 +114,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
                 // Analyse Cognitive (Insights)
                 const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
-                const insights = await generateSmartInsights(targetDraw, hist, spec, gaps, regData);
+                const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
                 setSmartInsights(insights);
             }
         } else {
@@ -104,42 +125,55 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setSmartInsights([]);
         }
 
-        // Clean-up si le tirage a changé
-        if (targetDraw !== drawName) setLastPrediction(null);
+        setLastPrediction(null); // Reset prediction on draw change
 
     } catch (e: any) {
+        if (e.name === 'AbortError') return;
+
         let errorMessage = "Erreur inconnue";
-        
-        // Safe Error Extraction to prevent Stack Overflow on JSON.stringify
         if (typeof e === 'string') errorMessage = e;
         else if (e instanceof Error) errorMessage = e.message;
-        else if (e && typeof e === 'object') {
-            // Avoid JSON.stringify on complex/circular objects
-            errorMessage = e.message || e.error_description || (e.code ? `Code: ${e.code}` : "Erreur objet non sérialisable");
-        }
+        else if (e && typeof e === 'object') errorMessage = e.message || "Erreur non sérialisable";
         
         console.error("Nexus Kernel Error:", errorMessage);
         
-        if (errorMessage.includes('FetchError') || errorMessage.includes('Network') || errorMessage.includes('Failed to fetch')) {
-             console.warn("Serveur injoignable.");
-        } else if (errorMessage.includes('42P01') || errorMessage.includes('relation "draw_results" does not exist')) {
-             showToast("Table 'draw_results' introuvable. Exécutez le SQL.", "error");
-        } else if (errorMessage.includes('42501') || errorMessage.includes('permission denied')) {
-             showToast("Accès refusé (RLS). Vérifiez les politiques.", "error");
-        } else {
-             // Only warn in console to avoid toast loop spam if excessive
-             console.warn(`Erreur chargement ${targetDraw}.`, errorMessage);
+        if (errorMessage.includes('42P01')) {
+             showToast("Table 'draw_results' introuvable.", "error");
+        } else if (!errorMessage.includes('aborted')) {
+             // Silencieux pour les erreurs mineures
         }
         setHistory([]); 
     } finally {
-        setLoading(false);
+        if (!abortControllerRef.current?.signal.aborted) {
+            setLoading(false);
+        }
     }
-  }, [drawName, showToast]);
+  }, [drawName, refreshTrigger, showToast]);
 
+  // Effet unique pour charger les données quand drawName ou le trigger change
   useEffect(() => { 
     loadData();
+    return () => {
+        if (abortControllerRef.current) abortControllerRef.current.abort();
+    };
   }, [loadData]);
 
+  // Actions Publiques
+  const setDrawName = useCallback((name: string) => {
+      audioEngine.play('click');
+      setDrawNameState(name);
+  }, []);
+
+  const refreshData = useCallback(async (name: string, force?: boolean) => {
+      audioEngine.play('scan');
+      if (name !== drawName) {
+          setDrawNameState(name); // Cela déclenchera loadData via useEffect
+      } else if (force) {
+          setRefreshTrigger(prev => prev + 1); // Cela déclenchera loadData via useEffect
+      }
+  }, [drawName]);
+
+  // Memos
   const stats = useMemo(() => {
     const counts: Record<number, number> = {};
     history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
@@ -149,9 +183,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [history]);
 
   const gaps = useMemo(() => {
-    // Les gaps n'ont pas de sens en mode 'ALL' (mélange de jeux)
     if (drawName === 'ALL') return [];
-    
     const res: { number: number; gap: number }[] = [];
     for (let i = 1; i <= 90; i++) {
       let gap = 0;
@@ -169,7 +201,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const contextValue: NexusContextType = {
     drawName,
-    setDrawName: (n) => { audioEngine.play('click'); setDrawName(n); },
+    setDrawName,
     currentDrawName: drawName,
     history,
     spectral,
@@ -186,8 +218,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     globalWeights,
     updateGlobalWeights: (w: AlgoWeights) => { audioEngine.play('success'); setGlobalWeights(w); },
     loading,
-    refresh: () => loadData(drawName, true),
-    refreshData: async (name: string, force?: boolean) => { audioEngine.play('scan'); setDrawName(name); await loadData(name, force); },
+    refresh: () => refreshData(drawName, true),
+    refreshData,
     correlationMatrix,
     regularity,
     calibration: { overallScore: 0.124, reliability: 82, bias: 'NEUTRAL', sampleSize: 30 },
