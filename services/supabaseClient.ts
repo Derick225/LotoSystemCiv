@@ -5,35 +5,38 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
  * Supporte à la fois Vite (import.meta.env) et l'injection Node (process.env).
  */
 const getViteEnv = (key: string): string => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-    // @ts-ignore
-    return String(import.meta.env[key]).trim();
+  // Vérification Vite (import.meta.env)
+  if (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env as any)[key]) {
+    return String((import.meta.env as any)[key]);
   }
   
-  // @ts-ignore
+  // Vérification Node (process.env)
   if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    // @ts-ignore
-    return String(process.env[key]).trim();
+    return String(process.env[key]);
   }
 
   return '';
 };
 
+// Nettoyage des valeurs (suppression des guillemets accidentels et espaces)
+const cleanEnv = (val: string) => val.replace(/["']/g, '').trim();
+
 // Récupération des variables avec fallbacks
-const SUPABASE_URL = getViteEnv('VITE_SUPABASE_URL');
-const SUPABASE_ANON_KEY = 
+const SUPABASE_URL = cleanEnv(getViteEnv('VITE_SUPABASE_URL'));
+const SUPABASE_ANON_KEY = cleanEnv(
   getViteEnv('VITE_SUPABASE_ANON_KEY') || 
   getViteEnv('VITE_SUPABASE_KEY') || 
-  getViteEnv('VITE_SUPABASE_PUBLISHABLE_KEY');
+  getViteEnv('VITE_SUPABASE_PUBLISHABLE_KEY')
+);
 
 /**
  * Vérifie que l’URL est valide (doit être une URL Supabase en HTTPS).
  */
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
+    if (!url) return false;
     const u = new URL(url);
-    return u.protocol === 'https:';
+    return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
   } catch {
     return false;
   }
@@ -43,33 +46,24 @@ const isValidSupabaseUrl = (url: string): boolean => {
  * Vérifie le format basique d'une clé Supabase (JWT).
  */
 const isValidSupabaseKey = (key: string): boolean => {
-  return key.length > 30 && (key.startsWith('ey') || key !== 'placeholder');
+  return key && key.length > 20 && key !== 'placeholder';
 };
 
 /**
  * Indique si la configuration minimale est présente et valide.
  */
 export const isSupabaseConfigured = (): boolean => {
-  const isValid = isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
-  
-  if (!isValid && typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-    console.debug("[Supabase Config Check] Missing or invalid keys", { 
-      hasUrl: !!SUPABASE_URL, 
-      keyLen: SUPABASE_ANON_KEY?.length 
-    });
-  }
-  return isValid;
+  return isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
 };
 
-// Configuration Fallback Safe (Sans espace en fin d'URL pour éviter le crash URL constructor)
+// Configuration Fallback Safe
 const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
 const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
 
-// Validation au démarrage
 if (!isSupabaseConfigured()) {
   console.warn(
-    '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incomplète.',
-    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.'
+    '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incorrecte.',
+    'Vérifiez votre fichier .env (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).'
   );
 }
 
@@ -99,7 +93,7 @@ export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
-      error: "Configuration manquante : URL ou Clé API absente/invalide.",
+      error: "Configuration manquante. Vérifiez le fichier .env.",
     };
   }
 
@@ -114,6 +108,10 @@ export const testDatabaseConnection = async () => {
 
     if (error) {
       console.error("[DB Test] Connection Failed:", error);
+      // Détection spécifique des erreurs courantes
+      if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Veuillez exécuter le script SQL d'initialisation.", code: error.code };
+      if (error.code === '28P01' || error.code === '42501') return { success: false, error: "Authentification refusée. Vérifiez vos clés API ou les politiques RLS.", code: error.code };
+      
       return {
         success: false,
         error: error.message || "Erreur d'accès à la base de données.",
@@ -131,7 +129,7 @@ export const testDatabaseConnection = async () => {
     console.error("[DB Test] Network Exception:", err);
     return {
       success: false,
-      error: err?.message || "Erreur réseau ou CORS.",
+      error: err?.message || "Erreur réseau (CORS ou DNS).",
     };
   }
 };

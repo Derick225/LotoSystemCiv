@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, testDatabaseConnection, isSupabaseConfigured } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
 import { NEXUS_DATABASE_SCHEMA } from '../../services/databaseSchema';
-import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save, ShieldCheck } from 'lucide-react';
+import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save, ShieldCheck, AlertCircle } from 'lucide-react';
 
 export const DatabaseControl: React.FC = () => {
     const { showToast } = useToast();
@@ -14,20 +14,33 @@ export const DatabaseControl: React.FC = () => {
         localStorageSize: 0
     });
     const [loading, setLoading] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'success' | 'error'>('unknown');
+    const [lastError, setLastError] = useState<string | null>(null);
 
     useEffect(() => {
         refreshMetrics();
     }, []);
 
     const refreshMetrics = async () => {
-        // Protection : ne rien faire si Supabase n'est pas configuré
         if (!isSupabaseConfigured()) {
+            setConnectionStatus('error');
+            setLastError("Configuration .env manquante");
             return;
         }
 
         setLoading(true);
         try {
-            // Requêtes parallèles légères (count exact)
+            // Test de connexion d'abord
+            const conn = await testDatabaseConnection();
+            if (!conn.success) {
+                setConnectionStatus('error');
+                setLastError(conn.error || "Erreur inconnue");
+                setLoading(false);
+                return;
+            }
+            setConnectionStatus('success');
+            setLastError(null);
+
             const [draws, analytics, weights, feedback] = await Promise.all([
                 supabase.from('draw_results').select('*', { count: 'exact', head: true }),
                 supabase.from('draw_analytics').select('*', { count: 'exact', head: true }),
@@ -35,11 +48,10 @@ export const DatabaseControl: React.FC = () => {
                 supabase.from('prediction_feedback').select('*', { count: 'exact', head: true })
             ]);
 
-            // Calcul taille LocalStorage (approx)
             let total = 0;
             if (typeof window !== 'undefined' && window.localStorage) {
                 for (const x in localStorage) {
-                    if (localStorage.hasOwnProperty(x)) {
+                    if (Object.prototype.hasOwnProperty.call(localStorage, x)) {
                         total += ((localStorage[x].length + x.length) * 2);
                     }
                 }
@@ -50,10 +62,12 @@ export const DatabaseControl: React.FC = () => {
                 analytics: analytics.count || 0,
                 weights: weights.count || 0,
                 feedback: feedback.count || 0,
-                localStorageSize: Math.round(total / 1024) // KB
+                localStorageSize: Math.round(total / 1024)
             });
-        } catch (e) {
+        } catch (e: any) {
             console.error("Metrics error", e);
+            setConnectionStatus('error');
+            setLastError(e.message);
         } finally {
             setLoading(false);
         }
@@ -70,47 +84,35 @@ export const DatabaseControl: React.FC = () => {
 
     const copySqlToClipboard = () => {
         navigator.clipboard.writeText(NEXUS_DATABASE_SCHEMA);
-        showToast("Script SQL de production copié.", "success");
-    };
-
-    const runRlsDiagnostic = async () => {
-        setLoading(true);
-        const res = await testDatabaseConnection();
-        setLoading(false);
-        if (res.success) {
-            showToast(`Connexion OK (${res.latency}ms). Table accessible.`, "success");
-        } else {
-            showToast(`Erreur Critique : ${res.error}`, "error");
-        }
+        showToast("Script SQL copié. Collez-le dans l'éditeur SQL Supabase.", "success");
     };
 
     return (
         <div className="space-y-8 animate-fade-in">
-            {/* Server Status Header */}
-            <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-6">
+            {/* Status Header */}
+            <div className={`p-8 rounded-[2.5rem] border shadow-2xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-6 ${connectionStatus === 'error' ? 'bg-rose-950 border-rose-800' : 'bg-slate-900 border-slate-800'}`}>
                 <div className="flex items-center gap-4 z-10">
-                    <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20">
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${connectionStatus === 'error' ? 'bg-rose-600' : 'bg-indigo-600'}`}>
                         <Server size={32} className="text-white" />
                     </div>
                     <div>
                         <h3 className="text-xl font-black text-white uppercase tracking-tighter">Nexus Cloud Node</h3>
                         <div className="flex items-center gap-2 mt-1">
-                            <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                            <span className="text-xs font-mono text-emerald-400">
-                                {isSupabaseConfigured() ? 'PostgreSQL Actif' : 'Mode Local (Offline)'}
+                            <span className={`w-2 h-2 rounded-full ${connectionStatus === 'success' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                            <span className={`text-xs font-mono ${connectionStatus === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {isSupabaseConfigured() 
+                                    ? (connectionStatus === 'success' ? 'Connecté (PostgreSQL)' : 'Erreur de Connexion') 
+                                    : 'Mode Local (Offline)'}
                             </span>
                         </div>
+                        {lastError && <p className="text-[10px] text-rose-300 mt-2 font-mono max-w-md">{lastError}</p>}
                     </div>
                 </div>
                 <div className="flex gap-3 z-10">
-                    <button onClick={runRlsDiagnostic} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all text-emerald-400" title="Tester accès DB">
-                        <ShieldCheck size={20} />
-                    </button>
                     <button onClick={refreshMetrics} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all text-slate-300">
                         <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                     </button>
                 </div>
-                {/* Background Decor */}
                 <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/5 rounded-full blur-[80px] pointer-events-none"></div>
             </div>
 
@@ -135,16 +137,24 @@ export const DatabaseControl: React.FC = () => {
                 <div className="bg-white dark:bg-slate-800 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl">
                     <div className="flex items-center gap-3 mb-6">
                         <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-lg"><Database size={20}/></div>
-                        <h4 className="font-black text-slate-700 dark:text-white uppercase tracking-tight">Déploiement SQL</h4>
+                        <h4 className="font-black text-slate-700 dark:text-white uppercase tracking-tight">Installation BDD</h4>
                     </div>
-                    <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 mb-6">
-                        <p className="text-[10px] font-mono text-slate-500 leading-relaxed">
-                            Initialise l'infrastructure complète (Tables, RLS, Indexes). À exécuter une seule fois dans l'éditeur SQL de votre projet Supabase.
-                        </p>
-                    </div>
+                    
+                    {connectionStatus === 'error' && (
+                        <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 mb-6 flex gap-3">
+                            <AlertCircle className="text-amber-500 shrink-0" size={18} />
+                            <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium leading-relaxed">
+                                Si vous venez de cloner le projet, vous devez exécuter le script SQL d'initialisation dans Supabase pour créer les tables.
+                            </p>
+                        </div>
+                    )}
+
                     <button onClick={copySqlToClipboard} className="w-full py-4 bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">
-                        <Copy size={16}/> Copier Script Init
+                        <Copy size={16}/> Copier Script SQL
                     </button>
+                    <p className="text-[9px] text-slate-400 text-center mt-3 font-mono">
+                        Collez dans : Supabase Dashboard {'>'} SQL Editor
+                    </p>
                 </div>
 
                 {/* Maintenance Zone */}
@@ -154,7 +164,7 @@ export const DatabaseControl: React.FC = () => {
                         <h4 className="font-black text-rose-800 dark:text-rose-400 uppercase tracking-tight">Zone Danger</h4>
                     </div>
                     <p className="text-xs text-rose-700 dark:text-rose-300/70 mb-8 font-medium leading-relaxed">
-                        Actions irréversibles sur les données locales. Utilisez avec précaution si l'application rencontre des problèmes de synchronisation.
+                        Actions irréversibles sur les données locales. Utilisez avec précaution si l'application rencontre des problèmes de synchronisation ou d'affichage.
                     </p>
                     <button onClick={handleClearCache} className="w-full py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">
                         <Trash2 size={16}/> Purger Cache Local

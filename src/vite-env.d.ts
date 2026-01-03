@@ -1,3 +1,4 @@
+// Type definitions for Vite environment variables
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
@@ -7,6 +8,7 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly SSR: boolean;
+  [key: string]: string | boolean | undefined;
 }
 
 interface ImportMeta {
