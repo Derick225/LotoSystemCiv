@@ -1,3 +1,4 @@
+
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const authService = {
@@ -69,19 +70,34 @@ export const authService = {
 
   /**
    * Vérifie si l'utilisateur a le rôle administrateur.
-   * Basé sur les métadonnées de l'utilisateur ou une liste blanche simple pour la démo.
+   * Basé sur les métadonnées de l'utilisateur (app_metadata) ou une liste blanche d'emails.
    */
   isAdminUser: (user: any): boolean => {
     if (!user) return false;
-    // Vérification via app_metadata (rôle Supabase)
-    if (user.app_metadata?.role === 'admin') return true;
     
-    // Fallback : Vérification simple par email (à adapter selon vos besoins)
-    const adminEmails = ['admin@lotopro.com', 'admin@nexus.com']; 
-    if (user.email && adminEmails.includes(user.email)) return true;
+    // 1. Vérification via rôle Supabase (app_metadata) - Méthode recommandée
+    if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+        return true;
+    }
     
-    // Pour les besoins de développement, si on est en localhost et qu'aucun email n'est fourni, on peut être permissif
-    // Mais pour la prod, on garde la logique stricte.
-    return false;
+    // 2. Vérification par liste blanche d'emails (Hardcoded)
+    // Ajoutez votre email ici pour devenir admin immédiatement
+    const adminEmails = [
+        'admin@lotopro.com', 
+        'admin@nexus.com',
+        'superadmin@example.com' 
+    ]; 
+    
+    const isWhitelisted = user.email && adminEmails.includes(user.email);
+
+    if (process.env.NODE_ENV === 'development') {
+        if (isWhitelisted) {
+            console.log("[Auth] Admin access granted via whitelist:", user.email);
+        } else {
+            console.debug("[Auth] User is not admin:", user.email);
+        }
+    }
+    
+    return isWhitelisted;
   }
 };

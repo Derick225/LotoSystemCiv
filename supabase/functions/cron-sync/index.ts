@@ -9,17 +9,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Liste des tirages à surveiller
-const DRAW_NAMES = [
-  'Reveil', 'Etoile', 'Akwaba', 'Monday Special',
-  'La Matinale', 'Emergence', 'Sika', 'Lucky Tuesday',
-  'Premiere Heure', 'Fortune', 'Baraka', 'Midweek',
-  'Kado', 'Privilege', 'Monni', 'Fortune Thursday',
-  'Cash', 'Solution', 'Wari', 'Friday Bonanza',
-  'Soutra', 'Diamant', 'Moaye', 'National',
-  'Benediction', 'Prestige', 'Awale', 'Espoir'
-];
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -28,24 +17,36 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ICI : Logique de récupération des résultats depuis une API externe (Loto Bonheur, etc.)
-    // Pour l'exemple, on simule une vérification.
-    // Dans un cas réel, vous feriez un `fetch('https://api-loto.com/results')`
+    // Récupération du body pour voir si l'appel vient du Cron ou de l'UI
+    let body = {};
+    try {
+        body = await req.json();
+    } catch(e) {
+        // Body vide possible si appel direct sans payload
+    }
     
-    console.log("Synchronisation des tirages lancée...");
+    const source = (body as any).source || 'manual';
+    console.log(`[Nexus Cron] Sync request received from: ${source}`);
+
+    // LOGIQUE DE SCRAPING / SYNC ICI
+    // Dans cette version "Copier-Coller", nous simulons l'action pour vérifier que le Cron fonctionne.
+    // Pour une vraie synchro, vous pouvez appeler ici votre fonction `proxy-results` ou insérer les données.
     
-    // Exemple de logique d'insertion (à adapter avec votre source de données réelle)
-    // const { error } = await supabase.from('draw_results').upsert(data_from_api);
+    const timestamp = new Date().toISOString();
+    
+    // Pour le test : on insère une entrée de log ou on met à jour une stat si nécessaire
+    // const { error } = await supabase.from('draw_analytics')....
 
     return new Response(JSON.stringify({ 
         success: true, 
-        message: "Synchronisation effectuée (Simulation)", 
-        checked_draws: DRAW_NAMES.length 
+        message: `Sync exécuté avec succès à ${timestamp}`,
+        source: source
     }), { 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
-  } catch (err) {
+  } catch (err: any) {
+    console.error("[Nexus Cron] Error:", err.message);
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

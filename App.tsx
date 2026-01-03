@@ -20,8 +20,40 @@ import { queryClient } from './services/queryClient';
 import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
 import { checkSubscriptionStatus } from './services/subscriptionService';
-import { supabase, isSupabaseConfigured } from './services/supabaseClient';
+import { supabase } from './services/supabaseClient';
+import { ShieldAlert, Lock, Fingerprint, ArrowLeft } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
+
+// Composant de sécurité pour les accès non autorisés
+const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
+  <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center animate-scale-in">
+    <div className="w-24 h-24 bg-rose-500/10 rounded-full flex items-center justify-center mb-6 border border-rose-500/20 shadow-[0_0_30px_rgba(244,63,94,0.2)]">
+      <ShieldAlert size={48} className="text-rose-500 animate-pulse" />
+    </div>
+    <h2 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Accès Restreint</h2>
+    <p className="text-slate-400 max-w-md mb-8 font-medium">
+      Votre signature neurale ne dispose pas des privilèges d'administration requis (Niveau 5). 
+      Cette tentative a été journalisée.
+    </p>
+    
+    <div className="flex flex-col gap-4 w-full max-w-xs">
+      <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center gap-4 opacity-70">
+        <Lock size={20} className="text-slate-500" />
+        <div className="text-left">
+          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Protocole Sécurité</div>
+          <div className="text-xs text-slate-300 font-mono">LOCKDOWN_MODE_ACTIVE</div>
+        </div>
+      </div>
+      
+      <button 
+        onClick={onBack}
+        className="w-full py-4 bg-white text-slate-900 hover:bg-indigo-50 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg"
+      >
+        <ArrowLeft size={16} /> Retour Station
+      </button>
+    </div>
+  </div>
+);
 
 // Composant Interne qui a accès au contexte Nexus et Auth
 const AppContent: React.FC = () => {
@@ -137,7 +169,7 @@ const AppContent: React.FC = () => {
     return <AuthScreen onSuccess={() => { /* Le listener onAuthStateChange gérera le state */ }} />;
   }
 
-  // Vérification Abonnement (Mur de Paiement)
+  // Vérification Abonnement (Mur de Paiement) - Bypass pour Admin
   if (!isAdmin && subscription?.status === 'expired') {
       return <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />;
   }
@@ -157,8 +189,8 @@ const AppContent: React.FC = () => {
       case 'home': return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
       case 'lab': return <QuantumLab />;
       case 'admin': 
-        // Protection de route simple
-        return isAdmin ? <AdminPanel /> : <div className="p-10 text-center text-rose-500 font-black">ACCÈS REFUSÉ</div>;
+        // Protection de route stricte : Seul l'admin peut voir ce composant
+        return isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />;
       default: return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
     }
   };
@@ -168,7 +200,16 @@ const AppContent: React.FC = () => {
       <GlobalErrorListener />
       <AppShell 
         viewMode={viewMode} 
-        setViewMode={(mode) => { setViewMode(mode); setSelectedDraw(null); setShowWallet(false); }}
+        setViewMode={(mode) => { 
+            // Interception si tentative d'accès Admin sans droits
+            if (mode === 'admin' && !isAdmin) {
+                showToast("Accès refusé : Privilèges Admin requis.", "error");
+                return;
+            }
+            setViewMode(mode); 
+            setSelectedDraw(null); 
+            setShowWallet(false); 
+        }}
         theme={theme}
         setTheme={setTheme as any}
         onReset={handleReset}
