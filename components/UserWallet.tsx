@@ -2,10 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll } from '../services/userPreferencesService';
 import { checkAndSyncRecentResults, fetchResults } from '../services/lotteryService';
-import type { SavedTicket, DrawResult } from '../types';
-import { useNexus } from './NexusProvider';
+import { checkSubscriptionStatus } from '../services/subscriptionService';
+import { authService } from '../services/authService';
+import type { SavedTicket, DrawResult, SubscriptionState } from '../types';
 import { NumberBall } from './NumberBall';
-import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator } from 'lucide-react';
+import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from 'recharts';
 import { TicketXRay } from './TicketXRay';
 import { LOTO_PAYOUTS } from '../constants';
@@ -21,6 +22,7 @@ export const UserWallet: React.FC = () => {
     const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
     const [bankroll, setBankroll] = useState(getBankroll());
     const [showKelly, setShowKelly] = useState(false);
+    const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
     
     // Financials
     const [totalWinnings, setTotalWinnings] = useState(0);
@@ -34,6 +36,13 @@ export const UserWallet: React.FC = () => {
         const saved = getSavedTickets().filter(t => t.status !== 'archived');
         setTickets(saved);
         setBankroll(getBankroll());
+
+        // Charge l'abonnement
+        const session = await authService.getSession();
+        if (session?.user) {
+            const sub = await checkSubscriptionStatus(session.user.id);
+            setSubscription(sub);
+        }
 
         const drawNames = [...new Set(saved.map(t => t.drawName))];
         const newResultsMap: Record<string, DrawResult[]> = {};
@@ -160,39 +169,71 @@ export const UserWallet: React.FC = () => {
 
     return (
         <div className="animate-fade-in space-y-8 pb-20">
+            {/* Subscription Status Card - EXPERT UI */}
+            {subscription && (
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-indigo-500/30 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><Crown size={120} /></div>
+                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div className="flex items-center gap-4">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${subscription.plan === 'premium' ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                                <Crown size={28} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase tracking-tight">Statut Membre</h3>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
+                                        {subscription.status === 'active' ? 'Premium Actif' : 'Essai Gratuit'}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-bold">• Expire dans {subscription.daysLeft} jours</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="flex gap-4">
+                            <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-2">
+                                <ShieldCheck size={16} className="text-emerald-400" />
+                                <span className="text-[10px] font-bold text-slate-300 uppercase">IA Débloquée</span>
+                            </div>
+                            <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-2">
+                                <Sparkles size={16} className="text-amber-400" />
+                                <span className="text-[10px] font-bold text-slate-300 uppercase">Analyses Platinum</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Financial Dashboard */}
-            <div className="bg-slate-900 text-white p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group border border-slate-800">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-16 -mt-16 group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
-                
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
                 <div className="relative z-10 grid lg:grid-cols-2 gap-8">
                     <div>
                         <div className="flex justify-between items-start mb-6">
                             <div>
-                                <h2 className="text-3xl font-black tracking-tighter mb-2 flex items-center gap-3">
+                                <h2 className="text-3xl font-black tracking-tighter mb-2 flex items-center gap-3 text-slate-900 dark:text-white">
                                     <Briefcase className="text-emerald-500" /> Capital Actif
                                 </h2>
                                 <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Bankroll Réel</p>
                             </div>
-                            <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col items-end text-emerald-400">
+                            <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col items-end text-emerald-600 dark:text-emerald-400">
                                 <span className="text-[10px] font-black uppercase tracking-widest">Solde Disponible</span>
                                 <span className="text-3xl font-black">{bankroll.toLocaleString()} F</span>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm">
+                            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
                                 <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Mises en Jeu</div>
-                                <div className="text-xl font-black">{totalSpent.toLocaleString()} F</div>
+                                <div className="text-xl font-black text-slate-700 dark:text-slate-200">{totalSpent.toLocaleString()} F</div>
                             </div>
-                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 backdrop-blur-sm">
-                                <div className="text-[10px] font-black text-emerald-400 uppercase mb-1">Gains Potentiels</div>
-                                <div className="text-xl font-black text-emerald-400">{totalWinnings.toLocaleString()} F</div>
+                            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                <div className="text-[10px] font-black text-emerald-500 uppercase mb-1">Gains Potentiels</div>
+                                <div className="text-xl font-black text-emerald-600 dark:text-emerald-400">{totalWinnings.toLocaleString()} F</div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="h-40 w-full bg-black/20 rounded-2xl p-4 border border-white/5 relative">
-                        <div className="absolute top-2 left-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">Evolution Capital</div>
+                    <div className="h-40 w-full bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 relative">
+                        <div className="absolute top-2 left-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Evolution Capital</div>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={financialHistory}>
                                 <defs>

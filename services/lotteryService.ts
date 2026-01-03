@@ -1,4 +1,3 @@
-
 import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
@@ -69,10 +68,13 @@ export const lotteryService = {
           .select('*')
           .order('date', { ascending: false });
 
-        // Si drawName est 'ALL', on récupère tout, sinon on filtre
+        // Si drawName est 'ALL', on ne filtre pas, mais on limite pour la performance
         if (drawName && drawName !== 'ALL') {
             query = query.ilike('draw_name', `%${drawName}%`);
         }
+        
+        // LIMITATION DE SÉCURITÉ : Empêche de charger 50 000 lignes et de tuer le navigateur
+        query = query.limit(2000);
         
         const { data, error } = await query;
         
@@ -143,8 +145,24 @@ export const getDailySummary = async (day: string) => {
   const results = [];
   for (const [time, name] of Object.entries(draws)) {
       try {
-          const history = await lotteryService.fetchHistory(name);
-          results.push({ time, name, result: history[0] || null });
+          // Optimisation : On ne charge que le dernier résultat pour le résumé
+          const { data } = await supabase
+            .from('draw_results')
+            .select('*')
+            .ilike('draw_name', `%${name}%`)
+            .order('date', { ascending: false })
+            .limit(1);
+            
+          const lastDraw = data && data[0] ? {
+              id: data[0].id,
+              drawName: data[0].draw_name,
+              date: formatDate(data[0].date),
+              gagnants: data[0].gagnants,
+              machine: data[0].machine || [],
+              version: data[0].version || 1
+          } : null;
+
+          results.push({ time, name, result: lastDraw });
       } catch (e) {
           results.push({ time, name, result: null });
       }

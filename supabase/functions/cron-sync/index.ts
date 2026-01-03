@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Liste officielle des tirages à surveiller (UPPERCASE pour matching facile)
+// Liste officielle des tirages à surveiller
 const TARGET_DRAWS = [
   'REVEIL', 'ETOILE', 'AKWABA', 'MONDAY SPECIAL',
   'LA MATINALE', 'EMERGENCE', 'SIKA', 'LUCKY TUESDAY',
@@ -44,6 +44,7 @@ serve(async (req) => {
     }
 
     let totalInserted = 0;
+    const insertedDrawNames = new Set<string>();
 
     for (const monthParam of monthsToFetch) {
       const targetUrl = `https://lotobonheur.ci/api/results?month=${encodeURIComponent(monthParam)}`;
@@ -82,11 +83,8 @@ serve(async (req) => {
 
             for (const draw of allDayDraws) {
               let drawName = (draw.drawName || "UNKNOWN").trim().toUpperCase();
-              
-              // Nettoyage standard (ex: "TIRAGE REVEIL" -> "REVEIL")
               drawName = drawName.replace(/^TIRAGE\s+/, "");
 
-              // Vérification si c'est un tirage cible valide
               const matchedTarget = TARGET_DRAWS.find(t => drawName === t || drawName.includes(t));
               
               if (!matchedTarget) continue;
@@ -96,7 +94,6 @@ serve(async (req) => {
                 const mac = (draw.machineNumbers?.match(/\d+/g) || []).map(Number);
 
                 if (win.length === 5) {
-                  // Normalisation en Title Case pour le front (ex: 'Reveil')
                   const formattedName = matchedTarget.charAt(0).toUpperCase() + matchedTarget.slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
 
                   drawsToUpsert.push({
@@ -113,24 +110,47 @@ serve(async (req) => {
         }
 
         if (drawsToUpsert.length > 0) {
-          // Dédoublonnage avant insert pour éviter les erreurs batch
           const uniqueDraws = Array.from(new Map(drawsToUpsert.map(item => [`${item.draw_name}_${item.date}`, item])).values());
 
-          const { error, data: inserted } = await supabaseAdmin
+          const { error, data: insertedData } = await supabaseAdmin
             .from('draw_results')
-            .upsert(uniqueDraws, { onConflict: 'draw_name, date' })
-            .select('id');
+            .upsert(uniqueDraws, { onConflict: 'draw_name, date', ignoreDuplicates: true }) // ignoreDuplicates true pour ne compter que les nouveaux
+            .select('draw_name');
             
           if (error) {
               console.error("Supabase Upsert Error:", error);
-          } else {
-              totalInserted += (inserted?.length || 0);
+          } else if (insertedData && insertedData.length > 0) {
+              totalInserted += insertedData.length;
+              insertedData.forEach((d: any) => insertedDrawNames.add(d.draw_name));
           }
         }
       }
     }
 
-    return new Response(JSON.stringify({ success: true, count: totalInserted }), { 
+    // CHAÎNAGE INTELLIGENT : Si de nouvelles données ont été insérées, on lance les calculs d'analytiques immédiatement
+    if (insertedDrawNames.size > 0) {
+        console.log(`Triggering analytics for ${insertedDrawNames.size} games...`);
+        // Construction robuste de l'URL
+        const functionUrl = new URL(`${supabaseUrl}/functions/v1/compute-nexus-analytics`);
+        
+        for (const drawName of insertedDrawNames) {
+            // Invocation asynchrone (fire and forget) pour ne pas bloquer le cron
+            fetch(functionUrl.toString(), {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ drawName })
+            }).catch(e => console.error(`Failed to trigger analytics for ${drawName}`, e));
+        }
+    }
+
+    return new Response(JSON.stringify({ 
+        success: true, 
+        count: totalInserted,
+        updated_games: Array.from(insertedDrawNames)
+    }), { 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
   } catch (err: any) {

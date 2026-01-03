@@ -28,6 +28,13 @@ export interface AlgoWeights {
     leader_succession: number;
 }
 
+export interface SubscriptionState {
+    status: 'trial' | 'active' | 'expired';
+    daysLeft: number;
+    expiresAt: string; // ISO Date
+    plan: 'free' | 'premium';
+}
+
 export interface ScoreBreakdown extends AlgoWeights {}
 
 export interface SpectralMetric {

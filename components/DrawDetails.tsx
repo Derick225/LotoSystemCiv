@@ -2,7 +2,7 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNexus } from './NexusProvider';
 import { 
   Database, Activity, Target, Share2, 
-  ShieldCheck, ArrowLeft, RefreshCw, 
+  ShieldCheck, RefreshCw, 
   FlaskConical, Microscope, Clock
 } from 'lucide-react';
 import { LocalErrorBoundary } from './ui/LocalErrorBoundary';
@@ -42,7 +42,7 @@ export const DrawDetails: React.FC = () => {
       );
   }
 
-  const tabs = [
+  const allTabs = [
     { id: 'Flux', icon: Database, label: 'Flux', desc: 'Historique & Data' },
     { id: 'Signaux', icon: Activity, label: 'Signaux', desc: 'Maths & Fréquences' },
     { id: 'Topologie', icon: Share2, label: 'Topologie', desc: 'Géométrie & Réseaux' },
@@ -50,6 +50,12 @@ export const DrawDetails: React.FC = () => {
     { id: 'Simulation', icon: FlaskConical, label: 'Simulation', desc: 'Backtesting' },
     { id: 'Forensic', icon: Microscope, label: 'Forensic', desc: 'Audit Post-Tirage' },
   ];
+
+  // En mode "ALL" (Archives Globales), seul l'historique brut (Flux) est pertinent.
+  // Les analyses mathématiques/prédictives nécessitent une séquence cohérente d'un même jeu.
+  const tabs = drawName === 'ALL' 
+    ? allTabs.filter(t => t.id === 'Flux') 
+    : allTabs;
 
   return (
     <div className="space-y-8 animate-fade-in pb-20">

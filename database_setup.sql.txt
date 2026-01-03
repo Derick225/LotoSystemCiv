@@ -1,3 +1,4 @@
+
 -- ==============================================================================
 -- NEXUS PLATINUM ELITE v11.0 - DATABASE SCHEMA (COPY PASTE TO SUPABASE SQL EDITOR)
 -- ==============================================================================
@@ -44,12 +45,13 @@ create table if not exists public.algo_weights (
   updated_at timestamptz default now()
 );
 
--- D. PRÉFÉRENCES UTILISATEURS
+-- D. PRÉFÉRENCES UTILISATEURS & ABONNEMENT
 create table if not exists public.user_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
   watchlist integer[],
   saved_tickets jsonb,
   settings jsonb,
+  subscription jsonb default '{"status": "trial", "plan": "free"}'::jsonb, -- Nouveau champ
   updated_at timestamptz default now()
 );
 
@@ -102,7 +104,7 @@ create policy "Service Write Analytics" on public.draw_analytics for all using (
 -- Politiques ALGO_WEIGHTS
 create policy "Public Read Weights" on public.algo_weights for select using (true);
 create policy "Admin Write Weights" on public.algo_weights for all using (
-  auth.role() = 'authenticated'
+  auth.role() = 'service_role' OR auth.role() = 'authenticated'
 );
 
 -- Politiques USER_PREFERENCES

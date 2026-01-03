@@ -1,5 +1,5 @@
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, Cpu, X, Signal, Terminal } from 'lucide-react';
+import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut } from 'lucide-react';
 import { useIsFetching } from '@tanstack/react-query';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
@@ -19,6 +19,8 @@ interface AppShellProps {
   showWallet: boolean;
   setShowWallet: (show: boolean) => void;
   isDrawSelected: boolean;
+  isAdmin: boolean;
+  onLogout: () => void;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ 
@@ -30,7 +32,9 @@ export const AppShell: React.FC<AppShellProps> = ({
   onReset,
   showWallet,
   setShowWallet,
-  isDrawSelected
+  isDrawSelected,
+  isAdmin,
+  onLogout
 }) => {
   const isFetching = useIsFetching();
   const [showPalette, setShowPalette] = useState(false);
@@ -45,8 +49,12 @@ export const AppShell: React.FC<AppShellProps> = ({
   const navItems: { id: ViewMode; icon: React.ReactNode; label: string }[] = [
       { id: 'home', icon: <Home size={18}/>, label: 'Station' },
       { id: 'lab', icon: <FlaskConical size={18}/>, label: 'Quantum Lab' },
-      { id: 'admin', icon: <Settings size={18}/>, label: 'Système' }
   ];
+
+  // Ajout conditionnel du menu Admin
+  if (isAdmin) {
+      navItems.push({ id: 'admin', icon: <Settings size={18}/>, label: 'Système' });
+  }
 
   const handleNav = (mode: ViewMode) => {
       audioEngine.play('click');
@@ -130,9 +138,17 @@ export const AppShell: React.FC<AppShellProps> = ({
                     
                     <button 
                       onClick={() => { audioEngine.play('click'); setTheme(theme === 'dark' ? 'light' : 'dark'); }} 
-                      className="p-3.5 bg-white/5 rounded-2xl text-slate-400 hover:text-white border border-white/10 active:scale-90 transition-all"
+                      className="p-3.5 bg-white/5 rounded-2xl text-slate-400 hover:text-white border border-white/10 active:scale-90 transition-all hidden sm:block"
                     >
                         {theme === 'dark' ? <Terminal size={20} /> : <Activity size={20} />}
+                    </button>
+
+                    <button 
+                      onClick={onLogout}
+                      className="p-3.5 bg-rose-500/10 rounded-2xl text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/20 active:scale-90 transition-all"
+                      title="Déconnexion"
+                    >
+                        <LogOut size={20} />
                     </button>
                 </div>
             </div>

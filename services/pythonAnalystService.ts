@@ -4,10 +4,11 @@ import { DrawResult, PythonAnalysisResult } from "../types";
 
 export const runDeepPythonAnalysis = async (drawName: string, history: DrawResult[]): Promise<PythonAnalysisResult> => {
     // La clé est injectée via vite.config.ts define: { 'process.env': ... }
+    // TypeScript reconnaitra process.env via src/vite-env.d.ts
     const apiKey = process.env.API_KEY;
     
     if (!apiKey) {
-        throw new Error("Clé API Google Gemini manquante (VITE_API_KEY dans .env).");
+        throw new Error("Clé API Google Gemini manquante. Vérifiez VITE_API_KEY dans votre fichier .env.");
     }
 
     const ai = new GoogleGenAI({ apiKey });

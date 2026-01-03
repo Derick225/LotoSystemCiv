@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback, useTransition } from 'react';
 import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -12,7 +13,7 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
-import { FileText, Cpu, Sparkles, Zap, Target, Network, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Network, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from 'recharts';
 import { useNexus } from '../NexusProvider';
 
@@ -115,9 +116,15 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
 
   const getRegimeLabel = () => {
       if (!regime) return "Standard";
-      if (regime.hurst > 0.6) return "Persistant (Suivi de Tendance)";
-      if (regime.hurst < 0.4) return "Anti-Persistant (Retour Moyenne)";
-      return "Chaotique (Défense Probabiliste)";
+      if (regime.hurst > 0.6) return "Suivi de Tendance";
+      if (regime.hurst < 0.4) return "Retour Moyenne";
+      return "Chaotique (Risqué)";
+  };
+
+  const getRiskLevel = (vol: number) => {
+      if (vol < 30) return { label: 'Faible', color: 'text-emerald-500', bg: 'bg-emerald-500/10', icon: <ShieldCheck size={16}/> };
+      if (vol < 60) return { label: 'Modéré', color: 'text-amber-500', bg: 'bg-amber-500/10', icon: <Info size={16}/> };
+      return { label: 'Élevé', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: <AlertTriangle size={16}/> };
   };
 
   if (nexusLoading || (computingIA && !lastPrediction)) return (
@@ -149,8 +156,12 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
         </div>
   );
 
+  const risk = getRiskLevel(volatility?.score || 0);
+
   return (
     <div className={`space-y-8 animate-fade-in pb-16 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
+        
+        {/* Synthèse Expert & KPIs */}
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-125 transition-transform"><Target size={48}/></div>
@@ -164,6 +175,19 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                     </div>
                 </div>
             </div>
+            
+            <div className={`p-6 rounded-[2.5rem] border shadow-sm flex flex-col justify-center relative overflow-hidden ${risk.bg} border-${risk.color.split('-')[1]}-200`}>
+                <div className="flex items-center gap-4 relative z-10">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg bg-white ${risk.color}`}>
+                        {risk.icon}
+                    </div>
+                    <div>
+                        <h3 className="font-black text-slate-500 text-[9px] uppercase tracking-widest">Niveau de Risque</h3>
+                        <span className={`text-xs font-black leading-tight block ${risk.color}`}>{risk.label} ({volatility?.score || 0}%)</span>
+                    </div>
+                </div>
+            </div>
+
             <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center">
                 <div className="flex items-center gap-2 mb-2">
                     <h4 className="text-[8px] font-black text-slate-400 uppercase">Signature ADN</h4>
@@ -171,7 +195,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 </div>
                 <AlgoRadar weights={globalWeights} height={160} />
             </div>
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
                 {calibration && <ReliabilityMeter calibration={calibration} />}
             </div>
         </div>
@@ -183,16 +207,22 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
                         <ThermometerSun size={14} className={(volatility?.score ?? 0) > 60 ? "text-orange-500" : "text-emerald-400"} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Inférence Dynamique (V={volatility?.score ?? 0}%)</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">Inférence Dynamique</span>
                     </div>
                     <h2 className="text-5xl md:text-8xl font-black tracking-tighter mb-8 leading-none">Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span></h2>
-                    <p className="text-slate-400 text-xl italic font-medium leading-relaxed max-w-2xl mx-auto xl:mx-0 border-l-4 border-indigo-600/30 pl-8">
-                        "{lastPrediction.analysis}"
-                    </p>
-                    <div className="mt-12 flex flex-wrap gap-4 items-center justify-center xl:justify-start">
+                    
+                    {/* Analyse Simplifiée pour Lecture Rapide */}
+                    <div className="bg-white/5 p-6 rounded-3xl border border-white/5 backdrop-blur-sm mb-8 text-left">
+                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={12}/> Verdict Expert</h5>
+                        <p className="text-slate-300 text-sm italic font-medium leading-relaxed">
+                            "{lastPrediction.analysis.replace(/Analyse complétée pour .*?\./, '')}"
+                        </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 items-center justify-center xl:justify-start">
                         <button onClick={loadPrediction} disabled={computingIA} className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/40 transition-all flex items-center gap-4 active:scale-95">
                             {computingIA ? <RefreshCw className="animate-spin" size={20}/> : <Zap size={20} className="fill-current" />} 
-                            RECALCULER VECTEURS
+                            RECALCULER
                         </button>
                         <button onClick={() => ExportService.generatePredictionPDF(drawName, lastPrediction)} className="p-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[1.8rem] transition shadow-xl group/btn">
                             <FileText className="text-slate-500 group-hover/btn:text-white transition-colors" size={24} />

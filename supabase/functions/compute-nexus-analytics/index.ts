@@ -15,6 +15,8 @@ serve(async (req: Request) => {
   try {
     const { drawName } = await req.json();
     
+    if (!drawName) throw new Error("drawName is required");
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     
@@ -22,7 +24,7 @@ serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Récupération de l'historique (100 derniers tirages)
+    // 1. Récupération de l'historique (100 derniers tirages pour une analyse rapide mais pertinente)
     const { data: history } = await supabaseAdmin
       .from('draw_results')
       .select('gagnants, date')
@@ -30,21 +32,22 @@ serve(async (req: Request) => {
       .order('date', { ascending: false })
       .limit(100);
 
-    if (!history || history.length < 15) throw new Error("Données insuffisantes pour le calcul.");
+    if (!history || history.length < 10) {
+        return new Response(JSON.stringify({ message: "Insufficent data", drawName }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     const N = history.length;
     const spectral = [];
     const fractal = [];
 
-    // 2. Calculs Mathématiques Intensifs
+    // 2. Calculs Mathématiques Intensifs (Backend-Side)
     for (let num = 1; num <= 90; num++) {
       const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
       const mean = signal.reduce((a, b) => a + b, 0) / N;
       
       // FFT Simplifiée (Spectral Energy)
       let maxPower = 0;
-      // On scanne jusqu'à Nyquist
-      for (let k = 1; k < N / 2; k++) {
+      for (let k = 1; k < Math.min(N / 2, 20); k++) { // Optimisation: Limiter les harmoniques
         let re = 0, im = 0;
         for (let t = 0; t < N; t++) {
           const angle = (2 * Math.PI * k * t) / N;
@@ -74,7 +77,7 @@ serve(async (req: Request) => {
       fractal.push({ number: num, hurst: parseFloat(clampedH.toFixed(3)) });
     }
 
-    // 3. Sauvegarde en base (Table draw_analytics)
+    // 3. Sauvegarde en base (Upsert dans draw_analytics)
     const { error } = await supabaseAdmin.from('draw_analytics').upsert({
       draw_name: drawName,
       date: history[0].date, // Lié à la date du dernier tirage connu
@@ -85,7 +88,7 @@ serve(async (req: Request) => {
 
     if (error) throw error;
 
-    return new Response(JSON.stringify({ success: true, count: 90 }), { 
+    return new Response(JSON.stringify({ success: true, drawName, count: 90 }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 

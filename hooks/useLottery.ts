@@ -1,4 +1,3 @@
-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult } from '../types';
@@ -71,11 +70,14 @@ export const useDrawHistory = (drawName: string) => {
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     
+    // Si 'ALL', on écoute tous les inserts (filtre undefined), sinon on filtre par draw_name
+    const filter = drawName === 'ALL' ? undefined : `draw_name=eq.${drawName}`;
+
     // Écoute Realtime des nouveaux résultats
     const channel = supabase
       .channel('draw-sync')
       .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'draw_results', filter: `draw_name=eq.${drawName}` }, 
+        { event: 'INSERT', schema: 'public', table: 'draw_results', filter }, 
         () => {
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });

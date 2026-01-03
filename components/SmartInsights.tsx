@@ -2,10 +2,10 @@
 import React from 'react';
 import type { SmartInsight } from '../types';
 import { useNexus } from './NexusProvider';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, TrendingUp, AlertTriangle, Lightbulb } from 'lucide-react';
 
 interface SmartInsightsProps {
-    drawName: string; // Updated
+    drawName: string;
 }
 
 export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
@@ -20,57 +20,71 @@ export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
         else if (insight.id.includes('gap-')) { mainTab = 'Signaux'; subTab = 'stats'; }
         else if (insight.id.includes('clock-')) { mainTab = 'Signaux'; subTab = 'fractal'; }
         
-        // Navigation multi-niveaux : 1. Onglet Principal (DrawDetails) 2. Sous-onglet (SignalHub)
         window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { 
             detail: { mainTab, subTab } 
         }));
     };
 
-    if (nexusLoading) return <div className="h-24 animate-pulse bg-slate-100 dark:bg-slate-800 rounded-2xl mb-6 border border-slate-200 dark:border-slate-700"></div>;
+    if (nexusLoading) return <div className="h-28 animate-pulse bg-slate-100 dark:bg-slate-800 rounded-[2.5rem] mb-6 border border-slate-200 dark:border-slate-700"></div>;
     if (smartInsights.length === 0) return null;
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 animate-slide-up">
-            {smartInsights.map((insight) => (
-                <div 
-                    key={insight.id}
-                    onClick={() => handleNavigate(insight)}
-                    className={`
-                        p-4 rounded-xl border shadow-sm relative overflow-hidden flex items-start gap-4 transition-all hover:scale-[1.02] cursor-pointer group
-                        ${insight.type === 'opportunity' 
-                            ? 'bg-gradient-to-br from-green-50 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/20 border-green-200 dark:border-green-800' 
-                            : insight.type === 'risk'
-                                ? 'bg-gradient-to-br from-red-50 to-orange-100 dark:from-red-900/30 dark:to-orange-900/20 border-red-200 dark:border-red-800'
-                                : 'bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800'
-                        }
-                    `}
-                >
-                    <div className={`
-                        w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-inner flex-shrink-0 transition-transform group-hover:scale-110
-                        ${insight.type === 'opportunity' ? 'bg-white/80 text-green-600' : insight.type === 'risk' ? 'bg-white/80 text-red-600' : 'bg-white/80 text-blue-600'}
-                    `}>
-                        {insight.icon}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-start">
-                            <h4 className={`font-bold text-sm truncate ${insight.type === 'opportunity' ? 'text-green-800 dark:text-green-300' : insight.type === 'risk' ? 'text-red-800 dark:text-red-300' : 'text-blue-800 dark:text-blue-300'}`}>
-                                {insight.title}
-                            </h4>
-                            <span className="text-[10px] font-bold bg-white/50 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300 border border-black/5 group-hover:bg-white transition-colors">
-                                {insight.score}%
-                            </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-slide-up">
+            {smartInsights.map((insight) => {
+                let borderColor = 'border-slate-200 dark:border-slate-700';
+                let iconBg = 'bg-slate-100 text-slate-500';
+                let titleColor = 'text-slate-800 dark:text-white';
+                let LucideIcon = Lightbulb;
+
+                if (insight.type === 'opportunity') {
+                    borderColor = 'border-emerald-200 dark:border-emerald-800';
+                    iconBg = 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600';
+                    titleColor = 'text-emerald-900 dark:text-emerald-100';
+                    LucideIcon = TrendingUp;
+                } else if (insight.type === 'risk') {
+                    borderColor = 'border-rose-200 dark:border-rose-800';
+                    iconBg = 'bg-rose-100 dark:bg-rose-900/30 text-rose-600';
+                    titleColor = 'text-rose-900 dark:text-rose-100';
+                    LucideIcon = AlertTriangle;
+                } else {
+                    iconBg = 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600';
+                    titleColor = 'text-indigo-900 dark:text-indigo-100';
+                }
+
+                return (
+                    <div 
+                        key={insight.id}
+                        onClick={() => handleNavigate(insight)}
+                        className={`
+                            p-6 rounded-[2.5rem] border-l-4 shadow-sm relative overflow-hidden flex items-start gap-5 transition-all hover:scale-[1.02] cursor-pointer group bg-white dark:bg-slate-800
+                            ${borderColor}
+                            ${insight.type === 'opportunity' ? 'border-l-emerald-500' : insight.type === 'risk' ? 'border-l-rose-500' : 'border-l-indigo-500'}
+                        `}
+                    >
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-inner flex-shrink-0 ${iconBg}`}>
+                            <LucideIcon size={24} />
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed font-medium line-clamp-2">
-                            {insight.description}
-                        </p>
-                        <div className="mt-2 flex items-center gap-1 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider">
-                            <span>Analyser</span>
-                            <ArrowRight className="w-3 h-3" />
+                        
+                        <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start mb-2">
+                                <h4 className={`font-black text-sm uppercase tracking-tight ${titleColor}`}>
+                                    {insight.title}
+                                </h4>
+                                <span className={`text-[10px] font-black px-2 py-1 rounded-lg border ${iconBg} bg-opacity-10 border-opacity-20`}>
+                                    {insight.score}% Impact
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                                {insight.description}
+                            </p>
+                            <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors uppercase tracking-widest">
+                                <span>Voir l'analyse</span>
+                                <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                            </div>
                         </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
     );
 };

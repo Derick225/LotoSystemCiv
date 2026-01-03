@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
@@ -41,14 +40,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
       const checkConnection = async () => {
           if (!isSupabaseConfigured()) {
-              // On n'affiche pas d'erreur, on laisse l'app fonctionner en mode hors-ligne/dégradé silencieusement
               console.log("Nexus en mode local (Pas de connexion Supabase)");
               return;
           }
           const status = await testDatabaseConnection();
           if (!status.success) {
               console.error("DB Connection Error:", status.error);
-              // On affiche le toast que si ce n'est pas juste un problème de clé manquante
               if (!status.error.includes("Variables d'environnement")) {
                   showToast(`Erreur Base de Données: ${status.error}`, "error");
               }
@@ -61,31 +58,43 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
     try {
         const hist = await lotteryService.fetchHistory(targetDraw);
-        setHistory(hist); // Historique vide [] est valide s'il n'y a pas d'erreur
+        setHistory(hist); 
         
         // Synchronisation ADN IA
         setGlobalWeights(getAlgoWeights(targetDraw));
 
         // Pipeline HPC Parallèle
         if (hist.length > 0) {
-            const [spec, frac, regData, corr, centrality] = await Promise.all([
-                Promise.resolve(mathService.calculateSpectral(hist)),
-                Promise.resolve(mathService.calculateFractal(hist)),
-                Promise.resolve(calculateRegularity(hist)),
-                calculateCorrelationMatrixAsync(hist),
-                calculateNetworkCentralityAsync(hist)
-            ]);
-            
-            setSpectral(spec);
-            setFractal(frac);
-            setRegularity(regData);
-            setCorrelationMatrix(corr);
-            setCliques(centrality);
+            // OPTIMISATION CRITIQUE : Si mode 'ALL', on saute les calculs complexes intra-tirage
+            // car analyser la structure temporelle d'un mélange de jeux est mathématiquement invalide.
+            if (targetDraw === 'ALL') {
+                 setSpectral([]);
+                 setFractal([]);
+                 setRegularity([]);
+                 setCorrelationMatrix({});
+                 setCliques([]);
+                 setSmartInsights([]);
+            } else {
+                // Mode Jeu Unique : Analyse complète
+                const [spec, frac, regData, corr, centrality] = await Promise.all([
+                    Promise.resolve(mathService.calculateSpectral(hist)),
+                    Promise.resolve(mathService.calculateFractal(hist)),
+                    Promise.resolve(calculateRegularity(hist)),
+                    calculateCorrelationMatrixAsync(hist),
+                    calculateNetworkCentralityAsync(hist)
+                ]);
+                
+                setSpectral(spec);
+                setFractal(frac);
+                setRegularity(regData);
+                setCorrelationMatrix(corr);
+                setCliques(centrality);
 
-            // Analyse Cognitive (Insights)
-            const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
-            const insights = await generateSmartInsights(targetDraw, hist, spec, gaps, regData);
-            setSmartInsights(insights);
+                // Analyse Cognitive (Insights)
+                const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
+                const insights = await generateSmartInsights(targetDraw, hist, spec, gaps, regData);
+                setSmartInsights(insights);
+            }
         } else {
             // Reset des états si pas de données
             setSpectral([]);
@@ -98,7 +107,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (targetDraw !== drawName) setLastPrediction(null);
 
     } catch (e: any) {
-        // Logging d'erreur amélioré pour éviter [object Object]
         let errorMessage = "Erreur inconnue";
         if (typeof e === 'string') errorMessage = e;
         else if (e instanceof Error) errorMessage = e.message;
@@ -108,16 +116,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         
         console.error("Nexus Kernel Error:", errorMessage);
         
-        // Détection spécifique des erreurs courantes Supabase
         if (errorMessage.includes('FetchError') || errorMessage.includes('Network') || errorMessage.includes('Failed to fetch')) {
-             // Silence en cas d'erreur réseau pour ne pas bloquer l'UX
              console.warn("Serveur injoignable.");
         } else if ((e as any).code === '42P01') {
              showToast("Table 'draw_results' introuvable. Exécutez le SQL.", "error");
         } else if ((e as any).code === '42501') {
              showToast("Accès refusé (RLS). Vérifiez les politiques.", "error");
         } else {
-             // Erreur générique discrète
              console.warn(`Erreur chargement ${targetDraw}.`, errorMessage);
         }
         setHistory([]); 
@@ -139,6 +144,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [history]);
 
   const gaps = useMemo(() => {
+    // Les gaps n'ont pas de sens en mode 'ALL' (mélange de jeux)
+    if (drawName === 'ALL') return [];
+    
     const res: { number: number; gap: number }[] = [];
     for (let i = 1; i <= 90; i++) {
       let gap = 0;
@@ -149,7 +157,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       res.push({ number: i, gap });
     }
     return res;
-  }, [history]);
+  }, [history, drawName]);
 
   const volatility = useMemo(() => history.length > 0 ? calculateVolatility(history) : null, [history]);
   const regime = useMemo(() => history.length > 0 ? detectGameRegime(history) : null, [history]);

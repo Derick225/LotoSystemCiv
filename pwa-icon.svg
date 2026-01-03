@@ -1,36 +1,56 @@
-<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#312e81"/>
-      <stop offset="100%" stop-color="#1e1b4b"/>
+    <!-- Dégradé de fond Cyber-Midnight -->
+    <linearGradient id="bg_grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e1b4b"/> <!-- Indigo 950 -->
+      <stop offset="1" stop-color="#020617"/> <!-- Slate 950 -->
     </linearGradient>
-    <radialGradient id="orange" cx="0.3" cy="0.3" r="0.7">
-      <stop offset="0%" stop-color="#fb923c"/>
-      <stop offset="100%" stop-color="#c2410c"/>
-    </radialGradient>
-    <radialGradient id="green" cx="0.3" cy="0.3" r="0.7">
-      <stop offset="0%" stop-color="#4ade80"/>
-      <stop offset="100%" stop-color="#15803d"/>
-    </radialGradient>
-    <radialGradient id="white" cx="0.3" cy="0.3" r="0.7">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#cbd5e1"/>
+    
+    <!-- Dégradé de l'anneau technologique -->
+    <linearGradient id="ring_grad" x1="100" y1="100" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818cf8"/> <!-- Indigo 400 -->
+      <stop offset="0.5" stop-color="#4f46e5"/> <!-- Indigo 600 -->
+      <stop offset="1" stop-color="#312e81"/> <!-- Indigo 900 -->
+    </linearGradient>
+
+    <!-- Lueur Or (Prestige) -->
+    <radialGradient id="gold_glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(380 130) rotate(90) scale(120)">
+      <stop stop-color="#fbbf24" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#fbbf24" stop-opacity="0"/>
     </radialGradient>
   </defs>
+
+  <!-- Fond Squircle (Forme iOS/Android moderne) -->
+  <rect width="512" height="512" rx="128" fill="url(#bg_grad)"/>
   
-  <!-- Fond -->
-  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
-  <circle cx="256" cy="256" r="230" fill="none" stroke="white" stroke-width="2" stroke-opacity="0.1"/>
+  <!-- Grille subtile en fond (Data Matrix) -->
+  <path d="M128 64V448M192 64V448M256 64V448M320 64V448M384 64V448" stroke="white" stroke-opacity="0.03" stroke-width="2"/>
+  <path d="M64 128H448M64 192H448M64 256H448M64 320H448M64 384H448" stroke="white" stroke-opacity="0.03" stroke-width="2"/>
+
+  <!-- Anneau Orbital (Cycle des tirages) -->
+  <circle cx="256" cy="256" r="160" stroke="white" stroke-opacity="0.05" stroke-width="4"/>
+  <!-- Segment actif de l'anneau -->
+  <path d="M416 256A160 160 0 0 1 256 416" stroke="url(#ring_grad)" stroke-width="16" stroke-linecap="round"/>
   
-  <!-- Boule Gauche (Orange) -->
-  <circle cx="150" cy="220" r="90" fill="url(#orange)"/>
+  <!-- Noyau Central (Le Cerveau Nexus) -->
+  <circle cx="256" cy="256" r="100" fill="#0f172a" stroke="#4f46e5" stroke-width="4"/>
   
-  <!-- Boule Droite (Verte) -->
-  <circle cx="362" cy="220" r="90" fill="url(#green)"/>
-  
-  <!-- Boule Centrale (Blanche) -->
-  <circle cx="256" cy="320" r="110" fill="url(#white)"/>
-  
-  <!-- Numéro 7 -->
-  <text x="256" y="365" font-family="Arial, sans-serif" font-weight="bold" font-size="120" text-anchor="middle" fill="#312e81">7</text>
+  <!-- Le Symbole "N" (Neural Network) -->
+  <g transform="translate(196, 196) scale(1.2)">
+    <!-- Liaisons -->
+    <path d="M0 0 V100 L100 0 V100" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Noeuds (Points de données) -->
+    <circle cx="0" cy="0" r="12" fill="#fbbf24"/> <!-- Gold Node -->
+    <circle cx="0" cy="100" r="8" fill="#6366f1"/>
+    <circle cx="100" cy="0" r="8" fill="#6366f1"/>
+    <circle cx="100" cy="100" r="12" fill="#fbbf24"/> <!-- Gold Node -->
+  </g>
+
+  <!-- Lueur d'activité (Sparkle) -->
+  <path d="M400 100L410 80L420 100L440 110L420 120L410 140L400 120L380 110L400 100Z" fill="#fbbf24" filter="url(#blur)"/>
+  <circle cx="410" cy="110" r="40" fill="url(#gold_glow)"/>
+
+  <!-- Reflet Glossy (Effet Vitre) -->
+  <path d="M60 60Q256 10 452 60V256Q452 60 60 60Z" fill="white" fill-opacity="0.03"/>
 </svg>

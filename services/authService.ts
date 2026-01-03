@@ -1,4 +1,3 @@
-
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const authService = {
@@ -10,6 +9,20 @@ export const authService = {
         return { data: null, error: new Error("Mode hors-ligne : Authentification désactivée.") };
     }
     const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { data, error };
+  },
+
+  /**
+   * Inscrit un nouvel utilisateur.
+   */
+  signUp: async (email: string, password: string) => {
+    if (!isSupabaseConfigured()) {
+        return { data: null, error: new Error("Mode hors-ligne : Inscription désactivée.") };
+    }
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
@@ -52,5 +65,23 @@ export const authService = {
       password: newPassword
     });
     return { data, error };
+  },
+
+  /**
+   * Vérifie si l'utilisateur a le rôle administrateur.
+   * Basé sur les métadonnées de l'utilisateur ou une liste blanche simple pour la démo.
+   */
+  isAdminUser: (user: any): boolean => {
+    if (!user) return false;
+    // Vérification via app_metadata (rôle Supabase)
+    if (user.app_metadata?.role === 'admin') return true;
+    
+    // Fallback : Vérification simple par email (à adapter selon vos besoins)
+    const adminEmails = ['admin@lotopro.com', 'admin@nexus.com']; 
+    if (user.email && adminEmails.includes(user.email)) return true;
+    
+    // Pour les besoins de développement, si on est en localhost et qu'aucun email n'est fourni, on peut être permissif
+    // Mais pour la prod, on garde la logique stricte.
+    return false;
   }
 };

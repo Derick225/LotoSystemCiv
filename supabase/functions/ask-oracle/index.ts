@@ -1,6 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@0.1.1";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@1.34.0";
 
 declare const Deno: any;
 
@@ -24,7 +24,7 @@ serve(async (req: Request) => {
     // --- Tâche 1 : Rapport Narratif (IntelligenceTab) ---
     if (task === 'narrative') {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview', // Mise à jour vers Gemini 3 Flash
         contents: {
             parts: [
                 { text: `Génère un rapport d'analyse stochastique court et percutant pour le tirage ${drawName}.
@@ -51,9 +51,9 @@ serve(async (req: Request) => {
 
     // --- Tâche 2 : Analyse Logique Profonde (IntelligenceTab / PythonAnalyst) ---
     } else if (task === 'analyze') {
-      // Pour une analyse complexe, on utilise le modèle Pro
+      // Pour une analyse complexe, on utilise le modèle Pro (Gemini 3 Pro)
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-pro', 
+        model: 'gemini-3-pro-preview', 
         contents: {
             parts: [
                 { text: `Analyse les patterns logiques pour le tirage ${drawName}.
@@ -84,7 +84,7 @@ serve(async (req: Request) => {
     // --- Tâche 3 : Audit de Simulation (SimulationTab) ---
     } else if (task === 'simulation-audit') {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3-flash-preview', // Tâche basique = Flash
         contents: {
             parts: [
                 { text: `Tu es un auditeur de risque financier. Critique cette simulation de stratégie de loterie.
@@ -98,7 +98,7 @@ serve(async (req: Request) => {
     // --- Tâche 4 : Vision (Analyse de graphique ou autre) ---
     } else if (task === 'vision-analysis') {
        const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash', // Modèle multimodal
+        model: 'gemini-2.0-flash', // Modèle Vision Stable
         contents: {
             parts: [
                 { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },

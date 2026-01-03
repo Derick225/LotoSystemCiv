@@ -2,6 +2,23 @@
 import { DrawResult, SpectralMetric, FractalMetric, NumberRegularity, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, EntropyMetric, ChiSquareMetric, ClusterPoint } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
+// Helper Worker Wrapper
+const runWorkerTask = async (task: string, history: DrawResult[]): Promise<any> => {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL('./workers/math.worker.ts', import.meta.url), { type: 'module' });
+        const requestId = Math.random().toString(36).substring(7);
+        
+        worker.onmessage = (e) => {
+            if (e.data.requestId === requestId) {
+                if (e.data.error) reject(e.data.error);
+                else resolve(e.data.result);
+                worker.terminate();
+            }
+        };
+        worker.postMessage({ requestId, task, history });
+    });
+};
+
 export const calculateACValue = (numbers: number[]): number => {
   const diffs = new Set();
   const sorted = [...numbers].sort((a, b) => a - b);
@@ -20,7 +37,6 @@ export const calculateDigitalRoot = (n: number): number => {
 export const mathService = {
   async fetchAnalytics(drawName: string, date: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
     if (!isSupabaseConfigured()) return null;
-    
     try {
         const { data, error } = await supabase
           .from('draw_analytics')
@@ -28,22 +44,19 @@ export const mathService = {
           .eq('draw_name', drawName)
           .eq('date', date)
           .single();
-        
         if (error || !data) return null;
         return { spectral: data.spectral, fractal: data.fractal };
-    } catch (e) {
-        // En cas d'erreur réseau ou autre, on retourne null pour utiliser le calcul local
-        return null;
-    }
+    } catch (e) { return null; }
   },
 
+  // Fallback synchrone rapide
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {
     const N = history.length;
     if (N < 2) return [];
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = history.map(d => (d.gagnants.includes(n) ? 1 : 0));
-        const mean = signal.reduce<number>((a, b) => a + b, 0) / N;
+        const mean = signal.reduce((a, b) => a + b, 0) / N;
         let maxPower = 0;
         const limit = Math.floor(N / 2);
         for (let k = 1; k < limit; k++) {
@@ -56,11 +69,10 @@ export const mathService = {
             const power = (re * re + im * im) / N;
             if (power > maxPower) maxPower = power;
         }
-        const energy = Math.min(100, Math.round(maxPower * 600));
         return {
             number: n,
-            energy: energy,
-            resonance: energy > 75,
+            energy: Math.min(100, Math.round(maxPower * 600)),
+            resonance: (maxPower * 600) > 75,
             dominantPeriod: parseFloat((N / (maxPower * 10 || 1)).toFixed(1))
         };
     }).sort((a, b) => b.energy - a.energy);
@@ -72,12 +84,12 @@ export const mathService = {
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = history.map(d => (d.gagnants.includes(n) ? 1 : 0));
-        const mean = signal.reduce<number>((a, b) => a + b, 0) / N;
+        const mean = signal.reduce((a, b) => a + b, 0) / N;
         const x = signal.map(v => v - mean);
         let cumsum = 0;
         const y = x.map(v => (cumsum += v, cumsum));
         const R = Math.max(...y) - Math.min(...y);
-        const S = Math.sqrt(x.reduce<number>((a, v) => a + v * v, 0) / N) || 1;
+        const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1;
         const h = Math.log(R / S) / Math.log(N);
         const hurst = Math.max(0, Math.min(1, isNaN(h) ? 0.5 : h));
         return {
@@ -89,19 +101,25 @@ export const mathService = {
   }
 };
 
+export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
+    try {
+        const res = await runWorkerTask('full_analysis', history);
+        return res.spectral || mathService.calculateSpectral(history);
+    } catch {
+        return mathService.calculateSpectral(history);
+    }
+};
+
 export const getMomentumScores = (history: DrawResult[]): Record<number, number> => {
     const scores: Record<number, number> = {};
     for (let i = 1; i <= 90; i++) {
         const recent = history.slice(0, 10).filter(h => h.gagnants.includes(i)).length;
         const previous = history.slice(10, 20).filter(h => h.gagnants.includes(i)).length;
-        scores[i] = (recent - previous) * 20 + 50; // Score centré sur 50
+        scores[i] = (recent - previous) * 20 + 50; 
     }
     return scores;
 };
 
-/**
- * Calcule la vélocité réelle (vitesse d'épuisement du retard) pour chaque numéro.
- */
 export const getVelocityScores = (history: DrawResult[]): Record<number, number> => {
     const scores: Record<number, number> = {};
     const regularity = calculateRegularity(history);
@@ -116,12 +134,12 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
     const N = history.length;
     const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
-    const mean = signal.reduce<number>((a, b) => a + b, 0) / N;
+    const mean = signal.reduce((a, b) => a + b, 0) / N;
     const x = signal.map(v => v - mean);
     let cumsum = 0;
     const y = x.map(v => (cumsum += v, cumsum));
     const R = Math.max(...y) - Math.min(...y);
-    const S = Math.sqrt(x.reduce<number>((a, v) => a + v * v, 0) / N) || 1;
+    const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1;
     const h = Math.log(R / S) / Math.log(N);
     return { hurst: isNaN(h) ? 0.5 : Math.max(0, Math.min(1, h)) };
 };
@@ -171,10 +189,6 @@ export const predictBarycenterShift = (trajectory: BarycenterPoint[]): Barycente
     const last = trajectory[trajectory.length - 1];
     const prev = trajectory[trajectory.length - 2];
     return { x: last.x + (last.x - prev.x) * 0.5, y: last.y + (last.y - prev.y) * 0.5 };
-};
-
-export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
-    return mathService.calculateSpectral(history);
 };
 
 export const calculateShannonEntropy = (history: DrawResult[]): EntropyMetric => {
@@ -227,7 +241,6 @@ export const performKMeansClusteringAsync = async (history: DrawResult[]): Promi
 
 export const detectCommunities = (nums: number[], correlationMatrix: any): Record<number, number> => {
     const comms: Record<number, number> = {};
-    // Algo de détection de communautés simplifié (Clique detection)
     nums.forEach((n, i) => {
         const affs = correlationMatrix[n]?.affinities || {};
         const bestFriend = Object.entries(affs).sort((a: any, b: any) => b[1] - a[1])[0];
@@ -237,11 +250,9 @@ export const detectCommunities = (nums: number[], correlationMatrix: any): Recor
 };
 
 export const calculateBenfordCompliance = (numbers: number[]): ChiSquareMetric => {
-    // Application de la loi de Benford sur les fréquences de chiffres
     const firstDigits = numbers.map(n => parseInt(n.toString()[0]));
     const counts: Record<number, number> = {};
     firstDigits.forEach(d => counts[d] = (counts[d] || 0) + 1);
-    
     let chi = 0;
     for(let d=1; d<=9; d++) {
         const observed = (counts[d] || 0) / numbers.length;
@@ -293,8 +304,8 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
             }
         });
         const currentGap = history.findIndex(d => d.gagnants.includes(num));
-        const avgGap = gaps.length > 0 ? gaps.reduce<number>((a,b)=>a+b,0)/gaps.length : 18;
-        const variance = gaps.reduce<number>((a,v)=>a + Math.pow(v-avgGap, 2), 0) / (gaps.length || 1);
+        const avgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : 18;
+        const variance = gaps.reduce((a,v)=>a + Math.pow(v-avgGap, 2), 0) / (gaps.length || 1);
         return {
             number: num,
             avgGap: parseFloat(avgGap.toFixed(2)),
@@ -315,38 +326,19 @@ export const detectGameRegime = (history: DrawResult[]) => {
 };
 
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
-    const N = history.length;
-    const matrix: Record<number, { affinities: Record<number, number> }> = {};
-    const vectors = Array.from({length: 91}, () => new Uint8Array(N));
-    
-    for(let t=0; t<N; t++) {
-        history[t].gagnants.forEach(n => { if(n<=90) vectors[n][t] = 1; });
+    try {
+        const res = await runWorkerTask('pearson_matrix', history);
+        return res || {};
+    } catch {
+        return {}; // Fallback empty
     }
-
-    for(let i=1; i<=90; i++) {
-        matrix[i] = { affinities: {} };
-        const vecI = vectors[i];
-        const sumI = vecI.reduce<number>((a,b)=>a+b, 0);
-        if (sumI === 0) continue;
-        
-        for(let j=1; j<=90; j++) {
-            if(i === j) continue;
-            const vecJ = vectors[j];
-            let intersection = 0;
-            for(let t=0; t<N; t++) if(vecI[t] && vecJ[t]) intersection++;
-            
-            const jaccard = intersection / (sumI + vecJ.reduce<number>((a,b)=>a+b,0) - intersection);
-            if(jaccard > 0.08) matrix[i].affinities[j] = jaccard;
-        }
-    }
-    return matrix;
 };
 
 export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => {
     const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
     return Array.from({length: 90}, (_, i) => {
         const n = i+1;
-        const outWeight = Object.values(matrix[n] || {}).reduce<number>((a,b)=>a+b, 0);
+        const outWeight = Object.values(matrix[n] || {}).reduce((a,b)=>a+(b as number), 0);
         return {
             number: n,
             centrality: outWeight,
@@ -355,7 +347,6 @@ export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => 
     });
 };
 
-/* FIX: Exported calculateSuccessionMatrixAsync to fix import errors in orchestrationService.ts and NetworkTab.tsx */
 export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
     const matrix: Record<number, Record<number, number>> = {};
     const totals: Record<number, number> = {};
@@ -392,6 +383,6 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
         historyGraph: history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse(),
         affinity: Object.entries((await calculateCorrelationMatrixAsync(history.slice(0, 50)))[num]?.affinities || {})
             .sort((a:any, b:any) => b[1] - a[1]).slice(0, 3).map(e => parseInt(e[0])),
-        nemesis: [] // Non implémenté
+        nemesis: []
     };
 };

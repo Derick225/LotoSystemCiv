@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -10,15 +11,14 @@ import { TicketXRay } from './TicketXRay';
 import { 
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
-    Binary, Signal, Database, 
-    Zap, Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Cpu, Monitor, ChevronRight, Layers
+    Binary, Signal, 
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useIsFetching } from '@tanstack/react-query';
 import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../utils/audioEngine';
-import { DRAW_SCHEDULE } from '../constants';
 
 interface SummaryItem {
     time: string;
@@ -154,26 +154,26 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean} | null>(null);
     const [globalHot, setGlobalHot] = useState<{number: number, count: number}[]>([]);
     const [fullSyncing, setFullSyncing] = useState(false);
-    const [displayDay, setDisplayDay] = useState<string>('');
+    
+    // Day Selection State
+    const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+    const [selectedDay, setSelectedDay] = useState<string>(daysOrder[new Date().getDay()]);
 
     const isMounted = useRef(true);
 
     const loadDailySummary = useCallback(async () => {
         if (!isMounted.current) return;
         setLoadingSummary(true);
-        const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-        const today = daysOrder[new Date().getDay()];
-        setDisplayDay(today);
         
         try {
-            const summaryData = await getDailySummary(today);
+            const summaryData = await getDailySummary(selectedDay);
             if (isMounted.current) setSummary(summaryData);
         } catch (e) { 
             console.error(e); 
         } finally { 
             if (isMounted.current) setLoadingSummary(false); 
         }
-    }, []);
+    }, [selectedDay]);
 
     const loadHotStats = useCallback(async () => {
         try {
@@ -231,6 +231,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
             setFullSyncing(false);
         }
     };
+
+    // Ordre d'affichage des jours (Lundi -> Dimanche pour l'UI)
+    const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
     return (
         <div className="space-y-12 animate-fade-in pb-24">
@@ -342,15 +345,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 </div>
             </div>
 
-            {/* FLUX DU JOUR */}
+            {/* FLUX DU JOUR SELECTOR & GRID */}
             <section className="mt-20">
-                <div className="flex items-center justify-between gap-5 mb-12 px-6">
-                    <div className="flex items-center gap-5">
-                        <div className="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/20"><Calendar size={24}/></div>
-                        <div>
-                            <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme {displayDay}</h2>
-                            <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-1">Fenêtre temporelle active</p>
-                        </div>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-10 px-4">
+                    <div>
+                        <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
+                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-2">Séquences temporelles disponibles</p>
                     </div>
                     
                     <button 
@@ -360,6 +360,28 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
                         Voir tout l'historique
                     </button>
+                </div>
+
+                {/* Day Selector */}
+                <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2">
+                    {uiDays.map(d => (
+                        <button
+                            key={d}
+                            onClick={() => {
+                                audioEngine.play('click');
+                                setSelectedDay(d);
+                            }}
+                            className={`
+                                px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
+                                ${selectedDay === d 
+                                    ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105' 
+                                    : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                                }
+                            `}
+                        >
+                            {d}
+                        </button>
+                    ))}
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
@@ -376,7 +398,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                 initial={{ opacity: 0, y: 30 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: idx * 0.1 }}
-                                onClick={() => onSelectDraw({ day: displayDay, time: item.time, name: item.name })}
+                                onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
                                 className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
                             >
                                 <div className="flex justify-between items-start mb-8 relative z-10">
