@@ -1,3 +1,4 @@
+
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
 
 export const FEATURES_LABELS = [
