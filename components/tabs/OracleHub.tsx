@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { PredictionTab } from './PredictionTab';
 import { MetaAnalystTab } from './MetaAnalystTab';

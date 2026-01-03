@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { GoogleGenerativeAI } from "https://esm.sh/@google/generative-ai@0.18.0";
 
@@ -28,8 +27,9 @@ serve(async (req) => {
     let resultData;
 
     // Configuration commune du modèle (JSON Mode)
+    // Utilisation de gemini-1.5-flash qui est optimisé pour la latence et le coût sur les edge functions
     const modelConfig = {
-      model: "gemini-1.5-flash", // Modèle rapide et stable pour Deno
+      model: "gemini-1.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
       },
