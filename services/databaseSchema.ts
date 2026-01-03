@@ -101,14 +101,17 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 -- ==============================================================================
 -- 3. TRIGGERS
 -- ==============================================================================
+DROP TRIGGER IF EXISTS handle_updated_at_draw_results ON public.draw_results;
 CREATE TRIGGER handle_updated_at_draw_results
 BEFORE UPDATE ON public.draw_results
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
+DROP TRIGGER IF EXISTS handle_updated_at_user_prefs ON public.user_preferences;
 CREATE TRIGGER handle_updated_at_user_prefs
 BEFORE UPDATE ON public.user_preferences
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
+DROP TRIGGER IF EXISTS handle_updated_at_transactions ON public.transactions;
 CREATE TRIGGER handle_updated_at_transactions
 BEFORE UPDATE ON public.transactions
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
