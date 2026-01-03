@@ -44,14 +44,10 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const checkAuthAndSub = async () => {
       setAuthLoading(true);
-      if (!isSupabaseConfigured()) {
-        // Mode hors ligne / démo : on laisse passer mais sans admin
-        setSession({ user: { id: 'demo', email: 'demo@offline.local' } });
-        setSubscription({ status: 'active', daysLeft: 30, expiresAt: '', plan: 'premium' });
-        setAuthLoading(false);
-        return;
-      }
-
+      
+      // Note: On ne force plus le mode démo ici si la config manque.
+      // On laisse AuthScreen afficher l'erreur de config pour aider le debug.
+      
       const currentSession = await authService.getSession();
       setSession(currentSession);
       
@@ -59,7 +55,6 @@ const AppContent: React.FC = () => {
         const adminStatus = authService.isAdminUser(currentSession.user);
         setIsAdmin(adminStatus);
         
-        // Si admin, pas besoin de check abonnement (illimité)
         if (adminStatus) {
             setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
         } else {

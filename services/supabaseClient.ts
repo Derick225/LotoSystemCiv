@@ -65,6 +65,28 @@ export const isSupabaseConfigured = (): boolean => {
   return true;
 };
 
+/**
+ * Fournit un diagnostic détaillé sur l'état de la configuration.
+ */
+export const getSupabaseConfigDiagnostics = () => {
+  const urlValid = isValidSupabaseUrl(SUPABASE_URL);
+  const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
+
+  return {
+    isConfigured: urlValid && keyValid,
+    url: {
+      valid: urlValid,
+      value: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : '(Vide)',
+      error: !SUPABASE_URL ? "URL Manquante" : !urlValid ? "Format URL Invalide (doit commencer par https://)" : null
+    },
+    key: {
+      valid: keyValid,
+      value: SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 5)}...` : '(Vide)',
+      error: !SUPABASE_ANON_KEY ? "Clé Manquante" : !keyValid ? "Format Clé Invalide (trop courte ou placeholder)" : null
+    }
+  };
+};
+
 // Configuration Fallback Safe
 const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
 const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
