@@ -2,17 +2,15 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Récupère une variable d'environnement avec stratégie de repli multiple.
- * Supporte à la fois Vite (import.meta.env) et l'injection Node (process.env) via DefinePlugin.
+ * Supporte à la fois Vite (import.meta.env) et l'injection Node (process.env).
  */
 const getViteEnv = (key: string): string => {
-  // 1. Stratégie Vite Standard (import.meta.env)
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
     // @ts-ignore
     return String(import.meta.env[key]).trim();
   }
   
-  // 2. Stratégie Polyfill (process.env injecté par vite.config.ts)
   // @ts-ignore
   if (typeof process !== 'undefined' && process.env && process.env[key]) {
     // @ts-ignore
@@ -22,7 +20,7 @@ const getViteEnv = (key: string): string => {
   return '';
 };
 
-// Récupération des variables avec fallbacks pour différentes conventions de nommage
+// Récupération des variables avec fallbacks
 const SUPABASE_URL = getViteEnv('VITE_SUPABASE_URL');
 const SUPABASE_ANON_KEY = 
   getViteEnv('VITE_SUPABASE_ANON_KEY') || 
@@ -35,8 +33,6 @@ const SUPABASE_ANON_KEY =
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
     const u = new URL(url);
-    // En production, HTTPS est requis. En local, HTTP peut passer si configuré, 
-    // mais pour Supabase Cloud c'est toujours HTTPS.
     return u.protocol === 'https:';
   } catch {
     return false;
@@ -44,12 +40,19 @@ const isValidSupabaseUrl = (url: string): boolean => {
 };
 
 /**
- * Indique si la configuration minimale est présente.
+ * Vérifie le format basique d'une clé Supabase (JWT).
+ */
+const isValidSupabaseKey = (key: string): boolean => {
+  return key.length > 30 && (key.startsWith('ey') || key !== 'placeholder');
+};
+
+/**
+ * Indique si la configuration minimale est présente et valide.
  */
 export const isSupabaseConfigured = (): boolean => {
-  const isValid = isValidSupabaseUrl(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
-  if (!isValid && typeof window !== 'undefined') {
-    // Log discret pour le débogage en production
+  const isValid = isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
+  
+  if (!isValid && typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
     console.debug("[Supabase Config Check] Missing or invalid keys", { 
       hasUrl: !!SUPABASE_URL, 
       keyLen: SUPABASE_ANON_KEY?.length 
@@ -58,11 +61,15 @@ export const isSupabaseConfigured = (): boolean => {
   return isValid;
 };
 
+// Configuration Fallback Safe (Sans espace en fin d'URL pour éviter le crash URL constructor)
+const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
+const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
+
 // Validation au démarrage
 if (!isSupabaseConfigured()) {
   console.warn(
     '[Nexus System] Mode Hors-Ligne : Configuration Supabase manquante ou incomplète.',
-    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans vos variables d\'environnement.'
+    'Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.'
   );
 }
 
@@ -70,8 +77,8 @@ if (!isSupabaseConfigured()) {
  * Client Supabase singleton.
  */
 export const supabase: SupabaseClient = createClient(
-  isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co',
-  isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder',
+  SAFE_URL,
+  SAFE_KEY,
   {
     auth: {
       persistSession: true,
@@ -86,18 +93,19 @@ export const supabase: SupabaseClient = createClient(
 );
 
 /**
- * Test de connexion simple.
+ * Test de connexion simple et diagnostic.
  */
 export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
-      error: "Configuration manquante : URL ou Clé API absente.",
+      error: "Configuration manquante : URL ou Clé API absente/invalide.",
     };
   }
 
   try {
     const start = performance.now();
+    // Requête légère HEAD pour vérifier l'accès
     const { error, count } = await supabase
       .from('draw_results')
       .select('*', { count: 'exact', head: true });

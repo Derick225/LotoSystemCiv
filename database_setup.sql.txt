@@ -1,121 +1,87 @@
 
 -- ==============================================================================
--- NEXUS PLATINUM ELITE v11.0 - DATABASE SCHEMA (COPY PASTE TO SUPABASE SQL EDITOR)
+-- NEXUS PLATINUM ELITE v11.0 - CONFIGURATION BASE DE DONNÉES
+-- Copiez tout ce contenu dans le "SQL Editor" de Supabase et cliquez sur "Run".
 -- ==============================================================================
 
--- 1. EXTENSIONS
-create extension if not exists "uuid-ossp";
-create extension if not exists "pg_cron";
-create extension if not exists "pg_net";
+-- 1. EXTENSIONS NÉCESSAIRES
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_cron";
+CREATE EXTENSION IF NOT EXISTS "pg_net";
+CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
--- ==============================================================================
--- 2. TABLES PRINCIPALES
--- ==============================================================================
-
--- A. RÉSULTATS DES TIRAGES
-create table if not exists public.draw_results (
-  id uuid default uuid_generate_v4() primary key,
-  draw_name text not null,
-  date date not null,
-  gagnants integer[] not null,
-  machine integer[],
-  version integer default 1,
-  created_at timestamptz default now(),
-  constraint unique_draw_date unique (draw_name, date)
+-- 2. TABLE : RÉSULTATS DES TIRAGES
+CREATE TABLE IF NOT EXISTS public.draw_results (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  draw_name TEXT NOT NULL,
+  date DATE NOT NULL,
+  gagnants INTEGER[] NOT NULL CHECK (array_length(gagnants, 1) = 5),
+  machine INTEGER[] CHECK (array_length(machine, 1) = 5),
+  version INTEGER DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT unique_draw_date UNIQUE (draw_name, date)
 );
 
--- B. ANALYTIQUES HPC (Cache serveur)
-create table if not exists public.draw_analytics (
-  id uuid default uuid_generate_v4() primary key,
-  draw_name text not null,
-  date date not null,
-  spectral jsonb,
-  fractal jsonb,
-  volatility jsonb,
-  audit jsonb,
-  correlations jsonb,
-  updated_at timestamptz default now(),
-  constraint unique_analytics_draw_date unique (draw_name, date)
+-- 3. TABLE : ANALYTIQUES (Cache Serveur)
+CREATE TABLE IF NOT EXISTS public.draw_analytics (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  draw_name TEXT NOT NULL,
+  date DATE NOT NULL,
+  spectral JSONB, 
+  fractal JSONB,
+  volatility JSONB,
+  audit JSONB,
+  correlations JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT unique_analytics_draw_date UNIQUE (draw_name, date)
 );
 
--- C. POIDS ALGORITHMIQUES (Mémoire IA)
-create table if not exists public.algo_weights (
-  draw_name text primary key,
-  weights jsonb not null,
-  updated_at timestamptz default now()
+-- 4. TABLE : POIDS ALGORITHMIQUES (IA)
+CREATE TABLE IF NOT EXISTS public.algo_weights (
+  draw_name TEXT PRIMARY KEY,
+  weights JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- D. PRÉFÉRENCES UTILISATEURS & ABONNEMENT
-create table if not exists public.user_preferences (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  watchlist integer[],
-  saved_tickets jsonb,
-  settings jsonb,
-  subscription jsonb default '{"status": "trial", "plan": "free"}'::jsonb, -- Nouveau champ
-  updated_at timestamptz default now()
+-- 5. TABLE : PRÉFÉRENCES UTILISATEUR
+CREATE TABLE IF NOT EXISTS public.user_preferences (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  watchlist INTEGER[],
+  saved_tickets JSONB,
+  settings JSONB,
+  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium"}'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- E. FEEDBACK RLHF (Apprentissage par renforcement)
-create table if not exists public.prediction_feedback (
-  id uuid default uuid_generate_v4() primary key,
-  prediction_id text,
-  draw_name text,
-  rating text,
-  actual_hits integer,
-  user_comment text,
-  created_at timestamptz default now()
-);
+-- 6. TRIGGERS POUR UPDATED_AT
+CREATE TRIGGER handle_updated_at_draw_results
+BEFORE UPDATE ON public.draw_results
+FOR EACH ROW EXECUTE PROCEDURE moddatetime (updated_at);
 
--- ==============================================================================
--- 3. SÉCURITÉ (ROW LEVEL SECURITY)
--- ==============================================================================
+CREATE TRIGGER handle_updated_at_user_prefs
+BEFORE UPDATE ON public.user_preferences
+FOR EACH ROW EXECUTE PROCEDURE moddatetime (updated_at);
 
-alter table public.draw_results enable row level security;
-alter table public.draw_analytics enable row level security;
-alter table public.algo_weights enable row level security;
-alter table public.user_preferences enable row level security;
-alter table public.prediction_feedback enable row level security;
+-- 7. SÉCURITÉ ROW LEVEL SECURITY (RLS)
+ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.draw_analytics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 
--- Nettoyage préventif
-do $$ 
-begin
-    drop policy if exists "Public Read Results" on public.draw_results;
-    drop policy if exists "Service Write Results" on public.draw_results;
-    drop policy if exists "Public Read Analytics" on public.draw_analytics;
-    drop policy if exists "Service Write Analytics" on public.draw_analytics;
-    drop policy if exists "Public Read Weights" on public.algo_weights;
-    drop policy if exists "Admin Write Weights" on public.algo_weights;
-    drop policy if exists "User Own Prefs" on public.user_preferences;
-    drop policy if exists "Public Feedback" on public.prediction_feedback;
-end $$;
+-- Politiques de lecture publique
+CREATE POLICY "Lecture Publique Resultats" ON public.draw_results FOR SELECT USING (true);
+CREATE POLICY "Lecture Publique Analytics" ON public.draw_analytics FOR SELECT USING (true);
+CREATE POLICY "Lecture Publique Poids" ON public.algo_weights FOR SELECT USING (true);
 
--- Politiques DRAW_RESULTS
-create policy "Public Read Results" on public.draw_results for select using (true);
-create policy "Service Write Results" on public.draw_results for all using (
-  auth.role() = 'service_role' OR auth.role() = 'authenticated'
-);
+-- Politiques d'écriture (Service Role uniquement pour les données globales)
+CREATE POLICY "Ecriture Service Resultats" ON public.draw_results FOR ALL USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
+CREATE POLICY "Ecriture Service Analytics" ON public.draw_analytics FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Ecriture Admin Poids" ON public.algo_weights FOR ALL USING (auth.role() = 'service_role' OR auth.role() = 'authenticated');
 
--- Politiques DRAW_ANALYTICS
-create policy "Public Read Analytics" on public.draw_analytics for select using (true);
-create policy "Service Write Analytics" on public.draw_analytics for all using (
-  auth.role() = 'service_role' OR auth.role() = 'authenticated'
-);
+-- Politiques Données Utilisateur (Chacun voit ses propres données)
+CREATE POLICY "Donnees Perso" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 
--- Politiques ALGO_WEIGHTS
-create policy "Public Read Weights" on public.algo_weights for select using (true);
-create policy "Admin Write Weights" on public.algo_weights for all using (
-  auth.role() = 'service_role' OR auth.role() = 'authenticated'
-);
-
--- Politiques USER_PREFERENCES
-create policy "User Own Prefs" on public.user_preferences for all using (auth.uid() = user_id);
-
--- Politiques FEEDBACK
-create policy "Public Feedback" on public.prediction_feedback for insert with check (true);
-
--- ==============================================================================
--- 4. INDEXES DE PERFORMANCE
--- ==============================================================================
-create index if not exists idx_results_draw_date on public.draw_results(draw_name, date);
-create index if not exists idx_results_gagnants on public.draw_results using gin(gagnants);
-create index if not exists idx_analytics_lookup on public.draw_analytics(draw_name, date);
+-- 8. INDEXES DE PERFORMANCE
+CREATE INDEX IF NOT EXISTS idx_results_draw_date ON public.draw_results(draw_name, date);
+CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);

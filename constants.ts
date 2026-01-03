@@ -44,7 +44,7 @@ export const DRAW_SCHEDULE: Record<string, Record<string, string>> = {
   },
 };
 
-// Liste plate pour les itérations rapides
+// Liste plate pour les itérations rapides et les sélecteurs
 export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
     Object.entries(times).map(([time, name]) => ({
         name,

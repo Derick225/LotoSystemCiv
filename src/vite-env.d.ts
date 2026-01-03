@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
@@ -14,7 +13,7 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-// Augmentation de l'interface ProcessEnv existante
+// Augmentation de l'interface ProcessEnv pour la compatibilité
 declare namespace NodeJS {
   interface ProcessEnv {
     API_KEY?: string;
