@@ -1,3 +1,4 @@
+
 import type { DrawResult } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { DRAW_SCHEDULE } from '../constants';
@@ -7,11 +8,17 @@ const getMonthParam = (date: Date) => {
     return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
 };
 
+// Construction d'un Set de noms valides pour une vérification rapide (case insensitive)
+const VALID_DRAW_NAMES = new Set<string>();
+Object.values(DRAW_SCHEDULE).forEach(day => {
+    Object.values(day).forEach(name => VALID_DRAW_NAMES.add(name.toUpperCase()));
+});
+
+// Mapping pour normalisation stricte (ex: "TIRAGE REVEIL" -> "Reveil")
 const NORMALIZE_MAP: Record<string, string> = {};
 Object.values(DRAW_SCHEDULE).forEach(day => {
     Object.values(day).forEach(name => {
-        NORMALIZE_MAP[name.toUpperCase()] = name;
-        NORMALIZE_MAP[`TIRAGE ${name.toUpperCase()}`] = name;
+        NORMALIZE_MAP[name.toUpperCase()] = name; // REVEIL -> Reveil
     });
 });
 
@@ -21,6 +28,7 @@ export const ExternalProviderService = {
 
         try {
             const now = new Date();
+            // On vérifie le mois courant et le mois précédent pour assurer la continuité
             const targetMonths = [
                 getMonthParam(now),
                 getMonthParam(new Date(now.getFullYear(), now.getMonth() - 1, 1))
@@ -38,33 +46,47 @@ export const ExternalProviderService = {
 
                 const weeks = resultsData.drawsResultsWeekly || [];
                 for (const week of weeks) {
-                    const yearMatch = week.startDate.match(/\d{4}$/);
+                    const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
                     const year = yearMatch ? yearMatch[0] : now.getFullYear().toString();
                     
+                    if (!week.drawResultsDaily) continue;
+
                     for (const daily of week.drawResultsDaily) {
-                        const dateMatch = daily.date.match(/(\d{2})\/(\d{2})/);
+                        const dateStr = daily.date; // Ex: "Lun 24/02" ou "24/02"
+                        const dateMatch = dateStr.match(/(\d{2})\/(\d{2})/);
+                        
                         if (!dateMatch) continue;
                         const formattedDate = `${dateMatch[1]}/${dateMatch[2]}/${year}`;
 
+                        // On combine tous les types de tirages (Standard, Turbo, etc. si dispo)
                         const apiDraws = [
                             ...(daily.drawResults?.standardDraws || []),
                             ...(daily.drawResults?.turboDraws || [])
                         ];
 
                         for (const draw of apiDraws) {
-                            const rawName = (draw.drawName || "").trim().toUpperCase();
-                            const normalizedName = NORMALIZE_MAP[rawName] || rawName;
+                            let rawName = (draw.drawName || "").trim().toUpperCase();
+                            // Nettoyage de préfixes communs
+                            rawName = rawName.replace(/^TIRAGE\s+/, "");
 
-                            if (normalizedName !== drawName && drawName !== 'ALL') continue;
+                            // Vérification si c'est un tirage connu
+                            if (!VALID_DRAW_NAMES.has(rawName)) continue;
+
+                            const normalizedName = NORMALIZE_MAP[rawName];
+
+                            // Filtrage : Si on cherche un jeu spécifique, on ignore les autres
+                            // Si 'ALL', on prend tout
+                            if (drawName !== 'ALL' && normalizedName.toUpperCase() !== targetUpper) continue;
                             
-                            if (!draw.winningNumbers || draw.winningNumbers.includes('..')) continue;
+                            // Ignorer les tirages incomplets ou placeholder
+                            if (!draw.winningNumbers || draw.winningNumbers.includes('..') || draw.winningNumbers.startsWith('.')) continue;
 
                             const win = (draw.winningNumbers.match(/\d+/g) || []).map(Number).slice(0, 5);
                             const mac = (draw.machineNumbers?.match(/\d+/g) || []).map(Number).slice(0, 5);
 
                             if (win.length === 5) {
                                 allResults.push({
-                                    drawName: normalizedName,
+                                    drawName: normalizedName, // Nom propre (ex: "Reveil")
                                     date: formattedDate,
                                     gagnants: win,
                                     machine: mac.length === 5 ? mac : [],
@@ -76,7 +98,13 @@ export const ExternalProviderService = {
                 }
             }
 
-            return Array.from(new Map(allResults.map(item => [item.date, item])).values());
+            // Dédoublonnage et tri par date décroissante
+            const uniqueResults = Array.from(new Map(allResults.map(item => [`${item.drawName}_${item.date}`, item])).values());
+            return uniqueResults.sort((a, b) => {
+                const [da, ma, ya] = a.date.split('/').map(Number);
+                const [db, mb, yb] = b.date.split('/').map(Number);
+                return new Date(yb, mb - 1, db).getTime() - new Date(ya, ma - 1, da).getTime();
+            });
 
         } catch (error) {
             console.error(`[Nexus Scraper] Failure:`, error);

@@ -64,12 +64,17 @@ export const lotteryService = {
     }
 
     try {
-        // Utilisation de jokers (%) pour une recherche flexible (ex: "REVEIL" trouvera "TIRAGE REVEIL")
-        const { data, error } = await supabase
+        let query = supabase
           .from('draw_results')
           .select('*')
-          .ilike('draw_name', `%${drawName}%`) 
           .order('date', { ascending: false });
+
+        // Si drawName est 'ALL', on récupère tout, sinon on filtre
+        if (drawName && drawName !== 'ALL') {
+            query = query.ilike('draw_name', `%${drawName}%`);
+        }
+        
+        const { data, error } = await query;
         
         if (error) {
           console.error(`[Supabase Error] Fetch ${drawName}:`, error);
@@ -77,8 +82,6 @@ export const lotteryService = {
         }
         
         if (!data || data.length === 0) {
-             // Log discret pour le développement sans spammer la prod si c'est juste vide
-             console.log(`[Supabase] Aucune donnée pour le filtre "%${drawName}%".`);
              return [];
         }
         
@@ -92,8 +95,7 @@ export const lotteryService = {
         }));
     } catch (e: any) {
         const msg = e.message || String(e);
-        // Gestion silencieuse des erreurs de connexion courantes
-        if (msg.includes('Failed to fetch') || msg.includes('Network request failed') || msg.includes('error parsing')) {
+        if (msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
             console.warn(`[Supabase Offline] Récupération historique ${drawName} ignorée (Problème réseau).`);
         } else {
             console.error(`[Supabase Critical] fetchHistory(${drawName}):`, msg);
@@ -144,7 +146,6 @@ export const getDailySummary = async (day: string) => {
           const history = await lotteryService.fetchHistory(name);
           results.push({ time, name, result: history[0] || null });
       } catch (e) {
-          // Fail silent pour l'UI
           results.push({ time, name, result: null });
       }
   }
@@ -256,66 +257,64 @@ export const fetchNextDrawProjections = async (drawName: string, lastNumbers: nu
     });
 
     return Object.entries(scores)
-        .map(([num, prob]) => ({ number: parseInt(num), probability: Math.round(prob * 1000) }))
-        .sort((a,b) => b.probability - a.probability)
+        .map(([num, prob]) => ({ number: parseInt(num), probability: Math.round(prob * 100) }))
+        .sort((a, b) => b.probability - a.probability)
         .slice(0, 10);
 };
 
 export const fetchTopFollowersAnalysis = async (drawName: string, history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
-    if (!history || history.length < 5) return [];
-    const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
-    
-    return Object.entries(matrix).map(([leaderStr, followersMap]) => {
-        const leader = parseInt(leaderStr);
-        const total = totals[leader] || 1;
-        const followers = Object.entries(followersMap)
-            .map(([numStr, count]) => ({ 
-                number: parseInt(numStr), 
-                count: count as number, 
-                probability: (count as number) / total 
-            }))
-            .sort((a,b) => b.count - a.count)
-            .slice(0, 3);
-            
-        return { leader, followers };
-    }).sort((a,b) => b.leader - a.leader).slice(0, 20);
-};
-
-export const fetchAssociatedNumbers = async (num: number, drawName: string, history: DrawResult[]) => {
-    if (!history || history.length < 2) return { following: [] };
-    
-    const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
-    const followersMap = matrix[num] || {};
-    const total = totals[num] || 1;
-    
-    return {
-        following: Object.entries(followersMap)
-            .map(([nStr, count]) => ({
-                number: parseInt(nStr),
-                count: count as number,
-                probability: (count as number) / total
-            }))
-            .sort((a,b) => b.count - a.count)
-            .slice(0, 5)
-    };
-};
-
-const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
-    const matrix: Record<number, Record<number, number>> = {};
-    const totals: Record<number, number> = {};
-    
-    if (!history || history.length < 2) return { matrix, totals };
-
+    const transitions: Record<number, Record<number, number>> = {};
     for (let i = 0; i < history.length - 1; i++) {
         const current = history[i].gagnants;
         const prev = history[i+1].gagnants;
         prev.forEach(p => {
-            if (!matrix[p]) matrix[p] = {};
-            totals[p] = (totals[p] || 0) + 1;
+            if (!transitions[p]) transitions[p] = {};
             current.forEach(c => {
-                matrix[p][c] = (matrix[p][c] || 0) + 1;
+                transitions[p][c] = (transitions[p][c] || 0) + 1;
             });
         });
     }
-    return { matrix, totals };
+
+    const result: TopFollowerAnalysis[] = [];
+    for (let leader = 1; leader <= 90; leader++) {
+        const followersMap = transitions[leader];
+        if (followersMap) {
+            const totalOccurrences = Object.values(followersMap).reduce((a, b) => a + b, 0);
+            const followers = Object.entries(followersMap)
+                .map(([numStr, count]) => ({
+                    number: parseInt(numStr),
+                    count,
+                    probability: totalOccurrences > 0 ? (count / totalOccurrences) * 100 : 0
+                }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5);
+            
+            if (followers.length > 0) {
+                result.push({ leader, followers });
+            }
+        }
+    }
+    return result.sort((a, b) => {
+        const sumA = a.followers.reduce((acc, f) => acc + f.count, 0);
+        const sumB = b.followers.reduce((acc, f) => acc + f.count, 0);
+        return sumB - sumA;
+    });
+};
+
+export const fetchAssociatedNumbers = async (number: number, drawName: string, history: DrawResult[]): Promise<{ following: { number: number; count: number }[] }> => {
+    const followers: Record<number, number> = {};
+    for (let i = 0; i < history.length - 1; i++) {
+        const prev = history[i+1].gagnants;
+        if (prev.includes(number)) {
+            const current = history[i].gagnants;
+            current.forEach(n => followers[n] = (followers[n] || 0) + 1);
+        }
+    }
+    
+    const sorted = Object.entries(followers)
+        .map(([n, c]) => ({ number: Number(n), count: c }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+        
+    return { following: sorted };
 };

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNexus } from './NexusProvider';
 import { 
@@ -62,7 +61,7 @@ export const DrawDetails: React.FC = () => {
                 <span className="text-[9px] font-mono text-slate-500 uppercase">{history.length} Séquences indexées</span>
             </div>
             <h2 className="text-4xl md:text-6xl font-black text-white uppercase tracking-tighter leading-none">
-              {drawName} <span className="text-indigo-500 text-2xl">v11.0</span>
+              {drawName === 'ALL' ? 'ARCHIVES GLOBALES' : drawName} <span className="text-indigo-500 text-2xl">v11.0</span>
             </h2>
             <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">
                 <Clock size={12}/> Temps Réel : {new Date().toLocaleTimeString()}

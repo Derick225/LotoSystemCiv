@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -12,7 +11,7 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, Database, 
-    Zap, Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Cpu, Monitor, ChevronRight
+    Zap, Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Cpu, Monitor, ChevronRight, Layers
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useIsFetching } from '@tanstack/react-query';
@@ -353,6 +352,14 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-1">Fenêtre temporelle active</p>
                         </div>
                     </div>
+                    
+                    <button 
+                        onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
+                        className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
+                    >
+                        <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
+                        Voir tout l'historique
+                    </button>
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">

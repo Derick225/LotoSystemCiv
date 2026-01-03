@@ -1,10 +1,9 @@
-
 import React, { useState, useMemo } from 'react';
 import { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { formatDate, syncDrawExternal } from '../../services/lotteryService';
 import { useNexus } from '../NexusProvider';
-import { RefreshCw, Search, Activity, Clock, Binary, Download, GitCompare, SearchCode, Calendar } from 'lucide-react';
+import { RefreshCw, Search, Activity, Clock, Binary, Download, GitCompare, SearchCode, Calendar, Layers } from 'lucide-react';
 import { ExportService } from '../../services/exportService';
 import { useToast } from '../ui/Toast';
 import { ListSkeleton } from '../skeletons/ListSkeleton';
@@ -35,7 +34,8 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
       const term = searchTerm.toLowerCase();
       return history.filter(h => 
           formatDate(h.date).includes(term) || 
-          h.gagnants.some(n => n.toString() === term)
+          h.gagnants.some(n => n.toString() === term) ||
+          h.drawName.toLowerCase().includes(term)
       );
   }, [history, searchTerm]);
 
@@ -70,7 +70,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
                 <div className="relative flex-1 sm:w-48 group">
                     <input 
                         type="text" 
-                        placeholder="Date ou Numéro..." 
+                        placeholder="Date, Nom ou Numéro..." 
                         value={searchTerm} 
                         onChange={(e) => setSearchTerm(e.target.value)} 
                         className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 font-bold text-[11px] outline-none focus:ring-2 ring-indigo-500/20 transition-all" 
@@ -107,7 +107,11 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
                 {pagedItems.map((draw) => (
                     <div key={draw.id} className="bg-white dark:bg-slate-800 p-4 rounded-[2rem] border border-slate-100 dark:border-slate-700 shadow-sm hover:border-indigo-400 transition-all group relative overflow-hidden">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div className="flex flex-col items-start min-w-[100px]">
+                            <div className="flex flex-col items-start min-w-[140px]">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Layers size={10} className="text-indigo-500"/>
+                                    <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wide">{draw.drawName}</span>
+                                </div>
                                 <span className="text-xl font-black text-slate-800 dark:text-white leading-none">{formatDate(draw.date).split('/')[0]}/{formatDate(draw.date).split('/')[1]}</span>
                                 <span className="text-[10px] text-slate-400 font-mono font-bold mt-1">{formatDate(draw.date).split('/')[2]}</span>
                             </div>
