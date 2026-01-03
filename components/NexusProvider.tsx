@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
@@ -108,21 +109,25 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     } catch (e: any) {
         let errorMessage = "Erreur inconnue";
+        
+        // Safe Error Extraction to prevent Stack Overflow on JSON.stringify
         if (typeof e === 'string') errorMessage = e;
         else if (e instanceof Error) errorMessage = e.message;
         else if (e && typeof e === 'object') {
-            errorMessage = e.message || e.error_description || JSON.stringify(e);
+            // Avoid JSON.stringify on complex/circular objects
+            errorMessage = e.message || e.error_description || (e.code ? `Code: ${e.code}` : "Erreur objet non sérialisable");
         }
         
         console.error("Nexus Kernel Error:", errorMessage);
         
         if (errorMessage.includes('FetchError') || errorMessage.includes('Network') || errorMessage.includes('Failed to fetch')) {
              console.warn("Serveur injoignable.");
-        } else if ((e as any).code === '42P01') {
+        } else if (errorMessage.includes('42P01') || errorMessage.includes('relation "draw_results" does not exist')) {
              showToast("Table 'draw_results' introuvable. Exécutez le SQL.", "error");
-        } else if ((e as any).code === '42501') {
+        } else if (errorMessage.includes('42501') || errorMessage.includes('permission denied')) {
              showToast("Accès refusé (RLS). Vérifiez les politiques.", "error");
         } else {
+             // Only warn in console to avoid toast loop spam if excessive
              console.warn(`Erreur chargement ${targetDraw}.`, errorMessage);
         }
         setHistory([]); 
