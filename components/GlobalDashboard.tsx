@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults } from '../services/lotteryService';
+import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
 import { useNexus } from './NexusProvider';
 import { useGlobalMarketHistory } from '../hooks/useLottery';
@@ -12,7 +11,7 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, 
-    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useIsFetching } from '@tanstack/react-query';
@@ -143,8 +142,8 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
 
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const { regime, volatility, refreshData } = useNexus(); 
-    const { data: recentGlobalResults } = useGlobalMarketHistory();
+    const { regime, volatility, refreshData, history } = useNexus(); 
+    const { data: recentGlobalResults, refetch: refetchGlobal } = useGlobalMarketHistory();
     const isFetchingGlobal = useIsFetching();
     
     const latestResult = recentGlobalResults && recentGlobalResults.length > 0 ? recentGlobalResults[0] : null;
@@ -222,6 +221,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         try {
             const count = await checkAndSyncRecentResults();
             await loadDailySummary();
+            await refetchGlobal();
             showToast(count > 0 ? `${count} signaux synchronisés.` : "Noyau à jour.", "success");
             if (count > 0) audioEngine.play('success');
         } catch (e) {
@@ -232,8 +232,27 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         }
     };
 
+    const handleInjectDemo = async () => {
+        setFullSyncing(true);
+        try {
+            await injectDemoData();
+            await loadDailySummary();
+            await refetchGlobal();
+            await refreshData('Reveil', true);
+            showToast("Données de démo injectées.", "success");
+            window.location.reload();
+        } catch(e) {
+            showToast("Erreur injection démo.", "error");
+        } finally {
+            setFullSyncing(false);
+        }
+    };
+
     // Ordre d'affichage des jours (Lundi -> Dimanche pour l'UI)
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+    // Si aucune donnée n'est chargée nulle part, afficher l'écran d'initialisation
+    const isEmptyState = !latestResult && !loadingSummary && summary.every(s => s.result === null);
 
     return (
         <div className="space-y-12 animate-fade-in pb-24">
@@ -263,184 +282,211 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     </div>
                 </div>
                 
-                <button 
-                    onClick={handleManualSync}
-                    disabled={fullSyncing}
-                    className="group px-10 py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center gap-4 active:scale-95 disabled:opacity-50"
-                >
-                    <RefreshCw size={18} className={`${fullSyncing ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform duration-700 text-indigo-400`} />
-                    <span className="text-xs font-black uppercase tracking-widest text-white">Cloud Sync Pulse</span>
-                </button>
+                <div className="flex gap-4">
+                    <button 
+                        onClick={handleManualSync}
+                        disabled={fullSyncing}
+                        className="group px-10 py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center gap-4 active:scale-95 disabled:opacity-50"
+                    >
+                        <RefreshCw size={18} className={`${fullSyncing ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform duration-700 text-indigo-400`} />
+                        <span className="text-xs font-black uppercase tracking-widest text-white">Cloud Sync Pulse</span>
+                    </button>
+                </div>
             </div>
 
             <WatchlistMonitor />
 
-            {latestResult && (
+            {isEmptyState ? (
+                <div className="bg-slate-900 border border-slate-800 p-12 rounded-[4rem] text-center shadow-2xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] -mr-32 -mt-32"></div>
+                    <div className="relative z-10 flex flex-col items-center gap-6">
+                        <div className="p-6 bg-white/5 rounded-full mb-4 animate-bounce-subtle">
+                            <Database size={48} className="text-indigo-400" />
+                        </div>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Base de Données Vierge</h2>
+                        <p className="text-slate-400 max-w-lg mx-auto text-sm font-medium">
+                            Le noyau Nexus ne détecte aucune donnée historique. Cela peut arriver lors de la première installation.
+                        </p>
+                        <button 
+                            onClick={handleInjectDemo}
+                            disabled={fullSyncing}
+                            className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-3"
+                        >
+                            {fullSyncing ? <RefreshCw className="animate-spin" size={16}/> : <Database size={16}/>}
+                            Injecter Données de Démo
+                        </button>
+                    </div>
+                </div>
+            ) : latestResult && (
                 <LatestResultHero result={latestResult} onAnalyze={() => onSelectDraw({ name: latestResult.drawName || 'Recent', day: 'Today', time: 'Now' })} />
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-                {/* PROCHAIN TIRAGE WIDGET */}
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className={`lg:col-span-8 rounded-[4rem] p-10 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
-                >
-                    <div className={`absolute top-0 right-0 w-[600px] h-[600px] rounded-full blur-[160px] -mr-48 -mt-48 transition-colors duration-1000 ${nextDraw?.isUrgent ? 'bg-rose-500/20' : 'bg-indigo-600/10'}`}></div>
-                    
-                    <div className="relative z-10 flex flex-col h-full">
-                        <div className="flex justify-between items-start">
-                            <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
-                                <Clock className={`w-5 h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
-                                <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">T-Sequence Alpha</span>
-                            </div>
-                            {nextDraw?.isUrgent && (
-                                <span className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-xl animate-pulse shadow-lg shadow-rose-600/40">Imminence Détectée</span>
-                            )}
-                        </div>
-
-                        <div className="mt-14 mb-10">
-                            <h3 className="text-4xl md:text-7xl font-black tracking-tighter leading-tight truncate">
-                                {nextDraw ? nextDraw.name : 'Vecteur Temporel...'}
-                            </h3>
-                            <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-4">Ouverture du flux dans :</p>
-                        </div>
-
-                        <div className="bg-black/50 backdrop-blur-3xl rounded-[3rem] p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
-                            <div className={`text-6xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
-                                {nextDraw ? nextDraw.timeLeft : '00:00:00'}
-                            </div>
-                        </div>
-                    </div>
-                </motion.div>
-
-                {/* TOP FREQUENCE 7J */}
-                <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[4rem] p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full">
-                    <h3 className="font-black text-white flex items-center gap-4 mb-10 text-2xl tracking-tight uppercase">
-                        <Flame className="w-7 h-7 text-orange-500" /> High-Heat 7d
-                    </h3>
-                    <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                        {globalHot.length === 0 ? (
-                            [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
-                        ) : 
-                        globalHot.slice(0, 5).map((stat, i) => (
-                            <motion.div 
-                              key={stat.number} 
-                              initial={{ opacity: 0, x: 20 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              transition={{ delay: i * 0.1 }}
-                              className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-white/5 hover:border-indigo-500/30 transition-all group"
-                            >
-                                <div className="flex items-center gap-4">
-                                    <span className="text-[10px] font-black text-slate-600 group-hover:text-indigo-400">#{i+1}</span>
-                                    <NumberBall number={stat.number} size="sm" confidence={Math.round(80 - i * 3)} />
-                                </div>
-                                <div className="text-right">
-                                    <span className="text-xl font-mono font-black text-white">{stat.count}</span>
-                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Signaux</div>
-                                </div>
-                            </motion.div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-
-            {/* FLUX DU JOUR SELECTOR & GRID */}
-            <section className="mt-20">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-10 px-4">
-                    <div>
-                        <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
-                        <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-2">Séquences temporelles disponibles</p>
-                    </div>
-                    
-                    <button 
-                        onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
-                        className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
-                    >
-                        <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
-                        Voir tout l'historique
-                    </button>
-                </div>
-
-                {/* Day Selector */}
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2">
-                    {uiDays.map(d => (
-                        <button
-                            key={d}
-                            onClick={() => {
-                                audioEngine.play('click');
-                                setSelectedDay(d);
-                            }}
-                            className={`
-                                px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
-                                ${selectedDay === d 
-                                    ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105' 
-                                    : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                                }
-                            `}
+            {!isEmptyState && (
+                <>
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                        {/* PROCHAIN TIRAGE WIDGET */}
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className={`lg:col-span-8 rounded-[4rem] p-10 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
                         >
-                            {d}
-                        </button>
-                    ))}
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-                    {loadingSummary ? (
-                        [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[3rem] animate-pulse border border-white/5"></div>)
-                    ) :
-                    summary.map((item, idx) => {
-                        const isCompleted = item.result !== null;
-                        const isNext = nextDraw?.name === item.name;
-                        
-                        return (
-                            <motion.div
-                                key={item.name}
-                                initial={{ opacity: 0, y: 30 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: idx * 0.1 }}
-                                onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
-                                className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
-                            >
-                                <div className="flex justify-between items-start mb-8 relative z-10">
-                                    <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-indigo-400'}`}>{item.time}</span>
-                                    {isCompleted ? <Signal size={12} className="text-emerald-500 animate-pulse" /> : isNext && <Clock size={12} className="text-indigo-400 animate-spin"/>}
-                                </div>
-
-                                <h3 className="font-black text-2xl text-white mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">{item.name}</h3>
-                                
-                                <div className="mt-auto relative z-10">
-                                    {item.result ? (
-                                        <div className="space-y-6">
-                                            <div className="flex gap-2.5 flex-wrap">
-                                                {item.result.gagnants.map((n) => (
-                                                    <div key={n} className="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[10px] font-black">{n}</div>
-                                                ))}
-                                            </div>
-                                            <div className="flex items-center justify-between pt-6 border-t border-white/5">
-                                                <div className="flex items-center gap-2 text-[9px] font-black text-slate-500 uppercase group-hover:text-slate-300">
-                                                    <Microscope size={12} /> Analyser
-                                                </div>
-                                                <ArrowUpRight size={14} className="text-slate-600 group-hover:text-indigo-300 transition-all"/>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="py-8 bg-black/20 rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3 group-hover:bg-black/40 transition-colors">
-                                            {isNext ? (
-                                                <>
-                                                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
-                                                    <span className="text-[9px] text-indigo-400 font-black uppercase tracking-widest">En cours...</span>
-                                                </>
-                                            ) : (
-                                                <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">À venir</span>
-                                            )}
-                                        </div>
+                            <div className={`absolute top-0 right-0 w-[600px] h-[600px] rounded-full blur-[160px] -mr-48 -mt-48 transition-colors duration-1000 ${nextDraw?.isUrgent ? 'bg-rose-500/20' : 'bg-indigo-600/10'}`}></div>
+                            
+                            <div className="relative z-10 flex flex-col h-full">
+                                <div className="flex justify-between items-start">
+                                    <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
+                                        <Clock className={`w-5 h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
+                                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">T-Sequence Alpha</span>
+                                    </div>
+                                    {nextDraw?.isUrgent && (
+                                        <span className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-xl animate-pulse shadow-lg shadow-rose-600/40">Imminence Détectée</span>
                                     )}
                                 </div>
-                            </motion.div>
-                        );
-                    })}
-                </div>
-            </section>
+
+                                <div className="mt-14 mb-10">
+                                    <h3 className="text-4xl md:text-7xl font-black tracking-tighter leading-tight truncate">
+                                        {nextDraw ? nextDraw.name : 'Vecteur Temporel...'}
+                                    </h3>
+                                    <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-4">Ouverture du flux dans :</p>
+                                </div>
+
+                                <div className="bg-black/50 backdrop-blur-3xl rounded-[3rem] p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
+                                    <div className={`text-6xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
+                                        {nextDraw ? nextDraw.timeLeft : '00:00:00'}
+                                    </div>
+                                </div>
+                            </div>
+                        </motion.div>
+
+                        {/* TOP FREQUENCE 7J */}
+                        <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[4rem] p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full">
+                            <h3 className="font-black text-white flex items-center gap-4 mb-10 text-2xl tracking-tight uppercase">
+                                <Flame className="w-7 h-7 text-orange-500" /> High-Heat 7d
+                            </h3>
+                            <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                {globalHot.length === 0 ? (
+                                    [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
+                                ) : 
+                                globalHot.slice(0, 5).map((stat, i) => (
+                                    <motion.div 
+                                      key={stat.number} 
+                                      initial={{ opacity: 0, x: 20 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: i * 0.1 }}
+                                      className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-white/5 hover:border-indigo-500/30 transition-all group"
+                                    >
+                                        <div className="flex items-center gap-4">
+                                            <span className="text-[10px] font-black text-slate-600 group-hover:text-indigo-400">#{i+1}</span>
+                                            <NumberBall number={stat.number} size="sm" confidence={Math.round(80 - i * 3)} />
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-xl font-mono font-black text-white">{stat.count}</span>
+                                            <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Signaux</div>
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* FLUX DU JOUR SELECTOR & GRID */}
+                    <section className="mt-20">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-10 px-4">
+                            <div>
+                                <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
+                                <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-2">Séquences temporelles disponibles</p>
+                            </div>
+                            
+                            <button 
+                                onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
+                                className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
+                            >
+                                <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
+                                Voir tout l'historique
+                            </button>
+                        </div>
+
+                        {/* Day Selector */}
+                        <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2">
+                            {uiDays.map(d => (
+                                <button
+                                    key={d}
+                                    onClick={() => {
+                                        audioEngine.play('click');
+                                        setSelectedDay(d);
+                                    }}
+                                    className={`
+                                        px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
+                                        ${selectedDay === d 
+                                            ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105' 
+                                            : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                                        }
+                                    `}
+                                >
+                                    {d}
+                                </button>
+                            ))}
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                            {loadingSummary ? (
+                                [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[3rem] animate-pulse border border-white/5"></div>)
+                            ) :
+                            summary.map((item, idx) => {
+                                const isCompleted = item.result !== null;
+                                const isNext = nextDraw?.name === item.name;
+                                
+                                return (
+                                    <motion.div
+                                        key={item.name}
+                                        initial={{ opacity: 0, y: 30 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: idx * 0.1 }}
+                                        onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
+                                        className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
+                                    >
+                                        <div className="flex justify-between items-start mb-8 relative z-10">
+                                            <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-indigo-400'}`}>{item.time}</span>
+                                            {isCompleted ? <Signal size={12} className="text-emerald-500 animate-pulse" /> : isNext && <Clock size={12} className="text-indigo-400 animate-spin"/>}
+                                        </div>
+
+                                        <h3 className="font-black text-2xl text-white mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">{item.name}</h3>
+                                        
+                                        <div className="mt-auto relative z-10">
+                                            {item.result ? (
+                                                <div className="space-y-6">
+                                                    <div className="flex gap-2.5 flex-wrap">
+                                                        {item.result.gagnants.map((n) => (
+                                                            <div key={n} className="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[10px] font-black">{n}</div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex items-center justify-between pt-6 border-t border-white/5">
+                                                        <div className="flex items-center gap-2 text-[9px] font-black text-slate-500 uppercase group-hover:text-slate-300">
+                                                            <Microscope size={12} /> Analyser
+                                                        </div>
+                                                        <ArrowUpRight size={14} className="text-slate-600 group-hover:text-indigo-300 transition-all"/>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="py-8 bg-black/20 rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3 group-hover:bg-black/40 transition-colors">
+                                                    {isNext ? (
+                                                        <>
+                                                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+                                                            <span className="text-[9px] text-indigo-400 font-black uppercase tracking-widest">En cours...</span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">À venir</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                );
+                            })}
+                        </div>
+                    </section>
+                </>
+            )}
         </div>
     );
 };

@@ -118,7 +118,7 @@ BEFORE UPDATE ON public.transactions
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
 -- ==============================================================================
--- 4. SÉCURITÉ (RLS) — CORRIGÉ
+-- 4. SÉCURITÉ (RLS)
 -- ==============================================================================
 
 -- Activer RLS partout
@@ -168,33 +168,44 @@ CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date);
 
 -- ==============================================================================
--- 6. AUTOMATISATION CRON (Optionnel)
+-- 6. AUTOMATISATION CRON (CONFIGURATION SÉCURISÉE)
 -- ==============================================================================
--- Ce bloc configure le job cron de manière sécurisée (Idempotente).
--- Vous devez remplacer [PROJECT_REF] et [SERVICE_ROLE_KEY] avant d'exécuter.
+-- Ce bloc configure le job cron pour la synchronisation automatique toutes les 30 minutes.
+-- Il gère automatiquement la suppression de l'ancien job s'il existe pour éviter les erreurs.
+
+-- ⚠️ REMPLACEZ LES VALEURS CI-DESSOUS AVANT D'EXÉCUTER :
+-- [PROJECT_REF] : Votre ID de projet Supabase (ex: abcdefghijklm)
+-- [SERVICE_ROLE_KEY] : Votre clé 'service_role' (Settings > API)
 
 DO $$
+DECLARE
+    -- 👇 CONFIGURATION ICI 👇
+    project_ref text := '[PROJECT_REF]';
+    service_key text := '[SERVICE_ROLE_KEY]';
+    
+    -- Construction de l'URL et du Header (ne pas toucher)
+    endpoint_url text := 'https://' || project_ref || '.supabase.co/functions/v1/cron-sync';
+    auth_header text := '{"Content-Type": "application/json", "Authorization": "Bearer ' || service_key || '"}';
 BEGIN
-    -- Suppression sécurisée si le job existe déjà
+    -- 1. Nettoyage sécurisé (ne plante pas si le job n'existe pas)
     IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-loto-30min') THEN
         PERFORM cron.unschedule('sync-loto-30min');
     END IF;
 
-    -- Création du nouveau planning (Exemple désactivé par défaut, décommentez pour activer)
-    /*
+    -- 2. Planification du nouveau job (Toutes les 30 minutes)
     PERFORM cron.schedule(
         'sync-loto-30min',
-        '30 * * * *', -- Toutes les heures à la 30ème minute
-        $$
-        SELECT
-          net.http_post(
-              url:='https://[PROJECT_REF].supabase.co/functions/v1/cron-sync',
-              headers:='{"Content-Type": "application/json", "Authorization": "Bearer [SERVICE_ROLE_KEY]"}'::jsonb,
-              body:='{"source": "pg_cron"}'::jsonb
-          ) as request_id;
-        $$
+        '*/30 * * * *',
+        format(
+            'SELECT net.http_post(
+                url:=''%s'',
+                headers:=''%s''::jsonb,
+                body:=''{"source": "pg_cron"}''::jsonb
+            ) as request_id;',
+            endpoint_url,
+            auth_header
+        )
     );
-    */
 END $$;
 
 -- ==============================================================================

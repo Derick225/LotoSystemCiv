@@ -62,48 +62,38 @@ export const lotteryService = {
         return [];
     }
 
-    try {
-        let query = supabase
-          .from('draw_results')
-          .select('*')
-          .order('date', { ascending: false });
+    let query = supabase
+      .from('draw_results')
+      .select('*')
+      .order('date', { ascending: false });
 
-        // Si drawName est 'ALL', on ne filtre pas, mais on limite pour la performance
-        if (drawName && drawName !== 'ALL') {
-            query = query.ilike('draw_name', `%${drawName}%`);
-        }
-        
-        // LIMITATION DE SÉCURITÉ : Empêche de charger 50 000 lignes et de tuer le navigateur
-        query = query.limit(2000);
-        
-        const { data, error } = await query;
-        
-        if (error) {
-          console.error(`[Supabase Error] Fetch ${drawName}:`, error);
-          throw error; 
-        }
-        
-        if (!data || data.length === 0) {
-             return [];
-        }
-        
-        return data.map(row => ({
-          id: row.id,
-          drawName: row.draw_name, // On garde le nom de la DB
-          date: formatDate(row.date),
-          gagnants: row.gagnants,
-          machine: row.machine || [],
-          version: row.version || 1
-        }));
-    } catch (e: any) {
-        const msg = e.message || String(e);
-        if (msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
-            console.warn(`[Supabase Offline] Récupération historique ${drawName} ignorée (Problème réseau).`);
-        } else {
-            console.error(`[Supabase Critical] fetchHistory(${drawName}):`, msg);
-        }
-        return [];
+    // Si drawName est 'ALL', on ne filtre pas, mais on limite pour la performance
+    if (drawName && drawName !== 'ALL') {
+        query = query.ilike('draw_name', `%${drawName}%`);
     }
+    
+    // LIMITATION DE SÉCURITÉ : Empêche de charger 50 000 lignes et de tuer le navigateur
+    query = query.limit(2000);
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      // On laisse l'erreur remonter pour que le NexusProvider puisse l'afficher (ex: Table introuvable)
+      throw error; 
+    }
+    
+    if (!data || data.length === 0) {
+         return [];
+    }
+    
+    return data.map(row => ({
+      id: row.id,
+      drawName: row.draw_name, // On garde le nom de la DB
+      date: formatDate(row.date),
+      gagnants: row.gagnants,
+      machine: row.machine || [],
+      version: row.version || 1
+    }));
   }
 };
 
@@ -335,4 +325,27 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
         .slice(0, 10);
         
     return { following: sorted };
+};
+
+/**
+ * INJECTEUR DE DONNÉES DÉMO
+ * Utiliser uniquement si la base est vide pour initialiser l'app.
+ */
+export const injectDemoData = async () => {
+    if (!isSupabaseConfigured()) return;
+    
+    const demoData = [
+        { draw_name: "Reveil", date: "2024-03-10", gagnants: [5, 12, 45, 67, 88], machine: [1, 2, 3, 4, 5] },
+        { draw_name: "Reveil", date: "2024-03-09", gagnants: [1, 15, 30, 48, 70], machine: [10, 20, 30, 40, 50] },
+        { draw_name: "Reveil", date: "2024-03-08", gagnants: [10, 25, 33, 55, 89], machine: [11, 22, 33, 44, 55] },
+        { draw_name: "Reveil", date: "2024-03-07", gagnants: [3, 19, 41, 60, 75], machine: [6, 7, 8, 9, 10] },
+        { draw_name: "Reveil", date: "2024-03-06", gagnants: [8, 14, 28, 52, 63], machine: [60, 70, 80, 85, 90] },
+    ];
+
+    try {
+        await supabase.from('draw_results').insert(demoData);
+        console.log("Demo data injected successfully");
+    } catch (e) {
+        console.error("Demo injection failed", e);
+    }
 };
