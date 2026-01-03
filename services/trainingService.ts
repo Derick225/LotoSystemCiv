@@ -3,6 +3,7 @@ import { fetchResults } from './lotteryService';
 import { generateMasterPrediction, saveAlgoWeights, getAlgoWeights, getAdaptiveRules, saveAdaptiveRules } from './predictionEngine';
 import { detectGameRegime } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { runGeneticOptimization } from './geneticOptimizer';
 import type { AlgoWeights, TrainingReport, TrainingResult, DrawResult } from '../types';
 
 export const runBacktestTraining = async (
@@ -97,7 +98,7 @@ export const evolveNeuralDNA = async (
     
     const currentWeights = getAlgoWeights(drawName);
     
-    // 1. Appel Edge Function pour calcul lourd
+    // 1. Appel Edge Function pour calcul lourd (Prioritaire)
     if (isSupabaseConfigured()) {
         try {
             console.log("Starting Cloud Genetic Optimization...");
@@ -117,13 +118,10 @@ export const evolveNeuralDNA = async (
             const bestWeights = data.bestWeights;
             const { data: fullHistory } = await fetchResults(drawName);
             
-            // 2. Backtest final local pour rapport détaillé
+            // Backtest final local pour rapport détaillé
             const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);
             
-            // Mise à jour locale
             saveAlgoWeights(drawName, bestWeights);
-            
-            // Mock telemetry for UI (since cloud compute is instant from UI perspective)
             onTelemetry({ gen: options.generations, bestFitness: data.bestFitness, diversity: 0.1 });
 
             return {
@@ -133,11 +131,32 @@ export const evolveNeuralDNA = async (
             };
 
         } catch (e) {
-            console.warn("Cloud Optimization failed, falling back to local.", e);
+            console.warn("Cloud Optimization failed, falling back to local Worker.", e);
         }
     }
 
-    // Fallback local (Original Worker logic via runGeneticOptimization import removed for brevity in this snippet but assumed handled or error thrown)
-    throw new Error("Optimisation Cloud non disponible.");
+    // 2. Fallback Local (Web Worker via geneticOptimizer)
+    try {
+        const currentRules = getAdaptiveRules(drawName);
+        const result = await runGeneticOptimization(
+            drawName,
+            currentWeights,
+            currentRules,
+            { maxGenerations: options.generations, populationSize: 20 },
+            onTelemetry
+        );
+
+        const { data: fullHistory } = await fetchResults(drawName);
+        const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, result.bestChromosome.weights);
+        
+        saveAlgoWeights(drawName, result.bestChromosome.weights);
+        
+        return {
+            bestWeights: result.bestChromosome.weights,
+            improvement: 0, // Difficile à estimer sans score précédent exact, on assume 0 pour l'affichage
+            report: newReport
+        };
+    } catch (e: any) {
+        throw new Error(`Optimisation locale échouée : ${e.message}`);
+    }
 };
-    

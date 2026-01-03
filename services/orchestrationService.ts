@@ -28,7 +28,6 @@ export interface ImmediateLesson {
     impactScore: number;
 }
 
-// FIX: Added missing analyzePredictionError to support forensics logic
 export const analyzePredictionError = (drawName: string, actualDraw: DrawResult): { auditLessons: ImmediateLesson[] } => {
     const lessons: ImmediateLesson[] = [];
     
@@ -43,8 +42,8 @@ export const analyzePredictionError = (drawName: string, actualDraw: DrawResult)
         }
     }
 
-    const repetitions = actualDraw.gagnants.filter(n => actualDraw.gagnants.includes(n)); // Simplified
-    // This should ideally compare with T-1 which isn't passed here directly
+    const repetitions = actualDraw.gagnants.length; // Simplified check context
+    // In a real implementation, we would pass the previous draw to check for exact repetitions
     
     return { auditLessons: lessons };
 };
@@ -76,8 +75,7 @@ export const analyzeImmediateTrend = (history: DrawResult[]): { lessons: Immedia
     const lessons: ImmediateLesson[] = [];
     if (history.length < 2) return { lessons };
     
-    const depth = Math.min(history.length - 1, 100); // On regarde jusqu'à 100 tirages pour les tendances récurrentes
-    const current = history[0];
+    const depth = Math.min(history.length - 1, 100); 
     
     // Répétitions systématiques
     const counts: Record<number, number> = {};
@@ -116,7 +114,7 @@ export const analyzeImmediateTrend = (history: DrawResult[]): { lessons: Immedia
 
 export const getFullOrchestrationAnalysis = async (drawName: string, history: DrawResult[]): Promise<OrchestrationMetrics> => {
     const baseScores = calculateOrchestrationScores(history);
-    const { matrix, totals } = await calculateSuccessionMatrixAsync(history); // Analyse complète
+    const { matrix, totals } = await calculateSuccessionMatrixAsync(history); 
     
     const lastWinners = history[0].gagnants;
     const finalScores = { ...baseScores };
@@ -128,7 +126,7 @@ export const getFullOrchestrationAnalysis = async (drawName: string, history: Dr
         Object.entries(followersMap).forEach(([fStr, count]) => {
             const follower = parseInt(fStr);
             const prob = (count as number) / total;
-            if (prob > 0.10) { // Seuil abaissé car l'historique complet dilue les probabilités
+            if (prob > 0.10) { 
                 finalScores[follower] = (finalScores[follower] || 0) + (prob * 100);
             }
         });

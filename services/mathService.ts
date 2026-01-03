@@ -36,7 +36,6 @@ export const calculateDigitalRoot = (n: number): number => {
 
 export const mathService = {
   // Récupère les analyses pré-calculées depuis Supabase (Table draw_analytics)
-  // Si pas dispo ou date différente, lance le calcul cloud
   async fetchAnalytics(drawName: string, lastDate: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
     if (!isSupabaseConfigured()) return null;
     try {
@@ -44,26 +43,22 @@ export const mathService = {
           .from('draw_analytics')
           .select('*')
           .eq('draw_name', drawName)
-          .eq('date', lastDate) // On veut les données correspondant EXACTEMENT au dernier tirage
+          .eq('date', lastDate)
           .single();
         
         if (data) {
-            console.log("Using cached Cloud Analytics");
             return { spectral: data.spectral, fractal: data.fractal };
         }
 
-        // Si pas de données à jour, on lance le calcul en tâche de fond (Fire and forget ou await selon besoin)
-        // On ne bloque pas l'UI, on renverra null pour forcer un calcul local temporaire
-        console.log("Triggering Cloud Compute...");
+        // Trigger Cloud Compute if missing
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
-        
         return null;
     } catch (e) { return null; }
   },
 
-  // Fallback synchrone rapide (Local)
+  // Fallback Local Spectral
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {
-    const N = Math.min(history.length, 200); // Limite locale pour perf mobile
+    const N = Math.min(history.length, 200);
     const sample = history.slice(0, N);
     
     return Array.from({ length: 90 }, (_, i) => {
@@ -71,9 +66,8 @@ export const mathService = {
         const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
         const mean = signal.reduce((a, b) => a + b, 0) / N;
         let maxPower = 0;
-        // DFT simplifiée locale
         const limit = Math.floor(N / 2);
-        for (let k = 1; k < limit; k+=2) { // Pas de 2 pour aller plus vite
+        for (let k = 1; k < limit; k+=2) {
             let re = 0, im = 0;
             for (let t = 0; t < N; t++) {
                 const angle = (2 * Math.PI * k * t) / N;
@@ -92,6 +86,7 @@ export const mathService = {
     }).sort((a, b) => b.energy - a.energy);
   },
 
+  // Fallback Local Fractal
   calculateFractal(history: DrawResult[]): FractalMetric[] {
     const N = Math.min(history.length, 100);
     const sample = history.slice(0, N);
@@ -117,18 +112,28 @@ export const mathService = {
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
-    // 1. Tenter de récupérer depuis le Cloud (Table draw_analytics)
     if (history.length > 0) {
         const cloudData = await mathService.fetchAnalytics(history[0].drawName, history[0].date);
         if (cloudData && cloudData.spectral) return cloudData.spectral;
     }
-
-    // 2. Sinon Worker Local
     try {
         const res = await runWorkerTask('full_analysis', history);
         return res.spectral || mathService.calculateSpectral(history);
     } catch {
         return mathService.calculateSpectral(history);
+    }
+};
+
+export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promise<FractalMetric[]> => {
+    if (history.length > 0) {
+        const cloudData = await mathService.fetchAnalytics(history[0].drawName, history[0].date);
+        if (cloudData && cloudData.fractal) return cloudData.fractal;
+    }
+    try {
+        const res = await runWorkerTask('full_analysis', history);
+        return res.fractal || mathService.calculateFractal(history);
+    } catch {
+        return mathService.calculateFractal(history);
     }
 };
 
@@ -340,9 +345,7 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
 };
 
 export const detectGameRegime = (history: DrawResult[]) => {
-    // Peut être récupéré depuis draw_analytics si dispo (à intégrer dans NexusProvider)
-    // Ici on garde le calcul local léger si besoin
-    const hurst = 0.5; // Placeholder si non calculé
+    const hurst = 0.5; // Placeholder
     return { 
         hurst, 
         regime: hurst > 0.60 ? 'PERSISTANT' : hurst < 0.40 ? 'CHAOS' : 'NOMINAL' 
@@ -350,7 +353,6 @@ export const detectGameRegime = (history: DrawResult[]) => {
 };
 
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
-    // Peut être lourd, à migrer vers Edge Function si nécessaire
     try {
         const res = await runWorkerTask('pearson_matrix', history);
         return res || {};
@@ -410,4 +412,3 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
         nemesis: []
     };
 };
-    

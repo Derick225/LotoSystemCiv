@@ -7,9 +7,10 @@ import {
 } from '../types';
 import { lotteryService } from '../services/lotteryService';
 import { 
-    mathService, calculateVolatility, calculateRegularity, 
+    calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
-    calculateNetworkCentralityAsync
+    calculateNetworkCentralityAsync, calculateSpectralMetricsAsync,
+    calculateFractalMetricsAsync
 } from '../services/mathService';
 import { getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
@@ -32,7 +33,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [inspectingNumber, setInspectingNumber] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger pour forcer le reload
+  const [refreshTrigger, setRefreshTrigger] = useState(0); 
   
   // High-Level States
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
@@ -40,7 +41,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [cliques, setCliques] = useState<any[]>([]);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
 
-  // Refs pour éviter les boucles dans les effects
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Vérification initiale de la connexion
@@ -62,7 +62,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const loadData = useCallback(async () => {
-    // Annulation de la requête précédente si elle existe
     if (abortControllerRef.current) {
         abortControllerRef.current.abort();
     }
@@ -70,20 +69,14 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setLoading(true);
     try {
-        // Chargement Historique
         const hist = await lotteryService.fetchHistory(drawName);
         
-        // Si le composant est démonté ou une nouvelle requête est partie, on arrête
         if (abortControllerRef.current.signal.aborted) return;
 
         setHistory(hist); 
-        
-        // Synchronisation ADN IA
         setGlobalWeights(getAlgoWeights(drawName));
 
-        // Pipeline HPC Parallèle (Optimisé pour éviter Stack Overflow)
         if (hist.length > 0) {
-            // OPTIMISATION CRITIQUE : Si mode 'ALL', on saute les calculs complexes
             if (drawName === 'ALL') {
                  setSpectral([]);
                  setFractal([]);
@@ -92,13 +85,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                  setCliques([]);
                  setSmartInsights([]);
             } else {
-                // On limite l'échantillon pour les calculs lourds (Max 500 derniers tirages)
-                // Cela garde l'interface fluide tout en ayant une précision suffisante
                 const computeSample = hist.slice(0, 500);
 
+                // UTILISATION DES ASYNC WRAPPERS POUR DÉCHARGER LE THREAD PRINCIPAL
                 const [spec, frac, regData, corr, centrality] = await Promise.all([
-                    Promise.resolve(mathService.calculateSpectral(computeSample)),
-                    Promise.resolve(mathService.calculateFractal(computeSample)),
+                    calculateSpectralMetricsAsync(computeSample),
+                    calculateFractalMetricsAsync(computeSample),
                     Promise.resolve(calculateRegularity(computeSample)),
                     calculateCorrelationMatrixAsync(computeSample),
                     calculateNetworkCentralityAsync(computeSample)
@@ -112,20 +104,18 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 setCorrelationMatrix(corr);
                 setCliques(centrality);
 
-                // Analyse Cognitive (Insights)
                 const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
                 const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
                 setSmartInsights(insights);
             }
         } else {
-            // Reset des états si pas de données
             setSpectral([]);
             setFractal([]);
             setRegularity([]);
             setSmartInsights([]);
         }
 
-        setLastPrediction(null); // Reset prediction on draw change
+        setLastPrediction(null); 
 
     } catch (e: any) {
         if (e.name === 'AbortError') return;
@@ -140,7 +130,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (errorMessage.includes('42P01')) {
              showToast("Table 'draw_results' introuvable.", "error");
         } else if (!errorMessage.includes('aborted')) {
-             // Silencieux pour les erreurs mineures
+             // Silence
         }
         setHistory([]); 
     } finally {
@@ -150,7 +140,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [drawName, refreshTrigger, showToast]);
 
-  // Effet unique pour charger les données quand drawName ou le trigger change
   useEffect(() => { 
     loadData();
     return () => {
@@ -158,7 +147,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [loadData]);
 
-  // Actions Publiques
   const setDrawName = useCallback((name: string) => {
       audioEngine.play('click');
       setDrawNameState(name);
@@ -167,13 +155,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refreshData = useCallback(async (name: string, force?: boolean) => {
       audioEngine.play('scan');
       if (name !== drawName) {
-          setDrawNameState(name); // Cela déclenchera loadData via useEffect
+          setDrawNameState(name);
       } else if (force) {
-          setRefreshTrigger(prev => prev + 1); // Cela déclenchera loadData via useEffect
+          setRefreshTrigger(prev => prev + 1);
       }
   }, [drawName]);
 
-  // Memos
   const stats = useMemo(() => {
     const counts: Record<number, number> = {};
     history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));

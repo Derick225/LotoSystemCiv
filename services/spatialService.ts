@@ -83,7 +83,6 @@ export const getSpatialScores = (data: DrawResult[]): Record<number, number> => 
     return scores;
 };
 
-// FIX: Added missing getBarycenterTrajectory
 export const getBarycenterTrajectory = (results: DrawResult[], limit: number = 12): BarycenterPoint[] => {
     return results.slice(0, limit).map((d, idx) => {
         let sumX = 0, sumY = 0;
@@ -91,6 +90,7 @@ export const getBarycenterTrajectory = (results: DrawResult[], limit: number = 1
             const c = getCoords(n);
             sumX += c.x; sumY += c.y;
         });
-        return { x: sumX / 5, y: sumY / 5, drawIndex: idx };
+        const len = d.gagnants.length || 1;
+        return { x: sumX / len, y: sumY / len, drawIndex: idx };
     });
 };

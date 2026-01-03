@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { Mic, MicOff, X, RefreshCw, Radio, Activity, Waves, Volume2, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, X, RefreshCw, Radio, Activity, Waves, AlertTriangle } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 
@@ -47,11 +47,22 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     const analyzerNode = useRef<AnalyserNode | null>(null);
 
     useEffect(() => {
-        // Vérification de la clé API au montage
         if (!process.env.API_KEY) {
             setHasApiKey(false);
         }
     }, []);
+
+    const initAudioContexts = () => {
+        if (!outputAudioContext.current) {
+            outputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        }
+        if (outputAudioContext.current.state === 'suspended') {
+            outputAudioContext.current.resume();
+        }
+        if (!inputAudioContext.current) {
+            inputAudioContext.current = new AudioContext({ sampleRate: 16000 });
+        }
+    };
 
     const stopAssistant = useCallback(() => {
         if (sessionRef.current) {
@@ -60,6 +71,10 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
         }
         if (inputAudioContext.current) inputAudioContext.current.close();
         if (outputAudioContext.current) outputAudioContext.current.close();
+        
+        inputAudioContext.current = null;
+        outputAudioContext.current = null;
+        
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
         
         setIsActive(false);
@@ -69,9 +84,8 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     }, []);
 
     const playAudioChunk = async (base64Data: string) => {
-        if (!outputAudioContext.current) {
-            outputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        }
+        if (!outputAudioContext.current) return;
+        
         const ctx = outputAudioContext.current;
         const rawBytes = decodeBase64Audio(base64Data);
         const int16 = new Int16Array(rawBytes.buffer);
@@ -104,6 +118,10 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             return;
         }
         if (isConnecting) return;
+        
+        // Initialisation immédiate sur interaction utilisateur
+        initAudioContexts();
+        
         setIsConnecting(true);
 
         try {
@@ -113,7 +131,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             const contextPrompt = `Tu es l'Oracle de LotoPro pour le tirage ${drawName}. 
                 Contexte actuel: Régime ${regime?.regime || 'Inconnu'}, Volatilité ${volatility?.score || 0}%.
                 Prédiction IA: ${lastPrediction?.suggestedNumbers.join(', ') || 'Non disponible'}.
-                Réponds de manière technique, mystérieuse et concise. Ne donne jamais de garantie de gain.`;
+                Réponds de manière technique, mystérieuse et concise.`;
 
             const sessionPromise = ai.live.connect({
                 model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -127,13 +145,12 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                         setIsActive(true);
                         setIsConnecting(false);
                         
-                        inputAudioContext.current = new AudioContext({ sampleRate: 16000 });
-                        const source = inputAudioContext.current.createMediaStreamSource(stream);
-                        analyzerNode.current = inputAudioContext.current.createAnalyser();
+                        const source = inputAudioContext.current!.createMediaStreamSource(stream);
+                        analyzerNode.current = inputAudioContext.current!.createAnalyser();
                         analyzerNode.current.fftSize = 64;
                         source.connect(analyzerNode.current);
                         
-                        const scriptProcessor = inputAudioContext.current.createScriptProcessor(4096, 1, 1);
+                        const scriptProcessor = inputAudioContext.current!.createScriptProcessor(4096, 1, 1);
                         scriptProcessor.onaudioprocess = (e) => {
                             const inputData = e.inputBuffer.getChannelData(0);
                             const pcm16 = new Int16Array(inputData.length);
@@ -151,7 +168,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                             });
                         };
                         source.connect(scriptProcessor);
-                        scriptProcessor.connect(inputAudioContext.current.destination);
+                        scriptProcessor.connect(inputAudioContext.current!.destination);
                         
                         startVisualizer();
                     },
