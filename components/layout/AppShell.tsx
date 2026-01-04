@@ -1,3 +1,4 @@
+
 import React, { ReactNode, useState, useEffect } from 'react';
 import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut } from 'lucide-react';
 import { useIsFetching } from '@tanstack/react-query';
@@ -72,16 +73,16 @@ export const AppShell: React.FC<AppShellProps> = ({
       <header className="fixed top-0 left-0 right-0 z-50 transition-all duration-500">
         <MarqueeTicker />
         
-        <div className={`mx-4 mt-2 transition-all duration-500 ${scrolled ? 'scale-[0.98]' : 'scale-100'}`}>
-            <div className={`container mx-auto px-6 h-20 rounded-[2.5rem] border shadow-2xl transition-all duration-500 flex justify-between items-center safe-top
+        <div className={`mx-2 md:mx-4 mt-2 transition-all duration-500 ${scrolled ? 'scale-[0.98]' : 'scale-100'}`}>
+            <div className={`container mx-auto px-4 md:px-6 h-16 md:h-20 rounded-[2rem] md:rounded-[2.5rem] border shadow-2xl transition-all duration-500 flex justify-between items-center safe-top
                 ${scrolled 
                   ? 'bg-nexus-950/90 backdrop-blur-2xl border-white/10' 
                   : 'bg-nexus-900/40 backdrop-blur-xl border-white/5'}
             `}>
                 {/* Logo Section */}
-                <div onClick={onReset} className="flex items-center gap-4 cursor-pointer group select-none">
-                    <div className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl flex items-center justify-center shadow-2xl group-hover:rotate-12 transition-all group-active:scale-90">
-                        <span className="text-white font-black text-xl italic">N</span>
+                <div onClick={onReset} className="flex items-center gap-3 md:gap-4 cursor-pointer group select-none">
+                    <div className="w-9 h-9 md:w-11 md:h-11 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-xl md:rounded-2xl flex items-center justify-center shadow-2xl group-hover:rotate-12 transition-all group-active:scale-90">
+                        <span className="text-white font-black text-lg md:text-xl italic">N</span>
                     </div>
                     <div className="hidden lg:block">
                         <h1 className="text-xl font-black tracking-tighter leading-none text-white">NEXUS<span className="text-indigo-500">PRO</span></h1>
@@ -112,7 +113,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </nav>
 
                 {/* Actions Group */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3">
                     <div className="hidden sm:flex flex-col items-end mr-3 px-3 py-1 bg-black/20 rounded-xl border border-white/5 cursor-pointer hover:border-indigo-500/50 transition-all" onClick={() => setShowPalette(true)}>
                         <div className="flex items-center gap-2">
                             <SonarPing />
@@ -122,13 +123,13 @@ export const AppShell: React.FC<AppShellProps> = ({
 
                     <button 
                       onClick={() => { audioEngine.play('click'); setShowWallet(!showWallet); }}
-                      className={`p-3.5 rounded-2xl transition-all border group relative overflow-hidden
+                      className={`p-3 md:p-3.5 rounded-2xl transition-all border group relative overflow-hidden
                         ${showWallet 
                           ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl shadow-indigo-600/30' 
                           : 'bg-white/5 text-slate-400 hover:text-white border-white/10 hover:bg-white/10'}
                       `}
                     >
-                        <Wallet size={20} className="relative z-10" />
+                        <Wallet size={18} className="relative z-10 md:w-5 md:h-5" />
                         <AnimatePresence>
                           {showWallet && (
                             <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} className="absolute inset-0 bg-white/20 blur-xl rounded-full" />
@@ -138,24 +139,25 @@ export const AppShell: React.FC<AppShellProps> = ({
                     
                     <button 
                       onClick={() => { audioEngine.play('click'); setTheme(theme === 'dark' ? 'light' : 'dark'); }} 
-                      className="p-3.5 bg-white/5 rounded-2xl text-slate-400 hover:text-white border border-white/10 active:scale-90 transition-all hidden sm:block"
+                      className="p-3 md:p-3.5 bg-white/5 rounded-2xl text-slate-400 hover:text-white border border-white/10 active:scale-90 transition-all hidden sm:block"
                     >
                         {theme === 'dark' ? <Terminal size={20} /> : <Activity size={20} />}
                     </button>
 
                     <button 
                       onClick={onLogout}
-                      className="p-3.5 bg-rose-500/10 rounded-2xl text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/20 active:scale-90 transition-all"
+                      className="p-3 md:p-3.5 bg-rose-500/10 rounded-2xl text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/20 active:scale-90 transition-all"
                       title="Déconnexion"
                     >
-                        <LogOut size={20} />
+                        <LogOut size={18} className="md:w-5 md:h-5" />
                     </button>
                 </div>
             </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 pt-44 pb-36 max-w-7xl flex-1 relative z-0">
+      {/* Ajustement du padding-top pour compenser le header plus petit sur mobile */}
+      <main className="container mx-auto px-3 sm:px-4 pt-32 md:pt-44 pb-36 max-w-7xl flex-1 relative z-0">
         <AnimatePresence mode="wait">
             <motion.div
                 key={viewMode + (isDrawSelected ? 'draw' : 'list') + (showWallet ? 'wallet' : 'main')}
@@ -170,14 +172,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       </main>
 
       {/* MOBILE BOTTOM NAVIGATION - PREMIUM */}
-      <nav className="md:hidden fixed bottom-8 left-8 right-8 z-50">
+      <nav className="md:hidden fixed bottom-6 left-6 right-6 z-50">
         <div className="glass-morphism bg-nexus-950/90 backdrop-blur-2xl p-2 rounded-[2.5rem] shadow-2xl border border-white/10 flex justify-between items-center">
             {navItems.map(btn => (
                 <button 
                     key={btn.id}
                     onClick={() => handleNav(btn.id)}
                     className={`
-                      flex-1 flex flex-col items-center justify-center py-4 rounded-3xl transition-all relative
+                      flex-1 flex flex-col items-center justify-center py-3.5 rounded-3xl transition-all relative
                       ${viewMode === btn.id && !showWallet && !isDrawSelected
                           ? 'text-indigo-400' 
                           : 'text-slate-600'
@@ -186,7 +188,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 >
                     {btn.icon}
                     {viewMode === btn.id && !showWallet && !isDrawSelected && (
-                      <motion.div layoutId="activeNav" className="absolute inset-x-4 bottom-2 h-1 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
+                      <motion.div layoutId="activeNav" className="absolute inset-x-4 bottom-1.5 h-1 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
                     )}
                 </button>
             ))}
@@ -194,13 +196,13 @@ export const AppShell: React.FC<AppShellProps> = ({
             <button 
                 onClick={() => { audioEngine.play('click'); setShowWallet(true); }}
                 className={`
-                  flex-1 flex flex-col items-center justify-center py-4 rounded-3xl transition-all relative
+                  flex-1 flex flex-col items-center justify-center py-3.5 rounded-3xl transition-all relative
                   ${showWallet ? 'text-indigo-400' : 'text-slate-600'}
                 `}
             >
                 <Wallet size={18}/>
                 {showWallet && (
-                  <motion.div layoutId="activeNav" className="absolute inset-x-4 bottom-2 h-1 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
+                  <motion.div layoutId="activeNav" className="absolute inset-x-4 bottom-1.5 h-1 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
                 )}
             </button>
         </div>

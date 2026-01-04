@@ -22,6 +22,7 @@ import { authService } from './services/authService';
 import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from './services/subscriptionService';
 import { hydrateUserData, getSettings, saveSettings } from './services/userPreferencesService';
 import { supabase } from './services/supabaseClient';
+import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
 import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
 
@@ -109,8 +110,6 @@ const AppContent: React.FC = () => {
                     audioEngine.play('success');
                 }
             });
-            // Cleanup function for listener is tricky here inside async, managed via side effect below if needed
-            // But auth state change usually handles full reset
         }
       }
       setAuthLoading(false);
@@ -245,6 +244,7 @@ const AppContent: React.FC = () => {
       >
         {renderContent()}
       </AppShell>
+      <GlobalNumberHUD />
       <TutorialOverlay />
       <InstallPrompt />
     </>

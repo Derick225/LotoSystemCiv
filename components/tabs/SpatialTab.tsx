@@ -102,12 +102,6 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
       const dy = shift.y - metrics.barycenter.y;
       
       // Calcul de l'angle pour la boussole (en degrés, 0 = Nord)
-      // Math.atan2(y, x) donne l'angle en radians depuis l'axe X.
-      // On convertit pour avoir 0 en haut (Nord).
-      // Note: Dans la grille de loto (9x10), Y augmente vers le bas (si on dessine de haut en bas), 
-      // mais conceptuellement le "Nord" est le petit nombre.
-      // On va simplifier : dx > 0 = Est, dy > 0 = Sud (chiffres plus grands).
-      
       let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
       angle = angle + 90; // Rotation pour aligner 0 au Nord
 
@@ -199,7 +193,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                       </div>
                   </div>
 
-                  <div className="grid grid-cols-10 gap-1.5 sm:gap-2">
+                  <div className="grid grid-cols-10 gap-1 sm:gap-2">
                       {Array.from({length: 90}, (_, i) => i + 1).map(n => {
                           const intensity = getCellIntensity(n);
                           // Couleur dynamique
@@ -229,9 +223,6 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                   {/* Bounding Box des Clusters (Visualisation simplifiée) */}
                   {metrics?.advancedClusters.map((cluster, i) => {
                       if (cluster.numbers.length < 3) return null;
-                      // On ne dessine pas vraiment une boite car c'est une grille CSS, 
-                      // mais on pourrait ajouter une bordure aux éléments du cluster si besoin.
-                      // Pour l'instant, la couleur suffit.
                       return null; 
                   })}
               </div>

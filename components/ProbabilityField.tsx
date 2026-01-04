@@ -53,7 +53,7 @@ export const ProbabilityField: React.FC<ProbabilityFieldProps> = ({ scores }) =>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-10 gap-1.5 sm:gap-2.5">
+                    <div className="grid grid-cols-10 gap-1 sm:gap-1.5 md:gap-2.5">
                         {grid.map(cell => (
                             <div 
                                 key={cell.num}

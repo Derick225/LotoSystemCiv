@@ -118,6 +118,9 @@ export interface NexusContextType {
     velocity: Record<number, number>;
     cliques: any[];
     vocalContext: any;
+    // Interaction UI
+    hoveredNumber: number | null;
+    setHoveredNumber: (n: number | null) => void;
 }
 
 // Forensic and history types

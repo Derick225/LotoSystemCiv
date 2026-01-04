@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -14,12 +13,9 @@ interface State {
  * LocalErrorBoundary - Targeted Module Error Isolation
  */
 export class LocalErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = {
-      hasError: false,
-    };
-  }
+  public state: State = {
+    hasError: false,
+  };
 
   static getDerivedStateFromError(_: Error): State {
     return { hasError: true };

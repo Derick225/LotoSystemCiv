@@ -192,11 +192,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             const parts = cleanLine.split(separator).map(p => p.trim()).filter(p => p !== '');
 
             if (parts.length < 6) {
-                // Pas assez de colonnes, tentative de parsing plus flexible si c'est juste des espaces
                 const spaceParts = cleanLine.split(/\s+/).map(p => p.trim());
                 if (spaceParts.length >= 6) {
-                     // Utiliser l'espace comme séparateur si ça marche mieux
-                     // Logique simplifiée pour éviter de casser le CSV standard
+                     // Auto-detect space separated
                 } else {
                     preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet (min 6 colonnes)', rawLine: line });
                     return;
@@ -271,11 +269,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         setIsImporting(true);
         try {
             // DEDOUBLONNAGE CRITIQUE : Postgres interdit de mettre à jour la même ligne 2x dans le même batch
-            // On utilise une Map pour ne garder que la dernière occurrence de chaque date
             const uniqueMap = new Map();
             
             validRows.forEach(row => {
-                // Normalisation si nécessaire (ici on suppose que row.date est la clé unique pour ce tirage)
                 uniqueMap.set(row.date, {
                     draw_name: drawName,
                     date: row.date,
@@ -287,7 +283,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             const batch = Array.from(uniqueMap.values());
 
-            // Si des doublons ont été retirés, on prévient l'utilisateur
             if (batch.length < validRows.length) {
                 const diff = validRows.length - batch.length;
                 showToast(`${diff} doublons ignorés automatiquement (Date identique).`, "info");
@@ -343,7 +338,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             {activeSubTab === 'manual' && (
                 <div className="grid md:grid-cols-2 gap-8">
                     {/* Formulaire */}
-                    <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
+                    <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
                         <div className="flex justify-between items-center mb-8">
                             <h3 className="font-black text-slate-700 dark:text-white uppercase tracking-tight flex items-center gap-2">
                                 {isEditing ? <Pencil size={18}/> : <Plus size={18}/>}
@@ -434,7 +429,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: BULK IMPORT */}
             {activeSubTab === 'bulk' && (
-                <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all">
+                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all">
                     
                     {importStep === 'upload' && (
                         <div className="animate-slide-up">
@@ -525,59 +520,62 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                 <button onClick={() => { setImportStep('upload'); setPreviewData([]); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><X size={16}/></button>
                             </div>
 
+                            {/* TABLEAU AVEC OVERFLOW POUR MOBILE */}
                             <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
-                                <table className="w-full text-left text-xs">
-                                    <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 shadow-sm">
-                                        <tr>
-                                            <th className="p-4 font-black text-slate-500 uppercase w-12">État</th>
-                                            <th className="p-4 font-black text-slate-500 uppercase">Date</th>
-                                            <th className="p-4 font-black text-slate-500 uppercase">Gagnants</th>
-                                            <th className="p-4 font-black text-slate-500 uppercase">Machine</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {filteredPreview.map((row, i) => (
-                                            <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
-                                                <td className="p-4">
-                                                    {row.isValid 
-                                                        ? <CheckCircle2 size={16} className="text-emerald-500"/> 
-                                                        : <div className="group relative">
-                                                            <AlertTriangle size={16} className="text-rose-500 cursor-help"/>
-                                                            <div className="absolute left-6 top-0 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-xl z-20 hidden group-hover:block">
-                                                                {row.error}
+                                <div className="w-full overflow-x-auto">
+                                    <table className="w-full text-left text-xs min-w-[600px]">
+                                        <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 shadow-sm">
+                                            <tr>
+                                                <th className="p-4 font-black text-slate-500 uppercase w-12">État</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase">Date</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase">Gagnants</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase">Machine</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {filteredPreview.map((row, i) => (
+                                                <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
+                                                    <td className="p-4">
+                                                        {row.isValid 
+                                                            ? <CheckCircle2 size={16} className="text-emerald-500"/> 
+                                                            : <div className="group relative">
+                                                                <AlertTriangle size={16} className="text-rose-500 cursor-help"/>
+                                                                <div className="absolute left-6 top-0 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-xl z-20 hidden group-hover:block">
+                                                                    {row.error}
+                                                                </div>
                                                             </div>
-                                                          </div>
-                                                    }
-                                                </td>
-                                                <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
-                                                <td className="p-4">
-                                                    {row.gagnants.length > 0 ? (
+                                                        }
+                                                    </td>
+                                                    <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
+                                                    <td className="p-4">
+                                                        {row.gagnants.length > 0 ? (
+                                                            <div className="flex gap-1">
+                                                                {row.gagnants.map((n, j) => (
+                                                                    <span key={j} className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">{n}</span>
+                                                                ))}
+                                                            </div>
+                                                        ) : <span className="text-slate-400 italic">Vide</span>}
+                                                    </td>
+                                                    <td className="p-4">
                                                         <div className="flex gap-1">
-                                                            {row.gagnants.map((n, j) => (
-                                                                <span key={j} className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">{n}</span>
+                                                            {row.machine.map((n, j) => (
+                                                                <span key={j} className="w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center justify-center text-[10px] font-bold">{n}</span>
                                                             ))}
                                                         </div>
-                                                    ) : <span className="text-slate-400 italic">Vide</span>}
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex gap-1">
-                                                        {row.machine.map((n, j) => (
-                                                            <span key={j} className="w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center justify-center text-[10px] font-bold">{n}</span>
-                                                        ))}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {filteredPreview.length === 0 && (
-                                            <tr>
-                                                <td colSpan={4} className="p-10 text-center text-slate-400 italic flex flex-col items-center gap-2">
-                                                    <Filter size={24} className="opacity-50"/>
-                                                    <span>Aucun élément dans cette vue.</span>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {filteredPreview.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={4} className="p-10 text-center text-slate-400 italic flex flex-col items-center gap-2">
+                                                        <Filter size={24} className="opacity-50"/>
+                                                        <span>Aucun élément dans cette vue.</span>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
 
                             <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800">

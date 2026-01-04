@@ -35,6 +35,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
   const [inspectingNumber, setInspectingNumber] = useState<number | null>(null);
   
+  // Interaction State (HUD)
+  const [hoveredNumber, setHoveredNumber] = useState<number | null>(null);
+  
   // Status Flags
   const [loading, setLoading] = useState(false); // Loading history
   const [computing, setComputing] = useState(false); // Loading math
@@ -224,7 +227,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     calibration,
     velocity: {}, 
     cliques,
-    vocalContext
+    vocalContext,
+    hoveredNumber,
+    setHoveredNumber
   };
 
   return (

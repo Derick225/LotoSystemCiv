@@ -89,7 +89,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             {/* Header Platinum Premium */}
-            <div className="bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-900 dark:to-slate-950 p-8 md:p-12 rounded-[3rem] shadow-2xl border border-white/50 dark:border-slate-800 relative overflow-hidden group">
+            <div className="bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-900 dark:to-slate-950 p-6 md:p-12 rounded-[3rem] shadow-2xl border border-white/50 dark:border-slate-800 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
                 
                 <div className="relative z-10 grid lg:grid-cols-2 gap-12 items-center">
