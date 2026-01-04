@@ -181,8 +181,11 @@ export const mathService = {
             if (power > maxPower) maxPower = power;
         }
         
-        // Normalisation approximative pour score 0-100
-        const normalizedEnergy = Math.min(100, Math.round(maxPower * 20));
+        // Normalisation et Gate de Bruit
+        // On considère que tout ce qui est en dessous de 0.05 est du bruit thermique
+        const noiseGate = 0.05;
+        const cleanPower = Math.max(0, maxPower - noiseGate);
+        const normalizedEnergy = Math.min(100, Math.round(cleanPower * 25)); // Gain ajusté
 
         return {
             number: n,

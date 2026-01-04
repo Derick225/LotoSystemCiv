@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -13,23 +14,26 @@ interface State {
  * LocalErrorBoundary - Targeted Module Error Isolation
  */
 export class LocalErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-  };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+    };
+  }
 
-  public static getDerivedStateFromError(_: Error): State {
+  static getDerivedStateFromError(_: Error): State {
     return { hasError: true };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn("Module Failure Intercepted:", error, errorInfo);
   }
 
-  public handleReload = () => {
+  handleReload = () => {
     this.setState({ hasError: false });
   };
 
-  public render(): ReactNode {
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div className="p-6 bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-300 rounded-2xl border border-red-200 dark:border-red-800/30 text-center animate-fade-in flex flex-col items-center justify-center gap-3 h-full min-h-[150px]">

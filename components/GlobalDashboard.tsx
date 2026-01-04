@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -129,7 +130,7 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        className="mt-12 overflow-hidden"
+                        className="mt-12 overflow-hidden border-t border-white/10 pt-8"
                       >
                           <TicketXRay numbers={result.gagnants} score={Math.round((metrics.acValue/10)*100)} showTitle={false} />
                       </motion.div>
@@ -154,7 +155,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const [globalHot, setGlobalHot] = useState<{number: number, count: number}[]>([]);
     const [fullSyncing, setFullSyncing] = useState(false);
     
-    // Day Selection State
     const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const [selectedDay, setSelectedDay] = useState<string>(daysOrder[new Date().getDay()]);
 
@@ -248,10 +248,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         }
     };
 
-    // Ordre d'affichage des jours (Lundi -> Dimanche pour l'UI)
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-
-    // Si aucune donnée n'est chargée nulle part, afficher l'écran d'initialisation
     const isEmptyState = !latestResult && !loadingSummary && summary.every(s => s.result === null);
 
     return (

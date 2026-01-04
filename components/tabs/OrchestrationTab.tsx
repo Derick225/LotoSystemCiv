@@ -10,6 +10,7 @@ import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2 } from
 
 interface OrchestrationTabProps { drawName: string; }
 
+// --- COMPOSANT DE VISUALISATION DE FLUX (FLOW CHART) ---
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [links, setLinks] = useState<{src: number, tgt: number, type: string, color: string}[]>([]);
     const [hoveredTgt, setHoveredTgt] = useState<number | null>(null);
@@ -20,9 +21,9 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
 
         prevDraw.forEach(src => {
             topCands.forEach(tgt => {
-                if (src === tgt) newLinks.push({ src, tgt, type: 'Répétition', color: '#10b981' });
-                else if (Math.abs(src - tgt) === 1) newLinks.push({ src, tgt, type: 'Voisin', color: '#3b82f6' });
-                else if (src === 91 - tgt) newLinks.push({ src, tgt, type: 'Miroir', color: '#ec4899' });
+                if (src === tgt) newLinks.push({ src, tgt, type: 'Répétition', color: '#10b981' }); // Vert
+                else if (Math.abs(src - tgt) === 1) newLinks.push({ src, tgt, type: 'Voisin', color: '#3b82f6' }); // Bleu
+                else if (src === 91 - tgt) newLinks.push({ src, tgt, type: 'Miroir', color: '#ec4899' }); // Rose
             });
         });
         return newLinks;
@@ -32,13 +33,16 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
 
     return (
         <div className="bg-slate-950 text-white p-8 rounded-[3rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[420px] flex flex-col justify-between group">
+            {/* Background Grid */}
             <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,#1e1b4b_0%,transparent_100%)]"></div>
             
             <div className="flex justify-between items-start relative z-10">
+                {/* SOURCE COLUMN (T-1) */}
                 <div className="text-center w-1/3 space-y-4">
-                    <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest">T-1 Winners</div>
+                    <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800 inline-block">T-1 Winners</div>
                     <div className="flex flex-col items-center gap-3">
                         {prevDraw.map(n => {
+                            // On grise si on survole une cible et qu'il n'y a pas de lien
                             const isRel = hoveredTgt ? links.some(l => l.tgt === hoveredTgt && l.src === n) : true;
                             return (
                                 <div key={`src-${n}`} className={`transition-all duration-300 ${!isRel ? 'opacity-20 scale-90 blur-[1px]' : 'opacity-100 scale-100'}`}>
@@ -49,16 +53,25 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                     </div>
                 </div>
                 
-                <div className="text-center w-1/3 pt-12">
+                {/* CENTER HUB */}
+                <div className="text-center w-1/3 pt-12 flex flex-col items-center">
                     <div className="text-[9px] uppercase font-black text-indigo-500 animate-pulse tracking-[0.4em]">Flux Neural</div>
-                    <div className="mt-4 flex justify-center"><Binary size={24} className="text-slate-800" /></div>
+                    <div className="mt-4 p-4 bg-indigo-500/10 rounded-full border border-indigo-500/20">
+                        <Binary size={24} className="text-indigo-400" />
+                    </div>
                 </div>
 
+                {/* TARGET COLUMN (Predictions) */}
                 <div className="text-center w-1/3 space-y-4">
-                    <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest">IA Cibles</div>
+                    <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800 inline-block">IA Cibles</div>
                     <div className="flex flex-col items-center gap-3">
                         {candidates.slice(0, 5).map(n => (
-                            <div key={`tgt-${n}`} className={`cursor-pointer transition-all duration-300 ${hoveredTgt === n ? 'scale-125 z-20' : hoveredTgt ? 'opacity-30 scale-90 blur-[1px]' : 'hover:scale-110'}`} onMouseEnter={() => setHoveredTgt(n)} onMouseLeave={() => setHoveredTgt(null)}>
+                            <div 
+                                key={`tgt-${n}`} 
+                                className={`cursor-pointer transition-all duration-300 ${hoveredTgt === n ? 'scale-125 z-20' : hoveredTgt ? 'opacity-30 scale-90 blur-[1px]' : 'hover:scale-110'}`} 
+                                onMouseEnter={() => setHoveredTgt(n)} 
+                                onMouseLeave={() => setHoveredTgt(null)}
+                            >
                                 <NumberBall number={n} size="md" selected={hoveredTgt === n} />
                             </div>
                         ))}
@@ -66,6 +79,7 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 </div>
             </div>
 
+            {/* VECTOR LINES (SVG LAYER) */}
             <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
                     <marker id="arrow" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
@@ -76,19 +90,33 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                     const sIdx = prevDraw.indexOf(link.src);
                     const tIdx = candidates.slice(0, 5).indexOf(link.tgt);
                     if (sIdx === -1 || tIdx === -1) return null;
+                    
                     const isFocus = hoveredTgt === null || link.tgt === hoveredTgt;
-                    const sY = 15 + (sIdx * 15);
-                    const tY = 15 + (tIdx * 15);
+                    // Coordonnées relatives (0-100)
+                    const sY = 18 + (sIdx * 13); // Ajustement position verticale source
+                    const tY = 18 + (tIdx * 13); // Ajustement position verticale cible
+                    
                     return (
-                        <path key={i} d={`M 33 ${sY} C 50 ${sY}, 50 ${tY}, 67 ${tY}`} fill="none" stroke={link.color} strokeWidth={isFocus ? 1.2 : 0.1} strokeOpacity={isFocus ? (hoveredTgt ? 0.9 : 0.4) : 0.02} markerEnd={isFocus ? "url(#arrow)" : ""} className="transition-all duration-500" />
+                        <path 
+                            key={i} 
+                            d={`M 28 ${sY} C 50 ${sY}, 50 ${tY}, 72 ${tY}`} // Courbe de Bézier cubique
+                            fill="none" 
+                            stroke={link.color} 
+                            strokeWidth={isFocus ? 0.8 : 0.2} 
+                            strokeOpacity={isFocus ? (hoveredTgt ? 1 : 0.6) : 0.1} 
+                            strokeDasharray={isFocus ? "none" : "2 2"}
+                            className="transition-all duration-500 ease-out" 
+                        />
                     );
                 })}
             </svg>
 
-            <div className="mt-8 flex flex-wrap gap-2 relative z-10 justify-center h-12 overflow-hidden">
+            {/* LEGEND */}
+            <div className="mt-8 flex flex-wrap gap-2 relative z-10 justify-center h-12 overflow-hidden items-center">
                 {links.filter(l => hoveredTgt === null || l.tgt === hoveredTgt).slice(0, 3).map((link, i) => (
-                    <div key={i} className="px-4 py-1.5 bg-slate-900 border border-slate-700 rounded-full text-[9px] font-black uppercase tracking-widest shadow-xl animate-fade-in" style={{ color: link.color }}>
-                        {link.type} Detected
+                    <div key={i} className="px-3 py-1 bg-slate-900 border border-slate-700 rounded-full text-[8px] font-black uppercase tracking-widest shadow-xl animate-fade-in flex items-center gap-1" style={{ borderColor: link.color }}>
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: link.color }}></div>
+                        <span style={{ color: link.color }}>{link.type}</span>
                     </div>
                 ))}
             </div>
@@ -101,7 +129,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     const [metrics, setMetrics] = useState<OrchestrationMetrics | null>(null);
     const [prevDraw, setPrevDraw] = useState<DrawResult | null>(null);
     const [loading, setLoading] = useState(true);
-    const [expandedCard, setExpandedCard] = useState<number | null>(null); // Interactive state
+    const [expandedCard, setExpandedCard] = useState<number | null>(null); 
     const isMounted = useRef(true);
 
     useEffect(() => {
@@ -131,6 +159,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
 
     return (
         <div className="space-y-10 animate-fade-in pb-20 w-full overflow-hidden">
+            {/* HERO CARD */}
             <div className="bg-gradient-to-br from-slate-900 to-indigo-950 p-8 md:p-12 rounded-[3.5rem] shadow-2xl border border-indigo-500/20 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-[100px] group-hover:scale-125 transition-transform duration-1000"></div>
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
@@ -149,6 +178,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                 </div>
             </div>
 
+            {/* FLOW CHART & RADAR */}
             <div className="grid lg:grid-cols-2 gap-8">
                 {prevDraw && (
                     <div className="bg-white dark:bg-slate-800 p-8 rounded-[3.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
@@ -166,6 +196,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                 </div>
             </div>
 
+            {/* CANDIDATES GRID */}
             <div className="bg-white dark:bg-slate-800 p-10 rounded-[4rem] shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
                 <h4 className="text-xl font-black text-slate-800 dark:text-white mb-10 flex items-center gap-4">
                     <Target className="text-indigo-600" size={28} /> Vecteurs de Convergence Isolés

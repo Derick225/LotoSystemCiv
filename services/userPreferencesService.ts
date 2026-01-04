@@ -7,6 +7,29 @@ const WATCHLIST_KEY = 'lotopro_user_watchlist';
 const TICKETS_KEY = 'lotopro_user_tickets';
 const BANKROLL_KEY = 'lotopro_user_bankroll';
 const SETTINGS_KEY = 'lotopro_user_settings';
+const FUSION_CONFIG_KEY = 'lotopro_fusion_config';
+
+// --- FUSION CONFIG (META ANALYST) ---
+
+export interface FusionConfig {
+    stability: number;
+    chaos: number;
+    harmony: number;
+}
+
+export const getFusionConfig = (): FusionConfig => {
+    try {
+        const raw = localStorage.getItem(FUSION_CONFIG_KEY);
+        return raw ? JSON.parse(raw) : { stability: 0.5, chaos: 0.3, harmony: 0.7 };
+    } catch (e) {
+        return { stability: 0.5, chaos: 0.3, harmony: 0.7 };
+    }
+};
+
+export const saveFusionConfig = (config: FusionConfig) => {
+    localStorage.setItem(FUSION_CONFIG_KEY, JSON.stringify(config));
+    // Pas de sync cloud critique pour ça, c'est une préférence UI locale volatile
+};
 
 // --- WATCHLIST ---
 

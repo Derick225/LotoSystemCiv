@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, type StrategyBias } from '../../services/metaAnalystService';
+import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
 import { useNexus } from '../NexusProvider';
 import type { PlatinumResult } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -9,7 +10,7 @@ import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, ShieldCheck, Activity, Target, 
     Layers, Zap, Sparkles, RefreshCw,
-    Sliders, Waves, Gauge, ChevronDown, Dna
+    Sliders, Waves, Gauge, ChevronDown, Dna, Save, LayoutTemplate
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, Cell, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from 'recharts';
 
@@ -25,17 +26,23 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const [loading, setLoading] = useState(false);
     const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
     
-    // Mixer State
-    const [bias, setBias] = useState<StrategyBias>({ stability: 0.5, chaos: 0.3, harmony: 0.7 });
+    // Mixer State with Persistence
+    const [bias, setBias] = useState<StrategyBias>(getFusionConfig());
     const isMounted = useRef(true);
 
     useEffect(() => {
         isMounted.current = true;
+        // Chargement initial du résultat si dispo
         if (history.length >= 30 && !result && !loading) {
             runMetaAnalysis();
         }
         return () => { isMounted.current = false; };
     }, [drawName, history, nexusLoading]);
+
+    // Auto-save configuration on change
+    useEffect(() => {
+        saveFusionConfig(bias);
+    }, [bias]);
 
     const runMetaAnalysis = async () => {
         if (isMounted.current) setLoading(true);
@@ -57,6 +64,16 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         } finally {
             if (isMounted.current) setLoading(false);
         }
+    };
+
+    const applyPreset = (preset: 'balanced' | 'chaos' | 'stable' | 'harmonic') => {
+        switch(preset) {
+            case 'balanced': setBias({ stability: 0.5, chaos: 0.5, harmony: 0.5 }); break;
+            case 'chaos': setBias({ stability: 0.2, chaos: 0.9, harmony: 0.4 }); break;
+            case 'stable': setBias({ stability: 0.9, chaos: 0.1, harmony: 0.6 }); break;
+            case 'harmonic': setBias({ stability: 0.6, chaos: 0.3, harmony: 0.95 }); break;
+        }
+        showToast(`Profil ${preset.toUpperCase()} chargé.`, "info");
     };
 
     if (nexusLoading) return (
@@ -91,34 +108,42 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         
                         {/* Mixer Panel */}
                         <div className="bg-white/60 dark:bg-black/30 backdrop-blur-md p-6 rounded-3xl border border-white/20 shadow-inner space-y-5">
-                            <div className="flex justify-between items-center">
+                            <div className="flex justify-between items-center mb-4">
                                 <h4 className="text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest flex items-center gap-2">
                                     <Sliders size={14}/> Paramètres de Fusion
                                 </h4>
-                                <button onClick={runMetaAnalysis} disabled={loading} className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100">
+                                <button onClick={runMetaAnalysis} disabled={loading} className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100" title="Relancer la Fusion">
                                     <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                                 </button>
+                            </div>
+
+                            {/* Presets */}
+                            <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-hide pb-2">
+                                <button onClick={() => applyPreset('balanced')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 transition flex items-center gap-1 whitespace-nowrap"><LayoutTemplate size={10}/> Équilibré</button>
+                                <button onClick={() => applyPreset('stable')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-emerald-100 hover:text-emerald-600 transition flex items-center gap-1 whitespace-nowrap"><Gauge size={10}/> Stable</button>
+                                <button onClick={() => applyPreset('chaos')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition flex items-center gap-1 whitespace-nowrap"><Zap size={10}/> Chaos</button>
+                                <button onClick={() => applyPreset('harmonic')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-purple-100 hover:text-purple-600 transition flex items-center gap-1 whitespace-nowrap"><Waves size={10}/> Spectral</button>
                             </div>
                             
                             <div className="space-y-4">
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Waves size={10}/> Harmonie Spectrale</span>
-                                        <span>{Math.round(bias.harmony * 100)}%</span>
+                                        <span className="text-purple-500">{Math.round(bias.harmony * 100)}%</span>
                                     </div>
-                                    <input type="range" min="0" max="1" step="0.1" value={bias.harmony} onChange={(e) => setBias(p => ({...p, harmony: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-600" />
+                                    <input type="range" min="0" max="1" step="0.1" value={bias.harmony} onChange={(e) => setBias(p => ({...p, harmony: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-purple-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Gauge size={10}/> Stabilité (Moyenne)</span>
-                                        <span>{Math.round(bias.stability * 100)}%</span>
+                                        <span className="text-emerald-500">{Math.round(bias.stability * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.stability} onChange={(e) => setBias(p => ({...p, stability: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-emerald-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Zap size={10}/> Entropie (Chaos)</span>
-                                        <span>{Math.round(bias.chaos * 100)}%</span>
+                                        <span className="text-rose-500">{Math.round(bias.chaos * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.chaos} onChange={(e) => setBias(p => ({...p, chaos: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-rose-500" />
                                 </div>
@@ -134,8 +159,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         </p>
                         <div className="flex gap-3 mt-6">
                             {result?.kingNumbers.map((k, i) => (
-                                <div key={k.number} className="relative group">
-                                    <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[8px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-900 z-10">
+                                <div key={k.number} className="relative group cursor-help">
+                                    <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[8px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-900 z-10 shadow-lg">
                                         {k.count}
                                     </div>
                                     <NumberBall number={k.number} size="md" isAttractor={true} />
@@ -192,7 +217,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 {/* Tags */}
                                 <div className="flex flex-wrap gap-2 mt-4 relative z-20">
                                     {combo.tags.map((tag, tIdx) => (
-                                        <span key={tIdx} className="text-[8px] font-black uppercase px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">
+                                        <span key={tIdx} className="text-[8px] font-black uppercase px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
                                             {tag}
                                         </span>
                                     ))}
@@ -258,7 +283,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 <Sparkles size={16}/> Note de l'Expert
                             </h4>
                             <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 leading-relaxed font-bold italic">
-                                "Le moteur Platinum v5.0 intègre désormais vos biais stratégiques. En augmentant le Chaos, vous forcez l'algorithme à explorer des chemins de moindre probabilité."
+                                "Le moteur Platinum v5.0 intègre désormais vos biais stratégiques en temps réel. La sauvegarde est automatique."
                             </p>
                         </div>
                     </div>
