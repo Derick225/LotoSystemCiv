@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll } from '../services/userPreferencesService';
+import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
 import { checkAndSyncRecentResults, fetchResults } from '../services/lotteryService';
 import { checkSubscriptionStatus } from '../services/subscriptionService';
 import { authService } from '../services/authService';
 import type { SavedTicket, DrawResult, SubscriptionState } from '../types';
 import { NumberBall } from './NumberBall';
-import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles } from 'lucide-react';
+import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles, CloudDownload } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from 'recharts';
 import { TicketXRay } from './TicketXRay';
 import { LOTO_PAYOUTS } from '../constants';
@@ -19,6 +19,7 @@ export const UserWallet: React.FC = () => {
     const [resultsMap, setResultsMap] = useState<Record<string, DrawResult[]>>({});
     const [loading, setLoading] = useState(true);
     const [scanning, setScanning] = useState(false);
+    const [syncingWallet, setSyncingWallet] = useState(false);
     const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
     const [bankroll, setBankroll] = useState(getBankroll());
     const [showKelly, setShowKelly] = useState(false);
@@ -59,6 +60,24 @@ export const UserWallet: React.FC = () => {
         setResultsMap(newResultsMap);
         calculateFinancials(saved, newResultsMap);
         setLoading(false);
+    };
+
+    const handleSyncWallet = async () => {
+        setSyncingWallet(true);
+        try {
+            const session = await authService.getSession();
+            if (session?.user) {
+                await hydrateUserData(session.user.id);
+                await loadWallet();
+                showToast("Portefeuille synchronisé depuis le Cloud.", "success");
+            } else {
+                showToast("Connectez-vous pour synchroniser.", "info");
+            }
+        } catch (e) {
+            showToast("Erreur de synchronisation.", "error");
+        } finally {
+            setSyncingWallet(false);
+        }
     };
 
     const handleScanLive = async () => {
@@ -265,6 +284,14 @@ export const UserWallet: React.FC = () => {
                 >
                     <RefreshCw size={18} className={scanning ? 'animate-spin' : ''} />
                     {scanning ? 'Scan en cours...' : 'Scan Résultats Live'}
+                </button>
+                <button 
+                    onClick={handleSyncWallet}
+                    disabled={syncingWallet}
+                    className="flex items-center gap-2 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
+                >
+                    <CloudDownload size={18} className={syncingWallet ? 'animate-bounce' : ''} />
+                    {syncingWallet ? 'Sync...' : 'Sync Cloud'}
                 </button>
             </div>
 

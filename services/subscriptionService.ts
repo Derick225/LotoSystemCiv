@@ -69,6 +69,45 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
 };
 
 /**
+ * Écoute les mises à jour de l'abonnement en temps réel.
+ * Permet de débloquer l'interface dès que le webhook de paiement met à jour la base.
+ */
+export const subscribeToSubscriptionUpdates = (userId: string, onUpdate: (sub: SubscriptionState) => void) => {
+    if (!isSupabaseConfigured()) return () => {};
+
+    const channel = supabase
+        .channel(`sub-updates-${userId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'user_preferences',
+                filter: `user_id=eq.${userId}`
+            },
+            (payload) => {
+                const newSub = payload.new.subscription;
+                if (newSub) {
+                    const now = new Date();
+                    const expiryDate = new Date(newSub.expires_at);
+                    const diffTime = expiryDate.getTime() - now.getTime();
+                    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    onUpdate({
+                        status: newSub.status === 'paid' ? 'active' : (daysLeft > 0 ? 'trial' : 'expired'),
+                        daysLeft: Math.max(0, daysLeft),
+                        expiresAt: newSub.expires_at,
+                        plan: newSub.plan || 'premium'
+                    });
+                }
+            }
+        )
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+};
+
+/**
  * Initialise le paiement réel via Edge Function.
  * Redirige l'utilisateur vers le guichet de paiement (CinetPay/FedaPay/etc).
  */

@@ -2,12 +2,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNexus } from './NexusProvider';
 import type { DrawResult } from '../types';
+import { analyzeMigrationFlux, type InterGameHeat } from '../services/interGameService';
 import { NumberBall } from './NumberBall';
 import { 
     Zap, Activity, TrendingUp, 
     RefreshCw, Layers, Microscope, 
     ShieldCheck, Binary, Waves, 
-    ArrowDownRight, Cpu
+    ArrowDownRight, Cpu, Globe, ArrowRight
 } from 'lucide-react';
 import { 
     Radar, RadarChart, PolarGrid, 
@@ -32,92 +33,86 @@ interface SelfCorrelationMetrics {
 export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ currentDrawName }) => {
     const { history, loading: nexusLoading } = useNexus();
     const [metrics, setMetrics] = useState<SelfCorrelationMetrics | null>(null);
+    const [migration, setMigration] = useState<InterGameHeat | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (history.length >= 15) {
-            analyzeSelfCorrelation();
-        } else if (!nexusLoading) {
-            setLoading(false);
-        }
+        const load = async () => {
+            if (history.length >= 15) {
+                // Parallélisation des analyses interne et externe
+                setLoading(true);
+                try {
+                    await analyzeSelfCorrelation();
+                    const migrationData = await analyzeMigrationFlux(currentDrawName);
+                    setMigration(migrationData);
+                } catch (e) {
+                    console.error("CrossDraw Analysis Error", e);
+                } finally {
+                    setLoading(false);
+                }
+            } else if (!nexusLoading) {
+                setLoading(false);
+            }
+        };
+        load();
     }, [currentDrawName, history, nexusLoading]);
 
     const analyzeSelfCorrelation = async () => {
-        setLoading(true);
-        try {
-            // Utilisation directe de l'historique du contexte
-            // history est déjà trié du plus récent au plus ancien
-            
-            // 1. Analyse des vecteurs internes (Auto-corrélation)
-            let machineToWinner = 0;
-            let winnersToWinners = 0;
-            let neighbors = 0;
-            let mirrors = 0;
-            let jumps = 0;
-            const sampleSize = Math.min(history.length - 2, 40);
+        // 1. Analyse des vecteurs internes (Auto-corrélation)
+        let machineToWinner = 0;
+        let winnersToWinners = 0;
+        let neighbors = 0;
+        let mirrors = 0;
+        let jumps = 0;
+        const sampleSize = Math.min(history.length - 2, 40);
 
-            for (let i = 0; i < sampleSize; i++) {
-                const T = history[i];
-                const T_minus_1 = history[i + 1];
-                const T_minus_2 = history[i + 2];
+        for (let i = 0; i < sampleSize; i++) {
+            const T = history[i];
+            const T_minus_1 = history[i + 1];
+            const T_minus_2 = history[i + 2];
 
-                T.gagnants.forEach(n => {
-                    // Fuite Machine
-                    if (T_minus_1.machine?.includes(n)) machineToWinner++;
-                    // Inertie
-                    if (T_minus_1.gagnants.includes(n)) winnersToWinners++;
-                    // Voisinage
-                    if (T_minus_1.gagnants.some(prev => Math.abs(prev - n) === 1)) neighbors++;
-                    // Miroir
-                    if (T_minus_1.gagnants.includes(91 - n)) mirrors++;
-                    // Saut (T-2)
-                    if (T_minus_2.gagnants.includes(n) && !T_minus_1.gagnants.includes(n)) jumps++;
-                });
-            }
-
-            // 2. Calcul des scores normalisés (0-100)
-            const totalEvents = sampleSize * 5;
-            const leakage = Math.round((machineToWinner / totalEvents) * 100 * 3.5);
-            const repetition = Math.round((winnersToWinners / totalEvents) * 100 * 3.5);
-            const neighbor = Math.round((neighbors / totalEvents) * 100 * 2.5);
-            const mirror = Math.round((mirrors / totalEvents) * 100 * 3.0);
-            const jump = Math.round((jumps / totalEvents) * 100 * 3.0);
-
-            // 3. Identification des Attracteurs par Translocation Active (T-1 -> NOW)
-            const lastDraw = history[0];
-            const attractors: Set<number> = new Set();
-            
-            // On privilégie le vecteur dominant
-            const vectorScores = [
-                { type: 'leakage', val: leakage, pool: lastDraw.machine || [] },
-                { type: 'repetition', val: repetition, pool: lastDraw.gagnants },
-                { type: 'mirror', val: mirror, pool: lastDraw.gagnants.map(n => 91 - n) },
-                { type: 'jump', val: jump, pool: history[1].gagnants }
-            ].sort((a, b) => b.val - a.val);
-
-            // On remplit le pool d'attracteurs avec les 2 vecteurs les plus forts
-            vectorScores.slice(0, 2).forEach(v => {
-                v.pool.forEach(n => {
-                    if (n >= 1 && n <= 90) attractors.add(n);
-                });
+            T.gagnants.forEach(n => {
+                if (T_minus_1.machine?.includes(n)) machineToWinner++;
+                if (T_minus_1.gagnants.includes(n)) winnersToWinners++;
+                if (T_minus_1.gagnants.some(prev => Math.abs(prev - n) === 1)) neighbors++;
+                if (T_minus_1.gagnants.includes(91 - n)) mirrors++;
+                if (T_minus_2.gagnants.includes(n) && !T_minus_1.gagnants.includes(n)) jumps++;
             });
-
-            setMetrics({
-                drawName: currentDrawName,
-                machineLeakage: Math.min(100, leakage),
-                repetitionRate: Math.min(100, repetition),
-                neighborForce: Math.min(100, neighbor),
-                mirrorForce: Math.min(100, mirror),
-                jumpRate: Math.min(100, jump),
-                attractors: Array.from(attractors).slice(0, 5),
-                stability: Math.round((leakage + repetition + neighbor + mirror) / 4)
-            });
-
-        } catch (e) {
-            console.error("Self-Correlation Error:", e);
-        } finally {
-            setLoading(false);
         }
+
+        const totalEvents = sampleSize * 5;
+        const leakage = Math.round((machineToWinner / totalEvents) * 100 * 3.5);
+        const repetition = Math.round((winnersToWinners / totalEvents) * 100 * 3.5);
+        const neighbor = Math.round((neighbors / totalEvents) * 100 * 2.5);
+        const mirror = Math.round((mirrors / totalEvents) * 100 * 3.0);
+        const jump = Math.round((jumps / totalEvents) * 100 * 3.0);
+
+        const lastDraw = history[0];
+        const attractors: Set<number> = new Set();
+        
+        const vectorScores = [
+            { type: 'leakage', val: leakage, pool: lastDraw.machine || [] },
+            { type: 'repetition', val: repetition, pool: lastDraw.gagnants },
+            { type: 'mirror', val: mirror, pool: lastDraw.gagnants.map(n => 91 - n) },
+            { type: 'jump', val: jump, pool: history[1].gagnants }
+        ].sort((a, b) => b.val - a.val);
+
+        vectorScores.slice(0, 2).forEach(v => {
+            v.pool.forEach(n => {
+                if (n >= 1 && n <= 90) attractors.add(n);
+            });
+        });
+
+        setMetrics({
+            drawName: currentDrawName,
+            machineLeakage: Math.min(100, leakage),
+            repetitionRate: Math.min(100, repetition),
+            neighborForce: Math.min(100, neighbor),
+            mirrorForce: Math.min(100, mirror),
+            jumpRate: Math.min(100, jump),
+            attractors: Array.from(attractors).slice(0, 5),
+            stability: Math.round((leakage + repetition + neighbor + mirror) / 4)
+        });
     };
 
     const chartData = useMemo(() => {
@@ -137,14 +132,14 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                 <RefreshCw className="text-indigo-500 animate-spin" size={40} />
                 <Binary className="absolute inset-0 m-auto text-indigo-300 w-4 h-4" />
             </div>
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Séquençage Intra-Flux...</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Séquençage Intra/Inter Flux...</span>
         </div>
     );
 
     if (!metrics) return null;
 
     return (
-        <div className="space-y-6 animate-fade-in pb-10">
+        <div className="space-y-8 animate-fade-in pb-10">
             {/* Main Analysis Hub */}
             <div className="bg-slate-950 border border-indigo-500/20 rounded-[3rem] p-6 md:p-10 shadow-2xl relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/5 rounded-full blur-[100px] group-hover:bg-indigo-600/10 transition-all duration-1000"></div>
@@ -157,9 +152,6 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                         <h3 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-tight">
                             Flux <span className="text-indigo-500">{metrics.drawName}</span>
                         </h3>
-                        <p className="text-slate-500 mt-3 text-sm md:text-base font-medium max-w-xl">
-                            Détection des cycles de translocation internes (Winners vs Machine) sur la séquence temporelle isolée.
-                        </p>
                     </div>
 
                     <div className="bg-white/5 backdrop-blur-2xl p-6 rounded-[2.5rem] border border-white/5 flex items-center gap-8 shadow-inner w-full lg:w-auto">
@@ -194,44 +186,53 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                                 </RadarChart>
                             </ResponsiveContainer>
                         </div>
-                        <p className="text-[9px] text-slate-600 font-bold uppercase mt-4 italic">Analyse basée sur les transitions T-1/T</p>
                     </div>
 
                     {/* Attracteurs (Right) */}
                     <div className="lg:col-span-7 space-y-8">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Zap className="text-white" size={18} /></div>
-                                <h4 className="text-lg font-black text-white uppercase tracking-tight">Attracteurs de Translocation</h4>
-                            </div>
-                            <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 uppercase">Signal Alpha</span>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-                            {metrics.attractors.map((n, i) => (
-                                <div key={n} className="bg-white/5 border border-white/5 p-5 rounded-3xl flex flex-col items-center gap-4 hover:bg-white/10 transition-all group/ball relative">
-                                    <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
-                                    <span className="text-[9px] font-black text-slate-500 uppercase">Vecteur {i+1}</span>
-                                    <NumberBall number={n} size="md" />
-                                    <div className="text-[8px] font-bold text-indigo-400 opacity-60 group-hover/ball:opacity-100 transition-opacity">
-                                        RE-ENTRY
+                        {/* Migration Inter-Jeux Widget */}
+                        {migration && migration.correlationFactor > 10 && (
+                            <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 p-5 rounded-3xl border border-emerald-500/20 flex items-center gap-5 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-3 opacity-10"><Globe size={64}/></div>
+                                <div className="p-3 bg-emerald-500/20 rounded-2xl text-emerald-400"><Globe size={24}/></div>
+                                <div className="flex-1 relative z-10">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <h4 className="text-xs font-black text-white uppercase tracking-widest">Influence Externe Détectée</h4>
+                                        <span className="text-[9px] font-black bg-emerald-500 text-slate-900 px-2 py-0.5 rounded">
+                                            {migration.correlationFactor}% CORR
+                                        </span>
                                     </div>
+                                    <p className="text-[10px] text-slate-300 font-medium">
+                                        Le tirage précédent <strong>{migration.sourceGame}</strong> exerce une pression de transfert.
+                                    </p>
+                                    {migration.migratingNumbers.length > 0 && (
+                                        <div className="flex gap-2 mt-3 items-center">
+                                            <span className="text-[9px] text-slate-500 uppercase font-black">Transferts :</span>
+                                            {migration.migratingNumbers.map(n => <span key={n} className="text-xs font-bold text-white bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">{n}</span>)}
+                                        </div>
+                                    )}
                                 </div>
-                            ))}
-                            {metrics.attractors.length === 0 && (
-                                <div className="col-span-5 py-10 text-center text-slate-500 italic text-sm">Calcul des vecteurs en cours...</div>
-                            )}
-                        </div>
+                                <ArrowRight size={20} className="text-emerald-500/50" />
+                            </div>
+                        )}
 
-                        <div className="p-5 bg-indigo-500/5 rounded-3xl border border-indigo-500/10 flex items-start gap-4">
-                            <Microscope size={22} className="text-indigo-400 shrink-0 mt-1" />
-                            <div className="space-y-1">
-                                <p className="text-xs md:text-sm text-slate-300 leading-relaxed font-medium">
-                                    "Le moteur détecte une dominance de **{chartData.sort((a,b)=>b.A - a.A)[0].subject}**. Les attracteurs isolés ci-dessus présentent une résonance harmonique avec les sorties Machine du tirage précédent."
-                                </p>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 flex items-center gap-2">
-                                    <ShieldCheck size={12} className="text-emerald-500" /> Données 100% isolées ({currentDrawName})
-                                </p>
+                        <div>
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Zap className="text-white" size={18} /></div>
+                                    <h4 className="text-lg font-black text-white uppercase tracking-tight">Attracteurs T-1</h4>
+                                </div>
+                                <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 uppercase">Signal Alpha</span>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                                {metrics.attractors.map((n, i) => (
+                                    <div key={n} className="bg-white/5 border border-white/5 p-5 rounded-3xl flex flex-col items-center gap-4 hover:bg-white/10 transition-all group/ball relative">
+                                        <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
+                                        <span className="text-[9px] font-black text-slate-500 uppercase">Vecteur {i+1}</span>
+                                        <NumberBall number={n} size="md" />
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>

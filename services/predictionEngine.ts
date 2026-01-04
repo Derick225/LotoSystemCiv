@@ -1,6 +1,7 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore } from './mathService';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
     frequency: 0.20,
@@ -27,14 +28,64 @@ export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMax: 18
 });
 
-export const saveAlgoWeights = (drawName: string, weights: AlgoWeights) => {
+// --- CLOUD SYNC LOGIC START ---
+
+export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
+    // 1. Sauvegarde Locale (Instantanéité)
     localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights));
+
+    // 2. Sauvegarde Cloud (Persistance Cross-Device)
+    if (isSupabaseConfigured()) {
+        try {
+            const { error } = await supabase.from('algo_weights').upsert({
+                draw_name: drawName,
+                weights: weights,
+                updated_at: new Date().toISOString()
+            });
+            if (error) console.warn("Cloud weights sync failed:", error.message);
+        } catch (e) {
+            console.warn("Cloud weights sync error", e);
+        }
+    }
 };
 
-export const getAlgoWeights = (drawName: string): AlgoWeights => {
+export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
+    // Stratégie "Stale-While-Revalidate"
+    // 1. On charge le local immédiatement
+    const rawLocal = localStorage.getItem(`weights_${drawName}`);
+    let currentWeights = rawLocal ? JSON.parse(rawLocal) : getDefaultWeights();
+
+    // 2. Si on est connecté, on vérifie le Cloud silencieusement
+    if (isSupabaseConfigured() && navigator.onLine) {
+        try {
+            const { data, error } = await supabase
+                .from('algo_weights')
+                .select('weights')
+                .eq('draw_name', drawName)
+                .single();
+
+            if (data && data.weights) {
+                // Si le cloud a des données différentes, on met à jour le local pour la prochaine fois
+                if (JSON.stringify(data.weights) !== rawLocal) {
+                    localStorage.setItem(`weights_${drawName}`, JSON.stringify(data.weights));
+                    return data.weights; // On retourne la version Cloud (Vérité terrain)
+                }
+            }
+        } catch (e) {
+            // Ignore cloud error, use local
+        }
+    }
+
+    return currentWeights;
+};
+
+// Version synchrone pour l'initialisation UI rapide (lectures seules)
+export const getAlgoWeightsSync = (drawName: string): AlgoWeights => {
     const raw = localStorage.getItem(`weights_${drawName}`);
     return raw ? JSON.parse(raw) : getDefaultWeights();
 };
+
+// --- CLOUD SYNC LOGIC END ---
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
     const raw = localStorage.getItem(`rules_${drawName}`);
@@ -47,17 +98,11 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 
 /**
  * Calibre dynamiquement les poids en fonction du Régime Fractal (Hurst).
- * - Hurst > 0.6 (Persistant) : Favorise Momentum, Markov, Succession.
- * - Hurst < 0.4 (Anti-Persistant) : Favorise Équilibre, Fréquence, Gap.
- * - Hurst ~ 0.5 (Chaos) : Favorise Poisson, IA, Spatial.
  */
 const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
-    // Calcul rapide du Hurst moyen sur les 5 numéros les plus fréquents récents
-    // pour estimer le régime global du jeu.
     let totalHurst = 0;
     const sampleSize = 5;
     for (let i = 1; i <= sampleSize; i++) {
-        // On prend arbitrairement les numéros 1 à 5 pour un échantillonnage rapide du "bruit" global
         totalHurst += calculateHurstForNumber(i, history).hurst;
     }
     const avgHurst = totalHurst / sampleSize;
@@ -67,32 +112,27 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
 
     if (avgHurst > 0.60) {
         label = "Tendance (Persistant)";
-        // Le marché suit une tendance : on mise sur ce qui bouge
         adjusted.momentum = (adjusted.momentum || 0) * 1.5;
         adjusted.markov = (adjusted.markov || 0) * 1.4;
         adjusted.leader_succession = (adjusted.leader_succession || 0) * 1.3;
-        // On réduit les stratégies de retour à la moyenne
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 0.7;
     } else if (avgHurst < 0.40) {
         label = "Oscillation (Retour Moyenne)";
-        // Le marché corrige les excès : on mise sur les retards et l'équilibre
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 1.6;
         adjusted.gap = (adjusted.gap || 0) * 1.4;
         adjusted.frequency = (adjusted.frequency || 0) * 1.3;
-        // On réduit les stratégies de suivi
         adjusted.momentum = (adjusted.momentum || 0) * 0.6;
     } else {
         label = "Chaos (Aléatoire)";
-        // Le marché est imprévisible : on s'appuie sur la géométrie et l'IA
         adjusted.spatial = (adjusted.spatial || 0) * 1.5;
         adjusted.ai_intuition = (adjusted.ai_intuition || 0) * 1.8;
         adjusted.poisson = (adjusted.poisson || 0) * 1.5;
     }
 
-    // Renormalisation pour garder la somme proche de l'originale
+    // Renormalisation
     const totalOld = Object.values(baseWeights).reduce((a, b) => a + (b||0), 0);
     const totalNew = Object.values(adjusted).reduce((a, b) => a + (b||0), 0);
-    const ratio = totalOld / totalNew;
+    const ratio = totalNew > 0 ? totalOld / totalNew : 1;
     
     (Object.keys(adjusted) as Array<keyof AlgoWeights>).forEach(k => {
         adjusted[k] = (adjusted[k] || 0) * ratio;
@@ -102,7 +142,7 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
 };
 
 /**
- * MOTEUR D'INFÉRENCE RÉEL (PLATINUM CORE v2)
+ * MOTEUR D'INFÉRENCE RÉEL (PLATINUM CORE v2.1 VALIDATED)
  */
 export const generateMasterPrediction = async (
     drawName: string, 
@@ -110,23 +150,28 @@ export const generateMasterPrediction = async (
     weightsToUse?: AlgoWeights,
     extraMetrics?: any
 ): Promise<Prediction> => {
-    let weights = weightsToUse || getAlgoWeights(drawName);
+    
+    const integrity = validateDataIntegrity(history);
+    if (!integrity.valid) {
+        console.warn("Prediction Warning: Data integrity check failed.", integrity.issues);
+    }
+
+    // Utilisation de la version Async/Cloud si possible pour les poids
+    let weights = weightsToUse || await getAlgoWeights(drawName);
     const breakdown: Record<number, ScoreBreakdown> = {};
     
     if (history.length < 5) {
         throw new Error("Profondeur de données insuffisante pour l'inférence.");
     }
 
-    // 1. Adaptation au Régime de Marché
     const { weights: dynamicWeights, regimeLabel } = adjustWeightsToRegime(weights, history);
-    weights = dynamicWeights; // On utilise les poids calibrés
+    weights = dynamicWeights;
 
     const regularity = calculateRegularity(history);
     const spectralMap = extraMetrics?.spectral || [];
     const fractalMap = extraMetrics?.fractal || [];
     const gravityField = calculateGravityField(history);
     
-    // Matrice de transition simplifiée pour Markov
     const transitions: Record<number, number> = {};
     const lastWinners = history[0].gagnants;
     for(let i=0; i < history.length - 1; i++) {
@@ -142,23 +187,13 @@ export const generateMasterPrediction = async (
         const frac = fractalMap.find((f: any) => f.number === num);
         const gravity = gravityField[num] || 0;
         
-        // 1. Fréquence (Normalisée sur 100)
         const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 500);
-        
-        // 2. Gap (Zone critique 8-18 favors)
         const currentGap = reg?.currentGap || 0;
         const gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
-        
-        // 3. Spectral Energy
         const specScore = spec?.energy || 0;
-
-        // 4. Markovian Transition
         const markovScore = Math.min(100, (transitions[num] || 0) * 10);
-
-        // 5. Gravity Pull (Force d'attraction des voisins)
         const spatialScore = Math.min(100, gravity * 50);
 
-        // Score final par neurone
         const nBreakdown: ScoreBreakdown = {
             ...getDefaultWeights(),
             frequency: Math.min(100, freqScore),
@@ -172,7 +207,6 @@ export const generateMasterPrediction = async (
 
         breakdown[num] = nBreakdown;
 
-        // Calcul du score global pondéré
         let finalScore = 0;
         Object.entries(weights).forEach(([key, weight]) => {
             const val = (nBreakdown as any)[key] || 0;
@@ -184,16 +218,22 @@ export const generateMasterPrediction = async (
 
     const sorted = scores.sort((a, b) => b.score - a.score);
     const suggested = sorted.slice(0, 5).map(s => s.num);
+    const zScore = calculatePredictionZScore(suggested);
+    const isOutlier = Math.abs(zScore) > 2.5;
+
+    const signalStrength = (sorted[0].score - sorted[10].score) / (sorted[0].score || 1);
+    let baseConfidence = Math.min(99, Math.round(50 + (signalStrength * 500) + (history.length / 10)));
     
-    // Calcul de confiance basé sur la netteté du signal (Différence entre le 1er et le 10ème score)
-    const signalStrength = (sorted[0].score - sorted[10].score) / sorted[0].score;
-    const confidence = Math.min(99, Math.round(50 + (signalStrength * 500) + (history.length / 10)));
+    if (integrity.score < 80) baseConfidence *= 0.8;
+    if (isOutlier) baseConfidence *= 0.9;
+
+    const analysisText = `Régime: ${regimeLabel}. Conv. sur ${suggested[0]} (Score: ${sorted[0].score.toFixed(1)}). ${isOutlier ? '⚠️ Combinaison atypique (Z>2.5).' : 'Structure équilibrée.'}`;
 
     return {
         suggestedNumbers: suggested,
         candidates: sorted.slice(5, 15).map(s => s.num),
-        confidence,
-        analysis: `Régime: ${regimeLabel}. Convergence forte sur ${suggested[0]} (Score: ${sorted[0].score.toFixed(1)}). Gravité spatiale active.`,
+        confidence: Math.round(baseConfidence),
+        analysis: analysisText,
         breakdown,
         usedWeights: weights
     };
@@ -211,7 +251,6 @@ export const getStrategyName = (weights: AlgoWeights): string => {
 };
 
 export const analyzeTicketStrength = async (nums: number[], drawName: string): Promise<TicketAnalysisResult> => {
-    const weights = getAlgoWeights(drawName);
     const ac = calculateACValue(nums);
     const sum = nums.reduce((a,b) => a+b, 0);
     
@@ -224,11 +263,10 @@ export const analyzeTicketStrength = async (nums: number[], drawName: string): P
     const even = nums.filter(n => n % 2 === 0).length;
     if (even === 0 || even === 5) { score -= 10; warnings.push("Déséquilibre Pair/Impair total."); }
 
-    // Bonus si suite
     const sorted = [...nums].sort((a,b)=>a-b);
     let consecutive = 0;
     for(let i=0; i<sorted.length-1; i++) if(sorted[i+1] === sorted[i]+1) consecutive++;
-    if (consecutive > 2) { score -= 20; warnings.push("Trop de suites consécutives (Probabilité faible)."); }
+    if (consecutive > 2) { score -= 20; warnings.push("Trop de suites consécutives."); }
     
     return {
         score: Math.max(0, Math.min(100, score + (ac * 5))),
@@ -251,7 +289,6 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
     } else if (hits >= 2) {
         reasoning.push("ADN validé. Renforcement des paramètres actuels.");
     } else {
-        // Punition du leader actuel si échec total
         const keys = Object.keys(newWeights) as Array<keyof AlgoWeights>;
         const topKey = keys.reduce((a, b) => (newWeights[a] || 0) > (newWeights[b] || 0) ? a : b);
         newWeights[topKey] = Math.max(0.05, (newWeights[topKey] || 0) * 0.9);

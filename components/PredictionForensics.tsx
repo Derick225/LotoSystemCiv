@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import type { ForensicReport, ForensicEvidence, AlgoWeights, AdaptiveRules, PredictionFeedback } from '../types';
 import { NumberBall } from './NumberBall';
@@ -44,8 +45,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         loadOrchestrationAudit();
     }, [report]);
 
-    const handlePrepareCorrection = () => {
-        const currentWeights = getAlgoWeights(report.drawName);
+    const handlePrepareCorrection = async () => {
+        const currentWeights = await getAlgoWeights(report.drawName);
         const currentRules = getAdaptiveRules(report.drawName);
         const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
         setCorrectionPlan(plan);

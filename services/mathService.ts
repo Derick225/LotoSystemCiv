@@ -31,12 +31,16 @@ export const calculateACValue = (numbers: number[]): number => {
       diffs.add(Math.abs(sorted[j] - sorted[i]));
     }
   }
-  return diffs.size - (numbers.length - 1);
+  // AC Value = Nombre de différences uniques - (Taille du tirage - 1)
+  return Math.max(0, diffs.size - (numbers.length - 1));
 };
 
 export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
+
+// Fenêtre de Hamming pour réduire les fuites spectrales dans la FFT
+const hammingWindow = (n: number, N: number) => 0.54 - 0.46 * Math.cos((2 * Math.PI * n) / (N - 1));
 
 export const calculateGravityField = (history: DrawResult[]): Record<number, number> => {
     const gravity: Record<number, number> = {};
@@ -80,6 +84,7 @@ export const mathService = {
         if (data) {
             return { spectral: data.spectral, fractal: data.fractal };
         }
+        // Déclenchement silencieux du calcul cloud si manquant
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
         return null;
     } catch (e) { return null; }
@@ -87,53 +92,140 @@ export const mathService = {
 
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {
     const N = Math.min(history.length, 200);
+    if (N < 10) return []; // Pas assez de données pour FFT
+
     const sample = history.slice(0, N);
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
-        const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
-        const mean = signal.reduce((a, b) => a + b, 0) / N;
+        // Signal binaire : 1 si sorti, 0 sinon
+        const rawSignal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
+        
+        // Application de la fenêtre de Hamming et centrage (suppression DC offset)
+        const mean = rawSignal.reduce((a, b) => a + b, 0) / N;
+        const signal = rawSignal.map((v, idx) => (v - mean) * hammingWindow(idx, N));
+
         let maxPower = 0;
         const limit = Math.floor(N / 2);
-        for (let k = 1; k < limit; k+=2) {
+        
+        // DFT (Discrete Fourier Transform)
+        for (let k = 1; k < limit; k+=1) { // Pas de 1 pour meilleure résolution
             let re = 0, im = 0;
             for (let t = 0; t < N; t++) {
                 const angle = (2 * Math.PI * k * t) / N;
-                re += (signal[t] - mean) * Math.cos(angle);
-                im -= (signal[t] - mean) * Math.sin(angle);
+                re += signal[t] * Math.cos(angle);
+                im -= signal[t] * Math.sin(angle);
             }
-            const power = (re * re + im * im) / N;
+            const power = (re * re + im * im);
             if (power > maxPower) maxPower = power;
         }
+        
+        // Normalisation approximative pour score 0-100
+        const normalizedEnergy = Math.min(100, Math.round(maxPower * 20));
+
         return {
             number: n,
-            energy: Math.min(100, Math.round(maxPower * 600)),
-            resonance: (maxPower * 600) > 75,
-            dominantPeriod: parseFloat((N / (maxPower * 10 || 1)).toFixed(1))
+            energy: normalizedEnergy,
+            resonance: normalizedEnergy > 75,
+            dominantPeriod: parseFloat((N / (maxPower * 0.5 || 1)).toFixed(1)) // Estimation grossière de la période
         };
     }).sort((a, b) => b.energy - a.energy);
   },
 
   calculateFractal(history: DrawResult[]): FractalMetric[] {
     const N = Math.min(history.length, 100);
+    if (N < 20) return Array.from({ length: 90 }, (_, i) => ({ number: i + 1, hurst: 0.5, regime: 'RANDOM' }));
+
     const sample = history.slice(0, N);
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
         const mean = signal.reduce((a, b) => a + b, 0) / N;
         const x = signal.map(v => v - mean);
+        
         let cumsum = 0;
         const y = x.map(v => (cumsum += v, cumsum));
+        
         const R = Math.max(...y) - Math.min(...y);
-        const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1;
-        const h = Math.log(R / S) / Math.log(N);
-        const hurst = Math.max(0, Math.min(1, isNaN(h) ? 0.5 : h));
+        const variance = x.reduce((a, v) => a + v * v, 0) / N;
+        const S = Math.sqrt(variance);
+
+        let hurst = 0.5;
+        if (R > 0 && S > 0) {
+            hurst = Math.log(R / S) / Math.log(N);
+        }
+        
+        // Clamp pour éviter les valeurs aberrantes mathématiques
+        hurst = Math.max(0, Math.min(1, isNaN(hurst) ? 0.5 : hurst));
+        
         return {
             number: n,
             hurst: hurst,
-            regime: hurst > 0.58 ? 'PERSISTANT' : hurst < 0.42 ? 'ANTI-PERSISTANT' : 'RANDOM'
+            regime: hurst > 0.6 ? 'PERSISTANT' : hurst < 0.4 ? 'ANTI-PERSISTANT' : 'RANDOM'
         };
     });
   }
+};
+
+/**
+ * Valide l'intégrité statistique d'un échantillon historique.
+ * Retourne un score de confiance sur la qualité des données.
+ */
+export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; score: number; issues: string[] } => {
+    const issues: string[] = [];
+    if (history.length < 10) {
+        return { valid: false, score: 0, issues: ["Historique critique insuffisant (<10)"] };
+    }
+
+    let score = 100;
+    
+    // 1. Vérification de continuité des dates (Approximation)
+    const dates = history.slice(0, 10).map(h => new Date(h.date).getTime());
+    for(let i=0; i<dates.length-1; i++) {
+        if (isNaN(dates[i])) {
+            score -= 10;
+            issues.push("Dates invalides détectées");
+            break;
+        }
+    }
+
+    // 2. Vérification des doublons stricts (même date, mêmes numéros)
+    const signatures = new Set();
+    let duplicates = 0;
+    history.forEach(h => {
+        const sig = `${h.date}-${h.gagnants.join(',')}`;
+        if (signatures.has(sig)) duplicates++;
+        signatures.add(sig);
+    });
+    
+    if (duplicates > 0) {
+        score -= (duplicates * 5);
+        issues.push(`${duplicates} doublons détectés`);
+    }
+
+    // 3. Vérification de la plage des numéros
+    const outOfBounds = history.some(h => h.gagnants.some(n => n < 1 || n > 90));
+    if (outOfBounds) {
+        score -= 50;
+        issues.push("Numéros hors limites (1-90)");
+    }
+
+    return { 
+        valid: score > 50, 
+        score: Math.max(0, score), 
+        issues 
+    };
+};
+
+/**
+ * Calcule le Z-Score d'une prédiction (somme) par rapport à la distribution théorique.
+ * Z = (X - μ) / σ
+ * Pour Loto 5/90 : μ ≈ 227.5, σ ≈ 60
+ */
+export const calculatePredictionZScore = (numbers: number[]): number => {
+    const sum = numbers.reduce((a, b) => a + b, 0);
+    const mu = 227.5;
+    const sigma = 60; // Approximation empirique
+    return (sum - mu) / sigma;
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
@@ -167,7 +259,6 @@ export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
         const res = await runWorkerTask('succession_matrix', history);
         return res || { matrix: {}, totals: {} };
     } catch {
-        // Fallback vide si échec worker
         return { matrix: {}, totals: {} };
     }
 };
@@ -199,7 +290,9 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
     const regularity = calculateRegularity(history);
     regularity.forEach(r => {
         const lastGap = r.lastGaps[0] || r.avgGap;
-        const velocity = (r.avgGap - r.currentGap) / (lastGap || 1);
+        // Protection division par zéro
+        const denominator = lastGap === 0 ? 0.5 : lastGap;
+        const velocity = (r.avgGap - r.currentGap) / denominator;
         scores[r.number] = Math.min(100, Math.max(0, 50 + velocity * 50));
     });
     return scores;
@@ -207,14 +300,21 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
     const N = Math.min(history.length, 100);
+    if (N < 10) return { hurst: 0.5 };
+
     const sample = history.slice(0, N);
     const signal = sample.map(d => (d.gagnants.includes(num) ? 1 : 0));
     const mean = signal.reduce((a, b) => a + b, 0) / N;
+    
     const x = signal.map(v => v - mean);
     let cumsum = 0;
     const y = x.map(v => (cumsum += v, cumsum));
+    
     const R = Math.max(...y) - Math.min(...y);
-    const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1;
+    const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1; // Fallback 1
+    
+    if (R === 0) return { hurst: 0.5 };
+
     const h = Math.log(R / S) / Math.log(N);
     return { hurst: isNaN(h) ? 0.5 : Math.max(0, Math.min(1, h)) };
 };
@@ -239,9 +339,13 @@ export const calculateRunsTest = (winners: number[]): { runs: number; zScore: nu
     
     const n1 = binary.filter(v => v).length;
     const n2 = binary.length - n1;
+    
+    if (n1 === 0 || n2 === 0) return { runs, zScore: 0, isRandom: false };
+
     const expectedRuns = ((2 * n1 * n2) / binary.length) + 1;
     const variance = (2 * n1 * n2 * (2 * n1 * n2 - binary.length)) / (Math.pow(binary.length, 2) * (binary.length - 1));
-    const zScore = (runs - expectedRuns) / (Math.sqrt(variance) || 1);
+    
+    const zScore = variance > 0 ? (runs - expectedRuns) / Math.sqrt(variance) : 0;
     
     return { runs, zScore, isRandom: Math.abs(zScore) < 1.96 };
 };
@@ -274,6 +378,8 @@ export const calculateShannonEntropy = (history: DrawResult[]): EntropyMetric =>
         total++;
     }));
     let entropy = 0;
+    if (total === 0) return { normalized: 0 };
+
     Object.values(freq).forEach(count => {
         const p = count / total;
         if (p > 0) entropy -= p * Math.log2(p);
@@ -284,9 +390,11 @@ export const calculateShannonEntropy = (history: DrawResult[]): EntropyMetric =>
 export const calculateChiSquare = (freqMap: Record<number, number>, total: number): ChiSquareMetric => {
     let chi = 0;
     const expected = total / 90;
+    if (expected === 0) return { score: 0 };
+
     for(let i=1; i<=90; i++) {
         const observed = freqMap[i] || 0;
-        chi += Math.pow(observed - expected, 2) / (expected || 1);
+        chi += Math.pow(observed - expected, 2) / expected;
     }
     return { score: parseFloat(chi.toFixed(2)) };
 };
@@ -318,8 +426,13 @@ export const detectCommunities = (nums: number[], correlationMatrix: any): Recor
     const comms: Record<number, number> = {};
     nums.forEach((n, i) => {
         const affs = correlationMatrix[n]?.affinities || {};
-        const bestFriend = Object.entries(affs).sort((a: any, b: any) => b[1] - a[1])[0];
-        comms[n] = bestFriend ? (parseInt(bestFriend[0]) % 8) : (i % 8);
+        const entries = Object.entries(affs);
+        if (entries.length > 0) {
+            const bestFriend = entries.sort((a: any, b: any) => b[1] - a[1])[0];
+            comms[n] = bestFriend ? (parseInt(bestFriend[0]) % 8) : (i % 8);
+        } else {
+            comms[n] = i % 8;
+        }
     });
     return comms;
 };
@@ -330,10 +443,11 @@ export const calculateBenfordCompliance = (numbers: number[]): ChiSquareMetric =
     firstDigits.forEach(d => counts[d] = (counts[d] || 0) + 1);
     let chi = 0;
     for(let d=1; d<=9; d++) {
-        const observed = (counts[d] || 0) / numbers.length;
+        const observed = (counts[d] || 0) / Math.max(1, numbers.length);
         const expected = Math.log10(1 + 1/d);
         chi += Math.pow(observed - expected, 2) / expected;
     }
+    // Score inversé : 100 = Parfait respect
     return { score: Math.max(0, 100 - chi * 100) };
 };
 
@@ -360,9 +474,13 @@ export const calculateVolatility = (history: DrawResult[]) => {
     const avg = sums.reduce((a,b)=>a+b,0) / sums.length;
     const variance = sums.reduce((a,v)=>a + Math.pow(v-avg, 2), 0) / sums.length;
     const stdDev = Math.sqrt(variance);
+    
+    // Normalisation approximative (StdDev max ~ 120 pour loto)
+    const score = Math.min(100, Math.round((stdDev / 60) * 100));
+    
     return {
-        score: Math.min(100, Math.round((stdDev / 50) * 100)),
-        status: stdDev > 60 ? 'Chaos' : stdDev > 35 ? 'Volatile' : 'Stable',
+        score,
+        status: score > 75 ? 'Chaos' : score > 45 ? 'Volatile' : 'Stable',
         trend: sums[0] > avg ? 'up' : 'down'
     };
 };
@@ -372,33 +490,42 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
         const num = i + 1;
         const gaps: number[] = [];
         let lastIdx = -1;
-        history.forEach((d, idx) => {
+        
+        // Optimisation : On ne parcourt que les 200 derniers tirages pour la régularité locale
+        const sample = history.length > 200 ? history.slice(0, 200) : history;
+        
+        sample.forEach((d, idx) => {
             if(d.gagnants.includes(num)) {
                 if(lastIdx !== -1) gaps.push(idx - lastIdx);
                 lastIdx = idx;
             }
         });
-        const currentGap = history.findIndex(d => d.gagnants.includes(num));
-        const avgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : 18;
-        const variance = gaps.reduce((a,v)=>a + Math.pow(v-avgGap, 2), 0) / (gaps.length || 1);
+        
+        const currentGap = sample.findIndex(d => d.gagnants.includes(num));
+        const safeAvgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : (sample.length / 5);
+        
+        const variance = gaps.reduce((a,v)=>a + Math.pow(v-safeAvgGap, 2), 0) / (Math.max(1, gaps.length));
+        
         return {
             number: num,
-            avgGap: parseFloat(avgGap.toFixed(2)),
+            avgGap: parseFloat(safeAvgGap.toFixed(2)),
             stdDev: parseFloat(Math.sqrt(variance).toFixed(2)),
-            currentGap: currentGap === -1 ? history.length : currentGap,
+            currentGap: currentGap === -1 ? sample.length : currentGap,
             lastGaps: gaps.slice(0, 5),
-            nextExpectedIn: Math.max(0, Math.round(avgGap - currentGap))
+            nextExpectedIn: Math.max(0, Math.round(safeAvgGap - (currentGap === -1 ? sample.length : currentGap)))
         };
     });
 };
 
 export const detectGameRegime = (history: DrawResult[]) => {
-    const totalHurst = Array.from({ length: 5 }, (_, i) => calculateHurstForNumber(i + 1, history).hurst)
-        .reduce((a,b) => a + b, 0) / 5;
+    // Échantillon sur 5 numéros clés pour performance
+    const keys = [1, 23, 45, 67, 90]; 
+    const hursts = keys.map(k => calculateHurstForNumber(k, history).hurst);
+    const avgHurst = hursts.reduce((a,b)=>a+b,0) / keys.length;
     
     return { 
-        hurst: totalHurst, 
-        regime: totalHurst > 0.60 ? 'PERSISTANT' : totalHurst < 0.40 ? 'CHAOS' : 'NOMINAL' 
+        hurst: avgHurst, 
+        regime: avgHurst > 0.60 ? 'PERSISTANT' : avgHurst < 0.40 ? 'ANTI-PERSISTANT' : 'CHAOS' 
     };
 };
 
@@ -412,16 +539,15 @@ export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => 
 };
 
 export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => {
-    const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
+    const { matrix } = await calculateSuccessionMatrixAsync(history);
     return Array.from({length: 90}, (_, i) => {
         const n = i+1;
-        // Fix: Explicit typing for reduce to resolve type errors
         const row = matrix[n] || {};
         const outWeight = Object.values(row).reduce<number>((a, b) => a + (Number(b) || 0), 0);
         return {
             number: n,
             centrality: outWeight,
-            normalized: Math.min(100, Math.round((outWeight / (history.length * 5)) * 1000))
+            normalized: Math.min(100, Math.round((outWeight / (history.length * 0.5)) * 100))
         };
     });
 };
@@ -431,14 +557,17 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
     const spec = spectral.find(s => s.number === num);
     const frac = fractal.find(f => f.number === num);
     
+    const safeAvg = reg?.avgGap || 18;
+    const safeGap = reg?.currentGap || 0;
+    
     return {
-        temperature: Math.round((spec?.energy || 0) * 0.7 + (reg?.currentGap || 0)),
+        temperature: Math.round((spec?.energy || 0) * 0.6 + (safeGap / safeAvg) * 20),
         hurst: frac?.hurst || 0.5,
-        lastGap: reg?.currentGap || 0,
-        avgGap: reg?.avgGap || 18,
-        nextProb: Math.round(50 + (reg ? (reg.currentGap / reg.avgGap) * 20 : 0)),
+        lastGap: safeGap,
+        avgGap: safeAvg,
+        nextProb: Math.round(50 + (safeGap > safeAvg ? 20 : -10)),
         spectralEnergy: spec?.energy || 0,
-        stdDev: reg?.stdDev || 2.5,
+        stdDev: reg?.stdDev || 5,
         historyGraph: history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse(),
         affinity: [], 
         nemesis: []

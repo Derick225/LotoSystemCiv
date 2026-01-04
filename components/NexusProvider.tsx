@@ -5,14 +5,14 @@ import {
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
   NexusContextType, OracleVocalContext
 } from '../types';
-import { lotteryService } from '../services/lotteryService';
+import { lotteryService, checkAndSyncRecentResults } from '../services/lotteryService';
 import { 
     calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
     calculateNetworkCentralityAsync, calculateSpectralMetricsAsync,
     calculateFractalMetricsAsync
 } from '../services/mathService';
-import { getAlgoWeights } from '../services/predictionEngine';
+import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
 import { audioEngine } from '../utils/audioEngine';
@@ -24,15 +24,21 @@ const NexusContext = createContext<NexusContextType | null>(null);
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast(); 
   
-  // State
+  // Core State
   const [drawName, setDrawNameState] = useState('Reveil');
   const [history, setHistory] = useState<DrawResult[]>([]);
+  
+  // Computed State (Lazy)
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
   const [fractal, setFractal] = useState<FractalMetric[]>([]);
-  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeights('Reveil'));
+  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync('Reveil'));
   const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
   const [inspectingNumber, setInspectingNumber] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  
+  // Status Flags
+  const [loading, setLoading] = useState(false); // Loading history
+  const [computing, setComputing] = useState(false); // Loading math
+  
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
   
@@ -48,113 +54,100 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Vérification initiale de la connexion
   useEffect(() => {
       const checkConnection = async () => {
-          if (!isSupabaseConfigured()) {
-              console.log("Nexus en mode local (Pas de connexion Supabase)");
-              return;
-          }
+          if (!isSupabaseConfigured()) return;
           const status = await testDatabaseConnection();
-          if (!status.success) {
-              console.error("DB Connection Error:", status.error);
-              if (!status.error.includes("Variables d'environnement")) {
-                  showToast(`Erreur Base de Données: ${status.error}`, "error");
-              }
+          if (!status.success && !status.error.includes("Variables d'environnement")) {
+              showToast(`Erreur Base de Données: ${status.error}`, "error");
           }
       };
       checkConnection();
   }, []);
 
   const loadData = useCallback(async () => {
-    if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-    }
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
 
     setLoading(true);
+    setComputing(true); // On indique que des calculs vont suivre
+
     try {
+        // 1. Chargement Historique (Prioritaire)
         const hist = await lotteryService.fetchHistory(drawName);
         
         if (abortControllerRef.current.signal.aborted) return;
 
-        setHistory(hist); 
-        setGlobalWeights(getAlgoWeights(drawName));
+        // Auto-Repair Check
+        if (hist.length === 0 && drawName !== 'ALL' && isSupabaseConfigured()) {
+            await checkAndSyncRecentResults(drawName);
+            const retriedHist = await lotteryService.fetchHistory(drawName);
+            setHistory(retriedHist);
+            if (retriedHist.length > 0) showToast(`Données restaurées pour ${drawName}`, "success");
+        } else {
+            setHistory(hist); 
+        }
+        
+        // Fin du chargement critique (UI débloquée)
+        setLoading(false);
 
-        if (hist.length > 0) {
-            if (drawName === 'ALL') {
-                 setSpectral([]);
-                 setFractal([]);
-                 setRegularity([]);
-                 setCorrelationMatrix({});
-                 setCliques([]);
-                 setSmartInsights([]);
-                 setCalibration(null);
+        // 2. Chargement Poids (Async)
+        getAlgoWeights(drawName).then(w => {
+            if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
+        });
+
+        // 3. Calculs HPC (Non-bloquants, en arrière plan)
+        const activeHistory = hist.length === 0 ? [] : hist; 
+
+        if (activeHistory.length > 0 && drawName !== 'ALL') {
+            const computeSample = activeHistory.slice(0, 500);
+
+            // On lance les calculs en parallèle
+            const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
+                calculateSpectralMetricsAsync(computeSample),
+                calculateFractalMetricsAsync(computeSample),
+                Promise.resolve(calculateRegularity(computeSample)),
+                calculateCorrelationMatrixAsync(computeSample),
+                calculateNetworkCentralityAsync(computeSample),
+                getPredictionHistoryAsync(drawName)
+            ]);
+            
+            if (abortControllerRef.current.signal.aborted) return;
+
+            setSpectral(spec);
+            setFractal(frac);
+            setRegularity(regData);
+            setCorrelationMatrix(corr);
+            setCliques(centrality);
+
+            const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
+            const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
+            setSmartInsights(insights);
+
+            if (preds.length > 5) {
+                const perf = calculateHistoricalPerformance(preds, activeHistory);
+                setCalibration({
+                    overallScore: 0.25 - (perf.accuracy / 100),
+                    reliability: Math.min(100, Math.round(perf.accuracy * 3.5)),
+                    bias: perf.accuracy > 20 ? 'OPTIMIST' : 'NEUTRAL',
+                    sampleSize: perf.analyzedDrawsCount
+                });
             } else {
-                const computeSample = hist.slice(0, 500);
-
-                // UTILISATION DES ASYNC WRAPPERS POUR DÉCHARGER LE THREAD PRINCIPAL
-                const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
-                    calculateSpectralMetricsAsync(computeSample),
-                    calculateFractalMetricsAsync(computeSample),
-                    Promise.resolve(calculateRegularity(computeSample)),
-                    calculateCorrelationMatrixAsync(computeSample),
-                    calculateNetworkCentralityAsync(computeSample),
-                    getPredictionHistoryAsync(drawName)
-                ]);
-                
-                if (abortControllerRef.current.signal.aborted) return;
-
-                setSpectral(spec);
-                setFractal(frac);
-                setRegularity(regData);
-                setCorrelationMatrix(corr);
-                setCliques(centrality);
-
-                const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
-                const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
-                setSmartInsights(insights);
-
-                // Calcul dynamique de la calibration
-                if (preds.length > 5) {
-                    const perf = calculateHistoricalPerformance(preds, hist);
-                    setCalibration({
-                        overallScore: 0.25 - (perf.accuracy / 100), // Score Brier simulé inversement proportionnel
-                        reliability: Math.min(100, Math.round(perf.accuracy * 3.5)), // Projection optimiste
-                        bias: perf.accuracy > 20 ? 'OPTIMIST' : 'NEUTRAL',
-                        sampleSize: perf.analyzedDrawsCount
-                    });
-                } else {
-                    // Valeur par défaut pour l'initialisation
-                    setCalibration({ overallScore: 0.33, reliability: 50, bias: 'NEUTRAL', sampleSize: 0 });
-                }
+                setCalibration({ overallScore: 0.33, reliability: 50, bias: 'NEUTRAL', sampleSize: 0 });
             }
         } else {
-            setSpectral([]);
-            setFractal([]);
-            setRegularity([]);
-            setSmartInsights([]);
-            setCalibration(null);
+            // Reset metrics if no data
+            setSpectral([]); setFractal([]); setRegularity([]); setSmartInsights([]); setCalibration(null);
         }
 
         setLastPrediction(null); 
 
     } catch (e: any) {
         if (e.name === 'AbortError') return;
-
-        let errorMessage = "Erreur inconnue";
-        if (typeof e === 'string') errorMessage = e;
-        else if (e instanceof Error) errorMessage = e.message;
-        else if (e && typeof e === 'object') errorMessage = e.message || "Erreur non sérialisable";
-        
-        console.error("Nexus Kernel Error:", errorMessage);
-        
-        if (errorMessage.includes('42P01')) {
-             showToast("Table 'draw_results' introuvable.", "error");
-        } else if (!errorMessage.includes('aborted')) {
-             // Silence
-        }
+        console.error("Nexus Kernel Error:", e);
         setHistory([]); 
     } finally {
         if (!abortControllerRef.current?.signal.aborted) {
             setLoading(false);
+            setComputing(false);
         }
     }
   }, [drawName, refreshTrigger, showToast]);
@@ -222,8 +215,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setInspectingNumber: (n) => { if(n) audioEngine.play('click'); setInspectingNumber(n); },
     smartInsights,
     globalWeights,
-    updateGlobalWeights: (w: AlgoWeights) => { audioEngine.play('success'); setGlobalWeights(w); },
-    loading,
+    updateGlobalWeights: (w: AlgoWeights) => { audioEngine.play('success'); setGlobalWeights(w); saveAlgoWeights(drawName, w); },
+    loading, // Is data loading?
     refresh: () => refreshData(drawName, true),
     refreshData,
     correlationMatrix,
@@ -246,3 +239,6 @@ export const useNexus = () => {
   if (!ctx) throw new Error("NexusProvider manquant.");
   return ctx;
 };
+
+// Circular dependency fix helper
+import { saveAlgoWeights } from '../services/predictionEngine';

@@ -1,5 +1,6 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { audioEngine } from '../utils/audioEngine';
 import type { SavedTicket } from '../types';
 
 const WATCHLIST_KEY = 'lotopro_user_watchlist';
@@ -46,6 +47,7 @@ export const syncWatchlist = async () => {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
             const localList = getWatchlist();
+            // Upsert intelligent : on ne lit pas avant, on écrase car le local est la vérité utilisateur active
             await supabase.from('user_preferences').upsert({ 
                 user_id: session.user.id, 
                 watchlist: localList, 
@@ -147,6 +149,9 @@ export const getSettings = (): UserSettings => {
 export const saveSettings = async (settings: UserSettings): Promise<void> => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     
+    // Application immédiate des effets
+    audioEngine.setEnabled(settings.sound);
+    
     if (isSupabaseConfigured()) {
         try {
             const { data: { session } } = await supabase.auth.getSession();
@@ -177,22 +182,71 @@ export const updateBankroll = (amount: number): number => {
     return newBalance;
 };
 
-export const syncAllUserData = async () => {
-    if (!isSupabaseConfigured()) return;
-    try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            const { data, error } = await supabase
-                .from('user_preferences')
-                .select('watchlist, saved_tickets, settings')
-                .eq('user_id', session.user.id)
-                .single();
+// --- HYDRATION DU CLOUD VERS LOCAL (LOGIQUE DE FUSION) ---
 
-            if (!error && data) {
-                if (data.watchlist) localStorage.setItem(WATCHLIST_KEY, JSON.stringify(data.watchlist));
-                if (data.saved_tickets) localStorage.setItem(TICKETS_KEY, JSON.stringify(data.saved_tickets));
-                if (data.settings) localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings));
+export const hydrateUserData = async (userId: string) => {
+    if (!isSupabaseConfigured()) return;
+    
+    try {
+        const { data, error } = await supabase
+            .from('user_preferences')
+            .select('watchlist, saved_tickets, settings')
+            .eq('user_id', userId)
+            .single();
+
+        if (error || !data) {
+            // Si pas de données distantes, on pousse les locales (First Sync)
+            await syncWatchlist();
+            // On sauvegarde aussi les tickets initiaux
+            const tickets = getSavedTickets();
+            if(tickets.length > 0) {
+                 await supabase.from('user_preferences').upsert({
+                    user_id: userId,
+                    saved_tickets: tickets,
+                    updated_at: new Date().toISOString()
+                });
             }
+            return;
         }
-    } catch (e) { console.warn("Full Sync Failed", e); }
+
+        // FUSION : WATCHLIST
+        // On fusionne les arrays en gardant les uniques
+        const localWatchlist = getWatchlist();
+        const remoteWatchlist = data.watchlist || [];
+        const mergedWatchlist = Array.from(new Set([...localWatchlist, ...remoteWatchlist])).sort((a,b) => a-b);
+        
+        if (mergedWatchlist.length !== localWatchlist.length) {
+            localStorage.setItem(WATCHLIST_KEY, JSON.stringify(mergedWatchlist));
+        }
+
+        // FUSION : TICKETS
+        // On utilise l'ID pour dédoublonner. En cas de conflit, on garde le plus récent (basé sur updated_at implicite ou logique métier)
+        const localTickets = getSavedTickets();
+        const remoteTickets = (data.saved_tickets || []) as SavedTicket[];
+        
+        const ticketMap = new Map<string, SavedTicket>();
+        localTickets.forEach(t => ticketMap.set(t.id, t));
+        
+        let hasChanges = false;
+        remoteTickets.forEach(t => {
+            if (!ticketMap.has(t.id)) {
+                ticketMap.set(t.id, t);
+                hasChanges = true;
+            }
+        });
+        
+        if (hasChanges || localTickets.length < ticketMap.size) {
+            const mergedTickets = Array.from(ticketMap.values()).sort((a, b) => b.createdAt - a.createdAt).slice(0, 50); // Keep limit
+            localStorage.setItem(TICKETS_KEY, JSON.stringify(mergedTickets));
+        }
+        
+        // SETTINGS : Cloud Wins (Source of Truth pour la configuration)
+        if (data.settings) {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings));
+            audioEngine.setEnabled(data.settings.sound);
+        }
+
+    } catch (e) { 
+        console.warn("Hydration Merge Failed", e); 
+    }
 };

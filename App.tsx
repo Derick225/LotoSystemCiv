@@ -19,7 +19,8 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/queryClient';
 import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
-import { checkSubscriptionStatus } from './services/subscriptionService';
+import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from './services/subscriptionService';
+import { hydrateUserData, getSettings, saveSettings } from './services/userPreferencesService';
 import { supabase } from './services/supabaseClient';
 import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
@@ -69,9 +70,12 @@ const AppContent: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
   const [showWallet, setShowWallet] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+      const s = getSettings();
+      return s.theme !== 'system' ? s.theme : 'dark';
+  });
 
-  // Gestion de l'authentification initiale et abonnement
   useEffect(() => {
     const checkAuthAndSub = async () => {
       setAuthLoading(true);
@@ -79,7 +83,15 @@ const AppContent: React.FC = () => {
       const currentSession = await authService.getSession();
       setSession(currentSession);
       
+      const savedSettings = getSettings();
+      audioEngine.setEnabled(savedSettings.sound);
+      
       if (currentSession?.user) {
+        await hydrateUserData(currentSession.user.id);
+        
+        const syncedSettings = getSettings();
+        if (syncedSettings.theme !== 'system') setTheme(syncedSettings.theme);
+
         const adminStatus = authService.isAdminUser(currentSession.user);
         setIsAdmin(adminStatus);
         
@@ -88,13 +100,35 @@ const AppContent: React.FC = () => {
         } else {
             const subState = await checkSubscriptionStatus(currentSession.user.id);
             setSubscription(subState);
+            
+            // ACTIVER LE LISTENER REALTIME POUR PAIEMENT INSTANTANÉ
+            const unsubscribe = subscribeToSubscriptionUpdates(currentSession.user.id, (newSub) => {
+                setSubscription(newSub);
+                if (newSub.status === 'active') {
+                    showToast("Accès débloqué en temps réel !", "success");
+                    audioEngine.play('success');
+                }
+            });
+            // Cleanup function for listener is tricky here inside async, managed via side effect below if needed
+            // But auth state change usually handles full reset
         }
       }
       setAuthLoading(false);
 
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('payment') === 'success') {
+          showToast("Paiement confirmé ! Abonnement activé.", "success");
+          audioEngine.play('success');
+          window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (params.get('payment') === 'cancel') {
+          showToast("Paiement annulé.", "info");
+          window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
       const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
         setSession(newSession);
         if (newSession?.user) {
+          await hydrateUserData(newSession.user.id);
           const adminStatus = authService.isAdminUser(newSession.user);
           setIsAdmin(adminStatus);
           
@@ -114,13 +148,16 @@ const AppContent: React.FC = () => {
     };
 
     checkAuthAndSub();
-  }, []);
+  }, [showToast]);
 
-  // Sync theme with DOM
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
+    const current = getSettings();
+    if (current.theme !== theme) {
+        saveSettings({ ...current, theme });
+    }
   }, [theme]);
 
   const handleSelectDraw = useCallback((draw: Draw) => {
@@ -150,20 +187,19 @@ const AppContent: React.FC = () => {
   };
 
   const handlePaymentSuccess = async () => {
+      // Callback local immédiat (optimiste)
       if (session?.user) {
           const subState = await checkSubscriptionStatus(session.user.id);
           setSubscription(subState);
       }
   };
 
-  // Si on charge l'auth
   if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
   
   if (!session) {
-    return <AuthScreen onSuccess={() => { /* Le listener onAuthStateChange gérera le state */ }} />;
+    return <AuthScreen onSuccess={() => {}} />;
   }
 
-  // Vérification Abonnement (Mur de Paiement) - Bypass pour Admin
   if (!isAdmin && subscription?.status === 'expired') {
       return <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />;
   }
@@ -174,17 +210,12 @@ const AppContent: React.FC = () => {
 
   const renderContent = () => {
     if (showWallet) return <UserWallet />;
-    
-    if (selectedDraw) {
-      return <DrawDetails />;
-    }
+    if (selectedDraw) return <DrawDetails />;
 
     switch (viewMode) {
       case 'home': return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
       case 'lab': return <QuantumLab />;
-      case 'admin': 
-        // Protection de route stricte : Seul l'admin peut voir ce composant
-        return isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />;
+      case 'admin': return isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />;
       default: return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
     }
   };
@@ -195,7 +226,6 @@ const AppContent: React.FC = () => {
       <AppShell 
         viewMode={viewMode} 
         setViewMode={(mode) => { 
-            // Interception si tentative d'accès Admin sans droits
             if (mode === 'admin' && !isAdmin) {
                 showToast("Accès refusé : Privilèges Admin requis.", "error");
                 return;

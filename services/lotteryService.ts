@@ -4,6 +4,8 @@ import { DRAW_SCHEDULE } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 
+const CACHE_PREFIX = 'nexus_cache_history_';
+
 const isValidDate = (d: number, m: number, y: number): boolean => {
   const date = new Date(y, m - 1, d);
   return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
@@ -50,35 +52,66 @@ const normalizeDrawName = (name: string): string => {
 
 export const lotteryService = {
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
-    if (!isSupabaseConfigured()) {
-        console.debug(`[Mode Hors-Ligne] Historique simulé pour ${drawName} (Pas de clés Supabase)`);
-        return [];
+    const cacheKey = `${CACHE_PREFIX}${drawName}`;
+    let remoteData: DrawResult[] | null = null;
+    let fetchError: any = null;
+
+    // Tentative de récupération en ligne
+    if (isSupabaseConfigured() && navigator.onLine) {
+        try {
+            let query = supabase
+              .from('draw_results')
+              .select('*')
+              .order('date', { ascending: false });
+
+            if (drawName && drawName !== 'ALL') {
+                query = query.ilike('draw_name', `%${drawName}%`);
+            }
+            
+            query = query.limit(2000);
+            
+            const { data, error } = await query;
+            
+            if (error) throw error;
+            
+            if (data) {
+                remoteData = data.map(row => ({
+                  id: row.id,
+                  drawName: row.draw_name,
+                  date: formatDate(row.date),
+                  gagnants: row.gagnants,
+                  machine: row.machine || [],
+                  version: row.version || 1
+                }));
+                
+                // Mise à jour du cache local si succès
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(remoteData));
+                } catch (storageErr) {
+                    console.warn("Storage quota exceeded, cache update skipped.");
+                }
+            }
+        } catch (e) {
+            console.warn("Supabase fetch failed, falling back to cache.", e);
+            fetchError = e;
+        }
     }
 
-    let query = supabase
-      .from('draw_results')
-      .select('*')
-      .order('date', { ascending: false });
+    // Si on a des données fraîches, on les retourne
+    if (remoteData) return remoteData;
 
-    if (drawName && drawName !== 'ALL') {
-        query = query.ilike('draw_name', `%${drawName}%`);
+    // Sinon, on tente le cache local (Mode Offline)
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+        console.debug(`[Nexus Offline] Serving cached history for ${drawName}`);
+        return JSON.parse(cached);
     }
+
+    // Si tout échoue
+    if (fetchError) throw fetchError;
     
-    query = query.limit(2000);
-    
-    const { data, error } = await query;
-    if (error) throw error;
-    
-    if (!data || data.length === 0) return [];
-    
-    return data.map(row => ({
-      id: row.id,
-      drawName: row.draw_name,
-      date: formatDate(row.date),
-      gagnants: row.gagnants,
-      machine: row.machine || [],
-      version: row.version || 1
-    }));
+    // Pas de config, pas de cache, pas d'erreur explicite (ex: premier lancement hors ligne sans config)
+    return [];
   }
 };
 
@@ -118,24 +151,39 @@ export const fetchResults = async (drawName: string): Promise<{ data: DrawResult
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const results = [];
+  
+  // Utilisation de fetchHistory pour profiter du cache au lieu de requêtes directes multiples
+  // Note: C'est moins optimal que le select direct si le cache est froid, mais mieux pour le offline.
+  // Pour le summary, on va quand même essayer de faire un appel optimisé si online.
+  
   for (const [time, name] of Object.entries(draws)) {
+      let lastDraw: DrawResult | null = null;
+      
       try {
-          const { data } = await supabase
-            .from('draw_results')
-            .select('*')
-            .ilike('draw_name', `%${name}%`)
-            .order('date', { ascending: false })
-            .limit(1);
-            
-          const lastDraw = data && data[0] ? {
-              id: data[0].id,
-              drawName: data[0].draw_name,
-              date: formatDate(data[0].date),
-              gagnants: data[0].gagnants,
-              machine: data[0].machine || [],
-              version: data[0].version || 1
-          } : null;
-
+          if (isSupabaseConfigured() && navigator.onLine) {
+              const { data } = await supabase
+                .from('draw_results')
+                .select('*')
+                .ilike('draw_name', `%${name}%`)
+                .order('date', { ascending: false })
+                .limit(1);
+                
+              if (data && data[0]) {
+                  lastDraw = {
+                      id: data[0].id,
+                      drawName: data[0].draw_name,
+                      date: formatDate(data[0].date),
+                      gagnants: data[0].gagnants,
+                      machine: data[0].machine || [],
+                      version: data[0].version || 1
+                  };
+              }
+          } else {
+              // Fallback cache via le service
+              const history = await lotteryService.fetchHistory(name);
+              if (history.length > 0) lastDraw = history[0];
+          }
+          
           results.push({ time, name, result: lastDraw });
       } catch (e) {
           results.push({ time, name, result: null });
@@ -166,18 +214,29 @@ export const getNextScheduledDraw = () => {
 };
 
 export const fetchGlobalStats = async () => {
-  if (!isSupabaseConfigured()) return [];
+  // Utilisation d'un cache spécifique pour les stats globales lourdes
+  const cacheKey = 'nexus_global_stats';
+  if (!isSupabaseConfigured() || !navigator.onLine) {
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : [];
+  }
+
   try {
-    const { data, error } = await supabase.from('draw_results').select('gagnants').limit(1000);
+    const { data, error } = await supabase.from('draw_results').select('gagnants').limit(2000);
     if (error) throw error;
+    
     const counts: Record<number, number> = {};
     (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
-    return Object.entries(counts)
+    const stats = Object.entries(counts)
       .map(([n, c]) => ({ number: Number(n), count: c }))
       .sort((a, b) => b.count - a.count);
+      
+    localStorage.setItem(cacheKey, JSON.stringify(stats));
+    return stats;
   } catch (e: any) {
-    console.warn("[Nexus Engine] Global stats failed (Mode offline).");
-    return [];
+    console.warn("[Nexus Engine] Global stats failed, using cache.");
+    const cached = localStorage.getItem(cacheKey);
+    return cached ? JSON.parse(cached) : [];
   }
 };
 
@@ -252,18 +311,15 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
 export const injectDemoData = async () => {
     if (!isSupabaseConfigured()) return;
     
-    // Génération de données pour "Reveil" et quelques autres pour peupler le dashboard
     const targetDraws = ["Reveil", "Etoile", "Akwaba"];
     const demoData: any[] = [];
     
     targetDraws.forEach(drawName => {
-        // 5 derniers jours
         for (let i = 0; i < 5; i++) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dateStr = d.toISOString().split('T')[0];
             
-            // Random numbers unique
             const numbers = new Set<number>();
             while(numbers.size < 5) numbers.add(Math.floor(Math.random() * 90) + 1);
             

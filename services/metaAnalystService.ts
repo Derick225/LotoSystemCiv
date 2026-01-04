@@ -34,7 +34,7 @@ export async function generatePlatinumPrediction(
     const data = history || (await fetchResults(drawName)).data;
     if (data.length < 30) throw new Error("Historique insuffisant pour la Fusion Platinum.");
 
-    const weights = getAlgoWeights(drawName);
+    const weights = await getAlgoWeights(drawName);
     const { regime } = detectGameRegime(data);
     
     // On génère une prédiction maître pour obtenir les scores bruts de chaque numéro

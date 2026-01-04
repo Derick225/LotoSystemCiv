@@ -30,7 +30,7 @@ export const runBacktestTraining = async (
     let atLeastOneHitCount = 0;
     const hitCountsArray: number[] = [];
     
-    const weightsToUse = customWeights || getAlgoWeights(drawName);
+    const weightsToUse = customWeights || await getAlgoWeights(drawName);
     
     for (let i = actualSampleSize - 1; i >= 0; i--) {
         const targetDraw = allResults[i];
@@ -96,7 +96,7 @@ export const evolveNeuralDNA = async (
     onTelemetry: (data: any) => void
 ): Promise<{ bestWeights: AlgoWeights, improvement: number, report: TrainingReport }> => {
     
-    const currentWeights = getAlgoWeights(drawName);
+    const currentWeights = await getAlgoWeights(drawName);
     
     // 1. Appel Edge Function pour calcul lourd (Prioritaire)
     if (isSupabaseConfigured()) {
