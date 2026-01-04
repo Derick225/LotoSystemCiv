@@ -13,7 +13,7 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
-import { FileText, Cpu, Sparkles, Zap, Target, Network, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Network, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from 'recharts';
 import { useNexus } from '../NexusProvider';
 
@@ -28,10 +28,10 @@ const NeuralConsensus: React.FC<{ breakdown?: Record<number, ScoreBreakdown>, su
     const data = [
         { subject: 'Temporel', A: Math.round(scores.temporal || 0), fullMark: 100 },
         { subject: 'Spectral', A: Math.round(scores.spectral || 0), fullMark: 100 },
-        { subject: 'Momentum', A: Math.round(scores.momentum || 0), fullMark: 100 },
+        { subject: 'Gravité', A: Math.round(scores.spatial || 0), fullMark: 100 }, // Updated Label
         { subject: 'Orchestr.', A: Math.round(scores.orchestration || 0), fullMark: 100 },
         { subject: 'Markov', A: Math.round(scores.markov || 0), fullMark: 100 },
-        { subject: 'Transformer', A: Math.round(scores.transformer || 0), fullMark: 100 },
+        { subject: 'Fréquence', A: Math.round(scores.frequency || 0), fullMark: 100 },
     ];
     return (
         <div className="bg-slate-900 border border-indigo-500/30 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group h-full">
@@ -95,8 +95,8 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           if (isMounted.current) {
               setLastPrediction(res);
               await savePredictionToHistory(drawName, res);
-              setStrategyMode(getStrategyName(globalWeights));
-              showToast("Consensus établi (Mode Adaptatif).", "success");
+              setStrategyMode(getStrategyName(res.usedWeights || globalWeights)); // Update with used weights
+              showToast("Inférence terminée. Calibration automatique appliquée.", "success");
           }
         } catch (e: any) {
           console.error("IA Collision:", e);
@@ -115,10 +115,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   };
 
   const getRegimeLabel = () => {
-      if (!regime) return "Standard";
-      if (regime.hurst > 0.6) return "Suivi de Tendance";
-      if (regime.hurst < 0.4) return "Retour Moyenne";
-      return "Chaotique (Risqué)";
+      if (!regime) return "Analyse...";
+      if (regime.hurst > 0.6) return "Persistant (Suivi de Tendance)";
+      if (regime.hurst < 0.4) return "Anti-Persistant (Retour Moyenne)";
+      return "Chaos Stochastique";
   };
 
   const getRiskLevel = (vol: number) => {
@@ -135,7 +135,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           </div>
           <div className="text-center">
             <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest">Calcul Neural Adaptatif</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Utilisation de l'ADN Global v13...</p>
+            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Calibration des poids selon H={regime?.hurst.toFixed(2)}...</p>
           </div>
       </div>
   );
@@ -170,7 +170,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                         {getRegimeIcon()}
                     </div>
                     <div>
-                        <h3 className="font-black text-slate-400 text-[9px] uppercase tracking-widest">Stratégie Adaptative</h3>
+                        <h3 className="font-black text-slate-400 text-[9px] uppercase tracking-widest">Régime de Marché</h3>
                         <span className="text-xs font-black dark:text-white leading-tight block max-w-[120px]">{getRegimeLabel()}</span>
                     </div>
                 </div>
@@ -190,10 +190,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
 
             <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center">
                 <div className="flex items-center gap-2 mb-2">
-                    <h4 className="text-[8px] font-black text-slate-400 uppercase">Signature ADN</h4>
-                    <span className="text-[7px] font-black bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Dna size={8}/> ACTIF</span>
+                    <h4 className="text-[8px] font-black text-slate-400 uppercase">ADN Adaptatif (Actif)</h4>
+                    <span className="text-[7px] font-black bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Dna size={8}/> AUTO-CALIBRÉ</span>
                 </div>
-                <AlgoRadar weights={globalWeights} height={160} />
+                <AlgoRadar weights={lastPrediction.usedWeights || globalWeights} height={160} />
             </div>
             <div className="lg:col-span-1">
                 {calibration && <ReliabilityMeter calibration={calibration} />}
@@ -232,7 +232,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 
                 <div className="bg-black/40 backdrop-blur-3xl p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner flex flex-col items-center min-w-[340px] transform hover:scale-[1.02] transition-all duration-500">
                     <span className="text-[11px] uppercase tracking-[0.4em] font-black text-indigo-400 mb-12 flex items-center gap-2">
-                        <Sparkles size={14}/> Attracteurs Alpha
+                        <Magnet size={14}/> Attracteurs Gravitationnels
                     </span>
                     <div className="flex gap-5">
                         {lastPrediction.suggestedNumbers.slice(0, 5).map((n: number) => (

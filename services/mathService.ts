@@ -34,6 +34,44 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
+/**
+ * Calcul du Champ Gravitationnel (Attracteurs).
+ * Chaque numéro sorti récemment agit comme une masse.
+ * La force diminue avec le carré de la distance (écart numérique) et le temps.
+ */
+export const calculateGravityField = (history: DrawResult[]): Record<number, number> => {
+    const gravity: Record<number, number> = {};
+    const DECAY = 0.8; // Décroissance temporelle
+    const G_CONST = 100;
+
+    // Initialisation
+    for(let i=1; i<=90; i++) gravity[i] = 0;
+
+    const limit = Math.min(history.length, 10); // Influence des 10 derniers tirages
+
+    for (let t = 0; t < limit; t++) {
+        const draw = history[t];
+        const timeWeight = Math.pow(DECAY, t);
+
+        draw.gagnants.forEach(winner => {
+            for (let target = 1; target <= 90; target++) {
+                if (target === winner) continue;
+                
+                // Distance sur le cercle 1-90 (Topo-loop)
+                let dist = Math.abs(winner - target);
+                if (dist > 45) dist = 90 - dist; 
+                
+                // Force ~ 1 / r^2
+                if (dist < 10) { // Rayon d'action local
+                    const force = (G_CONST / (dist * dist)) * timeWeight;
+                    gravity[target] += force;
+                }
+            }
+        });
+    }
+    return gravity;
+};
+
 export const mathService = {
   // Récupère les analyses pré-calculées depuis Supabase (Table draw_analytics)
   async fetchAnalytics(drawName: string, lastDate: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
@@ -159,8 +197,9 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
-    const N = history.length;
-    const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
+    const N = Math.min(history.length, 100);
+    const sample = history.slice(0, N);
+    const signal = sample.map(d => (d.gagnants.includes(num) ? 1 : 0));
     const mean = signal.reduce((a, b) => a + b, 0) / N;
     const x = signal.map(v => v - mean);
     let cumsum = 0;
@@ -345,10 +384,12 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
 };
 
 export const detectGameRegime = (history: DrawResult[]) => {
-    const hurst = 0.5; // Placeholder
+    const totalHurst = Array.from({ length: 5 }, (_, i) => calculateHurstForNumber(i + 1, history).hurst)
+        .reduce((a,b) => a + b, 0) / 5;
+    
     return { 
-        hurst, 
-        regime: hurst > 0.60 ? 'PERSISTANT' : hurst < 0.40 ? 'CHAOS' : 'NOMINAL' 
+        hurst: totalHurst, 
+        regime: totalHurst > 0.60 ? 'PERSISTANT' : totalHurst < 0.40 ? 'CHAOS' : 'NOMINAL' 
     };
 };
 
