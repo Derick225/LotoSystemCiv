@@ -32,6 +32,7 @@ export interface SubscriptionState {
     status: 'trial' | 'active' | 'expired';
     daysLeft: number;
     expiresAt: string; // ISO Date
+    start_date?: string; // ISO Date
     plan: 'free' | 'premium';
 }
 
@@ -370,7 +371,6 @@ export interface PythonAnalysisResult {
     insight: string;
 }
 
-// FIX: Added missing exported interfaces used across services and components
 export interface NumberGap {
     number: number;
     gap: number;

@@ -252,16 +252,35 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
 export const injectDemoData = async () => {
     if (!isSupabaseConfigured()) return;
     
-    const demoData = [
-        { draw_name: "Reveil", date: "2024-03-10", gagnants: [5, 12, 45, 67, 88], machine: [1, 2, 3, 4, 5] },
-        { draw_name: "Reveil", date: "2024-03-09", gagnants: [1, 15, 30, 48, 70], machine: [10, 20, 30, 40, 50] },
-        { draw_name: "Reveil", date: "2024-03-08", gagnants: [10, 25, 33, 55, 89], machine: [11, 22, 33, 44, 55] },
-        { draw_name: "Reveil", date: "2024-03-07", gagnants: [3, 19, 41, 60, 75], machine: [6, 7, 8, 9, 10] },
-        { draw_name: "Reveil", date: "2024-03-06", gagnants: [8, 14, 28, 52, 63], machine: [60, 70, 80, 85, 90] },
-    ];
+    // Génération de données pour "Reveil" et quelques autres pour peupler le dashboard
+    const targetDraws = ["Reveil", "Etoile", "Akwaba"];
+    const demoData: any[] = [];
+    
+    targetDraws.forEach(drawName => {
+        // 5 derniers jours
+        for (let i = 0; i < 5; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().split('T')[0];
+            
+            // Random numbers unique
+            const numbers = new Set<number>();
+            while(numbers.size < 5) numbers.add(Math.floor(Math.random() * 90) + 1);
+            
+            const machine = new Set<number>();
+            while(machine.size < 5) machine.add(Math.floor(Math.random() * 90) + 1);
+
+            demoData.push({ 
+                draw_name: drawName, 
+                date: dateStr, 
+                gagnants: Array.from(numbers), 
+                machine: Array.from(machine) 
+            });
+        }
+    });
 
     try {
-        await supabase.from('draw_results').insert(demoData);
+        await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' });
         console.log("Demo data injected successfully");
     } catch (e) {
         console.error("Demo injection failed", e);

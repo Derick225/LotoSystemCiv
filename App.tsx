@@ -21,7 +21,7 @@ import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
 import { checkSubscriptionStatus } from './services/subscriptionService';
 import { supabase } from './services/supabaseClient';
-import { ShieldAlert, Lock, Fingerprint, ArrowLeft } from 'lucide-react';
+import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
 
 // Composant de sécurité pour les accès non autorisés
@@ -64,8 +64,7 @@ const AppContent: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
-  const [subLoading, setSubLoading] = useState(false);
-
+  
   const [isBooted, setIsBooted] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
@@ -77,9 +76,6 @@ const AppContent: React.FC = () => {
     const checkAuthAndSub = async () => {
       setAuthLoading(true);
       
-      // Note: On ne force plus le mode démo ici si la config manque.
-      // On laisse AuthScreen afficher l'erreur de config pour aider le debug.
-      
       const currentSession = await authService.getSession();
       setSession(currentSession);
       
@@ -90,10 +86,8 @@ const AppContent: React.FC = () => {
         if (adminStatus) {
             setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
         } else {
-            setSubLoading(true);
             const subState = await checkSubscriptionStatus(currentSession.user.id);
             setSubscription(subState);
-            setSubLoading(false);
         }
       }
       setAuthLoading(false);
@@ -211,7 +205,7 @@ const AppContent: React.FC = () => {
             setShowWallet(false); 
         }}
         theme={theme}
-        setTheme={setTheme as any}
+        setTheme={setTheme} 
         onReset={handleReset}
         showWallet={showWallet}
         setShowWallet={setShowWallet}

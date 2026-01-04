@@ -14,6 +14,7 @@ import {
 } from '../services/mathService';
 import { getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
+import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
 import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast'; 
 import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; 
@@ -40,6 +41,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [cliques, setCliques] = useState<any[]>([]);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
+  const [calibration, setCalibration] = useState<BrierCalibration | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -84,16 +86,18 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                  setCorrelationMatrix({});
                  setCliques([]);
                  setSmartInsights([]);
+                 setCalibration(null);
             } else {
                 const computeSample = hist.slice(0, 500);
 
                 // UTILISATION DES ASYNC WRAPPERS POUR DÉCHARGER LE THREAD PRINCIPAL
-                const [spec, frac, regData, corr, centrality] = await Promise.all([
+                const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
                     calculateSpectralMetricsAsync(computeSample),
                     calculateFractalMetricsAsync(computeSample),
                     Promise.resolve(calculateRegularity(computeSample)),
                     calculateCorrelationMatrixAsync(computeSample),
-                    calculateNetworkCentralityAsync(computeSample)
+                    calculateNetworkCentralityAsync(computeSample),
+                    getPredictionHistoryAsync(drawName)
                 ]);
                 
                 if (abortControllerRef.current.signal.aborted) return;
@@ -107,12 +111,27 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
                 const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
                 setSmartInsights(insights);
+
+                // Calcul dynamique de la calibration
+                if (preds.length > 5) {
+                    const perf = calculateHistoricalPerformance(preds, hist);
+                    setCalibration({
+                        overallScore: 0.25 - (perf.accuracy / 100), // Score Brier simulé inversement proportionnel
+                        reliability: Math.min(100, Math.round(perf.accuracy * 3.5)), // Projection optimiste
+                        bias: perf.accuracy > 20 ? 'OPTIMIST' : 'NEUTRAL',
+                        sampleSize: perf.analyzedDrawsCount
+                    });
+                } else {
+                    // Valeur par défaut pour l'initialisation
+                    setCalibration({ overallScore: 0.33, reliability: 50, bias: 'NEUTRAL', sampleSize: 0 });
+                }
             }
         } else {
             setSpectral([]);
             setFractal([]);
             setRegularity([]);
             setSmartInsights([]);
+            setCalibration(null);
         }
 
         setLastPrediction(null); 
@@ -209,7 +228,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     refreshData,
     correlationMatrix,
     regularity,
-    calibration: { overallScore: 0.124, reliability: 82, bias: 'NEUTRAL', sampleSize: 30 },
+    calibration,
     velocity: {}, 
     cliques,
     vocalContext
