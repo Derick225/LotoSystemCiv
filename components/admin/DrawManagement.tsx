@@ -2,12 +2,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
-import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard, Filter, Ban } from 'lucide-react';
-import { DRAW_SCHEDULE } from '../../constants';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard, Filter } from 'lucide-react';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
 interface DrawManagementProps {
@@ -20,6 +18,7 @@ interface PreviewRow {
     machine: number[];
     isValid: boolean;
     error?: string;
+    rawLine?: string;
 }
 
 export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
@@ -45,7 +44,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const [isImporting, setIsImporting] = useState(false);
     const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
     const [importStep, setImportStep] = useState<'upload' | 'preview'>('upload');
-    const [uploadMode, setUploadMode] = useState<'file' | 'text'>('file');
+    const [uploadMode, setUploadMode] = useState<'file' | 'text'>('text');
     const [pasteContent, setPasteContent] = useState('');
     const [viewFilter, setViewFilter] = useState<'all' | 'valid' | 'error'>('all');
     
@@ -183,13 +182,26 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             if (index === 0 && (line.toLowerCase().includes('date') || line.toLowerCase().includes('g1'))) return;
 
             // Nettoyage et split (support virgule, point-virgule et tabulation)
+            // Priorité: Tabulation (Excel) > Point-virgule > Virgule
             let separator = ',';
-            if (line.includes(';')) separator = ';';
-            else if (line.includes('\t')) separator = '\t';
+            if (line.includes('\t')) separator = '\t';
+            else if (line.includes(';')) separator = ';';
             
-            const parts = line.split(separator).map(p => p.trim());
+            // Nettoyage des caractères invisibles et espaces
+            const cleanLine = line.replace(/['"]/g, '').trim();
+            const parts = cleanLine.split(separator).map(p => p.trim()).filter(p => p !== '');
 
-            if (parts.length < 6) return; // Date + 5 numéros min
+            if (parts.length < 6) {
+                // Pas assez de colonnes, tentative de parsing plus flexible si c'est juste des espaces
+                const spaceParts = cleanLine.split(/\s+/).map(p => p.trim());
+                if (spaceParts.length >= 6) {
+                     // Utiliser l'espace comme séparateur si ça marche mieux
+                     // Logique simplifiée pour éviter de casser le CSV standard
+                } else {
+                    preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet (min 6 colonnes)', rawLine: line });
+                    return;
+                }
+            }
 
             const dateStr = parts[0];
             const winners = parts.slice(1, 6).map(Number);
@@ -213,14 +225,21 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                 gagnants: winners,
                 machine: machine.length === 5 ? machine : [],
                 isValid,
-                error
+                error,
+                rawLine: line
             });
         });
 
         setPreviewData(preview);
         setImportStep('preview');
         setViewFilter('all');
-        if (preview.length === 0) showToast("Aucune donnée valide trouvée.", "error");
+        
+        const validCount = preview.filter(r => r.isValid).length;
+        if (validCount === 0 && preview.length > 0) {
+            showToast("Attention: Aucune donnée valide détectée.", "error");
+        } else if (preview.length > 0) {
+            showToast(`${validCount} lignes valides prêtes.`, "success");
+        }
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -409,7 +428,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                     <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-2xl"><Upload size={20}/></div>
                                     <div>
                                         <h3 className="font-black text-slate-800 dark:text-white uppercase">Import de Masse</h3>
-                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Support CSV & JSON</p>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Support CSV & Copier-Coller</p>
                                     </div>
                                 </div>
                                 <button onClick={downloadTemplate} className="text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Télécharger Modèle CSV</button>
@@ -418,16 +437,16 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                             {/* MODE SWITCHER */}
                             <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-fit">
                                 <button 
-                                    onClick={() => setUploadMode('file')} 
-                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                    Fichier (CSV/JSON)
-                                </button>
-                                <button 
                                     onClick={() => setUploadMode('text')} 
                                     className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                                 >
                                     <Clipboard size={14}/> Copier/Coller
+                                </button>
+                                <button 
+                                    onClick={() => setUploadMode('file')} 
+                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    Fichier (CSV)
                                 </button>
                             </div>
 
@@ -443,7 +462,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                             <FileSpreadsheet size={32} className="text-slate-400 group-hover:text-indigo-500" />
                                         </div>
                                         <div className="text-center">
-                                            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier ici</p>
+                                            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier CSV</p>
                                             <p className="text-xs text-slate-400 mt-1">Format: Date, G1, G2, G3, G4, G5, [M1..M5]</p>
                                         </div>
                                     </div>
@@ -454,15 +473,17 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                         value={pasteContent}
                                         onChange={(e) => setPasteContent(e.target.value)}
                                         className="w-full h-48 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 font-mono text-xs text-slate-600 dark:text-slate-300 focus:border-indigo-500 focus:ring-4 ring-indigo-500/10 outline-none transition-all resize-none"
-                                        placeholder={`Collez vos données ici...\nExemple:\n01/01/2024, 5, 12, 34, 56, 89\n02/01/2024; 10; 20; 30; 40; 50; 1; 2; 3; 4; 5`}
+                                        placeholder={`Collez vos données ici...\nFormats acceptés:\n01/01/2024, 5, 12, 34, 56, 89\n02/01/2024; 10; 20; 30; 40; 50\n03/01/2024 \t 1 \t 2 \t 3 \t 4 \t 5`}
                                     />
-                                    <button 
-                                        onClick={() => processRawData(pasteContent)}
-                                        disabled={!pasteContent.trim()}
-                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                    >
-                                        <Binary size={16}/> Analyser le contenu
-                                    </button>
+                                    <div className="flex justify-end">
+                                        <button 
+                                            onClick={() => processRawData(pasteContent)}
+                                            disabled={!pasteContent.trim()}
+                                            className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                        >
+                                            <Binary size={16}/> Analyser le contenu
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -473,7 +494,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                 <div className="flex-1">
                                     <div className="flex items-center gap-3">
-                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Prévisualisation</h3>
+                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Validation</h3>
                                         <div className="flex gap-2">
                                             <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold text-slate-500">{previewData.length} Total</span>
                                             <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 rounded text-[10px] font-bold text-emerald-600">{validCount} Valides</span>
@@ -481,19 +502,19 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                         </div>
                                     </div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button onClick={() => setViewFilter('all')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Tous</button>
-                                    <button onClick={() => setViewFilter('valid')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'valid' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Valides</button>
-                                    <button onClick={() => setViewFilter('error')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Erreurs</button>
+                                <div className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+                                    <button onClick={() => setViewFilter('all')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'all' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Tous</button>
+                                    <button onClick={() => setViewFilter('valid')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'valid' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600' : 'text-slate-500'}`}>Valides</button>
+                                    <button onClick={() => setViewFilter('error')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'error' ? 'bg-white dark:bg-slate-700 shadow text-rose-600' : 'text-slate-500'}`}>Erreurs</button>
                                 </div>
                                 <button onClick={() => { setImportStep('upload'); setPreviewData([]); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><X size={16}/></button>
                             </div>
 
-                            <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl">
+                            <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
                                 <table className="w-full text-left text-xs">
-                                    <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
+                                    <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 shadow-sm">
                                         <tr>
-                                            <th className="p-4 font-black text-slate-500 uppercase">Statut</th>
+                                            <th className="p-4 font-black text-slate-500 uppercase w-12">État</th>
                                             <th className="p-4 font-black text-slate-500 uppercase">Date</th>
                                             <th className="p-4 font-black text-slate-500 uppercase">Gagnants</th>
                                             <th className="p-4 font-black text-slate-500 uppercase">Machine</th>
@@ -505,21 +526,28 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                                 <td className="p-4">
                                                     {row.isValid 
                                                         ? <CheckCircle2 size={16} className="text-emerald-500"/> 
-                                                        : <div className="flex items-center gap-2 text-rose-500" title={row.error}><AlertTriangle size={16}/><span className="text-[9px] font-bold uppercase hidden md:inline">{row.error}</span></div>
+                                                        : <div className="group relative">
+                                                            <AlertTriangle size={16} className="text-rose-500 cursor-help"/>
+                                                            <div className="absolute left-6 top-0 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-xl z-20 hidden group-hover:block">
+                                                                {row.error}
+                                                            </div>
+                                                          </div>
                                                     }
                                                 </td>
                                                 <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
                                                 <td className="p-4">
-                                                    <div className="flex gap-1">
-                                                        {row.gagnants.map((n, j) => (
-                                                            <span key={j} className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[9px] font-bold">{n}</span>
-                                                        ))}
-                                                    </div>
+                                                    {row.gagnants.length > 0 ? (
+                                                        <div className="flex gap-1">
+                                                            {row.gagnants.map((n, j) => (
+                                                                <span key={j} className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">{n}</span>
+                                                            ))}
+                                                        </div>
+                                                    ) : <span className="text-slate-400 italic">Vide</span>}
                                                 </td>
                                                 <td className="p-4">
                                                     <div className="flex gap-1">
                                                         {row.machine.map((n, j) => (
-                                                            <span key={j} className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 flex items-center justify-center text-[9px] font-bold">{n}</span>
+                                                            <span key={j} className="w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center justify-center text-[10px] font-bold">{n}</span>
                                                         ))}
                                                     </div>
                                                 </td>
@@ -527,30 +555,39 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                         ))}
                                         {filteredPreview.length === 0 && (
                                             <tr>
-                                                <td colSpan={4} className="p-8 text-center text-slate-400 italic">Aucun élément dans cette vue.</td>
+                                                <td colSpan={4} className="p-10 text-center text-slate-400 italic flex flex-col items-center gap-2">
+                                                    <Filter size={24} className="opacity-50"/>
+                                                    <span>Aucun élément dans cette vue.</span>
+                                                </td>
                                             </tr>
                                         )}
                                     </tbody>
                                 </table>
                             </div>
 
-                            <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">
+                            <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800">
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide flex items-center gap-2">
                                     {errorCount > 0 ? (
-                                        <span className="flex items-center gap-2 text-amber-500"><AlertTriangle size={12}/> {errorCount} lignes seront ignorées</span>
+                                        <>
+                                            <span className="flex items-center gap-1 text-amber-500"><AlertTriangle size={12}/> Attention :</span> 
+                                            {errorCount} lignes invalides seront ignorées.
+                                        </>
                                     ) : (
-                                        <span className="flex items-center gap-2 text-emerald-500"><CheckCircle2 size={12}/> Données propres</span>
+                                        <>
+                                            <span className="flex items-center gap-1 text-emerald-500"><CheckCircle2 size={12}/> Parfait :</span> 
+                                            Toutes les lignes sont valides.
+                                        </>
                                     )}
                                 </div>
                                 <div className="flex gap-4">
-                                    <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition">Annuler</button>
+                                    <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition text-xs uppercase tracking-wider">Annuler</button>
                                     <button 
                                         onClick={confirmImport} 
                                         disabled={isImporting || validCount === 0} 
-                                        className={`px-8 py-3 rounded-xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center gap-2 disabled:opacity-50 active:scale-95 transition ${errorCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+                                        className={`px-8 py-3 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center gap-2 disabled:opacity-50 active:scale-95 transition-all ${errorCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
                                     >
                                         {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
-                                        {validCount > 0 ? `Importer ${validCount} Valides` : 'Aucune donnée valide'}
+                                        {validCount > 0 ? `Importer ${validCount} Valides` : 'Aucune donnée'}
                                     </button>
                                 </div>
                             </div>
