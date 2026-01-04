@@ -164,12 +164,12 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
                     )}
 
                     {analysis && (
-                        <div className="bg-slate-950 text-white p-8 rounded-[3rem] shadow-2xl border border-slate-800 relative overflow-hidden">
+                        <div className="bg-slate-950 text-white p-8 rounded-[3rem] shadow-2xl border border-slate-800 relative overflow-hidden h-full max-h-[500px] flex flex-col">
                             <div className="absolute top-0 right-0 p-6 opacity-5"><Terminal size={80} /></div>
                             <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-6 flex items-center gap-2 font-mono border-b border-white/10 pb-4">
                                 <span>&gt;_</span> Trace Logique IA
                             </h4>
-                            <div className="font-mono text-xs text-slate-400 leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                            <div className="font-mono text-xs text-slate-400 leading-relaxed flex-1 overflow-y-auto custom-scrollbar pr-2">
                                 <SafeMarkdown text={analysis.logicalAnalysis} />
                             </div>
                         </div>

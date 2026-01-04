@@ -40,31 +40,29 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
-// --- NOUVEAU: Distribution de Poisson ---
-// Calcule la probabilité qu'un numéro sorte au prochain tirage étant donné sa moyenne historique (lambda)
-// et son retard actuel (k)
+// --- NOUVEAU: Modèle de Pression de Poisson (Optimisé) ---
+// Utilise la CDF de la distribution exponentielle pour modéliser la probabilité 
+// qu'un événement se produise dans l'intervalle [0, k] sachant la moyenne lambda.
+// P(T <= k) = 1 - e^(-k/lambda)
 export const calculatePoissonProbability = (lambda: number, k: number): number => {
-    // Formule : P(X=k) = (e^-lambda * lambda^k) / k!
-    // Ici on adapte pour estimer la probabilité cumulée de sortie après un retard k
-    const e = Math.exp(-lambda);
-    let p = 1;
-    for(let i=1; i<=k; i++) p = p * i; // Factorielle simplifiée
+    if (lambda <= 0) return 0;
     
-    // Approximation numérique pour éviter l'overflow sur factorielle
-    // On utilise une heuristique de "Pression Poisson"
-    // Plus le retard dépasse lambda, plus la tension monte, jusqu'à un point de rupture (queue de distribution)
+    // CDF Exponentielle : Probabilité que l'écart soit <= k
+    // Plus k est grand par rapport à lambda, plus la probabilité cumulée approche 100%
+    // Cela signifie que l'événement est "en retard" (Overdue) et la pression statistique augmente.
+    const cdf = 1 - Math.exp(-k / lambda);
     
-    if (lambda === 0) return 0;
+    // On transforme cette probabilité en "Score de Pression" (0-100)
+    let score = cdf * 100;
+    
     const ratio = k / lambda;
+    if (ratio > 4.0) {
+        // Pénalité pour les numéros "morts" (Absent depuis trop longtemps, > 4x la moyenne)
+        // Probabilité que la machine soit biaisée contre ce numéro augmente.
+        score = score * Math.max(0.2, 1 - ((ratio - 4) * 0.1));
+    }
     
-    // Courbe sigmoïde centrée sur lambda (ratio = 1)
-    // < 1 : proba monte
-    // > 2 : proba baisse (numéro froid/mort)
-    
-    if (ratio > 3.5) return 10; // Zone "Morte"
-    if (ratio > 2.0) return 40; // Zone "Froide"
-    if (ratio > 0.8 && ratio < 1.5) return 95; // Zone "Critique" (Lambda atteinte)
-    return Math.min(100, ratio * 80);
+    return Math.round(Math.max(0, Math.min(100, score)));
 };
 
 // --- NOUVEAU: Echo State Network (Reservoir Computing) ---

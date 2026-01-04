@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
@@ -8,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Mapping des noms de tirage (API -> Base de données)
+// Mapping complet des tirages Loto Bonheur pour normalisation
 const DRAW_NAMES_MAP: Record<string, string> = {
   "REVEIL": "Reveil",
   "ETOILE": "Etoile",
@@ -43,14 +44,9 @@ const DRAW_NAMES_MAP: Record<string, string> = {
 const getMonthParams = () => {
     const now = new Date();
     const months = [];
-    
-    // Mois courant
     months.push(formatMonth(now));
-    
-    // Mois précédent (pour récupérer les tirages de fin de mois si on est au début du mois)
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     months.push(formatMonth(prev));
-    
     return months;
 };
 
@@ -64,41 +60,38 @@ serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''; // CLEF SERVICE_ROLE OBLIGATOIRE POUR ÉCRIRE
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Configuration Supabase manquante (URL ou SERVICE_ROLE_KEY).");
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     let body = {};
     try { body = await req.json(); } catch(e) {}
-    const manualTrigger = (body as any).manualTrigger;
     const targetDrawName = (body as any).drawName;
 
-    console.log(`[Sync] Démarrage de la synchronisation (Manuel: ${manualTrigger})...`);
+    console.log(`[Sync] Démarrage synchronisation...`);
 
     const months = getMonthParams();
     let totalInserted = 0;
-    let totalProcessed = 0;
 
     for (const monthParam of months) {
-        // 1. Appel API Externe
         const targetUrl = `https://lotobonheur.ci/api/results?month=${encodeURIComponent(monthParam)}`;
-        console.log(`[Sync] Fetching ${monthParam}...`);
         
         const response = await fetch(targetUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (NexusEngine/11.0)', 'Accept': 'application/json' }
         });
 
-        if (!response.ok) {
-            console.error(`[Sync] Erreur HTTP ${response.status} pour ${monthParam}`);
-            continue;
-        }
+        if (!response.ok) continue;
 
         const data = await response.json();
         const weeks = data.drawsResultsWeekly || [];
-        const currentYear = new Date().getFullYear().toString(); // Fallback year
+        const currentYear = new Date().getFullYear().toString();
 
         const batchUpsert = [];
 
-        // 2. Parsing et Normalisation
         for (const week of weeks) {
             const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
             const year = yearMatch ? yearMatch[0] : currentYear;
@@ -110,7 +103,6 @@ serve(async (req) => {
                 const dateMatch = dateStr.match(/(\d{2})\/(\d{2})/);
                 if (!dateMatch) continue;
                 
-                // Format DB: YYYY-MM-DD
                 const dbDate = `${year}-${dateMatch[2]}-${dateMatch[1]}`;
 
                 const apiDraws = [
@@ -122,16 +114,14 @@ serve(async (req) => {
                     let rawName = (draw.drawName || "").trim().toUpperCase();
                     rawName = rawName.replace(/^TIRAGE\s+/, "");
 
-                    // Mapping vers nom canonique
                     const canonicalName = DRAW_NAMES_MAP[rawName];
                     if (!canonicalName) continue;
 
-                    // Filtrage optionnel si un tirage spécifique est demandé
                     if (targetDrawName && targetDrawName !== 'ALL' && canonicalName.toUpperCase() !== targetDrawName.toUpperCase()) {
                         continue;
                     }
 
-                    if (!draw.winningNumbers || draw.winningNumbers.includes('..') || draw.winningNumbers.startsWith('.')) continue;
+                    if (!draw.winningNumbers || draw.winningNumbers.includes('..')) continue;
 
                     const win = (draw.winningNumbers.match(/\d+/g) || []).map(Number).slice(0, 5);
                     const mac = (draw.machineNumbers?.match(/\d+/g) || []).map(Number).slice(0, 5);
@@ -150,36 +140,28 @@ serve(async (req) => {
             }
         }
 
-        // 3. Upsert en base de données
         if (batchUpsert.length > 0) {
-            const { data: inserted, error } = await supabase
+            const { error } = await supabase
                 .from('draw_results')
-                .upsert(batchUpsert, { onConflict: 'draw_name, date', ignoreDuplicates: false })
-                .select();
+                .upsert(batchUpsert, { onConflict: 'draw_name, date' });
 
             if (error) {
                 console.error(`[Sync] Erreur DB:`, error);
-                throw error;
+            } else {
+                totalInserted += batchUpsert.length;
             }
-            
-            totalInserted += inserted?.length || 0;
-            totalProcessed += batchUpsert.length;
         }
     }
-
-    console.log(`[Sync] Terminé. ${totalInserted} enregistrements mis à jour.`);
 
     return new Response(JSON.stringify({ 
         success: true, 
         count: totalInserted,
-        processed: totalProcessed,
         message: `Synchronisation terminée : ${totalInserted} mises à jour.`
     }), { 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
   } catch (err: any) {
-    console.error("[Sync] Exception:", err.message);
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

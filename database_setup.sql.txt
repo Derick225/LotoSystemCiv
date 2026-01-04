@@ -1,35 +1,14 @@
--- ==============================================================================
--- SCHEMA NEXUS PLATINUM v11.1 (SECURE & PRODUCTION READY)
--- ==============================================================================
 
 -- ==============================================================================
--- 1. EXTENSIONS
+-- SCHEMA NEXUS PLATINUM v11.2 (INIT SCRIPT)
 -- ==============================================================================
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_cron";
 CREATE EXTENSION IF NOT EXISTS "pg_net";
 CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
--- ==============================================================================
--- 2. TABLES
--- ==============================================================================
-
--- Fonction utilitaire : vérifie si un tableau d'entiers est valide pour le loto
-CREATE OR REPLACE FUNCTION is_valid_loto_numbers(nums INTEGER[])
-RETURNS BOOLEAN AS $$
-BEGIN
-  -- Vérifie la longueur, les doublons, et la plage [1, 90]
-  RETURN (
-    array_length(nums, 1) = 5
-    AND array_length(nums, 1) = array_length(ARRAY(SELECT DISTINCT UNNEST(nums)), 1)
-    AND nums <@ ARRAY(
-      SELECT generate_series(1, 90)::INTEGER
-    )
-  );
-END;
-$$ LANGUAGE plpgsql IMMUTABLE;
-
--- A. RÉSULTATS DES TIRAGES
+-- 1. TABLE RÉSULTATS
 CREATE TABLE IF NOT EXISTS public.draw_results (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   draw_name TEXT NOT NULL,
@@ -39,12 +18,10 @@ CREATE TABLE IF NOT EXISTS public.draw_results (
   version INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT unique_draw_date UNIQUE (draw_name, date),
-  CONSTRAINT valid_gagnants CHECK (is_valid_loto_numbers(gagnants)),
-  CONSTRAINT valid_machine CHECK (machine IS NULL OR is_valid_loto_numbers(machine))
+  CONSTRAINT unique_draw_date UNIQUE (draw_name, date)
 );
 
--- B. ANALYTIQUES HPC
+-- 2. TABLE ANALYTIQUES
 CREATE TABLE IF NOT EXISTS public.draw_analytics (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   draw_name TEXT NOT NULL,
@@ -58,14 +35,14 @@ CREATE TABLE IF NOT EXISTS public.draw_analytics (
   CONSTRAINT unique_analytics_draw_date UNIQUE (draw_name, date)
 );
 
--- C. POIDS ALGORITHMIQUES
+-- 3. TABLE POIDS
 CREATE TABLE IF NOT EXISTS public.algo_weights (
   draw_name TEXT PRIMARY KEY,
   weights JSONB NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- D. PRÉFÉRENCES UTILISATEURS
+-- 4. PRÉFÉRENCES USER
 CREATE TABLE IF NOT EXISTS public.user_preferences (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   watchlist INTEGER[],
@@ -75,7 +52,7 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- E. FEEDBACK
+-- 5. FEEDBACK
 CREATE TABLE IF NOT EXISTS public.prediction_feedback (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   prediction_id TEXT NOT NULL,
@@ -86,7 +63,7 @@ CREATE TABLE IF NOT EXISTS public.prediction_feedback (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- F. TRANSACTIONS
+-- 6. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS public.transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   transaction_id TEXT NOT NULL UNIQUE,
@@ -99,29 +76,19 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- ==============================================================================
--- 3. TRIGGERS
--- ==============================================================================
-DROP TRIGGER IF EXISTS handle_updated_at_draw_results ON public.draw_results;
-CREATE TRIGGER handle_updated_at_draw_results
-BEFORE UPDATE ON public.draw_results
-FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+-- TRIGGERS (Auto Update At)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
 
-DROP TRIGGER IF EXISTS handle_updated_at_user_prefs ON public.user_preferences;
-CREATE TRIGGER handle_updated_at_user_prefs
-BEFORE UPDATE ON public.user_preferences
-FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE TRIGGER update_draw_results_modtime BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+CREATE TRIGGER update_user_prefs_modtime BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 
-DROP TRIGGER IF EXISTS handle_updated_at_transactions ON public.transactions;
-CREATE TRIGGER handle_updated_at_transactions
-BEFORE UPDATE ON public.transactions
-FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
-
--- ==============================================================================
--- 4. SÉCURITÉ (RLS)
--- ==============================================================================
-
--- Activer RLS partout
+-- SECURITY (RLS)
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_analytics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
@@ -129,85 +96,26 @@ ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 
--- 🔒 draw_results : Lecture publique, ÉCRITURE SEULEMENT PAR SERVICE_ROLE
-DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results;
-DROP POLICY IF EXISTS "Service Write Results" ON public.draw_results;
+-- POLICIES (Lecture publique, Ecriture Service Role uniquement pour les données partagées)
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
-CREATE POLICY "Service Write Results" ON public.draw_results FOR ALL USING (auth.role() = 'service_role');
-
--- 🔒 draw_analytics : Même règle
-DROP POLICY IF EXISTS "Public Read Analytics" ON public.draw_analytics;
-DROP POLICY IF EXISTS "Service Write Analytics" ON public.draw_analytics;
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
-CREATE POLICY "Service Write Analytics" ON public.draw_analytics FOR ALL USING (auth.role() = 'service_role');
-
--- 🔒 algo_weights : Même règle
-DROP POLICY IF EXISTS "Public Read Weights" ON public.algo_weights;
-DROP POLICY IF EXISTS "Service Write Weights" ON public.algo_weights;
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
-CREATE POLICY "Service Write Weights" ON public.algo_weights FOR ALL USING (auth.role() = 'service_role');
 
--- 👤 user_preferences : personnel
-DROP POLICY IF EXISTS "User Own Data" ON public.user_preferences;
+-- User Data
 CREATE POLICY "User Own Data" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "User Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (true);
 
--- 📝 prediction_feedback : insertion publique, lecture publique
-DROP POLICY IF EXISTS "Public Insert Feedback" ON public.prediction_feedback;
-CREATE POLICY "Public Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public Read Feedback" ON public.prediction_feedback FOR SELECT USING (true);
-
--- 💳 transactions : personnel
-DROP POLICY IF EXISTS "User View Own Tx" ON public.transactions;
-CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
-
--- ==============================================================================
--- 5. INDEXES
--- ==============================================================================
-CREATE INDEX IF NOT EXISTS idx_results_draw_date ON public.draw_results(draw_name, date);
-CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
-CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date);
-
--- ==============================================================================
--- 6. AUTOMATISATION CRON (CONFIGURATION SÉCURISÉE)
--- ==============================================================================
--- Ce bloc configure le job cron pour la synchronisation automatique toutes les 30 minutes.
--- Il gère automatiquement la suppression de l'ancien job s'il existe pour éviter les erreurs.
-
--- ⚠️ REMPLACEZ LES VALEURS CI-DESSOUS AVANT D'EXÉCUTER :
--- [PROJECT_REF] : Votre ID de projet Supabase (ex: abcdefghijklm)
--- [SERVICE_ROLE_KEY] : Votre clé 'service_role' (Settings > API)
-
-DO $$
-DECLARE
-    -- 👇 CONFIGURATION ICI 👇
-    project_ref text := '[PROJECT_REF]';
-    service_key text := '[SERVICE_ROLE_KEY]';
-    
-    -- Construction de l'URL et du Header (ne pas toucher)
-    endpoint_url text := 'https://' || project_ref || '.supabase.co/functions/v1/cron-sync';
-    auth_header text := '{"Content-Type": "application/json", "Authorization": "Bearer ' || service_key || '"}';
-BEGIN
-    -- 1. Nettoyage sécurisé (ne plante pas si le job n'existe pas)
-    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-loto-30min') THEN
-        PERFORM cron.unschedule('sync-loto-30min');
-    END IF;
-
-    -- 2. Planification du nouveau job (Toutes les 30 minutes)
-    PERFORM cron.schedule(
-        'sync-loto-30min',
-        '*/30 * * * *',
-        format(
-            'SELECT net.http_post(
-                url:=''%s'',
-                headers:=''%s''::jsonb,
-                body:=''{"source": "pg_cron"}''::jsonb
-            ) as request_id;',
-            endpoint_url,
-            auth_header
-        )
-    );
-END $$;
-
--- ==============================================================================
--- FIN DU SCRIPT
--- ==============================================================================
+-- CRON JOB (Sync automatique toutes les 30 min)
+-- Nécessite l'extension pg_cron active sur le projet Supabase
+SELECT cron.schedule(
+  'sync-loto-30min',
+  '*/30 * * * *',
+  $$
+  SELECT net.http_post(
+      url:='https://[VOTRE-PROJECT-REF].supabase.co/functions/v1/cron-sync',
+      headers:='{"Content-Type": "application/json", "Authorization": "Bearer [VOTRE-SERVICE-ROLE-KEY]"}'::jsonb,
+      body:='{}'::jsonb
+  ) as request_id;
+  $$
+);

@@ -4,8 +4,8 @@ import { PredictionTab } from './tabs/PredictionTab';
 import { MetaAnalystTab } from './tabs/MetaAnalystTab';
 import { IntelligenceTab } from './tabs/IntelligenceTab';
 import { OrchestrationTab } from './tabs/OrchestrationTab';
-import { useNexus } from './NexusProvider';
-import { getStrategyName } from '../services/predictionEngine';
+import { useNexus } from '../NexusProvider';
+import { getStrategyName } from '../../services/predictionEngine';
 import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target } from 'lucide-react';
 import { OracleLiveAssistant } from './OracleLiveAssistant';
 
