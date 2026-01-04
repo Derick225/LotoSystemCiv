@@ -3,7 +3,7 @@ import { DrawResult, SpectralMetric, FractalMetric, NumberRegularity, Barycenter
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 // Helper Worker Wrapper
-const runWorkerTask = async (task: string, history: DrawResult[]): Promise<any> => {
+const runWorkerTask = async (task: string, history: DrawResult[], payload?: any): Promise<any> => {
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/math.worker.ts', import.meta.url), { type: 'module' });
         const requestId = Math.random().toString(36).substring(7);
@@ -15,7 +15,11 @@ const runWorkerTask = async (task: string, history: DrawResult[]): Promise<any> 
                 worker.terminate();
             }
         };
-        worker.postMessage({ requestId, task, history });
+        worker.onerror = (e) => {
+            reject(e.message);
+            worker.terminate();
+        }
+        worker.postMessage({ requestId, task, history, payload });
     });
 };
 
@@ -34,20 +38,14 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
-/**
- * Calcul du Champ Gravitationnel (Attracteurs).
- * Chaque numéro sorti récemment agit comme une masse.
- * La force diminue avec le carré de la distance (écart numérique) et le temps.
- */
 export const calculateGravityField = (history: DrawResult[]): Record<number, number> => {
     const gravity: Record<number, number> = {};
-    const DECAY = 0.8; // Décroissance temporelle
+    const DECAY = 0.8;
     const G_CONST = 100;
 
-    // Initialisation
     for(let i=1; i<=90; i++) gravity[i] = 0;
 
-    const limit = Math.min(history.length, 10); // Influence des 10 derniers tirages
+    const limit = Math.min(history.length, 10);
 
     for (let t = 0; t < limit; t++) {
         const draw = history[t];
@@ -56,13 +54,9 @@ export const calculateGravityField = (history: DrawResult[]): Record<number, num
         draw.gagnants.forEach(winner => {
             for (let target = 1; target <= 90; target++) {
                 if (target === winner) continue;
-                
-                // Distance sur le cercle 1-90 (Topo-loop)
                 let dist = Math.abs(winner - target);
                 if (dist > 45) dist = 90 - dist; 
-                
-                // Force ~ 1 / r^2
-                if (dist < 10) { // Rayon d'action local
+                if (dist < 10) {
                     const force = (G_CONST / (dist * dist)) * timeWeight;
                     gravity[target] += force;
                 }
@@ -73,7 +67,6 @@ export const calculateGravityField = (history: DrawResult[]): Record<number, num
 };
 
 export const mathService = {
-  // Récupère les analyses pré-calculées depuis Supabase (Table draw_analytics)
   async fetchAnalytics(drawName: string, lastDate: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
     if (!isSupabaseConfigured()) return null;
     try {
@@ -87,18 +80,14 @@ export const mathService = {
         if (data) {
             return { spectral: data.spectral, fractal: data.fractal };
         }
-
-        // Trigger Cloud Compute if missing
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
         return null;
     } catch (e) { return null; }
   },
 
-  // Fallback Local Spectral
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {
     const N = Math.min(history.length, 200);
     const sample = history.slice(0, N);
-    
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
@@ -124,11 +113,9 @@ export const mathService = {
     }).sort((a, b) => b.energy - a.energy);
   },
 
-  // Fallback Local Fractal
   calculateFractal(history: DrawResult[]): FractalMetric[] {
     const N = Math.min(history.length, 100);
     const sample = history.slice(0, N);
-    
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
@@ -173,6 +160,28 @@ export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promi
     } catch {
         return mathService.calculateFractal(history);
     }
+};
+
+export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
+    try {
+        const res = await runWorkerTask('succession_matrix', history);
+        return res || { matrix: {}, totals: {} };
+    } catch {
+        // Fallback vide si échec worker
+        return { matrix: {}, totals: {} };
+    }
+};
+
+export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]) => {
+    try {
+        return await runWorkerTask('next_projections', history, { lastNumbers });
+    } catch { return []; }
+};
+
+export const getFollowersAnalysisAsync = async (history: DrawResult[]) => {
+    try {
+        return await runWorkerTask('followers_analysis', history);
+    } catch { return []; }
 };
 
 export const getMomentumScores = (history: DrawResult[]): Record<number, number> => {
@@ -406,33 +415,15 @@ export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => 
     const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
     return Array.from({length: 90}, (_, i) => {
         const n = i+1;
-        const outWeight = Object.values(matrix[n] || {}).reduce((a,b)=>a+(b as number), 0);
+        // Fix: Explicit typing for reduce to resolve type errors
+        const row = matrix[n] || {};
+        const outWeight = Object.values(row).reduce<number>((a, b) => a + (Number(b) || 0), 0);
         return {
             number: n,
             centrality: outWeight,
             normalized: Math.min(100, Math.round((outWeight / (history.length * 5)) * 1000))
         };
     });
-};
-
-export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
-    const matrix: Record<number, Record<number, number>> = {};
-    const totals: Record<number, number> = {};
-    
-    if (!history || history.length < 2) return { matrix, totals };
-
-    for (let i = 0; i < history.length - 1; i++) {
-        const current = history[i].gagnants;
-        const prev = history[i+1].gagnants;
-        prev.forEach(p => {
-            if (!matrix[p]) matrix[p] = {};
-            totals[p] = (totals[p] || 0) + 1;
-            current.forEach(c => {
-                matrix[p][c] = (matrix[p][c] || 0) + 1;
-            });
-        });
-    }
-    return { matrix, totals };
 };
 
 export const getNumberDetailedMetrics = async (num: number, history: DrawResult[], spectral: SpectralMetric[], fractal: FractalMetric[]): Promise<DetailedNumberMetrics> => {

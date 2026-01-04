@@ -71,6 +71,10 @@ export async function generatePlatinumPrediction(
         if (profile.type === 'chaos') adjustedWeight *= (0.5 + userBias.chaos);
         if (profile.type === 'harmony') adjustedWeight *= (0.5 + userBias.harmony);
 
+        // Boost dynamique selon le régime détecté
+        if (regime.includes('PERSISTANT') && profile.type === 'stability') adjustedWeight *= 1.2;
+        if (regime.includes('CHAOS') && profile.type === 'chaos') adjustedWeight *= 1.2;
+
         for (let i = 0; i < 2000; i++) {
             if (i % 300 === 0) await new Promise(r => setTimeout(r, 0));
 

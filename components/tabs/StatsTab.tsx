@@ -1,18 +1,35 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { ProbabilityField } from '../ProbabilityField';
-import { Waves, Scale, Fingerprint, Activity, BarChart2 } from 'lucide-react';
+import { Waves, Activity, BarChart2 } from 'lucide-react';
 
 export const StatsTab: React.FC<{ drawName: string }> = () => {
   const { stats, gaps, volatility, loading } = useNexus();
 
+  // Si pas de données, loading ou skeleton
   if (loading || stats.length === 0) return <StatsSkeleton />;
 
-  const topNumbers = stats.slice(0, 15);
-  const topGaps = [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15);
+  // Préparation des données réelles pour les graphiques
+  const topNumbers = useMemo(() => stats.slice(0, 15), [stats]);
+  const topGaps = useMemo(() => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15), [gaps]);
+
+  // Calcul pour la heatmap de probabilité (Score simple basé sur freq + gap)
+  const probabilityScores = useMemo(() => {
+      const scores: Record<number, number> = {};
+      const maxFreq = stats[0]?.count || 1;
+      const maxGap = Math.max(...gaps.map(g => g.gap)) || 1;
+
+      stats.forEach(s => {
+          const g = gaps.find(x => x.number === s.number)?.gap || 0;
+          // Formule simple : 60% Fréquence + 40% Retard (Gap)
+          const score = ((s.count / maxFreq) * 60) + ((g / maxGap) * 40);
+          scores[s.number] = Math.round(score);
+      });
+      return scores;
+  }, [stats, gaps]);
 
   return (
     <div className="space-y-10 animate-fade-in pb-12">
@@ -26,6 +43,7 @@ export const StatsTab: React.FC<{ drawName: string }> = () => {
                     {volatility?.status}
                 </div>
             </div>
+            {/* Autres KPIs simulés pour l'exemple mais basés sur la structure réelle */}
             <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
                 <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Entropie Shannon</div>
                 <div className="text-3xl font-black">0.92</div>
@@ -34,14 +52,14 @@ export const StatsTab: React.FC<{ drawName: string }> = () => {
                 </div>
             </div>
             <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
-                <div className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1">Test Chi²</div>
-                <div className="text-3xl font-black">12.4</div>
-                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Divergence Standard</div>
+                <div className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1">Ecart Moyen</div>
+                <div className="text-3xl font-black">{Math.round(gaps.reduce((a,b)=>a+b.gap,0)/90)}</div>
+                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Tirages sans sortie</div>
             </div>
             <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
-                <div className="text-[9px] font-black text-cyan-400 uppercase tracking-widest mb-1">Benford Law</div>
-                <div className="text-3xl font-black">98%</div>
-                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Conformité Naturelle</div>
+                <div className="text-[9px] font-black text-cyan-400 uppercase tracking-widest mb-1">Points Chauds</div>
+                <div className="text-3xl font-black">{topNumbers.length}</div>
+                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Vecteurs actifs</div>
             </div>
         </div>
 
@@ -97,11 +115,10 @@ export const StatsTab: React.FC<{ drawName: string }> = () => {
         {/* Probability Heatmap */}
         <section>
             <div className="flex justify-between items-center mb-6 px-2">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tighter uppercase">Distribution Gaussienne</h3>
+                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tighter uppercase">Matrice de Probabilité</h3>
                 <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-slate-500 uppercase">Grille 90</span>
             </div>
-            {/* Mocking scores for visualization */}
-            <ProbabilityField scores={Object.fromEntries(stats.map(s => [s.number, (s.count/stats[0].count)*100]))} />
+            <ProbabilityField scores={probabilityScores} />
         </section>
     </div>
   );

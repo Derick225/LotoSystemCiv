@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
@@ -5,12 +6,20 @@ import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw } from 'lucide-react';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { DRAW_SCHEDULE } from '../../constants';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
 interface DrawManagementProps {
     drawName: string;
+}
+
+interface PreviewRow {
+    date: string;
+    gagnants: number[];
+    machine: number[];
+    isValid: boolean;
+    error?: string;
 }
 
 export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
@@ -32,13 +41,17 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const [formMac, setFormMac] = useState<string[]>(Array(5).fill(''));
     const [isSaving, setIsSaving] = useState(false);
 
-    // Bulk Import State
-    const [bulkData, setBulkData] = useState<string>('');
+    // Bulk Import State Enhanced
     const [isImporting, setIsImporting] = useState(false);
+    const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
+    const [importStep, setImportStep] = useState<'upload' | 'preview'>('upload');
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => { 
         resetForm();
         loadData(); 
+        setPreviewData([]);
+        setImportStep('upload');
     }, [drawName]);
 
     const loadData = async () => {
@@ -49,6 +62,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         } catch (e) { showToast("Erreur de chargement", "error"); } finally { setLoading(false); }
     };
 
+    // --- MANUAL & CAMERA LOGIC ---
     const startCamera = async () => {
         setIsScanning(true);
         try {
@@ -147,121 +161,104 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         } catch (e: any) { showToast(e.message, "error"); } finally { setIsSaving(false); }
     };
 
-    const parseLotoBonheurJSON = (json: any): any[] => {
-        const results: any[] = [];
-        const currentYear = new Date().getFullYear().toString();
-
-        if (json.drawsResultsWeekly && Array.isArray(json.drawsResultsWeekly)) {
-            json.drawsResultsWeekly.forEach((week: any) => {
-                const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
-                const year = yearMatch ? yearMatch[0] : currentYear;
-
-                if (week.drawResultsDaily && Array.isArray(week.drawResultsDaily)) {
-                    week.drawResultsDaily.forEach((daily: any) => {
-                        const dateMatch = daily.date.match(/(\d{2})\/(\d{2})/);
-                        if (!dateMatch) return;
-                        const formattedDate = `${dateMatch[1]}/${dateMatch[2]}/${year}`;
-
-                        if (daily.drawResults && Array.isArray(daily.drawResults.standardDraws)) {
-                            daily.drawResults.standardDraws.forEach((draw: any) => {
-                                const apiName = (draw.drawName || "").trim().toUpperCase();
-                                let mappedName = null;
-                                if (apiName === drawName.toUpperCase() || apiName.includes(drawName.toUpperCase())) {
-                                    mappedName = drawName;
-                                } else {
-                                    Object.values(DRAW_SCHEDULE).forEach(daySched => {
-                                        Object.values(daySched).forEach(schedName => {
-                                            if (schedName.toUpperCase() === apiName) mappedName = schedName;
-                                        });
-                                    });
-                                }
-
-                                if (mappedName && draw.winningNumbers && !draw.winningNumbers.includes('..')) {
-                                    const win = (draw.winningNumbers.match(/\d+/g) || []).map(Number);
-                                    const mac = (draw.machineNumbers?.match(/\d+/g) || []).map(Number);
-                                    
-                                    if (win.length === 5) {
-                                        results.push({
-                                            draw_name: mappedName, 
-                                            date: formattedDate,
-                                            gagnants: win,
-                                            machine: mac.length === 5 ? mac : [],
-                                            version: 1
-                                        });
-                                    }
-                                }
-                            });
-                        }
-                    });
-                }
-            });
-        }
-        return results;
-    };
-
-    const handleBulkImport = async () => {
-        if (!bulkData.trim()) return;
-        setIsImporting(true);
-        try {
-            let parsedData;
-            let importCount = 0;
-
-            try {
-                const json = JSON.parse(bulkData);
-                if (json.drawsResultsWeekly || (Array.isArray(json) && json[0]?.drawsResultsWeekly)) {
-                    const root = Array.isArray(json) ? { drawsResultsWeekly: json.flatMap((x:any) => x.drawsResultsWeekly || []) } : json;
-                    parsedData = parseLotoBonheurJSON(root);
-                    showToast(`Format API détecté : ${parsedData.length} tirages extraits.`, "info");
-                } else if (Array.isArray(json)) {
-                    parsedData = json;
-                } else {
-                    parsedData = [json];
-                }
-            } catch (e) {
-                const rows = bulkData.split('\n');
-                parsedData = rows.map(r => {
-                    const parts = r.split(',');
-                    if (parts.length < 6) return null;
-                    return {
-                        draw_name: drawName,
-                        date: parts[0],
-                        gagnants: parts.slice(1, 6).map(Number),
-                        machine: parts.slice(6, 11).map(Number)
-                    };
-                }).filter(x => x !== null);
-            }
-
-            if (!parsedData || parsedData.length === 0) throw new Error("Format non reconnu ou aucune donnée valide.");
-            
-            const finalizedData = parsedData.map((d: any) => ({
-                ...d,
-                draw_name: d.draw_name || drawName 
-            }));
-
-            const groupedByName: Record<string, any[]> = {};
-            finalizedData.forEach((d: any) => {
-                if (!groupedByName[d.draw_name]) groupedByName[d.draw_name] = [];
-                groupedByName[d.draw_name].push(d);
-            });
-
-            for (const [name, batch] of Object.entries(groupedByName)) {
-                await bulkAddResults(name, batch);
-                importCount += batch.length;
-            }
-            
-            showToast(`${importCount} résultats importés avec succès !`, "success");
-            setBulkData('');
-            loadData();
-        } catch (e: any) {
-            showToast(`Échec Import : ${e.message}`, "error");
-        } finally {
-            setIsImporting(false);
-        }
-    };
-
     const resetForm = () => {
         setIsEditing(false); setEditId(null); setFormWin(Array(5).fill('')); setFormMac(Array(5).fill(''));
         setFormDate(new Date().toISOString().split('T')[0]);
+    };
+
+    // --- BULK IMPORT LOGIC ---
+
+    const processRawData = (content: string) => {
+        const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
+        const preview: PreviewRow[] = [];
+
+        lines.forEach((line, index) => {
+            // Ignorer l'entête si présent (détection heuristique)
+            if (index === 0 && (line.toLowerCase().includes('date') || line.toLowerCase().includes('g1'))) return;
+
+            // Nettoyage et split (support virgule et point-virgule)
+            const separator = line.includes(';') ? ';' : ',';
+            const parts = line.split(separator).map(p => p.trim());
+
+            if (parts.length < 6) return; // Date + 5 numéros min
+
+            const dateStr = parts[0];
+            const winners = parts.slice(1, 6).map(Number);
+            const machine = parts.slice(6, 11).map(Number).filter(n => !isNaN(n)); // Machine optionnelle
+
+            // Validation
+            let isValid = true;
+            let error = '';
+
+            // Check Date (Simple format check)
+            if (!dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/) && !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                isValid = false; error = 'Date invalide (DD/MM/YYYY ou YYYY-MM-DD)';
+            }
+            // Check Winners
+            if (winners.some(isNaN) || winners.length !== 5 || new Set(winners).size !== 5 || winners.some(n => n < 1 || n > 90)) {
+                isValid = false; error = 'Numéros gagnants invalides';
+            }
+
+            preview.push({
+                date: dateStr,
+                gagnants: winners,
+                machine: machine.length === 5 ? machine : [],
+                isValid,
+                error
+            });
+        });
+
+        setPreviewData(preview);
+        setImportStep('preview');
+        if (preview.length === 0) showToast("Aucune donnée valide trouvée.", "error");
+    };
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const text = event.target?.result as string;
+            processRawData(text);
+        };
+        reader.readAsText(file);
+    };
+
+    const downloadTemplate = () => {
+        const csvContent = "Date,G1,G2,G3,G4,G5,M1,M2,M3,M4,M5\n01/01/2024,5,12,34,56,89,1,2,3,4,5";
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'nexus_import_template.csv';
+        a.click();
+    };
+
+    const confirmImport = async () => {
+        const validRows = previewData.filter(r => r.isValid);
+        if (validRows.length === 0) return;
+
+        setIsImporting(true);
+        try {
+            const batch = validRows.map(row => ({
+                draw_name: drawName,
+                date: row.date,
+                gagnants: row.gagnants,
+                machine: row.machine,
+                version: 1
+            }));
+
+            await bulkAddResults(drawName, batch);
+            showToast(`${batch.length} tirages importés avec succès.`, "success");
+            setPreviewData([]);
+            setImportStep('upload');
+            loadData();
+        } catch (e: any) {
+            showToast(`Erreur Import: ${e.message}`, "error");
+        } finally {
+            setIsImporting(false);
+        }
     };
 
     return (
@@ -280,7 +277,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                         <Pencil size={14}/> Saisie
                     </button>
                     <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
-                        <LayoutGrid size={14}/> Bulk
+                        <LayoutGrid size={14}/> Import
                     </button>
                     <button onClick={() => setActiveSubTab('audit')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <Stethoscope size={14}/> Audit
@@ -383,28 +380,97 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: BULK IMPORT */}
             {activeSubTab === 'bulk' && (
-                <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-2xl"><Upload size={20}/></div>
-                        <div>
-                            <h3 className="font-black text-slate-800 dark:text-white uppercase">Import de Masse</h3>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Support JSON (API) & CSV</p>
+                <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all">
+                    
+                    {importStep === 'upload' && (
+                        <div className="animate-slide-up">
+                            <div className="flex justify-between items-center mb-8">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-2xl"><Upload size={20}/></div>
+                                    <div>
+                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Import de Masse</h3>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Support CSV & JSON</p>
+                                    </div>
+                                </div>
+                                <button onClick={downloadTemplate} className="text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Télécharger Modèle CSV</button>
+                            </div>
+
+                            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.json" className="hidden" />
+                            
+                            <div 
+                                onClick={() => fileInputRef.current?.click()}
+                                className="w-full h-48 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all group"
+                            >
+                                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-900 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                                    <FileSpreadsheet size={32} className="text-slate-400 group-hover:text-indigo-500" />
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier ici</p>
+                                    <p className="text-xs text-slate-400 mt-1">Format: Date, G1, G2, G3, G4, G5, [M1..M5]</p>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <textarea 
-                        value={bulkData}
-                        onChange={(e) => setBulkData(e.target.value)}
-                        className="w-full h-64 p-6 bg-slate-50 dark:bg-slate-900 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700 focus:border-indigo-500 outline-none font-mono text-xs text-slate-600 dark:text-slate-300 resize-none transition-colors mb-6"
-                        placeholder={`Collez ici le JSON de l'API ou un CSV au format:\nDD/MM/YYYY,G1,G2,G3,G4,G5,M1,M2,M3,M4,M5`}
-                    />
-                    
-                    <div className="flex justify-end gap-4">
-                        <button onClick={() => setBulkData('')} className="px-6 py-4 rounded-2xl font-bold text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Effacer</button>
-                        <button onClick={handleBulkImport} disabled={isImporting} className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center gap-3 disabled:opacity-50 transition active:scale-95">
-                            {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <FileJson size={16}/>} Traiter les données
-                        </button>
-                    </div>
+                    )}
+
+                    {importStep === 'preview' && (
+                        <div className="animate-slide-up space-y-6">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-black text-slate-800 dark:text-white uppercase">Prévisualisation</h3>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{previewData.filter(r => r.isValid).length} valides / {previewData.length} lignes</p>
+                                </div>
+                                <button onClick={() => { setImportStep('upload'); setPreviewData([]); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><X size={16}/></button>
+                            </div>
+
+                            <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
+                                        <tr>
+                                            <th className="p-4 font-black text-slate-500 uppercase">Statut</th>
+                                            <th className="p-4 font-black text-slate-500 uppercase">Date</th>
+                                            <th className="p-4 font-black text-slate-500 uppercase">Gagnants</th>
+                                            <th className="p-4 font-black text-slate-500 uppercase">Machine</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {previewData.map((row, i) => (
+                                            <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
+                                                <td className="p-4">
+                                                    {row.isValid 
+                                                        ? <CheckCircle2 size={16} className="text-emerald-500"/> 
+                                                        : <div className="flex items-center gap-2 text-rose-500" title={row.error}><AlertTriangle size={16}/><span className="text-[9px] font-bold uppercase hidden md:inline">{row.error}</span></div>
+                                                    }
+                                                </td>
+                                                <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
+                                                <td className="p-4">
+                                                    <div className="flex gap-1">
+                                                        {row.gagnants.map((n, j) => (
+                                                            <span key={j} className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[9px] font-bold">{n}</span>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4">
+                                                    <div className="flex gap-1">
+                                                        {row.machine.map((n, j) => (
+                                                            <span key={j} className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 flex items-center justify-center text-[9px] font-bold">{n}</span>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex justify-end gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition">Annuler</button>
+                                <button onClick={confirmImport} disabled={isImporting || previewData.filter(r => r.isValid).length === 0} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center gap-2 disabled:opacity-50 active:scale-95 transition">
+                                    {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
+                                    Confirmer Import
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

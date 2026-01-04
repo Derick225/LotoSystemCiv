@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runSurvivalSimulation, BettingStrategy, BacktestReport } from '../../services/backtestingEngine';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
@@ -9,35 +9,54 @@ import { generateSimulationAudit } from '../../services/geminiService';
 export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { history, globalWeights, loading: nexusLoading } = useNexus();
     const [simulating, setSimulating] = useState(false);
+    const [progress, setProgress] = useState(0);
     const [report, setReport] = useState<BacktestReport | null>(null);
     const [audit, setAudit] = useState<string | null>(null);
     const [strategy, setStrategy] = useState<BettingStrategy>('KELLY');
     const [depth, setDepth] = useState(50);
     const [isAuditLoading, setIsAuditLoading] = useState(false);
+    
+    const isMounted = useRef(true);
+    useEffect(() => {
+        return () => { isMounted.current = false; };
+    }, []);
 
     const handleRun = async () => {
         if (history.length < depth + 5) return;
         setSimulating(true);
         setAudit(null);
+        setProgress(0);
         
-        // Simule un calcul intensif
-        setTimeout(async () => {
-            const result = await runSurvivalSimulation(drawName, history, globalWeights, depth, strategy);
-            setReport(result);
-            setSimulating(false);
+        try {
+            const result = await runSurvivalSimulation(
+                drawName, 
+                history, 
+                globalWeights, 
+                depth, 
+                strategy,
+                (p) => { if(isMounted.current) setProgress(p); }
+            );
             
-            // Lancer l'audit IA automatiquement après le rapport
-            setIsAuditLoading(true);
-            try {
-                const aiAudit = await generateSimulationAudit(result);
-                setAudit(aiAudit);
-            } finally {
-                setIsAuditLoading(false);
+            if (isMounted.current) {
+                setReport(result);
+                setSimulating(false);
+                setProgress(100);
+                
+                // Lancer l'audit IA automatiquement
+                setIsAuditLoading(true);
+                generateSimulationAudit(result).then(aiAudit => {
+                    if(isMounted.current) {
+                        setAudit(aiAudit);
+                        setIsAuditLoading(false);
+                    }
+                });
             }
-        }, 800);
+        } catch (e) {
+            console.error(e);
+            if(isMounted.current) setSimulating(false);
+        }
     };
 
-    // Calcul de l'enveloppe Monte Carlo (Simulation de chemins probables)
     const monteCarloData = useMemo(() => {
         if (!report) return [];
         return report.history.map((h, i) => {
@@ -98,15 +117,20 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             className="mt-5 px-10 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50"
                         >
                             {simulating ? <RefreshCw className="animate-spin" size={16}/> : <Play size={16}/>} 
-                            {simulating ? 'Processing...' : 'Run Simulation'}
+                            {simulating ? `${progress}%` : 'Run Simulation'}
                         </button>
                     </div>
                 </div>
+                
+                {simulating && (
+                    <div className="absolute bottom-0 left-0 w-full h-1 bg-slate-800">
+                        <div className="h-full bg-indigo-500 transition-all duration-200" style={{width: `${progress}%`}}></div>
+                    </div>
+                )}
             </div>
 
             {report && (
                 <div className="grid lg:grid-cols-12 gap-8 animate-slide-up">
-                    {/* Stats & Finance */}
                     <div className="lg:col-span-4 space-y-6">
                         <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700 h-full flex flex-col">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8">Performance Financière</h4>
@@ -150,7 +174,6 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                     </div>
 
-                    {/* Chart & AI Audit */}
                     <div className="lg:col-span-8 space-y-8">
                         <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 flex justify-between items-center">
@@ -173,20 +196,15 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                             contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }}
                                             formatter={(val: number) => [`${val.toLocaleString()} F`, 'Solde']}
                                         />
-                                        <ReferenceLine y={initialBankroll} stroke="#475569" strokeDasharray="3 3" />
-                                        
-                                        {/* Monte Carlo Bands */}
+                                        <ReferenceLine y={50000} stroke="#475569" strokeDasharray="3 3" />
                                         <Area type="monotone" dataKey="optimistic" stroke="transparent" fill="#10b981" fillOpacity={0.05} />
                                         <Area type="monotone" dataKey="pessimistic" stroke="transparent" fill="#f43f5e" fillOpacity={0.05} />
-                                        
-                                        {/* Main Path */}
                                         <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={4} fill="url(#colorArea)" />
                                     </AreaChart>
                                 </ResponsiveContainer>
                             </div>
                         </div>
 
-                        {/* Oracle AI Simulation Audit */}
                         <div className="bg-slate-950 p-8 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-4 opacity-5"><TrendingUp size={48} /></div>
                             <div className="flex items-center gap-3 mb-6">
@@ -214,5 +232,3 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
     );
 };
-
-const initialBankroll = 50000;

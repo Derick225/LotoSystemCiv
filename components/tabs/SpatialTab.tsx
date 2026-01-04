@@ -3,10 +3,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateSpatialMetrics, getBarycenterTrajectory } from '../../services/spatialService';
 import { predictBarycenterShift } from '../../services/mathService';
 import { useNexus } from '../NexusProvider';
-import type { SpatialMetrics, DrawResult, SpatialCluster, BarycenterPoint } from '../../types';
-import { NumberBall } from '../NumberBall';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList, Line, ComposedChart, Scatter, ReferenceLine, Area } from 'recharts';
-import { Target, TrendingUp, Info, Activity, MoveUpRight, Zap, Layers, Globe, Database, Clock, Play, Pause, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import type { SpatialMetrics, DrawResult, BarycenterPoint } from '../../types';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Scatter, ReferenceLine } from 'recharts';
+import { Target, Activity, MoveUpRight, Layers, Globe, Clock, Play, Pause, RotateCcw } from 'lucide-react';
 
 interface SpatialTabProps {
   drawName: string;
@@ -15,9 +14,7 @@ interface SpatialTabProps {
 export function SpatialTab({ drawName }: SpatialTabProps) {
   const { history, loading: nexusLoading } = useNexus();
   
-  // Time Travel State
-  // timeIndex = 0 : Présent (Dernier tirage connu)
-  // timeIndex > 0 : Passé (Décalage de X tirages)
+  // Time Travel State (0 = Présent)
   const [timeIndex, setTimeIndex] = useState(0); 
   const [isPlaying, setIsPlaying] = useState(false);
   const playIntervalRef = useRef<number | null>(null);
@@ -26,24 +23,22 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
   const [trajectory, setTrajectory] = useState<BarycenterPoint[]>([]);
   const [lastDraw, setLastDraw] = useState<DrawResult | null>(null);
   const [localLoading, setLocalLoading] = useState(true);
-  const [hoveredCluster, setHoveredCluster] = useState<string | null>(null);
 
-  const maxHistory = Math.min(history.length - 20, 100); // Limite de recul
+  const maxHistory = Math.min(history.length - 20, 100); 
 
   // Recalcul des métriques basé sur la fenêtre temporelle active
   useEffect(() => {
     if (history.length > 20) {
-        // Pas de loading spinner bloquant pour la fluidité du time-travel, juste un recalcul rapide
-        // On simule une "fenêtre glissante" en prenant l'historique décalé
+        // Fenêtre glissante virtuelle sur l'historique
         const snapshotHistory = history.slice(timeIndex);
         
         try {
             const spatialMetrics = calculateSpatialMetrics(snapshotHistory); 
             // La trajectoire doit être relative au point de vue temporel
-            const traj = getBarycenterTrajectory(snapshotHistory, 15); // 15 derniers points de trajectoire
+            const traj = getBarycenterTrajectory(snapshotHistory, 15); 
             
             setMetrics(spatialMetrics);
-            setTrajectory(traj.reverse()); // Pour le graphe (gauche -> droite)
+            setTrajectory(traj.reverse()); // Chronologique pour le graphe
             setLastDraw(snapshotHistory[0]);
         } catch(e) {
             console.error(e);
@@ -53,18 +48,18 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
     }
   }, [history, timeIndex]);
 
-  // Player Logic
+  // Player Logic (Remonte le temps vers le présent)
   useEffect(() => {
       if (isPlaying) {
           playIntervalRef.current = window.setInterval(() => {
               setTimeIndex(prev => {
-                  if (prev <= 0) { // Si on arrive au présent
+                  if (prev <= 0) { 
                       setIsPlaying(false);
                       return 0;
                   }
-                  return prev - 1; // On avance vers le présent
+                  return prev - 1; 
               });
-          }, 600); // Vitesse de lecture
+          }, 600); 
       } else {
           if (playIntervalRef.current) clearInterval(playIntervalRef.current);
       }
@@ -76,7 +71,6 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
     return predictBarycenterShift(trajectory);
   }, [trajectory]);
 
-  // Prédiction vectorielle simple basée sur le mouvement du barycentre
   const vectorPrediction = useMemo(() => {
       if (!shift || !metrics) return { x: 0, y: 0, zone: 'Centre' };
       const dx = shift.x - metrics.barycenter.x;
@@ -96,9 +90,8 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
           <div className="flex flex-col items-center justify-center p-24 gap-6 bg-slate-900/5 rounded-[3.5rem] border border-dashed border-indigo-200">
               <div className="relative">
                   <Globe className="animate-spin text-indigo-500" size={48} />
-                  <div className="absolute inset-0 m-auto w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
               </div>
-              <p className="text-xs font-black uppercase tracking-[0.4em] text-indigo-500 animate-pulse">Séquençage Spatial Master...</p>
+              <p className="text-xs font-black uppercase tracking-[0.4em] text-indigo-500 animate-pulse">Séquençage Spatial...</p>
           </div>
       );
   }
@@ -139,12 +132,8 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                           value={timeIndex}
                           onChange={(e) => { setIsPlaying(false); setTimeIndex(Number(e.target.value)); }}
                           className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500 dir-rtl"
-                          style={{ direction: 'rtl' }} // Pour que 0 (Présent) soit à droite
+                          style={{ direction: 'rtl' }} 
                       />
-                      <div className="flex justify-between text-[8px] font-black uppercase text-slate-500 mt-2 px-1">
-                          <span>Présent</span>
-                          <span>Passé ({maxHistory}t)</span>
-                      </div>
                   </div>
 
                   <button onClick={() => { setIsPlaying(false); setTimeIndex(0); }} className="p-3 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-all" title="Reset au présent">
@@ -234,15 +223,13 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                   {/* Clusters List */}
                   <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
                       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                          <Layers size={14} className="text-emerald-500"/> Clusters Actifs (DBSCAN)
+                          <Layers size={14} className="text-emerald-500"/> Clusters Actifs
                       </h4>
                       <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar">
                           {metrics?.advancedClusters.map(cluster => (
                               <div 
                                   key={cluster.id} 
-                                  className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 hover:border-indigo-400 transition-colors cursor-help"
-                                  onMouseEnter={() => setHoveredCluster(cluster.id)}
-                                  onMouseLeave={() => setHoveredCluster(null)}
+                                  className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800"
                               >
                                   <div className="flex justify-between items-center mb-2">
                                       <span className="text-[10px] font-black text-slate-500 uppercase">Densité {cluster.density}</span>
@@ -258,7 +245,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                               </div>
                           ))}
                           {metrics?.advancedClusters.length === 0 && (
-                              <div className="text-center text-slate-400 text-xs italic py-4">Aucun cluster dense détecté. Distribution uniforme.</div>
+                              <div className="text-center text-slate-400 text-xs italic py-4">Aucun cluster dense détecté.</div>
                           )}
                       </div>
                   </div>

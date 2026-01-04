@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import type { ForensicReport, ForensicEvidence, AlgoWeights, AdaptiveRules, PredictionFeedback } from '../types';
 import { NumberBall } from './NumberBall';
@@ -38,7 +37,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             const { data } = await fetchResults(report.drawName);
             const actualDraw = data.find(d => d.date === report.date);
             if (actualDraw) {
-                const analysis = analyzePredictionError(report.drawName, actualDraw);
+                const analysis = analyzePredictionError(report.drawName, actualDraw, data);
                 setAuditLessons(analysis.auditLessons);
             }
         };

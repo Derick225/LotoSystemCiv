@@ -11,84 +11,78 @@ export interface InterGameHeat {
 }
 
 /**
- * Analyse si les résultats d'un jeu influencent mathématiquement le suivant.
- * Version v3.5 : Jaccard Pondéré Temporellement (Récence) avec gestion circulaire.
+ * Analyse si les résultats d'un jeu influencent mathématiquement le suivant (Translocation).
+ * Recherche le tirage précédent (chronologique) sur l'ensemble des jeux disponibles.
  */
 export const analyzeMigrationFlux = async (targetDrawName: string): Promise<InterGameHeat | null> => {
-    const draws = ALL_DRAWS;
-    const currentIndex = draws.findIndex(d => d.name === targetDrawName);
+    // 1. Récupération de l'historique cible
+    const { data: targetHist } = await fetchResults(targetDrawName);
+    if (!targetHist || targetHist.length === 0) return null;
+
+    const latestDraw = targetHist[0];
+    const targetDate = new Date(latestDraw.date.split('/').reverse().join('-')); // Format YYYY-MM-DD supposé après parsing
+
+    // 2. Identification du tirage précédent (tous jeux confondus)
+    // On doit charger les résultats récents de TOUS les jeux pour trouver celui juste avant
+    // Optimisation : On ne cherche que dans les jeux du même jour ou de la veille
     
-    // Gestion circulaire : si c'est le premier tirage, on prend le dernier de la liste (Dimanche soir précédent)
-    // Sinon on prend simplement le précédent.
-    const prevIndex = currentIndex <= 0 ? draws.length - 1 : currentIndex - 1;
-    const prevDrawDef = draws[prevIndex];
-    
-    // Sécurité si la liste est vide ou erreur d'index
-    if (!prevDrawDef) return null;
-    
-    try {
-        const [{ data: targetHist }, { data: sourceHist }] = await Promise.all([
-            fetchResults(targetDrawName),
-            fetchResults(prevDrawDef.name)
-        ]);
+    let bestPreviousDraw: { name: string, result: DrawResult, diff: number } | null = null;
 
-        if (targetHist.length < 20 || sourceHist.length < 20) return null;
+    // Liste des jeux potentiels (excluant le jeu cible)
+    const otherGames = ALL_DRAWS.filter(d => d.name !== targetDrawName);
 
-        let weightedJaccardSum = 0;
-        let totalWeights = 0;
-        const migrationFreq: Record<number, number> = {};
+    // On charge en parallèle les derniers résultats des autres jeux (limité à 1 pour perf)
+    const promises = otherGames.map(game => 
+        fetchResults(game.name).then(res => ({ name: game.name, history: res.data }))
+    );
 
-        // Analyse sur les 50 derniers tirages
-        const depth = Math.min(50, targetHist.length);
+    const allGamesHistory = await Promise.all(promises);
 
-        for (let i = 0; i < depth; i++) {
-            const tDraw = targetHist[i];
-            
-            // Recherche heuristique du tirage source correspondant (même jour ou jour précédent selon le cycle)
-            // Note: Pour une analyse parfaite, il faudrait aligner les timestamps exacts, 
-            // mais ici on cherche une corrélation structurelle proche.
-            // On cherche le tirage source le plus proche temporellement de tDraw.date
-            const sameDaySource = sourceHist.find(s => s.date === tDraw.date);
-            // Si pas trouvé le même jour (ex: transition Lundi/Dimanche), on prend juste l'index correspondant
-            // en supposant une régularité, ou on saute.
-            const sourceDraw = sameDaySource || sourceHist[i]; 
-            
-            if (sourceDraw) {
-                // Poids temporel : Les tirages récents comptent plus (décroissance exponentielle)
-                const weight = Math.exp(-0.05 * i); 
-                totalWeights += weight;
+    for (const gameData of allGamesHistory) {
+        if (!gameData.history || gameData.history.length === 0) continue;
+        
+        const candidate = gameData.history[0];
+        // Parsing date format (DD/MM/YYYY)
+        const parts = candidate.date.split('/');
+        const cDate = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+        
+        // Ajout de l'heure approximative pour le tri fin (basé sur DRAW_SCHEDULE)
+        // C'est une approximation heuristique suffisante
+        const diff = targetDate.getTime() - cDate.getTime();
 
-                const intersection = tDraw.gagnants.filter(n => sourceDraw.gagnants.includes(n));
-                const unionSize = new Set([...tDraw.gagnants, ...sourceDraw.gagnants]).size;
-                
-                // Jaccard local
-                const jaccard = intersection.length / unionSize;
-                weightedJaccardSum += (jaccard * weight);
-                
-                intersection.forEach(n => migrationFreq[n] = (migrationFreq[n] || 0) + weight);
+        // On cherche le tirage le plus proche dans le passé (positif mais petit)
+        // Tolérance : doit être avant (diff > 0) et moins de 48h (172800000ms)
+        if (diff > 0 && diff < 172800000) {
+            if (!bestPreviousDraw || diff < bestPreviousDraw.diff) {
+                bestPreviousDraw = {
+                    name: gameData.name,
+                    result: candidate,
+                    diff: diff
+                };
             }
         }
-
-        if (totalWeights === 0) return null;
-
-        // Facteur de corrélation global normalisé
-        const avgWeightedJaccard = weightedJaccardSum / totalWeights;
-        // On amplifie pour la lisibilité (0.1 Jaccard est déjà énorme pour du loto)
-        const factor = Math.min(100, Math.round(avgWeightedJaccard * 500)); 
-        
-        // Seuil de bruit pour les migrants
-        const hotMigrators = Object.entries(migrationFreq)
-            .sort((a,b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(e => Number(e[0]));
-
-        return {
-            sourceGame: prevDrawDef.name,
-            targetGame: targetDrawName,
-            correlationFactor: factor,
-            migratingNumbers: hotMigrators
-        };
-    } catch (e) {
-        return null;
     }
+
+    if (!bestPreviousDraw) return null;
+
+    const sourceDraw = bestPreviousDraw.result;
+    
+    // 3. Calcul de la translocation (Combien de numéros du tirage source se retrouvent dans le tirage cible ?)
+    const intersection = latestDraw.gagnants.filter(n => sourceDraw.gagnants.includes(n));
+    
+    // Calcul pondéré : On regarde aussi les voisins (+/-1) pour la "pression"
+    let pressureScore = 0;
+    sourceDraw.gagnants.forEach(src => {
+        if (latestDraw.gagnants.includes(src)) pressureScore += 100; // Transfert direct
+        if (latestDraw.gagnants.includes(src + 1) || latestDraw.gagnants.includes(src - 1)) pressureScore += 25; // Voisin
+    });
+
+    const correlationFactor = Math.min(100, pressureScore / 5 * 20); // Normalisation arbitraire
+
+    return {
+        sourceGame: bestPreviousDraw.name,
+        targetGame: targetDrawName,
+        correlationFactor,
+        migratingNumbers: intersection // Numéros ayant translaté
+    };
 };

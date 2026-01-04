@@ -28,9 +28,10 @@ export interface ImmediateLesson {
     impactScore: number;
 }
 
-export const analyzePredictionError = (drawName: string, actualDraw: DrawResult): { auditLessons: ImmediateLesson[] } => {
+export const analyzePredictionError = (drawName: string, actualDraw: DrawResult, history: DrawResult[]): { auditLessons: ImmediateLesson[] } => {
     const lessons: ImmediateLesson[] = [];
     
+    // 1. Analyse Machine -> Gagnant
     if (actualDraw.machine) {
         const transfers = actualDraw.gagnants.filter(n => actualDraw.machine?.includes(n));
         if (transfers.length > 0) {
@@ -42,8 +43,33 @@ export const analyzePredictionError = (drawName: string, actualDraw: DrawResult)
         }
     }
 
-    const repetitions = actualDraw.gagnants.length; // Simplified check context
-    // In a real implementation, we would pass the previous draw to check for exact repetitions
+    // 2. Analyse Répétition (T vs T-1)
+    // On cherche le tirage qui précède immédiatement 'actualDraw'
+    const actualIndex = history.findIndex(h => h.id === actualDraw.id);
+    const prevDraw = (actualIndex !== -1 && actualIndex < history.length - 1) ? history[actualIndex + 1] : null;
+
+    if (prevDraw) {
+        const repeats = actualDraw.gagnants.filter(n => prevDraw.gagnants.includes(n));
+        if (repeats.length > 0) {
+            lessons.push({
+                pattern: 'Répétition',
+                description: `Inertie temporelle forte : ${repeats.length} numéros conservés du tirage précédent (${repeats.join(', ')}).`,
+                impactScore: repeats.length * 30 // Impact fort pour les répétitions
+            });
+        }
+
+        // 3. Analyse Voisinage (T vs T-1)
+        const neighbors = actualDraw.gagnants.filter(n => 
+            prevDraw.gagnants.includes(n - 1) || prevDraw.gagnants.includes(n + 1)
+        );
+        if (neighbors.length >= 2) {
+            lessons.push({
+                pattern: 'Voisin',
+                description: `Glissement de voisinage sur ${neighbors.length} vecteurs.`,
+                impactScore: neighbors.length * 15
+            });
+        }
+    }
     
     return { auditLessons: lessons };
 };

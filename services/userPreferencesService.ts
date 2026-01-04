@@ -5,6 +5,7 @@ import type { SavedTicket } from '../types';
 const WATCHLIST_KEY = 'lotopro_user_watchlist';
 const TICKETS_KEY = 'lotopro_user_tickets';
 const BANKROLL_KEY = 'lotopro_user_bankroll';
+const SETTINGS_KEY = 'lotopro_user_settings';
 
 // --- WATCHLIST ---
 
@@ -112,6 +113,52 @@ export const archiveTicket = async (id: string): Promise<void> => {
     const current = getSavedTickets();
     const updated = current.map(t => t.id === id ? { ...t, status: 'archived' as const } : t);
     localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
+    
+    if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            await supabase.from('user_preferences').upsert({
+                user_id: session.user.id,
+                saved_tickets: updated,
+                updated_at: new Date().toISOString()
+            });
+        }
+    }
+};
+
+// --- SYSTEM SETTINGS (NEW) ---
+
+export interface UserSettings {
+    sound: boolean;
+    haptics: boolean;
+    highPerf: boolean;
+    theme: 'light' | 'dark' | 'system';
+}
+
+export const getSettings = (): UserSettings => {
+    try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        return raw ? JSON.parse(raw) : { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+    } catch (e) {
+        return { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+    }
+};
+
+export const saveSettings = async (settings: UserSettings): Promise<void> => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    
+    if (isSupabaseConfigured()) {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                await supabase.from('user_preferences').upsert({
+                    user_id: session.user.id,
+                    settings: settings,
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch(e) { console.warn("Sync settings failed"); }
+    }
 };
 
 // --- BANKROLL MANAGEMENT ---
@@ -137,13 +184,14 @@ export const syncAllUserData = async () => {
         if (session) {
             const { data, error } = await supabase
                 .from('user_preferences')
-                .select('watchlist, saved_tickets')
+                .select('watchlist, saved_tickets, settings')
                 .eq('user_id', session.user.id)
                 .single();
 
             if (!error && data) {
                 if (data.watchlist) localStorage.setItem(WATCHLIST_KEY, JSON.stringify(data.watchlist));
                 if (data.saved_tickets) localStorage.setItem(TICKETS_KEY, JSON.stringify(data.saved_tickets));
+                if (data.settings) localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings));
             }
         }
     } catch (e) { console.warn("Full Sync Failed", e); }

@@ -1,6 +1,6 @@
 
 /**
- * Nexus Production Math Worker v8.1
+ * Nexus Production Math Worker v8.5
  * Traitement analytique lourd sur l'ENTIÈRETÉ de l'historique.
  */
 
@@ -10,7 +10,7 @@ export {};
 const ctx = self as unknown as Worker;
 
 ctx.onmessage = async (e: MessageEvent) => {
-    const { requestId, task, history } = e.data;
+    const { requestId, task, history, payload } = e.data;
     if (!history || history.length === 0) return;
 
     try {
@@ -21,6 +21,15 @@ ctx.onmessage = async (e: MessageEvent) => {
                 break;
             case 'pearson_matrix':
                 result = calculatePearsonMatrix(history);
+                break;
+            case 'succession_matrix':
+                result = calculateSuccessionMatrix(history);
+                break;
+            case 'followers_analysis':
+                result = calculateFollowersAnalysis(history);
+                break;
+            case 'next_projections':
+                result = calculateNextProjections(history, payload?.lastNumbers);
                 break;
             case 'hurst_exponent':
                 result = calculateHurstExponent(history);
@@ -41,14 +50,94 @@ function performFullComputePipeline(history: any[]) {
     return {
         spectral: calculateSpectralFFT(history),
         fractal: calculateHurstExponent(history),
-        audit: performStructuralAudit(history), // Utilisation complète
+        audit: performStructuralAudit(history), 
         centrality: calculateEigenvectorCentrality(history),
         correlations: calculatePearsonMatrix(history)
     };
 }
 
+function calculateSuccessionMatrix(history: any[]) {
+    const matrix: Record<number, Record<number, number>> = {};
+    const totals: Record<number, number> = {};
+    
+    if (!history || history.length < 2) return { matrix, totals };
+
+    // Optimisation: Itération unique
+    for (let i = 0; i < history.length - 1; i++) {
+        const current = history[i].gagnants;
+        const prev = history[i+1].gagnants;
+        
+        for (const p of prev) {
+            if (!matrix[p]) matrix[p] = {};
+            totals[p] = (totals[p] || 0) + 1;
+            for (const c of current) {
+                matrix[p][c] = (matrix[p][c] || 0) + 1;
+            }
+        }
+    }
+    return { matrix, totals };
+}
+
+function calculateFollowersAnalysis(history: any[]) {
+    const { matrix, totals } = calculateSuccessionMatrix(history);
+    const result = [];
+
+    for (let leader = 1; leader <= 90; leader++) {
+        const followersMap = matrix[leader];
+        if (followersMap) {
+            const totalOccurrences = totals[leader] || 0;
+            const followers = Object.entries(followersMap)
+                .map(([numStr, count]) => ({
+                    number: parseInt(numStr),
+                    count: count as number,
+                    probability: totalOccurrences > 0 ? ((count as number) / totalOccurrences) * 100 : 0
+                }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5);
+            
+            if (followers.length > 0) {
+                result.push({ leader, followers });
+            }
+        }
+    }
+    // Tri par impact global (somme des suivis)
+    return result.sort((a, b) => {
+        const sumA = a.followers.reduce((acc, f) => acc + f.count, 0);
+        const sumB = b.followers.reduce((acc, f) => acc + f.count, 0);
+        return sumB - sumA;
+    });
+}
+
+function calculateNextProjections(history: any[], lastNumbers: number[]) {
+    if (!history || history.length < 2 || !lastNumbers) return [];
+    
+    const { matrix, totals } = calculateSuccessionMatrix(history);
+    const scores: Record<number, number> = {};
+
+    lastNumbers.forEach(n => {
+        const nextMap = matrix[n] || {};
+        const total = totals[n] || 1;
+        Object.entries(nextMap).forEach(([target, count]) => {
+            const t = parseInt(target);
+            const prob = (count as number) / total;
+            scores[t] = (scores[t] || 0) + prob;
+        });
+    });
+
+    // Normalisation propre basée sur le max trouvé
+    const maxScore = Math.max(...Object.values(scores), 0.001);
+
+    return Object.entries(scores)
+        .map(([num, prob]) => ({ 
+            number: parseInt(num), 
+            probability: Math.min(99, Math.round((prob / maxScore) * 90)) // Normalisation 0-90% pour garder une marge d'incertitude
+        }))
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, 10);
+}
+
 function calculatePearsonMatrix(history: any[]) {
-    const N = history.length; // Intégralité
+    const N = history.length; 
     const nodes = 90;
     const matrix: Record<number, { affinities: Record<number, number> }> = {};
     
@@ -80,7 +169,7 @@ function calculatePearsonMatrix(history: any[]) {
             }
             
             const r = denI * denJ === 0 ? 0 : num / Math.sqrt(denI * denJ);
-            if (Math.abs(r) > 0.05) { // Seuil réduit pour capturer plus de signaux sur l'historique complet
+            if (Math.abs(r) > 0.05) { 
                 matrix[i].affinities[j] = parseFloat(r.toFixed(4));
             }
         }
@@ -133,7 +222,6 @@ function calculateSpectralFFT(history: any[]) {
         let maxPower = 0;
         let dominantPeriod = 0;
         
-        // Résolution spectrale accrue sur l'historique complet
         const limit = Math.floor(N / 2);
         for (let k = 1; k < limit; k++) {
             let re = 0, im = 0;

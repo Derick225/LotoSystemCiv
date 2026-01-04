@@ -1,6 +1,8 @@
+
 import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 
 const isValidDate = (d: number, m: number, y: number): boolean => {
   const date = new Date(y, m - 1, d);
@@ -9,16 +11,12 @@ const isValidDate = (d: number, m: number, y: number): boolean => {
 
 export const formatDate = (dateStr: string, isIsoOutput: boolean = false): string => {
   if (!dateStr) return '';
-  
-  // Format ISO YYYY-MM-DD
   if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
       const [y, m, d] = dateStr.split('-').map(Number);
       if (!isValidDate(d, m, y)) return 'Invalid Date';
       if (isIsoOutput) return dateStr;
       return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
   }
-
-  // Format FR DD/MM/YYYY
   if (dateStr.includes('/')) {
     const parts = dateStr.split('/');
     if (parts.length === 3) {
@@ -28,11 +26,8 @@ export const formatDate = (dateStr: string, isIsoOutput: boolean = false): strin
         return dateStr;
     }
   }
-  
-  // Fallback Date Object
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
-  
   const d = date.getDate().toString().padStart(2, '0');
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
   const y = date.getFullYear();
@@ -49,14 +44,12 @@ export const normalizeDate = (dateStr: string): string => {
   return dateStr;
 };
 
-// Normalisation du nom pour correspondre à la DB (Title Case)
 const normalizeDrawName = (name: string): string => {
     return name.trim().charAt(0).toUpperCase() + name.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
 };
 
 export const lotteryService = {
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
-    // Évite les appels réseau inutiles si Supabase n'est pas configuré
     if (!isSupabaseConfigured()) {
         console.debug(`[Mode Hors-Ligne] Historique simulé pour ${drawName} (Pas de clés Supabase)`);
         return [];
@@ -67,28 +60,20 @@ export const lotteryService = {
       .select('*')
       .order('date', { ascending: false });
 
-    // Si drawName est 'ALL', on ne filtre pas, mais on limite pour la performance
     if (drawName && drawName !== 'ALL') {
         query = query.ilike('draw_name', `%${drawName}%`);
     }
     
-    // LIMITATION DE SÉCURITÉ : Empêche de charger 50 000 lignes et de tuer le navigateur
     query = query.limit(2000);
     
     const { data, error } = await query;
+    if (error) throw error;
     
-    if (error) {
-      // On laisse l'erreur remonter pour que le NexusProvider puisse l'afficher (ex: Table introuvable)
-      throw error; 
-    }
-    
-    if (!data || data.length === 0) {
-         return [];
-    }
+    if (!data || data.length === 0) return [];
     
     return data.map(row => ({
       id: row.id,
-      drawName: row.draw_name, // On garde le nom de la DB
+      drawName: row.draw_name,
       date: formatDate(row.date),
       gagnants: row.gagnants,
       machine: row.machine || [],
@@ -135,7 +120,6 @@ export const getDailySummary = async (day: string) => {
   const results = [];
   for (const [time, name] of Object.entries(draws)) {
       try {
-          // Optimisation : On ne charge que le dernier résultat pour le résumé
           const { data } = await supabase
             .from('draw_results')
             .select('*')
@@ -178,7 +162,6 @@ export const getNextScheduledDraw = () => {
   });
 
   const finalTime = nextTime || times[0];
-  
   return { time: finalTime, name: schedule[finalTime] };
 };
 
@@ -241,72 +224,11 @@ export const deleteResult = async (drawName: string, id: string) => {
 };
 
 export const fetchNextDrawProjections = async (drawName: string, lastNumbers: number[], history: DrawResult[]): Promise<ProjectionItem[]> => {
-    if (!history || history.length < 2 || !lastNumbers || lastNumbers.length === 0) return [];
-    
-    const transitions: Record<number, Record<number, number>> = {};
-    for (let i = 0; i < history.length - 1; i++) {
-        const current = history[i].gagnants;
-        const prev = history[i+1].gagnants;
-        prev.forEach(p => {
-            if (!transitions[p]) transitions[p] = {};
-            current.forEach(c => {
-                transitions[p][c] = (transitions[p][c] || 0) + 1;
-            });
-        });
-    }
-
-    const scores: Record<number, number> = {};
-    lastNumbers.forEach(n => {
-        const nextMap = transitions[n] || {};
-        Object.entries(nextMap).forEach(([target, count]) => {
-            const t = parseInt(target);
-            scores[t] = (scores[t] || 0) + (count / history.length);
-        });
-    });
-
-    return Object.entries(scores)
-        .map(([num, prob]) => ({ number: parseInt(num), probability: Math.round(prob * 100) }))
-        .sort((a, b) => b.probability - a.probability)
-        .slice(0, 10);
+    return await getProjectionsAsync(history, lastNumbers);
 };
 
 export const fetchTopFollowersAnalysis = async (drawName: string, history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
-    const transitions: Record<number, Record<number, number>> = {};
-    for (let i = 0; i < history.length - 1; i++) {
-        const current = history[i].gagnants;
-        const prev = history[i+1].gagnants;
-        prev.forEach(p => {
-            if (!transitions[p]) transitions[p] = {};
-            current.forEach(c => {
-                transitions[p][c] = (transitions[p][c] || 0) + 1;
-            });
-        });
-    }
-
-    const result: TopFollowerAnalysis[] = [];
-    for (let leader = 1; leader <= 90; leader++) {
-        const followersMap = transitions[leader];
-        if (followersMap) {
-            const totalOccurrences = Object.values(followersMap).reduce((a, b) => a + b, 0);
-            const followers = Object.entries(followersMap)
-                .map(([numStr, count]) => ({
-                    number: parseInt(numStr),
-                    count,
-                    probability: totalOccurrences > 0 ? (count / totalOccurrences) * 100 : 0
-                }))
-                .sort((a, b) => b.count - a.count)
-                .slice(0, 5);
-            
-            if (followers.length > 0) {
-                result.push({ leader, followers });
-            }
-        }
-    }
-    return result.sort((a, b) => {
-        const sumA = a.followers.reduce((acc, f) => acc + f.count, 0);
-        const sumB = b.followers.reduce((acc, f) => acc + f.count, 0);
-        return sumB - sumA;
-    });
+    return await getFollowersAnalysisAsync(history);
 };
 
 export const fetchAssociatedNumbers = async (number: number, drawName: string, history: DrawResult[]): Promise<{ following: { number: number; count: number }[] }> => {
@@ -327,10 +249,6 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
     return { following: sorted };
 };
 
-/**
- * INJECTEUR DE DONNÉES DÉMO
- * Utiliser uniquement si la base est vide pour initialiser l'app.
- */
 export const injectDemoData = async () => {
     if (!isSupabaseConfigured()) return;
     
