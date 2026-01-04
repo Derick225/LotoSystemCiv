@@ -6,7 +6,7 @@ import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard } from 'lucide-react';
 import { DRAW_SCHEDULE } from '../../constants';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
@@ -45,6 +45,8 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const [isImporting, setIsImporting] = useState(false);
     const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
     const [importStep, setImportStep] = useState<'upload' | 'preview'>('upload');
+    const [uploadMode, setUploadMode] = useState<'file' | 'text'>('file');
+    const [pasteContent, setPasteContent] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => { 
@@ -52,6 +54,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         loadData(); 
         setPreviewData([]);
         setImportStep('upload');
+        setPasteContent('');
     }, [drawName]);
 
     const loadData = async () => {
@@ -176,8 +179,11 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             // Ignorer l'entête si présent (détection heuristique)
             if (index === 0 && (line.toLowerCase().includes('date') || line.toLowerCase().includes('g1'))) return;
 
-            // Nettoyage et split (support virgule et point-virgule)
-            const separator = line.includes(';') ? ';' : ',';
+            // Nettoyage et split (support virgule, point-virgule et tabulation)
+            let separator = ',';
+            if (line.includes(';')) separator = ';';
+            else if (line.includes('\t')) separator = '\t';
+            
             const parts = line.split(separator).map(p => p.trim());
 
             if (parts.length < 6) return; // Date + 5 numéros min
@@ -253,6 +259,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             showToast(`${batch.length} tirages importés avec succès.`, "success");
             setPreviewData([]);
             setImportStep('upload');
+            setPasteContent('');
             loadData();
         } catch (e: any) {
             showToast(`Erreur Import: ${e.message}`, "error");
@@ -395,20 +402,56 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                 <button onClick={downloadTemplate} className="text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Télécharger Modèle CSV</button>
                             </div>
 
-                            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.json" className="hidden" />
-                            
-                            <div 
-                                onClick={() => fileInputRef.current?.click()}
-                                className="w-full h-48 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all group"
-                            >
-                                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-900 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <FileSpreadsheet size={32} className="text-slate-400 group-hover:text-indigo-500" />
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier ici</p>
-                                    <p className="text-xs text-slate-400 mt-1">Format: Date, G1, G2, G3, G4, G5, [M1..M5]</p>
-                                </div>
+                            {/* MODE SWITCHER */}
+                            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-fit">
+                                <button 
+                                    onClick={() => setUploadMode('file')} 
+                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    Fichier (CSV/JSON)
+                                </button>
+                                <button 
+                                    onClick={() => setUploadMode('text')} 
+                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <Clipboard size={14}/> Copier/Coller
+                                </button>
                             </div>
+
+                            {uploadMode === 'file' ? (
+                                <>
+                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.json" className="hidden" />
+                                    
+                                    <div 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="w-full h-48 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all group"
+                                    >
+                                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-900 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                                            <FileSpreadsheet size={32} className="text-slate-400 group-hover:text-indigo-500" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier ici</p>
+                                            <p className="text-xs text-slate-400 mt-1">Format: Date, G1, G2, G3, G4, G5, [M1..M5]</p>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="space-y-4">
+                                    <textarea
+                                        value={pasteContent}
+                                        onChange={(e) => setPasteContent(e.target.value)}
+                                        className="w-full h-48 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 font-mono text-xs text-slate-600 dark:text-slate-300 focus:border-indigo-500 focus:ring-4 ring-indigo-500/10 outline-none transition-all resize-none"
+                                        placeholder={`Collez vos données ici...\nExemple:\n01/01/2024, 5, 12, 34, 56, 89\n02/01/2024; 10; 20; 30; 40; 50; 1; 2; 3; 4; 5`}
+                                    />
+                                    <button 
+                                        onClick={() => processRawData(pasteContent)}
+                                        disabled={!pasteContent.trim()}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        <Binary size={16}/> Analyser le contenu
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
 
