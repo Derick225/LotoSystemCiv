@@ -1,13 +1,15 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
-    frequency: 0.20,
-    gap: 0.15,
-    spectral: 0.15,
+    frequency: 0.15,
+    gap: 0.10,
+    spectral: 0.10,
     fractal: 0.05,
+    wavelet: 0.10, // NOUVEAU
+    resistance: 0.05, // NOUVEAU
     markov: 0.15,
     spatial: 0.05,
     momentum: 0.05,
@@ -15,7 +17,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
     bayes: 0.02,
     orchestration: 0.03,
     transformer: 0.02,
-    temporal: 0.05,
+    temporal: 0.03,
     ai_intuition: 0.01,
     digital_root: 0.01,
     gap_velocity: 0.01,
@@ -120,12 +122,12 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
         label = "Oscillation (Retour Moyenne)";
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 1.6;
         adjusted.gap = (adjusted.gap || 0) * 1.4;
-        adjusted.frequency = (adjusted.frequency || 0) * 1.3;
+        adjusted.wavelet = (adjusted.wavelet || 0) * 1.5; // Ondelettes fortes sur le retour
         adjusted.momentum = (adjusted.momentum || 0) * 0.6;
     } else {
         label = "Chaos (Aléatoire)";
         adjusted.spatial = (adjusted.spatial || 0) * 1.5;
-        adjusted.ai_intuition = (adjusted.ai_intuition || 0) * 1.8;
+        adjusted.resistance = (adjusted.resistance || 0) * 1.4; // Résistance pure en mode chaos
         adjusted.poisson = (adjusted.poisson || 0) * 1.5;
     }
 
@@ -180,6 +182,9 @@ export const generateMasterPrediction = async (
         }
     }
 
+    // Optimisation : Pré-calcul du signal historique binaire pour wavelet
+    // On le fait numéro par numéro dans la boucle
+    
     const scores = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const reg = regularity.find(r => r.number === num);
@@ -187,12 +192,19 @@ export const generateMasterPrediction = async (
         const frac = fractalMap.find((f: any) => f.number === num);
         const gravity = gravityField[num] || 0;
         
+        // Extraction signal historique pour ce numéro (binaire)
+        const signal = history.slice(0, 32).map(d => d.gagnants.includes(num) ? 1 : 0);
+        
         const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 500);
         const currentGap = reg?.currentGap || 0;
         const gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
         const specScore = spec?.energy || 0;
         const markovScore = Math.min(100, (transitions[num] || 0) * 10);
         const spatialScore = Math.min(100, gravity * 50);
+        
+        // Nouveaux Scores v11.1
+        const waveletScore = calculateWaveletEnergy(signal);
+        const resistScore = calculateTechnicalResistance(num, history);
 
         const nBreakdown: ScoreBreakdown = {
             ...getDefaultWeights(),
@@ -202,7 +214,9 @@ export const generateMasterPrediction = async (
             markov: markovScore,
             spatial: spatialScore,
             temporal: reg && Math.abs(reg.avgGap - reg.currentGap) < 2 ? 100 : 30,
-            fractal: frac?.hurst ? frac.hurst * 100 : 50
+            fractal: frac?.hurst ? frac.hurst * 100 : 50,
+            wavelet: waveletScore,
+            resistance: resistScore
         };
 
         breakdown[num] = nBreakdown;
@@ -243,6 +257,7 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     const keys = Object.entries(weights).sort((a, b) => (b[1] as number) - (a[1] as number));
     const top = keys[0][0];
     if (top === 'spectral') return "Résonance FFT";
+    if (top === 'wavelet') return "Ondelette Pulse";
     if (top === 'frequency') return "Hot-Spot Scanner";
     if (top === 'gap') return "Pression Sniper";
     if (top === 'markov') return "Markov Chain Flow";

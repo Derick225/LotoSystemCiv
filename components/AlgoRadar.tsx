@@ -28,7 +28,9 @@ const LABELS: Record<string, string> = {
     digital_root: 'Racine',
     gap_velocity: 'Vélocité',
     poisson: 'Poisson',
-    leader_succession: 'Succession'
+    leader_succession: 'Succession',
+    wavelet: 'Ondelette', // NOUVEAU
+    resistance: 'Résistance' // NOUVEAU
 };
 
 const CustomTooltip = ({ active, payload, label }: any) => {

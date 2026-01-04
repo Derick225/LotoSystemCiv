@@ -39,6 +39,68 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
+// --- NOUVEAU: Transformée en Ondelettes de Haar Discrète (DWT) ---
+// Détecte les ruptures de tendance locales vs globales
+export const calculateWaveletEnergy = (signal: number[]): number => {
+    let data = [...signal];
+    let energy = 0;
+    
+    // On effectue 3 niveaux de décomposition
+    for (let level = 0; level < 3; level++) {
+        if (data.length < 2) break;
+        const nextData = [];
+        let detailSum = 0;
+        
+        for (let i = 0; i < data.length - 1; i += 2) {
+            const avg = (data[i] + data[i+1]) / 2; // Approximation (Tendance)
+            const detail = (data[i] - data[i+1]) / 2; // Détail (Fluctuation)
+            
+            nextData.push(avg);
+            detailSum += Math.abs(detail);
+        }
+        
+        // Plus le détail est élevé sur les niveaux récents (niveau 0), plus le signal est "nerveux"
+        // On pondère plus fortement les détails de haute fréquence (changements récents)
+        energy += detailSum * Math.pow(2, 2 - level);
+        data = nextData;
+    }
+    
+    // Normalisation approximative
+    return Math.min(100, Math.round(energy * 50));
+};
+
+// --- NOUVEAU: Calcul de Résistance Technique ---
+// Inspire du trading: identifie les "niveaux" où un numéro a tendance à sortir ou rebondir
+export const calculateTechnicalResistance = (num: number, history: DrawResult[]): number => {
+    let resistanceScore = 0;
+    // On analyse les gaps successifs
+    let lastGap = 0;
+    let gaps: number[] = [];
+    
+    // Extraction des gaps
+    const limit = Math.min(history.length, 100);
+    for (let i=0; i<limit; i++) {
+        if (history[i].gagnants.includes(num)) {
+            gaps.push(lastGap);
+            lastGap = 0;
+        } else {
+            lastGap++;
+        }
+    }
+    const currentGap = lastGap;
+    
+    // Si le gap actuel est proche d'un gap historique fréquent (Support), le score augmente
+    if (gaps.length > 2) {
+        gaps.forEach(g => {
+            const diff = Math.abs(currentGap - g);
+            if (diff === 0) resistanceScore += 30; // Support exact
+            else if (diff <= 2) resistanceScore += 10; // Zone de support
+        });
+    }
+    
+    return Math.min(100, resistanceScore);
+};
+
 // Fenêtre de Hamming pour réduire les fuites spectrales dans la FFT
 const hammingWindow = (n: number, N: number) => 0.54 - 0.46 * Math.cos((2 * Math.PI * n) / (N - 1));
 

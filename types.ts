@@ -13,6 +13,8 @@ export interface AlgoWeights {
     gap: number;
     spectral: number;
     fractal: number;
+    wavelet: number; // NOUVEAU: Analyse temps-fréquence
+    resistance: number; // NOUVEAU: Niveaux de support technique
     markov: number;
     spatial: number;
     momentum: number;

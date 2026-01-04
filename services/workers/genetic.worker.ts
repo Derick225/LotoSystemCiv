@@ -2,8 +2,8 @@
 export {};
 
 /**
- * Darwin Genetic Worker v3.3.6
- * Optimisé pour la synthèse stochastique 2025.
+ * Darwin Genetic Worker v4.0 (Sharpe Edition)
+ * Optimisé pour la synthèse stochastique ROBUSTE.
  */
 
 interface DrawResultLite { gagnants: number[]; machine?: number[]; }
@@ -29,48 +29,59 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
 };
 
 /**
- * Fitness Multi-Objectif : Performance + Stabilité + Diversité Jaccard.
+ * Fitness Multi-Objectif : Performance + Stabilité + Sharpe Ratio
+ * Nous voulons des algos qui gagnent souvent un peu, plutôt que rarement beaucoup.
  */
 const evaluate = (w: AlgoWeights, r: AdaptiveRules, history: DrawResultLite[], depth: number): number => {
     const limit = Math.min(history.length - 1, depth);
     const cMin = r.criticalZoneMin || 12;
     const cMax = r.criticalZoneMax || 18;
     
-    let totalHits = 0;
-    const hitsByDraw: number[] = [];
+    const returns: number[] = []; // Liste des scores par tirage
 
     for (let i = 0; i < limit; i++) {
         const target = history[i]; 
         const past = history.slice(i + 1);
         if (past.length < 10) break;
 
-        let drawFitness = 0;
+        let drawScore = 0;
         target.gagnants.forEach(n => {
             // 1. Fréquence locale pondérée
             const freq = past.slice(0, 25).filter(d => d.gagnants.includes(n)).length;
-            drawFitness += freq * (w.frequency || 0.05) * 4;
+            drawScore += freq * (w.frequency || 0.05) * 4;
             
             // 2. Résonance Zone Critique (Sniper)
             let gap = 50;
             for(let j=0; j<25; j++) { if(past[j]?.gagnants.includes(n)) { gap = j; break; } }
-            if (gap >= cMin && gap <= cMax) drawFitness += 15 * (w.temporal || 0.05);
+            if (gap >= cMin && gap <= cMax) drawScore += 15 * (w.temporal || 0.05);
 
             // 3. Force de Transition (Markov)
             const prevDraw = past[0].gagnants;
-            if (prevDraw.some(p => Math.abs(p - n) <= 1)) drawFitness += 10 * (w.orchestration || 0.05);
+            if (prevDraw.some(p => Math.abs(p - n) <= 1)) drawScore += 10 * (w.orchestration || 0.05);
+            
+            // 4. Ondelette (Simulation simplifiée pour perf)
+            // On vérifie juste si le numéro était présent 2x dans les 5 derniers tirages (Burst)
+            const recentBurst = past.slice(0, 5).filter(d => d.gagnants.includes(n)).length;
+            if (recentBurst >= 2) drawScore += 20 * (w.wavelet || 0.05);
         });
 
-        hitsByDraw.push(drawFitness);
-        totalHits += drawFitness;
+        returns.push(drawScore);
     }
 
-    // Calcul de Stabilité (Inverse de la variance)
-    const avg = totalHits / (hitsByDraw.length || 1);
-    const variance = hitsByDraw.reduce<number>((acc, v) => acc + Math.pow(v - avg, 2), 0) / (hitsByDraw.length || 1);
-    const stabilityBonus = 1 / (1 + Math.sqrt(variance));
+    if (returns.length === 0) return 0;
 
-    // Résultat final : Performance brute boostée par la régularité
-    return totalHits * (1 + stabilityBonus);
+    // Calcul de Sharpe Ratio Simplifié (Moyenne / Ecart-Type)
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((acc, val) => acc + Math.pow(val - avgReturn, 2), 0) / returns.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // On pénalise fortement la volatilité (stdDev)
+    // Fitness = Moyenne * (1 / (1 + Volatilité))
+    // Cela favorise les stratégies "régulières"
+    const sharpeRatio = avgReturn / (stdDev + 1); 
+
+    // Multiplicateur pour garder une échelle comparable
+    return sharpeRatio * 1000;
 };
 
 /**
