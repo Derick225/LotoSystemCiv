@@ -1,29 +1,27 @@
 
 import React, { useState, useEffect } from 'react';
-import { calculateShadowNumbers, calculateRunsTest, calculateTrendOscillator } from '../../services/mathService';
+import { calculateShadowNumbers, calculateRunsTest, calculateTrendOscillator, calculateCUSUM } from '../../services/mathService';
 import type { MathAnalysisReport, ShadowNumbers, TrendOscillatorPoint } from '../../types';
 import { 
-    PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, 
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, BarChart, Bar, ComposedChart 
+    ResponsiveContainer, 
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, BarChart, Bar, ComposedChart, LineChart, Line, Tooltip 
 } from 'recharts';
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { NumberBall } from '../NumberBall';
 import { InfoTooltip } from '../ui/InfoTooltip';
-import { Info, RotateCw, Activity, Layers, Target, Scale, TrendingUp } from 'lucide-react';
+import { RotateCw, Activity, Layers, Target, Scale, TrendingUp, AlertOctagon } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface MathTabProps {
   drawName: string;
 }
 
-const COLORS_PARITY = ['#4f46e5', '#06b6d4']; // Indigo (Pair), Cyan (Impair)
-const COLORS_LOWHIGH = ['#10b981', '#f59e0b']; // Green (Low), Amber (High)
-
 export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
   const { history, loading: nexusLoading } = useNexus();
   const [report, setReport] = useState<MathAnalysisReport | null>(null);
   const [shadows, setShadows] = useState<ShadowNumbers | null>(null);
   const [trendData, setTrendData] = useState<TrendOscillatorPoint[]>([]);
+  const [cusumData, setCusumData] = useState<{name: string, pos: number, neg: number, alert: boolean}[]>([]);
 
   useEffect(() => {
     if (history.length > 0) {
@@ -54,20 +52,20 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
         // Calcul Oscillateur
         const osc = calculateTrendOscillator(history, 40);
         setTrendData(osc);
+
+        // Calcul CUSUM
+        const cusum = calculateCUSUM(history.slice(0, 50));
+        const chartData = cusum.positive.map((p, i) => ({
+            name: i.toString(),
+            pos: p,
+            neg: cusum.negative[i],
+            alert: cusum.alerts.includes(i)
+        })).reverse(); // On inverse pour l'affichage chronologique
+        setCusumData(chartData);
     }
   }, [history]);
 
   if (nexusLoading || !report) return <StatsSkeleton />;
-
-  const parityData = [
-      { name: 'Pairs', value: report.parity.even },
-      { name: 'Impairs', value: report.parity.odd },
-  ];
-
-  const lowHighData = [
-      { name: 'Manque (1-45)', value: report.lowHigh.low },
-      { name: 'Passe (46-90)', value: report.lowHigh.high },
-  ];
 
   const renderZScoreGauge = (z: number) => {
       const clampedZ = Math.max(-4, Math.min(4, z));
@@ -91,7 +89,7 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
               </div>
               <div className="text-center mt-3">
                   <span className={`text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full border ${isRandom ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                      Z-Score: {z}
+                      Z-Score: {z.toFixed(2)}
                   </span>
               </div>
           </div>
@@ -143,6 +141,40 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
                         </div>
                     </InfoTooltip>
                 </div>
+            </div>
+        )}
+
+        {/* CUSUM CONTROL CHART */}
+        {cusumData.length > 0 && (
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                    <div>
+                        <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-3 uppercase tracking-tighter">
+                            <AlertOctagon className="text-rose-500" /> Contrôle Qualité (CUSUM)
+                        </h3>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Détection de dérive moyenne (Biais Machine)</p>
+                    </div>
+                    <div className="flex gap-4 text-[9px] font-bold uppercase">
+                        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> Dérive Positive</div>
+                        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Dérive Négative</div>
+                    </div>
+                </div>
+
+                <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={cusumData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                            <XAxis hide />
+                            <YAxis hide domain={['auto', 'auto']} />
+                            <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
+                            <ReferenceLine y={80} stroke="#f43f5e" strokeDasharray="3 3" label={{ value: "SEUIL ALARME", fill: "#f43f5e", fontSize: 9 }} />
+                            
+                            <Line type="monotone" dataKey="pos" stroke="#6366f1" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="neg" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+                <p className="text-[9px] text-slate-400 text-center mt-2 italic">Une courbe dépassant le seuil rouge indique une anomalie statistique significative.</p>
             </div>
         )}
 

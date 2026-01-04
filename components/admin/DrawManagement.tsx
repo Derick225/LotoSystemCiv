@@ -311,17 +311,17 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     }, [previewData, viewFilter]);
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-fade-in w-full max-w-7xl mx-auto">
             {/* Header Actions Card */}
-            <div className="bg-slate-900 text-white p-4 md:p-6 rounded-[2.2rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between shadow-2xl border border-slate-800 gap-4">
-                <div className="flex items-center gap-4 w-full sm:w-auto">
+            <div className="bg-slate-900 text-white p-4 md:p-6 rounded-[2.2rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between shadow-2xl border border-slate-800 gap-4 mx-auto w-full">
+                <div className="flex items-center gap-4 w-full sm:w-auto justify-center sm:justify-start">
                     <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20"><History size={22} className="text-white" /></div>
                     <div>
                         <span className="text-[9px] font-black uppercase tracking-[0.2em] text-indigo-400">Registre Master</span>
                         <h4 className="text-lg md:text-xl font-black leading-none">{drawName}</h4>
                     </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto justify-end overflow-x-auto scrollbar-hide">
+                <div className="flex gap-2 w-full sm:w-auto justify-center sm:justify-end overflow-x-auto scrollbar-hide">
                     <button onClick={() => setActiveSubTab('manual')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'manual' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <Pencil size={14}/> Saisie
                     </button>
@@ -336,7 +336,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: MANUAL ENTRY */}
             {activeSubTab === 'manual' && (
-                <div className="grid md:grid-cols-2 gap-8">
+                <div className="grid md:grid-cols-2 gap-8 mx-auto w-full">
                     {/* Formulaire */}
                     <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
                         <div className="flex justify-between items-center mb-8">
@@ -429,7 +429,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: BULK IMPORT */}
             {activeSubTab === 'bulk' && (
-                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all">
+                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all mx-auto w-full">
                     
                     {importStep === 'upload' && (
                         <div className="animate-slide-up">
@@ -445,7 +445,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                             </div>
 
                             {/* MODE SWITCHER */}
-                            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-fit">
+                            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-fit mx-auto sm:mx-0">
                                 <button 
                                     onClick={() => setUploadMode('text')} 
                                     className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
@@ -523,41 +523,41 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                             {/* TABLEAU AVEC OVERFLOW POUR MOBILE */}
                             <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
                                 <div className="w-full overflow-x-auto">
-                                    <table className="w-full text-left text-xs min-w-[600px]">
+                                    <table className="w-full text-left text-xs min-w-[600px] table-auto mx-auto">
                                         <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 shadow-sm">
                                             <tr>
-                                                <th className="p-4 font-black text-slate-500 uppercase w-12">État</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase">Date</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase">Gagnants</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase">Machine</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase w-12 text-center">État</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Date</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Gagnants</th>
+                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Machine</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                             {filteredPreview.map((row, i) => (
                                                 <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
-                                                    <td className="p-4">
+                                                    <td className="p-4 text-center">
                                                         {row.isValid 
-                                                            ? <CheckCircle2 size={16} className="text-emerald-500"/> 
-                                                            : <div className="group relative">
-                                                                <AlertTriangle size={16} className="text-rose-500 cursor-help"/>
+                                                            ? <CheckCircle2 size={16} className="text-emerald-500 mx-auto"/> 
+                                                            : <div className="group relative inline-block">
+                                                                <AlertTriangle size={16} className="text-rose-500 cursor-help mx-auto"/>
                                                                 <div className="absolute left-6 top-0 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-xl z-20 hidden group-hover:block">
                                                                     {row.error}
                                                                 </div>
                                                             </div>
                                                         }
                                                     </td>
-                                                    <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300">{row.date}</td>
-                                                    <td className="p-4">
+                                                    <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300 text-center">{row.date}</td>
+                                                    <td className="p-4 text-center">
                                                         {row.gagnants.length > 0 ? (
-                                                            <div className="flex gap-1">
+                                                            <div className="flex gap-1 justify-center">
                                                                 {row.gagnants.map((n, j) => (
                                                                     <span key={j} className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">{n}</span>
                                                                 ))}
                                                             </div>
                                                         ) : <span className="text-slate-400 italic">Vide</span>}
                                                     </td>
-                                                    <td className="p-4">
-                                                        <div className="flex gap-1">
+                                                    <td className="p-4 text-center">
+                                                        <div className="flex gap-1 justify-center">
                                                             {row.machine.map((n, j) => (
                                                                 <span key={j} className="w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center justify-center text-[10px] font-bold">{n}</span>
                                                             ))}

@@ -44,6 +44,14 @@ export const DRAW_SCHEDULE: Record<string, Record<string, string>> = {
   },
 };
 
+// Métadonnées visuelles pour les créneaux horaires
+export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: string }> = {
+    '10:00': { color: 'text-amber-400', icon: '🌅', label: 'Ouverture' },
+    '13:00': { color: 'text-blue-400', icon: '☀️', label: 'Zénith' },
+    '16:00': { color: 'text-orange-400', icon: '🌤️', label: 'Après-midi' },
+    '18:15': { color: 'text-indigo-400', icon: '🌙', label: 'Spécial Soir' }
+};
+
 // Liste plate pour les itérations rapides et les sélecteurs
 export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
     Object.entries(times).map(([time, name]) => ({

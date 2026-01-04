@@ -93,8 +93,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
                 
                 <div className="relative z-10 grid lg:grid-cols-2 gap-12 items-center">
-                    <div>
-                        <div className="flex items-center gap-3 mb-4">
+                    <div className="text-center lg:text-left">
+                        <div className="flex items-center justify-center lg:justify-start gap-3 mb-4">
                             <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-600/30">
                                 Platinum Engine v5.0
                             </div>
@@ -107,7 +107,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         </h2>
                         
                         {/* Mixer Panel */}
-                        <div className="bg-white/60 dark:bg-black/30 backdrop-blur-md p-6 rounded-3xl border border-white/20 shadow-inner space-y-5">
+                        <div className="bg-white/60 dark:bg-black/30 backdrop-blur-md p-6 rounded-3xl border border-white/20 shadow-inner space-y-5 text-left">
                             <div className="flex justify-between items-center mb-4">
                                 <h4 className="text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest flex items-center gap-2">
                                     <Sliders size={14}/> Paramètres de Fusion
@@ -129,21 +129,21 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Waves size={10}/> Harmonie Spectrale</span>
-                                        <span className="text-purple-500">{Math.round(bias.harmony * 100)}%</span>
+                                        <span className="text-purple-600 dark:text-purple-400">{Math.round(bias.harmony * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.harmony} onChange={(e) => setBias(p => ({...p, harmony: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-purple-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Gauge size={10}/> Stabilité (Moyenne)</span>
-                                        <span className="text-emerald-500">{Math.round(bias.stability * 100)}%</span>
+                                        <span className="text-emerald-600 dark:text-emerald-400">{Math.round(bias.stability * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.stability} onChange={(e) => setBias(p => ({...p, stability: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-emerald-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
                                         <span className="flex items-center gap-1"><Zap size={10}/> Entropie (Chaos)</span>
-                                        <span className="text-rose-500">{Math.round(bias.chaos * 100)}%</span>
+                                        <span className="text-rose-600 dark:text-rose-400">{Math.round(bias.chaos * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.chaos} onChange={(e) => setBias(p => ({...p, chaos: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-rose-500" />
                                 </div>

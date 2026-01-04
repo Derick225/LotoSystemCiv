@@ -2,8 +2,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runSurvivalSimulation, BettingStrategy, BacktestReport } from '../../services/backtestingEngine';
+import { calculateVaR } from '../../services/mathService'; // Nouvelle fonction
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { Play, RefreshCw, Sliders, TrendingUp, AlertTriangle, ShieldCheck, Zap, Info } from 'lucide-react';
+import { Play, RefreshCw, Sliders, TrendingUp, AlertTriangle, ShieldCheck, Zap, Info, Landmark } from 'lucide-react';
 import { generateSimulationAudit } from '../../services/geminiService';
 
 export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
@@ -15,6 +16,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [strategy, setStrategy] = useState<BettingStrategy>('KELLY');
     const [depth, setDepth] = useState(50);
     const [isAuditLoading, setIsAuditLoading] = useState(false);
+    const [vaRScore, setVaRScore] = useState(0);
     
     const isMounted = useRef(true);
     useEffect(() => {
@@ -42,6 +44,12 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setSimulating(false);
                 setProgress(100);
                 
+                // Calcul VaR (95%) sur les variations de PnL
+                // On calcule le PnL draw-par-draw
+                const pnlSeries = result.history.map(h => h.profit);
+                const varCalc = calculateVaR(pnlSeries, 0.95);
+                setVaRScore(varCalc);
+
                 // Lancer l'audit IA automatiquement
                 setIsAuditLoading(true);
                 generateSimulationAudit(result).then(aiAudit => {
@@ -159,6 +167,19 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     </div>
                                     <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                                         <div className="h-full bg-rose-500" style={{ width: `${report.maxDrawdown}%` }}></div>
+                                    </div>
+                                </div>
+                                {/* VaR Display */}
+                                <div className="p-5 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <Landmark size={14} className="text-amber-500"/>
+                                            <span className="text-[10px] font-black text-slate-500 uppercase">Value At Risk (95%)</span>
+                                        </div>
+                                        <span className="text-[9px] text-slate-400">Perte max probable par session</span>
+                                    </div>
+                                    <div className="text-xl font-black text-slate-800 dark:text-white">
+                                        -{Math.round(vaRScore)} F
                                     </div>
                                 </div>
                             </div>

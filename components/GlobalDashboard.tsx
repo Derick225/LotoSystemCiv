@@ -19,6 +19,7 @@ import { useIsFetching } from '@tanstack/react-query';
 import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../utils/audioEngine';
+import { SLOT_CONFIG } from '../constants';
 
 interface SummaryItem {
     time: string;
@@ -35,14 +36,14 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
     const [showXRay, setShowXRay] = useState(false);
     
     return (
-        <div className="relative overflow-hidden rounded-[4rem] p-8 md:p-14 text-white shadow-2xl group border border-white/5 mb-12 transition-all duration-700 bg-slate-950">
+        <div className="relative overflow-hidden rounded-[4rem] p-8 md:p-14 text-white shadow-2xl group border border-white/5 mb-12 transition-all duration-700 bg-slate-950 mx-auto w-full">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/60 via-slate-900 to-black opacity-90"></div>
             
             <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
 
             <div className="relative z-10">
                 <div className="flex flex-col lg:flex-row gap-12 items-center justify-between">
-                    <div className="flex-1 space-y-8 text-center lg:text-left">
+                    <div className="flex-1 space-y-8 text-center lg:text-left w-full">
                         <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4">
                             <motion.div 
                               initial={{ opacity: 0, x: -20 }}
@@ -52,11 +53,11 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                                 <Signal size={14} className="text-indigo-400 animate-pulse" /> Signal Entrant • {result.drawName}
                             </motion.div>
                             <div className="inline-flex items-center gap-2.5 px-5 py-2 bg-emerald-500/10 rounded-full border border-emerald-500/30 text-[10px] font-black uppercase tracking-[0.3em] text-emerald-400">
-                                <ShieldCheck size={14} /> Donnée Vérifiée
+                                <ShieldCheck size={14} /> {result.date}
                             </div>
                         </div>
                         
-                        <h2 className="text-6xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl">
+                        <h2 className="text-5xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl uppercase">
                             {result.drawName || 'TERMINAL'}
                         </h2>
                         
@@ -91,9 +92,9 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                         </div>
                     </div>
 
-                    <div className="flex flex-col items-center gap-10 bg-black/40 p-10 md:p-14 rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden">
+                    <div className="flex flex-col items-center gap-10 bg-black/40 p-10 md:p-14 rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden w-full lg:w-auto">
                         <div className="absolute inset-0 bg-indigo-600/5 opacity-30" />
-                        <div className="flex gap-4 md:gap-6 relative z-10">
+                        <div className="flex gap-3 md:gap-5 relative z-10 justify-center">
                             {result.gagnants.map((n, i) => (
                                 <motion.div 
                                     key={n} 
@@ -151,7 +152,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     
     const [summary, setSummary] = useState<SummaryItem[]>([]);
     const [loadingSummary, setLoadingSummary] = useState(true);
-    const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean} | null>(null);
+    const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean, time: string, day: string} | null>(null);
     const [globalHot, setGlobalHot] = useState<{number: number, count: number}[]>([]);
     const [fullSyncing, setFullSyncing] = useState(false);
     
@@ -189,7 +190,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 const [h, m] = next.time.split(':').map(Number);
                 const targetDate = new Date();
                 targetDate.setHours(h, m, 0, 0);
+                // Si l'heure cible est passée aujourd'hui, mais que getNextScheduledDraw renvoie une date future (logique), on s'assure que targetDate correspond
                 if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
+                
                 const diffMs = targetDate.getTime() - now.getTime();
                 
                 const isUrgent = diffMs < 600000; 
@@ -200,7 +203,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 setNextDraw({ 
                     name: next.name, 
                     timeLeft: `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`,
-                    isUrgent
+                    isUrgent,
+                    time: next.time,
+                    day: next.day
                 });
             }
         }, 1000);
@@ -252,10 +257,10 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const isEmptyState = !latestResult && !loadingSummary && summary.every(s => s.result === null);
 
     return (
-        <div className="space-y-12 animate-fade-in pb-24">
+        <div className="space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
             
             {/* Core Status Monitoring Bar */}
-            <div className="bg-slate-900/50 backdrop-blur-xl p-8 rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-10">
+            <div className="bg-slate-900/50 backdrop-blur-xl p-8 rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-10 mx-auto w-full">
                 <div className="flex items-center gap-6">
                     <div className="p-5 bg-indigo-600 rounded-[2rem] shadow-2xl shadow-indigo-600/30 text-white group hover:rotate-6 transition-all">
                         <Monitor size={32} />
@@ -294,7 +299,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
             <WatchlistMonitor />
 
             {isEmptyState ? (
-                <div className="bg-slate-900 border border-slate-800 p-12 rounded-[4rem] text-center shadow-2xl relative overflow-hidden">
+                <div className="bg-slate-900 border border-slate-800 p-12 rounded-[4rem] text-center shadow-2xl relative overflow-hidden mx-auto w-full">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] -mr-32 -mt-32"></div>
                     <div className="relative z-10 flex flex-col items-center gap-6">
                         <div className="p-6 bg-white/5 rounded-full mb-4 animate-bounce-subtle">
@@ -333,15 +338,17 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                 <div className="flex justify-between items-start">
                                     <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
                                         <Clock className={`w-5 h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
-                                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">T-Sequence Alpha</span>
+                                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">
+                                            {nextDraw ? `${nextDraw.day} ${nextDraw.time}` : 'En attente...'}
+                                        </span>
                                     </div>
                                     {nextDraw?.isUrgent && (
-                                        <span className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-xl animate-pulse shadow-lg shadow-rose-600/40">Imminence Détectée</span>
+                                        <span className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-xl animate-pulse shadow-lg shadow-rose-600/40">Fermeture Imminente</span>
                                     )}
                                 </div>
 
-                                <div className="mt-14 mb-10">
-                                    <h3 className="text-4xl md:text-7xl font-black tracking-tighter leading-tight truncate">
+                                <div className="mt-14 mb-10 text-center md:text-left">
+                                    <h3 className="text-4xl md:text-7xl font-black tracking-tighter leading-tight truncate uppercase">
                                         {nextDraw ? nextDraw.name : 'Vecteur Temporel...'}
                                     </h3>
                                     <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-4">Ouverture du flux dans :</p>
@@ -357,7 +364,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
 
                         {/* TOP FREQUENCE 7J */}
                         <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[4rem] p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full">
-                            <h3 className="font-black text-white flex items-center gap-4 mb-10 text-2xl tracking-tight uppercase">
+                            <h3 className="font-black text-white flex items-center gap-4 mb-10 text-2xl tracking-tight uppercase justify-center lg:justify-start">
                                 <Flame className="w-7 h-7 text-orange-500" /> High-Heat 7d
                             </h3>
                             <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -389,14 +396,14 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     {/* FLUX DU JOUR SELECTOR & GRID */}
                     <section className="mt-20">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-10 px-4">
-                            <div>
+                            <div className="text-center md:text-left w-full">
                                 <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
                                 <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-2">Séquences temporelles disponibles</p>
                             </div>
                             
                             <button 
                                 onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
-                                className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
+                                className="mx-auto md:mx-0 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
                             >
                                 <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
                                 Voir tout l'historique
@@ -404,7 +411,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         </div>
 
                         {/* Day Selector */}
-                        <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2">
+                        <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2 justify-start md:justify-center">
                             {uiDays.map(d => (
                                 <button
                                     key={d}
@@ -413,7 +420,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         setSelectedDay(d);
                                     }}
                                     className={`
-                                        px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
+                                        px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
                                         ${selectedDay === d 
                                             ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105' 
                                             : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
@@ -427,11 +434,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                             {loadingSummary ? (
-                                [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[3rem] animate-pulse border border-white/5"></div>)
+                                [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[3rem] animate-pulse border border-white/5 mx-auto w-full"></div>)
                             ) :
                             summary.map((item, idx) => {
                                 const isCompleted = item.result !== null;
                                 const isNext = nextDraw?.name === item.name;
+                                const config = SLOT_CONFIG[item.time] || { color: 'text-slate-400', icon: '⏱️', label: '' };
                                 
                                 return (
                                     <motion.div
@@ -440,10 +448,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ delay: idx * 0.1 }}
                                         onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
-                                        className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
+                                        className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
                                     >
                                         <div className="flex justify-between items-start mb-8 relative z-10">
-                                            <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-indigo-400'}`}>{item.time}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xl">{config.icon}</span>
+                                                <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-slate-400'}`}>{item.time}</span>
+                                            </div>
                                             {isCompleted ? <Signal size={12} className="text-emerald-500 animate-pulse" /> : isNext && <Clock size={12} className="text-indigo-400 animate-spin"/>}
                                         </div>
 
@@ -452,7 +463,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         <div className="mt-auto relative z-10">
                                             {item.result ? (
                                                 <div className="space-y-6">
-                                                    <div className="flex gap-2.5 flex-wrap">
+                                                    <div className="flex gap-2.5 flex-wrap justify-center sm:justify-start">
                                                         {item.result.gagnants.map((n) => (
                                                             <div key={n} className="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[10px] font-black">{n}</div>
                                                         ))}

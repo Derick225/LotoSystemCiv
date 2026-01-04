@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 // Helper Worker Wrapper
 const runWorkerTask = async (task: string, history: DrawResult[], payload?: any): Promise<any> => {
+    if (typeof Worker === 'undefined') return null; // SSR safety
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/math.worker.ts', import.meta.url), { type: 'module' });
         const requestId = Math.random().toString(36).substring(7);
@@ -39,45 +40,176 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
+// --- NOUVEAU: Distribution de Poisson ---
+// Calcule la probabilité qu'un numéro sorte au prochain tirage étant donné sa moyenne historique (lambda)
+// et son retard actuel (k)
+export const calculatePoissonProbability = (lambda: number, k: number): number => {
+    // Formule : P(X=k) = (e^-lambda * lambda^k) / k!
+    // Ici on adapte pour estimer la probabilité cumulée de sortie après un retard k
+    const e = Math.exp(-lambda);
+    let p = 1;
+    for(let i=1; i<=k; i++) p = p * i; // Factorielle simplifiée
+    
+    // Approximation numérique pour éviter l'overflow sur factorielle
+    // On utilise une heuristique de "Pression Poisson"
+    // Plus le retard dépasse lambda, plus la tension monte, jusqu'à un point de rupture (queue de distribution)
+    
+    if (lambda === 0) return 0;
+    const ratio = k / lambda;
+    
+    // Courbe sigmoïde centrée sur lambda (ratio = 1)
+    // < 1 : proba monte
+    // > 2 : proba baisse (numéro froid/mort)
+    
+    if (ratio > 3.5) return 10; // Zone "Morte"
+    if (ratio > 2.0) return 40; // Zone "Froide"
+    if (ratio > 0.8 && ratio < 1.5) return 95; // Zone "Critique" (Lambda atteinte)
+    return Math.min(100, ratio * 80);
+};
+
+// --- NOUVEAU: Echo State Network (Reservoir Computing) ---
+// Modèle de réseau de neurones récurrents simplifié pour séries chaotiques
+// Entraîne une matrice de poids de sortie (readout) sur un réservoir fixe
+export const runEchoStateNetwork = (signal: number[]): number => {
+    if (signal.length < 20) return 0;
+    
+    // Paramètres ESN
+    const reservoirSize = 20;
+    const spectralRadius = 0.95;
+    const leakage = 0.3;
+    const trainLen = signal.length - 1;
+    
+    // Initialisation du réservoir (Matrice aléatoire fixe)
+    const W = Array.from({length: reservoirSize}, () => 
+        Array.from({length: reservoirSize}, () => (Math.random() - 0.5))
+    );
+    const Win = Array.from({length: reservoirSize}, () => (Math.random() - 0.5) * 2.0);
+    
+    // États
+    let x = new Array(reservoirSize).fill(0);
+    const X_states: number[][] = []; // Collecte des états pour régression
+    const Y_target: number[] = [];
+    
+    // Collecte des états (Training)
+    for (let t = 0; t < trainLen; t++) {
+        const u = signal[t];
+        const newX = new Array(reservoirSize).fill(0);
+        
+        for (let i = 0; i < reservoirSize; i++) {
+            let internalSum = 0;
+            for (let j = 0; j < reservoirSize; j++) {
+                internalSum += W[i][j] * x[j];
+            }
+            // Fonction d'activation tanh + Leaky Integrator
+            newX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u);
+        }
+        x = newX;
+        X_states.push([...x, 1]); // Bias term
+        Y_target.push(signal[t+1]);
+    }
+    
+    // Ridge Regression (Readout weights calculation)
+    // W_out = Y * X^T * (X * X^T + beta * I)^-1
+    // Simplification heuristique : Moyenne pondérée des états corrélés à la sortie
+    const W_out = new Array(reservoirSize + 1).fill(0);
+    for (let i = 0; i <= reservoirSize; i++) {
+        let num = 0, den = 0;
+        for (let t = 0; t < trainLen; t++) {
+            num += X_states[t][i] * Y_target[t];
+            den += X_states[t][i] * X_states[t][i];
+        }
+        W_out[i] = den !== 0 ? num / (den + 0.01) : 0;
+    }
+    
+    // Prediction Step
+    const u_last = signal[signal.length - 1];
+    const nextX = new Array(reservoirSize).fill(0);
+    for (let i = 0; i < reservoirSize; i++) {
+        let internalSum = 0;
+        for (let j = 0; j < reservoirSize; j++) {
+            internalSum += W[i][j] * x[j];
+        }
+        nextX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u_last);
+    }
+    
+    let prediction = 0;
+    for (let i = 0; i < reservoirSize; i++) prediction += W_out[i] * nextX[i];
+    prediction += W_out[reservoirSize]; // Bias
+    
+    // Normalisation du signal de sortie (probabilité 0-100)
+    return Math.max(0, Math.min(100, prediction * 100));
+};
+
 // --- NOUVEAU: Transformée en Ondelettes de Haar Discrète (DWT) ---
-// Détecte les ruptures de tendance locales vs globales
 export const calculateWaveletEnergy = (signal: number[]): number => {
     let data = [...signal];
     let energy = 0;
     
-    // On effectue 3 niveaux de décomposition
     for (let level = 0; level < 3; level++) {
         if (data.length < 2) break;
         const nextData = [];
         let detailSum = 0;
         
         for (let i = 0; i < data.length - 1; i += 2) {
-            const avg = (data[i] + data[i+1]) / 2; // Approximation (Tendance)
-            const detail = (data[i] - data[i+1]) / 2; // Détail (Fluctuation)
+            const avg = (data[i] + data[i+1]) / 2; 
+            const detail = (data[i] - data[i+1]) / 2; 
             
             nextData.push(avg);
             detailSum += Math.abs(detail);
         }
-        
-        // Plus le détail est élevé sur les niveaux récents (niveau 0), plus le signal est "nerveux"
-        // On pondère plus fortement les détails de haute fréquence (changements récents)
         energy += detailSum * Math.pow(2, 2 - level);
         data = nextData;
     }
-    
-    // Normalisation approximative
     return Math.min(100, Math.round(energy * 50));
 };
 
-// --- NOUVEAU: Calcul de Résistance Technique ---
-// Inspire du trading: identifie les "niveaux" où un numéro a tendance à sortir ou rebondir
+// --- NOUVEAU: CUSUM (Cumulative Sum Control Chart) ---
+export const calculateCUSUM = (history: DrawResult[]): { positive: number[], negative: number[], alerts: number[] } => {
+    const means = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
+    const target = 227.5; // Moyenne théorique (1+90)/2 * 5
+    const k = 15; // Slack value (tolérance)
+    const h = 80; // Seuil d'alarme (Decision Interval)
+
+    let cp = 0; // CUSUM Positif
+    let cn = 0; // CUSUM Négatif
+    
+    const pSeries = [];
+    const nSeries = [];
+    const alerts = [];
+
+    // Parcours chronologique (inverse de l'historique habituel qui est DESC)
+    for (let i = history.length - 1; i >= 0; i--) {
+        const val = means[i];
+        
+        cp = Math.max(0, cp + (val - target) - k);
+        cn = Math.max(0, cn + (target - val) - k);
+        
+        pSeries.push(parseFloat(cp.toFixed(1)));
+        nSeries.push(parseFloat(cn.toFixed(1))); // On garde positif pour l'affichage graphique
+
+        if (cp > h || cn > h) {
+            alerts.push(history.length - 1 - i); // Index dans le tableau history original
+        }
+    }
+
+    return { positive: pSeries, negative: nSeries, alerts };
+};
+
+// --- NOUVEAU: Value at Risk (VaR) Historique ---
+export const calculateVaR = (pnlHistory: number[], confidence: number = 0.95): number => {
+    if (pnlHistory.length === 0) return 0;
+    const sorted = [...pnlHistory].sort((a, b) => a - b);
+    const index = Math.floor((1 - confidence) * sorted.length);
+    // VaR est la perte à ce percentile
+    const value = sorted[index];
+    return value < 0 ? Math.abs(value) : 0;
+};
+
 export const calculateTechnicalResistance = (num: number, history: DrawResult[]): number => {
     let resistanceScore = 0;
-    // On analyse les gaps successifs
     let lastGap = 0;
     let gaps: number[] = [];
     
-    // Extraction des gaps
     const limit = Math.min(history.length, 100);
     for (let i=0; i<limit; i++) {
         if (history[i].gagnants.includes(num)) {
@@ -89,19 +221,16 @@ export const calculateTechnicalResistance = (num: number, history: DrawResult[])
     }
     const currentGap = lastGap;
     
-    // Si le gap actuel est proche d'un gap historique fréquent (Support), le score augmente
     if (gaps.length > 2) {
         gaps.forEach(g => {
             const diff = Math.abs(currentGap - g);
-            if (diff === 0) resistanceScore += 30; // Support exact
-            else if (diff <= 2) resistanceScore += 10; // Zone de support
+            if (diff === 0) resistanceScore += 30; 
+            else if (diff <= 2) resistanceScore += 10; 
         });
     }
-    
     return Math.min(100, resistanceScore);
 };
 
-// Fenêtre de Hamming pour réduire les fuites spectrales dans la FFT
 const hammingWindow = (n: number, N: number) => 0.54 - 0.46 * Math.cos((2 * Math.PI * n) / (N - 1));
 
 export const calculateGravityField = (history: DrawResult[]): Record<number, number> => {
@@ -136,7 +265,7 @@ export const mathService = {
   async fetchAnalytics(drawName: string, lastDate: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
     if (!isSupabaseConfigured()) return null;
     try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('draw_analytics')
           .select('*')
           .eq('draw_name', drawName)
@@ -146,7 +275,7 @@ export const mathService = {
         if (data) {
             return { spectral: data.spectral, fractal: data.fractal };
         }
-        // Déclenchement silencieux du calcul cloud si manquant
+        // Trigger background compute if missing
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
         return null;
     } catch (e) { return null; }
@@ -154,23 +283,19 @@ export const mathService = {
 
   calculateSpectral(history: DrawResult[]): SpectralMetric[] {
     const N = Math.min(history.length, 200);
-    if (N < 10) return []; // Pas assez de données pour FFT
+    if (N < 10) return [];
 
     const sample = history.slice(0, N);
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
-        // Signal binaire : 1 si sorti, 0 sinon
         const rawSignal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
-        
-        // Application de la fenêtre de Hamming et centrage (suppression DC offset)
         const mean = rawSignal.reduce((a, b) => a + b, 0) / N;
         const signal = rawSignal.map((v, idx) => (v - mean) * hammingWindow(idx, N));
 
         let maxPower = 0;
         const limit = Math.floor(N / 2);
         
-        // DFT (Discrete Fourier Transform)
-        for (let k = 1; k < limit; k+=1) { // Pas de 1 pour meilleure résolution
+        for (let k = 1; k < limit; k+=1) {
             let re = 0, im = 0;
             for (let t = 0; t < N; t++) {
                 const angle = (2 * Math.PI * k * t) / N;
@@ -181,17 +306,15 @@ export const mathService = {
             if (power > maxPower) maxPower = power;
         }
         
-        // Normalisation et Gate de Bruit
-        // On considère que tout ce qui est en dessous de 0.05 est du bruit thermique
         const noiseGate = 0.05;
         const cleanPower = Math.max(0, maxPower - noiseGate);
-        const normalizedEnergy = Math.min(100, Math.round(cleanPower * 25)); // Gain ajusté
+        const normalizedEnergy = Math.min(100, Math.round(cleanPower * 25));
 
         return {
             number: n,
             energy: normalizedEnergy,
             resonance: normalizedEnergy > 75,
-            dominantPeriod: parseFloat((N / (maxPower * 0.5 || 1)).toFixed(1)) // Estimation grossière de la période
+            dominantPeriod: parseFloat((N / (maxPower * 0.5 || 1)).toFixed(1))
         };
     }).sort((a, b) => b.energy - a.energy);
   },
@@ -219,7 +342,6 @@ export const mathService = {
             hurst = Math.log(R / S) / Math.log(N);
         }
         
-        // Clamp pour éviter les valeurs aberrantes mathématiques
         hurst = Math.max(0, Math.min(1, isNaN(hurst) ? 0.5 : hurst));
         
         return {
@@ -231,10 +353,6 @@ export const mathService = {
   }
 };
 
-/**
- * Valide l'intégrité statistique d'un échantillon historique.
- * Retourne un score de confiance sur la qualité des données.
- */
 export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; score: number; issues: string[] } => {
     const issues: string[] = [];
     if (history.length < 10) {
@@ -242,8 +360,6 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
     }
 
     let score = 100;
-    
-    // 1. Vérification de continuité des dates (Approximation)
     const dates = history.slice(0, 10).map(h => new Date(h.date).getTime());
     for(let i=0; i<dates.length-1; i++) {
         if (isNaN(dates[i])) {
@@ -253,7 +369,6 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
         }
     }
 
-    // 2. Vérification des doublons stricts (même date, mêmes numéros)
     const signatures = new Set();
     let duplicates = 0;
     history.forEach(h => {
@@ -267,7 +382,6 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
         issues.push(`${duplicates} doublons détectés`);
     }
 
-    // 3. Vérification de la plage des numéros
     const outOfBounds = history.some(h => h.gagnants.some(n => n < 1 || n > 90));
     if (outOfBounds) {
         score -= 50;
@@ -281,17 +395,14 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
     };
 };
 
-/**
- * Calcule le Z-Score d'une prédiction (somme) par rapport à la distribution théorique.
- * Z = (X - μ) / σ
- * Pour Loto 5/90 : μ ≈ 227.5, σ ≈ 60
- */
 export const calculatePredictionZScore = (numbers: number[]): number => {
     const sum = numbers.reduce((a, b) => a + b, 0);
     const mu = 227.5;
-    const sigma = 60; // Approximation empirique
+    const sigma = 60;
     return (sum - mu) / sigma;
 };
+
+// --- ASYNC WRAPPERS & ANALYTICS ---
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     if (history.length > 0) {
@@ -328,6 +439,20 @@ export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
     }
 };
 
+export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
+    try {
+        const res = await runWorkerTask('pearson_matrix', history);
+        return res || {};
+    } catch { return {}; }
+};
+
+export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => {
+    try {
+        const res = await runWorkerTask('full_analysis', history);
+        return res.centrality || [];
+    } catch { return []; }
+};
+
 export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]) => {
     try {
         return await runWorkerTask('next_projections', history, { lastNumbers });
@@ -338,6 +463,125 @@ export const getFollowersAnalysisAsync = async (history: DrawResult[]) => {
     try {
         return await runWorkerTask('followers_analysis', history);
     } catch { return []; }
+};
+
+// --- REGULARITY & VOLATILITY ---
+
+export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
+    const regularities: NumberRegularity[] = [];
+    const N = Math.min(history.length, 200);
+    const sample = history.slice(0, N);
+
+    for (let num = 1; num <= 90; num++) {
+        let lastGap = 0;
+        const gaps: number[] = [];
+        
+        for (let i = 0; i < sample.length; i++) {
+            if (sample[i].gagnants.includes(num)) {
+                gaps.push(lastGap);
+                lastGap = 0;
+            } else {
+                lastGap++;
+            }
+        }
+        
+        if (gaps.length > 0) {
+            const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+            const variance = gaps.reduce((a, b) => a + Math.pow(b - avgGap, 2), 0) / gaps.length;
+            const stdDev = Math.sqrt(variance);
+            
+            regularities.push({
+                number: num,
+                avgGap: parseFloat(avgGap.toFixed(1)),
+                stdDev: parseFloat(stdDev.toFixed(1)),
+                currentGap: lastGap,
+                lastGaps: gaps.slice(0, 5),
+                nextExpectedIn: Math.max(0, Math.round(avgGap - lastGap))
+            });
+        } else {
+            regularities.push({
+                number: num,
+                avgGap: N,
+                stdDev: 0,
+                currentGap: lastGap,
+                lastGaps: [],
+                nextExpectedIn: 0
+            });
+        }
+    }
+    return regularities;
+};
+
+export const calculateVolatility = (history: DrawResult[]): { score: number, status: string, trend: string } => {
+    const sums = history.slice(0, 20).map(d => d.gagnants.reduce((a, b) => a + b, 0));
+    if (sums.length < 2) return { score: 0, status: 'Unknown', trend: 'flat' };
+
+    const mean = sums.reduce((a, b) => a + b, 0) / sums.length;
+    const variance = sums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sums.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Volatilité normalisée (0-100)
+    const volatilityScore = Math.min(100, Math.round(stdDev)); 
+    let status = 'Stable';
+    if (volatilityScore > 60) status = 'Chaos';
+    else if (volatilityScore > 30) status = 'Volatile';
+
+    // Tendance immédiate
+    const trend = sums[0] > mean ? 'high' : 'low';
+
+    return { score: volatilityScore, status, trend };
+};
+
+export const detectGameRegime = (history: DrawResult[]) => {
+    const fractal = mathService.calculateFractal(history);
+    const avgHurst = fractal.reduce((a, b) => a + b.hurst, 0) / (fractal.length || 1);
+    
+    let regime = 'NEUTRE';
+    if (avgHurst > 0.6) regime = 'PERSISTANT';
+    else if (avgHurst < 0.4) regime = 'ANTI-PERSISTANT';
+    else regime = 'BROWNIEN (ALÉATOIRE)';
+
+    return { regime, hurst: avgHurst };
+};
+
+export const getNumberDetailedMetrics = async (
+    num: number, 
+    history: DrawResult[],
+    spectral: SpectralMetric[],
+    fractal: FractalMetric[]
+): Promise<DetailedNumberMetrics> => {
+    const reg = calculateRegularity(history).find(r => r.number === num);
+    const spec = spectral.find(s => s.number === num);
+    const frac = fractal.find(f => f.number === num);
+    const corr = await calculateCorrelationMatrixAsync(history);
+    
+    const historyGraph = history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
+    
+    const affinities = corr[num]?.affinities || {};
+    const topAffinities = Object.entries(affinities)
+        .sort((a: any, b: any) => b[1] - a[1])
+        .slice(0, 5)
+        .map(x => parseInt(x[0]));
+        
+    const nemesis = Object.entries(affinities)
+        .sort((a: any, b: any) => a[1] - b[1]) // Corrélation négative ou faible
+        .slice(0, 5)
+        .map(x => parseInt(x[0]));
+
+    const temp = (spec?.energy || 0) + (frac?.hurst ? frac.hurst * 50 : 25);
+
+    return {
+        temperature: Math.min(100, temp),
+        hurst: frac?.hurst || 0.5,
+        lastGap: reg?.currentGap || 0,
+        avgGap: reg?.avgGap || 0,
+        nextProb: Math.max(0, 100 - (reg?.nextExpectedIn || 0) * 10),
+        spectralEnergy: spec?.energy || 0,
+        stdDev: reg?.stdDev || 0,
+        historyGraph,
+        affinity: topAffinities,
+        nemesis
+    };
 };
 
 export const getMomentumScores = (history: DrawResult[]): Record<number, number> => {
@@ -355,7 +599,6 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
     const regularity = calculateRegularity(history);
     regularity.forEach(r => {
         const lastGap = r.lastGaps[0] || r.avgGap;
-        // Protection division par zéro
         const denominator = lastGap === 0 ? 0.5 : lastGap;
         const velocity = (r.avgGap - r.currentGap) / denominator;
         scores[r.number] = Math.min(100, Math.max(0, 50 + velocity * 50));
@@ -376,7 +619,7 @@ export const calculateHurstForNumber = (num: number, history: DrawResult[]): { h
     const y = x.map(v => (cumsum += v, cumsum));
     
     const R = Math.max(...y) - Math.min(...y);
-    const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1; // Fallback 1
+    const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1; 
     
     if (R === 0) return { hurst: 0.5 };
 
@@ -512,129 +755,28 @@ export const calculateBenfordCompliance = (numbers: number[]): ChiSquareMetric =
         const expected = Math.log10(1 + 1/d);
         chi += Math.pow(observed - expected, 2) / expected;
     }
-    // Score inversé : 100 = Parfait respect
     return { score: Math.max(0, 100 - chi * 100) };
 };
 
 export const findHistoricalMatches = (draw: DrawResult, history: DrawResult[], limit: number = 5) => {
+    // Note: 'history' est trié du plus récent au plus ancien (index 0 = dernier)
+    // Pour trouver le "nextDraw" (futur), on doit prendre l'index i-1
     return history
-      .filter(h => h.id !== draw.id)
-      .map(h => {
+      .map((h, index) => ({ h, index }))
+      .filter(({ h }) => h.id !== draw.id)
+      .map(({ h, index }) => {
         const intersection = draw.gagnants.filter(n => h.gagnants.includes(n)).length;
         const similarity = (intersection / 5) * 100;
+        // Le tirage suivant chronologiquement est à l'index - 1
+        const nextDraw = index > 0 ? history[index - 1] : null;
+        
         return {
             match: h,
-            nextDraw: history[history.indexOf(h) - 1] || null,
+            nextDraw,
             similarity
         };
       })
-      .filter(m => m.similarity >= 40)
+      .filter(item => item.similarity >= 40) // Seuil min
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
-};
-
-export const calculateVolatility = (history: DrawResult[]) => {
-    if (history.length < 2) return { score: 0, status: 'Stable', trend: 'steady' };
-    const sums = history.map(d => d.gagnants.reduce((a,b)=>a+b, 0));
-    const avg = sums.reduce((a,b)=>a+b,0) / sums.length;
-    const variance = sums.reduce((a,v)=>a + Math.pow(v-avg, 2), 0) / sums.length;
-    const stdDev = Math.sqrt(variance);
-    
-    // Normalisation approximative (StdDev max ~ 120 pour loto)
-    const score = Math.min(100, Math.round((stdDev / 60) * 100));
-    
-    return {
-        score,
-        status: score > 75 ? 'Chaos' : score > 45 ? 'Volatile' : 'Stable',
-        trend: sums[0] > avg ? 'up' : 'down'
-    };
-};
-
-export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
-    return Array.from({ length: 90 }, (_, i) => {
-        const num = i + 1;
-        const gaps: number[] = [];
-        let lastIdx = -1;
-        
-        // Optimisation : On ne parcourt que les 200 derniers tirages pour la régularité locale
-        const sample = history.length > 200 ? history.slice(0, 200) : history;
-        
-        sample.forEach((d, idx) => {
-            if(d.gagnants.includes(num)) {
-                if(lastIdx !== -1) gaps.push(idx - lastIdx);
-                lastIdx = idx;
-            }
-        });
-        
-        const currentGap = sample.findIndex(d => d.gagnants.includes(num));
-        const safeAvgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : (sample.length / 5);
-        
-        const variance = gaps.reduce((a,v)=>a + Math.pow(v-safeAvgGap, 2), 0) / (Math.max(1, gaps.length));
-        
-        return {
-            number: num,
-            avgGap: parseFloat(safeAvgGap.toFixed(2)),
-            stdDev: parseFloat(Math.sqrt(variance).toFixed(2)),
-            currentGap: currentGap === -1 ? sample.length : currentGap,
-            lastGaps: gaps.slice(0, 5),
-            nextExpectedIn: Math.max(0, Math.round(safeAvgGap - (currentGap === -1 ? sample.length : currentGap)))
-        };
-    });
-};
-
-export const detectGameRegime = (history: DrawResult[]) => {
-    // Échantillon sur 5 numéros clés pour performance
-    const keys = [1, 23, 45, 67, 90]; 
-    const hursts = keys.map(k => calculateHurstForNumber(k, history).hurst);
-    const avgHurst = hursts.reduce((a,b)=>a+b,0) / keys.length;
-    
-    return { 
-        hurst: avgHurst, 
-        regime: avgHurst > 0.60 ? 'PERSISTANT' : avgHurst < 0.40 ? 'ANTI-PERSISTANT' : 'CHAOS' 
-    };
-};
-
-export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
-    try {
-        const res = await runWorkerTask('pearson_matrix', history);
-        return res || {};
-    } catch {
-        return {}; 
-    }
-};
-
-export const calculateNetworkCentralityAsync = async (history: DrawResult[]) => {
-    const { matrix } = await calculateSuccessionMatrixAsync(history);
-    return Array.from({length: 90}, (_, i) => {
-        const n = i+1;
-        const row = matrix[n] || {};
-        const outWeight = Object.values(row).reduce<number>((a, b) => a + (Number(b) || 0), 0);
-        return {
-            number: n,
-            centrality: outWeight,
-            normalized: Math.min(100, Math.round((outWeight / (history.length * 0.5)) * 100))
-        };
-    });
-};
-
-export const getNumberDetailedMetrics = async (num: number, history: DrawResult[], spectral: SpectralMetric[], fractal: FractalMetric[]): Promise<DetailedNumberMetrics> => {
-    const reg = calculateRegularity(history).find(r => r.number === num);
-    const spec = spectral.find(s => s.number === num);
-    const frac = fractal.find(f => f.number === num);
-    
-    const safeAvg = reg?.avgGap || 18;
-    const safeGap = reg?.currentGap || 0;
-    
-    return {
-        temperature: Math.round((spec?.energy || 0) * 0.6 + (safeGap / safeAvg) * 20),
-        hurst: frac?.hurst || 0.5,
-        lastGap: safeGap,
-        avgGap: safeAvg,
-        nextProb: Math.round(50 + (safeGap > safeAvg ? 20 : -10)),
-        spectralEnergy: spec?.energy || 0,
-        stdDev: reg?.stdDev || 5,
-        historyGraph: history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse(),
-        affinity: [], 
-        nemesis: []
-    };
 };

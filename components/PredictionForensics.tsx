@@ -99,20 +99,20 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
-            case 'Hit': return 'bg-green-100 text-green-700 border-green-300';
-            case 'Voisin': return 'bg-blue-100 text-blue-700 border-blue-300';
-            case 'Miroir': return 'bg-purple-100 text-purple-700 border-purple-300';
-            case 'Shadow': return 'bg-gray-100 text-gray-700 border-gray-300';
-            default: return 'bg-red-50 text-red-400 border-red-100 opacity-70';
+            case 'Hit': return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700';
+            case 'Voisin': return 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700';
+            case 'Miroir': return 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-700';
+            case 'Shadow': return 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600';
+            default: return 'bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800';
         }
     };
 
     const getConnectorStyle = (type: ForensicEvidence['errorType']) => {
         switch(type) {
-            case 'Hit': return 'border-green-500 bg-green-500';
+            case 'Hit': return 'border-emerald-500 bg-emerald-500';
             case 'Voisin': return 'border-blue-400 border-dashed';
             case 'Miroir': return 'border-purple-400 border-dotted';
-            case 'Shadow': return 'border-gray-400 border-double';
+            case 'Shadow': return 'border-slate-400 border-double';
             default: return 'border-transparent';
         }
     };
@@ -211,7 +211,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         {match.actual !== null ? (
                                             <>
                                                 <div className={`flex-1 border-b-2 ${getConnectorStyle(match.errorType)} relative top-0`}></div>
-                                                <span className={`absolute bg-white dark:bg-slate-800 px-3 py-1 rounded-full text-xs font-bold border ${getBadgeColor(match.errorType)} z-10`}>
+                                                <span className={`absolute px-3 py-1 rounded-full text-xs font-bold border ${getBadgeColor(match.errorType)} z-10 shadow-sm`}>
                                                     {match.errorType} {match.delta !== 'Direct' && `(${match.delta})`}
                                                 </span>
                                             </>
@@ -241,8 +241,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                         <TicketXRay numbers={predictedTicket} score={50} showTitle={false} />
                     </section>
-
-                    {/* Logic for corrections skipped for brevity as structure is same */}
                 </div>
             </div>
         </div>

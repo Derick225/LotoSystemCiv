@@ -150,13 +150,13 @@ export const fetchResults = async (drawName: string): Promise<{ data: DrawResult
 
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
+  // Trier les clés (heures) pour l'ordre chronologique : 10:00, 13:00, 16:00, 18:15
+  const sortedTimes = Object.keys(draws).sort(); 
+  
   const results = [];
   
-  // Utilisation de fetchHistory pour profiter du cache au lieu de requêtes directes multiples
-  // Note: C'est moins optimal que le select direct si le cache est froid, mais mieux pour le offline.
-  // Pour le summary, on va quand même essayer de faire un appel optimisé si online.
-  
-  for (const [time, name] of Object.entries(draws)) {
+  for (const time of sortedTimes) {
+      const name = draws[time];
       let lastDraw: DrawResult | null = null;
       
       try {
@@ -195,13 +195,21 @@ export const getDailySummary = async (day: string) => {
 export const getNextScheduledDraw = () => {
   const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
   const now = new Date();
-  const today = days[now.getDay()];
-  const schedule = DRAW_SCHEDULE[today];
+  const todayName = days[now.getDay()];
+  const schedule = DRAW_SCHEDULE[todayName];
+  
   if (!schedule) return null;
   
-  const times = Object.keys(schedule).sort();
+  // Tri strict des heures (support des minutes)
+  const times = Object.keys(schedule).sort((a, b) => {
+      const [h1, m1] = a.split(':').map(Number);
+      const [h2, m2] = b.split(':').map(Number);
+      return (h1 * 60 + m1) - (h2 * 60 + m2);
+  });
+
   const currentTimestamp = now.getTime();
   
+  // Trouver le premier créneau dont l'heure est > maintenant
   const nextTime = times.find(t => {
       const [h, m] = t.split(':').map(Number);
       const drawDate = new Date(now);
@@ -209,8 +217,22 @@ export const getNextScheduledDraw = () => {
       return drawDate.getTime() > currentTimestamp;
   });
 
-  const finalTime = nextTime || times[0];
-  return { time: finalTime, name: schedule[finalTime] };
+  if (nextTime) {
+      return { time: nextTime, name: schedule[nextTime], day: todayName };
+  } else {
+      // Si plus de tirage aujourd'hui, prendre le premier de demain
+      const tomorrowIndex = (now.getDay() + 1) % 7;
+      const tomorrowName = days[tomorrowIndex];
+      const tomorrowSchedule = DRAW_SCHEDULE[tomorrowName];
+      const tomorrowTimes = Object.keys(tomorrowSchedule).sort();
+      const firstDraw = tomorrowTimes[0];
+      
+      return { 
+          time: firstDraw, 
+          name: tomorrowSchedule[firstDraw], 
+          day: tomorrowName 
+      };
+  }
 };
 
 export const fetchGlobalStats = async () => {
@@ -311,7 +333,7 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
 export const injectDemoData = async () => {
     if (!isSupabaseConfigured()) return;
     
-    const targetDraws = ["Reveil", "Etoile", "Akwaba"];
+    const targetDraws = ["Reveil", "Etoile", "Akwaba", "Monday Special"];
     const demoData: any[] = [];
     
     targetDraws.forEach(drawName => {

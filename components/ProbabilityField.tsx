@@ -8,8 +8,7 @@ interface ProbabilityFieldProps {
 }
 
 /**
- * ProbabilityField v5.1 - Industrial Multi-Layer Visualization
- * Fix: TS1382 parser ambiguity handled by isolating logic
+ * ProbabilityField v5.2 - Industrial Multi-Layer Visualization
  */
 export const ProbabilityField: React.FC<ProbabilityFieldProps> = ({ scores }) => {
     const topNumbers = useMemo(() => {
@@ -31,7 +30,8 @@ export const ProbabilityField: React.FC<ProbabilityFieldProps> = ({ scores }) =>
         if (score > 90) return base + "bg-rose-600 text-white shadow-[0_0_15px_rgba(225,29,72,0.4)] scale-110 z-10";
         if (score > 70) return base + "bg-indigo-600 text-white";
         if (score > 40) return base + "bg-slate-800 text-slate-400";
-        return base + "bg-slate-800/40 text-slate-700 opacity-40";
+        // Correction de contraste pour les scores faibles sur fond sombre
+        return base + "bg-slate-800/40 text-slate-500 dark:text-slate-400 opacity-60";
     };
 
     return (

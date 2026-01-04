@@ -32,22 +32,22 @@ export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-slide-up">
             {smartInsights.map((insight) => {
                 let borderColor = 'border-slate-200 dark:border-slate-700';
-                let iconBg = 'bg-slate-100 text-slate-500';
+                let iconBg = 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300';
                 let titleColor = 'text-slate-800 dark:text-white';
                 let LucideIcon = Lightbulb;
 
                 if (insight.type === 'opportunity') {
                     borderColor = 'border-emerald-200 dark:border-emerald-800';
-                    iconBg = 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600';
+                    iconBg = 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400';
                     titleColor = 'text-emerald-900 dark:text-emerald-100';
                     LucideIcon = TrendingUp;
                 } else if (insight.type === 'risk') {
                     borderColor = 'border-rose-200 dark:border-rose-800';
-                    iconBg = 'bg-rose-100 dark:bg-rose-900/30 text-rose-600';
+                    iconBg = 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400';
                     titleColor = 'text-rose-900 dark:text-rose-100';
                     LucideIcon = AlertTriangle;
                 } else {
-                    iconBg = 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600';
+                    iconBg = 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400';
                     titleColor = 'text-indigo-900 dark:text-indigo-100';
                 }
 
@@ -70,7 +70,7 @@ export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
                                 <h4 className={`font-black text-sm uppercase tracking-tight ${titleColor}`}>
                                     {insight.title}
                                 </h4>
-                                <span className={`text-[10px] font-black px-2 py-1 rounded-lg border ${iconBg} bg-opacity-10 border-opacity-20`}>
+                                <span className={`text-[10px] font-black px-2 py-1 rounded-lg border ${iconBg} bg-opacity-20 border-opacity-30`}>
                                     {insight.score}% Impact
                                 </span>
                             </div>

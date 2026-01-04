@@ -1,6 +1,6 @@
 
 /**
- * Nexus Production Math Worker v8.5
+ * Nexus Production Math Worker v8.6 (Deep Resonance)
  * Traitement analytique lourd sur l'ENTIÈRETÉ de l'historique.
  */
 
@@ -8,6 +8,57 @@ export {};
 
 // Fix: Explicitly type self as Worker using safe casting
 const ctx = self as unknown as Worker;
+
+// Importation directe des fonctions mathématiques pures (pas d'import de module pour worker standalone si possible, mais ici on duplique pour la perf ou on utilise des fonctions locales)
+// Pour simplifier et garantir l'exécution sans bundler complexe pour le worker, nous incluons les fonctions mathématiques critiques ici.
+
+// --- MATH UTILS LOCALES AU WORKER ---
+const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
+
+const runEchoStateNetworkLocal = (signal: number[]): number => {
+    if (signal.length < 20) return 0;
+    const reservoirSize = 20;
+    const spectralRadius = 0.95;
+    const leakage = 0.3;
+    const trainLen = signal.length - 1;
+    const W = Array.from({length: reservoirSize}, () => Array.from({length: reservoirSize}, () => (Math.random() - 0.5)));
+    const Win = Array.from({length: reservoirSize}, () => (Math.random() - 0.5) * 2.0);
+    let x = new Array(reservoirSize).fill(0);
+    const X_states: number[][] = [];
+    const Y_target: number[] = [];
+    for (let t = 0; t < trainLen; t++) {
+        const u = signal[t];
+        const newX = new Array(reservoirSize).fill(0);
+        for (let i = 0; i < reservoirSize; i++) {
+            let internalSum = 0;
+            for (let j = 0; j < reservoirSize; j++) internalSum += W[i][j] * x[j];
+            newX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u);
+        }
+        x = newX;
+        X_states.push([...x, 1]);
+        Y_target.push(signal[t+1]);
+    }
+    const W_out = new Array(reservoirSize + 1).fill(0);
+    for (let i = 0; i <= reservoirSize; i++) {
+        let num = 0, den = 0;
+        for (let t = 0; t < trainLen; t++) {
+            num += X_states[t][i] * Y_target[t];
+            den += X_states[t][i] * X_states[t][i];
+        }
+        W_out[i] = den !== 0 ? num / (den + 0.01) : 0;
+    }
+    const u_last = signal[signal.length - 1];
+    const nextX = new Array(reservoirSize).fill(0);
+    for (let i = 0; i < reservoirSize; i++) {
+        let internalSum = 0;
+        for (let j = 0; j < reservoirSize; j++) internalSum += W[i][j] * x[j];
+        nextX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u_last);
+    }
+    let prediction = 0;
+    for (let i = 0; i < reservoirSize; i++) prediction += W_out[i] * nextX[i];
+    prediction += W_out[reservoirSize];
+    return Math.max(0, Math.min(100, prediction * 100));
+};
 
 ctx.onmessage = async (e: MessageEvent) => {
     const { requestId, task, history, payload } = e.data;
@@ -62,7 +113,6 @@ function calculateSuccessionMatrix(history: any[]) {
     
     if (!history || history.length < 2) return { matrix, totals };
 
-    // Optimisation: Itération unique
     for (let i = 0; i < history.length - 1; i++) {
         const current = history[i].gagnants;
         const prev = history[i+1].gagnants;
@@ -100,7 +150,6 @@ function calculateFollowersAnalysis(history: any[]) {
             }
         }
     }
-    // Tri par impact global (somme des suivis)
     return result.sort((a, b) => {
         const sumA = a.followers.reduce((acc, f) => acc + f.count, 0);
         const sumB = b.followers.reduce((acc, f) => acc + f.count, 0);
@@ -114,6 +163,7 @@ function calculateNextProjections(history: any[], lastNumbers: number[]) {
     const { matrix, totals } = calculateSuccessionMatrix(history);
     const scores: Record<number, number> = {};
 
+    // 1. Matrice de Markov (Classique)
     lastNumbers.forEach(n => {
         const nextMap = matrix[n] || {};
         const total = totals[n] || 1;
@@ -124,13 +174,31 @@ function calculateNextProjections(history: any[], lastNumbers: number[]) {
         });
     });
 
-    // Normalisation propre basée sur le max trouvé
+    // 2. Injection Deep Resonance (ESN)
+    // On analyse les séries temporelles de chaque numéro pour détecter des patterns non-linéaires
+    const signalLength = Math.min(history.length, 100);
+    
+    for (let num = 1; num <= 90; num++) {
+        // Extraction de la série binaire (présence/absence)
+        const signal = [];
+        for(let i = signalLength - 1; i >= 0; i--) {
+            signal.push(history[i].gagnants.includes(num) ? 1 : 0);
+        }
+        
+        // Calcul ESN
+        const resonance = runEchoStateNetworkLocal(signal);
+        
+        // Mixage avec le score Markov (Pondération 30% ESN, 70% Markov)
+        // ESN donne une probabilité entre 0 et 100
+        scores[num] = (scores[num] || 0) + (resonance / 100) * 0.5;
+    }
+
     const maxScore = Math.max(...Object.values(scores), 0.001);
 
     return Object.entries(scores)
         .map(([num, prob]) => ({ 
             number: parseInt(num), 
-            probability: Math.min(99, Math.round((prob / maxScore) * 90)) // Normalisation 0-90% pour garder une marge d'incertitude
+            probability: Math.min(99, Math.round((prob / maxScore) * 90))
         }))
         .sort((a, b) => b.probability - a.probability)
         .slice(0, 10);
@@ -259,7 +327,6 @@ function performStructuralAudit(sample: any[]) {
         if (p > 0) entropy -= p * Math.log2(p);
     });
     const maxEntropy = Math.log2(90);
-    
     const normalizedEntropy = entropy / maxEntropy;
 
     return {
@@ -288,9 +355,7 @@ function calculateEigenvectorCentrality(history: any[]) {
     for(let iter=0; iter<15; iter++) {
         const next = new Float32Array(nodes).fill(0);
         for(let i=0; i<nodes; i++) {
-            for(let j=0; j<nodes; j++) {
-                next[i] += adj[i * nodes + j] * centrality[j];
-            }
+            for(let j=0; j<nodes; j++) next[i] += adj[i * nodes + j] * centrality[j];
         }
         const norm = Math.sqrt(Array.from(next).reduce((a,v) => a + v*v, 0));
         if(norm > 0) for(let i=0; i<nodes; i++) next[i] /= norm;

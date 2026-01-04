@@ -1,11 +1,13 @@
+
 import React, { useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, Cell, ReferenceLine, ReferenceArea } from 'recharts';
 import { NumberBall } from '../NumberBall';
 import { Brain, TrendingUp, Anchor, Shuffle, Activity, HelpCircle } from 'lucide-react';
+import { ChaosAttractor } from '../ChaosAttractor';
 
 export const FractalTab: React.FC<{ drawName: string }> = () => {
-  const { fractal, regime, loading } = useNexus();
+  const { fractal, regime, loading, history } = useNexus();
 
   // Segmentation des données pour les "Buckets" novices
   const buckets = useMemo(() => {
@@ -39,49 +41,54 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
     <div className="space-y-10 animate-fade-in pb-16">
         
         {/* HERO: MÉTÉO DU MARCHÉ (JAUGE SIMPLE) */}
-        <div className="bg-slate-950 p-8 rounded-[3rem] text-white shadow-2xl border border-slate-800 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/10 rounded-full blur-[100px] -mr-10 -mt-10"></div>
-            
-            <div className="relative z-10 grid lg:grid-cols-2 gap-10 items-center">
-                <div>
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
-                            <Brain size={20} className="text-indigo-400" />
+        <div className="grid lg:grid-cols-2 gap-8">
+            <div className="bg-slate-950 p-8 rounded-[3rem] text-white shadow-2xl border border-slate-800 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/10 rounded-full blur-[100px] -mr-10 -mt-10"></div>
+                
+                <div className="relative z-10 flex flex-col justify-between h-full gap-8">
+                    <div>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
+                                <Brain size={20} className="text-indigo-400" />
+                            </div>
+                            <h3 className="text-sm font-black uppercase tracking-[0.2em] text-indigo-300">Mémoire du Marché</h3>
                         </div>
-                        <h3 className="text-sm font-black uppercase tracking-[0.2em] text-indigo-300">Mémoire du Marché</h3>
+                        <h2 className="text-3xl font-black text-white tracking-tighter mb-4">
+                            Indice de <span className="text-indigo-500">Prédictibilité</span>
+                        </h2>
+                        <p className="text-slate-400 text-sm font-medium leading-relaxed max-w-md">
+                            Mesure mathématique de la persistance. Un score élevé indique que le tirage suit une structure cyclique détectable.
+                        </p>
                     </div>
-                    <h2 className="text-3xl font-black text-white tracking-tighter mb-4">
-                        Indice de <span className="text-indigo-500">Prédictibilité</span>
-                    </h2>
-                    <p className="text-slate-400 text-sm font-medium leading-relaxed max-w-md">
-                        Cet indice mesure si le jeu suit une logique (Tendances/Cycles) ou s'il est purement chaotique. Plus le score est élevé, plus les stratégies fonctionnent.
-                    </p>
-                </div>
 
-                <div className="bg-white/5 p-6 rounded-3xl border border-white/10 shadow-inner">
-                    <div className="flex justify-between items-end mb-4">
-                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">État Actuel</span>
-                        <span className={`text-2xl font-black ${orderScore > 30 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {orderScore > 30 ? 'STRUCTUREL' : 'CHAOTIQUE'}
-                        </span>
-                    </div>
-                    
-                    {/* Visual Gauge */}
-                    <div className="h-4 w-full bg-slate-800 rounded-full overflow-hidden relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-rose-500 via-slate-500 to-emerald-500 opacity-30"></div>
-                        {/* Cursor */}
-                        <div 
-                            className="absolute top-0 bottom-0 w-2 bg-white shadow-[0_0_10px_white] transition-all duration-1000"
-                            style={{ left: `${Math.min(100, Math.max(0, (regime?.hurst || 0.5) * 100))}%` }}
-                        ></div>
-                    </div>
-                    <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase mt-2">
-                        <span>Rebond (Anti)</span>
-                        <span>Aléatoire (Chaos)</span>
-                        <span>Tendance (Suivi)</span>
+                    <div className="bg-white/5 p-6 rounded-3xl border border-white/10 shadow-inner">
+                        <div className="flex justify-between items-end mb-4">
+                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">État Actuel</span>
+                            <span className={`text-2xl font-black ${orderScore > 30 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {orderScore > 30 ? 'STRUCTUREL' : 'CHAOTIQUE'}
+                            </span>
+                        </div>
+                        
+                        {/* Visual Gauge */}
+                        <div className="h-4 w-full bg-slate-800 rounded-full overflow-hidden relative">
+                            <div className="absolute inset-0 bg-gradient-to-r from-rose-500 via-slate-500 to-emerald-500 opacity-30"></div>
+                            {/* Cursor */}
+                            <div 
+                                className="absolute top-0 bottom-0 w-2 bg-white shadow-[0_0_10px_white] transition-all duration-1000"
+                                style={{ left: `${Math.min(100, Math.max(0, (regime?.hurst || 0.5) * 100))}%` }}
+                            ></div>
+                        </div>
+                        <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase mt-2">
+                            <span>Rebond (Anti)</span>
+                            <span>Aléatoire (Chaos)</span>
+                            <span>Tendance (Suivi)</span>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* NEW: ATTRACTEUR DE CHAOS */}
+            <ChaosAttractor history={history} />
         </div>
 
         {/* LES 3 FAMILLES (NOVICE FRIENDLY) */}
