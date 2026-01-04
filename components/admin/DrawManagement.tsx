@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
 import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard } from 'lucide-react';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, FileJson, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, ChevronRight, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard, Filter, Ban } from 'lucide-react';
 import { DRAW_SCHEDULE } from '../../constants';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
@@ -47,6 +47,8 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const [importStep, setImportStep] = useState<'upload' | 'preview'>('upload');
     const [uploadMode, setUploadMode] = useState<'file' | 'text'>('file');
     const [pasteContent, setPasteContent] = useState('');
+    const [viewFilter, setViewFilter] = useState<'all' | 'valid' | 'error'>('all');
+    
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => { 
@@ -55,6 +57,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         setPreviewData([]);
         setImportStep('upload');
         setPasteContent('');
+        setViewFilter('all');
     }, [drawName]);
 
     const loadData = async () => {
@@ -216,6 +219,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
         setPreviewData(preview);
         setImportStep('preview');
+        setViewFilter('all');
         if (preview.length === 0) showToast("Aucune donnée valide trouvée.", "error");
     };
 
@@ -267,6 +271,15 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             setIsImporting(false);
         }
     };
+
+    // Calculs pour l'affichage Preview
+    const validCount = useMemo(() => previewData.filter(r => r.isValid).length, [previewData]);
+    const errorCount = useMemo(() => previewData.filter(r => !r.isValid).length, [previewData]);
+    const filteredPreview = useMemo(() => {
+        if (viewFilter === 'valid') return previewData.filter(r => r.isValid);
+        if (viewFilter === 'error') return previewData.filter(r => !r.isValid);
+        return previewData;
+    }, [previewData, viewFilter]);
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -457,10 +470,21 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
                     {importStep === 'preview' && (
                         <div className="animate-slide-up space-y-6">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <h3 className="font-black text-slate-800 dark:text-white uppercase">Prévisualisation</h3>
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{previewData.filter(r => r.isValid).length} valides / {previewData.length} lignes</p>
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Prévisualisation</h3>
+                                        <div className="flex gap-2">
+                                            <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold text-slate-500">{previewData.length} Total</span>
+                                            <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 rounded text-[10px] font-bold text-emerald-600">{validCount} Valides</span>
+                                            {errorCount > 0 && <span className="px-2 py-0.5 bg-rose-100 dark:bg-rose-900/30 rounded text-[10px] font-bold text-rose-600">{errorCount} Erreurs</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setViewFilter('all')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Tous</button>
+                                    <button onClick={() => setViewFilter('valid')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'valid' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Valides</button>
+                                    <button onClick={() => setViewFilter('error')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>Erreurs</button>
                                 </div>
                                 <button onClick={() => { setImportStep('upload'); setPreviewData([]); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><X size={16}/></button>
                             </div>
@@ -476,7 +500,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {previewData.map((row, i) => (
+                                        {filteredPreview.map((row, i) => (
                                             <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
                                                 <td className="p-4">
                                                     {row.isValid 
@@ -501,16 +525,34 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                                 </td>
                                             </tr>
                                         ))}
+                                        {filteredPreview.length === 0 && (
+                                            <tr>
+                                                <td colSpan={4} className="p-8 text-center text-slate-400 italic">Aucun élément dans cette vue.</td>
+                                            </tr>
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
 
-                            <div className="flex justify-end gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                                <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition">Annuler</button>
-                                <button onClick={confirmImport} disabled={isImporting || previewData.filter(r => r.isValid).length === 0} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center gap-2 disabled:opacity-50 active:scale-95 transition">
-                                    {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
-                                    Confirmer Import
-                                </button>
+                            <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">
+                                    {errorCount > 0 ? (
+                                        <span className="flex items-center gap-2 text-amber-500"><AlertTriangle size={12}/> {errorCount} lignes seront ignorées</span>
+                                    ) : (
+                                        <span className="flex items-center gap-2 text-emerald-500"><CheckCircle2 size={12}/> Données propres</span>
+                                    )}
+                                </div>
+                                <div className="flex gap-4">
+                                    <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition">Annuler</button>
+                                    <button 
+                                        onClick={confirmImport} 
+                                        disabled={isImporting || validCount === 0} 
+                                        className={`px-8 py-3 rounded-xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center gap-2 disabled:opacity-50 active:scale-95 transition ${errorCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+                                    >
+                                        {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
+                                        {validCount > 0 ? `Importer ${validCount} Valides` : 'Aucune donnée valide'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
