@@ -270,13 +270,28 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
         setIsImporting(true);
         try {
-            const batch = validRows.map(row => ({
-                draw_name: drawName,
-                date: row.date,
-                gagnants: row.gagnants,
-                machine: row.machine,
-                version: 1
-            }));
+            // DEDOUBLONNAGE CRITIQUE : Postgres interdit de mettre à jour la même ligne 2x dans le même batch
+            // On utilise une Map pour ne garder que la dernière occurrence de chaque date
+            const uniqueMap = new Map();
+            
+            validRows.forEach(row => {
+                // Normalisation si nécessaire (ici on suppose que row.date est la clé unique pour ce tirage)
+                uniqueMap.set(row.date, {
+                    draw_name: drawName,
+                    date: row.date,
+                    gagnants: row.gagnants,
+                    machine: row.machine,
+                    version: 1
+                });
+            });
+
+            const batch = Array.from(uniqueMap.values());
+
+            // Si des doublons ont été retirés, on prévient l'utilisateur
+            if (batch.length < validRows.length) {
+                const diff = validRows.length - batch.length;
+                showToast(`${diff} doublons ignorés automatiquement (Date identique).`, "info");
+            }
 
             await bulkAddResults(drawName, batch);
             showToast(`${batch.length} tirages importés avec succès.`, "success");
