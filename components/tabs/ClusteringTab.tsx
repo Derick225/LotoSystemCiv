@@ -134,6 +134,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
         let bestAC = -1;
 
         // Génération Monte Carlo simple pour trouver un bon ticket dans ce cluster
+        // On essaie de créer un ticket avec un AC élevé (complexité) pour éviter les tickets trop simples
         for(let i=0; i<50; i++) {
             const shuffled = [...pool].sort(() => 0.5 - Math.random());
             const candidate = shuffled.slice(0, 5).sort((a,b)=>a-b);
@@ -208,7 +209,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                             {/* Action Button embedded in card */}
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleGenerateFromCluster(s.type); }}
-                                className={`w-full py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${activeFilter === s.type ? 'bg-white text-slate-900 hover:bg-slate-200' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-indigo-500'}`}
+                                className={`w-full py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all shadow-sm ${activeFilter === s.type ? 'bg-white text-slate-900 hover:bg-slate-200' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-indigo-500'}`}
                             >
                                 <Ticket size={12}/> Générer
                             </button>

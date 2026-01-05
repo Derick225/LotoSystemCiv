@@ -12,7 +12,7 @@ interface State {
 /**
  * LocalErrorBoundary - Targeted Module Error Isolation
  */
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
   };

@@ -15,7 +15,6 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
     const [selection, setSelection] = useState<number[]>([]);
     const [metrics, setMetrics] = useState<TicketAnalysisResult | null>(null);
     const [spectralScore, setSpectralScore] = useState(0);
-    const [suggestions, setSuggestions] = useState<number[]>([]);
 
     // Calcul des affinités prédictives (Heatmap temps réel)
     const heatMap = useMemo(() => {
@@ -35,14 +34,15 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
             // On somme les corrélations avec chaque numéro déjà sélectionné
             selection.forEach(source => {
                 // correlationMatrix[source].affinities[target] est entre -1 et 1
-                const affinity = correlationMatrix[source]?.affinities?.[target] || 0;
+                // On vérifie que la matrice est bien chargée pour éviter les crashs
+                const affinity = Number(correlationMatrix[source]?.affinities?.[target] || 0);
                 if (affinity > 0) { // On ne garde que les corrélations positives pour la suggestion
                     affinitySum += affinity;
                     count++;
                 }
             });
 
-            // Score moyen normalisé (boosté pour la visibilité)
+            // Score moyen normalisé (boosté pour la visibilité visuelle)
             map[target] = count > 0 ? (affinitySum / selection.length) * 200 : 0;
         }
         return map;
@@ -67,13 +67,13 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
 
     const toggleNumber = (n: number) => {
         if (selection.includes(n)) {
-            setSelection(prev => prev.filter(x => x !== n).sort((a: number, b: number) => a - b));
+            setSelection(prev => prev.filter(x => x !== n).sort((a, b) => a - b));
         } else {
             if (selection.length >= 5) {
                 showToast("Maximum 5 numéros atteints.", "info");
                 return;
             }
-            setSelection(prev => [...prev, n].sort((a: number, b: number) => a - b));
+            setSelection(prev => [...prev, n].sort((a, b) => a - b));
         }
     };
 
@@ -82,7 +82,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
         
         // Trouver les meilleurs candidats basés sur la heatmap
         const candidates = Object.entries(heatMap)
-            .map(([n, score]) => ({ n: parseInt(n), score }))
+            .map(([n, score]) => ({ n: parseInt(n), score: Number(score) }))
             .filter(item => !selection.includes(item.n))
             .sort((a, b) => b.score - a.score);
 
@@ -90,10 +90,10 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
         const toAdd = candidates.slice(0, needed).map(c => c.n);
         
         if (toAdd.length > 0) {
-            setSelection(prev => [...prev, ...toAdd].sort((a: number, b: number) => a - b));
+            setSelection(prev => [...prev, ...toAdd].sort((a, b) => a - b));
             showToast(`${toAdd.length} vecteurs convergents ajoutés.`, "success");
         } else {
-            // Fallback aléatoire intelligent si pas de corrélation (premier numéro)
+            // Fallback aléatoire intelligent si pas de corrélation (premier numéro ou pas de données)
             const remaining = 5 - selection.length;
             const smartRandom: number[] = [];
             while(smartRandom.length < remaining) {
@@ -106,7 +106,8 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                     smartRandom.push(candidate);
                 }
             }
-            setSelection(prev => [...prev, ...smartRandom].sort((a: number, b: number) => a - b));
+            setSelection(prev => [...prev, ...smartRandom].sort((a, b) => a - b));
+            showToast("Complétion spectrale activée.", "info");
         }
     };
 
@@ -124,7 +125,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
     };
 
     const getCellColor = (n: number) => {
-        if (selection.includes(n)) return 'bg-indigo-600 text-white ring-2 ring-white scale-110 z-10 shadow-lg font-black';
+        if (selection.includes(n)) return 'bg-indigo-600 text-white ring-2 ring-white scale-110 z-10 shadow-lg font-black border-indigo-500';
         
         const affinity = heatMap[n] || 0;
         
@@ -134,10 +135,10 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
             if (affinity > 30) return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
             if (affinity > 10) return 'bg-emerald-500/10 text-emerald-500/70 border-emerald-500/10';
             // Les numéros "froids" par rapport à la sélection (pas de corrélation)
-            return 'bg-slate-900 text-slate-700 border-slate-800 opacity-50';
+            return 'bg-slate-900 text-slate-700 border-slate-800 opacity-40';
         }
 
-        // État par défaut (Energie spectrale)
+        // État par défaut (Energie spectrale) si aucune sélection
         const spec = spectral.find(s => s.number === n);
         const energy = spec?.energy || 0;
         if (energy > 80) return 'bg-rose-500/20 text-rose-300 border-rose-500/30';
