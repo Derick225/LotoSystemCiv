@@ -14,7 +14,7 @@ interface State {
  * LocalErrorBoundary - Targeted Module Error Isolation
  * Catches errors in children, displays fallback UI, and allows recovery.
  */
-export class LocalErrorBoundary extends React.Component<Props, State> {
+export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): State {

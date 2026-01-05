@@ -1,62 +1,166 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DRAW_SCHEDULE, SLOT_CONFIG } from '../constants';
 import { useNexus } from './NexusProvider';
-import { Clock, Target, Calendar } from 'lucide-react';
+import { Clock, Target, Calendar, CheckCircle2, Lock, ChevronRight } from 'lucide-react';
+
+const DAYS_ORDER = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
 export const DrawSelector: React.FC = () => {
   const { drawName, setDrawName } = useNexus();
-  const days = Object.keys(DRAW_SCHEDULE);
-  // Jour actuel par défaut, mais modifiable
-  const [activeDay, setActiveDay] = useState(days[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1] || 'Lundi');
+  
+  // Robust day detection
+  const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+  const todayName = DAYS_ORDER[todayIndex];
+  
+  const [activeDay, setActiveDay] = useState(todayName);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+      const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+      return () => clearInterval(timer);
+  }, []);
+
+  const getDrawStatus = (timeStr: string) => {
+      // Comparison logic
+      const dayDiff = DAYS_ORDER.indexOf(activeDay) - todayIndex;
+      
+      if (dayDiff < 0) return 'closed'; // Past days
+      if (dayDiff > 0) return 'future'; // Future days
+
+      // Current Day Logic
+      const [h, m] = timeStr.split(':').map(Number);
+      const drawTime = new Date();
+      drawTime.setHours(h, m, 0, 0);
+      const now = new Date();
+      
+      const diffMinutes = (drawTime.getTime() - now.getTime()) / 60000;
+
+      if (diffMinutes < -60) return 'closed'; // Closed 1h ago
+      if (diffMinutes <= 0) return 'live'; // Active (0 to -60m)
+      if (diffMinutes < 120) return 'next'; // Coming soon (< 2h)
+      return 'upcoming';
+  };
+
+  const activeSchedule = useMemo(() => {
+      return Object.entries(DRAW_SCHEDULE[activeDay] || {}).sort((a,b) => parseInt(a[0]) - parseInt(b[0]));
+  }, [activeDay]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-slate-800 rounded-xl"><Calendar size={16} className="text-indigo-400"/></div>
-          <h3 className="text-sm font-black text-white uppercase tracking-widest">Calendrier des Tirages</h3>
+    <div className="space-y-6 animate-fade-in">
+      {/* Header & Clock */}
+      <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-slate-800 rounded-xl shadow-lg border border-slate-700">
+                <Calendar size={18} className="text-indigo-400"/>
+            </div>
+            <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest leading-none">Calendrier</h3>
+                <p className="text-[10px] text-slate-500 font-bold mt-1">Séquence {activeDay}</p>
+            </div>
+          </div>
+          <div className="text-xs font-mono font-black text-slate-400 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 shadow-inner flex items-center gap-2">
+              <Clock size={12} className="text-indigo-500 animate-pulse"/>
+              {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-        {days.map(d => (
-          <button
-            key={d}
-            onClick={() => setActiveDay(d)}
-            className={`px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeDay === d ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/40 scale-105' : 'bg-slate-900 text-slate-500 hover:text-slate-300 border border-slate-800'}`}
-          >
-            {d}
-          </button>
-        ))}
+      {/* Day Navigation */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+        {DAYS_ORDER.map((d, idx) => {
+            const isToday = d === todayName;
+            const isActive = activeDay === d;
+            return (
+                <button
+                    key={d}
+                    onClick={() => setActiveDay(d)}
+                    className={`
+                        relative px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
+                        ${isActive 
+                            ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 scale-[1.02] z-10' 
+                            : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                        }
+                    `}
+                >
+                    {d}
+                    {isToday && !isActive && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>}
+                </button>
+            );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {Object.entries(DRAW_SCHEDULE[activeDay]).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).map(([time, name]) => {
+      {/* Schedule Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {activeSchedule.map(([time, name]) => {
             const config = SLOT_CONFIG[time] || { color: 'text-slate-400', icon: '⏱️', label: 'Tirage' };
             const isActive = drawName === name;
+            const status = getDrawStatus(time);
+
+            // Dynamic Styling based on Status
+            let statusClasses = "border-slate-800 bg-slate-900 opacity-60 grayscale";
+            let iconElement = <Lock size={14} className="text-slate-600"/>;
+            let labelText = "Terminé";
+
+            if (status === 'live') {
+                statusClasses = "border-emerald-500/50 bg-emerald-900/10 shadow-[0_0_20px_rgba(16,185,129,0.1)] opacity-100";
+                iconElement = <span className="flex h-2.5 w-2.5 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>;
+                labelText = "En Cours";
+            } else if (status === 'next') {
+                statusClasses = "border-indigo-500/50 bg-indigo-900/10 opacity-100";
+                iconElement = <Clock size={14} className="text-indigo-400 animate-spin-slow"/>;
+                labelText = "Bientôt";
+            } else if (status === 'upcoming') {
+                statusClasses = "border-slate-700 bg-slate-900 opacity-100";
+                iconElement = <Clock size={14} className="text-slate-500"/>;
+                labelText = "À venir";
+            } else if (status === 'future') {
+                statusClasses = "border-slate-800 bg-slate-900/50 opacity-50";
+                iconElement = <Calendar size={14} className="text-slate-600"/>;
+                labelText = "Planifié";
+            } else if (status === 'closed') {
+                statusClasses = "border-slate-800 bg-slate-950 opacity-70";
+                iconElement = <CheckCircle2 size={14} className="text-emerald-600"/>;
+                labelText = "Clôturé";
+            }
+
+            if (isActive) {
+                statusClasses = "bg-indigo-600 border-indigo-500 text-white shadow-2xl scale-[1.02] z-20 ring-1 ring-indigo-400 opacity-100";
+            }
 
             return (
               <div
                 key={name}
                 onClick={() => setDrawName(name)}
-                className={`p-5 rounded-[2rem] border transition-all cursor-pointer group relative overflow-hidden ${isActive ? 'bg-indigo-900/40 border-indigo-500 shadow-2xl ring-1 ring-indigo-500/50' : 'bg-slate-900 border-slate-800 hover:border-slate-600'}`}
+                className={`
+                    p-5 rounded-[2rem] border transition-all duration-300 cursor-pointer group relative overflow-hidden flex flex-col justify-between h-32
+                    ${statusClasses}
+                `}
               >
-                {isActive && <div className="absolute top-0 right-0 p-3"><Target size={16} className="text-indigo-400 animate-pulse" /></div>}
+                {/* Background Decor */}
+                {isActive && <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/20 rounded-full blur-2xl pointer-events-none"></div>}
                 
-                <div className="flex flex-col h-full justify-between">
+                <div className="flex justify-between items-start relative z-10">
                     <div>
-                        <div className="flex items-center gap-2 mb-3">
-                            <span className="text-lg">{config.icon}</span>
-                            <span className={`text-[10px] font-black uppercase tracking-widest ${config.color}`}>{config.label}</span>
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg filter drop-shadow-md">{config.icon}</span>
+                            <span className={`text-[9px] font-black uppercase tracking-widest ${isActive ? 'text-indigo-200' : config.color}`}>
+                                {config.label}
+                            </span>
                         </div>
-                        <h3 className="text-lg font-black text-white uppercase tracking-tight leading-none group-hover:translate-x-1 transition-transform">{name}</h3>
+                        <h3 className={`text-lg font-black uppercase tracking-tight leading-none ${isActive ? 'text-white' : 'text-slate-200'}`}>
+                            {name}
+                        </h3>
                     </div>
-                    
-                    <div className="mt-4 pt-4 border-t border-white/5 flex justify-between items-center">
-                        <span className="text-slate-400 font-mono text-xs flex items-center gap-1 font-bold">
-                            <Clock size={12} /> {time}
-                        </span>
-                        <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500 animate-ping' : 'bg-slate-700'}`}></div>
-                    </div>
+                    {isActive && <Target size={20} className="text-white animate-pulse" />}
+                </div>
+                
+                <div className={`mt-auto flex justify-between items-center relative z-10 pt-3 border-t ${isActive ? 'border-white/20' : 'border-white/5'}`}>
+                    <span className={`font-mono text-xs font-bold flex items-center gap-2 ${isActive ? 'text-indigo-100' : 'text-slate-400'}`}>
+                        {iconElement} {time}
+                    </span>
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                        {labelText}
+                    </span>
                 </div>
               </div>
             );

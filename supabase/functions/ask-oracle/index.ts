@@ -1,6 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenAI } from "https://esm.sh/@google/genai@1.34.0";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@1.34.0";
 
 declare const Deno: any;
 
@@ -28,62 +28,70 @@ serve(async (req) => {
 
     if (task === "analyze") {
       const prompt = `
-        Rôle : Tu es le "Nexus Quant Architect", une IA experte en dynamique stochastique appliquée aux séries temporelles de loto (5/90).
-        Contexte : Tirage "${drawName}".
+        Rôle : Tu es le "Nexus Quant Architect", une IA de niveau Doctorat experte en dynamique stochastique et théorie du chaos appliquée aux séries temporelles de loterie (5/90).
+        Ta mission : Déconstruire la structure du tirage "${drawName}" pour identifier les biais mécaniques ou statistiques invisibles.
         
-        Données d'entrée (25 derniers tirages): 
+        Contexte Technique :
+        - Tirage : ${drawName}
+        - Métriques Avancées : Hurst=${metrics?.hurst || "?"}, Entropie=${metrics?.entropy || "?"}.
+        
+        Données d'entrée (Séquence Récente): 
         ${JSON.stringify(history.slice(0, 25))}
         
-        Métriques Clés (Si dispo):
-        - Exposant de Hurst: ${metrics?.hurst || "Non fourni"} (Rappel: >0.5 = Tendance, <0.5 = Retour moyenne)
-        - Entropie Shannon: ${metrics?.entropy || "Non fourni"}
-        
-        Tâche :
-        1. Identifie la "Signature Temporelle" actuelle (Est-ce que les numéros se répètent ou est-ce le chaos total ?).
-        2. Détecte les "Zones Mortes" (Dizaines qui ne sortent pas depuis longtemps).
-        3. Suggère 5 numéros ("Vecteurs") basés sur la logique détectée.
-        4. Donne un score d'intuition (0-100) sur la fiabilité de ce pattern.
-
-        Réponds UNIQUEMENT avec ce JSON strict :
-        {
-          "logicalAnalysis": "string (Markdown concis, max 300 mots. Parle en expert : mentionne 'écart-type', 'rupture de symétrie', 'attracteurs'. Sois mystérieux mais précis.)",
-          "patternType": "string (ex: 'Compression de Volatilité', 'Expansion Fractale', 'Retour à la Moyenne')",
-          "nextSequence": "string (ex: 'Focus sur les termin 3 et 7')",
-          "anomalies": ["string (Liste 2-3 anomalies statistiques détectées)"],
-          "strategicAdvice": "string (Conseil de mise : Kelly, Martingale, ou Prudence)",
-          "suggestedFocus": [number] (Tableau de 5 entiers),
-          "intuitionScore": number
-        }
+        Instructions :
+        1. Analyse la "Signature Temporelle" : Identifie si le régime est Persistant (Tendance) ou Anti-Persistant (Rebond).
+        2. Détecte les "Vecteurs de Rupture" : Numéros qui brisent la linéarité actuelle.
+        3. Propose 5 "Vecteurs Cibles" (Numéros) basés sur une convergence algorithmique stricte.
+        4. Évalue ton "Intuition Score" (0-100) basé sur la clarté du signal.
       `;
 
       const response = await genAI.models.generateContent({
         model: modelName,
         contents: prompt,
-        config: { responseMimeType: "application/json" }
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    logicalAnalysis: { type: Type.STRING, description: "Analyse technique détaillée style 'Quant Hedge Fund'." },
+                    patternType: { type: Type.STRING, description: "Nom du pattern identifié (ex: 'Fibonacci Retracement', 'Poisson Decay')." },
+                    nextSequence: { type: Type.STRING, description: "Description brève de la séquence attendue." },
+                    anomalies: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    strategicAdvice: { type: Type.STRING, description: "Conseil de mise (Kelly, Martingale, Flat)." },
+                    suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                    intuitionScore: { type: Type.NUMBER }
+                },
+                required: ["logicalAnalysis", "patternType", "suggestedFocus", "intuitionScore", "strategicAdvice"]
+            }
+        }
       });
       resultData = JSON.parse(response.text || '{}');
 
     } else if (task === "narrative") {
       const prompt = `
-        Rédige un "Flash Report" pour le tirage ${drawName}.
+        Rédige un "Flash Report" exécutif pour le tirage ${drawName}.
         Métriques contextuelles : ${JSON.stringify(metrics)}.
         Historique récent : ${JSON.stringify(history)}.
-        
-        Ton style doit être celui d'un analyste financier de haut vol qui parle de "Marché" et de "Liquidité" pour les numéros.
-        
-        Format JSON :
-        {
-          "summary": "string",
-          "technicalVerdict": "string (ex: 'Signal Achat Fort', 'Marché Bearish')",
-          "riskAssessment": "string",
-          "confidence": number
-        }
+        Ton : Analyste Financier Senior. Vocabulaire : "Liquidité", "Volatilité", "Support", "Résistance", "Correction Technique".
+        Objectif : Donner confiance au joueur avec une rationalisation pseudo-scientifique robuste.
       `;
 
       const response = await genAI.models.generateContent({
         model: modelName,
         contents: prompt,
-        config: { responseMimeType: "application/json" }
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    summary: { type: Type.STRING },
+                    technicalVerdict: { type: Type.STRING },
+                    riskAssessment: { type: Type.STRING },
+                    confidence: { type: Type.NUMBER }
+                },
+                required: ["summary", "technicalVerdict", "confidence"]
+            }
+        }
       });
       resultData = JSON.parse(response.text || '{}');
 
@@ -92,18 +100,26 @@ serve(async (req) => {
             Analyse ce rapport de backtesting (Monte Carlo) : ${JSON.stringify(report)}.
             Critique le risque de ruine (Bankruptcy) et le Drawdown.
             Donne un avis tranché : Est-ce une stratégie viable ou suicidaire ?
-            Réponse JSON : { "audit": "string" }
         `;
         const response = await genAI.models.generateContent({
             model: modelName,
             contents: prompt,
-            config: { responseMimeType: "application/json" }
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        audit: { type: Type.STRING }
+                    },
+                    required: ["audit"]
+                }
+            }
         });
         resultData = JSON.parse(response.text || '{}');
         
     } else if (task === "vision-analysis") {
-        // Handle vision task if passed to this function or separate
-        // Based on provided code, vision tasks might be handled here or in separate functions
+        // Placeholder for future vision tasks
+        resultData = { analysis: "Module Vision non activé sur ce endpoint." };
     } else {
       throw new Error(`Tâche inconnue : ${task}`);
     }
