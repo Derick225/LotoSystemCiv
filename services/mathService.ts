@@ -40,15 +40,33 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
-// --- NOUVEAU: Modèle de Pression de Poisson (Optimisé) ---
+// --- NOUVEAU: Modèle de Pression de Poisson (Optimisé v2) ---
+// Gère la "Surchauffe" (Burstiness) et la "Décroissance" (Decay) pour éviter le biais du joueur
 export const calculatePoissonProbability = (lambda: number, k: number): number => {
     if (lambda <= 0) return 0;
-    const cdf = 1 - Math.exp(-k / lambda);
-    let score = cdf * 100;
+    
+    // Probabilité classique de Poisson pour k événements (ici k = gap actuel)
+    // P(X >= k) = 1 - CDF(k) approximé ici par l'exponentielle cumulative inverse pour le temps d'attente
+    // Plus le gap (k) est grand par rapport à la moyenne (lambda), plus la "pression" monte...
+    // JUSQU'A UN CERTAIN POINT où l'on considère le numéro "mort" ou "hors cycle".
+    
     const ratio = k / lambda;
-    if (ratio > 4.0) {
-        score = score * Math.max(0.2, 1 - ((ratio - 4) * 0.1));
+    let score = 0;
+
+    if (ratio < 0.5) {
+        // Trop tôt : Le numéro vient de sortir
+        score = 10 + (ratio * 20); 
+    } else if (ratio >= 0.5 && ratio <= 2.5) {
+        // Zone Idéale : Cycle naturel de retour
+        score = 30 + ((ratio - 0.5) * 35); // Monte jusqu'à 100
+    } else if (ratio > 2.5 && ratio <= 4.0) {
+        // Zone Critique : Retard important
+        score = 100 - ((ratio - 2.5) * 20); // Redescend doucement
+    } else {
+        // Zone "Trou Noir" : Anomalie statistique, probabilité de blocage machine
+        score = Math.max(5, 70 * Math.exp(-(ratio - 4))); 
     }
+
     return Math.round(Math.max(0, Math.min(100, score)));
 };
 

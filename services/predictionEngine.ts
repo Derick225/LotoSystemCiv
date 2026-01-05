@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
@@ -21,7 +21,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
     ai_intuition: 0.01,
     digital_root: 0.01,
     gap_velocity: 0.01,
-    poisson: 0.05, // Augmenté pour le nouveau modèle
+    poisson: 0.05, 
     leader_succession: 0.01
 });
 
@@ -33,18 +33,14 @@ export const getDefaultRules = (): AdaptiveRules => ({
 // --- CLOUD SYNC LOGIC START ---
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
-    // 1. Sauvegarde Locale (Instantanéité)
     localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights));
-
-    // 2. Sauvegarde Cloud (Persistance Cross-Device)
     if (isSupabaseConfigured()) {
         try {
-            const { error } = await supabase.from('algo_weights').upsert({
+            await supabase.from('algo_weights').upsert({
                 draw_name: drawName,
                 weights: weights,
                 updated_at: new Date().toISOString()
             });
-            if (error) console.warn("Cloud weights sync failed:", error.message);
         } catch (e) {
             console.warn("Cloud weights sync error", e);
         }
@@ -52,29 +48,23 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
 };
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
-    // Stratégie "Stale-While-Revalidate"
     const rawLocal = localStorage.getItem(`weights_${drawName}`);
     let currentWeights = rawLocal ? JSON.parse(rawLocal) : getDefaultWeights();
 
     if (isSupabaseConfigured() && navigator.onLine) {
         try {
-            const { data, error } = await supabase
+            const { data } = await supabase
                 .from('algo_weights')
                 .select('weights')
                 .eq('draw_name', drawName)
                 .single();
 
-            if (data && data.weights) {
-                if (JSON.stringify(data.weights) !== rawLocal) {
-                    localStorage.setItem(`weights_${drawName}`, JSON.stringify(data.weights));
-                    return data.weights;
-                }
+            if (data && data.weights && JSON.stringify(data.weights) !== rawLocal) {
+                localStorage.setItem(`weights_${drawName}`, JSON.stringify(data.weights));
+                return data.weights;
             }
-        } catch (e) {
-            // Ignore cloud error, use local
-        }
+        } catch (e) { /* Ignore */ }
     }
-
     return currentWeights;
 };
 
@@ -97,11 +87,10 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
  */
 const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
     let totalHurst = 0;
-    const sampleSize = 5;
-    for (let i = 1; i <= sampleSize; i++) {
+    for (let i = 1; i <= 5; i++) {
         totalHurst += calculateHurstForNumber(i, history).hurst;
     }
-    const avgHurst = totalHurst / sampleSize;
+    const avgHurst = totalHurst / 5;
 
     const adjusted = { ...baseWeights };
     let label = "Neutre";
@@ -122,10 +111,9 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
         label = "Chaos (Aléatoire)";
         adjusted.spatial = (adjusted.spatial || 0) * 1.5;
         adjusted.resistance = (adjusted.resistance || 0) * 1.4; 
-        adjusted.poisson = (adjusted.poisson || 0) * 1.8; // Poisson très fort en chaos
+        adjusted.poisson = (adjusted.poisson || 0) * 1.8;
     }
 
-    // Renormalisation
     const totalOld = Object.values(baseWeights).reduce((a, b) => a + (b||0), 0);
     const totalNew = Object.values(adjusted).reduce((a, b) => a + (b||0), 0);
     const ratio = totalNew > 0 ? totalOld / totalNew : 1;
@@ -137,8 +125,11 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
     return { weights: adjusted, regimeLabel: label };
 };
 
+// Fonction Sigmoid pour la normalisation non-linéaire des scores
+const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
+
 /**
- * MOTEUR D'INFÉRENCE RÉEL (PLATINUM CORE v2.2 POISSON ENABLED)
+ * MOTEUR D'INFÉRENCE RÉEL (PLATINUM CORE v2.3)
  */
 export const generateMasterPrediction = async (
     drawName: string, 
@@ -148,21 +139,12 @@ export const generateMasterPrediction = async (
 ): Promise<Prediction> => {
     
     const integrity = validateDataIntegrity(history);
-    if (!integrity.valid) {
-        console.warn("Prediction Warning: Data integrity check failed.", integrity.issues);
-    }
-
     let weights = weightsToUse || await getAlgoWeights(drawName);
     const breakdown: Record<number, ScoreBreakdown> = {};
     
-    if (history.length < 5) {
-        throw new Error("Profondeur de données insuffisante pour l'inférence.");
-    }
+    if (history.length < 5) throw new Error("Profondeur de données insuffisante.");
 
-    // Application automatique de la correction Bayesienne si possible
-    // (Ajustement mineur basé sur la tendance récente)
-    weights = applyBayesianTrendCorrection(weights, history);
-
+    const volatility = calculateVolatility(history);
     const { weights: dynamicWeights, regimeLabel } = adjustWeightsToRegime(weights, history);
     weights = dynamicWeights;
 
@@ -185,22 +167,24 @@ export const generateMasterPrediction = async (
         const spec = spectralMap.find((s: any) => s.number === num);
         const frac = fractalMap.find((f: any) => f.number === num);
         const gravity = gravityField[num] || 0;
-        
         const signal = history.slice(0, 32).map(d => d.gagnants.includes(num) ? 1 : 0);
         
         const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 500);
         const currentGap = reg?.currentGap || 0;
-        const gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
+        
+        // Gap Scoring amélioré avec pénalité sur les gaps extrêmes (> 40)
+        let gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
+        if (currentGap > 60) gapScore = 5; // Pénalité "Froid polaire"
+
         const specScore = spec?.energy || 0;
         const markovScore = Math.min(100, (transitions[num] || 0) * 10);
         const spatialScore = Math.min(100, gravity * 50);
-        
         const waveletScore = calculateWaveletEnergy(signal);
         const resistScore = calculateTechnicalResistance(num, history);
         
-        // Calcul Poisson (Lambda estimé par moyenne de sorties sur 100 tirages)
-        const lambda = (history.slice(0, 100).filter(h => h.gagnants.includes(num)).length / 100) * (90/5); 
-        // Note: 90/5 car lambda standard est ~5.55 pour 5/90 par 100 tirages
+        // Lambda estimé par moyenne locale (50 derniers tirages)
+        const localFreq = history.slice(0, 50).filter(h => h.gagnants.includes(num)).length;
+        const lambda = (localFreq / 50) * (90/5); 
         const poissonVal = calculatePoissonProbability(lambda, currentGap);
 
         const nBreakdown: ScoreBreakdown = {
@@ -219,11 +203,14 @@ export const generateMasterPrediction = async (
 
         breakdown[num] = nBreakdown;
 
-        let finalScore = 0;
+        let rawScore = 0;
         Object.entries(weights).forEach(([key, weight]) => {
             const val = (nBreakdown as any)[key] || 0;
-            finalScore += val * (weight as number);
+            rawScore += val * (weight as number);
         });
+
+        // Boost non-linéaire pour les candidats très forts
+        const finalScore = sigmoid(rawScore) * 100;
 
         return { num, score: finalScore };
     });
@@ -233,13 +220,18 @@ export const generateMasterPrediction = async (
     const zScore = calculatePredictionZScore(suggested);
     const isOutlier = Math.abs(zScore) > 2.5;
 
-    const signalStrength = (sorted[0].score - sorted[10].score) / (sorted[0].score || 1);
-    let baseConfidence = Math.min(99, Math.round(50 + (signalStrength * 500) + (history.length / 10)));
-    
+    // Calcul de la confiance
+    const topScoreAvg = (sorted[0].score + sorted[1].score + sorted[2].score) / 3;
+    let baseConfidence = Math.min(99, Math.round(topScoreAvg));
     if (integrity.score < 80) baseConfidence *= 0.8;
-    if (isOutlier) baseConfidence *= 0.9;
+    if (volatility.score > 70) baseConfidence *= 0.9;
 
-    const analysisText = `Régime: ${regimeLabel}. Conv. sur ${suggested[0]} (Score: ${sorted[0].score.toFixed(1)}). ${isOutlier ? '⚠️ Combinaison atypique (Z>2.5).' : 'Structure équilibrée.'}`;
+    // Détection de "Dizaines Manquantes" pour le texte d'analyse
+    const decades = suggested.map(n => Math.floor(n/10));
+    const missingDecades = [0,1,2,3,4,5,6,7,8].filter(d => !decades.includes(d));
+    const missingText = missingDecades.length > 4 ? `Zones vides: ${missingDecades.slice(0,3).join(',')}` : 'Répartition homogène';
+
+    const analysisText = `Régime: ${regimeLabel} (Volatilité ${volatility.score}%). Convergence sur ${suggested[0]} (Score: ${sorted[0].score.toFixed(1)}). Structure: ${missingText}. ${isOutlier ? '⚠️ Combinaison atypique (Z>2.5).' : 'Ticket équilibré.'}`;
 
     return {
         suggestedNumbers: suggested,
@@ -251,38 +243,21 @@ export const generateMasterPrediction = async (
     };
 };
 
-/**
- * Correction Bayesienne Simplifiée
- * Ajuste les poids si les prédictions récentes d'un algo sont systématiquement mauvaises
- */
 const applyBayesianTrendCorrection = (weights: AlgoWeights, history: DrawResult[]): AlgoWeights => {
-    // Si on a moins de 5 tirages, pas d'historique suffisant pour corriger
     if (history.length < 5) return weights;
-    
     const newWeights = { ...weights };
-    
-    // Simulation rapide du dernier tirage (Backtest T-1)
-    const lastDraw = history[0];
-    const prevHistory = history.slice(1);
-    
-    // On regarde quel algo aurait donné les meilleurs scores pour les numéros sortis
-    // C'est une simplification pour éviter de recalculer toute la prédiction
-    const winningNumbers = lastDraw.gagnants;
-    
-    // On booste légèrement l'algo 'Markov' si le tirage était très répétitif
-    const intersection = prevHistory[0]?.gagnants.filter(n => winningNumbers.includes(n)).length || 0;
+    const winningNumbers = history[0].gagnants;
+    const intersection = history.slice(1)[0]?.gagnants.filter(n => winningNumbers.includes(n)).length || 0;
     
     if (intersection >= 2) {
         newWeights.markov = Math.min(0.25, (newWeights.markov || 0) * 1.2);
         newWeights.leader_succession = Math.min(0.1, (newWeights.leader_succession || 0) * 1.2);
     }
     
-    // Si tirage très dispersé (Ecart type numéros élevé), on booste 'spatial' et 'resistance'
     const spread = Math.max(...winningNumbers) - Math.min(...winningNumbers);
     if (spread > 80) {
         newWeights.spatial = Math.min(0.15, (newWeights.spatial || 0) * 1.15);
     }
-
     return newWeights;
 };
 

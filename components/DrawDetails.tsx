@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNexus } from './NexusProvider';
 import { 
@@ -111,7 +112,7 @@ export const DrawDetails: React.FC = () => {
 
       {/* Zone de Contenu Dynamique */}
       <div className="min-h-[600px] relative">
-        <LocalErrorBoundary>
+        <LocalErrorBoundary key={activeTab}> {/* La clé force le reset de l'erreur au changement d'onglet */}
           <Suspense fallback={
             <div className="flex flex-col items-center justify-center py-32 gap-6 animate-pulse">
                 <RefreshCw className="animate-spin text-indigo-500" size={32} />

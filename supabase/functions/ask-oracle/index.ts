@@ -1,6 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenerativeAI } from "https://esm.sh/@google/genai@1.34.0";
+import { GoogleGenAI } from "https://esm.sh/@google/genai@1.34.0";
 
 declare const Deno: any;
 
@@ -17,37 +17,42 @@ serve(async (req) => {
   try {
     const { task, drawName, history, metrics, report } = await req.json();
 
-    // Utilisez 'API_KEY' ou 'GEMINI_API_KEY' défini dans les Secrets Supabase
     const apiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("API_KEY");
     if (!apiKey) {
       throw new Error("Clé API GEMINI manquante dans les secrets Supabase.");
     }
 
-    const genAI = new GoogleGenerativeAI({ apiKey });
+    const genAI = new GoogleGenAI({ apiKey });
     let resultData;
-    
-    // Modèle Standard Universel : Gemini 1.5 Flash
-    // Garantit que le code fonctionne avec n'importe quelle clé valide
     const modelName = "gemini-1.5-flash"; 
 
     if (task === "analyze") {
       const prompt = `
-        Rôle : Tu es le "Nexus Quant Architect", une IA experte en dynamique stochastique.
-        Contexte : Tirage "${drawName}" (5/90).
-        Données :
-        - Historique : ${JSON.stringify(history.slice(0, 15))}
-        - Régime : ${metrics?.hurst || "N/A"}
-        - Entropie : ${metrics?.entropy || "N/A"}
+        Rôle : Tu es le "Nexus Quant Architect", une IA experte en dynamique stochastique appliquée aux séries temporelles de loto (5/90).
+        Contexte : Tirage "${drawName}".
         
-        Format de réponse JSON attendu :
+        Données d'entrée (25 derniers tirages): 
+        ${JSON.stringify(history.slice(0, 25))}
+        
+        Métriques Clés (Si dispo):
+        - Exposant de Hurst: ${metrics?.hurst || "Non fourni"} (Rappel: >0.5 = Tendance, <0.5 = Retour moyenne)
+        - Entropie Shannon: ${metrics?.entropy || "Non fourni"}
+        
+        Tâche :
+        1. Identifie la "Signature Temporelle" actuelle (Est-ce que les numéros se répètent ou est-ce le chaos total ?).
+        2. Détecte les "Zones Mortes" (Dizaines qui ne sortent pas depuis longtemps).
+        3. Suggère 5 numéros ("Vecteurs") basés sur la logique détectée.
+        4. Donne un score d'intuition (0-100) sur la fiabilité de ce pattern.
+
+        Réponds UNIQUEMENT avec ce JSON strict :
         {
-          "logicalAnalysis": "string (Markdown concis)",
-          "patternType": "string",
-          "nextSequence": "string",
-          "anomalies": ["string"],
-          "strategicAdvice": "string",
-          "suggestedFocus": [number] (5 entiers),
-          "intuitionScore": number (0-100)
+          "logicalAnalysis": "string (Markdown concis, max 300 mots. Parle en expert : mentionne 'écart-type', 'rupture de symétrie', 'attracteurs'. Sois mystérieux mais précis.)",
+          "patternType": "string (ex: 'Compression de Volatilité', 'Expansion Fractale', 'Retour à la Moyenne')",
+          "nextSequence": "string (ex: 'Focus sur les termin 3 et 7')",
+          "anomalies": ["string (Liste 2-3 anomalies statistiques détectées)"],
+          "strategicAdvice": "string (Conseil de mise : Kelly, Martingale, ou Prudence)",
+          "suggestedFocus": [number] (Tableau de 5 entiers),
+          "intuitionScore": number
         }
       `;
 
@@ -56,17 +61,20 @@ serve(async (req) => {
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
-      resultData = JSON.parse(response.text());
+      resultData = JSON.parse(response.text || '{}');
 
     } else if (task === "narrative") {
       const prompt = `
         Rédige un "Flash Report" pour le tirage ${drawName}.
-        Métriques : ${JSON.stringify(metrics)}.
+        Métriques contextuelles : ${JSON.stringify(metrics)}.
+        Historique récent : ${JSON.stringify(history)}.
+        
+        Ton style doit être celui d'un analyste financier de haut vol qui parle de "Marché" et de "Liquidité" pour les numéros.
         
         Format JSON :
         {
           "summary": "string",
-          "technicalVerdict": "string",
+          "technicalVerdict": "string (ex: 'Signal Achat Fort', 'Marché Bearish')",
           "riskAssessment": "string",
           "confidence": number
         }
@@ -77,12 +85,13 @@ serve(async (req) => {
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
-      resultData = JSON.parse(response.text());
+      resultData = JSON.parse(response.text || '{}');
 
     } else if (task === "simulation-audit") {
         const prompt = `
-            Analyse ce backtest : ${JSON.stringify(report)}.
-            Critique le risque.
+            Analyse ce rapport de backtesting (Monte Carlo) : ${JSON.stringify(report)}.
+            Critique le risque de ruine (Bankruptcy) et le Drawdown.
+            Donne un avis tranché : Est-ce une stratégie viable ou suicidaire ?
             Réponse JSON : { "audit": "string" }
         `;
         const response = await genAI.models.generateContent({
@@ -90,11 +99,11 @@ serve(async (req) => {
             contents: prompt,
             config: { responseMimeType: "application/json" }
         });
-        resultData = JSON.parse(response.text());
+        resultData = JSON.parse(response.text || '{}');
         
     } else if (task === "vision-analysis") {
-       // Support futur pour l'analyse visuelle via backend si nécessaire
-       resultData = { analysis: "Not implemented in standard version" };
+        // Handle vision task if passed to this function or separate
+        // Based on provided code, vision tasks might be handled here or in separate functions
     } else {
       throw new Error(`Tâche inconnue : ${task}`);
     }

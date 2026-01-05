@@ -47,7 +47,8 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
                 body: {
                     task: 'analyze',
                     drawName,
-                    history: history.slice(0, 25)
+                    history: history.slice(0, 25), // On envoie les 25 derniers tirages
+                    // On peut ajouter des métriques calculées côté client ici si nécessaire pour enrichir le prompt
                 }
             });
 

@@ -1,5 +1,7 @@
+
 import React, { useState, Suspense, lazy } from 'react';
 import { Grid, GitBranch, Calculator, RefreshCw, Share2, Terminal } from 'lucide-react';
+import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 
 const SpatialTab = lazy(() => import('./SpatialTab').then(m => ({ default: m.SpatialTab })));
 const DecisionTreeTab = lazy(() => import('./DecisionTreeTab').then(m => ({ default: m.DecisionTreeTab })));
@@ -66,9 +68,11 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
             </div>
             
             <div className="animate-slide-up transition-all duration-500">
-                <Suspense fallback={<TabLoader />}>
-                    {renderTab()}
-                </Suspense>
+                <LocalErrorBoundary key={subTab}>
+                    <Suspense fallback={<TabLoader />}>
+                        {renderTab()}
+                    </Suspense>
+                </LocalErrorBoundary>
             </div>
         </div>
     );

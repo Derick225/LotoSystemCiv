@@ -4,6 +4,7 @@ import { useNexus } from '../NexusProvider';
 import { SmartInsights } from '../SmartInsights';
 import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw } from 'lucide-react';
 import { DrawResult } from '../../types';
+import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 
 // Lazy loading for performance
 const StatsTab = lazy(() => import('./StatsTab').then(m => ({ default: m.StatsTab })));
@@ -67,19 +68,21 @@ export const SignalHub: React.FC<SignalHubProps> = ({ history }) => {
             </div>
 
             <div className="min-h-[500px] transition-all duration-500">
-                <Suspense fallback={
-                    <div className="flex flex-col items-center justify-center h-64 gap-4 animate-pulse">
-                        <RefreshCw className="animate-spin text-indigo-500" />
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-400">Chargement Module...</span>
-                    </div>
-                }>
-                    {activeSubTab === 'stats' && <StatsTab drawName={currentDrawName} />}
-                    {activeSubTab === 'spectral' && <SpectralTab drawName={currentDrawName} />}
-                    {activeSubTab === 'fractal' && <FractalTab drawName={currentDrawName} />}
-                    {activeSubTab === 'math' && <MathTab drawName={currentDrawName} />}
-                    {activeSubTab === 'temporal' && <TemporalTab drawName={currentDrawName} />}
-                    {activeSubTab === 'cluster' && <ClusteringTab drawName={currentDrawName} />}
-                </Suspense>
+                <LocalErrorBoundary key={activeSubTab}>
+                    <Suspense fallback={
+                        <div className="flex flex-col items-center justify-center h-64 gap-4 animate-pulse">
+                            <RefreshCw className="animate-spin text-indigo-500" />
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-400">Chargement Module...</span>
+                        </div>
+                    }>
+                        {activeSubTab === 'stats' && <StatsTab drawName={currentDrawName} />}
+                        {activeSubTab === 'spectral' && <SpectralTab drawName={currentDrawName} />}
+                        {activeSubTab === 'fractal' && <FractalTab drawName={currentDrawName} />}
+                        {activeSubTab === 'math' && <MathTab drawName={currentDrawName} />}
+                        {activeSubTab === 'temporal' && <TemporalTab drawName={currentDrawName} />}
+                        {activeSubTab === 'cluster' && <ClusteringTab drawName={currentDrawName} />}
+                    </Suspense>
+                </LocalErrorBoundary>
             </div>
         </div>
     );

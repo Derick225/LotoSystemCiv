@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -8,26 +7,29 @@ interface Props {
 
 interface State {
   hasError: boolean;
+  error: Error | null;
 }
 
 /**
  * LocalErrorBoundary - Targeted Module Error Isolation
+ * Catches errors in children, displays fallback UI, and allows recovery.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-  };
+export class LocalErrorBoundary extends React.Component<Props, State> {
+  public state: State = { hasError: false, error: null };
 
-  static getDerivedStateFromError(_: Error): State {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.warn("Module Failure Intercepted:", error, errorInfo);
+    // Log uniquement en développement ou pour analyse
+    if (process.env.NODE_ENV === 'development') {
+        console.warn("Module Failure Intercepted:", error, errorInfo);
+    }
   }
 
   handleReload = () => {
-    this.setState({ hasError: false });
+    this.setState({ hasError: false, error: null });
   };
 
   render(): ReactNode {
@@ -38,9 +40,12 @@ export class LocalErrorBoundary extends Component<Props, State> {
             <AlertTriangle size={24} />
           </div>
           <p className="font-bold text-xs uppercase tracking-widest">Module Instable</p>
+          <p className="text-[10px] text-red-600/70 dark:text-red-400/70 max-w-[250px] truncate">
+            {this.state.error?.message || "Erreur de rendu"}
+          </p>
           <button 
             onClick={this.handleReload} 
-            className="px-5 py-2 bg-white dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-700 transition shadow-sm flex items-center justify-center gap-2"
+            className="px-5 py-2 bg-white dark:bg-slate-800 text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-slate-700 transition shadow-sm flex items-center justify-center gap-2 mt-2"
           >
             <RefreshCw size={12} /> Réessayer
           </button>
