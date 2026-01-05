@@ -8,11 +8,12 @@ import {
 } from 'lucide-react';
 import { LocalErrorBoundary } from './ui/LocalErrorBoundary';
 
-// Lazy loading des Hubs pour optimiser le thread principal
+// Lazy loading sécurisé
+// OracleHub est à la racine de components/ d'après la structure fournie
 const FluxHub = lazy(() => import('./tabs/FluxHub').then(m => ({ default: m.FluxHub })));
 const SignalHub = lazy(() => import('./tabs/SignalHub').then(m => ({ default: m.SignalHub })));
 const TopologyHub = lazy(() => import('./tabs/TopologyHub').then(m => ({ default: m.TopologyHub })));
-const OracleHub = lazy(() => import('./tabs/OracleHub').then(m => ({ default: m.OracleHub })));
+const OracleHub = lazy(() => import('./OracleHub').then(m => ({ default: m.OracleHub })));
 const SimulationTab = lazy(() => import('./tabs/SimulationTab').then(m => ({ default: m.SimulationTab })));
 const ForensicHub = lazy(() => import('./tabs/ForensicHub').then(m => ({ default: m.ForensicHub })));
 
@@ -53,7 +54,6 @@ export const DrawDetails: React.FC = () => {
   ];
 
   // En mode "ALL" (Archives Globales), seul l'historique brut (Flux) est pertinent.
-  // Les analyses mathématiques/prédictives nécessitent une séquence cohérente d'un même jeu.
   const tabs = drawName === 'ALL' 
     ? allTabs.filter(t => t.id === 'Flux') 
     : allTabs;
