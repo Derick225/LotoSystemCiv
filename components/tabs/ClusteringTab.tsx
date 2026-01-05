@@ -1,19 +1,17 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { calculateRegularity, performKMeansClusteringAsync } from '../../services/mathService';
-import { addToWatchlist, removeFromWatchlist, isInWatchlist } from '../../services/userPreferencesService';
+import { calculateRegularity, performKMeansClusteringAsync, calculateACValue } from '../../services/mathService';
+import { addToWatchlist, removeFromWatchlist, isInWatchlist, saveTicket } from '../../services/userPreferencesService';
 import type { ClusterPoint, ClusterSummary, NumberRegularity } from '../../types';
-import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceArea, ReferenceLine } from 'recharts';
+import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceArea } from 'recharts';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Brain, Star, Activity, Info, Network, Zap, Clock, TrendingUp, UserCheck, HelpCircle } from 'lucide-react';
+import { Brain, Star, Activity, Info, Network, Zap, Clock, TrendingUp, UserCheck, HelpCircle, Ticket } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface ClusteringTabProps {
     drawName: string;
 }
 
-// Configuration "Novice-Friendly" des familles
 const CLUSTER_CONFIG: Record<string, ClusterSummary & { advice: string, metaphor: string }> = {
     'Sprinter': { 
         type: 'Sprinter', 
@@ -58,10 +56,10 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     const { history, loading: nexusLoading } = useNexus();
     
     const [points, setPoints] = useState<ClusterPoint[]>([]);
-    const [summary, setSummary] = useState<any[]>([]); // Using any for enriched summary
+    const [summary, setSummary] = useState<any[]>([]); 
     const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
     const [selectedPoint, setSelectedPoint] = useState<ClusterPoint | null>(null);
-    const [activeFilter, setActiveFilter] = useState<string | null>(null); // Filtre actif
+    const [activeFilter, setActiveFilter] = useState<string | null>(null); 
     const [calculating, setCalculating] = useState(false);
 
     useEffect(() => {
@@ -75,7 +73,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 setRegularity(regData);
                 setPoints(kMeansPoints);
                 
-                // Calcul des comptes pour les cartes
                 const counts: Record<string, number> = {};
                 Object.keys(CLUSTER_CONFIG).forEach(k => counts[k] = 0);
                 kMeansPoints.forEach(p => { if (counts[p.cluster] !== undefined) counts[p.cluster]++; });
@@ -94,21 +91,18 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
         }
     }, [history]);
 
-    // Données filtrées pour le graphique
     const filteredPoints = useMemo(() => {
         if (!activeFilter) return points;
         return points.filter(p => p.cluster === activeFilter);
     }, [points, activeFilter]);
 
-    // Construction de la "Carte d'Identité" du numéro sélectionné
     const numberProfile = useMemo(() => {
         if (!selectedPoint) return null;
         const reg = regularity.find(r => r.number === selectedPoint.number);
         const config = CLUSTER_CONFIG[selectedPoint.cluster];
         
-        // Scores (0-100) pour les jauges
-        const formScore = Math.min(100, (selectedPoint.y / 8) * 100); // Basé sur fréquence récente
-        const gapScore = Math.min(100, (selectedPoint.x / 40) * 100); // Basé sur l'écart
+        const formScore = Math.min(100, (selectedPoint.y / 8) * 100); 
+        const gapScore = Math.min(100, (selectedPoint.x / 40) * 100); 
         
         return { 
             ...selectedPoint,
@@ -128,6 +122,38 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
         }
     };
 
+    const handleGenerateFromCluster = async (clusterType: string) => {
+        const clusterPoints = points.filter(p => p.cluster === clusterType);
+        if (clusterPoints.length < 5) {
+            showToast(`Pas assez de ${clusterType}s pour générer un ticket (Min 5).`, "error");
+            return;
+        }
+
+        const pool = clusterPoints.map(p => p.number);
+        let bestTicket: number[] = [];
+        let bestAC = -1;
+
+        // Génération Monte Carlo simple pour trouver un bon ticket dans ce cluster
+        for(let i=0; i<50; i++) {
+            const shuffled = [...pool].sort(() => 0.5 - Math.random());
+            const candidate = shuffled.slice(0, 5).sort((a,b)=>a-b);
+            const ac = calculateACValue(candidate);
+            if (ac > bestAC) {
+                bestAC = ac;
+                bestTicket = candidate;
+            }
+        }
+
+        if (bestTicket.length === 5) {
+            await saveTicket({
+                numbers: bestTicket,
+                drawName,
+                strategy: `Cluster ${clusterType}`
+            });
+            showToast(`Ticket ${clusterType} généré et sauvegardé (AC:${bestAC}).`, "success");
+        }
+    };
+
     if (nexusLoading || calculating || history.length === 0) return (
         <div className="flex flex-col items-center justify-center h-64 gap-6 bg-slate-900/5 rounded-[3rem] border border-dashed border-indigo-200 dark:border-slate-700 animate-pulse">
             <div className="relative">
@@ -140,7 +166,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             
-            {/* HERO SECTION: LES FAMILLES */}
             <div className="space-y-4">
                 <div className="flex justify-between items-center px-2">
                     <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter flex items-center gap-3">
@@ -155,10 +180,10 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {summary.map(s => (
-                        <button
+                        <div
                             key={s.type}
                             onClick={() => { setActiveFilter(activeFilter === s.type ? null : s.type); setSelectedPoint(null); }}
-                            className={`p-4 rounded-[2rem] border transition-all relative overflow-hidden group text-left
+                            className={`p-4 rounded-[2rem] border transition-all relative overflow-hidden group text-left cursor-pointer
                                 ${activeFilter === s.type 
                                     ? 'bg-slate-900 text-white shadow-xl scale-105 z-10 border-transparent' 
                                     : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:border-indigo-300'
@@ -171,7 +196,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                     {s.count}
                                 </span>
                             </div>
-                            <div>
+                            <div className="mb-4">
                                 <div className={`text-[11px] font-black uppercase tracking-wide ${activeFilter === s.type ? 'text-white' : ''}`} style={{ color: activeFilter === s.type ? 'white' : s.color }}>
                                     {s.type}s
                                 </div>
@@ -179,18 +204,25 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                     {s.metaphor}
                                 </div>
                             </div>
-                            {/* Background decoration */}
-                            <div className="absolute -right-4 -bottom-4 opacity-10 transform rotate-12 scale-150" style={{ color: s.color }}>
+                            
+                            {/* Action Button embedded in card */}
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleGenerateFromCluster(s.type); }}
+                                className={`w-full py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${activeFilter === s.type ? 'bg-white text-slate-900 hover:bg-slate-200' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-indigo-500'}`}
+                            >
+                                <Ticket size={12}/> Générer
+                            </button>
+
+                            <div className="absolute -right-4 -bottom-4 opacity-10 transform rotate-12 scale-150 pointer-events-none" style={{ color: s.color }}>
                                 {s.type === 'Sprinter' ? <Zap size={60}/> : s.type === 'Dormeur' ? <Clock size={60}/> : s.type === 'Marathonien' ? <Activity size={60}/> : <Network size={60}/>}
                             </div>
-                        </button>
+                        </div>
                     ))}
                 </div>
             </div>
 
             <div className="grid lg:grid-cols-3 gap-8">
                 
-                {/* GRAPHIQUE (CARTE DE POSITION) */}
                 <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-[3rem] p-6 shadow-xl border border-slate-100 dark:border-slate-800 h-[450px] relative">
                     <div className="absolute top-6 left-6 z-10">
                         <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
@@ -235,7 +267,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                     return null;
                                 }}
                             />
-                            {/* Zones visuelles */}
                             <ReferenceArea x1={20} fill="#f43f5e" fillOpacity={0.03} label={{ value: "ZONE DE RETARD", position: 'insideTopRight', fontSize: 9, fill: '#fda4af' }} />
                             <ReferenceArea y1={4} fill="#10b981" fillOpacity={0.03} label={{ value: "ZONE CHAUDE", position: 'insideTopLeft', fontSize: 9, fill: '#6ee7b7' }} />
                             
@@ -259,11 +290,9 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                     <p className="text-[9px] text-center text-slate-400 mt-2 italic">Cliquez sur un point pour voir sa fiche joueur.</p>
                 </div>
 
-                {/* FICHE JOUEUR (RPG STYLE) */}
                 <div className="h-full">
                     {numberProfile ? (
                         <div className="bg-slate-900 text-white p-6 rounded-[3rem] shadow-2xl border border-slate-800 h-full flex flex-col relative overflow-hidden animate-slide-up">
-                            {/* Background Glow */}
                             <div className="absolute top-0 right-0 w-48 h-48 rounded-full blur-[80px] opacity-20" style={{ backgroundColor: numberProfile.config.color }}></div>
                             
                             <div className="relative z-10 flex flex-col items-center text-center">
@@ -274,7 +303,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                 <p className="text-xs text-slate-400 font-medium mt-1">{numberProfile.config.metaphor}</p>
                                 
                                 <div className="mt-6 w-full space-y-4">
-                                    {/* Jauges RPG */}
                                     <div className="space-y-1">
                                         <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
                                             <span>Forme (Fréquence)</span>
@@ -322,19 +350,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                     )}
                 </div>
             </div>
-
-            {/* QUICK LIST: TOP OPPORTUNITÉS */}
-            {!selectedPoint && (
-                <div className="bg-indigo-50 dark:bg-indigo-900/10 p-6 rounded-[2.5rem] border border-indigo-100 dark:border-indigo-800/30 flex items-start gap-4">
-                    <HelpCircle size={24} className="text-indigo-500 shrink-0 mt-1" />
-                    <div>
-                        <h5 className="text-xs font-black text-indigo-700 dark:text-indigo-300 uppercase mb-1">Comment utiliser ce graphe ?</h5>
-                        <p className="text-[11px] text-indigo-800/70 dark:text-indigo-200/70 leading-relaxed font-medium">
-                            Les <strong>Sprinters</strong> (en vert, en haut à gauche) sont chauds et sortent souvent. Les <strong>Dormeurs</strong> (en rouge, à droite) sont des numéros qui n'ont pas joué depuis longtemps. Une bonne combinaison mélange souvent 1 Sprinter, 1 Dormeur et 3 Marathoniens.
-                        </p>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

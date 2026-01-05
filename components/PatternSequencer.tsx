@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { NumberBall } from './NumberBall';
 import { useNexus } from './NexusProvider';
@@ -6,18 +5,50 @@ import { analyzeTicketStrength } from '../services/predictionEngine';
 import { saveTicket } from '../services/userPreferencesService';
 import { useToast } from './ui/Toast';
 import type { TicketAnalysisResult } from '../types';
-import { Activity, Save, RefreshCw, Layers, Gauge, Cpu } from 'lucide-react';
+import { Activity, Save, RefreshCw, Layers, Wand2, ThermometerSun } from 'lucide-react';
 import { TicketXRay } from './TicketXRay';
 
 export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { spectral } = useNexus();
+    const { spectral, correlationMatrix } = useNexus();
     
     const [selection, setSelection] = useState<number[]>([]);
     const [metrics, setMetrics] = useState<TicketAnalysisResult | null>(null);
     const [spectralScore, setSpectralScore] = useState(0);
+    const [suggestions, setSuggestions] = useState<number[]>([]);
 
-    // Calcul temps réel
+    // Calcul des affinités prédictives (Heatmap temps réel)
+    const heatMap = useMemo(() => {
+        const map: Record<number, number> = {};
+        if (selection.length === 0) return map;
+
+        // On parcourt tous les numéros de 1 à 90
+        for (let target = 1; target <= 90; target++) {
+            if (selection.includes(target)) {
+                map[target] = 100; // Le numéro sélectionné est "chaud"
+                continue;
+            }
+
+            let affinitySum = 0;
+            let count = 0;
+
+            // On somme les corrélations avec chaque numéro déjà sélectionné
+            selection.forEach(source => {
+                // correlationMatrix[source].affinities[target] est entre -1 et 1
+                const affinity = correlationMatrix[source]?.affinities?.[target] || 0;
+                if (affinity > 0) { // On ne garde que les corrélations positives pour la suggestion
+                    affinitySum += affinity;
+                    count++;
+                }
+            });
+
+            // Score moyen normalisé (boosté pour la visibilité)
+            map[target] = count > 0 ? (affinitySum / selection.length) * 200 : 0;
+        }
+        return map;
+    }, [selection, correlationMatrix]);
+
+    // Calcul temps réel des métriques du ticket
     useEffect(() => {
         if (selection.length > 0) {
             analyzeTicketStrength(selection, drawName).then(setMetrics);
@@ -36,13 +67,46 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
 
     const toggleNumber = (n: number) => {
         if (selection.includes(n)) {
-            setSelection(prev => prev.filter(x => x !== n).sort((a, b) => a - b));
+            setSelection(prev => prev.filter(x => x !== n).sort((a: number, b: number) => a - b));
         } else {
             if (selection.length >= 5) {
                 showToast("Maximum 5 numéros atteints.", "info");
                 return;
             }
-            setSelection(prev => [...prev, n].sort((a, b) => a - b));
+            setSelection(prev => [...prev, n].sort((a: number, b: number) => a - b));
+        }
+    };
+
+    const handleMagicFill = () => {
+        if (selection.length >= 5) return;
+        
+        // Trouver les meilleurs candidats basés sur la heatmap
+        const candidates = Object.entries(heatMap)
+            .map(([n, score]) => ({ n: parseInt(n), score }))
+            .filter(item => !selection.includes(item.n))
+            .sort((a, b) => b.score - a.score);
+
+        const needed = 5 - selection.length;
+        const toAdd = candidates.slice(0, needed).map(c => c.n);
+        
+        if (toAdd.length > 0) {
+            setSelection(prev => [...prev, ...toAdd].sort((a: number, b: number) => a - b));
+            showToast(`${toAdd.length} vecteurs convergents ajoutés.`, "success");
+        } else {
+            // Fallback aléatoire intelligent si pas de corrélation (premier numéro)
+            const remaining = 5 - selection.length;
+            const smartRandom: number[] = [];
+            while(smartRandom.length < remaining) {
+                // On privilégie les numéros à haute énergie spectrale
+                const candidate = spectral.length > 0 
+                    ? spectral[Math.floor(Math.random() * Math.min(20, spectral.length))].number
+                    : Math.floor(Math.random() * 90) + 1;
+                
+                if (!selection.includes(candidate) && !smartRandom.includes(candidate)) {
+                    smartRandom.push(candidate);
+                }
+            }
+            setSelection(prev => [...prev, ...smartRandom].sort((a: number, b: number) => a - b));
         }
     };
 
@@ -54,15 +118,28 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
         await saveTicket({
             numbers: selection,
             drawName,
-            strategy: `Séquenceur Manuel (S:${metrics?.score || 0})`
+            strategy: `Séquenceur Assisté (S:${metrics?.score || 0})`
         });
         showToast("Séquence enregistrée dans le Portefeuille.", "success");
     };
 
-    const getHeatColor = (n: number) => {
+    const getCellColor = (n: number) => {
+        if (selection.includes(n)) return 'bg-indigo-600 text-white ring-2 ring-white scale-110 z-10 shadow-lg font-black';
+        
+        const affinity = heatMap[n] || 0;
+        
+        // Heatmap dynamique basée sur la sélection actuelle
+        if (selection.length > 0) {
+            if (affinity > 60) return 'bg-emerald-500 text-white shadow-[0_0_10px_#10b981] scale-105 font-bold border-emerald-400';
+            if (affinity > 30) return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+            if (affinity > 10) return 'bg-emerald-500/10 text-emerald-500/70 border-emerald-500/10';
+            // Les numéros "froids" par rapport à la sélection (pas de corrélation)
+            return 'bg-slate-900 text-slate-700 border-slate-800 opacity-50';
+        }
+
+        // État par défaut (Energie spectrale)
         const spec = spectral.find(s => s.number === n);
         const energy = spec?.energy || 0;
-        if (selection.includes(n)) return 'bg-indigo-600 text-white ring-2 ring-white scale-110 z-10 shadow-lg';
         if (energy > 80) return 'bg-rose-500/20 text-rose-300 border-rose-500/30';
         if (energy > 50) return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
         return 'bg-slate-800 text-slate-500 border-slate-700';
@@ -78,10 +155,26 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                             <div className="p-2 bg-indigo-600 rounded-xl"><Layers size={18} className="text-white"/></div>
                             <div>
                                 <h3 className="text-white font-black uppercase tracking-widest text-sm">Matrice Tactile</h3>
-                                <p className="text-[10px] text-slate-400 font-bold">{selection.length}/5 Vecteurs</p>
+                                <p className="text-[10px] text-slate-400 font-bold flex items-center gap-2">
+                                    {selection.length > 0 ? (
+                                        <span className="text-emerald-400 flex items-center gap-1"><ThermometerSun size={10}/> Heatmap Active</span>
+                                    ) : (
+                                        "Mode Énergie Spectrale"
+                                    )}
+                                </p>
                             </div>
                         </div>
-                        <button onClick={() => setSelection([])} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white transition"><RefreshCw size={14}/></button>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={handleMagicFill}
+                                disabled={selection.length >= 5}
+                                className="p-2 bg-emerald-600 rounded-full text-white hover:bg-emerald-500 transition disabled:opacity-50 shadow-lg"
+                                title="Compléter intelligemment"
+                            >
+                                <Wand2 size={16}/>
+                            </button>
+                            <button onClick={() => setSelection([])} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white transition shadow-lg"><RefreshCw size={14}/></button>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-10 gap-2 relative z-10">
@@ -89,7 +182,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                             <button
                                 key={n}
                                 onClick={() => toggleNumber(n)}
-                                className={`aspect-square rounded-lg flex items-center justify-center text-[10px] font-black transition-all duration-200 border ${getHeatColor(n)}`}
+                                className={`aspect-square rounded-lg flex items-center justify-center text-[10px] font-medium transition-all duration-300 border ${getCellColor(n)}`}
                             >
                                 {n}
                             </button>
@@ -106,7 +199,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl min-h-[200px] flex flex-col justify-between">
                         <div>
                             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <Cpu size={14} className="text-emerald-500"/> Analyse Temps Réel
+                                <Activity size={14} className="text-emerald-500"/> Analyse Temps Réel
                             </h4>
                             <div className="flex flex-wrap gap-2 justify-center min-h-[50px]">
                                 {selection.length > 0 ? selection.map(n => <NumberBall key={n} number={n} size="sm" />) : <span className="text-xs text-slate-400 italic mt-2">En attente de signal...</span>}
