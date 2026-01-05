@@ -41,74 +41,44 @@ export const calculateDigitalRoot = (n: number): number => {
 };
 
 // --- NOUVEAU: Modèle de Pression de Poisson (Optimisé) ---
-// Utilise la CDF de la distribution exponentielle pour modéliser la probabilité 
-// qu'un événement se produise dans l'intervalle [0, k] sachant la moyenne lambda.
-// P(T <= k) = 1 - e^(-k/lambda)
 export const calculatePoissonProbability = (lambda: number, k: number): number => {
     if (lambda <= 0) return 0;
-    
-    // CDF Exponentielle : Probabilité que l'écart soit <= k
-    // Plus k est grand par rapport à lambda, plus la probabilité cumulée approche 100%
-    // Cela signifie que l'événement est "en retard" (Overdue) et la pression statistique augmente.
     const cdf = 1 - Math.exp(-k / lambda);
-    
-    // On transforme cette probabilité en "Score de Pression" (0-100)
     let score = cdf * 100;
-    
     const ratio = k / lambda;
     if (ratio > 4.0) {
-        // Pénalité pour les numéros "morts" (Absent depuis trop longtemps, > 4x la moyenne)
-        // Probabilité que la machine soit biaisée contre ce numéro augmente.
         score = score * Math.max(0.2, 1 - ((ratio - 4) * 0.1));
     }
-    
     return Math.round(Math.max(0, Math.min(100, score)));
 };
 
-// --- NOUVEAU: Echo State Network (Reservoir Computing) ---
-// Modèle de réseau de neurones récurrents simplifié pour séries chaotiques
-// Entraîne une matrice de poids de sortie (readout) sur un réservoir fixe
 export const runEchoStateNetwork = (signal: number[]): number => {
     if (signal.length < 20) return 0;
-    
-    // Paramètres ESN
     const reservoirSize = 20;
     const spectralRadius = 0.95;
     const leakage = 0.3;
     const trainLen = signal.length - 1;
-    
-    // Initialisation du réservoir (Matrice aléatoire fixe)
     const W = Array.from({length: reservoirSize}, () => 
         Array.from({length: reservoirSize}, () => (Math.random() - 0.5))
     );
     const Win = Array.from({length: reservoirSize}, () => (Math.random() - 0.5) * 2.0);
-    
-    // États
     let x = new Array(reservoirSize).fill(0);
-    const X_states: number[][] = []; // Collecte des états pour régression
+    const X_states: number[][] = []; 
     const Y_target: number[] = [];
-    
-    // Collecte des états (Training)
     for (let t = 0; t < trainLen; t++) {
         const u = signal[t];
         const newX = new Array(reservoirSize).fill(0);
-        
         for (let i = 0; i < reservoirSize; i++) {
             let internalSum = 0;
             for (let j = 0; j < reservoirSize; j++) {
                 internalSum += W[i][j] * x[j];
             }
-            // Fonction d'activation tanh + Leaky Integrator
             newX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u);
         }
         x = newX;
-        X_states.push([...x, 1]); // Bias term
+        X_states.push([...x, 1]); 
         Y_target.push(signal[t+1]);
     }
-    
-    // Ridge Regression (Readout weights calculation)
-    // W_out = Y * X^T * (X * X^T + beta * I)^-1
-    // Simplification heuristique : Moyenne pondérée des états corrélés à la sortie
     const W_out = new Array(reservoirSize + 1).fill(0);
     for (let i = 0; i <= reservoirSize; i++) {
         let num = 0, den = 0;
@@ -118,8 +88,6 @@ export const runEchoStateNetwork = (signal: number[]): number => {
         }
         W_out[i] = den !== 0 ? num / (den + 0.01) : 0;
     }
-    
-    // Prediction Step
     const u_last = signal[signal.length - 1];
     const nextX = new Array(reservoirSize).fill(0);
     for (let i = 0; i < reservoirSize; i++) {
@@ -129,29 +97,22 @@ export const runEchoStateNetwork = (signal: number[]): number => {
         }
         nextX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u_last);
     }
-    
     let prediction = 0;
     for (let i = 0; i < reservoirSize; i++) prediction += W_out[i] * nextX[i];
-    prediction += W_out[reservoirSize]; // Bias
-    
-    // Normalisation du signal de sortie (probabilité 0-100)
+    prediction += W_out[reservoirSize]; 
     return Math.max(0, Math.min(100, prediction * 100));
 };
 
-// --- NOUVEAU: Transformée en Ondelettes de Haar Discrète (DWT) ---
 export const calculateWaveletEnergy = (signal: number[]): number => {
     let data = [...signal];
     let energy = 0;
-    
     for (let level = 0; level < 3; level++) {
         if (data.length < 2) break;
         const nextData = [];
         let detailSum = 0;
-        
         for (let i = 0; i < data.length - 1; i += 2) {
             const avg = (data[i] + data[i+1]) / 2; 
             const detail = (data[i] - data[i+1]) / 2; 
-            
             nextData.push(avg);
             detailSum += Math.abs(detail);
         }
@@ -161,44 +122,33 @@ export const calculateWaveletEnergy = (signal: number[]): number => {
     return Math.min(100, Math.round(energy * 50));
 };
 
-// --- NOUVEAU: CUSUM (Cumulative Sum Control Chart) ---
 export const calculateCUSUM = (history: DrawResult[]): { positive: number[], negative: number[], alerts: number[] } => {
     const means = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
-    const target = 227.5; // Moyenne théorique (1+90)/2 * 5
-    const k = 15; // Slack value (tolérance)
-    const h = 80; // Seuil d'alarme (Decision Interval)
-
-    let cp = 0; // CUSUM Positif
-    let cn = 0; // CUSUM Négatif
-    
+    const target = 227.5; 
+    const k = 15; 
+    const h = 80; 
+    let cp = 0; 
+    let cn = 0; 
     const pSeries = [];
     const nSeries = [];
     const alerts = [];
-
-    // Parcours chronologique (inverse de l'historique habituel qui est DESC)
     for (let i = history.length - 1; i >= 0; i--) {
         const val = means[i];
-        
         cp = Math.max(0, cp + (val - target) - k);
         cn = Math.max(0, cn + (target - val) - k);
-        
         pSeries.push(parseFloat(cp.toFixed(1)));
-        nSeries.push(parseFloat(cn.toFixed(1))); // On garde positif pour l'affichage graphique
-
+        nSeries.push(parseFloat(cn.toFixed(1))); 
         if (cp > h || cn > h) {
-            alerts.push(history.length - 1 - i); // Index dans le tableau history original
+            alerts.push(history.length - 1 - i); 
         }
     }
-
     return { positive: pSeries, negative: nSeries, alerts };
 };
 
-// --- NOUVEAU: Value at Risk (VaR) Historique ---
 export const calculateVaR = (pnlHistory: number[], confidence: number = 0.95): number => {
     if (pnlHistory.length === 0) return 0;
     const sorted = [...pnlHistory].sort((a, b) => a - b);
     const index = Math.floor((1 - confidence) * sorted.length);
-    // VaR est la perte à ce percentile
     const value = sorted[index];
     return value < 0 ? Math.abs(value) : 0;
 };
@@ -207,7 +157,6 @@ export const calculateTechnicalResistance = (num: number, history: DrawResult[])
     let resistanceScore = 0;
     let lastGap = 0;
     let gaps: number[] = [];
-    
     const limit = Math.min(history.length, 100);
     for (let i=0; i<limit; i++) {
         if (history[i].gagnants.includes(num)) {
@@ -218,7 +167,6 @@ export const calculateTechnicalResistance = (num: number, history: DrawResult[])
         }
     }
     const currentGap = lastGap;
-    
     if (gaps.length > 2) {
         gaps.forEach(g => {
             const diff = Math.abs(currentGap - g);
@@ -235,15 +183,11 @@ export const calculateGravityField = (history: DrawResult[]): Record<number, num
     const gravity: Record<number, number> = {};
     const DECAY = 0.8;
     const G_CONST = 100;
-
     for(let i=1; i<=90; i++) gravity[i] = 0;
-
     const limit = Math.min(history.length, 10);
-
     for (let t = 0; t < limit; t++) {
         const draw = history[t];
         const timeWeight = Math.pow(DECAY, t);
-
         draw.gagnants.forEach(winner => {
             for (let target = 1; target <= 90; target++) {
                 if (target === winner) continue;
@@ -269,11 +213,9 @@ export const mathService = {
           .eq('draw_name', drawName)
           .eq('date', lastDate)
           .single();
-        
         if (data) {
             return { spectral: data.spectral, fractal: data.fractal };
         }
-        // Trigger background compute if missing
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
         return null;
     } catch (e) { return null; }
@@ -284,13 +226,16 @@ export const mathService = {
     if (N < 10) return [];
 
     const sample = history.slice(0, N);
-    return Array.from({ length: 90 }, (_, i) => {
-        const n = i + 1;
-        const rawSignal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
+    const rawPowers: {number: number, rawEnergy: number, dominantPeriod: number}[] = [];
+    let globalMaxPower = 0;
+
+    for (let num = 1; num <= 90; num++) {
+        const rawSignal = sample.map(d => (d.gagnants.includes(num) ? 1 : 0));
         const mean = rawSignal.reduce((a, b) => a + b, 0) / N;
         const signal = rawSignal.map((v, idx) => (v - mean) * hammingWindow(idx, N));
 
         let maxPower = 0;
+        let dominantPeriod = 0;
         const limit = Math.floor(N / 2);
         
         for (let k = 1; k < limit; k+=1) {
@@ -301,18 +246,25 @@ export const mathService = {
                 im -= signal[t] * Math.sin(angle);
             }
             const power = (re * re + im * im);
-            if (power > maxPower) maxPower = power;
+            if (power > maxPower) {
+                maxPower = power;
+                dominantPeriod = N / k;
+            }
         }
         
-        const noiseGate = 0.05;
-        const cleanPower = Math.max(0, maxPower - noiseGate);
-        const normalizedEnergy = Math.min(100, Math.round(cleanPower * 25));
+        if (maxPower > globalMaxPower) globalMaxPower = maxPower;
+        rawPowers.push({ number: num, rawEnergy: maxPower, dominantPeriod });
+    }
 
+    const safeMax = globalMaxPower > 0 ? globalMaxPower : 1;
+
+    return rawPowers.map(p => {
+        const normalized = (p.rawEnergy / safeMax) * 100;
         return {
-            number: n,
-            energy: normalizedEnergy,
-            resonance: normalizedEnergy > 75,
-            dominantPeriod: parseFloat((N / (maxPower * 0.5 || 1)).toFixed(1))
+            number: p.number,
+            energy: Math.round(normalized),
+            resonance: normalized > 75,
+            dominantPeriod: parseFloat(p.dominantPeriod.toFixed(1))
         };
     }).sort((a, b) => b.energy - a.energy);
   },
@@ -320,28 +272,22 @@ export const mathService = {
   calculateFractal(history: DrawResult[]): FractalMetric[] {
     const N = Math.min(history.length, 100);
     if (N < 20) return Array.from({ length: 90 }, (_, i) => ({ number: i + 1, hurst: 0.5, regime: 'RANDOM' }));
-
     const sample = history.slice(0, N);
     return Array.from({ length: 90 }, (_, i) => {
         const n = i + 1;
         const signal = sample.map(d => (d.gagnants.includes(n) ? 1 : 0));
         const mean = signal.reduce((a, b) => a + b, 0) / N;
         const x = signal.map(v => v - mean);
-        
         let cumsum = 0;
         const y = x.map(v => (cumsum += v, cumsum));
-        
         const R = Math.max(...y) - Math.min(...y);
         const variance = x.reduce((a, v) => a + v * v, 0) / N;
         const S = Math.sqrt(variance);
-
         let hurst = 0.5;
         if (R > 0 && S > 0) {
             hurst = Math.log(R / S) / Math.log(N);
         }
-        
         hurst = Math.max(0, Math.min(1, isNaN(hurst) ? 0.5 : hurst));
-        
         return {
             number: n,
             hurst: hurst,
@@ -356,7 +302,6 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
     if (history.length < 10) {
         return { valid: false, score: 0, issues: ["Historique critique insuffisant (<10)"] };
     }
-
     let score = 100;
     const dates = history.slice(0, 10).map(h => new Date(h.date).getTime());
     for(let i=0; i<dates.length-1; i++) {
@@ -366,7 +311,6 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
             break;
         }
     }
-
     const signatures = new Set();
     let duplicates = 0;
     history.forEach(h => {
@@ -374,18 +318,15 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
         if (signatures.has(sig)) duplicates++;
         signatures.add(sig);
     });
-    
     if (duplicates > 0) {
         score -= (duplicates * 5);
         issues.push(`${duplicates} doublons détectés`);
     }
-
     const outOfBounds = history.some(h => h.gagnants.some(n => n < 1 || n > 90));
     if (outOfBounds) {
         score -= 50;
         issues.push("Numéros hors limites (1-90)");
     }
-
     return { 
         valid: score > 50, 
         score: Math.max(0, score), 
@@ -399,8 +340,6 @@ export const calculatePredictionZScore = (numbers: number[]): number => {
     const sigma = 60;
     return (sum - mu) / sigma;
 };
-
-// --- ASYNC WRAPPERS & ANALYTICS ---
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     if (history.length > 0) {
@@ -463,17 +402,13 @@ export const getFollowersAnalysisAsync = async (history: DrawResult[]) => {
     } catch { return []; }
 };
 
-// --- REGULARITY & VOLATILITY ---
-
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const regularities: NumberRegularity[] = [];
     const N = Math.min(history.length, 200);
     const sample = history.slice(0, N);
-
     for (let num = 1; num <= 90; num++) {
         let lastGap = 0;
         const gaps: number[] = [];
-        
         for (let i = 0; i < sample.length; i++) {
             if (sample[i].gagnants.includes(num)) {
                 gaps.push(lastGap);
@@ -482,12 +417,10 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
                 lastGap++;
             }
         }
-        
         if (gaps.length > 0) {
             const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
             const variance = gaps.reduce((a, b) => a + Math.pow(b - avgGap, 2), 0) / gaps.length;
             const stdDev = Math.sqrt(variance);
-            
             regularities.push({
                 number: num,
                 avgGap: parseFloat(avgGap.toFixed(1)),
@@ -513,32 +446,24 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
 export const calculateVolatility = (history: DrawResult[]): { score: number, status: string, trend: string } => {
     const sums = history.slice(0, 20).map(d => d.gagnants.reduce((a, b) => a + b, 0));
     if (sums.length < 2) return { score: 0, status: 'Unknown', trend: 'flat' };
-
     const mean = sums.reduce((a, b) => a + b, 0) / sums.length;
     const variance = sums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sums.length;
     const stdDev = Math.sqrt(variance);
-    
-    // Volatilité normalisée (0-100)
     const volatilityScore = Math.min(100, Math.round(stdDev)); 
     let status = 'Stable';
     if (volatilityScore > 60) status = 'Chaos';
     else if (volatilityScore > 30) status = 'Volatile';
-
-    // Tendance immédiate
     const trend = sums[0] > mean ? 'high' : 'low';
-
     return { score: volatilityScore, status, trend };
 };
 
 export const detectGameRegime = (history: DrawResult[]) => {
     const fractal = mathService.calculateFractal(history);
     const avgHurst = fractal.reduce((a, b) => a + b.hurst, 0) / (fractal.length || 1);
-    
     let regime = 'NEUTRE';
     if (avgHurst > 0.6) regime = 'PERSISTANT';
     else if (avgHurst < 0.4) regime = 'ANTI-PERSISTANT';
     else regime = 'BROWNIEN (ALÉATOIRE)';
-
     return { regime, hurst: avgHurst };
 };
 
@@ -552,22 +477,17 @@ export const getNumberDetailedMetrics = async (
     const spec = spectral.find(s => s.number === num);
     const frac = fractal.find(f => f.number === num);
     const corr = await calculateCorrelationMatrixAsync(history);
-    
     const historyGraph = history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
-    
     const affinities = corr[num]?.affinities || {};
     const topAffinities = Object.entries(affinities)
         .sort((a: any, b: any) => b[1] - a[1])
         .slice(0, 5)
         .map(x => parseInt(x[0]));
-        
     const nemesis = Object.entries(affinities)
-        .sort((a: any, b: any) => a[1] - b[1]) // Corrélation négative ou faible
+        .sort((a: any, b: any) => a[1] - b[1])
         .slice(0, 5)
         .map(x => parseInt(x[0]));
-
     const temp = (spec?.energy || 0) + (frac?.hurst ? frac.hurst * 50 : 25);
-
     return {
         temperature: Math.min(100, temp),
         hurst: frac?.hurst || 0.5,
@@ -607,20 +527,15 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
     const N = Math.min(history.length, 100);
     if (N < 10) return { hurst: 0.5 };
-
     const sample = history.slice(0, N);
     const signal = sample.map(d => (d.gagnants.includes(num) ? 1 : 0));
     const mean = signal.reduce((a, b) => a + b, 0) / N;
-    
     const x = signal.map(v => v - mean);
     let cumsum = 0;
     const y = x.map(v => (cumsum += v, cumsum));
-    
     const R = Math.max(...y) - Math.min(...y);
     const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1; 
-    
     if (R === 0) return { hurst: 0.5 };
-
     const h = Math.log(R / S) / Math.log(N);
     return { hurst: isNaN(h) ? 0.5 : Math.max(0, Math.min(1, h)) };
 };
@@ -642,17 +557,12 @@ export const calculateRunsTest = (winners: number[]): { runs: number; zScore: nu
     const binary = winners.map(n => n > median);
     let runs = 1;
     for(let i=1; i<binary.length; i++) if(binary[i] !== binary[i-1]) runs++;
-    
     const n1 = binary.filter(v => v).length;
     const n2 = binary.length - n1;
-    
     if (n1 === 0 || n2 === 0) return { runs, zScore: 0, isRandom: false };
-
     const expectedRuns = ((2 * n1 * n2) / binary.length) + 1;
     const variance = (2 * n1 * n2 * (2 * n1 * n2 - binary.length)) / (Math.pow(binary.length, 2) * (binary.length - 1));
-    
     const zScore = variance > 0 ? (runs - expectedRuns) / Math.sqrt(variance) : 0;
-    
     return { runs, zScore, isRandom: Math.abs(zScore) < 1.96 };
 };
 
@@ -685,7 +595,6 @@ export const calculateShannonEntropy = (history: DrawResult[]): EntropyMetric =>
     }));
     let entropy = 0;
     if (total === 0) return { normalized: 0 };
-
     Object.values(freq).forEach(count => {
         const p = count / total;
         if (p > 0) entropy -= p * Math.log2(p);
@@ -697,7 +606,6 @@ export const calculateChiSquare = (freqMap: Record<number, number>, total: numbe
     let chi = 0;
     const expected = total / 90;
     if (expected === 0) return { score: 0 };
-
     for(let i=1; i<=90; i++) {
         const observed = freqMap[i] || 0;
         chi += Math.pow(observed - expected, 2) / expected;
@@ -718,7 +626,6 @@ export const performKMeansClusteringAsync = async (history: DrawResult[]): Promi
         if (r.currentGap > 25) cluster = 'Dormeur';
         else if (freq >= 4 && r.avgGap < 15) cluster = 'Sprinter';
         else if (r.stdDev < 1.5) cluster = 'Marathonien';
-        
         return {
             number: r.number,
             x: r.currentGap,
@@ -757,24 +664,20 @@ export const calculateBenfordCompliance = (numbers: number[]): ChiSquareMetric =
 };
 
 export const findHistoricalMatches = (draw: DrawResult, history: DrawResult[], limit: number = 5) => {
-    // Note: 'history' est trié du plus récent au plus ancien (index 0 = dernier)
-    // Pour trouver le "nextDraw" (futur), on doit prendre l'index i-1
     return history
       .map((h, index) => ({ h, index }))
       .filter(({ h }) => h.id !== draw.id)
       .map(({ h, index }) => {
         const intersection = draw.gagnants.filter(n => h.gagnants.includes(n)).length;
         const similarity = (intersection / 5) * 100;
-        // Le tirage suivant chronologiquement est à l'index - 1
         const nextDraw = index > 0 ? history[index - 1] : null;
-        
         return {
             match: h,
             nextDraw,
             similarity
         };
       })
-      .filter(item => item.similarity >= 40) // Seuil min
+      .filter(item => item.similarity >= 40)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
 };

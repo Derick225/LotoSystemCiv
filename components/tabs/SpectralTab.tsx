@@ -5,7 +5,7 @@ import { NumberBall } from '../NumberBall';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import { Zap, Activity, Radio, Waves, Maximize2, Grid3X3 } from 'lucide-react';
 
-export const SpectralTab: React.FC<{ drawName: string }> = () => {
+export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { spectral, loading } = useNexus();
   const [viewMode, setViewMode] = useState<'wave' | 'matrix'>('wave');
 
@@ -29,7 +29,7 @@ export const SpectralTab: React.FC<{ drawName: string }> = () => {
   );
 
   return (
-    <div className="space-y-8 animate-fade-in pb-16">
+    <div className="space-y-8 animate-fade-in pb-16" key={drawName}>
         {/* Header Hero */}
         <div className="bg-slate-950 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group border border-slate-800">
             <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/10 rounded-full blur-[100px] -mr-20 -mt-20"></div>

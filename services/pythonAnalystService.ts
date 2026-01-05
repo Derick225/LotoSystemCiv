@@ -1,9 +1,7 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { DrawResult, PythonAnalysisResult } from "../types";
 
 export const runDeepPythonAnalysis = async (drawName: string, history: DrawResult[]): Promise<PythonAnalysisResult> => {
-    // La clé est injectée via vite.config.ts define: { 'process.env': ... }
     const apiKey = process.env.API_KEY;
     
     if (!apiKey) {
@@ -18,10 +16,10 @@ export const runDeepPythonAnalysis = async (drawName: string, history: DrawResul
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash', // Utilisation de Flash 2.0 (plus stable pour le JSON que le 3-preview)
+            model: 'gemini-1.5-flash', 
             contents: `Tu es un Senior Quant Analyst. Dataset: ${JSON.stringify(dataset)}. Implémente un modèle VAR ou Random Forest en Python pour le tirage ${drawName}.`,
             config: {
-                systemInstruction: "Tu es le Nexus Python Kernel. Réponds UNIQUEMENT en JSON brut, sans balises Markdown.",
+                systemInstruction: "Tu es le Nexus Python Kernel. Réponds UNIQUEMENT avec un JSON pur. Pas de balises markdown, pas de texte avant ou après.",
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
@@ -48,10 +46,25 @@ export const runDeepPythonAnalysis = async (drawName: string, history: DrawResul
         
         if (!text) throw new Error("Réponse vide du modèle.");
 
-        // NETTOYAGE CRITIQUE : Suppression des balises Markdown ```json éventuelles
-        text = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+        // --- NETTOYAGE ROBUSTE DU JSON ---
+        // 1. Suppression des balises Markdown code blocks
+        text = text.replace(/```json/g, '').replace(/```/g, '');
+        
+        // 2. Extraction chirurgicale de l'objet JSON (entre la première { et la dernière })
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        
+        if (firstBrace !== -1 && lastBrace !== -1) {
+            text = text.substring(firstBrace, lastBrace + 1);
+        }
 
-        return JSON.parse(text) as PythonAnalysisResult;
+        // 3. Parsing sécurisé
+        try {
+            return JSON.parse(text) as PythonAnalysisResult;
+        } catch (parseError) {
+            console.error("JSON PARSE ERROR. Raw text received:", text);
+            throw new Error("Le format JSON reçu de l'IA est invalide.");
+        }
 
     } catch (e: any) {
         console.error("Python Kernel Error:", e);

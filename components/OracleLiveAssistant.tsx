@@ -297,8 +297,9 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                 Prédiction IA: ${lastPrediction?.suggestedNumbers?.join(', ') || 'Non disponible'}.
                 Réponds de manière technique, mystérieuse et concise.`;
 
+            // Utilisation de gemini-2.0-flash-exp pour le Live API : Le plus standard et ouvert
             const session = await ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview', 
+                model: 'gemini-2.0-flash-exp', 
                 config: {
                     responseModalities: [Modality.AUDIO],
                     speechConfig: { 

@@ -1,6 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@0.1.1";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai@1.34.0";
 
 declare const Deno: any;
 
@@ -19,9 +19,9 @@ serve(async (req: Request) => {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    // Modèle Vision Performant
+    // Utilisation de 1.5 Flash pour une compatibilité maximale Vision
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash', 
+      model: 'gemini-1.5-flash', 
       contents: {
         parts: [
           { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },

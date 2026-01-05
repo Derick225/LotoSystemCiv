@@ -34,13 +34,17 @@ export const generateSmartInsights = async (
         });
     }
 
-    const dominant = spectral.find(s => s.energy > 85);
-    if (dominant) {
+    // CORRECTION : On trie explicitement par énergie décroissante pour trouver le VRAI dominant
+    // (Sinon .find() retourne juste le premier numéro de la liste 1..90 qui dépasse le seuil)
+    const sortedSpectral = [...spectral].sort((a, b) => b.energy - a.energy);
+    const dominant = sortedSpectral[0];
+
+    if (dominant && dominant.energy > 85) {
         insights.push({
             id: 'spec-res',
             type: 'opportunity',
             title: `Point de Résonance: ${dominant.number}`,
-            description: `Vecteur harmonique ultra-fort détecté sur le cycle de ${dominant.dominantPeriod} tirages.`,
+            description: `Vecteur harmonique ultra-fort (${dominant.energy}%) détecté sur le cycle de ${dominant.dominantPeriod} tirages.`,
             score: 95,
             icon: '🎯'
         });

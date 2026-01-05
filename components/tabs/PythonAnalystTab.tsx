@@ -55,10 +55,11 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                 showToast("Analyse terminée avec succès.", "success");
             }, 500);
 
-        } catch (e) {
+        } catch (e: any) {
             clearInterval(interval);
             setStatus('error');
-            showToast("Erreur du laboratoire.", "error");
+            console.error("ANALYSIS FAILED:", e); // Log critique pour le debug
+            showToast(e.message || "Erreur du laboratoire.", "error");
         }
     };
 
@@ -218,7 +219,8 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                     <div className="p-8 bg-rose-50 dark:bg-rose-900/20 rounded-[2.5rem] border border-rose-200 dark:border-rose-800 text-center">
                         <AlertTriangle size={32} className="text-rose-500 mx-auto mb-4" />
                         <h3 className="text-lg font-black text-rose-700 dark:text-rose-300">Échec de l'Expérience</h3>
-                        <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">Le noyau Python n'a pas pu converger. Veuillez réessayer avec plus de données.</p>
+                        <p className="text-sm text-rose-600 dark:text-rose-400 mt-2">Le noyau Python n'a pas pu converger ou l'API ne répond pas.</p>
+                        <p className="text-xs text-rose-500 mt-4 opacity-70">Ouvrez la console du navigateur (F12) pour voir les détails techniques.</p>
                     </div>
                 )}
             </div>

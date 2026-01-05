@@ -1,6 +1,6 @@
 
 /**
- * Nexus Production Math Worker v8.6 (Deep Resonance)
+ * Nexus Production Math Worker v8.7 (Deep Resonance)
  * Traitement analytique lourd sur l'ENTIÈRETÉ de l'historique.
  */
 
@@ -9,10 +9,7 @@ export {};
 // Fix: Explicitly type self as Worker using safe casting
 const ctx = self as unknown as Worker;
 
-// Importation directe des fonctions mathématiques pures (pas d'import de module pour worker standalone si possible, mais ici on duplique pour la perf ou on utilise des fonctions locales)
-// Pour simplifier et garantir l'exécution sans bundler complexe pour le worker, nous incluons les fonctions mathématiques critiques ici.
-
-// --- MATH UTILS LOCALES AU WORKER ---
+// Importation directe des fonctions mathématiques pures
 const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
 
 const runEchoStateNetworkLocal = (signal: number[]): number => {
@@ -175,21 +172,14 @@ function calculateNextProjections(history: any[], lastNumbers: number[]) {
     });
 
     // 2. Injection Deep Resonance (ESN)
-    // On analyse les séries temporelles de chaque numéro pour détecter des patterns non-linéaires
     const signalLength = Math.min(history.length, 100);
     
     for (let num = 1; num <= 90; num++) {
-        // Extraction de la série binaire (présence/absence)
         const signal = [];
         for(let i = signalLength - 1; i >= 0; i--) {
             signal.push(history[i].gagnants.includes(num) ? 1 : 0);
         }
-        
-        // Calcul ESN
         const resonance = runEchoStateNetworkLocal(signal);
-        
-        // Mixage avec le score Markov (Pondération 30% ESN, 70% Markov)
-        // ESN donne une probabilité entre 0 et 100
         scores[num] = (scores[num] || 0) + (resonance / 100) * 0.5;
     }
 
@@ -283,20 +273,24 @@ function calculateHurstExponent(history: any[]) {
 
 function calculateSpectralFFT(history: any[]) {
     const N = history.length;
-    const results = [];
+    const rawPowers = [];
+    let globalMaxPower = 0;
+
+    // 1. Calcul des puissances brutes
     for (let num = 1; num <= 90; num++) {
         const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
         const mean = signal.reduce((a: number, b: number) => a + b, 0) / N;
         let maxPower = 0;
         let dominantPeriod = 0;
-        
+        const signalWindowed = signal.map((s, idx) => (s - mean) * (0.54 - 0.46 * Math.cos((2 * Math.PI * idx) / (N - 1)))); // Hamming
+
         const limit = Math.floor(N / 2);
         for (let k = 1; k < limit; k++) {
             let re = 0, im = 0;
             for (let n = 0; n < N; n++) {
                 const angle = (2 * Math.PI * k * n) / N;
-                re += (signal[n] - mean) * Math.cos(angle);
-                im -= (signal[n] - mean) * Math.sin(angle);
+                re += signalWindowed[n] * Math.cos(angle);
+                im -= signalWindowed[n] * Math.sin(angle);
             }
             const power = (re * re + im * im) / N;
             if (power > maxPower) {
@@ -304,15 +298,35 @@ function calculateSpectralFFT(history: any[]) {
                 dominantPeriod = N / k;
             }
         }
-        results.push({ 
+        
+        if (maxPower > globalMaxPower) globalMaxPower = maxPower;
+        
+        rawPowers.push({ 
             number: num, 
-            energy: Math.min(100, Math.round(maxPower * 500)), 
-            dominantPeriod: parseFloat(dominantPeriod.toFixed(1)), 
-            waveform: signal.slice(0, 30),
-            isResonating: maxPower > 0.15
+            rawEnergy: maxPower, 
+            dominantPeriod: parseFloat(dominantPeriod.toFixed(1)),
+            waveform: signal.slice(0, 30) // Garde le signal récent pour viz
         });
     }
-    return results;
+
+    // 2. Normalisation Dynamique Relative (Scale 0-100 based on Global Max)
+    // Cela garantit que le "meilleur" numéro du tirage a toujours 100 (ou proche) et les autres sont relatifs à lui.
+    // Évite d'avoir tout le monde à 0 ou 1.
+    const safeMax = globalMaxPower > 0 ? globalMaxPower : 1;
+    
+    const results = rawPowers.map(p => {
+        const normalized = (p.rawEnergy / safeMax) * 100;
+        return {
+            number: p.number,
+            energy: Math.round(normalized),
+            dominantPeriod: p.dominantPeriod,
+            waveform: p.waveform,
+            isResonating: normalized > 75
+        };
+    });
+
+    // Tri décroissant pour s'assurer que les pics sont en premier dans les listes
+    return results.sort((a, b) => b.energy - a.energy);
 }
 
 function performStructuralAudit(sample: any[]) {

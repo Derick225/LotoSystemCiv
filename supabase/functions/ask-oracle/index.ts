@@ -25,6 +25,9 @@ serve(async (req) => {
 
     const genAI = new GoogleGenerativeAI({ apiKey });
     let resultData;
+    
+    // Modèle Standard Universel : Gemini 1.5 Flash
+    // Garantit que le code fonctionne avec n'importe quelle clé valide
     const modelName = "gemini-1.5-flash"; 
 
     if (task === "analyze") {
@@ -89,6 +92,9 @@ serve(async (req) => {
         });
         resultData = JSON.parse(response.text());
         
+    } else if (task === "vision-analysis") {
+       // Support futur pour l'analyse visuelle via backend si nécessaire
+       resultData = { analysis: "Not implemented in standard version" };
     } else {
       throw new Error(`Tâche inconnue : ${task}`);
     }
