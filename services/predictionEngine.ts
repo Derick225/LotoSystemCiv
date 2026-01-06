@@ -1,4 +1,3 @@
-
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
@@ -87,8 +86,12 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
  */
 const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
     let totalHurst = 0;
-    for (let i = 1; i <= 5; i++) {
-        totalHurst += calculateHurstForNumber(i, history).hurst;
+    // On analyse un échantillon représentatif (les 5 premiers numéros gagnants récents)
+    for (let i = 0; i < Math.min(5, history.length); i++) {
+        const draw = history[i];
+        if(draw && draw.gagnants.length > 0) {
+             totalHurst += calculateHurstForNumber(draw.gagnants[0], history).hurst;
+        }
     }
     const avgHurst = totalHurst / 5;
 
@@ -114,6 +117,7 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
         adjusted.poisson = (adjusted.poisson || 0) * 1.8;
     }
 
+    // Normalisation pour maintenir la somme des poids stable
     const totalOld = Object.values(baseWeights).reduce((a, b) => a + (b||0), 0);
     const totalNew = Object.values(adjusted).reduce((a, b) => a + (b||0), 0);
     const ratio = totalNew > 0 ? totalOld / totalNew : 1;
@@ -123,6 +127,94 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
     });
 
     return { weights: adjusted, regimeLabel: label };
+};
+
+/**
+ * CALCULATEUR D'ADN (NOUVEAU)
+ * Analyse l'historique pour déterminer quels algos ont "raison" le plus souvent pour CE tirage.
+ */
+export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
+    if (history.length < 30) return getDefaultWeights();
+
+    // Init with default structure then zero out to keep type safety
+    const scoresSum: AlgoWeights = { ...getDefaultWeights() };
+    const keys = Object.keys(scoresSum) as Array<keyof AlgoWeights>;
+    keys.forEach(k => scoresSum[k] = 0);
+
+    // On analyse les 50 derniers tirages (fenêtre glissante)
+    const analysisWindow = Math.min(history.length - 1, 50);
+    
+    for (let i = 0; i < analysisWindow; i++) {
+        const targetDraw = history[i]; // Le tirage qu'on veut prédire (le "futur" dans le passé)
+        const pastContext = history.slice(i + 1); // L'historique disponible à ce moment-là
+        
+        if (pastContext.length < 20) break;
+
+        // On recalcule les indicateurs clés pour le contexte passé
+        const regularity = calculateRegularity(pastContext);
+        const gravityField = calculateGravityField(pastContext);
+        
+        // Pour chaque numéro gagnant du tirage cible, on regarde quels algos l'auraient favorisé
+        targetDraw.gagnants.forEach(winner => {
+            const reg = regularity.find(r => r.number === winner);
+            
+            // 1. Frequency Performance
+            const freq = pastContext.slice(0, 20).filter(h => h.gagnants.includes(winner)).length;
+            if (freq >= 3) scoresSum.frequency = (scoresSum.frequency || 0) + 1;
+
+            // 2. Gap Performance
+            if (reg && reg.currentGap >= 8 && reg.currentGap <= 18) {
+                scoresSum.gap = (scoresSum.gap || 0) + 1;
+            }
+
+            // 3. Spatial/Gravity Performance
+            if ((gravityField[winner] || 0) > 1.5) {
+                scoresSum.spatial = (scoresSum.spatial || 0) + 1;
+            }
+
+            // 4. Markov Performance (Simulation simplifiée)
+            if (pastContext.length > 0) {
+                const lastWinners = pastContext[0].gagnants;
+                // Si le gagnant actuel était un "ami" fréquent des précédents
+                // (Ici on simplifie en checkant juste s'il est sorti récemment, 
+                // une vraie implémentation Markov serait plus lourde)
+                if (pastContext.slice(0,5).some(d => d.gagnants.includes(winner))) {
+                     scoresSum.markov = (scoresSum.markov || 0) + 1;
+                }
+            }
+            
+            // 5. Poisson Performance (Saut logique)
+            const lambda = (freq / 20) * 18; 
+            const poissonP = calculatePoissonProbability(lambda, reg?.currentGap || 0);
+            if (poissonP > 60) scoresSum.poisson = (scoresSum.poisson || 0) + 1;
+            
+            // 6. Resistance / Support
+            const resScore = calculateTechnicalResistance(winner, pastContext);
+            if (resScore > 50) scoresSum.resistance = (scoresSum.resistance || 0) + 1;
+        });
+    }
+
+    // Normalisation
+    const totalScore = Object.values(scoresSum).reduce((a, b) => a + (b || 0), 0);
+    const optimizedWeights = { ...getDefaultWeights() }; // Start with defaults to keep minor weights
+    
+    if (totalScore > 0) {
+        keys.forEach(k => {
+            const raw = scoresSum[k] || 0;
+            // Mélange : 40% poids par défaut + 60% performance historique
+            // Cela évite l'overfitting sur un petit échantillon
+            const historicalWeight = raw / totalScore;
+            optimizedWeights[k] = (optimizedWeights[k]! * 0.4) + (historicalWeight * 0.6);
+        });
+    }
+    
+    // Renormalisation finale à 1.0
+    const finalTotal = Object.values(optimizedWeights).reduce((a, b) => a + (b || 0), 0);
+    keys.forEach(k => {
+        optimizedWeights[k] = parseFloat(((optimizedWeights[k]! / finalTotal)).toFixed(4));
+    });
+
+    return optimizedWeights;
 };
 
 // Fonction Sigmoid pour la normalisation non-linéaire des scores

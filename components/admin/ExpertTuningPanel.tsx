@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
-import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules } from '../../services/predictionEngine';
+import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, calculateOptimalWeights } from '../../services/predictionEngine';
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';
 import { useNexus } from '../NexusProvider';
-import { Sliders, Save, Scale, Activity, Gauge, AlertCircle, RefreshCw } from 'lucide-react';
+import { Sliders, Save, Scale, Activity, Gauge, AlertCircle, RefreshCw, Wand2 } from 'lucide-react';
 
 interface ExpertTuningPanelProps {
     selectedDrawName: string;
@@ -14,12 +14,13 @@ interface ExpertTuningPanelProps {
 export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDrawName }) => {
     const { showToast } = useToast();
     // Connexion au Cerveau Global
-    const { globalWeights, updateGlobalWeights, refreshData } = useNexus();
+    const { globalWeights, updateGlobalWeights, refreshData, history } = useNexus();
     
     // État local pour l'édition (pour ne pas commit à chaque micro-mouvement de slider)
     const [localWeights, setLocalWeights] = useState<AlgoWeights>(globalWeights);
     const [rules, setRules] = useState<AdaptiveRules>(getDefaultRules());
     const [isDirty, setIsDirty] = useState(false);
+    const [isCalibrating, setIsCalibrating] = useState(false);
     
     // Synchronisation initiale quand le draw change ou quand le global change (ex: après un training)
     useEffect(() => {
@@ -53,6 +54,28 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         setLocalWeights(normalized);
         setIsDirty(true);
         showToast("Poids normalisés à 1.0", "info");
+    };
+
+    const handleAutoCalibrate = async () => {
+        if (history.length < 30) {
+            showToast("Historique insuffisant pour le calibrage IA (min 30 tirages).", "error");
+            return;
+        }
+        
+        setIsCalibrating(true);
+        // Simulation d'analyse (CPU heavy)
+        setTimeout(() => {
+            try {
+                const optimized = calculateOptimalWeights(history);
+                setLocalWeights(optimized);
+                setIsDirty(true);
+                showToast(`ADN extrait pour ${selectedDrawName}. Cliquez sur Injecter.`, "success");
+            } catch (e) {
+                showToast("Erreur lors du calibrage.", "error");
+            } finally {
+                setIsCalibrating(false);
+            }
+        }, 800);
     };
 
     const handleSave = () => {
@@ -126,19 +149,34 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     </div>
                     
                     <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl flex flex-col gap-4">
-                        <button onClick={handleAutoNormalize} className="w-full py-4 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 font-black rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition hover:bg-slate-100 dark:hover:bg-slate-950 border border-slate-200 dark:border-slate-700 active:scale-[0.98]">
-                            <Scale size={16}/> Normaliser
+                        <button 
+                            onClick={handleAutoCalibrate} 
+                            disabled={isCalibrating}
+                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition shadow-lg shadow-emerald-500/20 active:scale-[0.98] disabled:opacity-50"
+                        >
+                            {isCalibrating ? <RefreshCw className="animate-spin" size={16}/> : <Wand2 size={16}/>}
+                            Calibrage Auto-Adaptatif
                         </button>
-                        <button onClick={handleSave} disabled={!isDirty} className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all active:scale-[0.98]">
-                            <Save size={18}/> Injecter dans le Noyau
-                        </button>
+                        <div className="flex gap-4">
+                            <button onClick={handleAutoNormalize} className="flex-1 py-4 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 font-black rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition hover:bg-slate-100 dark:hover:bg-slate-950 border border-slate-200 dark:border-slate-700 active:scale-[0.98]">
+                                <Scale size={16}/> Normaliser
+                            </button>
+                            <button onClick={handleSave} disabled={!isDirty} className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all active:scale-[0.98]">
+                                <Save size={18}/> Injecter
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 {/* Sliders Grid */}
                 <div className="xl:col-span-7 bg-white dark:bg-slate-800 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 dark:border-slate-700 shadow-xl overflow-hidden relative">
                     <div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/5 rounded-full blur-[60px]"></div>
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-10 flex items-center gap-2"><Sliders size={14}/> Paramètres Tactiles</h4>
+                    <div className="flex justify-between items-center mb-10">
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2"><Sliders size={14}/> Paramètres Tactiles</h4>
+                        <div className="px-3 py-1 bg-slate-100 dark:bg-slate-900 rounded-full border border-slate-200 dark:border-slate-700">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">{selectedDrawName}</span>
+                        </div>
+                    </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 max-h-[600px] overflow-y-auto pr-4 custom-scrollbar">
                         {(Object.keys(localWeights) as Array<keyof AlgoWeights>).map(key => (
@@ -166,7 +204,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     <div className="mt-10 p-5 bg-slate-50 dark:bg-slate-950 rounded-[1.8rem] border border-slate-100 dark:border-slate-900 flex items-start gap-4">
                         <AlertCircle className="text-indigo-500 shrink-0 mt-0.5" size={18} />
                         <p className="text-[10px] text-slate-500 font-medium leading-relaxed italic">
-                            "Ajustez les curseurs pour orienter le moteur Nexus. Toute modification ici sera immédiatement répercutée sur les prédictions après sauvegarde."
+                            "Le bouton 'Calibrage Auto-Adaptatif' analyse les 50 derniers tirages de <strong>{selectedDrawName}</strong> pour identifier quelles stratégies fonctionnent le mieux historiquement pour ce jeu spécifique."
                         </p>
                     </div>
                 </div>
