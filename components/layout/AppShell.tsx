@@ -1,12 +1,13 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut } from 'lucide-react';
+import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff } from 'lucide-react';
 import { useIsFetching } from '@tanstack/react-query';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
 import { SonarPing } from '../ui/SonarPing';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
+import { useVoiceControl } from '../../hooks/useVoiceControl';
 
 export type ViewMode = 'home' | 'admin' | 'lab';
 
@@ -41,6 +42,13 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [showPalette, setShowPalette] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   
+  // Intégration V.O.I.C.E
+  const { isListening, transcript, toggleListening } = useVoiceControl(
+      setViewMode,
+      setShowWallet,
+      () => { /* Placeholder pour triggerGeneration global si besoin */ }
+  );
+  
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', handleScroll);
@@ -52,7 +60,6 @@ export const AppShell: React.FC<AppShellProps> = ({
       { id: 'lab', icon: <FlaskConical size={18}/>, label: 'Quantum Lab' },
   ];
 
-  // Ajout conditionnel du menu Admin
   if (isAdmin) {
       navItems.push({ id: 'admin', icon: <Settings size={18}/>, label: 'Système' });
   }
@@ -88,10 +95,36 @@ export const AppShell: React.FC<AppShellProps> = ({
                         <h1 className="text-xl font-black tracking-tighter leading-none text-white">NEXUS<span className="text-indigo-500">PRO</span></h1>
                         <div className="flex items-center gap-1.5 mt-1">
                             <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></div>
-                            <p className="text-[7px] font-black text-slate-500 uppercase tracking-[0.4em]">PLATINUM ELITE v11.0</p>
+                            <p className="text-[7px] font-black text-slate-500 uppercase tracking-[0.4em]">PLATINUM ELITE v11.5</p>
                         </div>
                     </div>
                 </div>
+
+                {/* V.O.I.C.E FEEDBACK CENTER (Mobile/Desktop) */}
+                <AnimatePresence>
+                    {isListening && (
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
+                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-3 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.3)] pointer-events-none"
+                        >
+                            <div className="flex gap-1">
+                                {[1,2,3].map(i => (
+                                    <motion.div 
+                                        key={i}
+                                        animate={{ height: [8, 16, 8] }}
+                                        transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.1 }}
+                                        className="w-1 bg-indigo-400 rounded-full"
+                                    />
+                                ))}
+                            </div>
+                            <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest min-w-[80px] text-center">
+                                {transcript || "Écoute..."}
+                            </span>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* Desktop Navigation */}
                 <nav className="hidden md:flex bg-white/5 p-1 rounded-2xl border border-white/5 shadow-inner">
@@ -114,6 +147,14 @@ export const AppShell: React.FC<AppShellProps> = ({
 
                 {/* Actions Group */}
                 <div className="flex items-center gap-2 md:gap-3">
+                    {/* BOUTON MICRO (V.O.I.C.E) */}
+                    <button 
+                        onClick={toggleListening}
+                        className={`p-3 md:p-3.5 rounded-2xl transition-all border group relative overflow-hidden ${isListening ? 'bg-rose-600 text-white border-rose-500 shadow-rose-900/50' : 'bg-white/5 text-slate-400 hover:text-white border-white/10 hover:bg-white/10'}`}
+                    >
+                        {isListening ? <Mic size={18} className="animate-pulse" /> : <MicOff size={18} />}
+                    </button>
+
                     <div className="hidden sm:flex flex-col items-end mr-3 px-3 py-1 bg-black/20 rounded-xl border border-white/5 cursor-pointer hover:border-indigo-500/50 transition-all" onClick={() => setShowPalette(true)}>
                         <div className="flex items-center gap-2">
                             <SonarPing />
@@ -156,7 +197,6 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
       </header>
 
-      {/* Ajustement du padding-top pour compenser le header plus petit sur mobile */}
       <main className="container mx-auto px-3 sm:px-4 pt-32 md:pt-44 pb-36 max-w-7xl flex-1 relative z-0">
         <AnimatePresence mode="wait">
             <motion.div

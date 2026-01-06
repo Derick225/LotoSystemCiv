@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { generatePlatinumPrediction, savePlatinumHistory, type StrategyBias } from '../../services/metaAnalystService';
+import { generatePlatinumPrediction, savePlatinumHistory, type StrategyBias, calculateOptimalUserBias } from '../../services/metaAnalystService';
 import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
 import { useNexus } from '../NexusProvider';
 import type { PlatinumResult } from '../../types';
@@ -10,7 +10,7 @@ import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, ShieldCheck, Activity, Target, 
     Layers, Zap, Sparkles, RefreshCw,
-    Sliders, Waves, Gauge, ChevronDown, Dna, Save, LayoutTemplate
+    Sliders, Waves, Gauge, ChevronDown, Dna, Save, LayoutTemplate, Wand2
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, Cell, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from 'recharts';
 
@@ -26,14 +26,24 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const [loading, setLoading] = useState(false);
     const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
     
-    // Mixer State with Persistence
-    const [bias, setBias] = useState<StrategyBias>(getFusionConfig());
+    // Initialise avec une config optimale calculée automatiquement si possible
+    const [bias, setBias] = useState<StrategyBias>(() => {
+        // Tente de récupérer la config sauvegardée, sinon auto-tune
+        const saved = getFusionConfig();
+        // Si c'est le défaut (0.5 partout), on force l'auto-tune au montage si historique dispo
+        if (saved.stability === 0.5 && saved.chaos === 0.3 && saved.harmony === 0.7) {
+             return saved; 
+        }
+        return saved;
+    });
+    
     const isMounted = useRef(true);
 
     useEffect(() => {
         isMounted.current = true;
         // Chargement initial du résultat si dispo
         if (history.length >= 30 && !result && !loading) {
+            handleAutoTune(); // Auto-tune au premier chargement pour garantir la cohérence
             runMetaAnalysis();
         }
         return () => { isMounted.current = false; };
@@ -43,6 +53,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     useEffect(() => {
         saveFusionConfig(bias);
     }, [bias]);
+
+    const handleAutoTune = () => {
+        if (history.length < 20) return;
+        const optimal = calculateOptimalUserBias(drawName, history);
+        setBias(optimal);
+        showToast(`Biais optimisé pour ${drawName} : S${(optimal.stability*10).toFixed(0)} C${(optimal.chaos*10).toFixed(0)} H${(optimal.harmony*10).toFixed(0)}`, "success");
+    };
 
     const runMetaAnalysis = async () => {
         if (isMounted.current) setLoading(true);
@@ -112,9 +129,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 <h4 className="text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest flex items-center gap-2">
                                     <Sliders size={14}/> Paramètres de Fusion
                                 </h4>
-                                <button onClick={runMetaAnalysis} disabled={loading} className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100" title="Relancer la Fusion">
-                                    <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                                </button>
+                                <div className="flex gap-2">
+                                    <button onClick={handleAutoTune} className="p-2 bg-emerald-600 text-white rounded-xl shadow-lg hover:bg-emerald-500 transition-all" title="Auto-Calibration">
+                                        <Wand2 size={16} />
+                                    </button>
+                                    <button onClick={runMetaAnalysis} disabled={loading} className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100" title="Relancer la Fusion">
+                                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Presets - Scrollable avec contrainte de largeur mobile */}

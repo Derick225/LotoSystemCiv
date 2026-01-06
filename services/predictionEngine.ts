@@ -1,3 +1,4 @@
+
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
@@ -19,7 +20,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
     temporal: 0.03,
     ai_intuition: 0.01,
     digital_root: 0.01,
-    gap_velocity: 0.01,
+    gap_velocity: 0.05, // Augmenté par défaut
     poisson: 0.05, 
     leader_succession: 0.01
 });
@@ -82,11 +83,50 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 };
 
 /**
- * Calibre dynamiquement les poids en fonction du Régime Fractal (Hurst).
+ * Applique des ajustements spécifiques basés sur le NOM du tirage et ses tendances connues.
+ * C'est ici que l'on code la "personnalité" de chaque jeu.
  */
-const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
+const applyDrawSpecificTuning = (drawName: string, weights: AlgoWeights): AlgoWeights => {
+    const tuned = { ...weights };
+    const name = drawName.toUpperCase();
+
+    // Monday Special : Tendance à la répétition et aux cycles courts
+    if (name.includes('MONDAY') || name.includes('SPECIAL')) {
+        tuned.gap_velocity = Math.max(0.15, (tuned.gap_velocity || 0) * 2.0);
+        tuned.poisson = Math.max(0.12, (tuned.poisson || 0) * 1.5);
+        tuned.equilibrium = (tuned.equilibrium || 0) * 0.5; // Moins de retour à la moyenne
+    }
+    // National / Diamant : Tirages très "Mathématiques" et stables
+    else if (name.includes('NATIONAL') || name.includes('DIAMANT')) {
+        tuned.spectral = Math.max(0.15, (tuned.spectral || 0) * 1.5);
+        tuned.resistance = Math.max(0.10, (tuned.resistance || 0) * 1.5);
+    }
+    // Bonanza : Tendance chaotique forte
+    else if (name.includes('BONANZA')) {
+        tuned.ai_intuition = Math.max(0.15, (tuned.ai_intuition || 0) * 2.0);
+        tuned.spatial = Math.max(0.15, (tuned.spatial || 0) * 1.5);
+    }
+
+    return normalizeWeights(tuned);
+};
+
+const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
+    const total = Object.values(w).reduce((a, b) => a + (b || 0), 0);
+    const keys = Object.keys(w) as Array<keyof AlgoWeights>;
+    const normalized = { ...w };
+    if (total > 0) {
+        keys.forEach(k => {
+            normalized[k] = parseFloat(((normalized[k] || 0) / total).toFixed(4));
+        });
+    }
+    return normalized;
+};
+
+/**
+ * Calibre dynamiquement les poids en fonction du Régime Fractal (Hurst) ET du tirage.
+ */
+const adjustWeightsToRegime = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
     let totalHurst = 0;
-    // On analyse un échantillon représentatif (les 5 premiers numéros gagnants récents)
     for (let i = 0; i < Math.min(5, history.length); i++) {
         const draw = history[i];
         if(draw && draw.gagnants.length > 0) {
@@ -95,9 +135,11 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
     }
     const avgHurst = totalHurst / 5;
 
-    const adjusted = { ...baseWeights };
-    let label = "Neutre";
+    // 1. Ajustement Spécifique au Jeu (Monday, Bonanza, etc.)
+    let adjusted = applyDrawSpecificTuning(drawName, baseWeights);
 
+    // 2. Ajustement Fractal Global
+    let label = "Neutre";
     if (avgHurst > 0.60) {
         label = "Tendance (Persistant)";
         adjusted.momentum = (adjusted.momentum || 0) * 1.5;
@@ -117,104 +159,71 @@ const adjustWeightsToRegime = (baseWeights: AlgoWeights, history: DrawResult[]):
         adjusted.poisson = (adjusted.poisson || 0) * 1.8;
     }
 
-    // Normalisation pour maintenir la somme des poids stable
-    const totalOld = Object.values(baseWeights).reduce((a, b) => a + (b||0), 0);
-    const totalNew = Object.values(adjusted).reduce((a, b) => a + (b||0), 0);
-    const ratio = totalNew > 0 ? totalOld / totalNew : 1;
-    
-    (Object.keys(adjusted) as Array<keyof AlgoWeights>).forEach(k => {
-        adjusted[k] = (adjusted[k] || 0) * ratio;
-    });
-
-    return { weights: adjusted, regimeLabel: label };
+    return { weights: normalizeWeights(adjusted), regimeLabel: label };
 };
 
 /**
  * CALCULATEUR D'ADN (NOUVEAU)
- * Analyse l'historique pour déterminer quels algos ont "raison" le plus souvent pour CE tirage.
  */
 export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
     if (history.length < 30) return getDefaultWeights();
 
-    // Init with default structure then zero out to keep type safety
     const scoresSum: AlgoWeights = { ...getDefaultWeights() };
     const keys = Object.keys(scoresSum) as Array<keyof AlgoWeights>;
     keys.forEach(k => scoresSum[k] = 0);
 
-    // On analyse les 50 derniers tirages (fenêtre glissante)
     const analysisWindow = Math.min(history.length - 1, 50);
     
     for (let i = 0; i < analysisWindow; i++) {
-        const targetDraw = history[i]; // Le tirage qu'on veut prédire (le "futur" dans le passé)
-        const pastContext = history.slice(i + 1); // L'historique disponible à ce moment-là
+        const targetDraw = history[i]; 
+        const pastContext = history.slice(i + 1); 
         
         if (pastContext.length < 20) break;
 
-        // On recalcule les indicateurs clés pour le contexte passé
         const regularity = calculateRegularity(pastContext);
         const gravityField = calculateGravityField(pastContext);
         
-        // Pour chaque numéro gagnant du tirage cible, on regarde quels algos l'auraient favorisé
         targetDraw.gagnants.forEach(winner => {
             const reg = regularity.find(r => r.number === winner);
             
-            // 1. Frequency Performance
             const freq = pastContext.slice(0, 20).filter(h => h.gagnants.includes(winner)).length;
             if (freq >= 3) scoresSum.frequency = (scoresSum.frequency || 0) + 1;
 
-            // 2. Gap Performance
             if (reg && reg.currentGap >= 8 && reg.currentGap <= 18) {
                 scoresSum.gap = (scoresSum.gap || 0) + 1;
             }
 
-            // 3. Spatial/Gravity Performance
             if ((gravityField[winner] || 0) > 1.5) {
                 scoresSum.spatial = (scoresSum.spatial || 0) + 1;
             }
 
-            // 4. Markov Performance (Simulation simplifiée)
             if (pastContext.length > 0) {
-                const lastWinners = pastContext[0].gagnants;
-                // Si le gagnant actuel était un "ami" fréquent des précédents
-                // (Ici on simplifie en checkant juste s'il est sorti récemment, 
-                // une vraie implémentation Markov serait plus lourde)
                 if (pastContext.slice(0,5).some(d => d.gagnants.includes(winner))) {
                      scoresSum.markov = (scoresSum.markov || 0) + 1;
                 }
             }
             
-            // 5. Poisson Performance (Saut logique)
             const lambda = (freq / 20) * 18; 
             const poissonP = calculatePoissonProbability(lambda, reg?.currentGap || 0);
             if (poissonP > 60) scoresSum.poisson = (scoresSum.poisson || 0) + 1;
             
-            // 6. Resistance / Support
             const resScore = calculateTechnicalResistance(winner, pastContext);
             if (resScore > 50) scoresSum.resistance = (scoresSum.resistance || 0) + 1;
         });
     }
 
-    // Normalisation
     const totalScore = Object.values(scoresSum).reduce((a, b) => a + (b || 0), 0);
-    const optimizedWeights = { ...getDefaultWeights() }; // Start with defaults to keep minor weights
+    const optimizedWeights = { ...getDefaultWeights() }; 
     
     if (totalScore > 0) {
         keys.forEach(k => {
             const raw = scoresSum[k] || 0;
-            // Mélange : 40% poids par défaut + 60% performance historique
-            // Cela évite l'overfitting sur un petit échantillon
             const historicalWeight = raw / totalScore;
             optimizedWeights[k] = (optimizedWeights[k]! * 0.4) + (historicalWeight * 0.6);
         });
     }
     
-    // Renormalisation finale à 1.0
-    const finalTotal = Object.values(optimizedWeights).reduce((a, b) => a + (b || 0), 0);
-    keys.forEach(k => {
-        optimizedWeights[k] = parseFloat(((optimizedWeights[k]! / finalTotal)).toFixed(4));
-    });
-
-    return optimizedWeights;
+    return normalizeWeights(optimizedWeights);
 };
 
 // Fonction Sigmoid pour la normalisation non-linéaire des scores
@@ -237,7 +246,8 @@ export const generateMasterPrediction = async (
     if (history.length < 5) throw new Error("Profondeur de données insuffisante.");
 
     const volatility = calculateVolatility(history);
-    const { weights: dynamicWeights, regimeLabel } = adjustWeightsToRegime(weights, history);
+    // Ajustement contextuel complet (Draw Name + Hurst)
+    const { weights: dynamicWeights, regimeLabel } = adjustWeightsToRegime(drawName, weights, history);
     weights = dynamicWeights;
 
     const regularity = calculateRegularity(history);
@@ -263,10 +273,19 @@ export const generateMasterPrediction = async (
         
         const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 500);
         const currentGap = reg?.currentGap || 0;
+        const avgGap = reg?.avgGap || 15;
         
         // Gap Scoring amélioré avec pénalité sur les gaps extrêmes (> 40)
         let gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
-        if (currentGap > 60) gapScore = 5; // Pénalité "Froid polaire"
+        if (currentGap > 60) gapScore = 5; 
+
+        // Gap Velocity : Accélération du gap par rapport à la moyenne
+        // Si (currentGap / avgGap) est proche de 1, la vélocité est haute (sortie imminente)
+        const gapRatio = avgGap > 0 ? currentGap / avgGap : 0;
+        let gapVelocity = 0;
+        if (gapRatio >= 0.8 && gapRatio <= 1.2) gapVelocity = 100; // Zone critique parfaite
+        else if (gapRatio > 1.2) gapVelocity = Math.max(0, 100 - (gapRatio - 1.2) * 50); // Retard
+        else gapVelocity = gapRatio * 80; // Trop tôt
 
         const specScore = spec?.energy || 0;
         const markovScore = Math.min(100, (transitions[num] || 0) * 10);
@@ -274,7 +293,6 @@ export const generateMasterPrediction = async (
         const waveletScore = calculateWaveletEnergy(signal);
         const resistScore = calculateTechnicalResistance(num, history);
         
-        // Lambda estimé par moyenne locale (50 derniers tirages)
         const localFreq = history.slice(0, 50).filter(h => h.gagnants.includes(num)).length;
         const lambda = (localFreq / 50) * (90/5); 
         const poissonVal = calculatePoissonProbability(lambda, currentGap);
@@ -290,7 +308,8 @@ export const generateMasterPrediction = async (
             fractal: frac?.hurst ? frac.hurst * 100 : 50,
             wavelet: waveletScore,
             resistance: resistScore,
-            poisson: poissonVal
+            poisson: poissonVal,
+            gap_velocity: gapVelocity // Nouveau paramètre
         };
 
         breakdown[num] = nBreakdown;
@@ -301,7 +320,7 @@ export const generateMasterPrediction = async (
             rawScore += val * (weight as number);
         });
 
-        // Boost non-linéaire pour les candidats très forts
+        // Boost non-linéaire
         const finalScore = sigmoid(rawScore) * 100;
 
         return { num, score: finalScore };
@@ -312,13 +331,11 @@ export const generateMasterPrediction = async (
     const zScore = calculatePredictionZScore(suggested);
     const isOutlier = Math.abs(zScore) > 2.5;
 
-    // Calcul de la confiance
     const topScoreAvg = (sorted[0].score + sorted[1].score + sorted[2].score) / 3;
     let baseConfidence = Math.min(99, Math.round(topScoreAvg));
     if (integrity.score < 80) baseConfidence *= 0.8;
     if (volatility.score > 70) baseConfidence *= 0.9;
 
-    // Détection de "Dizaines Manquantes" pour le texte d'analyse
     const decades = suggested.map(n => Math.floor(n/10));
     const missingDecades = [0,1,2,3,4,5,6,7,8].filter(d => !decades.includes(d));
     const missingText = missingDecades.length > 4 ? `Zones vides: ${missingDecades.slice(0,3).join(',')}` : 'Répartition homogène';
@@ -335,62 +352,6 @@ export const generateMasterPrediction = async (
     };
 };
 
-const applyBayesianTrendCorrection = (weights: AlgoWeights, history: DrawResult[]): AlgoWeights => {
-    if (history.length < 5) return weights;
-    const newWeights = { ...weights };
-    const winningNumbers = history[0].gagnants;
-    const intersection = history.slice(1)[0]?.gagnants.filter(n => winningNumbers.includes(n)).length || 0;
-    
-    if (intersection >= 2) {
-        newWeights.markov = Math.min(0.25, (newWeights.markov || 0) * 1.2);
-        newWeights.leader_succession = Math.min(0.1, (newWeights.leader_succession || 0) * 1.2);
-    }
-    
-    const spread = Math.max(...winningNumbers) - Math.min(...winningNumbers);
-    if (spread > 80) {
-        newWeights.spatial = Math.min(0.15, (newWeights.spatial || 0) * 1.15);
-    }
-    return newWeights;
-};
-
-export const getStrategyName = (weights: AlgoWeights): string => {
-    const keys = Object.entries(weights).sort((a, b) => (b[1] as number) - (a[1] as number));
-    const top = keys[0][0];
-    if (top === 'spectral') return "Résonance FFT";
-    if (top === 'wavelet') return "Ondelette Pulse";
-    if (top === 'frequency') return "Hot-Spot Scanner";
-    if (top === 'gap') return "Pression Sniper";
-    if (top === 'markov') return "Markov Chain Flow";
-    if (top === 'ai_intuition') return "Chaos Oracle";
-    if (top === 'poisson') return "Poisson Distribution";
-    return "Consensus Platinum";
-};
-
-export const analyzeTicketStrength = async (nums: number[], drawName: string): Promise<TicketAnalysisResult> => {
-    const ac = calculateACValue(nums);
-    const sum = nums.reduce((a,b) => a+b, 0);
-    
-    let score = 50;
-    const warnings = [];
-
-    if (ac < 7) { score -= 15; warnings.push("Complexité Arithmétique faible (Pattern trop simple)."); }
-    if (sum < 150 || sum > 300) { score -= 10; warnings.push("Somme hors-zone gaussienne idéale."); }
-    
-    const even = nums.filter(n => n % 2 === 0).length;
-    if (even === 0 || even === 5) { score -= 10; warnings.push("Déséquilibre Pair/Impair total."); }
-
-    const sorted = [...nums].sort((a,b)=>a-b);
-    let consecutive = 0;
-    for(let i=0; i<sorted.length-1; i++) if(sorted[i+1] === sorted[i]+1) consecutive++;
-    if (consecutive > 2) { score -= 20; warnings.push("Trop de suites consécutives."); }
-    
-    return {
-        score: Math.max(0, Math.min(100, score + (ac * 5))),
-        verdict: score > 75 ? "Structure Élite" : score > 50 ? "Configuration Viable" : "Risque Élevé",
-        warnings
-    };
-};
-
 export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: AdaptiveRules, report: ForensicReport) => {
     const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     const proximity = report.matches.filter(m => ['Voisin', 'Miroir'].includes(m.errorType)).length;
@@ -398,12 +359,20 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
     const newWeights = { ...weights };
     const reasoning = [];
 
+    // Détection de cycles binaires extrêmes (pour Monday Special et autres volatils)
+    // Si on a raté à cause d'un saut brutal, on augmente la vélocité
+    const velocityMiss = report.missedOpportunities.length > 3;
+
     if (hits === 0 && proximity > 0) {
         newWeights.orchestration = Math.min(0.2, (newWeights.orchestration || 0) + 0.02);
         newWeights.spatial = Math.min(0.15, (newWeights.spatial || 0) + 0.02);
         reasoning.push("Augmentation du neurone Orchestration (Détection de frôlements)");
     } else if (hits >= 2) {
         reasoning.push("ADN validé. Renforcement des paramètres actuels.");
+    } else if (velocityMiss) {
+        newWeights.gap_velocity = Math.min(0.2, (newWeights.gap_velocity || 0) + 0.03);
+        newWeights.poisson = Math.min(0.2, (newWeights.poisson || 0) + 0.02);
+        reasoning.push("Renforcement Vélocité & Poisson suite à une rupture de cycle.");
     } else {
         const keys = Object.keys(newWeights) as Array<keyof AlgoWeights>;
         const topKey = keys.reduce((a, b) => (newWeights[a] || 0) > (newWeights[b] || 0) ? a : b);
@@ -412,8 +381,57 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
     }
 
     return {
-        newWeights,
+        newWeights: normalizeWeights(newWeights),
         newRules: { ...rules },
         reasoning
     };
+};
+
+/**
+ * Analyse la structure d'un ticket et retourne un score de qualité (0-100)
+ */
+export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {
+    const ac = calculateACValue(numbers);
+    const sum = numbers.reduce((a, b) => a + b, 0);
+    const odd = numbers.filter(n => n % 2 !== 0).length;
+    
+    let score = 50;
+    const warnings: string[] = [];
+
+    // AC Value logic
+    if (ac >= 7) score += 20;
+    else if (ac < 4) { score -= 20; warnings.push("Complexité AC trop faible"); }
+
+    // Sum logic
+    if (sum >= 150 && sum <= 300) score += 10;
+    else { score -= 10; warnings.push("Somme hors zone statistique (150-300)"); }
+
+    // Parity
+    if (odd >= 2 && odd <= 3) score += 10;
+    else warnings.push("Déséquilibre Pair/Impair");
+
+    let verdict = "Standard";
+    if (score >= 80) verdict = "Elite";
+    else if (score >= 60) verdict = "Solide";
+    else if (score < 40) verdict = "Fragile";
+
+    return { score: Math.max(0, Math.min(100, score)), verdict, warnings };
+};
+
+export const getStrategyName = (weights: AlgoWeights): string => {
+    // Simple heuristic to name the strategy based on dominant weights
+    const entries = Object.entries(weights).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+    const top = entries[0];
+    if (!top) return "Standard";
+    
+    switch (top[0]) {
+        case 'spectral': return "Spectral Resonance";
+        case 'gap_velocity': return "Velocity Break";
+        case 'frequency': return "Frequentist";
+        case 'equilibrium': return "Mean Reversion";
+        case 'ai_intuition': return "AI Intuition";
+        case 'fractal': return "Fractal Analysis";
+        case 'spatial': return "Spatial Gravity";
+        default: return "Adaptive Hybrid";
+    }
 };
