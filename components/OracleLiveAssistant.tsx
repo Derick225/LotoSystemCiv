@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { Mic, MicOff, X, RefreshCw, Radio, Activity, Waves, AlertTriangle } from 'lucide-react';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { Mic, MicOff, X, RefreshCw, Radio, Activity, Waves, AlertTriangle, Command } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 
@@ -11,6 +11,7 @@ interface OracleLiveAssistantProps {
 
 interface LiveSession {
     sendRealtimeInput: (data: any) => void;
+    sendToolResponse: (data: any) => void;
     close: () => void;
 }
 
@@ -33,9 +34,24 @@ function encodeAudioToBase64(bytes: Uint8Array): string {
     return btoa(binary);
 }
 
+// Définition des outils que l'IA peut utiliser
+const toolsDef: { functionDeclarations: FunctionDeclaration[] }[] = [{
+    functionDeclarations: [{
+        name: "inspectNumber",
+        description: "Ouvre le panneau d'inspection détaillée (Quantum Inspector) pour un numéro spécifique demandé par l'utilisateur.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                number: { type: Type.NUMBER, description: "Le numéro à analyser (entre 1 et 90)" }
+            },
+            required: ["number"]
+        }
+    }]
+}];
+
 export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { lastPrediction, regime, volatility } = useNexus();
+    const { lastPrediction, regime, volatility, setInspectingNumber } = useNexus();
     
     const [isActive, setIsActive] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
@@ -93,22 +109,21 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     };
 
     const initAudioContexts = async () => {
-        // Output context (24kHz for Gemini)
+        // Output context (24kHz for Gemini Live)
         if (!outputAudioContext.current || outputAudioContext.current.state === 'closed') {
-            if (outputAudioContext.current) await closeAudioContext(outputAudioContext.current);
             outputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ 
                 sampleRate: 24000 
             });
         }
-        if (outputAudioContext.current.state === 'suspended') {
-            await outputAudioContext.current.resume();
-        }
-
+        
         // Input context (16kHz for mic)
         if (!inputAudioContext.current || inputAudioContext.current.state === 'closed') {
-            if (inputAudioContext.current) await closeAudioContext(inputAudioContext.current);
             inputAudioContext.current = new AudioContext({ sampleRate: 16000 });
         }
+
+        // Resume if suspended (browser autoplay policy)
+        if (outputAudioContext.current.state === 'suspended') await outputAudioContext.current.resume();
+        if (inputAudioContext.current.state === 'suspended') await inputAudioContext.current.resume();
     };
 
     const stopAssistant = useCallback(async () => {
@@ -179,10 +194,9 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             setIsSpeaking(true);
 
             source.onended = () => {
-                // Use requestAnimationFrame pour éviter les race conditions
                 requestAnimationFrame(() => {
-                    if (!outputAudioContext.current?.currentTime || 
-                        outputAudioContext.current.currentTime >= nextStartTime.current - 0.1) {
+                    if (!outputAudioContext.current || outputAudioContext.current.state === 'closed') return;
+                    if (outputAudioContext.current.currentTime >= nextStartTime.current - 0.1) {
                         setIsSpeaking(false);
                     }
                 });
@@ -193,29 +207,26 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     };
 
     const setupAudioProcessing = async (stream: MediaStream) => {
-        const inputCtx = inputAudioContext.current!;
+        if (!inputAudioContext.current) return;
+        const inputCtx = inputAudioContext.current;
         
         const source = inputCtx.createMediaStreamSource(stream);
         analyzerNode.current = inputCtx.createAnalyser();
         analyzerNode.current.fftSize = 64;
         source.connect(analyzerNode.current);
 
-        // Utilisation de AudioWorkletNode (moderne) avec fallback ScriptProcessor
-        if (inputCtx.createScriptProcessor) {
-            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
-            scriptProcessor.onaudioprocess = (e) => {
-                processAudioChunk(e.inputBuffer.getChannelData(0));
-            };
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
-        } else {
-            // Fallback pour navigateurs modernes (AudioWorklet requis)
-            console.warn('ScriptProcessor déprécié, implémentez AudioWorklet');
-        }
+        // Fallback ScriptProcessor (AudioWorklet preferred in prod but keeps single-file simplicity here)
+        const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+        scriptProcessor.onaudioprocess = (e) => {
+            if (!isActive) return; // Guard
+            processAudioChunk(e.inputBuffer.getChannelData(0));
+        };
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(inputCtx.destination);
     };
 
     const processAudioChunk = (inputData: Float32Array) => {
-        if (!sessionRef.current) return;
+        if (!sessionRef.current || !isActive) return;
 
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
@@ -230,7 +241,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                 }
             });
         } catch (e) {
-            console.warn('Error sending audio:', e);
+            // Silent catch to avoid spamming console on disconnect
         }
     };
 
@@ -258,11 +269,42 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             for (let i = 0; i < bufferLength; i++) {
                 const h = (dataArray[i] / 255) * canvas.height * 0.8;
                 ctx.fillStyle = isSpeaking ? '#10b981' : '#6366f1';
-                ctx.fillRect(x, canvas.height - h, barWidth, h);
-                x += barWidth + 1;
+                // Rounded bar top
+                ctx.beginPath();
+                ctx.roundRect(x, canvas.height - h, barWidth, h, [4, 4, 0, 0]);
+                ctx.fill();
+                x += barWidth + 2;
             }
         };
         draw();
+    };
+
+    const handleToolCall = async (toolCall: any) => {
+        const responses = [];
+        for (const fc of toolCall.functionCalls) {
+            if (fc.name === 'inspectNumber') {
+                const num = Number(fc.args.number);
+                if (!isNaN(num) && num >= 1 && num <= 90) {
+                    setInspectingNumber(num);
+                    showToast(`Oracle inspecte le ${num}`, "info");
+                    responses.push({
+                        id: fc.id,
+                        name: fc.name,
+                        response: { result: "Inspector opened successfully" }
+                    });
+                } else {
+                    responses.push({
+                        id: fc.id,
+                        name: fc.name,
+                        response: { error: "Invalid number" }
+                    });
+                }
+            }
+        }
+        
+        if (responses.length > 0 && sessionRef.current) {
+            sessionRef.current.sendToolResponse({ functionResponses: responses });
+        }
     };
 
     const startAssistant = async () => {
@@ -275,33 +317,38 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
         setIsConnecting(true);
 
         try {
-            // Get microphone
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     sampleRate: 16000,
                     channelCount: 1,
                     echoCancellation: true,
-                    noiseSuppression: true
+                    noiseSuppression: true,
+                    autoGainControl: true
                 } 
             });
             mediaStreamRef.current = stream;
 
-            // Init audio contexts
             await initAudioContexts();
 
-            // Create AI session
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
             
-            const contextPrompt = `Tu es l'Oracle de LotoPro pour le tirage ${drawName}. 
-                Contexte actuel: Régime ${regime?.regime || 'Inconnu'}, Volatilité ${volatility?.score || 0}%.
-                Prédiction IA: ${lastPrediction?.suggestedNumbers?.join(', ') || 'Non disponible'}.
-                Réponds de manière technique, mystérieuse et concise.`;
+            // Context injection
+            const contextPrompt = `Tu es l'Oracle de LotoPro.
+                Tirage cible : ${drawName}.
+                Régime actuel : ${regime?.regime || 'Inconnu'} (Hurst: ${regime?.hurst.toFixed(2) || '?'}).
+                Volatilité : ${volatility?.score || 0}%.
+                Prédiction IA : ${lastPrediction?.suggestedNumbers?.join(', ') || 'Non disponible'}.
+                
+                Rôle: Expert en dynamique stochastique. Tu es mystérieux, précis et professionnel.
+                Si l'utilisateur demande d'analyser ou de voir un numéro, utilise l'outil 'inspectNumber'.
+                Réponds de manière concise.`;
 
-            // Utilisation de gemini-2.0-flash-exp pour le Live API : Le plus standard et ouvert
+            // Utilisation du modèle Live dédié
             const session = await ai.live.connect({
-                model: 'gemini-2.0-flash-exp', 
+                model: 'gemini-2.5-flash-native-audio-preview-12-2025', 
                 config: {
                     responseModalities: [Modality.AUDIO],
+                    tools: toolsDef,
                     speechConfig: { 
                         voiceConfig: { 
                             prebuiltVoiceConfig: { voiceName: 'Zephyr' } 
@@ -313,12 +360,13 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                     onopen: () => {
                         setIsActive(true);
                         setIsConnecting(false);
-                        
-                        // Setup audio processing
                         setupAudioProcessing(stream);
                         startVisualizer();
                     },
                     onmessage: (msg: LiveServerMessage) => {
+                        if (msg.toolCall) {
+                            handleToolCall(msg.toolCall);
+                        }
                         const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
                         if (audio) {
                             playAudioChunk(audio);
@@ -329,7 +377,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                     },
                     onerror: (e) => {
                         console.error('Session error:', e);
-                        showToast("Signal instable avec l'Oracle.", "error");
+                        showToast("Signal perdu avec l'Oracle.", "error");
                         stopAssistant();
                     }
                 }
@@ -341,11 +389,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             console.error('Start assistant error:', e);
             showToast("Microphone inaccessible ou erreur API.", "error");
             setIsConnecting(false);
-            // Cleanup on error
-            if (mediaStreamRef.current) {
-                mediaStreamRef.current.getTracks().forEach(track => track.stop());
-                mediaStreamRef.current = null;
-            }
+            stopAssistant();
         }
     };
 
@@ -367,7 +411,13 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                         </button>
                     </div>
                     
-                    <div className="h-24 bg-black/40 rounded-3xl overflow-hidden border border-white/5 flex items-center justify-center p-2">
+                    <div className="h-24 bg-black/40 rounded-3xl overflow-hidden border border-white/5 flex items-center justify-center p-2 relative">
+                        {/* Status Overlay */}
+                        <div className="absolute top-3 left-4 flex gap-1">
+                            <div className={`w-1.5 h-1.5 rounded-full ${isSpeaking ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`}></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-slate-700"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-slate-700"></div>
+                        </div>
                         <canvas ref={canvasRef} className="w-full h-full" />
                     </div>
                     
@@ -376,15 +426,18 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                             <Waves 
                                 size={14} 
                                 className={isSpeaking 
-                                    ? "text-indigo-400 animate-pulse" 
+                                    ? "text-emerald-400 animate-pulse" 
                                     : "text-slate-600"
                                 } 
                             />
-                            <span className="text-[9px] font-bold text-slate-500 uppercase">
+                            <span className={`text-[9px] font-bold uppercase transition-colors ${isSpeaking ? 'text-emerald-400' : 'text-slate-500'}`}>
                                 {isSpeaking ? 'Transmission...' : 'Écoute active'}
                             </span>
                         </div>
-                        <Activity size={16} className="text-slate-600" />
+                        <div className="flex items-center gap-2 text-indigo-400/50">
+                            <Command size={12} />
+                            <span className="text-[8px] font-black">CMD ACTIVE</span>
+                        </div>
                     </div>
                 </div>
             )}
@@ -398,8 +451,8 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                         : isConnecting 
                         ? 'bg-slate-700 animate-pulse' 
                         : isActive 
-                        ? 'bg-rose-600 hover:bg-rose-500 animate-pulse-slow' 
-                        : 'bg-indigo-600 hover:bg-indigo-500'
+                        ? 'bg-rose-600 hover:bg-rose-500 animate-pulse-slow shadow-rose-900/50' 
+                        : 'bg-indigo-600 hover:bg-indigo-500 hover:scale-105'
                 }`}
                 title={!hasApiKey ? "Configuration API Requise" : isActive ? "Arrêter l'Oracle" : "Oracle Vocal"}
             >
