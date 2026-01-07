@@ -17,9 +17,11 @@ serve(async (req) => {
   try {
     const { task, drawName, history, metrics, report } = await req.json();
 
-    const apiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("API_KEY");
+    // Standardisation : On utilise API_KEY partout (comme dans vision-ocr)
+    const apiKey = Deno.env.get("API_KEY");
+    
     if (!apiKey) {
-      throw new Error("Clé API GEMINI manquante dans les secrets Supabase.");
+      throw new Error("Clé API GEMINI (API_KEY) manquante dans les secrets Supabase.");
     }
 
     const genAI = new GoogleGenAI({ apiKey });

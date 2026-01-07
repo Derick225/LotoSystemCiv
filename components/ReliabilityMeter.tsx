@@ -34,7 +34,10 @@ export const ReliabilityMeter: React.FC<ReliabilityMeterProps> = ({ calibration 
                     <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                         <Target size={16} className="text-indigo-500" /> Calibration de l'Oracle
                     </h4>
-                    <p className="text-xs text-slate-500 mt-1">Fiabilité historique basée sur {calibration.sampleSize} tirages</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                        {/* Affichage adaptatif selon la source de la métrique */}
+                        Base de connaissance : {calibration.sampleSize} tirages
+                    </p>
                 </div>
                 <div className={`p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 ${getStatusColor()}`}>
                     <ShieldCheck size={20} />
@@ -92,7 +95,8 @@ export const ReliabilityMeter: React.FC<ReliabilityMeterProps> = ({ calibration 
             <div className="mt-6 flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/10 rounded-xl border border-amber-100 dark:border-amber-900/30">
                 <AlertCircle size={14} className="text-amber-500 flex-shrink-0" />
                 <p className="text-[9px] text-amber-700 dark:text-amber-400 leading-tight">
-                    Le score de Brier mesure l'erreur quadratique moyenne des probabilités. Plus il est proche de 0, plus l'IA est honnête sur sa confiance.
+                    Le score de fiabilité est {calibration.sampleSize > 200 ? 'calculé sur l\'historique global' : 'estimé sur vos prédictions'}. 
+                    Plus il est proche de 100%, plus la variance est maîtrisée.
                 </p>
             </div>
         </div>

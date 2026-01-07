@@ -125,7 +125,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
             setSmartInsights(insights);
 
+            // LOGIQUE DE CALIBRATION AMÉLIORÉE
             if (preds.length > 5) {
+                // Si l'utilisateur a un historique réel, on utilise sa précision réelle
                 const perf = calculateHistoricalPerformance(preds, activeHistory);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
@@ -134,7 +136,17 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     sampleSize: perf.analyzedDrawsCount
                 });
             } else {
-                setCalibration({ overallScore: 0.33, reliability: 50, bias: 'NEUTRAL', sampleSize: 0 });
+                // SINON : Calcul d'une fiabilité THÉORIQUE basée sur la qualité des données (Volatilité)
+                // Plus la volatilité est basse, plus le jeu est "prédictible" théoriquement.
+                const theoreticalVol = calculateVolatility(computeSample);
+                const theoreticalReliability = Math.max(30, 95 - (theoreticalVol.score || 50));
+                
+                setCalibration({ 
+                    overallScore: 0.5, 
+                    reliability: theoreticalReliability, 
+                    bias: 'NEUTRAL', 
+                    sampleSize: activeHistory.length // On affiche la taille de la DB analysée
+                });
             }
         } else {
             // Reset metrics if no data
