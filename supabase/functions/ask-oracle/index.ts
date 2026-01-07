@@ -24,25 +24,28 @@ serve(async (req) => {
 
     const genAI = new GoogleGenAI({ apiKey });
     let resultData;
-    const modelName = "gemini-1.5-flash"; 
+    const modelName = "gemini-3-flash-preview"; 
 
     if (task === "analyze") {
       const prompt = `
-        Rôle : Tu es le "Nexus Quant Architect", une IA de niveau Doctorat experte en dynamique stochastique et théorie du chaos appliquée aux séries temporelles de loterie (5/90).
-        Ta mission : Déconstruire la structure du tirage "${drawName}" pour identifier les biais mécaniques ou statistiques invisibles.
+        Rôle : Tu es le "Nexus Quant Architect", une IA de niveau Doctorat experte en dynamique stochastique et théorie du chaos (Loterie 5/90).
         
+        PRINCIPE FONDAMENTAL : 
+        Tu sais que la foule joue les "Favoris" (Hot Numbers). Ton intelligence supérieure réside dans la détection des "Cygnes Noirs" : les numéros délaissés ou en rupture de séquence qui DOIVENT sortir pour rétablir l'équilibre entropique (Mean Reversion).
+        Ne te laisse pas aveugler par la fréquence simple. Cherche la tension invisible.
+
         Contexte Technique :
         - Tirage : ${drawName}
-        - Métriques Avancées : Hurst=${metrics?.hurst || "?"}, Entropie=${metrics?.entropy || "?"}.
+        - Métriques : Hurst=${metrics?.hurst || "?"} (Si < 0.5, privilégie le rebond/contre-tendance), Entropie=${metrics?.entropy || "?"}.
         
         Données d'entrée (Séquence Récente): 
         ${JSON.stringify(history.slice(0, 25))}
         
         Instructions :
-        1. Analyse la "Signature Temporelle" : Identifie si le régime est Persistant (Tendance) ou Anti-Persistant (Rebond).
+        1. Identifie la "Tension du Vide" : Quels numéros ou zones sont anormalement silencieux ?
         2. Détecte les "Vecteurs de Rupture" : Numéros qui brisent la linéarité actuelle.
-        3. Propose 5 "Vecteurs Cibles" (Numéros) basés sur une convergence algorithmique stricte.
-        4. Évalue ton "Intuition Score" (0-100) basé sur la clarté du signal.
+        3. Propose 5 "Vecteurs Cibles" basés sur une convergence entre Structure (Favoris) et Chaos (Surprises).
+        4. Évalue ton "Intuition Score" basé sur la clarté du signal de rupture.
       `;
 
       const response = await genAI.models.generateContent({
@@ -53,11 +56,11 @@ serve(async (req) => {
             responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                    logicalAnalysis: { type: Type.STRING, description: "Analyse technique détaillée style 'Quant Hedge Fund'." },
-                    patternType: { type: Type.STRING, description: "Nom du pattern identifié (ex: 'Fibonacci Retracement', 'Poisson Decay')." },
-                    nextSequence: { type: Type.STRING, description: "Description brève de la séquence attendue." },
+                    logicalAnalysis: { type: Type.STRING, description: "Analyse technique pointue justifiant le choix de numéros 'oubliés' ou stratégiques." },
+                    patternType: { type: Type.STRING, description: "Type de configuration (ex: 'Rebond Technique', 'Correction de Biais', 'Harmonique Inverse')." },
+                    nextSequence: { type: Type.STRING, description: "Description de la texture attendue du tirage." },
                     anomalies: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    strategicAdvice: { type: Type.STRING, description: "Conseil de mise (Kelly, Martingale, Flat)." },
+                    strategicAdvice: { type: Type.STRING, description: "Conseil de gestion du risque (ex: 'Couvrir les écarts', 'Jouer les miroirs')." },
                     suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER } },
                     intuitionScore: { type: Type.NUMBER }
                 },
@@ -70,10 +73,11 @@ serve(async (req) => {
     } else if (task === "narrative") {
       const prompt = `
         Rédige un "Flash Report" exécutif pour le tirage ${drawName}.
-        Métriques contextuelles : ${JSON.stringify(metrics)}.
-        Historique récent : ${JSON.stringify(history)}.
-        Ton : Analyste Financier Senior. Vocabulaire : "Liquidité", "Volatilité", "Support", "Résistance", "Correction Technique".
-        Objectif : Donner confiance au joueur avec une rationalisation pseudo-scientifique robuste.
+        Métriques : ${JSON.stringify(metrics)}.
+        Historique : ${JSON.stringify(history)}.
+        
+        Consigne : Adopte un ton d'Analyste Contrarien. Rappelle que les performances passées (favoris) ne garantissent pas les sorties futures. Mets en garde contre le suivi aveugle de la foule.
+        Vocabulaire : "Saturation", "Correction", "Liquidité", "Point de rupture".
       `;
 
       const response = await genAI.models.generateContent({
@@ -98,8 +102,8 @@ serve(async (req) => {
     } else if (task === "simulation-audit") {
         const prompt = `
             Analyse ce rapport de backtesting (Monte Carlo) : ${JSON.stringify(report)}.
-            Critique le risque de ruine (Bankruptcy) et le Drawdown.
-            Donne un avis tranché : Est-ce une stratégie viable ou suicidaire ?
+            Critique la stratégie utilisée. Est-elle trop exposée aux numéros favoris ? A-t-elle su capter les écarts ?
+            Donne un avis tranché : Viable ou Suicidaire ?
         `;
         const response = await genAI.models.generateContent({
             model: modelName,
@@ -118,7 +122,6 @@ serve(async (req) => {
         resultData = JSON.parse(response.text || '{}');
         
     } else if (task === "vision-analysis") {
-        // Placeholder for future vision tasks
         resultData = { analysis: "Module Vision non activé sur ce endpoint." };
     } else {
       throw new Error(`Tâche inconnue : ${task}`);

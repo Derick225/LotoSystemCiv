@@ -29,8 +29,9 @@ const LABELS: Record<string, string> = {
     gap_velocity: 'Vélocité',
     poisson: 'Poisson',
     leader_succession: 'Succession',
-    wavelet: 'Ondelette', // NOUVEAU
-    resistance: 'Résistance' // NOUVEAU
+    wavelet: 'Ondelette',
+    resistance: 'Résistance',
+    anti_consensus: 'Anti-Favori' // NOUVEAU
 };
 
 const CustomTooltip = ({ active, payload, label }: any) => {

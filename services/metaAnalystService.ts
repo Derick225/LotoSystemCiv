@@ -17,7 +17,8 @@ const STRATEGY_PROFILES = [
     { name: 'Chaos-Theory', focus: 'gap_velocity' as keyof ScoreBreakdown, baseWeight: 2.2, type: 'chaos', desc: 'Capture des ruptures de tendance (Vélocité)' },
     { name: 'Sigma-Mean', focus: 'equilibrium' as keyof ScoreBreakdown, baseWeight: 1.5, type: 'stability', desc: 'Retour à la moyenne (Mean Reversion)' },
     { name: 'Gamma-Moment', focus: 'momentum' as keyof ScoreBreakdown, baseWeight: 1.6, type: 'stability', desc: 'Accélération des flux courts (Inertie)' },
-    { name: 'Omega-Shadow', focus: 'ai_intuition' as keyof ScoreBreakdown, baseWeight: 1.9, type: 'chaos', desc: 'Shadow Oracle (Signaux Faibles & Anti-Consensus)' }
+    { name: 'Omega-Shadow', focus: 'ai_intuition' as keyof ScoreBreakdown, baseWeight: 1.9, type: 'chaos', desc: 'Shadow Oracle (Signaux Faibles & Anti-Consensus)' },
+    { name: 'Black-Swan', focus: 'anti_consensus' as keyof ScoreBreakdown, baseWeight: 2.5, type: 'chaos', desc: 'Ciblage des anomalies froides (Contre-tendance majeure)' } // NOUVEAU
 ];
 
 /**

@@ -28,6 +28,7 @@ export interface AlgoWeights {
     gap_velocity: number;
     poisson: number;
     leader_succession: number;
+    anti_consensus: number; // NOUVEAU: Stratégie Contre-Intuitive (Black Swan)
 }
 
 export interface SubscriptionState {

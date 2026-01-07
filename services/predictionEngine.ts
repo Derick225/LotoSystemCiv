@@ -20,9 +20,10 @@ export const getDefaultWeights = (): AlgoWeights => ({
     temporal: 0.03,
     ai_intuition: 0.01,
     digital_root: 0.01,
-    gap_velocity: 0.05, // Augmenté par défaut
+    gap_velocity: 0.05,
     poisson: 0.05, 
-    leader_succession: 0.01
+    leader_succession: 0.01,
+    anti_consensus: 0.05 // NOUVEAU : Poids Contre-Intuitif
 });
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -84,7 +85,6 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 
 /**
  * Applique des ajustements spécifiques basés sur le NOM du tirage et ses tendances connues.
- * C'est ici que l'on code la "personnalité" de chaque jeu.
  */
 const applyDrawSpecificTuning = (drawName: string, weights: AlgoWeights): AlgoWeights => {
     const tuned = { ...weights };
@@ -94,7 +94,8 @@ const applyDrawSpecificTuning = (drawName: string, weights: AlgoWeights): AlgoWe
     if (name.includes('MONDAY') || name.includes('SPECIAL')) {
         tuned.gap_velocity = Math.max(0.15, (tuned.gap_velocity || 0) * 2.0);
         tuned.poisson = Math.max(0.12, (tuned.poisson || 0) * 1.5);
-        tuned.equilibrium = (tuned.equilibrium || 0) * 0.5; // Moins de retour à la moyenne
+        tuned.equilibrium = (tuned.equilibrium || 0) * 0.5; 
+        tuned.anti_consensus = (tuned.anti_consensus || 0) * 1.5; // Favorise les surprises
     }
     // National / Diamant : Tirages très "Mathématiques" et stables
     else if (name.includes('NATIONAL') || name.includes('DIAMANT')) {
@@ -105,6 +106,7 @@ const applyDrawSpecificTuning = (drawName: string, weights: AlgoWeights): AlgoWe
     else if (name.includes('BONANZA')) {
         tuned.ai_intuition = Math.max(0.15, (tuned.ai_intuition || 0) * 2.0);
         tuned.spatial = Math.max(0.15, (tuned.spatial || 0) * 1.5);
+        tuned.anti_consensus = Math.max(0.15, (tuned.anti_consensus || 0) * 2.5); // Chaos maximum
     }
 
     return normalizeWeights(tuned);
@@ -152,11 +154,13 @@ const adjustWeightsToRegime = (drawName: string, baseWeights: AlgoWeights, histo
         adjusted.gap = (adjusted.gap || 0) * 1.4;
         adjusted.wavelet = (adjusted.wavelet || 0) * 1.5; 
         adjusted.momentum = (adjusted.momentum || 0) * 0.6;
+        adjusted.anti_consensus = (adjusted.anti_consensus || 0) * 1.4; // En retour à la moyenne, les favoris chutent
     } else {
         label = "Chaos (Aléatoire)";
         adjusted.spatial = (adjusted.spatial || 0) * 1.5;
         adjusted.resistance = (adjusted.resistance || 0) * 1.4; 
         adjusted.poisson = (adjusted.poisson || 0) * 1.8;
+        adjusted.anti_consensus = (adjusted.anti_consensus || 0) * 2.0; // En chaos, les favoris sont imprévisibles
     }
 
     return { weights: normalizeWeights(adjusted), regimeLabel: label };
@@ -188,6 +192,10 @@ export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
             
             const freq = pastContext.slice(0, 20).filter(h => h.gagnants.includes(winner)).length;
             if (freq >= 3) scoresSum.frequency = (scoresSum.frequency || 0) + 1;
+
+            // Détection si c'était un "Anti-Favori" (0 sortie récente sur 12 tirages)
+            const recFreq = pastContext.slice(0, 12).filter(h => h.gagnants.includes(winner)).length;
+            if (recFreq === 0) scoresSum.anti_consensus = (scoresSum.anti_consensus || 0) + 1;
 
             if (reg && reg.currentGap >= 8 && reg.currentGap <= 18) {
                 scoresSum.gap = (scoresSum.gap || 0) + 1;
@@ -275,17 +283,24 @@ export const generateMasterPrediction = async (
         const currentGap = reg?.currentGap || 0;
         const avgGap = reg?.avgGap || 15;
         
-        // Gap Scoring amélioré avec pénalité sur les gaps extrêmes (> 40)
         let gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
         if (currentGap > 60) gapScore = 5; 
 
-        // Gap Velocity : Accélération du gap par rapport à la moyenne
-        // Si (currentGap / avgGap) est proche de 1, la vélocité est haute (sortie imminente)
+        // Anti-Consensus Scoring : "Pas toujours les favoris"
+        // Si le numéro est très fréquent récemment (top favori), on le pénalise dans ce score.
+        // Si le numéro est "caché" (froid récemment) mais pas mort, on le valorise.
+        const recentFreq = history.slice(0, 12).filter(h => h.gagnants.includes(num)).length;
+        let antiConsensusScore = 0;
+        if (recentFreq === 0) antiConsensusScore = 100; // Froid sur 12 tours = Potentiel surprise
+        else if (recentFreq === 1) antiConsensusScore = 60;
+        else if (recentFreq === 2) antiConsensusScore = 30;
+        else antiConsensusScore = 0; // Trop chaud = 0 point pour l'anti-consensus
+
         const gapRatio = avgGap > 0 ? currentGap / avgGap : 0;
         let gapVelocity = 0;
-        if (gapRatio >= 0.8 && gapRatio <= 1.2) gapVelocity = 100; // Zone critique parfaite
-        else if (gapRatio > 1.2) gapVelocity = Math.max(0, 100 - (gapRatio - 1.2) * 50); // Retard
-        else gapVelocity = gapRatio * 80; // Trop tôt
+        if (gapRatio >= 0.8 && gapRatio <= 1.2) gapVelocity = 100; 
+        else if (gapRatio > 1.2) gapVelocity = Math.max(0, 100 - (gapRatio - 1.2) * 50); 
+        else gapVelocity = gapRatio * 80; 
 
         const specScore = spec?.energy || 0;
         const markovScore = Math.min(100, (transitions[num] || 0) * 10);
@@ -309,7 +324,8 @@ export const generateMasterPrediction = async (
             wavelet: waveletScore,
             resistance: resistScore,
             poisson: poissonVal,
-            gap_velocity: gapVelocity // Nouveau paramètre
+            gap_velocity: gapVelocity,
+            anti_consensus: antiConsensusScore // Injection du score Anti-Favori
         };
 
         breakdown[num] = nBreakdown;
@@ -320,7 +336,6 @@ export const generateMasterPrediction = async (
             rawScore += val * (weight as number);
         });
 
-        // Boost non-linéaire
         const finalScore = sigmoid(rawScore) * 100;
 
         return { num, score: finalScore };
@@ -359,8 +374,6 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
     const newWeights = { ...weights };
     const reasoning = [];
 
-    // Détection de cycles binaires extrêmes (pour Monday Special et autres volatils)
-    // Si on a raté à cause d'un saut brutal, on augmente la vélocité
     const velocityMiss = report.missedOpportunities.length > 3;
 
     if (hits === 0 && proximity > 0) {
@@ -374,10 +387,10 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
         newWeights.poisson = Math.min(0.2, (newWeights.poisson || 0) + 0.02);
         reasoning.push("Renforcement Vélocité & Poisson suite à une rupture de cycle.");
     } else {
-        const keys = Object.keys(newWeights) as Array<keyof AlgoWeights>;
-        const topKey = keys.reduce((a, b) => (newWeights[a] || 0) > (newWeights[b] || 0) ? a : b);
-        newWeights[topKey] = Math.max(0.05, (newWeights[topKey] || 0) * 0.9);
-        reasoning.push(`Diminution du poids dominant (${topKey}) suite à divergence.`);
+        // Echec majeur : Peut-être un tirage "Surprise" (Anti-Consensus)
+        newWeights.anti_consensus = Math.min(0.3, (newWeights.anti_consensus || 0) + 0.05);
+        newWeights.frequency = Math.max(0.05, (newWeights.frequency || 0) * 0.8);
+        reasoning.push("Echec du Consensus. Bascule vers stratégie Anti-Favori (Black Swan).");
     }
 
     return {
@@ -432,6 +445,7 @@ export const getStrategyName = (weights: AlgoWeights): string => {
         case 'ai_intuition': return "AI Intuition";
         case 'fractal': return "Fractal Analysis";
         case 'spatial': return "Spatial Gravity";
+        case 'anti_consensus': return "Contrarian (Black Swan)"; // NOUVEAU
         default: return "Adaptive Hybrid";
     }
 };

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { DrawResult, PythonAnalysisResult } from "../types";
 
@@ -16,7 +17,7 @@ export const runDeepPythonAnalysis = async (drawName: string, history: DrawResul
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-1.5-flash', 
+            model: 'gemini-3-flash-preview', 
             contents: `Tu es un Senior Quant Analyst. Dataset: ${JSON.stringify(dataset)}. Implémente un modèle VAR ou Random Forest en Python pour le tirage ${drawName}.`,
             config: {
                 systemInstruction: "Tu es le Nexus Python Kernel. Réponds UNIQUEMENT avec un JSON pur. Pas de balises markdown, pas de texte avant ou après.",
