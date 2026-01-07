@@ -4,6 +4,7 @@
   "short_name": "NexusPro",
   "id": "lotopro-platinum-v11",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#020617",
   "theme_color": "#0f172a",

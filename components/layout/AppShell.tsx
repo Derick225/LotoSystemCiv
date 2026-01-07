@@ -1,6 +1,6 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff } from 'lucide-react';
+import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff, Share2 } from 'lucide-react';
 import { useIsFetching } from '@tanstack/react-query';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
@@ -67,6 +67,37 @@ export const AppShell: React.FC<AppShellProps> = ({
   const handleNav = (mode: ViewMode) => {
       audioEngine.play('click');
       setViewMode(mode);
+  };
+
+  const handleShare = async () => {
+    audioEngine.play('click');
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'NexusPro Platinum',
+          text: 'Découvrez l\'Oracle de prédiction stochastique LotoPro Nexus.',
+          url: window.location.href,
+        });
+        audioEngine.play('success');
+      } catch (error) {
+        console.log('Partage annulé ou erreur', error);
+      }
+    } else {
+      // Fallback: Copy link
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        // Simple visual feedback since we don't have direct access to toast here
+        const btn = document.getElementById('share-btn');
+        if (btn) {
+            const originalColor = btn.style.color;
+            btn.style.color = '#10b981'; // Green
+            setTimeout(() => { btn.style.color = originalColor; }, 1000);
+        }
+        audioEngine.play('success');
+      } catch (e) {
+        audioEngine.play('error');
+      }
+    }
   };
 
   return (
@@ -161,6 +192,16 @@ export const AppShell: React.FC<AppShellProps> = ({
                             <span className="text-[8px] font-mono text-slate-400 uppercase tracking-tighter">Flux: {isFetching > 0 ? 'Busy' : 'Live'}</span>
                         </div>
                     </div>
+
+                    {/* SHARE BUTTON */}
+                    <button 
+                      id="share-btn"
+                      onClick={handleShare}
+                      className="p-3 md:p-3.5 bg-white/5 rounded-2xl text-slate-400 hover:text-white border border-white/10 active:scale-90 transition-all"
+                      title="Partager l'application"
+                    >
+                        <Share2 size={18} />
+                    </button>
 
                     <button 
                       onClick={() => { audioEngine.play('click'); setShowWallet(!showWallet); }}
