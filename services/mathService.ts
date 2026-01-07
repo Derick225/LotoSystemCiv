@@ -40,15 +40,66 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
+/**
+ * CALCULE LA TENDANCE DES ÉCARTS (LA "MUSIQUE")
+ * Analyse si le jeu accélère (écarts qui se réduisent) ou ralentit (écarts qui grandissent).
+ */
+export const calculateGapTrend = (history: DrawResult[]): { trend: 'ACCELERATING' | 'DECELERATING' | 'STABLE', velocity: number, avgGapHistory: number[] } => {
+    const SAMPLE_SIZE = Math.min(history.length, 12); // Analyse sur 12 tirages
+    if (SAMPLE_SIZE < 5) return { trend: 'STABLE', velocity: 0, avgGapHistory: [] };
+
+    const gapHistorySeries: number[] = [];
+
+    // Pour chaque tirage historique, on calcule l'écart moyen des numéros gagnants À CE MOMENT LÀ
+    for (let i = 0; i < SAMPLE_SIZE; i++) {
+        const currentDraw = history[i];
+        const pastDraws = history.slice(i + 1);
+        
+        let sumGaps = 0;
+        currentDraw.gagnants.forEach(n => {
+            let gap = 0;
+            // On cherche la dernière sortie avant ce tirage
+            for (const past of pastDraws) {
+                if (past.gagnants.includes(n)) break;
+                gap++;
+            }
+            sumGaps += gap;
+        });
+        
+        // Moyenne des écarts pour ce tirage
+        gapHistorySeries.push(sumGaps / 5);
+    }
+
+    // gapHistorySeries[0] est le plus récent.
+    // On veut voir l'évolution du passé vers le présent (donc on reverse pour le calcul de pente)
+    const chronological = [...gapHistorySeries].reverse();
+    
+    // Calcul de la pente (Régression linéaire simple sur les 5 derniers points)
+    const recent = chronological.slice(-5);
+    let slope = 0;
+    if (recent.length >= 2) {
+        const xMean = (recent.length - 1) / 2;
+        const yMean = recent.reduce((a, b) => a + b, 0) / recent.length;
+        let num = 0;
+        let den = 0;
+        recent.forEach((y, x) => {
+            num += (x - xMean) * (y - yMean);
+            den += Math.pow(x - xMean, 2);
+        });
+        slope = den !== 0 ? num / den : 0;
+    }
+
+    let trend: 'ACCELERATING' | 'DECELERATING' | 'STABLE' = 'STABLE';
+    if (slope < -0.5) trend = 'ACCELERATING'; // Les écarts diminuent (ça chauffe)
+    else if (slope > 0.5) trend = 'DECELERATING'; // Les écarts augmentent (ça refroidit)
+
+    return { trend, velocity: slope, avgGapHistory: chronological };
+};
+
 // --- NOUVEAU: Modèle de Pression de Poisson (Optimisé v2) ---
 // Gère la "Surchauffe" (Burstiness) et la "Décroissance" (Decay) pour éviter le biais du joueur
 export const calculatePoissonProbability = (lambda: number, k: number): number => {
     if (lambda <= 0) return 0;
-    
-    // Probabilité classique de Poisson pour k événements (ici k = gap actuel)
-    // P(X >= k) = 1 - CDF(k) approximé ici par l'exponentielle cumulative inverse pour le temps d'attente
-    // Plus le gap (k) est grand par rapport à la moyenne (lambda), plus la "pression" monte...
-    // JUSQU'A UN CERTAIN POINT où l'on considère le numéro "mort" ou "hors cycle".
     
     const ratio = k / lambda;
     let score = 0;

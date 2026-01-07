@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
@@ -125,6 +125,35 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
 };
 
 /**
+ * Moteur Harmonique : Ajuste les poids selon la "Musique" (Vélocité des écarts)
+ */
+const adjustWeightsToGapTrend = (weights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, trendLabel: string } => {
+    const analysis = calculateGapTrend(history);
+    const adjusted = { ...weights };
+    let label = "Stable (Neutre)";
+
+    if (analysis.trend === 'ACCELERATING') {
+        label = "Accelerando (Compression)";
+        // Le jeu accélère : il faut jouer les numéros chauds
+        adjusted.frequency = (adjusted.frequency || 0) * 1.6;
+        adjusted.momentum = (adjusted.momentum || 0) * 1.5;
+        adjusted.markov = (adjusted.markov || 0) * 1.3;
+        adjusted.gap = (adjusted.gap || 0) * 0.5; // On réduit l'importance des écarts froids
+        adjusted.resistance = (adjusted.resistance || 0) * 0.6;
+    } else if (analysis.trend === 'DECELERATING') {
+        label = "Rallentando (Expansion)";
+        // Le jeu ralentit : les écarts s'agrandissent, chercher les numéros froids
+        adjusted.gap = (adjusted.gap || 0) * 1.7;
+        adjusted.resistance = (adjusted.resistance || 0) * 1.5;
+        adjusted.anti_consensus = (adjusted.anti_consensus || 0) * 1.4;
+        adjusted.frequency = (adjusted.frequency || 0) * 0.6;
+        adjusted.momentum = (adjusted.momentum || 0) * 0.5;
+    }
+
+    return { weights: normalizeWeights(adjusted), trendLabel: label };
+};
+
+/**
  * Calibre dynamiquement les poids en fonction du Régime Fractal (Hurst) ET du tirage.
  */
 const adjustWeightsToRegime = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, regimeLabel: string } => {
@@ -163,7 +192,13 @@ const adjustWeightsToRegime = (drawName: string, baseWeights: AlgoWeights, histo
         adjusted.anti_consensus = (adjusted.anti_consensus || 0) * 2.0; // En chaos, les favoris sont imprévisibles
     }
 
-    return { weights: normalizeWeights(adjusted), regimeLabel: label };
+    // 3. Ajustement Harmonique (Musique des écarts)
+    const gapAnalysis = adjustWeightsToGapTrend(adjusted, history);
+    adjusted = gapAnalysis.weights;
+    // On combine les labels pour le rapport
+    const combinedLabel = `${label} / ${gapAnalysis.trendLabel}`;
+
+    return { weights: normalizeWeights(adjusted), regimeLabel: combinedLabel };
 };
 
 /**
@@ -254,7 +289,7 @@ export const generateMasterPrediction = async (
     if (history.length < 5) throw new Error("Profondeur de données insuffisante.");
 
     const volatility = calculateVolatility(history);
-    // Ajustement contextuel complet (Draw Name + Hurst)
+    // Ajustement contextuel complet (Draw Name + Hurst + Gap Trend)
     const { weights: dynamicWeights, regimeLabel } = adjustWeightsToRegime(drawName, weights, history);
     weights = dynamicWeights;
 
@@ -262,6 +297,7 @@ export const generateMasterPrediction = async (
     const spectralMap = extraMetrics?.spectral || [];
     const fractalMap = extraMetrics?.fractal || [];
     const gravityField = calculateGravityField(history);
+    const gapTrend = calculateGapTrend(history); // Pour l'analyse individuelle
     
     const transitions: Record<number, number> = {};
     const lastWinners = history[0].gagnants;
@@ -285,6 +321,18 @@ export const generateMasterPrediction = async (
         
         let gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
         if (currentGap > 60) gapScore = 5; 
+
+        // Modulation Harmonique Individuelle
+        // Si le jeu accélère (Gap Trend Neg), on favorise les petits écarts
+        if (gapTrend.trend === 'ACCELERATING') {
+            if (currentGap < 10) gapScore += 40;
+            else if (currentGap > 20) gapScore -= 30;
+        } 
+        // Si le jeu ralentit (Gap Trend Pos), on favorise les gros écarts
+        else if (gapTrend.trend === 'DECELERATING') {
+            if (currentGap > 20) gapScore += 40;
+            else if (currentGap < 5) gapScore -= 20;
+        }
 
         // Anti-Consensus Scoring : "Pas toujours les favoris"
         // Si le numéro est très fréquent récemment (top favori), on le pénalise dans ce score.
