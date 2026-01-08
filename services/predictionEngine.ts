@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend, mathService, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
@@ -142,8 +142,32 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
         reportParts.push("Forte Inertie -> Boost Succession");
     }
 
-    // 3. Signature Spectrale (Est-ce que le jeu est cyclique ?)
-    // Simulation simple : on regarde si les numéros reviennent par cycle
+    // 3. Signature Spectrale & Vélocité Réelle
+    // Calcul de la puissance harmonique moyenne
+    const spectralMap = mathService.calculateSpectral(history.slice(0, 50));
+    const avgEnergy = spectralMap.reduce((acc, s) => acc + s.energy, 0) / (spectralMap.length || 1);
+    
+    if (avgEnergy > 45) {
+        tuned.spectral = (tuned.spectral || 0.10) * 1.6;
+        tuned.wavelet = (tuned.wavelet || 0.10) * 1.4;
+        reportParts.push("Résonance Harmonique -> Boost Spectral");
+    }
+
+    // Analyse de la vélocité des écarts
+    const gapTrend = calculateGapTrend(history);
+    if (gapTrend.trend === 'ACCELERATING') {
+        tuned.gap_velocity = (tuned.gap_velocity || 0.05) * 2.0;
+        tuned.gap = (tuned.gap || 0.10) * 0.8; // On joue l'accélération, pas l'écart brut
+        reportParts.push("Compression des Écarts -> Boost Vélocité");
+    }
+
+    // 4. Entropie pour Intuition IA
+    const entropy = calculateShannonEntropy(history.slice(0, 50));
+    if (entropy.normalized > 0.92) {
+        // Système très aléatoire, on fait confiance à l'intuition IA (Pattern recognition profond)
+        tuned.ai_intuition = (tuned.ai_intuition || 0.01) * 3.0;
+        reportParts.push("Entropie Max -> Boost Intuition IA");
+    }
     
     return { 
         weights: normalizeWeights(tuned), 
@@ -185,8 +209,8 @@ export const generateMasterPrediction = async (
     // 2. Calcul des Indicateurs Techniques (Scope: Ce tirage uniquement)
     const volatility = calculateVolatility(history);
     const regularity = calculateRegularity(history);
-    const spectralMap = extraMetrics?.spectral || [];
-    const fractalMap = extraMetrics?.fractal || [];
+    const spectralMap = extraMetrics?.spectral || mathService.calculateSpectral(history.slice(0, 100));
+    const fractalMap = extraMetrics?.fractal || mathService.calculateFractal(history.slice(0, 100));
     const gravityField = calculateGravityField(history);
     const gapTrend = calculateGapTrend(history); 
     
@@ -251,7 +275,7 @@ export const generateMasterPrediction = async (
             wavelet: waveletScore,
             resistance: resistScore,
             poisson: poissonVal,
-            gap_velocity: 50, // Placeholder
+            gap_velocity: gapTrend.trend !== 'STABLE' ? 80 : 40,
             anti_consensus: antiConsensusScore
         };
 
@@ -294,7 +318,11 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
 
     if (hits === 0) {
         newWeights.anti_consensus = Math.min(0.3, (newWeights.anti_consensus || 0) + 0.05);
-        reasoning.push("Renforcement Anti-Consensus suite échec total.");
+        newWeights.equilibrium = Math.min(0.3, (newWeights.equilibrium || 0) + 0.05);
+        reasoning.push("Renforcement Anti-Consensus & Équilibre suite échec total.");
+    } else if (hits >= 3) {
+        // Renforcement positif : on augmente légèrement les poids dominants
+        reasoning.push("Succès partiel : Stabilisation des poids actuels.");
     }
     
     return {
@@ -334,6 +362,8 @@ export const getStrategyName = (weights: AlgoWeights): string => {
         case 'anti_consensus': return "Contre-Intuitive";
         case 'fractal': return "Fractale";
         case 'markov': return "Markovienne";
+        case 'gap_velocity': return "Vélocité d'Écart";
+        case 'ai_intuition': return "Intuition Deep";
         default: return "Adaptive " + top[0];
     }
 };

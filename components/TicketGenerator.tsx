@@ -20,13 +20,24 @@ type Strategy = 'safe' | 'balanced' | 'audacious' | 'chaos';
 
 export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbers, candidates, drawName = 'Unknown' }) => {
     const { showToast } = useToast();
-    const { history, stats, gaps } = useNexus(); // Accès aux données brutes pour les calculs
+    const { history, stats, gaps, spectral } = useNexus(); // Accès aux données spectrales
     
     const [strategy, setStrategy] = useState<Strategy>('balanced');
     const [ticket, setTicket] = useState<number[]>([]);
     const [audit, setAudit] = useState<TicketAnalysisResult | null>(null);
     const [isAuditing, setIsAuditing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
+
+    // Fonction de sélection pondérée (Roulette Wheel Selection)
+    const selectWeighted = (pool: {n: number, w: number}[]) => {
+        const totalWeight = pool.reduce((acc, item) => acc + item.w, 0);
+        let random = Math.random() * totalWeight;
+        for (const item of pool) {
+            random -= item.w;
+            if (random <= 0) return item.n;
+        }
+        return pool[0].n; // Fallback
+    };
 
     const generateTicket = async () => {
         setIsGenerating(true);
@@ -40,14 +51,10 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
             
             // --- STRATEGIE BALANCED : IA + Fréquence (King Numbers) ---
             else if (strategy === 'balanced') {
-                // 3 numéros de l'IA
                 suggestedNumbers.slice(0, 3).forEach(n => selection.add(n));
-                
-                // 2 numéros les plus fréquents (Hot)
                 const hotNumbers = stats.slice(0, 10).map(s => s.number);
                 const availableHot = hotNumbers.filter(n => !selection.has(n));
                 
-                // On ajoute aléatoirement parmi les hot restants
                 while (selection.size < 5 && availableHot.length > 0) {
                     const idx = Math.floor(Math.random() * availableHot.length);
                     selection.add(availableHot[idx]);
@@ -57,17 +64,13 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
             
             // --- STRATEGIE AUDACIOUS : Orchestration (Patterns T-1) ---
             else if (strategy === 'audacious') {
-                // Analyse en temps réel des patterns
                 const orchestration = await getFullOrchestrationAnalysis(drawName, history);
                 const patternCandidates = orchestration.topCandidates.map(c => c.number);
-                
-                // 2 numéros de l'IA (Base)
                 suggestedNumbers.slice(0, 2).forEach(n => selection.add(n));
                 
-                // 3 numéros issus de l'analyse structurelle (Voisins, Miroirs, Suites)
                 const availablePatterns = patternCandidates.filter(n => !selection.has(n));
                 while (selection.size < 5 && availablePatterns.length > 0) {
-                    const idx = Math.floor(Math.random() * Math.min(5, availablePatterns.length)); // Top 5 patterns
+                    const idx = Math.floor(Math.random() * Math.min(5, availablePatterns.length)); 
                     selection.add(availablePatterns[idx]);
                     availablePatterns.splice(idx, 1);
                 }
@@ -75,10 +78,7 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
             
             // --- STRATEGIE CHAOS : Contre-Tendance (Gaps Critiques) ---
             else if (strategy === 'chaos') {
-                // On cherche les numéros avec le plus grand retard (Cold numbers)
                 const coldNumbers = [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15).map(g => g.number);
-                
-                // On mélange les numéros froids pour ne pas toujours prendre le top 1
                 while (selection.size < 5 && coldNumbers.length > 0) {
                     const idx = Math.floor(Math.random() * coldNumbers.length);
                     selection.add(coldNumbers[idx]);
@@ -86,16 +86,30 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
                 }
             }
 
-            // Fallback : Remplissage si stratégie incomplète
-            while (selection.size < 5) {
-                const rnd = Math.floor(Math.random() * 90) + 1;
-                selection.add(rnd);
+            // REMPLISSAGE INTELLIGENT (SMART FILL)
+            // Au lieu du random, on utilise l'énergie spectrale pour boucher les trous
+            if (selection.size < 5) {
+                // Création d'un pool pondéré par l'énergie spectrale
+                const weightedPool = Array.from({length: 90}, (_, i) => i + 1)
+                    .filter(n => !selection.has(n))
+                    .map(n => {
+                        const spec = spectral.find(s => s.number === n);
+                        // Poids minimal de 5 pour laisser une chance à tous
+                        return { n, w: spec ? spec.energy + 5 : 10 };
+                    });
+
+                while (selection.size < 5) {
+                    const pick = selectWeighted(weightedPool);
+                    selection.add(pick);
+                    // On retire le numéro du pool pour ne pas le reprendre
+                    const idx = weightedPool.findIndex(i => i.n === pick);
+                    if (idx !== -1) weightedPool.splice(idx, 1);
+                }
             }
 
             const finalTicket = Array.from(selection).sort((a,b) => a-b);
             setTicket(finalTicket);
             
-            // Audit immédiat du ticket généré
             if (drawName !== 'Unknown') {
                 setIsAuditing(true);
                 const auditResult = await analyzeTicketStrength(finalTicket, drawName);
@@ -198,7 +212,6 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
                             </button>
                         </div>
                         
-                        {/* X-Ray Visual Analysis */}
                         <div className="w-full mt-4">
                             <TicketXRay numbers={ticket} score={audit?.score || 0} showTitle={false} />
                         </div>

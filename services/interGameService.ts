@@ -1,6 +1,6 @@
 
-import { ALL_DRAWS } from '../constants';
 import { fetchResults } from './lotteryService';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { DrawResult } from '../types';
 
 export interface InterGameHeat {
@@ -12,7 +12,7 @@ export interface InterGameHeat {
 
 /**
  * Analyse si les résultats d'un jeu influencent mathématiquement le suivant (Translocation).
- * Recherche le tirage précédent (chronologique) sur l'ensemble des jeux disponibles.
+ * VERSION OPTIMISÉE : Utilise une requête globale au lieu de N requêtes unitaires.
  */
 export const analyzeMigrationFlux = async (targetDrawName: string): Promise<InterGameHeat | null> => {
     // 1. Récupération de l'historique cible
@@ -20,43 +20,58 @@ export const analyzeMigrationFlux = async (targetDrawName: string): Promise<Inte
     if (!targetHist || targetHist.length === 0) return null;
 
     const latestDraw = targetHist[0];
-    const targetDate = new Date(latestDraw.date.split('/').reverse().join('-')); // Format YYYY-MM-DD supposé après parsing
+    // Parsing robuste de la date
+    let targetDate: Date;
+    if (latestDraw.date.includes('/')) {
+        const [d, m, y] = latestDraw.date.split('/').map(Number);
+        targetDate = new Date(y, m - 1, d);
+    } else {
+        targetDate = new Date(latestDraw.date);
+    }
 
-    // 2. Identification du tirage précédent (tous jeux confondus)
-    // On doit charger les résultats récents de TOUS les jeux pour trouver celui juste avant
-    // Optimisation : On ne cherche que dans les jeux du même jour ou de la veille
+    // 2. Récupération optimisée du marché global (500 derniers tirages tous jeux confondus)
+    // Cela remplace les 30+ appels individuels
+    let allMarketDraws: any[] = [];
     
+    if (isSupabaseConfigured()) {
+        const { data } = await supabase
+            .from('draw_results')
+            .select('draw_name, date, gagnants')
+            .neq('draw_name', targetDrawName) // On exclut le jeu cible
+            .order('date', { ascending: false })
+            .limit(300);
+        
+        allMarketDraws = data || [];
+    } else {
+        // Fallback Local (Moins précis mais fonctionnel hors ligne)
+        // On ne peut pas scanner tout le localstorage efficacement, on retourne null
+        return null; 
+    }
+
     let bestPreviousDraw: { name: string, result: DrawResult, diff: number } | null = null;
 
-    // Liste des jeux potentiels (excluant le jeu cible)
-    const otherGames = ALL_DRAWS.filter(d => d.name !== targetDrawName);
+    for (const entry of allMarketDraws) {
+        // Parsing date
+        const dStr = entry.date;
+        let cDate: Date;
+        if (dStr.includes('/')) {
+            const [d, m, y] = dStr.split('/').map(Number);
+            cDate = new Date(y, m - 1, d);
+        } else {
+            cDate = new Date(dStr);
+        }
 
-    // On charge en parallèle les derniers résultats des autres jeux (limité à 1 pour perf)
-    const promises = otherGames.map(game => 
-        fetchResults(game.name).then(res => ({ name: game.name, history: res.data }))
-    );
-
-    const allGamesHistory = await Promise.all(promises);
-
-    for (const gameData of allGamesHistory) {
-        if (!gameData.history || gameData.history.length === 0) continue;
-        
-        const candidate = gameData.history[0];
-        // Parsing date format (DD/MM/YYYY)
-        const parts = candidate.date.split('/');
-        const cDate = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
-        
-        // Ajout de l'heure approximative pour le tri fin (basé sur DRAW_SCHEDULE)
-        // C'est une approximation heuristique suffisante
+        // Calcul du delta temps
         const diff = targetDate.getTime() - cDate.getTime();
 
-        // On cherche le tirage le plus proche dans le passé (positif mais petit)
-        // Tolérance : doit être avant (diff > 0) et moins de 48h (172800000ms)
+        // On cherche le tirage le plus proche dans le passé immédiat ( < 48h )
+        // diff > 0 signifie que cDate est AVANT targetDate
         if (diff > 0 && diff < 172800000) {
+            // Si on a plusieurs tirages le même jour, on prend le plus proche (logique simplifiée ici)
             if (!bestPreviousDraw || diff < bestPreviousDraw.diff) {
                 bestPreviousDraw = {
-                    name: gameData.name,
-                    result: candidate,
+                    name: entry.draw_name,
+                    result: { ...entry, id: 'temp', machine: [], version: 1 }, // Reconstruction type DrawResult
                     diff: diff
                 };
             }
@@ -77,7 +92,7 @@ export const analyzeMigrationFlux = async (targetDrawName: string): Promise<Inte
         if (latestDraw.gagnants.includes(src + 1) || latestDraw.gagnants.includes(src - 1)) pressureScore += 25; // Voisin
     });
 
-    const correlationFactor = Math.min(100, pressureScore / 5 * 20); // Normalisation arbitraire
+    const correlationFactor = Math.min(100, Math.round(pressureScore / 5 * 20)); // Normalisation arbitraire
 
     return {
         sourceGame: bestPreviousDraw.name,

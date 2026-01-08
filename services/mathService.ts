@@ -2,6 +2,17 @@
 import { DrawResult, SpectralMetric, FractalMetric, NumberRegularity, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, EntropyMetric, ChiSquareMetric, ClusterPoint } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
+// --- SEEDABLE PRNG (Deterministic) ---
+// Linear Congruential Generator simple pour assurer que runEchoStateNetwork donne le même résultat pour la même série
+class SeededRandom {
+    private seed: number;
+    constructor(seed: number) { this.seed = seed; }
+    next() {
+        this.seed = (this.seed * 9301 + 49297) % 233280;
+        return this.seed / 233280;
+    }
+}
+
 // Helper Worker Wrapper
 const runWorkerTask = async (task: string, history: DrawResult[], payload?: any): Promise<any> => {
     if (typeof Worker === 'undefined') return null; // SSR safety
@@ -32,7 +43,6 @@ export const calculateACValue = (numbers: number[]): number => {
       diffs.add(Math.abs(sorted[j] - sorted[i]));
     }
   }
-  // AC Value = Nombre de différences uniques - (Taille du tirage - 1)
   return Math.max(0, diffs.size - (numbers.length - 1));
 };
 
@@ -40,17 +50,12 @@ export const calculateDigitalRoot = (n: number): number => {
     return (n - 1) % 9 + 1;
 };
 
-/**
- * CALCULE LA TENDANCE DES ÉCARTS (LA "MUSIQUE")
- * Analyse si le jeu accélère (écarts qui se réduisent) ou ralentit (écarts qui grandissent).
- */
 export const calculateGapTrend = (history: DrawResult[]): { trend: 'ACCELERATING' | 'DECELERATING' | 'STABLE', velocity: number, avgGapHistory: number[] } => {
-    const SAMPLE_SIZE = Math.min(history.length, 12); // Analyse sur 12 tirages
+    const SAMPLE_SIZE = Math.min(history.length, 12);
     if (SAMPLE_SIZE < 5) return { trend: 'STABLE', velocity: 0, avgGapHistory: [] };
 
     const gapHistorySeries: number[] = [];
 
-    // Pour chaque tirage historique, on calcule l'écart moyen des numéros gagnants À CE MOMENT LÀ
     for (let i = 0; i < SAMPLE_SIZE; i++) {
         const currentDraw = history[i];
         const pastDraws = history.slice(i + 1);
@@ -58,7 +63,6 @@ export const calculateGapTrend = (history: DrawResult[]): { trend: 'ACCELERATING
         let sumGaps = 0;
         currentDraw.gagnants.forEach(n => {
             let gap = 0;
-            // On cherche la dernière sortie avant ce tirage
             for (const past of pastDraws) {
                 if (past.gagnants.includes(n)) break;
                 gap++;
@@ -66,22 +70,16 @@ export const calculateGapTrend = (history: DrawResult[]): { trend: 'ACCELERATING
             sumGaps += gap;
         });
         
-        // Moyenne des écarts pour ce tirage
         gapHistorySeries.push(sumGaps / 5);
     }
 
-    // gapHistorySeries[0] est le plus récent.
-    // On veut voir l'évolution du passé vers le présent (donc on reverse pour le calcul de pente)
     const chronological = [...gapHistorySeries].reverse();
-    
-    // Calcul de la pente (Régression linéaire simple sur les 5 derniers points)
     const recent = chronological.slice(-5);
     let slope = 0;
     if (recent.length >= 2) {
         const xMean = (recent.length - 1) / 2;
         const yMean = recent.reduce((a, b) => a + b, 0) / recent.length;
-        let num = 0;
-        let den = 0;
+        let num = 0, den = 0;
         recent.forEach((y, x) => {
             num += (x - xMean) * (y - yMean);
             den += Math.pow(x - xMean, 2);
@@ -90,50 +88,49 @@ export const calculateGapTrend = (history: DrawResult[]): { trend: 'ACCELERATING
     }
 
     let trend: 'ACCELERATING' | 'DECELERATING' | 'STABLE' = 'STABLE';
-    if (slope < -0.5) trend = 'ACCELERATING'; // Les écarts diminuent (ça chauffe)
-    else if (slope > 0.5) trend = 'DECELERATING'; // Les écarts augmentent (ça refroidit)
+    if (slope < -0.5) trend = 'ACCELERATING';
+    else if (slope > 0.5) trend = 'DECELERATING';
 
     return { trend, velocity: slope, avgGapHistory: chronological };
 };
 
-// --- NOUVEAU: Modèle de Pression de Poisson (Optimisé v2) ---
-// Gère la "Surchauffe" (Burstiness) et la "Décroissance" (Decay) pour éviter le biais du joueur
 export const calculatePoissonProbability = (lambda: number, k: number): number => {
     if (lambda <= 0) return 0;
-    
     const ratio = k / lambda;
     let score = 0;
-
-    if (ratio < 0.5) {
-        // Trop tôt : Le numéro vient de sortir
-        score = 10 + (ratio * 20); 
-    } else if (ratio >= 0.5 && ratio <= 2.5) {
-        // Zone Idéale : Cycle naturel de retour
-        score = 30 + ((ratio - 0.5) * 35); // Monte jusqu'à 100
-    } else if (ratio > 2.5 && ratio <= 4.0) {
-        // Zone Critique : Retard important
-        score = 100 - ((ratio - 2.5) * 20); // Redescend doucement
-    } else {
-        // Zone "Trou Noir" : Anomalie statistique, probabilité de blocage machine
-        score = Math.max(5, 70 * Math.exp(-(ratio - 4))); 
-    }
-
+    if (ratio < 0.5) score = 10 + (ratio * 20); 
+    else if (ratio >= 0.5 && ratio <= 2.5) score = 30 + ((ratio - 0.5) * 35);
+    else if (ratio > 2.5 && ratio <= 4.0) score = 100 - ((ratio - 2.5) * 20);
+    else score = Math.max(5, 70 * Math.exp(-(ratio - 4))); 
     return Math.round(Math.max(0, Math.min(100, score)));
 };
 
+/**
+ * Echo State Network (ESN) Déterministe
+ * Utilise un PRNG seedé pour garantir que la prédiction est stable pour une même entrée.
+ */
 export const runEchoStateNetwork = (signal: number[]): number => {
     if (signal.length < 20) return 0;
+    
+    // Seed basé sur le contenu du signal pour la cohérence
+    const seed = signal.reduce((acc, val, i) => acc + val * (i + 1), 0);
+    const rng = new SeededRandom(seed);
+
     const reservoirSize = 20;
     const spectralRadius = 0.95;
     const leakage = 0.3;
     const trainLen = signal.length - 1;
+    
+    // Initialisation déterministe des poids
     const W = Array.from({length: reservoirSize}, () => 
-        Array.from({length: reservoirSize}, () => (Math.random() - 0.5))
+        Array.from({length: reservoirSize}, () => (rng.next() - 0.5))
     );
-    const Win = Array.from({length: reservoirSize}, () => (Math.random() - 0.5) * 2.0);
+    const Win = Array.from({length: reservoirSize}, () => (rng.next() - 0.5) * 2.0);
+    
     let x = new Array(reservoirSize).fill(0);
     const X_states: number[][] = []; 
     const Y_target: number[] = [];
+    
     for (let t = 0; t < trainLen; t++) {
         const u = signal[t];
         const newX = new Array(reservoirSize).fill(0);
@@ -148,6 +145,7 @@ export const runEchoStateNetwork = (signal: number[]): number => {
         X_states.push([...x, 1]); 
         Y_target.push(signal[t+1]);
     }
+    
     const W_out = new Array(reservoirSize + 1).fill(0);
     for (let i = 0; i <= reservoirSize; i++) {
         let num = 0, den = 0;
@@ -157,6 +155,7 @@ export const runEchoStateNetwork = (signal: number[]): number => {
         }
         W_out[i] = den !== 0 ? num / (den + 0.01) : 0;
     }
+    
     const u_last = signal[signal.length - 1];
     const nextX = new Array(reservoirSize).fill(0);
     for (let i = 0; i < reservoirSize; i++) {
@@ -166,9 +165,11 @@ export const runEchoStateNetwork = (signal: number[]): number => {
         }
         nextX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u_last);
     }
+    
     let prediction = 0;
     for (let i = 0; i < reservoirSize; i++) prediction += W_out[i] * nextX[i];
     prediction += W_out[reservoirSize]; 
+    
     return Math.max(0, Math.min(100, prediction * 100));
 };
 
