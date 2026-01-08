@@ -7,12 +7,11 @@ import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { OraclePerformance } from '../OraclePerformance'; 
 import { OracleAnalyticsDashboard } from '../OracleAnalyticsDashboard'; 
-import { PredictionForensics } from '../PredictionForensics';
 import { ReliabilityMeter } from '../ReliabilityMeter';
 import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
-import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface PredictionTabProps { drawName: string; }
@@ -28,7 +27,6 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   
   const [computingIA, setComputingIA] = useState(false);
   const [strategyMode, setStrategyMode] = useState<string>('Standard');
-  const [lastAuditReport, setLastAuditReport] = useState<any | null>(null);
   
   const isMounted = useRef(true);
 
@@ -47,26 +45,24 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
     }
     
     setComputingIA(true);
-    showToast("Activation des neurones adaptatifs...", "info");
+    showToast(`Analyse contextuelle pour ${drawName}...`, "info");
 
-    // Utilisation de startTransition pour ne pas bloquer l'UI pendant le calcul lourd
     startTransition(async () => {
         try {
-          // APPEL RÉEL AU MOTEUR D'INFÉRENCE
+          // L'inférence utilise désormais l'historique spécifique pour l'auto-calibrage
           const res = await generateMasterPrediction(
               drawName, 
               history, 
-              globalWeights, 
+              undefined, // On laisse l'auto-calibrage déterminer les poids si nécessaire
               { spectral, fractal, velocity, cliques }
           );
 
           if (isMounted.current) {
               setLastPrediction(res);
-              // SAUVEGARDE RÉELLE DANS L'HISTORIQUE
               await savePredictionToHistory(drawName, res);
               
               setStrategyMode(getStrategyName(res.usedWeights || globalWeights)); 
-              showToast("Inférence terminée. Calibration automatique appliquée.", "success");
+              showToast("Inférence terminée. ADN spécifique appliqué.", "success");
           }
         } catch (e: any) {
           console.error("IA Collision:", e);
@@ -98,7 +94,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           </div>
           <div className="text-center">
             <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest">Calcul Neural Adaptatif</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Calibration des poids selon H={regime?.hurst.toFixed(2) || '...'}...</p>
+            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Décodage de la signature {drawName}...</p>
           </div>
       </div>
   );
@@ -134,7 +130,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                         {getRegimeIcon()}
                     </div>
                     <div>
-                        <h3 className="font-black text-slate-400 text-[9px] uppercase tracking-widest">Régime de Marché</h3>
+                        <h3 className="font-black text-slate-400 text-[9px] uppercase tracking-widest">Régime {drawName}</h3>
                         <span className="text-xs font-black dark:text-white leading-tight block max-w-[120px]">
                             {regime ? (regime.hurst > 0.6 ? "Tendance Persistante" : regime.hurst < 0.4 ? "Retour Moyenne" : "Chaos") : "Analyse..."}
                         </span>
@@ -149,19 +145,23 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                         {risk.icon}
                     </div>
                     <div>
-                        <h3 className="font-black text-slate-500 text-[9px] uppercase tracking-widest">Niveau de Risque</h3>
+                        <h3 className="font-black text-slate-500 text-[9px] uppercase tracking-widest">Volatilité Locale</h3>
                         <span className={`text-xs font-black leading-tight block ${risk.color}`}>{risk.label} ({volatility?.score || 0}%)</span>
                     </div>
                 </div>
             </div>
 
-            {/* DNA Radar Mini */}
+            {/* DNA Radar Mini - Specific for this draw */}
             <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center">
                 <div className="flex items-center gap-2 mb-2">
-                    <h4 className="text-[8px] font-black text-slate-400 uppercase">ADN Adaptatif</h4>
-                    <span className="text-[7px] font-black bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Dna size={8}/> ACTIF</span>
+                    <h4 className="text-[8px] font-black text-slate-400 uppercase flex items-center gap-1">
+                        <Fingerprint size={10}/> ADN {drawName}
+                    </h4>
                 </div>
                 <AlgoRadar weights={lastPrediction.usedWeights || globalWeights} height={100} />
+                <div className="mt-1 text-[8px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded">
+                    {strategyMode}
+                </div>
             </div>
             
             {/* Calibration Meter */}
@@ -177,13 +177,12 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
                         <ThermometerSun size={14} className={(volatility?.score ?? 0) > 60 ? "text-orange-500" : "text-emerald-400"} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Inférence Dynamique</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">Algorithme : {strategyMode.toUpperCase()}</span>
                     </div>
                     <h2 className="text-5xl md:text-8xl font-black tracking-tighter mb-8 leading-none">Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span></h2>
                     
-                    {/* Analyse Simplifiée pour Lecture Rapide */}
                     <div className="bg-white/5 p-6 rounded-3xl border border-white/5 backdrop-blur-sm mb-8 text-left">
-                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={12}/> Verdict Expert</h5>
+                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={12}/> Verdict Spécifique</h5>
                         <p className="text-slate-300 text-sm italic font-medium leading-relaxed">
                             "{lastPrediction.analysis.replace(/Analyse complétée pour .*?\./, '')}"
                         </p>
@@ -202,7 +201,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 
                 <div className="bg-black/40 backdrop-blur-3xl p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner flex flex-col items-center min-w-[340px] transform hover:scale-[1.02] transition-all duration-500">
                     <span className="text-[11px] uppercase tracking-[0.4em] font-black text-indigo-400 mb-12 flex items-center gap-2">
-                        <Magnet size={14}/> Attracteurs Gravitationnels
+                        <Magnet size={14}/> Attracteurs
                     </span>
                     <div className="flex gap-5">
                         {lastPrediction.suggestedNumbers.slice(0, 5).map((n: number) => (
@@ -224,7 +223,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             <div className="lg:col-span-4">
                 <div className="bg-slate-900 border border-indigo-500/30 p-8 rounded-[3rem] shadow-2xl h-full flex flex-col justify-center items-center text-center">
                     <h4 className="text-white font-black text-lg mb-4">Focus IA</h4>
-                    <p className="text-slate-400 text-xs">Vecteurs à haute convergence.</p>
+                    <p className="text-slate-400 text-xs leading-relaxed px-4">
+                        Ces vecteurs ont été sélectionnés car ils maximisent l'algorithme <strong>{strategyMode}</strong> qui a historiquement 
+                        une bonne performance sur {drawName}.
+                    </p>
                 </div>
             </div>
         </div>
@@ -235,8 +237,6 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
         </div>
         
         <OracleAnalyticsDashboard breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />
-        
-        {lastAuditReport && <PredictionForensics report={lastAuditReport} onClose={() => setLastAuditReport(null)} />}
     </div>
   );
 };

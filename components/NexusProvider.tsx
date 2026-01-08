@@ -39,13 +39,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [hoveredNumber, setHoveredNumber] = useState<number | null>(null);
   
   // Status Flags
-  const [loading, setLoading] = useState(false); // Loading history
-  const [computing, setComputing] = useState(false); // Loading math
+  const [loading, setLoading] = useState(false); 
+  const [computing, setComputing] = useState(false);
   
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
   
-  // High-Level States
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
   const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [cliques, setCliques] = useState<any[]>([]);
@@ -54,7 +53,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Vérification initiale de la connexion
   useEffect(() => {
       const checkConnection = async () => {
           if (!isSupabaseConfigured()) return;
@@ -71,10 +69,18 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     abortControllerRef.current = new AbortController();
 
     setLoading(true);
-    setComputing(true); // On indique que des calculs vont suivre
+    setComputing(true); 
+    
+    // NETTOYAGE PRÉVENTIF : On vide les métriques de l'ancien tirage
+    // Cela garantit l'isolation visuelle et logique immédiate
+    setHistory([]); 
+    setSpectral([]);
+    setFractal([]);
+    setLastPrediction(null);
+    setSmartInsights([]);
 
     try {
-        // 1. Chargement Historique (Prioritaire)
+        // 1. Chargement Historique (Strict Draw Isolation)
         const hist = await lotteryService.fetchHistory(drawName);
         
         if (abortControllerRef.current.signal.aborted) return;
@@ -89,21 +95,19 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setHistory(hist); 
         }
         
-        // Fin du chargement critique (UI débloquée)
         setLoading(false);
 
-        // 2. Chargement Poids (Async)
+        // 2. Chargement Poids Specifiques
         getAlgoWeights(drawName).then(w => {
             if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
         });
 
-        // 3. Calculs HPC (Non-bloquants, en arrière plan)
+        // 3. Calculs HPC (Sur le nouvel historique uniquement)
         const activeHistory = hist.length === 0 ? [] : hist; 
 
         if (activeHistory.length > 0 && drawName !== 'ALL') {
-            const computeSample = activeHistory.slice(0, 500);
+            const computeSample = activeHistory.slice(0, 300); // Optimisation taille échantillon
 
-            // On lance les calculs en parallèle
             const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateFractalMetricsAsync(computeSample),
@@ -125,9 +129,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
             setSmartInsights(insights);
 
-            // LOGIQUE DE CALIBRATION AMÉLIORÉE
             if (preds.length > 5) {
-                // Si l'utilisateur a un historique réel, on utilise sa précision réelle
                 const perf = calculateHistoricalPerformance(preds, activeHistory);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
@@ -136,24 +138,16 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     sampleSize: perf.analyzedDrawsCount
                 });
             } else {
-                // SINON : Calcul d'une fiabilité THÉORIQUE basée sur la qualité des données (Volatilité)
-                // Plus la volatilité est basse, plus le jeu est "prédictible" théoriquement.
                 const theoreticalVol = calculateVolatility(computeSample);
                 const theoreticalReliability = Math.max(30, 95 - (theoreticalVol.score || 50));
-                
                 setCalibration({ 
                     overallScore: 0.5, 
                     reliability: theoreticalReliability, 
                     bias: 'NEUTRAL', 
-                    sampleSize: activeHistory.length // On affiche la taille de la DB analysée
+                    sampleSize: activeHistory.length 
                 });
             }
-        } else {
-            // Reset metrics if no data
-            setSpectral([]); setFractal([]); setRegularity([]); setSmartInsights([]); setCalibration(null);
-        }
-
-        setLastPrediction(null); 
+        } 
 
     } catch (e: any) {
         if (e.name === 'AbortError') return;
@@ -230,8 +224,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setInspectingNumber: (n) => { if(n) audioEngine.play('click'); setInspectingNumber(n); },
     smartInsights,
     globalWeights,
-    updateGlobalWeights: (w: AlgoWeights) => { audioEngine.play('success'); setGlobalWeights(w); saveAlgoWeights(drawName, w); },
-    loading, // Is data loading?
+    updateGlobalWeights: (w: AlgoWeights) => { 
+        audioEngine.play('success'); 
+        setGlobalWeights(w); 
+        import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
+    },
+    loading,
     refresh: () => refreshData(drawName, true),
     refreshData,
     correlationMatrix,
@@ -256,6 +254,3 @@ export const useNexus = () => {
   if (!ctx) throw new Error("NexusProvider manquant.");
   return ctx;
 };
-
-// Circular dependency fix helper
-import { saveAlgoWeights } from '../services/predictionEngine';
