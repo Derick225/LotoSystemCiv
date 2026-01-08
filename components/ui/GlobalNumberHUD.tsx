@@ -1,11 +1,11 @@
 
 import React from 'react';
 import { useNexus } from '../NexusProvider';
-import { Activity, ThermometerSun, History, Zap } from 'lucide-react';
+import { Activity, X } from 'lucide-react';
 import { getNumberColor } from '../../constants';
 
 export const GlobalNumberHUD: React.FC = () => {
-    const { hoveredNumber, stats, gaps, spectral } = useNexus();
+    const { hoveredNumber, setHoveredNumber, stats, gaps, spectral } = useNexus();
 
     if (!hoveredNumber) return null;
 
@@ -26,12 +26,27 @@ export const GlobalNumberHUD: React.FC = () => {
     else if (gap > 25) { status = 'DORMEUR'; statusColor = 'text-indigo-400'; }
     else if (freq > 10) { status = 'FRÉQUENT'; statusColor = 'text-emerald-400'; }
 
+    const handleClose = () => setHoveredNumber(null);
+
     return (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center pointer-events-none px-6 animate-scale-in">
-            <div className="bg-slate-900/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col items-center gap-6 min-w-[280px] max-w-sm w-full relative overflow-hidden">
-                
+        <div 
+            className="fixed inset-0 z-[150] flex items-center justify-center px-6 animate-scale-in bg-black/60 backdrop-blur-sm"
+            onClick={handleClose}
+        >
+            <div 
+                className="bg-slate-900/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col items-center gap-6 min-w-[280px] max-w-sm w-full relative overflow-hidden pointer-events-auto"
+                onClick={(e) => e.stopPropagation()} // Empêche la fermeture au clic sur la carte
+            >
+                {/* Close Button */}
+                <button 
+                    onClick={handleClose}
+                    className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors z-20"
+                >
+                    <X size={18} />
+                </button>
+
                 {/* Background FX */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>
 
                 {/* Boule Visuelle */}
                 <div className={`w-24 h-24 rounded-full flex items-center justify-center font-black text-5xl text-white shadow-2xl ring-4 ring-white/5 ${getNumberColor(hoveredNumber)}`}>

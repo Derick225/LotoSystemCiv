@@ -34,15 +34,15 @@ export const NumberBall: React.FC<NumberBallProps> = ({
       className={`
         ${sizes[size]} ${getNumberColor(number)}
         rounded-full flex items-center justify-center font-black text-white
-        border-2 shadow-2xl transition-all hover:scale-110 cursor-pointer
+        border-2 shadow-2xl transition-all hover:scale-110 cursor-pointer select-none
         ${glow || isAttractor ? 'animate-glow ring-4 ring-indigo-500/50' : ''}
         ${selected ? 'ring-4 ring-white border-white' : ''}
         ${confidence && confidence > 80 ? 'shadow-indigo-500/40' : ''}
       `}
-      onMouseEnter={() => setHoveredNumber(number)}
-      onMouseLeave={() => setHoveredNumber(null)}
-      onTouchStart={() => setHoveredNumber(number)}
-      onTouchEnd={() => setTimeout(() => setHoveredNumber(null), 1000)} // Délai sur mobile pour lecture
+      onClick={(e) => {
+        e.stopPropagation(); // Empêche la propagation pour ne pas fermer immédiatement si imbriqué
+        setHoveredNumber(number);
+      }}
     >
       {number}
       {confidence !== undefined && size !== 'sm' && (

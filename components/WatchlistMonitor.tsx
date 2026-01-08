@@ -4,8 +4,10 @@ import { getWatchlist, removeFromWatchlist } from '../services/userPreferencesSe
 import { getDailySummary } from '../services/lotteryService';
 import { NumberBall } from './NumberBall';
 import { Eye, Bell, X, CheckCircle2, Clock, Zap } from 'lucide-react';
+import { useToast } from './ui/Toast';
 
 export const WatchlistMonitor: React.FC = () => {
+    const { showToast } = useToast();
     const [watchlist, setWatchlist] = useState<number[]>([]);
     const [hits, setHits] = useState<Record<number, { time: string, draw: string }[]>>({});
     const [loading, setLoading] = useState(true);
@@ -45,6 +47,7 @@ export const WatchlistMonitor: React.FC = () => {
 
     const handleRemove = (num: number) => {
         removeFromWatchlist(num);
+        showToast(`Numéro ${num} retiré des favoris.`, "info");
         loadStatus();
     };
 
@@ -77,10 +80,14 @@ export const WatchlistMonitor: React.FC = () => {
                     return (
                         <div key={num} className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-3 group relative ${found ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 shadow-md' : 'bg-gray-50 dark:bg-gray-900/50 border-gray-100 dark:border-gray-700'}`}>
                             <button 
-                                onClick={() => handleRemove(num)}
-                                className="absolute top-1 right-1 text-gray-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemove(num);
+                                }}
+                                className="absolute top-2 right-2 bg-white dark:bg-slate-700 text-slate-400 hover:bg-rose-500 hover:text-white transition-colors p-1.5 rounded-full shadow-sm z-20 border border-slate-200 dark:border-slate-600"
+                                title="Supprimer des favoris"
                             >
-                                <X size={14} />
+                                <X size={12} />
                             </button>
                             
                             <NumberBall number={num} size="md" />

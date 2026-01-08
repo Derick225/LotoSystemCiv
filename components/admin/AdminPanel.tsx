@@ -1,20 +1,19 @@
+
 import React, { useState } from 'react';
 import { ExpertTuningPanel } from './ExpertTuningPanel';
 import { DrawManagement } from './DrawManagement';
 import { TrainingTab } from '../tabs/TrainingTab';
 import { DatabaseControl } from './DatabaseControl';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
-import { Server, BrainCircuit, Activity, Sliders, Database, ShieldCheck } from 'lucide-react';
+import { UserManagement } from './UserManagement';
+import { Server, BrainCircuit, Activity, Sliders, Database, ShieldCheck, Users } from 'lucide-react';
 import { ALL_DRAWS } from '../../constants';
 import { RefreshCw } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'tuning' | 'training' | 'management' | 'database' | 'integrity'>('tuning');
+    const [activeTab, setActiveTab] = useState<'tuning' | 'training' | 'management' | 'users' | 'integrity' | 'database'>('tuning');
     const [selectedDraw, setSelectedDraw] = useState<string>(ALL_DRAWS[0].name);
     
-    // NOTE: L'authentification est maintenant gérée globalement par App.tsx
-    // Ce composant n'est rendu que si l'utilisateur est Admin.
-
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             <header className="sticky top-[80px] z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-6 rounded-b-[3rem] shadow-xl border-x border-b border-indigo-100 dark:border-indigo-900/30 flex flex-col md:flex-row justify-between items-center gap-6">
@@ -33,9 +32,10 @@ export const AdminPanel: React.FC = () => {
                     {[
                         { id: 'tuning', label: 'Tuning', icon: <Sliders size={14}/> },
                         { id: 'training', label: 'Training', icon: <BrainCircuit size={14}/> },
-                        { id: 'management', label: 'Data Registry', icon: <Database size={14}/> },
+                        { id: 'management', label: 'Registre', icon: <Database size={14}/> },
+                        { id: 'users', label: 'Utilisateurs', icon: <Users size={14}/> },
                         { id: 'integrity', label: 'Intégrité', icon: <ShieldCheck size={14}/> },
-                        { id: 'database', label: 'Infrastructure', icon: <Activity size={14}/> }
+                        { id: 'database', label: 'Infra', icon: <Activity size={14}/> }
                     ].map(tab => (
                         <button 
                             key={tab.id} 
@@ -49,7 +49,7 @@ export const AdminPanel: React.FC = () => {
             </header>
 
             <main className="px-4 animate-slide-up">
-                {activeTab !== 'database' && (
+                {activeTab !== 'database' && activeTab !== 'users' && (
                     <div className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                         <div className="relative group min-w-[280px]">
                             <select 
@@ -70,6 +70,7 @@ export const AdminPanel: React.FC = () => {
                     {activeTab === 'tuning' && <ExpertTuningPanel selectedDrawName={selectedDraw} />}
                     {activeTab === 'training' && <TrainingTab drawName={selectedDraw} />}
                     {activeTab === 'management' && <DrawManagement drawName={selectedDraw} />}
+                    {activeTab === 'users' && <UserManagement />}
                     {activeTab === 'integrity' && <DataIntegrityMonitor drawName={selectedDraw} />}
                     {activeTab === 'database' && <DatabaseControl />}
                 </div>

@@ -15,6 +15,7 @@ import {
 import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
+import { LearningService } from '../services/learningService'; // NEW
 import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast'; 
 import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; 
@@ -71,8 +72,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
     setComputing(true); 
     
-    // NETTOYAGE PRÉVENTIF : On vide les métriques de l'ancien tirage
-    // Cela garantit l'isolation visuelle et logique immédiate
+    // NETTOYAGE PRÉVENTIF
     setHistory([]); 
     setSpectral([]);
     setFractal([]);
@@ -97,16 +97,30 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         
         setLoading(false);
 
-        // 2. Chargement Poids Specifiques
+        // 2. Chargement Poids Specifiques (et potentiellement mis à jour par l'auto-learning précédent)
         getAlgoWeights(drawName).then(w => {
             if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
         });
 
-        // 3. Calculs HPC (Sur le nouvel historique uniquement)
+        // 3. Calculs HPC
         const activeHistory = hist.length === 0 ? [] : hist; 
 
         if (activeHistory.length > 0 && drawName !== 'ALL') {
-            const computeSample = activeHistory.slice(0, 300); // Optimisation taille échantillon
+            const computeSample = activeHistory.slice(0, 300); 
+
+            // --- AUTO-APPRENTISSAGE TRIGGER ---
+            // On lance la vérification en arrière-plan sans bloquer l'UI
+            // Si une mise à jour a lieu, elle sera prise en compte au prochain refresh ou via un signal
+            if (activeHistory.length >= 25 && isSupabaseConfigured()) {
+                LearningService.checkAndLearn(drawName, activeHistory[0]).then(status => {
+                    if (status && status.improvement) {
+                        showToast(status.message, "success");
+                        // On recharche les poids car ils ont changé
+                        getAlgoWeights(drawName).then(w => setGlobalWeights(w));
+                    }
+                });
+            }
+            // ----------------------------------
 
             const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
