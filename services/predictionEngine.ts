@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculatePredictionZScore, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend } from './mathService';
+import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
@@ -144,7 +144,6 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
 
     // 3. Signature Spectrale (Est-ce que le jeu est cyclique ?)
     // Simulation simple : on regarde si les numéros reviennent par cycle
-    // (Implémentation simplifiée pour performance)
     
     return { 
         weights: normalizeWeights(tuned), 
