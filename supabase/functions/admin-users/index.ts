@@ -9,50 +9,65 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// LISTE DES SUPER ADMINS (Emails qui ont toujours accès, même sans le rôle DB)
-// Ajoutez votre email de production ici
-const SUPER_ADMINS = [
+// --- CONFIGURATION CRITIQUE ---
+// Ajoutez ici votre email de connexion pour contourner la vérification de rôle
+// Cela vous permet de devenir Admin même si la BDD dit "user"
+const SUPER_ADMIN_EMAILS = [
     'admin@lotopro.com',
-    'admin@nexus.com',
-    'votre_email_perso@gmail.com' // REMPLACEZ CECI PAR VOTRE EMAIL
+    'votre_email@gmail.com' // <--- REMPLACEZ CECI PAR VOTRE EMAIL DE CONNEXION
 ];
 
 serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  // Gestion Preflight CORS (Indispensable pour le navigateur)
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
 
   try {
+    // 1. Initialisation Admin
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     
-    if (!supabaseUrl || !supabaseKey) {
-        throw new Error("Configuration Serveur critique manquante (SERVICE_ROLE_KEY).");
+    if (!supabaseKey) {
+        throw new Error("Secret SUPABASE_SERVICE_ROLE_KEY introuvable dans les paramètres de la fonction.");
     }
     
-    // Client Admin (Service Role) pour gérer auth.users
-    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+    // Client avec droits suprêmes (Service Role)
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
 
-    // Vérification de l'utilisateur appelant
+    // 2. Vérification de l'appelant (Qui êtes-vous ?)
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) throw new Error("Token d'autorisation manquant.");
+    if (!authHeader) throw new Error("Token d'autorisation manquant (Non connecté).");
 
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
 
-    if (authError || !user) throw new Error("Utilisateur non authentifié ou token invalide.");
-
-    // VÉRIFICATION DES DROITS (Rôle DB OU Email Whitelist)
-    const hasAdminRole = user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin';
-    const isSuperAdmin = user.email && SUPER_ADMINS.includes(user.email);
-
-    if (!hasAdminRole && !isSuperAdmin) {
-        console.error(`[Access Denied] User ${user.email} tried to access admin-users.`);
-        return new Response(JSON.stringify({ error: "Accès refusé. Privilèges Admin requis." }), { status: 403, headers: corsHeaders });
+    if (authError || !user) {
+        console.error("Auth Error:", authError);
+        throw new Error("Token invalide ou utilisateur introuvable.");
     }
 
+    // 3. Vérification des Privilèges (Rôle DB OU Whitelist Email)
+    const hasAdminRole = user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin';
+    const isWhitelisted = user.email && SUPER_ADMIN_EMAILS.includes(user.email);
+
+    if (!hasAdminRole && !isWhitelisted) {
+        console.error(`[Security Alert] Accès refusé pour : ${user.email}`);
+        return new Response(JSON.stringify({ 
+            error: "Accès refusé. Vous n'êtes pas administrateur.",
+            detail: "Ajoutez votre email à la constante SUPER_ADMIN_EMAILS dans le code de la fonction."
+        }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // 4. Traitement de la demande
     const { action, userId, role } = await req.json();
 
     if (action === 'list') {
-        // Récupération de la liste des utilisateurs
         const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({
             page: 1,
             perPage: 1000
@@ -60,10 +75,8 @@ serve(async (req: Request) => {
         
         if (error) throw error;
 
-        // On récupère aussi les infos de profil public/préférences pour enrichir
+        // Enrichissement avec les données publiques
         const userIds = users.map(u => u.id);
-        
-        // Note: user_preferences peut ne pas contenir tous les users, on gère le cas
         const { data: prefs } = await supabaseAdmin
             .from('user_preferences')
             .select('user_id, subscription')
@@ -85,12 +98,11 @@ serve(async (req: Request) => {
     }
 
     if (action === 'updateRole') {
-        if (!userId || !role) throw new Error("Paramètres manquants pour updateRole");
+        if (!userId || !role) throw new Error("ID ou Rôle manquant.");
         
-        // Mise à jour des metadata Auth
         const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
             app_metadata: { role: role },
-            user_metadata: { role: role } // On met à jour les deux pour la compatibilité
+            user_metadata: { role: role }
         });
         
         if (error) throw error;
@@ -98,16 +110,22 @@ serve(async (req: Request) => {
     }
 
     if (action === 'delete') {
-        if (!userId) throw new Error("ID utilisateur manquant");
+        if (!userId) throw new Error("ID utilisateur manquant.");
+        
+        // Suppression Auth (Cascade automatique si FK configurées, sinon nettoyage manuel recommandé)
         const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
         if (error) throw error;
+        
+        // Nettoyage manuel de sécurité pour user_preferences
+        await supabaseAdmin.from('user_preferences').delete().eq('user_id', userId);
+
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     throw new Error(`Action inconnue: ${action}`);
 
   } catch (error: any) {
-    console.error("[Admin Function Error]", error);
+    console.error("[Admin Function Error]", error.message);
     return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
