@@ -2,21 +2,29 @@
 import React, { useState, useEffect } from 'react';
 import { adminService, AdminUser } from '../../services/adminService';
 import { useToast } from '../ui/Toast';
-import { Users, Shield, ShieldAlert, Trash2, Search, UserCheck, Crown, Clock, RefreshCw } from 'lucide-react';
+import { Users, Shield, ShieldAlert, Trash2, Search, UserCheck, Crown, Clock, RefreshCw, AlertTriangle } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
     const { showToast } = useToast();
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [processingId, setProcessingId] = useState<string | null>(null);
 
     const loadUsers = async () => {
         setLoading(true);
+        setError(null);
         try {
             const data = await adminService.fetchUsers();
-            setUsers(data);
+            if (Array.isArray(data)) {
+                setUsers(data);
+            } else {
+                throw new Error("Format de données invalide reçu du serveur.");
+            }
         } catch (e: any) {
+            console.error(e);
+            setError(e.message || "Erreur de chargement.");
             showToast(e.message || "Erreur chargement utilisateurs", "error");
         } finally {
             setLoading(false);
@@ -107,61 +115,72 @@ export const UserManagement: React.FC = () => {
                 </div>
             </div>
 
-            <div className="overflow-x-auto custom-scrollbar rounded-2xl border border-slate-100 dark:border-slate-700">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 text-[10px] font-black uppercase tracking-widest">
-                        <tr>
-                            <th className="p-4 rounded-tl-2xl">Utilisateur</th>
-                            <th className="p-4">Rôle</th>
-                            <th className="p-4">Abonnement</th>
-                            <th className="p-4">Activité</th>
-                            <th className="p-4 text-right rounded-tr-2xl">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-medium">
-                        {filteredUsers.map(user => (
-                            <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors group">
-                                <td className="p-4">
-                                    <div className="font-bold text-slate-800 dark:text-white">{user.email}</div>
-                                    <div className="text-[9px] text-slate-400 font-mono mt-0.5">{user.id}</div>
-                                </td>
-                                <td className="p-4">
-                                    <button 
-                                        onClick={() => handleRoleUpdate(user.id, user.role)}
-                                        disabled={!!processingId}
-                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all active:scale-95 ${user.role === 'admin' ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-100 dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-white hover:border-indigo-300'}`}
-                                    >
-                                        {user.role === 'admin' ? <ShieldAlert size={12} /> : <UserCheck size={12} />}
-                                        <span className="text-[10px] font-black uppercase">{user.role}</span>
-                                    </button>
-                                </td>
-                                <td className="p-4">
-                                    {getSubscriptionBadge(user.subscription)}
-                                </td>
-                                <td className="p-4">
-                                    <div className="flex items-center gap-2 text-slate-500">
-                                        <Clock size={12} />
-                                        <span>{user.last_sign_in ? new Date(user.last_sign_in).toLocaleDateString() : 'Jamais'}</span>
-                                    </div>
-                                </td>
-                                <td className="p-4 text-right">
-                                    <button 
-                                        onClick={() => handleDelete(user.id)}
-                                        disabled={!!processingId}
-                                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
-                                        title="Supprimer le compte"
-                                    >
-                                        {processingId === user.id ? <RefreshCw size={16} className="animate-spin text-indigo-500"/> : <Trash2 size={16} />}
-                                    </button>
-                                </td>
+            {error ? (
+                <div className="p-8 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-center">
+                    <AlertTriangle className="mx-auto text-rose-500 mb-4" size={32} />
+                    <h4 className="text-rose-700 dark:text-rose-300 font-bold mb-2">Accès aux données impossible</h4>
+                    <p className="text-xs text-rose-600 dark:text-rose-400 mb-4">{error}</p>
+                    <p className="text-[10px] text-slate-500">
+                        Vérifiez que votre email est dans la liste blanche des admins ou que les secrets Supabase (SERVICE_ROLE_KEY) sont configurés.
+                    </p>
+                </div>
+            ) : (
+                <div className="overflow-x-auto custom-scrollbar rounded-2xl border border-slate-100 dark:border-slate-700">
+                    <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 text-[10px] font-black uppercase tracking-widest">
+                            <tr>
+                                <th className="p-4 rounded-tl-2xl">Utilisateur</th>
+                                <th className="p-4">Rôle</th>
+                                <th className="p-4">Abonnement</th>
+                                <th className="p-4">Activité</th>
+                                <th className="p-4 text-right rounded-tr-2xl">Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {filteredUsers.length === 0 && (
-                    <div className="p-12 text-center text-slate-400 italic">Aucun utilisateur trouvé.</div>
-                )}
-            </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs font-medium">
+                            {filteredUsers.map(user => (
+                                <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors group">
+                                    <td className="p-4">
+                                        <div className="font-bold text-slate-800 dark:text-white">{user.email}</div>
+                                        <div className="text-[9px] text-slate-400 font-mono mt-0.5">{user.id}</div>
+                                    </td>
+                                    <td className="p-4">
+                                        <button 
+                                            onClick={() => handleRoleUpdate(user.id, user.role)}
+                                            disabled={!!processingId}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all active:scale-95 ${user.role === 'admin' ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-100 dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-white hover:border-indigo-300'}`}
+                                        >
+                                            {user.role === 'admin' ? <ShieldAlert size={12} /> : <UserCheck size={12} />}
+                                            <span className="text-[10px] font-black uppercase">{user.role}</span>
+                                        </button>
+                                    </td>
+                                    <td className="p-4">
+                                        {getSubscriptionBadge(user.subscription)}
+                                    </td>
+                                    <td className="p-4">
+                                        <div className="flex items-center gap-2 text-slate-500">
+                                            <Clock size={12} />
+                                            <span>{user.last_sign_in ? new Date(user.last_sign_in).toLocaleDateString() : 'Jamais'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="p-4 text-right">
+                                        <button 
+                                            onClick={() => handleDelete(user.id)}
+                                            disabled={!!processingId}
+                                            className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                                            title="Supprimer le compte"
+                                        >
+                                            {processingId === user.id ? <RefreshCw size={16} className="animate-spin text-indigo-500"/> : <Trash2 size={16} />}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {filteredUsers.length === 0 && !loading && (
+                        <div className="p-12 text-center text-slate-400 italic">Aucun utilisateur trouvé.</div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
