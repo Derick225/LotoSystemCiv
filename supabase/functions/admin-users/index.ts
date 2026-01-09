@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
@@ -21,19 +22,17 @@ serve(async (req: Request) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     
-    if (!supabaseKey) {
-        throw new Error("Clé SUPABASE_SERVICE_ROLE_KEY manquante dans les secrets.");
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Clé SUPABASE_SERVICE_ROLE_KEY manquante dans les secrets Supabase.");
     }
     
-    // Client Admin avec droits suprêmes (Service Role)
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
         auth: { autoRefreshToken: false, persistSession: false }
     });
 
-    // 1. Authentification de l'appelant
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) throw new Error("Token manquant.");
 
@@ -42,7 +41,6 @@ serve(async (req: Request) => {
 
     if (authError || !user) throw new Error("Utilisateur introuvable.");
 
-    // 2. Vérification des Droits (Role DB OU Whitelist Email)
     const dbRole = user.app_metadata?.role || '';
     const isWhitelisted = user.email && SUPER_ADMIN_EMAILS.includes(user.email);
 
@@ -56,14 +54,12 @@ serve(async (req: Request) => {
         });
     }
 
-    // 3. Traitement de l'action
     const { action, userId, role } = await req.json();
 
     if (action === 'list') {
         const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
         if (error) throw error;
 
-        // Enrichissement avec les données publiques (Abonnement)
         const userIds = users.map(u => u.id);
         const { data: prefs } = await supabaseAdmin.from('user_preferences').select('user_id, subscription').in('user_id', userIds);
 
@@ -81,26 +77,19 @@ serve(async (req: Request) => {
 
     if (action === 'updateRole') {
         if (!userId || !role) throw new Error("Paramètres manquants.");
-        
-        // Mise à jour des métadonnées Auth
         const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
             app_metadata: { role },
             user_metadata: { role }
         });
-        
         if (error) throw error;
         return new Response(JSON.stringify({ success: true, user: data.user }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     if (action === 'delete') {
         if (!userId) throw new Error("ID manquant.");
-        
         const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
         if (error) throw error;
-        
-        // Nettoyage manuel des préférences
         await supabaseAdmin.from('user_preferences').delete().eq('user_id', userId);
-        
         return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 

@@ -1,6 +1,6 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { getAlgoWeights, saveAlgoWeights } from './predictionEngine';
+import { saveAlgoWeights } from './predictionEngine';
 import { DrawResult } from '../types';
 
 export interface LearningStatus {
@@ -12,7 +12,6 @@ export interface LearningStatus {
 export const LearningService = {
     /**
      * Déclenche le processus d'auto-apprentissage sur le Cloud (Edge Function).
-     * C'est une opération asynchrone lourde déléguée au serveur.
      */
     triggerAutoLearning: async (drawName: string): Promise<LearningStatus> => {
         if (!isSupabaseConfigured()) {
@@ -26,30 +25,46 @@ export const LearningService = {
                 body: { drawName }
             });
 
-            if (error) throw error;
+            if (error) {
+                // Gestion spécifique des erreurs d'invocation
+                throw new Error(error.message || "Erreur de communication avec le Cloud.");
+            }
 
-            if (data.success && data.improved && data.weights) {
-                // Mise à jour immédiate du cache local pour que l'utilisateur en profite tout de suite
-                saveAlgoWeights(drawName, data.weights);
+            if (data?.error) {
+                // Erreur renvoyée par la fonction elle-même (logique)
+                throw new Error(data.error);
+            }
+
+            if (data && data.success) {
+                if (data.improved && data.weights) {
+                    saveAlgoWeights(drawName, data.weights);
+                    return {
+                        lastRun: new Date().toISOString(),
+                        improvement: true,
+                        message: data.message
+                    };
+                }
                 return {
                     lastRun: new Date().toISOString(),
-                    improvement: true,
-                    message: data.message
+                    improvement: false,
+                    message: data.message || "Modèle stable."
                 };
             }
 
-            return {
-                lastRun: new Date().toISOString(),
-                improvement: false,
-                message: "Modèle stable (Pas d'amélioration nécessaire)"
-            };
+            throw new Error("Réponse inattendue du serveur.");
 
         } catch (e: any) {
             console.error("Auto-Learning Error:", e);
+            let msg = `Erreur d'apprentissage: ${e.message}`;
+            
+            if (e.message?.includes('Failed to send a request')) {
+                msg = "Connexion au Cloud échouée. Vérifiez vos secrets Supabase (SERVICE_ROLE_KEY).";
+            }
+            
             return {
                 lastRun: null,
                 improvement: false,
-                message: `Erreur d'apprentissage: ${e.message}`
+                message: msg
             };
         }
     },
@@ -61,8 +76,6 @@ export const LearningService = {
         const lastLearnKey = `nexus_last_learn_${drawName}`;
         const lastLearn = localStorage.getItem(lastLearnKey);
         
-        // Si on n'a jamais appris ou si le dernier apprentissage date d'avant le dernier tirage
-        // On utilise la date du tirage comme versioning
         if (!lastLearn || lastLearn !== latestDraw.date) {
             const result = await LearningService.triggerAutoLearning(drawName);
             if (result.lastRun) {
@@ -73,3 +86,4 @@ export const LearningService = {
         return null;
     }
 };
+    
