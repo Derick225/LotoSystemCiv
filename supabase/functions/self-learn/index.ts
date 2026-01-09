@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
@@ -9,141 +8,95 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Moteur de Fitness (Optimisé pour Deno)
-const simulatePredictionScore = (weights: any, history: any[], targetNumbers: number[]): number => {
+// Configuration "Lite" pour Edge Function (Timeout 2s CPU)
+const CONFIG = {
+    POPULATION_SIZE: 15, // Réduit de 50 à 15
+    GENERATIONS: 8,      // Réduit de 20 à 8
+    SAMPLE_DEPTH: 20     // Profondeur d'historique analysée
+};
+
+// Fitness function ultra-optimisée (évite les calculs complexes)
+const quickFitness = (weights: any, history: any[], metrics: any) => {
     let score = 0;
-    // Extraction locale pour éviter les lookups couteux
     const wFreq = weights.frequency || 0.1;
-    const wGap = weights.gap || 0.1;
     
-    // Heuristique simplifiée : On vérifie juste si les poids favorisent la fréquence ou le gap
-    // (Simulation complète trop lourde pour le Edge Timeout)
-    
-    targetNumbers.forEach(n => {
-        // Fréquence sur les 10 derniers tirages
-        let freq = 0;
-        for(let i=0; i<10 && i<history.length; i++) {
-            if (history[i].gagnants.includes(n)) freq++;
-        }
-        
-        // Gap actuel
-        let gap = 0;
-        for(const d of history) {
-            if (d.gagnants.includes(n)) break;
-            gap++;
-        }
-
-        if (freq >= 2) score += (wFreq * 50);
-        if (gap > 10 && gap < 20) score += (wGap * 50);
-    });
-
-    // Pénalité régularisation (évite les poids extrêmes)
-    if (wFreq > 0.8 || wGap > 0.8) score -= 20;
-
+    // On utilise les métriques pré-calculées
+    for(const num of metrics.hotNumbers) {
+        score += wFreq * 10;
+    }
     return score;
 };
 
-// Mutation optimisée
-const mutateWeights = (weights: any) => {
-    const newWeights = { ...weights };
-    const keys = Object.keys(newWeights);
-    // Mutation d'un seul gène pour aller vite
+const mutate = (weights: any) => {
+    const newW = { ...weights };
+    const keys = Object.keys(newW);
     const key = keys[Math.floor(Math.random() * keys.length)];
-    const noise = (Math.random() - 0.5) * 0.2; 
-    let val = newWeights[key] + noise;
-    newWeights[key] = Math.max(0.01, Math.min(1.0, val));
-    
-    // Normalisation approximative
-    return newWeights;
+    const noise = (Math.random() - 0.5) * 0.3;
+    newW[key] = Math.max(0.01, Math.min(1.0, (newW[key] || 0.1) + noise));
+    return newW;
 };
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    // 1. Validation de l'environnement
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    
-    if (!supabaseKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY manquant.");
-
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
     const { drawName } = await req.json();
 
-    // 2. Récupération Historique (Limité à 30 pour vitesse)
-    const [historyReq, weightsReq] = await Promise.all([
-        supabase.from('draw_results').select('gagnants').eq('draw_name', drawName).order('date', { ascending: false }).limit(30),
-        supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single()
-    ]);
+    const { data: history } = await supabase
+        .from('draw_results')
+        .select('gagnants')
+        .eq('draw_name', drawName)
+        .order('date', { ascending: false })
+        .limit(CONFIG.SAMPLE_DEPTH + 5);
 
-    if (!historyReq.data || historyReq.data.length < 15) {
-        return new Response(JSON.stringify({ success: false, message: "Historique insuffisant (<15)" }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { data: currentW } = await supabase
+        .from('algo_weights')
+        .select('weights')
+        .eq('draw_name', drawName)
+        .single();
+
+    if (!history || history.length < 10) {
+        return new Response(JSON.stringify({ success: false, message: "Historique insuffisant." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    let currentWeights = weightsReq.data?.weights || {
-        frequency: 0.15, gap: 0.10, spectral: 0.10, fractal: 0.05,
-        markov: 0.15, spatial: 0.05, momentum: 0.05, equilibrium: 0.05,
-        ai_intuition: 0.05, anti_consensus: 0.05
-    };
+    const counts: Record<number, number> = {};
+    history.forEach((d: any) => d.gagnants.forEach((n: number) => counts[n] = (counts[n]||0)+1));
+    const hotNumbers = Object.entries(counts).sort((a:any, b:any) => b[1]-a[1]).slice(0, 10).map(x => parseInt(x[0]));
+    const metrics = { hotNumbers };
 
-    // 3. Algorithme Génétique "Lite" (Budget Temps < 1s)
-    const validationSet = historyReq.data.slice(0, 5); // Test sur les 5 derniers
-    const trainHistory = historyReq.data.slice(5);
-
-    let bestWeights = currentWeights;
-    let bestFitness = -Infinity;
-
-    // POPULATION ET GÉNÉRATIONS RÉDUITES
-    const POPULATION_SIZE = 15; 
-    const GENERATIONS = 8;
+    let bestWeights = currentW?.weights || { frequency: 0.2, gap: 0.2, spectral: 0.1, markov: 0.2, spatial: 0.1 };
+    let bestScore = quickFitness(bestWeights, history, metrics);
     let improved = false;
 
-    // Fitness initiale
-    validationSet.forEach((target: any, idx: number) => {
-        const context = [...validationSet.slice(idx+1), ...trainHistory];
-        bestFitness += simulatePredictionScore(currentWeights, context, target.gagnants);
-    });
-
-    for (let g = 0; g < GENERATIONS; g++) {
-        for (let i = 0; i < POPULATION_SIZE; i++) {
-            const mutant = mutateWeights(bestWeights);
-            let fitness = 0;
+    for (let g = 0; g < CONFIG.GENERATIONS; g++) {
+        for (let p = 0; p < CONFIG.POPULATION_SIZE; p++) {
+            const candidate = mutate(bestWeights);
+            const score = quickFitness(candidate, history, metrics);
             
-            // Calcul fitness rapide
-            for(let j=0; j<validationSet.length; j++) {
-                const target = validationSet[j];
-                const context = [...validationSet.slice(j+1), ...trainHistory];
-                fitness += simulatePredictionScore(mutant, context, target.gagnants);
-            }
-
-            if (fitness > bestFitness) {
-                bestFitness = fitness;
-                bestWeights = mutant;
+            if (score > bestScore) {
+                bestScore = score;
+                bestWeights = candidate;
                 improved = true;
             }
         }
     }
 
-    // 4. Sauvegarde
     if (improved) {
         await supabase.from('algo_weights').upsert({
             draw_name: drawName,
             weights: bestWeights,
             updated_at: new Date().toISOString()
         });
-        
-        await supabase.from('learning_logs').insert({
-            draw_name: drawName,
-            new_fitness: bestFitness,
-            improvement_delta: 'Optimized via Edge Lite',
-            applied_weights: bestWeights
-        });
     }
 
     return new Response(JSON.stringify({ 
         success: true, 
         improved, 
-        message: improved ? "Optimisation réussie." : "Pas d'amélioration trouvée.", 
+        message: improved ? "Optimisation réussie." : "Modèle stable.",
         weights: bestWeights 
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
