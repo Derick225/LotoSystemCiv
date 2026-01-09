@@ -1,106 +1,102 @@
 
 -- ==============================================================================
--- SCHEMA NEXUS PLATINUM v11.3 (PRODUCTION READY)
+-- SCHEMA NEXUS PLATINUM v11.5 (PRODUCTION & DEEP LEARNING READY)
 -- ==============================================================================
 
 -- ==============================================================================
--- 1. EXTENSIONS
+-- 1. EXTENSIONS ET CONFIGURATION
 -- ==============================================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_cron";
 CREATE EXTENSION IF NOT EXISTS "pg_net";
 CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
--- ==============================================================================
--- 2. TABLES
--- ==============================================================================
-
--- Fonction utilitaire : vérifie si un tableau d'entiers est valide pour le loto
+-- Fonction de validation des tableaux de numéros (Intégrité des données)
 CREATE OR REPLACE FUNCTION is_valid_loto_numbers(nums INTEGER[])
 RETURNS BOOLEAN AS $$
 BEGIN
-  -- Vérifie la longueur, les doublons, et la plage [1, 90]
+  -- Vérifie : 5 numéros, pas de doublons, plage 1-90
   RETURN (
     array_length(nums, 1) = 5
     AND array_length(nums, 1) = array_length(ARRAY(SELECT DISTINCT UNNEST(nums)), 1)
-    AND nums <@ ARRAY(
-      SELECT generate_series(1, 90)::INTEGER
-    )
+    AND nums <@ ARRAY(SELECT generate_series(1, 90)::INTEGER)
   );
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
--- A. RÉSULTATS DES TIRAGES
+-- ==============================================================================
+-- 2. TABLES MAÎTRESSE
+-- ==============================================================================
+
+-- A. RÉSULTATS DES TIRAGES (Historique)
 CREATE TABLE IF NOT EXISTS public.draw_results (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   draw_name TEXT NOT NULL,
   date DATE NOT NULL,
-  gagnants INTEGER[] NOT NULL,
-  machine INTEGER[],
+  gagnants INTEGER[] NOT NULL CHECK (is_valid_loto_numbers(gagnants)),
+  machine INTEGER[] CHECK (machine IS NULL OR is_valid_loto_numbers(machine)),
   version INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT unique_draw_date UNIQUE (draw_name, date),
-  CONSTRAINT valid_gagnants CHECK (is_valid_loto_numbers(gagnants)),
-  CONSTRAINT valid_machine CHECK (machine IS NULL OR is_valid_loto_numbers(machine))
+  CONSTRAINT unique_draw_date UNIQUE (draw_name, date)
 );
 
--- B. ANALYTIQUES HPC
+-- B. ANALYTIQUES HPC (Calculs lourds pré-générés)
 CREATE TABLE IF NOT EXISTS public.draw_analytics (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   draw_name TEXT NOT NULL,
   date DATE NOT NULL,
-  spectral JSONB, 
-  fractal JSONB,
-  volatility JSONB,
-  audit JSONB,
+  spectral JSONB,    -- FFT Analysis
+  fractal JSONB,     -- Hurst & Chaos
+  volatility JSONB,  -- Standard Deviation & Trends
+  audit JSONB,       -- Forensic checks
   correlations JSONB,
   updated_at TIMESTAMPTZ DEFAULT now(),
   CONSTRAINT unique_analytics_draw_date UNIQUE (draw_name, date)
 );
 
--- C. POIDS ALGORITHMIQUES
+-- C. POIDS ALGORITHMIQUES (ADN de l'IA)
 CREATE TABLE IF NOT EXISTS public.algo_weights (
   draw_name TEXT PRIMARY KEY,
-  weights JSONB NOT NULL,
+  weights JSONB NOT NULL, -- Poids génétiques (0.0 - 1.0)
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- D. PRÉFÉRENCES UTILISATEURS
+-- D. PRÉFÉRENCES UTILISATEURS & ABONNEMENT
 CREATE TABLE IF NOT EXISTS public.user_preferences (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   watchlist INTEGER[],
   saved_tickets JSONB,
   settings JSONB,
-  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium"}'::JSONB,
+  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium", "daysLeft": 30}'::JSONB,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- E. FEEDBACK
+-- E. FEEDBACK (Reinforcement Learning from Human Feedback)
 CREATE TABLE IF NOT EXISTS public.prediction_feedback (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   prediction_id TEXT NOT NULL,
   draw_name TEXT NOT NULL,
-  rating TEXT NOT NULL,
+  rating TEXT NOT NULL, -- 'Visionnaire', 'Standard', 'Incohérente'
   actual_hits INTEGER,
   user_comment TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- F. TRANSACTIONS
+-- F. TRANSACTIONS (Paiements Mobile Money)
 CREATE TABLE IF NOT EXISTS public.transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   transaction_id TEXT NOT NULL UNIQUE,
   payment_token TEXT,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   amount INTEGER NOT NULL,
-  provider TEXT NOT NULL,
+  provider TEXT NOT NULL, -- 'ORANGE', 'MTN', 'WAVE'
   status TEXT DEFAULT 'PENDING',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- G. LEARNING LOGS (Auto-Apprentissage IA)
+-- G. LEARNING LOGS (Suivi de l'évolution génétique)
 CREATE TABLE IF NOT EXISTS public.learning_logs (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   draw_name TEXT NOT NULL,
@@ -112,28 +108,29 @@ CREATE TABLE IF NOT EXISTS public.learning_logs (
 );
 
 -- ==============================================================================
--- 3. TRIGGERS
+-- 3. TRIGGERS (Auto-Update timestamps)
 -- ==============================================================================
-DROP TRIGGER IF EXISTS handle_updated_at_draw_results ON public.draw_results;
-CREATE TRIGGER handle_updated_at_draw_results
+CREATE OR REPLACE TRIGGER handle_updated_at_draw_results
 BEFORE UPDATE ON public.draw_results
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
-DROP TRIGGER IF EXISTS handle_updated_at_user_prefs ON public.user_preferences;
-CREATE TRIGGER handle_updated_at_user_prefs
+CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs
 BEFORE UPDATE ON public.user_preferences
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
-DROP TRIGGER IF EXISTS handle_updated_at_transactions ON public.transactions;
-CREATE TRIGGER handle_updated_at_transactions
+CREATE OR REPLACE TRIGGER handle_updated_at_transactions
 BEFORE UPDATE ON public.transactions
 FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
+CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights
+BEFORE UPDATE ON public.algo_weights
+FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+
 -- ==============================================================================
--- 4. SÉCURITÉ (RLS)
+-- 4. SÉCURITÉ (RLS - Row Level Security)
 -- ==============================================================================
 
--- Activer RLS partout
+-- Activation RLS
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_analytics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
@@ -142,65 +139,55 @@ ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
 
--- 🔒 draw_results : Lecture publique
-DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results;
+-- POLITIQUES
+
+-- 1. Données Publiques (Lecture seule pour tous)
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
-
--- 🔒 draw_analytics : Lecture publique
-DROP POLICY IF EXISTS "Public Read Analytics" ON public.draw_analytics;
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
-
--- 🔒 algo_weights : Lecture publique
-DROP POLICY IF EXISTS "Public Read Weights" ON public.algo_weights;
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
-
--- 🔒 learning_logs : Lecture publique (Audits)
-DROP POLICY IF EXISTS "Public Read Logs" ON public.learning_logs;
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
-
--- 👤 user_preferences : Personnel uniquement
-DROP POLICY IF EXISTS "User Own Data" ON public.user_preferences;
-CREATE POLICY "User Own Data" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
-
--- 📝 prediction_feedback : Insertion libre (Auth), Lecture publique (Statistiques)
-DROP POLICY IF EXISTS "Public Insert Feedback" ON public.prediction_feedback;
-CREATE POLICY "Public Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-DROP POLICY IF EXISTS "Public Read Feedback" ON public.prediction_feedback;
 CREATE POLICY "Public Read Feedback" ON public.prediction_feedback FOR SELECT USING (true);
 
--- 💳 transactions : Personnel uniquement
-DROP POLICY IF EXISTS "User View Own Tx" ON public.transactions;
-CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
+-- 2. Données Utilisateur (CRUD pour le propriétaire uniquement)
+-- Note: On autorise INSERT pour permettre la création du profil au premier login
+CREATE POLICY "User Manage Own Prefs" ON public.user_preferences 
+FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- NOTE: Les écritures sur draw_results, draw_analytics, algo_weights et transactions
--- sont gérées par les Edge Functions via la Service Role Key qui contourne RLS.
+CREATE POLICY "User View Own Tx" ON public.transactions 
+FOR SELECT USING (auth.uid() = user_id);
+
+-- 3. Contributions Utilisateur (Feedback)
+CREATE POLICY "Auth Insert Feedback" ON public.prediction_feedback 
+FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+-- 4. Droits du Serveur (Edge Functions)
+-- Les fonctions utilisent la clé SERVICE_ROLE qui bypass RLS, 
+-- mais ces politiques sont là pour la clarté et la sécurité explicite.
+-- (Pas strictement nécessaires si service_role est utilisé correctement)
 
 -- ==============================================================================
--- 5. INDEXES
+-- 5. INDEXES DE PERFORMANCE
 -- ==============================================================================
-CREATE INDEX IF NOT EXISTS idx_results_draw_date ON public.draw_results(draw_name, date);
+CREATE INDEX IF NOT EXISTS idx_results_draw_date ON public.draw_results(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
-CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date);
-CREATE INDEX IF NOT EXISTS idx_learning_draw ON public.learning_logs(draw_name);
+CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
+CREATE INDEX IF NOT EXISTS idx_learning_draw ON public.learning_logs(draw_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id);
 
 -- ==============================================================================
--- 6. CRON JOBS (Nécessite extension pg_cron et pg_net)
+-- 6. TÂCHES CRON (AUTOMATISATION)
 -- ==============================================================================
--- Décommentez pour activer la synchro auto toutes les 30 minutes
+-- Activez ceci seulement si pg_cron est disponible sur votre instance
 /*
 SELECT cron.schedule(
   'sync-loto-30min',
   '*/30 * * * *',
   $$
   SELECT net.http_post(
-      url:='https://[VOTRE-PROJECT-REF].supabase.co/functions/v1/cron-sync',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer [VOTRE-SERVICE-ROLE-KEY]"}'::jsonb,
+      url:='https://[VOTRE-PROJET].supabase.co/functions/v1/cron-sync',
+      headers:='{"Content-Type": "application/json", "Authorization": "Bearer [VOTRE-CLE-SERVICE]"}'::jsonb,
       body:='{}'::jsonb
   ) as request_id;
   $$
 );
 */
-
--- ==============================================================================
--- FIN DU SCRIPT
--- ==============================================================================

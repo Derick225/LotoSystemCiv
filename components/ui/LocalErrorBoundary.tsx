@@ -15,7 +15,7 @@ interface State {
  * Catches errors in children, displays fallback UI, and allows recovery.
  * Now smarter: Reloads page on ChunkLoadErrors.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): State {
