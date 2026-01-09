@@ -16,19 +16,36 @@ serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Initialisation client Admin pour l'écriture (bypass RLS interne, mais on valide l'user avant)
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     
+    // 1. Validation de l'utilisateur (Sécurité)
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+        throw new Error("Token d'authentification manquant.");
+    }
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Utilisateur non authentifié." }), { 
+            status: 401, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
     const { predictionId, rating, drawName, actualHits, user_comment } = await req.json();
 
     if (!predictionId) throw new Error("predictionId is required");
 
-    // Insertion directe en base
-    const { error } = await supabase.from('prediction_feedback').upsert({
+    // 2. Insertion sécurisée
+    const { error } = await supabaseAdmin.from('prediction_feedback').upsert({
       prediction_id: predictionId,
       rating,
       draw_name: drawName,
       actual_hits: actualHits,
       user_comment,
+      // On pourrait ajouter user_id ici si la table le supporte pour tracer qui a donné le feedback
       created_at: new Date().toISOString()
     });
 

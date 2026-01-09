@@ -1,6 +1,6 @@
 
 -- ==============================================================================
--- SCHEMA NEXUS PLATINUM v11.5 (PRODUCTION & DEEP LEARNING READY)
+-- SCHEMA NEXUS PLATINUM v11.6 (PRODUCTION & DEEP LEARNING READY)
 -- ==============================================================================
 
 -- ==============================================================================
@@ -12,10 +12,16 @@ CREATE EXTENSION IF NOT EXISTS "pg_net";
 CREATE EXTENSION IF NOT EXISTS "moddatetime";
 
 -- Fonction de validation des tableaux de numéros (Intégrité des données)
+-- Correction v2 : Gestion stricte des NULL et tableaux vides
 CREATE OR REPLACE FUNCTION is_valid_loto_numbers(nums INTEGER[])
 RETURNS BOOLEAN AS $$
 BEGIN
-  -- Vérifie : 5 numéros, pas de doublons, plage 1-90
+  -- Si le tableau est NULL ou vide, retourne FALSE (sauf si la colonne autorise NULL, mais ici on valide le contenu)
+  IF nums IS NULL OR array_length(nums, 1) IS NULL THEN
+    RETURN FALSE;
+  END IF;
+
+  -- Vérifie : 5 numéros exactement, pas de doublons, plage 1-90
   RETURN (
     array_length(nums, 1) = 5
     AND array_length(nums, 1) = array_length(ARRAY(SELECT DISTINCT UNNEST(nums)), 1)
@@ -149,7 +155,6 @@ CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true)
 CREATE POLICY "Public Read Feedback" ON public.prediction_feedback FOR SELECT USING (true);
 
 -- 2. Données Utilisateur (CRUD pour le propriétaire uniquement)
--- Note: On autorise INSERT pour permettre la création du profil au premier login
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences 
 FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
@@ -160,11 +165,6 @@ FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Auth Insert Feedback" ON public.prediction_feedback 
 FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
--- 4. Droits du Serveur (Edge Functions)
--- Les fonctions utilisent la clé SERVICE_ROLE qui bypass RLS, 
--- mais ces politiques sont là pour la clarté et la sécurité explicite.
--- (Pas strictement nécessaires si service_role est utilisé correctement)
-
 -- ==============================================================================
 -- 5. INDEXES DE PERFORMANCE
 -- ==============================================================================
@@ -173,21 +173,3 @@ CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_learning_draw ON public.learning_logs(draw_name, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id);
-
--- ==============================================================================
--- 6. TÂCHES CRON (AUTOMATISATION)
--- ==============================================================================
--- Activez ceci seulement si pg_cron est disponible sur votre instance
-/*
-SELECT cron.schedule(
-  'sync-loto-30min',
-  '*/30 * * * *',
-  $$
-  SELECT net.http_post(
-      url:='https://[VOTRE-PROJET].supabase.co/functions/v1/cron-sync',
-      headers:='{"Content-Type": "application/json", "Authorization": "Bearer [VOTRE-CLE-SERVICE]"}'::jsonb,
-      body:='{}'::jsonb
-  ) as request_id;
-  $$
-);
-*/
