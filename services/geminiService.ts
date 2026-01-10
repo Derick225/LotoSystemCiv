@@ -3,11 +3,35 @@ import type { DrawResult, GeminiReasoning } from "../types";
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * Nexus Oracle Engine v12.7 - Security Edition
+ * Nexus Oracle Engine v12.8 - Security Edition (SSR Safe)
  * Bridge sécurisé vers l'API Gemini via Supabase Edge Functions.
  */
 
 const CACHE_PREFIX = 'nexus_reasoning_v12_';
+
+// Helper Safe Storage pour éviter les erreurs SSR
+const storage = {
+    getItem: (key: string) => {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            return localStorage.getItem(key);
+        }
+        return null;
+    },
+    setItem: (key: string, value: string) => {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+                localStorage.setItem(key, value);
+            } catch (e) {
+                console.warn('LocalStorage quota exceeded');
+            }
+        }
+    },
+    removeItem: (key: string) => {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem(key);
+        }
+    }
+};
 
 // Validation du schéma de réponse pour éviter les hallucinations de format
 const validateReasoningSchema = (data: any): GeminiReasoning => {
@@ -54,14 +78,14 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
     const signature = history.slice(0, 3).map(h => h.gagnants.join('-')).join('|');
     const cacheKey = `${CACHE_PREFIX}${drawName}_${signature}`;
     
-    // 1. Vérification Cache
+    // 1. Vérification Cache (SSR Safe)
     try {
-        const cached = localStorage.getItem(cacheKey);
+        const cached = storage.getItem(cacheKey);
         if (cached) return validateReasoningSchema(JSON.parse(cached));
-    } catch { localStorage.removeItem(cacheKey); }
+    } catch { storage.removeItem(cacheKey); }
 
     // 2. Vérification Configuration
-    if (!navigator.onLine || !isSupabaseConfigured()) {
+    if ((typeof navigator !== 'undefined' && !navigator.onLine) || !isSupabaseConfigured()) {
         return generateFallbackReasoning(drawName, history);
     }
 
@@ -82,8 +106,8 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
 
         const parsed = validateReasoningSchema(data);
         
-        // Mise en cache
-        localStorage.setItem(cacheKey, JSON.stringify(parsed));
+        // Mise en cache (SSR Safe)
+        storage.setItem(cacheKey, JSON.stringify(parsed));
         return parsed;
 
     } catch (e: any) {

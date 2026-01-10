@@ -1,3 +1,4 @@
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -88,6 +89,7 @@ export const getSupabaseConfigDiagnostics = () => {
 };
 
 // Configuration Fallback Safe
+// NOTE: L'URL placeholder doit être valide (sans espace final) pour éviter le crash de new URL()
 const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
 const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
 
