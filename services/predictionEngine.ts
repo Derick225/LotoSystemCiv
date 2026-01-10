@@ -3,7 +3,25 @@ import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, For
 import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend, mathService, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
-export const getDefaultWeights = (): AlgoWeights => ({
+/**
+ * Normalise un objet AlgoWeights pour que la somme soit exactement 1.0
+ */
+export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
+    const values = Object.values(weights).map(v => Number(v) || 0);
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total === 0) return getDefaultWeights();
+    
+    const normalized = { ...weights };
+    (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
+        const val = Number(normalized[key]) || 0;
+        // Plafond de sécurité à 0.6 par algo pour éviter l'overfitting extrême
+        const capped = Math.min(val, total * 0.6);
+        normalized[key] = parseFloat((capped / total).toFixed(4));
+    });
+    return normalized;
+};
+
+export const getDefaultWeights = (): AlgoWeights => normalizeWeights({
     frequency: 0.15,
     gap: 0.10,
     spectral: 0.10,
@@ -34,12 +52,13 @@ export const getDefaultRules = (): AdaptiveRules => ({
 // --- STORAGE UTILS ---
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
-    localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights));
+    const clean = normalizeWeights(weights);
+    localStorage.setItem(`weights_${drawName}`, JSON.stringify(clean));
     if (isSupabaseConfigured()) {
         try {
             await supabase.from('algo_weights').upsert({
                 draw_name: drawName,
-                weights: weights,
+                weights: clean,
                 updated_at: new Date().toISOString()
             });
         } catch (e) {
@@ -61,17 +80,18 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
                 .single();
 
             if (data && data.weights) {
-                localStorage.setItem(`weights_${drawName}`, JSON.stringify(data.weights));
-                return data.weights;
+                const normalized = normalizeWeights(data.weights);
+                localStorage.setItem(`weights_${drawName}`, JSON.stringify(normalized));
+                return normalized;
             }
         } catch (e) { /* Ignore */ }
     }
-    return currentWeights;
+    return normalizeWeights(currentWeights);
 };
 
 export const getAlgoWeightsSync = (drawName: string): AlgoWeights => {
     const raw = localStorage.getItem(`weights_${drawName}`);
-    return raw ? JSON.parse(raw) : getDefaultWeights();
+    return raw ? normalizeWeights(JSON.parse(raw)) : getDefaultWeights();
 };
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
@@ -85,17 +105,7 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 
 // --- CORE ENGINE LOGIC ---
 
-const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
-    const total = Object.values(w).reduce((a, b) => a + (b || 0), 0);
-    const keys = Object.keys(w) as Array<keyof AlgoWeights>;
-    const normalized = { ...w };
-    if (total > 0) {
-        keys.forEach(k => {
-            normalized[k] = parseFloat(((normalized[k] || 0) / total).toFixed(4));
-        });
-    }
-    return normalized;
-};
+const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
 
 /**
  * AUTO-CALIBRATION: Analyse la "personnalité" mathématique du tirage
@@ -103,7 +113,7 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
  */
 const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, analysis: string } => {
     // Si pas assez d'historique, on retourne les poids par défaut ou manuels
-    if (history.length < 20) return { weights: baseWeights, analysis: "Données insuffisantes pour calibration." };
+    if (history.length < 20) return { weights: normalizeWeights(baseWeights), analysis: "Données insuffisantes pour calibration." };
 
     const tuned = { ...baseWeights };
     const reportParts: string[] = [];
@@ -185,8 +195,6 @@ export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
     return weights;
 };
 
-const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
-
 /**
  * MOTEUR D'INFÉRENCE PLATINUM (ISOLÉ)
  * Utilise uniquement l'historique fourni en argument (qui doit être celui du tirage spécifique).
@@ -204,7 +212,11 @@ export const generateMasterPrediction = async (
     
     // 1. Détermination des Poids (Manuel ou Auto-Calibré)
     let baseWeights = weightsToUse || await getAlgoWeights(drawName);
-    const { weights: optimizedWeights, analysis: tuningAnalysis } = autoCalibrateWeights(drawName, baseWeights, history);
+    
+    // Si aucun poids personnalisé n'est fourni, on tente l'auto-calibration
+    const { weights: optimizedWeights, analysis: tuningAnalysis } = weightsToUse 
+        ? { weights: normalizeWeights(weightsToUse), analysis: "Mode Manuel" }
+        : autoCalibrateWeights(drawName, baseWeights, history);
     
     // 2. Calcul des Indicateurs Techniques (Scope: Ce tirage uniquement)
     const volatility = calculateVolatility(history);
@@ -276,7 +288,15 @@ export const generateMasterPrediction = async (
             resistance: resistScore,
             poisson: poissonVal,
             gap_velocity: gapTrend.trend !== 'STABLE' ? 80 : 40,
-            anti_consensus: antiConsensusScore
+            anti_consensus: antiConsensusScore,
+            momentum: 50,
+            orchestration: 0,
+            equilibrium: 0,
+            bayes: 0,
+            ai_intuition: 0,
+            digital_root: 0,
+            leader_succession: 0,
+            transformer: 0
         };
 
         breakdown[num] = nBreakdown;
@@ -310,60 +330,66 @@ export const generateMasterPrediction = async (
     };
 };
 
-export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: AdaptiveRules, report: ForensicReport) => {
-    // Logique de correction existante...
-    const hits = report.matches.filter(m => m.errorType === 'Hit').length;
-    const newWeights = { ...weights };
-    const reasoning = [];
+export const calculateCorrectionsFromForensics = (
+    currentWeights: AlgoWeights,
+    currentRules: AdaptiveRules,
+    report: ForensicReport
+): { newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } => {
+    let newWeights = { ...currentWeights };
+    const reasoning: string[] = ["Adaptation balistique post-tirage."];
 
+    report.scoreDivergence.forEach(div => {
+        const key = div.algo.toLowerCase() as keyof AlgoWeights;
+        // On renforce les algos qui avaient vu juste (impact fort)
+        if (div.impact > 70 && newWeights[key] !== undefined) {
+            // Incrément prudent (+2%) avant renormalisation
+            newWeights[key] = (Number(newWeights[key]) || 0) + 0.02;
+            reasoning.push(`Renforcement de ${div.algo} (+2%).`);
+        }
+    });
+    
+    const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     if (hits === 0) {
         newWeights.anti_consensus = Math.min(0.3, (newWeights.anti_consensus || 0) + 0.05);
         newWeights.equilibrium = Math.min(0.3, (newWeights.equilibrium || 0) + 0.05);
         reasoning.push("Renforcement Anti-Consensus & Équilibre suite échec total.");
-    } else if (hits >= 3) {
-        // Renforcement positif : on augmente légèrement les poids dominants
-        reasoning.push("Succès partiel : Stabilisation des poids actuels.");
     }
-    
-    return {
-        newWeights: normalizeWeights(newWeights),
-        newRules: { ...rules },
-        reasoning
+
+    return { 
+        newWeights: normalizeWeights(newWeights), 
+        newRules: currentRules, 
+        reasoning 
     };
 };
 
-export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {
-    // Logique existante préservée
-    const ac = calculateACValue(numbers);
-    const sum = numbers.reduce((a, b) => a + b, 0);
-    const odd = numbers.filter(n => n % 2 !== 0).length;
+export const analyzeTicketStrength = async (nums: number[], _drawName: string): Promise<TicketAnalysisResult> => {
+    const ac = calculateACValue(nums);
+    const sum = nums.reduce((a,b) => a+b, 0);
     let score = 50;
-    const warnings: string[] = [];
-    if (ac >= 7) score += 20; else if (ac < 4) { score -= 20; warnings.push("AC faible"); }
-    if (sum >= 150 && sum <= 300) score += 10; else { score -= 10; warnings.push("Somme hors zone"); }
-    if (odd >= 2 && odd <= 3) score += 10; else warnings.push("Déséquilibre P/I");
+    const warnings = [];
+    if (ac < 7) { score -= 15; warnings.push("Faible complexité structurelle."); }
+    if (sum < 150 || sum > 300) { score -= 10; warnings.push("Somme Sigma atypique."); }
     
-    let verdict = "Standard";
-    if (score >= 80) verdict = "Elite";
-    else if (score >= 60) verdict = "Solide";
-    else if (score < 40) verdict = "Fragile";
+    // Ajout d'analyse de parité
+    const odd = nums.filter(n => n % 2 !== 0).length;
+    if (odd < 2 || odd > 3) { score -= 5; warnings.push("Déséquilibre Pair/Impair."); }
 
-    return { score: Math.max(0, Math.min(100, score)), verdict, warnings };
+    return {
+        score: Math.max(0, Math.min(100, score + (ac * 5))),
+        verdict: score > 70 ? "Vecteur Élite" : score > 50 ? "Vecteur Standard" : "Fragile",
+        warnings
+    };
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
-    const entries = Object.entries(weights).sort((a, b) => (b[1] || 0) - (a[1] || 0));
-    const top = entries[0];
-    if (!top) return "Hybride";
+    const w = weights;
+    // Détection heuristique de la stratégie dominante
+    if ((w.frequency || 0) > 0.25) return "Domination Fréquence";
+    if ((w.spectral || 0) > 0.25) return "Résonance Harmonique";
+    if ((w.markov || 0) > 0.25) return "Transition de Phase";
+    if ((w.gap || 0) > 0.25) return "Sniper d'Écarts";
+    if ((w.anti_consensus || 0) > 0.15) return "Contre-Intuitive";
     
-    switch (top[0]) {
-        case 'spectral': return "Resonance Spectrale";
-        case 'frequency': return "Tendance Chaude";
-        case 'anti_consensus': return "Contre-Intuitive";
-        case 'fractal': return "Fractale";
-        case 'markov': return "Markovienne";
-        case 'gap_velocity': return "Vélocité d'Écart";
-        case 'ai_intuition': return "Intuition Deep";
-        default: return "Adaptive " + top[0];
-    }
+    // Si pas de dominance claire
+    return "Consensus Nexus";
 };

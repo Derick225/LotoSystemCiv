@@ -19,17 +19,16 @@ serve(async (req: Request) => {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    // Utilisation de gemini-3-flash-preview pour une compatibilité maximale Vision et rapidité
+    // Utilisation de gemini-2.5-flash-image, optimisé pour la vision
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', 
+      model: 'gemini-2.5-flash-image', 
       contents: {
         parts: [
           { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
-          { text: "Analyse cette image de ticket de loto ou d'écran de résultats. Extrais la date, les 5 numéros gagnants et si présents, les 5 numéros machine." }
+          { text: "Extrais la date (format DD/MM/YYYY) et les 5 numéros gagnants (et les 5 numéros machine si présents) de ce ticket de loto ou écran de résultats. Retourne un JSON strict." }
         ]
       },
       config: {
-        systemInstruction: "OCR Mode. Réponds UNIQUEMENT avec un JSON valide respectant le schéma.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,

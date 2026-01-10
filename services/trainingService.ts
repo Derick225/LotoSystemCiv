@@ -1,11 +1,14 @@
 
 import { fetchResults } from './lotteryService';
 import { generateMasterPrediction, saveAlgoWeights, getAlgoWeights, getAdaptiveRules, saveAdaptiveRules } from './predictionEngine';
+import { runGeneticOptimization } from './geneticOptimizer';
 import { detectGameRegime } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { runGeneticOptimization } from './geneticOptimizer';
 import type { AlgoWeights, TrainingReport, TrainingResult, DrawResult } from '../types';
 
+/**
+ * Exécute une simulation historique (Backtest) pour évaluer la performance des poids actuels.
+ */
 export const runBacktestTraining = async (
     drawName: string, 
     history: DrawResult[],
@@ -14,12 +17,14 @@ export const runBacktestTraining = async (
     customWeights?: AlgoWeights
 ): Promise<TrainingReport> => {
     let allResults = history;
+    
+    // Si l'historique n'est pas fourni, on le charge
     if (!allResults || allResults.length === 0) {
         const { data } = await fetchResults(drawName);
         allResults = data;
     }
 
-    if (allResults.length < 25) throw new Error("Historique insuffisant pour l'entraînement (min 25 requis).");
+    if (allResults.length < 25) throw new Error("Historique insuffisant (min 25 requis).");
     
     const regime = detectGameRegime(allResults);
     const actualSampleSize = Math.min(requestedSampleSize, allResults.length - 15);
@@ -30,14 +35,21 @@ export const runBacktestTraining = async (
     let atLeastOneHitCount = 0;
     const hitCountsArray: number[] = [];
     
+    // Récupération des poids (soit custom, soit actuels en base/local)
     const weightsToUse = customWeights || await getAlgoWeights(drawName);
     
+    // Boucle de simulation (du plus ancien au plus récent dans la fenêtre d'échantillon)
+    // i représente l'index dans le tableau history (qui est trié par date décroissante)
+    // Donc i=0 est le plus récent. On veut tester sur les 'actualSampleSize' derniers tirages.
     for (let i = actualSampleSize - 1; i >= 0; i--) {
         const targetDraw = allResults[i];
+        
+        // L'historique connu à ce moment-là est tout ce qui est après l'index i
         const historyAtThatTime = allResults.slice(i + 1); 
         
-        // Simulation locale rapide (l'inférence unitaire reste locale pour l'instant)
+        // On génère la prédiction comme si on était à la veille du tirage
         const prediction = await generateMasterPrediction(drawName, historyAtThatTime, weightsToUse);
+        
         const predicted = prediction.suggestedNumbers;
         const actual = targetDraw.gagnants;
         const hits = predicted.filter(n => actual.includes(n));
@@ -67,13 +79,18 @@ export const runBacktestTraining = async (
         });
 
         if (onProgress) onProgress(Math.round(((actualSampleSize - i) / actualSampleSize) * 100));
+        
+        // Petit délai pour ne pas bloquer l'UI
         if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
     const totalTests = trainingResults.length;
     const avg = totalTests > 0 ? totalHitsAcc / totalTests : 0;
-    const variance = hitCountsArray.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / totalTests;
+    const variance = hitCountsArray.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / (totalTests || 1);
     const stabilityScore = Math.sqrt(variance);
+
+    // Score pondéré pour privilégier les gros gains
+    const score = Math.min(100, Math.round((distribution.two * 10 + distribution.three * 50 + distribution.four * 200 + distribution.five * 1000) / totalTests * 2));
 
     return {
         totalTests,
@@ -84,12 +101,17 @@ export const runBacktestTraining = async (
         stabilityLabel: stabilityScore < 0.7 ? 'Rocher' : stabilityScore > 1.8 ? 'Chaos' : 'Stable',
         winDistribution: distribution,
         history: trainingResults,
-        score: Math.min(100, Math.round((distribution.two * 30 + distribution.three * 150 + distribution.four * 800 + distribution.five * 5000) / totalTests)),
+        score,
         learnedPatternsSummary: {}, 
         regimeInfo: { regime: regime.regime, hurst: regime.hurst }
     };
 };
 
+/**
+ * evolveNeuralDNA v3.4
+ * Optimise les poids via algorithme génétique (Cloud ou Local Worker).
+ * Compare la performance avant/après pour valider l'évolution.
+ */
 export const evolveNeuralDNA = async (
     drawName: string, 
     options: { generations: number; sampleSize: number } = { generations: 20, sampleSize: 30 },
@@ -97,8 +119,19 @@ export const evolveNeuralDNA = async (
 ): Promise<{ bestWeights: AlgoWeights, improvement: number, report: TrainingReport }> => {
     
     const currentWeights = await getAlgoWeights(drawName);
+    const currentRules = getAdaptiveRules(drawName);
+    const { data: fullHistory } = await fetchResults(drawName);
+
+    // 1. Baseline (Performance actuelle)
+    // On évalue ce que vaut la configuration actuelle
+    const oldReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, currentWeights);
     
-    // 1. Appel Edge Function pour calcul lourd (Prioritaire)
+    let bestWeights: AlgoWeights = currentWeights;
+    let bestRules: any = currentRules;
+    let optimizationSource = 'LOCAL';
+
+    // 2. Phase Génétique
+    // Essai Cloud (Prioritaire pour la vitesse et la profondeur)
     if (isSupabaseConfigured()) {
         try {
             console.log("Starting Cloud Genetic Optimization...");
@@ -108,55 +141,68 @@ export const evolveNeuralDNA = async (
                     baseWeights: currentWeights,
                     config: {
                         generations: options.generations,
-                        populationSize: 20
+                        populationSize: 30 // Population plus large sur le cloud
                     }
                 }
             });
 
-            if (error) throw error;
-            
-            const bestWeights = data.bestWeights;
-            const { data: fullHistory } = await fetchResults(drawName);
-            
-            // Backtest final local pour rapport détaillé
-            const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);
-            
-            saveAlgoWeights(drawName, bestWeights);
-            onTelemetry({ gen: options.generations, bestFitness: data.bestFitness, diversity: 0.1 });
-
-            return {
-                bestWeights,
-                improvement: data.improvement || 0,
-                report: newReport
-            };
-
+            if (!error && data?.bestWeights) {
+                bestWeights = data.bestWeights;
+                optimizationSource = 'CLOUD';
+                onTelemetry({ gen: options.generations, bestFitness: data.bestFitness, diversity: 0.1, source: 'CLOUD' });
+            } else {
+                throw new Error(error?.message || "Cloud optimize returned no data");
+            }
         } catch (e) {
             console.warn("Cloud Optimization failed, falling back to local Worker.", e);
+            optimizationSource = 'LOCAL';
         }
     }
 
-    // 2. Fallback Local (Web Worker via geneticOptimizer)
-    try {
-        const currentRules = getAdaptiveRules(drawName);
-        const result = await runGeneticOptimization(
-            drawName,
-            currentWeights,
+    // Fallback Local (Si Cloud a échoué ou n'est pas configuré)
+    if (optimizationSource === 'LOCAL') {
+        const optimization = await runGeneticOptimization(
+            drawName, 
+            currentWeights, 
             currentRules,
-            { maxGenerations: options.generations, populationSize: 20 },
+            { 
+                maxGenerations: options.generations, 
+                historyDepth: options.sampleSize,
+                mutationRate: 0.35
+            },
             onTelemetry
         );
-
-        const { data: fullHistory } = await fetchResults(drawName);
-        const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, result.bestChromosome.weights);
-        
-        saveAlgoWeights(drawName, result.bestChromosome.weights);
-        
-        return {
-            bestWeights: result.bestChromosome.weights,
-            improvement: 0, // Difficile à estimer sans score précédent exact, on assume 0 pour l'affichage
-            report: newReport
-        };
-    } catch (e: any) {
-        throw new Error(`Optimisation locale échouée : ${e.message}`);
+        bestWeights = optimization.bestChromosome.weights;
+        bestRules = optimization.bestChromosome.rules;
     }
+
+    // 3. Validation (Performance post-optimisation)
+    // On re-teste les nouveaux poids sur le même échantillon historique
+    const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);
+    
+    // Calcul de l'amélioration (Différence de score)
+    const improvement = parseFloat((newReport.score - oldReport.score).toFixed(2));
+
+    // 4. Persistance (Uniquement si pas de dégradation majeure)
+    // On tolère une légère baisse (-1) si la stabilité est meilleure, sinon on rejette
+    if (improvement >= -1) {
+        await saveAlgoWeights(drawName, bestWeights);
+        if (optimizationSource === 'LOCAL') {
+            saveAdaptiveRules(drawName, bestRules);
+        }
+    } else {
+        console.warn(`Evolution rejetée : Score ${newReport.score} vs ${oldReport.score}`);
+        // On renvoie quand même le rapport du "meilleur" trouvé pour analyse, mais on ne sauvegarde pas
+        return {
+            bestWeights: currentWeights, // On garde les anciens
+            improvement,
+            report: oldReport // On garde l'ancien rapport
+        };
+    }
+
+    return {
+        bestWeights,
+        improvement,
+        report: newReport
+    };
 };

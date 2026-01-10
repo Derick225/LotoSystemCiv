@@ -365,7 +365,17 @@ export interface TicketAnalysisResult {
     warnings: string[];
 }
 
+export interface NotebookCell {
+    id: string;
+    type: 'code' | 'markdown' | 'output';
+    content: string;
+}
+
 export interface PythonAnalysisResult {
+    id?: string;
+    timestamp?: number;
+    drawName?: string;
+    modelType?: string;
     script: string;
     stdout: string[];
     findings: {
@@ -375,6 +385,7 @@ export interface PythonAnalysisResult {
         p_value: number;
     };
     insight: string;
+    cells?: NotebookCell[];
 }
 
 export interface NumberGap {

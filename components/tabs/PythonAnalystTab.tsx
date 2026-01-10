@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runDeepPythonAnalysis } from '../../services/pythonAnalystService';
 import { PythonAnalysisResult } from '../../types';
@@ -15,17 +15,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
     const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
     const [result, setResult] = useState<PythonAnalysisResult | null>(null);
     const [showCode, setShowCode] = useState(false);
-    
-    // Fake progress steps for immersion
-    const [progressStep, setProgressStep] = useState(0);
-    const steps = [
-        "Chargement du noyau Python 3.12...",
-        "Importation des bibliothèques (Pandas, Scikit-learn)...",
-        "Nettoyage des données historiques...",
-        "Entraînement du modèle vectoriel...",
-        "Calcul des probabilités de convergence...",
-        "Génération du rapport scientifique..."
-    ];
+    const [logs, setLogs] = useState<string[]>([]);
 
     const runAnalysis = async () => {
         if (history.length < 20) {
@@ -34,31 +24,25 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
         }
         
         setStatus('running');
-        setProgressStep(0);
+        setLogs([]);
         setResult(null);
 
-        // Simulation de progression visuelle
-        let step = 0;
-        const interval = setInterval(() => {
-            step++;
-            if (step < steps.length) setProgressStep(step);
-        }, 800);
-
         try {
-            const data = await runDeepPythonAnalysis(drawName, history);
-            clearInterval(interval);
-            setProgressStep(steps.length - 1);
+            const data = await runDeepPythonAnalysis(
+                drawName, 
+                history, 
+                'XGBoost', 
+                undefined,
+                (msg) => setLogs(prev => [...prev, msg].slice(-8)) // Garder les 8 derniers logs
+            );
             
-            setTimeout(() => {
-                setResult(data);
-                setStatus('completed');
-                showToast("Analyse terminée avec succès.", "success");
-            }, 500);
+            setResult(data);
+            setStatus('completed');
+            showToast("Analyse terminée avec succès.", "success");
 
         } catch (e: any) {
-            clearInterval(interval);
             setStatus('error');
-            console.error("ANALYSIS FAILED:", e); // Log critique pour le debug
+            console.error("ANALYSIS FAILED:", e); 
             showToast(e.message || "Erreur du laboratoire.", "error");
         }
     };
@@ -111,10 +95,11 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                         <div className="mb-6 flex justify-center">
                             <Cpu size={64} className="text-emerald-500 animate-spin-slow" />
                         </div>
-                        <h3 className="text-xl font-black text-slate-800 dark:text-white mb-2">Traitement des Données</h3>
-                        <p className="text-sm font-mono text-emerald-600 dark:text-emerald-400">{steps[progressStep]}</p>
-                        <div className="mt-8 w-64 mx-auto h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${(progressStep / (steps.length - 1)) * 100}%` }}></div>
+                        <h3 className="text-xl font-black text-slate-800 dark:text-white mb-4">Traitement des Données</h3>
+                        <div className="space-y-2 font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                            {logs.map((log, i) => (
+                                <div key={i}>{log}</div>
+                            ))}
                         </div>
                     </div>
                 )}

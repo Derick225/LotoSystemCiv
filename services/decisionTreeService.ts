@@ -1,44 +1,53 @@
 
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
+import ForestWorker from './workers/forest.worker.ts?worker';
 
 export const FEATURES_LABELS = [
     'Critical Gap', 'Frequency', 'Shadow', 
     'Consensus Trap', 'Neighbor', 'Machine Leak', 'Norm Gap'
 ];
 
-// Conversion des features booléens en vecteur numérique pour le worker
 const extractNumericFeatures = (num: number, results: DrawResult[], globalConsensusMap: Record<number, number>, activeIndices: number[]): number[] => {
     if (results.length < 5) return new Array(activeIndices.length).fill(0);
     const recent20 = results.slice(0, 20);
     const lastDraw = results[0];
-    const freq20 = recent20.filter(r => r.gagnants.includes(num)).length;
+    
+    const checkIncludes = (arr: number[] | undefined, target: number) => {
+        if (!arr) return false;
+        return arr.includes(target);
+    };
+
+    const freq20 = recent20.filter(r => checkIncludes(r.gagnants, num)).length;
     const consensus = globalConsensusMap[num] || 0;
     
     let gap = 0;
     for(let i=0; i<results.length; i++) {
-        if(results[i].gagnants.includes(num)) { gap = i; break; }
+        if(checkIncludes(results[i].gagnants, num)) { gap = i; break; }
     }
     
-    // Vecteur complet brut
     const allFeatures = [
-        (gap >= 8 && gap <= 18) ? 1 : 0, // Critical Gap
-        freq20 >= 3 ? 1 : 0,             // Hot
-        (consensus < 40 && freq20 >= 2) ? 1 : 0, // Shadow
-        consensus > 85 ? 1 : 0,          // Consensus Trap
-        (lastDraw?.gagnants.includes(num - 1) || lastDraw?.gagnants.includes(num + 1)) ? 1 : 0, // Neighbor
-        (lastDraw?.machine?.includes(num)) ? 1 : 0, // Machine Leak
-        gap / 50 // Normalized Gap
+        (gap >= 8 && gap <= 18) ? 1 : 0, 
+        freq20 >= 3 ? 1 : 0,             
+        (consensus < 40 && freq20 >= 2) ? 1 : 0, 
+        consensus > 85 ? 1 : 0,          
+        (checkIncludes(lastDraw?.gagnants, num - 1) || checkIncludes(lastDraw?.gagnants, num + 1)) ? 1 : 0, 
+        (checkIncludes(lastDraw?.machine, num)) ? 1 : 0, 
+        Math.min(1, gap / 50) 
     ];
 
-    // Filtrage dynamique selon la sélection utilisateur
     return activeIndices.map(idx => allFeatures[idx]);
 };
 
-export const runDecisionForest = async (history: DrawResult[], shadowMode: boolean = false, activeFeatures: string[] = FEATURES_LABELS): Promise<ForestVote[]> => {
-    if (!history || history.length < 40) return [];
+export const runDecisionForest = async (
+    history: DrawResult[], 
+    shadowMode: boolean = false, 
+    activeFeatures: string[] = FEATURES_LABELS,
+    minScore: number = 50
+): Promise<{ votes: ForestVote[], dataset: any[] }> => {
+    if (!history || history.length < 40) return { votes: [], dataset: [] };
 
     const activeIndices = activeFeatures.map(label => FEATURES_LABELS.indexOf(label)).filter(idx => idx !== -1);
-    if (activeIndices.length === 0) return [];
+    if (activeIndices.length === 0) return { votes: [], dataset: [] };
 
     const consensusMap: Record<number, number> = {};
     for (let i = 1; i <= 90; i++) {
@@ -47,21 +56,25 @@ export const runDecisionForest = async (history: DrawResult[], shadowMode: boole
     }
 
     const dataset: { features: number[], label: 0 | 1 }[] = [];
-    history.slice(0, 60).forEach((target, idx) => {
+    history.slice(0, 50).forEach((target, idx) => {
         const context = history.slice(idx + 1);
-        if (context.length >= 25) {
-            target.gagnants.forEach(n => dataset.push({ 
-                features: extractNumericFeatures(n, context, consensusMap, activeIndices), 
-                label: 1 
-            }));
-            for(let i=0; i<6; i++) {
-                const rnd = Math.floor(Math.random()*90)+1;
-                if(!target.gagnants.includes(rnd)) {
-                    dataset.push({ 
-                        features: extractNumericFeatures(rnd, context, consensusMap, activeIndices), 
-                        label: 0 
-                    });
-                }
+        if (context.length < 25) return;
+
+        const winners = target.gagnants;
+        winners.forEach(n => dataset.push({ 
+            features: extractNumericFeatures(n, context, consensusMap, activeIndices), 
+            label: 1 
+        }));
+
+        let negativesCount = 0;
+        while (negativesCount < winners.length) {
+            const rnd = Math.floor(Math.random() * 90) + 1;
+            if (!winners.includes(rnd)) {
+                dataset.push({ 
+                    features: extractNumericFeatures(rnd, context, consensusMap, activeIndices), 
+                    label: 0 
+                });
+                negativesCount++;
             }
         }
     });
@@ -71,10 +84,8 @@ export const runDecisionForest = async (history: DrawResult[], shadowMode: boole
         features: extractNumericFeatures(i + 1, history, consensusMap, activeIndices)
     }));
 
-    (window as any).__nexus_forest_dataset = { dataset, activeFeatures };
-
-    return new Promise((resolve) => {
-        const worker = new Worker(new URL('./workers/forest.worker.ts', import.meta.url), { type: 'module' });
+    return new Promise((resolve, reject) => {
+        const worker = new ForestWorker();
         
         worker.onmessage = (e) => {
             const { votes } = e.data;
@@ -85,38 +96,44 @@ export const runDecisionForest = async (history: DrawResult[], shadowMode: boole
                 score: Math.round(v.score),
                 votes: { temporal: 0, spatial: 0, structural: 0 },
                 decisionPath: { id: 'root', type: 'condition', label: 'Forest Consensus', children: [] } as DecisionNode,
-                features: { isConsensusTrap: v.score > 80 && shadowMode }
+                features: { isConsensusTrap: v.score > 85 && shadowMode }
             }));
 
             const filtered = shadowMode 
-                ? finalVotes.filter(v => v.score > 40 && v.score < 80)
-                : finalVotes.filter(v => v.score > 50);
+                ? finalVotes.filter(v => v.score > 35 && v.score < 75)
+                : finalVotes.filter(v => v.score >= minScore);
 
-            resolve(filtered.slice(0, 20));
+            resolve({ 
+                votes: filtered.sort((a, b) => b.score - a.score).slice(0, 20),
+                dataset 
+            });
+        };
+
+        worker.onerror = (err) => {
+            worker.terminate();
+            reject(err);
         };
 
         worker.postMessage({ 
             dataset, 
             candidates, 
-            config: { numTrees: 100, maxDepth: 6 } 
+            config: { numTrees: 80, maxDepth: 6 } 
         });
     });
 };
 
-export const calculateFeatureImportance = (_node: any): Record<string, number> => {
-    const dataObj = (window as any).__nexus_forest_dataset;
-    if (!dataObj || !dataObj.dataset || dataObj.dataset.length === 0) return {};
+export const calculateFeatureImportance = (dataset: any[], activeFeatures: string[]): Record<string, number> => {
+    if (!dataset || dataset.length === 0) return {};
 
-    const { dataset, activeFeatures } = dataObj;
     const importance: Record<string, number> = {};
     const n = dataset.length;
-    const meanY = dataset.reduce((acc: number, d: any) => acc + d.label, 0) / n;
+    const meanY = dataset.reduce((acc, d) => acc + d.label, 0) / n;
 
-    activeFeatures.forEach((label: string, idx: number) => {
-        const meanX = dataset.reduce((acc: number, d: any) => acc + d.features[idx], 0) / n;
+    activeFeatures.forEach((label, idx) => {
+        const meanX = dataset.reduce((acc, d) => acc + d.features[idx], 0) / n;
         let num = 0, denX = 0, denY = 0;
 
-        dataset.forEach((d: any) => {
+        dataset.forEach((d) => {
             const x = d.features[idx];
             const y = d.label;
             num += (x - meanX) * (y - meanY);

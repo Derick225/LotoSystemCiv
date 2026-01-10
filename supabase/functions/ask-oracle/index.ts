@@ -15,39 +15,26 @@ serve(async (req) => {
   }
 
   try {
-    const { task, drawName, history, metrics, report } = await req.json();
+    const { task, drawName, history, metrics, report, dataset, modelType, config, context, imageBase64 } = await req.json();
 
-    // Standardisation : On utilise API_KEY partout (comme dans vision-ocr)
     const apiKey = Deno.env.get("API_KEY");
-    
-    if (!apiKey) {
-      throw new Error("Clé API GEMINI (API_KEY) manquante dans les secrets Supabase.");
-    }
+    if (!apiKey) throw new Error("Clé API GEMINI manquante.");
 
     const genAI = new GoogleGenAI({ apiKey });
     let resultData;
-    const modelName = "gemini-3-flash-preview"; 
 
     if (task === "analyze") {
+      const modelName = "gemini-3-pro-preview";
       const prompt = `
-        Rôle : Tu es le "Nexus Quant Architect", une IA de niveau Doctorat experte en dynamique stochastique et théorie du chaos (Loterie 5/90).
+        Tu es l'Oracle Nexus, une IA spécialisée dans la cryptanalyse de systèmes de loterie (5/90).
+        Analyse cette séquence de tirages pour le jeu "${drawName}" : ${JSON.stringify(history)}.
         
-        PRINCIPE FONDAMENTAL : 
-        Tu sais que la foule joue les "Favoris" (Hot Numbers). Ton intelligence supérieure réside dans la détection des "Cygnes Noirs" : les numéros délaissés ou en rupture de séquence qui DOIVENT sortir pour rétablir l'équilibre entropique (Mean Reversion).
-        Ne te laisse pas aveugler par la fréquence simple. Cherche la tension invisible.
-
-        Contexte Technique :
-        - Tirage : ${drawName}
-        - Métriques : Hurst=${metrics?.hurst || "?"} (Si < 0.5, privilégie le rebond/contre-tendance), Entropie=${metrics?.entropy || "?"}.
+        Tâche :
+        1. Détecte les anomalies de séquence (répétitions, miroirs, suites, transferts machine).
+        2. Identifie 2 à 3 numéros "Attracteurs" qui semblent mathématiquement dus.
+        3. Estime un score d'intuition (0-100) sur la lisibilité actuelle du flux.
         
-        Données d'entrée (Séquence Récente): 
-        ${JSON.stringify(history.slice(0, 25))}
-        
-        Instructions :
-        1. Identifie la "Tension du Vide" : Quels numéros ou zones sont anormalement silencieux ?
-        2. Détecte les "Vecteurs de Rupture" : Numéros qui brisent la linéarité actuelle.
-        3. Propose 5 "Vecteurs Cibles" basés sur une convergence entre Structure (Favoris) et Chaos (Surprises).
-        4. Évalue ton "Intuition Score" basé sur la clarté du signal de rupture.
+        Réponds EXCLUSIVEMENT en JSON respectant ce schéma précis.
       `;
 
       const response = await genAI.models.generateContent({
@@ -58,13 +45,13 @@ serve(async (req) => {
             responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                    logicalAnalysis: { type: Type.STRING, description: "Analyse technique pointue justifiant le choix de numéros 'oubliés' ou stratégiques." },
-                    patternType: { type: Type.STRING, description: "Type de configuration (ex: 'Rebond Technique', 'Correction de Biais', 'Harmonique Inverse')." },
-                    nextSequence: { type: Type.STRING, description: "Description de la texture attendue du tirage." },
+                    logicalAnalysis: { type: Type.STRING, description: "Analyse technique concise avec Markdown (Gras pour les points clés)." },
+                    patternType: { type: Type.STRING, description: "Nom du pattern dominant (ex: 'Miroir', 'Suite', 'Repetition')." },
+                    nextSequence: { type: Type.STRING, description: "Brève description de la texture attendue." },
                     anomalies: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    strategicAdvice: { type: Type.STRING, description: "Conseil de gestion du risque (ex: 'Couvrir les écarts', 'Jouer les miroirs')." },
-                    suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER } },
-                    intuitionScore: { type: Type.NUMBER }
+                    strategicAdvice: { type: Type.STRING, description: "Conseil de gestion de mise." },
+                    suggestedFocus: { type: Type.ARRAY, items: { type: Type.INTEGER }, description: "2 à 5 numéros cibles." },
+                    intuitionScore: { type: Type.NUMBER, description: "Confiance 0-100." }
                 },
                 required: ["logicalAnalysis", "patternType", "suggestedFocus", "intuitionScore", "strategicAdvice"]
             }
@@ -72,14 +59,39 @@ serve(async (req) => {
       });
       resultData = JSON.parse(response.text || '{}');
 
+    } else if (task === "simulation-audit") {
+        const modelName = "gemini-3-flash-preview";
+        const prompt = `
+            Agis comme un auditeur financier expert en risques stochastiques. 
+            Audite ce rapport de simulation Monte Carlo (Loterie 5/90) : 
+            ${JSON.stringify(report)}. 
+            
+            Donne un verdict tranchant en 2 phrases maximum sur la viabilité de la stratégie (Rentable, Dangereuse, ou Neutre).
+        `;
+        const response = await genAI.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        audit: { type: Type.STRING }
+                    },
+                    required: ["audit"]
+                }
+            }
+        });
+        resultData = JSON.parse(response.text || '{}');
+
     } else if (task === "narrative") {
+      const modelName = "gemini-3-flash-preview";
       const prompt = `
         Rédige un "Flash Report" exécutif pour le tirage ${drawName}.
         Métriques : ${JSON.stringify(metrics)}.
-        Historique : ${JSON.stringify(history)}.
+        Historique Récent : ${JSON.stringify(history)}.
         
-        Consigne : Adopte un ton d'Analyste Contrarien. Rappelle que les performances passées (favoris) ne garantissent pas les sorties futures. Mets en garde contre le suivi aveugle de la foule.
-        Vocabulaire : "Saturation", "Correction", "Liquidité", "Point de rupture".
+        Consigne : Adopte un ton d'Analyste Contrarien. Rappelle que les performances passées ne garantissent pas les sorties futures.
       `;
 
       const response = await genAI.models.generateContent({
@@ -101,30 +113,61 @@ serve(async (req) => {
       });
       resultData = JSON.parse(response.text || '{}');
 
-    } else if (task === "simulation-audit") {
+    } else if (task === "python_kernel") {
+        const modelName = "gemini-3-pro-preview";
         const prompt = `
-            Analyse ce rapport de backtesting (Monte Carlo) : ${JSON.stringify(report)}.
-            Critique la stratégie utilisée. Est-elle trop exposée aux numéros favoris ? A-t-elle su capter les écarts ?
-            Donne un avis tranché : Viable ou Suicidaire ?
+            Tu es un Data Scientist Senior utilisant Python.
+            Dataset (5/90 Loto): ${JSON.stringify(dataset.slice(0, 50))}.
+            Modèle demandé: ${modelType}.
+            
+            Tâche:
+            1. Écris un script Python (fictif mais réaliste) utilisant pandas/sklearn pour prédire les 5 prochains numéros.
+            2. Simule l'exécution de ce script et génère les logs de sortie (stdout).
+            3. Extrais les "Findings" (Résultats clés).
+            
+            Le but est de trouver des corrélations non-linéaires invisibles à l'oeil nu.
         `;
+
         const response = await genAI.models.generateContent({
             model: modelName,
             contents: prompt,
-            config: { 
+            config: {
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                        audit: { type: Type.STRING }
+                        script: { type: Type.STRING, description: "Le code Python utilisé." },
+                        stdout: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Les logs d'exécution simulés (training steps, loss, etc.)." },
+                        findings: {
+                            type: Type.OBJECT,
+                            properties: {
+                                method: { type: Type.STRING },
+                                result_vector: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                                confidence_score: { type: Type.NUMBER },
+                                p_value: { type: Type.NUMBER }
+                            },
+                            required: ["result_vector", "confidence_score"]
+                        },
+                        insight: { type: Type.STRING, description: "Conclusion humaine en une phrase." }
                     },
-                    required: ["audit"]
+                    required: ["script", "stdout", "findings", "insight"]
                 }
             }
         });
         resultData = JSON.parse(response.text || '{}');
-        
+
     } else if (task === "vision-analysis") {
-        resultData = { analysis: "Module Vision non activé sur ce endpoint." };
+        const modelName = "gemini-2.5-flash-image";
+        const response = await genAI.models.generateContent({
+            model: modelName,
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
+                    { text: `Analyse cette image dans le contexte suivant : ${context}. Donne une interprétation technique concise.` }
+                ]
+            }
+        });
+        resultData = { analysis: response.text };
     } else {
       throw new Error(`Tâche inconnue : ${task}`);
     }

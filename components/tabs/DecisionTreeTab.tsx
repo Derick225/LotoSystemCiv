@@ -27,15 +27,15 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
         setLocalLoading(true);
         try {
             // Lancement du Worker Forest
-            const res = await runDecisionForest(history, shadowMode, selectedFeatures);
-            setCandidates(res);
+            const { votes, dataset } = await runDecisionForest(history, shadowMode, selectedFeatures);
+            setCandidates(votes);
             
-            if (res.length > 0) {
+            if (votes.length > 0) {
                 // Par défaut, on sélectionne le meilleur candidat
-                setSelectedCandidate(res[0]);
+                setSelectedCandidate(votes[0]);
                 
                 // Calcul de l'importance des features (post-training)
-                const impMap = calculateFeatureImportance(null);
+                const impMap = calculateFeatureImportance(dataset, selectedFeatures);
                 const impArray = Object.entries(impMap)
                     .map(([name, val]) => ({ name, val }))
                     .sort((a,b) => b.val - a.val);
@@ -93,7 +93,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                         <p className="text-slate-400 text-sm font-medium max-w-xl mx-auto xl:mx-0">
                             {shadowMode 
                                 ? "Nous recherchons les numéros que tout le monde ignore mais qui ont une signature mathématique de 'Réveil imminent'." 
-                                : "100 arbres de décision analysent l'historique. Voici les numéros qui obtiennent la majorité absolue des votes."}
+                                : "80 arbres de décision analysent l'historique. Voici les numéros qui obtiennent la majorité absolue des votes."}
                         </p>
                     </div>
 
@@ -187,7 +187,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                         <div>
                             <h5 className="text-xs font-black text-indigo-700 dark:text-indigo-400 uppercase mb-1">Comment ça marche ?</h5>
                             <p className="text-[11px] text-indigo-800/70 dark:text-indigo-200/70 leading-relaxed font-medium">
-                                Imaginez 100 experts qui regardent le passé du loto. Chacun a sa spécialité (les écarts, les suites, les fréquences...). Ils votent tous. Ici, nous affichons uniquement les numéros qui ont convaincu la majorité du conseil.
+                                Imaginez 80 experts qui regardent le passé du loto. Chacun a sa spécialité (les écarts, les suites, les fréquences...). Ils votent tous. Ici, nous affichons uniquement les numéros qui ont convaincu la majorité du conseil.
                             </p>
                         </div>
                     </div>

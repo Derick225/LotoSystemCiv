@@ -1,81 +1,79 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { DrawResult, PythonAnalysisResult } from "../types";
+import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { DrawResult, PythonAnalysisResult, NotebookCell } from "../types";
 
-export const runDeepPythonAnalysis = async (drawName: string, history: DrawResult[]): Promise<PythonAnalysisResult> => {
-    const apiKey = process.env.API_KEY;
+export const runDeepPythonAnalysis = async (
+    drawName: string, 
+    history: DrawResult[], 
+    modelType: 'XGBoost' | 'ARIMA' | 'MCMC' = 'XGBoost',
+    onProgress?: (data: any) => void,
+    onLog?: (msg: string) => void
+): Promise<PythonAnalysisResult> => {
     
-    if (!apiKey) {
-        console.error("API Key missing. Please check .env file.");
-        throw new Error("Clé API manquante. Vérifiez le fichier .env (VITE_API_KEY).");
+    // Initial logs
+    if (onLog) {
+        onLog(`[SYSTEM] Initializing Neural Python Kernel v12.0...`);
+        onLog(`[CONFIG] Model selected: ${modelType}`);
+        onLog(`[DATA] Loading ${history.length} frames from registry...`);
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    
-    // Dataset allégé pour optimiser les tokens et la rapidité
-    const dataset = history.slice(0, 40).map(d => ({ date: d.date, winners: d.gagnants }));
+    if (!isSupabaseConfigured()) {
+        throw new Error("Connexion Cloud requise pour le moteur d'inférence Python.");
+    }
+
+    const dataset = history.slice(0, 100).map(d => ({
+        date: d.date,
+        gagnants: d.gagnants,
+        machine: d.machine || []
+    }));
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview', 
-            contents: `Tu es un Senior Quant Analyst. Dataset: ${JSON.stringify(dataset)}. Implémente un modèle VAR ou Random Forest en Python pour le tirage ${drawName}.`,
-            config: {
-                systemInstruction: "Tu es le Nexus Python Kernel. Réponds UNIQUEMENT avec un JSON pur. Pas de balises markdown, pas de texte avant ou après.",
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        script: { type: Type.STRING },
-                        stdout: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        findings: {
-                            type: Type.OBJECT,
-                            properties: {
-                                method: { type: Type.STRING },
-                                result_vector: { type: Type.ARRAY, items: { type: Type.INTEGER } },
-                                confidence_score: { type: Type.NUMBER },
-                                p_value: { type: Type.NUMBER }
-                            }
-                        },
-                        insight: { type: Type.STRING }
-                    },
-                    required: ["script", "stdout", "findings", "insight"]
+        if (onLog) onLog(`[CLOUD] Transmitting vector payload to Edge Function...`);
+        
+        const { data, error } = await supabase.functions.invoke('ask-oracle', {
+            body: {
+                task: 'python_kernel',
+                drawName,
+                dataset,
+                modelType,
+                config: {
+                    iterations: 1000,
+                    depth: 10,
+                    learning_rate: 0.01
                 }
             }
         });
 
-        let text = response.text;
-        
-        if (!text) throw new Error("Réponse vide du modèle.");
+        if (error) throw new Error(error.message);
+        if (!data) throw new Error("Réponse vide du noyau distant.");
 
-        // --- NETTOYAGE ROBUSTE DU JSON ---
-        // 1. Suppression des balises Markdown code blocks
-        text = text.replace(/```json/g, '').replace(/```/g, '');
-        
-        // 2. Extraction chirurgicale de l'objet JSON (entre la première { et la dernière })
-        const firstBrace = text.indexOf('{');
-        const lastBrace = text.lastIndexOf('}');
-        
-        if (firstBrace !== -1 && lastBrace !== -1) {
-            text = text.substring(firstBrace, lastBrace + 1);
+        if (onLog) {
+            data.stdout?.forEach((line: string) => onLog(line));
+            if (data.findings?.p_value) onLog(`[SUCCESS] Convergence atteinte. P-Value: ${data.findings.p_value}`);
         }
 
-        // 3. Parsing sécurisé
-        try {
-            return JSON.parse(text) as PythonAnalysisResult;
-        } catch (parseError) {
-            console.error("JSON PARSE ERROR. Raw text received:", text);
-            throw new Error("Le format JSON reçu de l'IA est invalide.");
-        }
+        const cells: NotebookCell[] = [
+            { id: 'c1', type: 'markdown', content: `## Analyse Avancée : ${modelType}\n**Cible** : ${drawName}\n**Dataset** : ${history.length} tirages` },
+            { id: 'c2', type: 'code', content: data.script || "# Script auto-généré par le noyau" },
+            { id: 'c3', type: 'output', content: data.stdout?.join('\n') || "Execution completed." },
+            { id: 'c4', type: 'markdown', content: `### Synthèse Stochastique\n${data.insight || "Analyse terminée."}` }
+        ];
+
+        return {
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            drawName,
+            modelType,
+            stdout: data.stdout || [],
+            script: data.script || "",
+            findings: data.findings,
+            insight: data.insight,
+            cells
+        };
 
     } catch (e: any) {
         console.error("Python Kernel Error:", e);
-        // Propagation d'un message d'erreur plus clair vers l'UI
-        if (e.message.includes('401') || e.message.includes('API key')) {
-            throw new Error("Clé API invalide ou expirée.");
-        }
-        if (e.message.includes('JSON')) {
-            throw new Error("Erreur de formatage IA (JSON invalide).");
-        }
-        throw new Error(`Échec Kernel: ${e.message}`);
+        if (onLog) onLog(`[CRITICAL] Kernel Panic: ${e.message}`);
+        throw new Error(`Échec de l'analyse distante: ${e.message}`);
     }
 };
