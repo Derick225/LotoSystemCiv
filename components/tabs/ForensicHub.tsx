@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
 import { performForensicAnalysis } from '../../services/postPredictionAnalysisService';
+import { formatDate } from '../../services/lotteryService';
 import { PredictionForensics } from '../PredictionForensics';
 import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target } from 'lucide-react';
 import { ForensicReport } from '../../types';
@@ -22,15 +23,21 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                 const preds = await getPredictionHistoryAsync(drawName);
                 const computedReports: ForensicReport[] = [];
 
-                // Analyse des 20 dernières prédictions (augmenté pour le graphique)
+                // Analyse des 20 dernières prédictions
                 for (const pred of preds.slice(0, 20)) {
-                    const predDate = new Date(pred.timestamp).toLocaleDateString('fr-FR');
-                    const actual = history.find(h => h.date === predDate);
-                    
+                    // 1. Priorité au lien explicite (ID)
+                    let actual = pred.drawResultId ? history.find(h => h.id === pred.drawResultId) : null;
+
+                    // 2. Fallback sur la date (format normalisé)
+                    if (!actual) {
+                        const predDateStr = formatDate(new Date(pred.timestamp).toISOString());
+                        actual = history.find(h => h.date === predDateStr);
+                    }
+
                     if (actual) {
                         const rep = await performForensicAnalysis(
                             drawName, 
-                            predDate, 
+                            actual.date, 
                             pred.prediction.suggestedNumbers, 
                             actual.gagnants, 
                             pred.prediction.breakdown,
