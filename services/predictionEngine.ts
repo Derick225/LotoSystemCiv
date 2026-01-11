@@ -330,34 +330,66 @@ export const generateMasterPrediction = async (
     };
 };
 
+/**
+ * Calcul de correction par Gradient Descent (Apprentissage par Renforcement)
+ * Utilise le rapport forensique pour ajuster les poids vers ce qui AURAIT marché.
+ */
 export const calculateCorrectionsFromForensics = (
     currentWeights: AlgoWeights,
     currentRules: AdaptiveRules,
     report: ForensicReport
 ): { newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } => {
     let newWeights = { ...currentWeights };
-    const reasoning: string[] = ["Adaptation balistique post-tirage."];
+    const reasoning: string[] = [];
+    const LEARNING_RATE = 0.05; // Taux d'apprentissage modéré
 
-    report.scoreDivergence.forEach(div => {
-        const key = div.algo.toLowerCase() as keyof AlgoWeights;
-        // On renforce les algos qui avaient vu juste (impact fort)
-        if (div.impact > 70 && newWeights[key] !== undefined) {
-            // Incrément prudent (+2%) avant renormalisation
-            newWeights[key] = (Number(newWeights[key]) || 0) + 0.02;
-            reasoning.push(`Renforcement de ${div.algo} (+2%).`);
-        }
-    });
-    
-    const hits = report.matches.filter(m => m.errorType === 'Hit').length;
-    if (hits === 0) {
-        newWeights.anti_consensus = Math.min(0.3, (newWeights.anti_consensus || 0) + 0.05);
-        newWeights.equilibrium = Math.min(0.3, (newWeights.equilibrium || 0) + 0.05);
-        reasoning.push("Renforcement Anti-Consensus & Équilibre suite échec total.");
+    // 1. Analyse de Divergence (Quels algos avaient raison ?)
+    // scoreDivergence contient l'impact relatif des algos qui ont correctement prédit les numéros MANQUÉS
+    if (report.scoreDivergence.length > 0) {
+        report.scoreDivergence.forEach(div => {
+            const key = div.algo.toLowerCase() as keyof AlgoWeights;
+            const boost = (div.impact / 100) * LEARNING_RATE;
+            
+            if (newWeights[key] !== undefined) {
+                // Application du gradient positif
+                newWeights[key] = (Number(newWeights[key]) || 0) + boost;
+                if (boost > 0.01) {
+                    reasoning.push(`Boost ${div.algo} (+${(boost*100).toFixed(1)}%) car il avait détecté des gagnants manqués.`);
+                }
+            }
+        });
     }
 
+    // 2. Pénalité en cas d'échec total (Anti-Overfitting)
+    const hits = report.matches.filter(m => m.errorType === 'Hit').length;
+    if (hits === 0) {
+        // Si aucun hit, on augmente l'anti-consensus et l'équilibre pour "secouer" le modèle
+        const chaosBoost = LEARNING_RATE * 1.5;
+        newWeights.anti_consensus = (newWeights.anti_consensus || 0) + chaosBoost;
+        newWeights.equilibrium = (newWeights.equilibrium || 0) + chaosBoost;
+        
+        // On réduit légèrement les poids dominants actuels (qui ont échoué)
+        Object.keys(newWeights).forEach(k => {
+            const key = k as keyof AlgoWeights;
+            if ((newWeights[key] || 0) > 0.15) {
+                newWeights[key] = (newWeights[key] || 0) * 0.95; // Pénalité de 5%
+            }
+        });
+        
+        reasoning.push("Échec critique détecté : Activation des protocoles de Chaos et réduction des dominants.");
+    } else if (hits >= 3) {
+        // Renforcement positif : On touche peu aux poids si ça marche
+        reasoning.push("Performance Élite : Stabilisation des poids actuels.");
+    }
+
+    // 3. Ajustement des règles adaptatives (ex: fenêtre de gap critique)
+    const newRules = { ...currentRules };
+    // Si beaucoup de numéros manqués avaient un gap > max actuel
+    // (Logique simplifiée ici, pourrait utiliser report.missedOpportunities plus en détail)
+    
     return { 
         newWeights: normalizeWeights(newWeights), 
-        newRules: currentRules, 
+        newRules, 
         reasoning 
     };
 };

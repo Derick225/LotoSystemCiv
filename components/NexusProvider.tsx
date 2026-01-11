@@ -15,7 +15,7 @@ import {
 import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
-import { LearningService } from '../services/learningService'; // NEW
+import { LearningService } from '../services/learningService'; 
 import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast'; 
 import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; 
@@ -65,6 +65,33 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       checkConnection();
   }, []);
 
+  // --- AUTOMATED FEEDBACK LOOP ---
+  // Surveille l'historique. Si un nouveau tirage arrive et que la dernière prédiction était mauvaise, lance l'auto-correction.
+  useEffect(() => {
+      if (history.length > 0 && lastPrediction && drawName !== 'ALL') {
+          const lastDraw = history[0];
+          // Vérifie si la prédiction correspond au dernier tirage (en supposant que lastPrediction était pour ce tirage)
+          // Dans un système réel, on lierait par ID, mais ici on check les hits
+          const hits = lastPrediction.suggestedNumbers.filter(n => lastDraw.gagnants.includes(n)).length;
+          
+          if (hits < 2) {
+              // Performance faible détectée -> Auto-Correction
+              const lastAutoLearn = localStorage.getItem(`auto_learn_${drawName}_${lastDraw.date}`);
+              if (!lastAutoLearn) {
+                  console.log(`[Auto-Correction] Déclenchement pour ${drawName} (Hits: ${hits})`);
+                  LearningService.triggerAutoLearning(drawName).then(res => {
+                      if (res.improvement) {
+                          showToast("🧬 Le système s'est auto-corrigé après le dernier résultat.", "info");
+                          // Recharger les poids
+                          getAlgoWeights(drawName).then(w => setGlobalWeights(w));
+                          localStorage.setItem(`auto_learn_${drawName}_${lastDraw.date}`, 'done');
+                      }
+                  });
+              }
+          }
+      }
+  }, [history, lastPrediction, drawName]);
+
   const loadData = useCallback(async () => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
@@ -108,14 +135,11 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (activeHistory.length > 0 && drawName !== 'ALL') {
             const computeSample = activeHistory.slice(0, 300); 
 
-            // --- AUTO-APPRENTISSAGE TRIGGER ---
-            // On lance la vérification en arrière-plan sans bloquer l'UI
-            // Si une mise à jour a lieu, elle sera prise en compte au prochain refresh ou via un signal
+            // --- AUTO-APPRENTISSAGE TRIGGER (Deep Check) ---
             if (activeHistory.length >= 25 && isSupabaseConfigured()) {
                 LearningService.checkAndLearn(drawName, activeHistory[0]).then(status => {
                     if (status && status.improvement) {
                         showToast(status.message, "success");
-                        // On recharche les poids car ils ont changé
                         getAlgoWeights(drawName).then(w => setGlobalWeights(w));
                     }
                 });

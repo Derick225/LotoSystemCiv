@@ -10,7 +10,7 @@ import { fetchResults } from '../services/lotteryService';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
-import { ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, Send, BrainCircuit, X as XIcon } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, Send, BrainCircuit, X as XIcon, AlertOctagon, ScanLine, GitMerge } from 'lucide-react';
 
 interface PredictionForensicsProps {
     report: ForensicReport;
@@ -42,26 +42,26 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                 setAuditLessons(analysis.auditLessons);
             }
         };
-        loadOrchestrationAudit();
-    }, [report]);
+        const prepCorrection = async () => {
+            const currentWeights = await getAlgoWeights(report.drawName);
+            const currentRules = getAdaptiveRules(report.drawName);
+            const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
+            setCorrectionPlan(plan);
+        }
 
-    const handlePrepareCorrection = async () => {
-        const currentWeights = await getAlgoWeights(report.drawName);
-        const currentRules = getAdaptiveRules(report.drawName);
-        const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
-        setCorrectionPlan(plan);
-    };
+        loadOrchestrationAudit();
+        prepCorrection();
+    }, [report]);
 
     const handleApplyCorrection = async () => {
         if (!correctionPlan) return;
         setApplying(true);
         try {
             updateGlobalWeights(correctionPlan.newWeights);
-            showToast("Leçons assimilées. ADN mis à jour.", "success");
-            setTimeout(onClose, 1200);
+            showToast("🧬 Mutation génétique appliquée avec succès.", "success");
+            setTimeout(onClose, 1500);
         } catch(e) {
             showToast("Erreur d'assimilation.", "error");
-        } finally {
             setApplying(false);
         }
     };
@@ -89,6 +89,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
             setFeedbackSent(true);
             showToast("Signal RL envoyé au Cloud.", "success");
+            
+            // Si le feedback est négatif, on suggère fortement la correction
+            if (userRating === 'Incohérente' || userRating === 'Standard') {
+                handleApplyCorrection();
+            }
+
         } catch (e) {
             showToast("Feedback sauvegardé localement.", "info");
             setFeedbackSent(true);
@@ -125,7 +131,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                     <div>
                         <div className="flex items-center gap-2">
                             <span className="text-2xl">🕵️‍♂️</span>
-                            <h3 className="text-xl font-bold text-slate-800 dark:text-white">Autopsie Algorithmique</h3>
+                            <h3 className="text-xl font-bold text-slate-800 dark:text-white">Autopsie & Apprentissage</h3>
                         </div>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                             Analyse forensique du tirage {report.drawName} ({report.date})
@@ -140,7 +146,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform duration-1000"><MessageSquare size={80} /></div>
                         <div className="relative z-10">
                             <h4 className="font-bold text-white text-lg mb-4 flex items-center gap-3">
-                                <CheckCircle2 size={24} /> Évaluation de l'Expert (Reinforcement Learning)
+                                <CheckCircle2 size={24} /> Évaluation de l'Expert (RLHF)
                             </h4>
                             
                             {feedbackSent ? (
@@ -194,6 +200,28 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </section>
 
+                    {/* Zone d'Auto-Correction (Nouvelle Fonctionnalité) */}
+                    {correctionPlan && correctionPlan.reasoning.length > 0 && !applying && (
+                        <div className="p-6 border-2 border-indigo-500/30 rounded-3xl bg-indigo-50/50 dark:bg-indigo-900/10">
+                            <h4 className="text-sm font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300 mb-4 flex items-center gap-2">
+                                <GitMerge size={16}/> Plan d'Auto-Correction Détecté
+                            </h4>
+                            <ul className="space-y-2 mb-6">
+                                {correctionPlan.reasoning.map((reason, i) => (
+                                    <li key={i} className="text-xs text-slate-600 dark:text-slate-300 flex items-start gap-2">
+                                        <span className="text-indigo-500 mt-0.5">•</span> {reason}
+                                    </li>
+                                ))}
+                            </ul>
+                            <button 
+                                onClick={handleApplyCorrection}
+                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                            >
+                                <BrainCircuit size={16}/> Appliquer le Gradient d'Apprentissage
+                            </button>
+                        </div>
+                    )}
+
                     <section>
                         <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-indigo-500 pl-2">
                             Comparaison Balistique (Prédit vs Réel)
@@ -233,10 +261,30 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </section>
 
-                    {/* Nouvelle section: Analyse Structurelle du Ticket Prédit */}
+                    {/* Section Opportunités Manquées */}
+                    {report.missedOpportunities.length > 0 && (
+                        <section>
+                            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-amber-500 pl-2 flex items-center gap-2">
+                                <AlertOctagon size={16} className="text-amber-500"/> Signaux Manqués (Faux Négatifs)
+                            </h4>
+                            <div className="grid gap-3">
+                                {report.missedOpportunities.map((miss, idx) => (
+                                    <div key={idx} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 p-4 rounded-2xl flex items-center gap-4">
+                                        <NumberBall number={miss.number} size="sm" />
+                                        <div className="flex-1">
+                                            <div className="text-xs font-bold text-amber-800 dark:text-amber-200">Vecteur {miss.number} manqué</div>
+                                            <div className="text-[10px] text-amber-700/70 dark:text-amber-300/70 mt-0.5 font-medium">{miss.reason}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* Analyse Structurelle du Ticket Prédit */}
                     <section>
                         <div className="flex items-center gap-2 mb-4">
-                            {/* Icon was removed to fix missing import, but logic remains valid */}
+                            <ScanLine size={14} className="text-indigo-500"/>
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Scanner Structurel (Prédiction)</span>
                         </div>
                         <TicketXRay numbers={predictedTicket} score={50} showTitle={false} />

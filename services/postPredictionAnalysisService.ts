@@ -50,22 +50,37 @@ export const performForensicAnalysis = async (
         if (!predictedNumbers.includes(win)) {
             const scores = predictionBreakdown?.[win];
             if (scores) {
+                // On cherche quel algo avait "vu" ce numéro avec un score élevé (> 60)
                 const sortedAlgos = Object.entries(scores)
                     .filter(([_, v]) => typeof v === 'number')
                     .sort((a: any, b: any) => b[1] - a[1]);
                 
                 const bestAlgo = sortedAlgos[0];
-                if (bestAlgo && (bestAlgo[1] as number) > 65) {
+                const totalScore = Object.values(scores).reduce((a:any, b:any) => a + (typeof b === 'number' ? b : 0), 0);
+                
+                // Si un algo spécifique l'avait très bien classé
+                if (bestAlgo && (bestAlgo[1] as number) > 60) {
                     missed.push({ 
                         number: win, 
-                        reason: `Le neurone ${bestAlgo[0]} avait isolé ce signal (${Math.round(bestAlgo[1] as number)}%), mais le consensus l'a étouffé.` 
+                        reason: `Signal fort sur ${bestAlgo[0]} (${Math.round(bestAlgo[1] as number)}%), mais filtré par le consensus.` 
+                    });
+                }
+                // Ou si le score moyen était correct mais pas suffisant pour le top 5
+                else if (totalScore > 200) { // Valeur arbitraire dépendant de la normalisation
+                     missed.push({ 
+                        number: win, 
+                        reason: "Score global moyen-haut, a manqué le cut-off du Top 5." 
                     });
                 }
 
-                // Collecte d'impact pour le rapport final
+                // Collecte d'impact pour le rapport final (Score Divergence)
+                // On incrémente les compteurs pour les algos qui avaient raison sur ce numéro manqué
                 Object.entries(scores).forEach(([algo, val]) => {
                     if (typeof val === 'number') {
-                        algoImpacts[algo] = (algoImpacts[algo] || 0) + val;
+                        // On ajoute au poids de l'algo seulement s'il avait "vu" le numéro (score > 50)
+                        if (val > 50) {
+                            algoImpacts[algo] = (algoImpacts[algo] || 0) + val;
+                        }
                     }
                 });
             }
@@ -73,6 +88,7 @@ export const performForensicAnalysis = async (
     });
 
     // 3. Calcul de la divergence des scores
+    // Cela nous dit quels algos auraient dû être plus écoutés
     const scoreDivergence: { algo: string; impact: number }[] = [];
     const maxImpact = Math.max(...Object.values(algoImpacts), 1);
     Object.entries(algoImpacts).forEach(([algo, val]) => {
