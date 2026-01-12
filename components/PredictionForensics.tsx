@@ -7,7 +7,8 @@ import { calculateCorrectionsFromForensics, getAlgoWeights, getAdaptiveRules } f
 import { analyzePredictionError, type ImmediateLesson } from '../services/orchestrationService';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { fetchResults } from '../services/lotteryService';
-import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
+import { isSupabaseConfigured } from '../services/supabaseClient';
+import { invokeEdgeFunction } from '../services/apiClient';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 import { ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, Send, BrainCircuit, X as XIcon, AlertOctagon, ScanLine, GitMerge } from 'lucide-react';
@@ -30,7 +31,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const [correctionPlan, setCorrectionPlan] = useState<{ newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } | null>(null);
     const [auditLessons, setAuditLessons] = useState<ImmediateLesson[]>([]);
     
-    // Reconstruction du ticket prédit pour l'analyse XRay
     const predictedTicket = report.matches.map(m => m.predicted).sort((a,b) => a-b);
 
     useEffect(() => {
@@ -77,12 +77,13 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             });
 
             if (isSupabaseConfigured()) {
-                await supabase.functions.invoke('process-rlhf', {
+                await invokeEdgeFunction('process-rlhf', {
                     body: {
                         predictionId: report.predictionId,
                         rating: userRating,
                         drawName: report.drawName,
-                        actualHits: report.matches.filter(m => m.errorType === 'Hit').length
+                        actualHits: report.matches.filter(m => m.errorType === 'Hit').length,
+                        user_comment: userComment
                     }
                 });
             }
@@ -90,7 +91,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             setFeedbackSent(true);
             showToast("Signal RL envoyé au Cloud.", "success");
             
-            // Si le feedback est négatif, on suggère fortement la correction
             if (userRating === 'Incohérente' || userRating === 'Standard') {
                 handleApplyCorrection();
             }
@@ -103,6 +103,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
     
+    // ... (Reste du composant d'affichage identique) ...
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
             case 'Hit': return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700';
@@ -126,7 +127,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-fade-in">
             <div className="bg-white dark:bg-slate-800 w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700">
-                
                 <div className="p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
                     <div>
                         <div className="flex items-center gap-2">
@@ -141,14 +141,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-                    
                     <section className="bg-indigo-600 p-6 rounded-3xl shadow-xl relative overflow-hidden group">
                         <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform duration-1000"><MessageSquare size={80} /></div>
                         <div className="relative z-10">
                             <h4 className="font-bold text-white text-lg mb-4 flex items-center gap-3">
                                 <CheckCircle2 size={24} /> Évaluation de l'Expert (RLHF)
                             </h4>
-                            
                             {feedbackSent ? (
                                 <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 text-center animate-fade-in">
                                     <p className="text-white font-bold flex items-center justify-center gap-2"><BrainCircuit /> Signal RL transmis au Nexus Cloud</p>
@@ -157,42 +155,16 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                             ) : (
                                 <div className="space-y-6">
                                     <div className="flex flex-wrap gap-4">
-                                        {[
-                                            { id: 'Visionnaire', icon: <ThumbsUp size={18}/>, color: 'bg-emerald-500' },
-                                            { id: 'Standard', icon: <Meh size={18}/>, color: 'bg-amber-500' },
-                                            { id: 'Incohérente', icon: <ThumbsDown size={18}/>, color: 'bg-red-500' }
-                                        ].map((rate) => (
-                                            <button 
-                                                key={rate.id}
-                                                onClick={() => setUserRating(rate.id as any)}
-                                                className={`
-                                                    px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 transition-all transform active:scale-95
-                                                    ${userRating === rate.id 
-                                                        ? `${rate.color} text-white shadow-xl ring-4 ring-white/20` 
-                                                        : 'bg-white/10 text-white hover:bg-white/20'
-                                                    }
-                                                `}
-                                            >
+                                        {[{ id: 'Visionnaire', icon: <ThumbsUp size={18}/>, color: 'bg-emerald-500' }, { id: 'Standard', icon: <Meh size={18}/>, color: 'bg-amber-500' }, { id: 'Incohérente', icon: <ThumbsDown size={18}/>, color: 'bg-red-500' }].map((rate) => (
+                                            <button key={rate.id} onClick={() => setUserRating(rate.id as any)} className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 transition-all transform active:scale-95 ${userRating === rate.id ? `${rate.color} text-white shadow-xl ring-4 ring-white/20` : 'bg-white/10 text-white hover:bg-white/20'}`}>
                                                 {rate.icon} {rate.id}
                                             </button>
                                         ))}
                                     </div>
-                                    
                                     <div className="flex gap-4">
-                                        <input 
-                                            type="text" 
-                                            value={userComment}
-                                            onChange={(e) => setUserComment(e.target.value)}
-                                            placeholder="Note technique optionnelle pour l'IA..."
-                                            className="flex-1 bg-black/20 border border-white/20 rounded-2xl p-4 text-sm text-white placeholder-white/40 outline-none focus:border-white/50 transition-all"
-                                        />
-                                        <button 
-                                            onClick={handleSubmitFeedback}
-                                            disabled={!userRating || submittingFeedback}
-                                            className="px-6 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-50 transition-all disabled:opacity-50 flex items-center gap-2"
-                                        >
-                                            {submittingFeedback ? <span className="animate-spin">🌀</span> : <Send size={14} />} 
-                                            {submittingFeedback ? '...' : 'ENVOYER'}
+                                        <input type="text" value={userComment} onChange={(e) => setUserComment(e.target.value)} placeholder="Note technique optionnelle pour l'IA..." className="flex-1 bg-black/20 border border-white/20 rounded-2xl p-4 text-sm text-white placeholder-white/40 outline-none focus:border-white/50 transition-all" />
+                                        <button onClick={handleSubmitFeedback} disabled={!userRating || submittingFeedback} className="px-6 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-50 transition-all disabled:opacity-50 flex items-center gap-2">
+                                            {submittingFeedback ? <span className="animate-spin">🌀</span> : <Send size={14} />} {submittingFeedback ? '...' : 'ENVOYER'}
                                         </button>
                                     </div>
                                 </div>
@@ -200,60 +172,36 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </section>
 
-                    {/* Zone d'Auto-Correction (Nouvelle Fonctionnalité) */}
                     {correctionPlan && correctionPlan.reasoning.length > 0 && !applying && (
                         <div className="p-6 border-2 border-indigo-500/30 rounded-3xl bg-indigo-50/50 dark:bg-indigo-900/10">
-                            <h4 className="text-sm font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300 mb-4 flex items-center gap-2">
-                                <GitMerge size={16}/> Plan d'Auto-Correction Détecté
-                            </h4>
+                            <h4 className="text-sm font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300 mb-4 flex items-center gap-2"><GitMerge size={16}/> Plan d'Auto-Correction Détecté</h4>
                             <ul className="space-y-2 mb-6">
                                 {correctionPlan.reasoning.map((reason, i) => (
-                                    <li key={i} className="text-xs text-slate-600 dark:text-slate-300 flex items-start gap-2">
-                                        <span className="text-indigo-500 mt-0.5">•</span> {reason}
-                                    </li>
+                                    <li key={i} className="text-xs text-slate-600 dark:text-slate-300 flex items-start gap-2"><span className="text-indigo-500 mt-0.5">•</span> {reason}</li>
                                 ))}
                             </ul>
-                            <button 
-                                onClick={handleApplyCorrection}
-                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                            >
+                            <button onClick={handleApplyCorrection} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
                                 <BrainCircuit size={16}/> Appliquer le Gradient d'Apprentissage
                             </button>
                         </div>
                     )}
 
                     <section>
-                        <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-indigo-500 pl-2">
-                            Comparaison Balistique (Prédit vs Réel)
-                        </h4>
-                        
+                        <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-indigo-500 pl-2">Comparaison Balistique (Prédit vs Réel)</h4>
                         <div className="space-y-4">
                             {report.matches.map((match, idx) => (
                                 <div key={idx} className="flex items-center gap-4 group">
-                                    <div className="w-16 flex flex-col items-center gap-1">
-                                        <NumberBall number={match.predicted} size="md" />
-                                        <span className="text-[10px] text-slate-400 font-mono">PRÉDIT</span>
-                                    </div>
-
+                                    <div className="w-16 flex flex-col items-center gap-1"><NumberBall number={match.predicted} size="md" /><span className="text-[10px] text-slate-400 font-mono">PRÉDIT</span></div>
                                     <div className="flex-1 flex items-center justify-center relative h-10">
                                         {match.actual !== null ? (
                                             <>
                                                 <div className={`flex-1 border-b-2 ${getConnectorStyle(match.errorType)} relative top-0`}></div>
-                                                <span className={`absolute px-3 py-1 rounded-full text-xs font-bold border ${getBadgeColor(match.errorType)} z-10 shadow-sm`}>
-                                                    {match.errorType} {match.delta !== 'Direct' && `(${match.delta})`}
-                                                </span>
+                                                <span className={`absolute px-3 py-1 rounded-full text-xs font-bold border ${getBadgeColor(match.errorType)} z-10 shadow-sm`}>{match.errorType} {match.delta !== 'Direct' && `(${match.delta})`}</span>
                                             </>
-                                        ) : (
-                                            <span className="text-xs text-slate-300 italic">Aucune correspondance</span>
-                                        )}
+                                        ) : <span className="text-xs text-slate-300 italic">Aucune correspondance</span>}
                                     </div>
-
                                     <div className="w-16 flex flex-col items-center gap-1">
-                                        {match.actual !== null ? (
-                                            <NumberBall number={match.actual} size="md" />
-                                        ) : (
-                                            <div className="w-10 h-10 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-300">?</div>
-                                        )}
+                                        {match.actual !== null ? <NumberBall number={match.actual} size="md" /> : <div className="w-10 h-10 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-300">?</div>}
                                         <span className="text-[10px] text-slate-400 font-mono">RÉEL</span>
                                     </div>
                                 </div>
@@ -261,12 +209,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </section>
 
-                    {/* Section Opportunités Manquées */}
                     {report.missedOpportunities.length > 0 && (
                         <section>
-                            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-amber-500 pl-2 flex items-center gap-2">
-                                <AlertOctagon size={16} className="text-amber-500"/> Signaux Manqués (Faux Négatifs)
-                            </h4>
+                            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-wider border-l-4 border-amber-500 pl-2 flex items-center gap-2"><AlertOctagon size={16} className="text-amber-500"/> Signaux Manqués (Faux Négatifs)</h4>
                             <div className="grid gap-3">
                                 {report.missedOpportunities.map((miss, idx) => (
                                     <div key={idx} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 p-4 rounded-2xl flex items-center gap-4">
@@ -281,12 +226,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </section>
                     )}
 
-                    {/* Analyse Structurelle du Ticket Prédit */}
                     <section>
-                        <div className="flex items-center gap-2 mb-4">
-                            <ScanLine size={14} className="text-indigo-500"/>
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Scanner Structurel (Prédiction)</span>
-                        </div>
+                        <div className="flex items-center gap-2 mb-4"><ScanLine size={14} className="text-indigo-500"/><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Scanner Structurel (Prédiction)</span></div>
                         <TicketXRay numbers={predictedTicket} score={50} showTitle={false} />
                     </section>
                 </div>

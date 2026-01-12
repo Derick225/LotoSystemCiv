@@ -1,5 +1,6 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { invokeEdgeFunction } from './apiClient';
 
 export interface AdminUser {
     id: string;
@@ -14,57 +15,34 @@ export interface AdminUser {
     } | null;
 }
 
-const getAuthHeaders = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-        throw new Error("Session expirée ou invalide. Veuillez vous reconnecter.");
-    }
-    return { Authorization: `Bearer ${session.access_token}` };
-};
-
 export const adminService = {
-    /**
-     * Récupère la liste complète des utilisateurs via Edge Function
-     */
     fetchUsers: async (): Promise<AdminUser[]> => {
         if (!isSupabaseConfigured()) return [];
 
-        const headers = await getAuthHeaders();
-        const { data, error } = await supabase.functions.invoke('admin-users', {
-            body: { action: 'list' },
-            headers
+        const { data, error } = await invokeEdgeFunction('admin-users', {
+            body: { action: 'list' }
         });
 
         if (error) throw new Error(error.message);
         return data.users;
     },
 
-    /**
-     * Met à jour le rôle d'un utilisateur (Admin/User)
-     */
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
         if (!isSupabaseConfigured()) return false;
 
-        const headers = await getAuthHeaders();
-        const { data, error } = await supabase.functions.invoke('admin-users', {
-            body: { action: 'updateRole', userId, role },
-            headers
+        const { data, error } = await invokeEdgeFunction('admin-users', {
+            body: { action: 'updateRole', userId, role }
         });
 
         if (error) throw new Error(error.message);
         return data.success;
     },
 
-    /**
-     * Supprime un utilisateur définitivement
-     */
     deleteUser: async (userId: string): Promise<boolean> => {
         if (!isSupabaseConfigured()) return false;
 
-        const headers = await getAuthHeaders();
-        const { data, error } = await supabase.functions.invoke('admin-users', {
-            body: { action: 'delete', userId },
-            headers
+        const { data, error } = await invokeEdgeFunction('admin-users', {
+            body: { action: 'delete', userId }
         });
 
         if (error) throw new Error(error.message);

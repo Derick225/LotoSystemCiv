@@ -1,5 +1,6 @@
 
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { isSupabaseConfigured } from './supabaseClient';
+import { invokeEdgeFunction } from './apiClient';
 import { saveAlgoWeights } from './predictionEngine';
 import { DrawResult } from '../types';
 
@@ -10,9 +11,6 @@ export interface LearningStatus {
 }
 
 export const LearningService = {
-    /**
-     * Déclenche le processus d'auto-apprentissage sur le Cloud (Edge Function).
-     */
     triggerAutoLearning: async (drawName: string): Promise<LearningStatus> => {
         if (!isSupabaseConfigured()) {
             return { lastRun: new Date().toISOString(), improvement: false, message: "Mode Hors-Ligne (Simulation)" };
@@ -21,19 +19,13 @@ export const LearningService = {
         try {
             console.log(`[NeuralNet] Initiating Self-Learning sequence for ${drawName}...`);
             
-            const { data, error } = await supabase.functions.invoke('self-learn', {
+            const { data, error } = await invokeEdgeFunction('self-learn', {
                 body: { drawName }
             });
 
-            if (error) {
-                // Gestion spécifique des erreurs d'invocation
-                throw new Error(error.message || "Erreur de communication avec le Cloud.");
-            }
+            if (error) throw new Error(error.message);
 
-            if (data?.error) {
-                // Erreur renvoyée par la fonction elle-même (logique)
-                throw new Error(data.error);
-            }
+            if (data?.error) throw new Error(data.error);
 
             if (data && data.success) {
                 if (data.improved && data.weights) {
@@ -55,23 +47,14 @@ export const LearningService = {
 
         } catch (e: any) {
             console.error("Auto-Learning Error:", e);
-            let msg = `Erreur d'apprentissage: ${e.message}`;
-            
-            if (e.message?.includes('Failed to send a request')) {
-                msg = "Connexion au Cloud échouée. Vérifiez vos secrets Supabase (SERVICE_ROLE_KEY).";
-            }
-            
             return {
                 lastRun: null,
                 improvement: false,
-                message: msg
+                message: `Erreur: ${e.message}`
             };
         }
     },
 
-    /**
-     * Vérifie si un apprentissage est nécessaire (ex: après un nouveau tirage).
-     */
     checkAndLearn: async (drawName: string, latestDraw: DrawResult) => {
         const lastLearnKey = `nexus_last_learn_${drawName}`;
         const lastLearn = localStorage.getItem(lastLearnKey);
@@ -86,4 +69,3 @@ export const LearningService = {
         return null;
     }
 };
-    
