@@ -1,13 +1,13 @@
 
 import { PlatinumResult, PlatinumCombo, ScoreBreakdown, DrawResult, SpectralMetric } from '../types';
 import { getAlgoWeights, generateMasterPrediction } from './predictionEngine';
-import { detectGameRegime, calculateVolatility, calculateSpectralMetricsAsync } from './mathService';
+import { calculateSpectralMetricsAsync } from './mathService';
 import { fetchResults } from './lotteryService';
 
 /**
- * Nexus MetaAnalyst v6.0 (Structural Edition)
+ * Nexus MetaAnalyst v6.1 (Version Générique Adaptative)
  * Couche d'abstraction qui fusionne les signaux faibles pour générer des "Super Combinaisons".
- * Intègre la logique de succession contextuelle (Markov/Voisinage/Miroir) et des filtres structurels stricts.
+ * S'adapte automatiquement aux régimes statistiques de chaque tirage.
  */
 
 const PLATINUM_STORAGE_KEY = 'lotopro_platinum_history';
@@ -16,6 +16,23 @@ export interface StrategyBias {
     stability: number; // Poids donné aux stats long terme (Momentum)
     chaos: number;     // Poids donné à l'entropie et à la vélocité (Rupture)
     harmony: number;   // Poids donné à la résonance spectrale (Cycle)
+}
+
+interface PositionalBehavior {
+  position: number;
+  regimeType: 'persistent' | 'anti_persistent' | 'chaotic';
+  hurst: number;
+  cycleType: 'bimodal' | 'persistent' | 'chaotic';
+  confidence: number;
+  extremesFrequency: number;
+  lastValue: number;
+}
+
+interface PositionalCorrelation {
+  positions: number[];
+  correlation: number;
+  avgDifference: number;
+  frequencyClose: number;
 }
 
 // Cache avec timestamp pour éviter de recalculer si les données n'ont pas changé
@@ -54,113 +71,275 @@ export const savePlatinumHistory = (result: PlatinumResult) => {
     }
 };
 
+// --- MATH HELPERS FOR ADAPTIVE BIAS ---
+
+const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / (data.length || 1);
+
+const calculateSeriesVolatility = (values: number[]): number => {
+    if (values.length < 2) return 0;
+    const mean = calculateMean(values);
+    const variance = values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    // Normalisation approximative (Ecart-type max théorique pour 1-90 est ~26)
+    return Math.min(1, stdDev / 25);
+};
+
+const calculateHurstForSeries = (values: number[]): number => {
+    const N = values.length;
+    if (N < 10) return 0.5;
+    const mean = calculateMean(values);
+    const y = values.map(x => x - mean);
+    let cumsum = 0;
+    const cumDev = y.map(val => { cumsum += val; return cumsum; });
+    
+    const R = Math.max(...cumDev) - Math.min(...cumDev);
+    const S = Math.sqrt(values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / N) || 1;
+    
+    if (R === 0 || S === 0) return 0.5;
+    const hurst = Math.log(R / S) / Math.log(N);
+    return Math.max(0, Math.min(1, hurst));
+};
+
+const detectSeriesCycles = (values: number[]) => {
+    if (values.length < 5) return { strength: 0 };
+    const mean = calculateMean(values);
+    let num = 0, den = 0;
+    // Autocorrélation Lag-1
+    for (let i = 0; i < values.length - 1; i++) {
+        num += (values[i] - mean) * (values[i+1] - mean);
+        den += Math.pow(values[i] - mean, 2);
+    }
+    const correlation = den === 0 ? 0 : num / den;
+    return { strength: Math.abs(correlation) };
+};
+
+const detectGlobalCycles = (values: number[]) => {
+    return detectSeriesCycles(values);
+};
+
+const detectPositionalCycles = (values: number[]) => {
+    const cycle = detectSeriesCycles(values);
+    return { strength: cycle.strength };
+};
+
 /**
- * Calcule automatiquement le biais utilisateur optimal selon le profil du tirage.
+ * Analyse le comportement statistique par position (G1 à G5)
  */
-export const calculateOptimalUserBias = (
-  drawName: string, 
-  history: DrawResult[]
-): StrategyBias => {
-  const { regime, hurst } = detectGameRegime(history);
-  const { score: volScore } = calculateVolatility(history);
-  const name = drawName.toUpperCase();
+const analyzePositionalBehavior = (history: DrawResult[]): PositionalBehavior[] => {
+  return Array.from({ length: 5 }, (_, posIndex) => {
+    const positionValues = history.map(h => h.gagnants[posIndex]);
+    const hurst = calculateHurstForSeries(positionValues);
+    
+    // Détection de régimes bimodaux extrêmes
+    const sortedValues = [...positionValues].sort((a, b) => a - b);
+    
+    const extremeLowCount = positionValues.filter(v => v <= 15).length;
+    const extremeHighCount = positionValues.filter(v => v >= 75).length;
+    const extremesFrequency = (extremeLowCount + extremeHighCount) / positionValues.length;
+    
+    let cycleType: 'bimodal' | 'persistent' | 'chaotic' = 'chaotic';
+    let confidence = 0.5;
+    
+    if (hurst > 0.65) {
+      cycleType = 'persistent';
+      confidence = (hurst - 0.65) * 2;
+    } else if (extremesFrequency > 0.6 && Math.abs(extremeLowCount - extremeHighCount) < positionValues.length * 0.3) {
+      cycleType = 'bimodal';
+      confidence = extremesFrequency * 0.9;
+    }
+    
+    return {
+      position: posIndex + 1,
+      regimeType: hurst > 0.6 ? 'persistent' : hurst < 0.4 ? 'anti_persistent' : 'chaotic',
+      hurst,
+      cycleType,
+      confidence,
+      extremesFrequency,
+      lastValue: positionValues[0] || 0
+    };
+  });
+};
 
-  // Profils par défaut
-  let stability = 0.5;
-  let chaos = 0.3;
-  let harmony = 0.5;
-
-  // 1. Profilage par Nom (Spécificité du Jeu)
-  if (name.includes('MONDAY') || name.includes('BONANZA')) {
-      return { stability: 0.3, chaos: 0.7, harmony: 0.45 };
+/**
+ * Détecte les corrélations entre positions (ex: G4 et G5 souvent proches)
+ */
+const detectPositionalCorrelations = (history: DrawResult[]): PositionalCorrelation[] => {
+  const correlations: PositionalCorrelation[] = [];
+  
+  // Analyse des paires de positions
+  for (let i = 0; i < 5; i++) {
+    for (let j = i + 1; j < 5; j++) {
+      const diffs = history.map(h => Math.abs(h.gagnants[i] - h.gagnants[j]));
+      const avgDiff = diffs.reduce((a, b) => a + b, 0) / (diffs.length || 1);
+      
+      // Si les positions sont souvent proches (diff < 12) et stablement proches
+      const closeFrequency = diffs.filter(d => d < 15).length / (diffs.length || 1);
+      
+      if (avgDiff < 12 && closeFrequency > 0.7) {
+        const correlationStrength = 1 - (avgDiff / 90);
+        correlations.push({
+          positions: [i+1, j+1],
+          correlation: correlationStrength,
+          avgDifference: avgDiff,
+          frequencyClose: closeFrequency
+        });
+      }
+    }
   }
   
-  if (name.includes('NATIONAL') || name.includes('DIAMANT')) {
-      return { stability: 0.8, chaos: 0.2, harmony: 0.6 };
-  }
+  return correlations.sort((a, b) => b.correlation - a.correlation);
+};
 
-  // 2. Profilage Mathématique
-  if (regime === 'PERSISTANT' && hurst > 0.65) {
-      stability = 0.8;
-      chaos = 0.2;
-  } else if (regime === 'ANTI-PERSISTANT') {
-      stability = 0.4;
-      harmony = 0.8;
-  } else if (volScore > 70) {
-      chaos = 0.7;
-      stability = 0.2;
-  }
+/**
+ * Calcule la volatilité par position
+ */
+const calculatePositionalVolatility = (history: DrawResult[]) => {
+  return Array.from({ length: 5 }, (_, posIndex) => {
+    const values = history.map(h => h.gagnants[posIndex]);
+    const volatility = calculateSeriesVolatility(values);
+    
+    return { 
+      position: posIndex + 1,
+      score: volatility * 100,  // Normalisation 0-100
+      confidence: Math.min(1.0, history.length / 50)
+    };
+  });
+};
 
-  return { 
-      stability: parseFloat(stability.toFixed(2)), 
-      chaos: parseFloat(chaos.toFixed(2)), 
-      harmony: parseFloat(harmony.toFixed(2)) 
+/**
+ * Détecte les patterns cycliques dans l'historique
+ */
+const detectCyclePatterns = (history: DrawResult[]) => {
+  // Analyse globale et par position
+  const globalCycles = detectGlobalCycles(history.flatMap(h => h.gagnants));
+  
+  const positionalCycles = Array.from({ length: 5 }, (_, posIndex) => {
+    const values = history.map(h => h.gagnants[posIndex]);
+    return detectSeriesCycles(values);
+  });
+  
+  return {
+    globalStrength: globalCycles.strength,
+    positionalStrength: positionalCycles.map(c => c.strength),
+    dominantPositions: positionalCycles
+      .map((c, i) => ({ position: i+1, strength: c.strength }))
+      .filter(p => p.strength > 0.7)
+      .sort((a, b) => b.strength - a.strength)
   };
 };
 
 /**
- * Calcule l'affinité de succession avancée :
- * - Analyse les gagnants (Succession directe)
- * - Analyse la Machine (Contexte de flux)
- * - Analyse les Miroirs (Symétrie)
+ * Calcule automatiquement le biais utilisateur optimal selon le profil statistique du tirage.
+ * Version générique qui ne dépend pas des noms de jeux.
+ */
+export const calculateOptimalUserBias = (
+  _drawName: string, 
+  history: DrawResult[]
+): StrategyBias => {
+  if (history.length < 15) {
+    // Valeurs par défaut neutres pour les jeux avec peu d'historique
+    return { stability: 0.5, chaos: 0.3, harmony: 0.5 };
+  }
+
+  // Analyse mathématique pure des régimes statistiques
+  const positionalAnalysis = analyzePositionalBehavior(history);
+  const volatilityProfile = calculatePositionalVolatility(history);
+  // Unused but kept for future: const cycleStrength = detectCyclePatterns(history);
+  
+  // Calcul dynamique basé sur les caractéristiques statistiques
+  let stability = 0.5;
+  let chaos = 0.3;
+  let harmony = 0.5;
+
+  // 1. Adaptation basée sur la volatilité positionnelle
+  const avgVolatility = volatilityProfile.reduce((sum, v) => sum + v.score, 0) / 5;
+  
+  if (avgVolatility > 70) {
+    // Régime chaotique - favoriser la détection de ruptures
+    stability = Math.max(0.2, 0.5 - (avgVolatility - 70) / 200);
+    chaos = Math.min(0.8, 0.3 + (avgVolatility - 70) / 150);
+  } else if (avgVolatility < 30) {
+    // Régime stable - favoriser la persistance
+    stability = Math.min(0.8, 0.5 + (30 - avgVolatility) / 100);
+    chaos = Math.max(0.1, 0.3 - (30 - avgVolatility) / 150);
+  }
+
+  // 2. Détection de cycles binaires extrêmes (important pour G3)
+  const extremeBimodalPositions = positionalAnalysis.filter(pos => 
+    pos.cycleType === 'bimodal' && pos.confidence > 0.8 && pos.extremesFrequency > 0.6
+  );
+  
+  if (extremeBimodalPositions.length >= 1) {
+    // Renforcement du chaos pour capturer les inversions extrêmes
+    chaos = Math.min(0.85, chaos * 1.5 + 0.2);
+    // Réduction de la stabilité car les cycles ne sont pas persistants
+    stability = Math.max(0.15, stability * 0.6);
+  }
+
+  // 3. Détection de persistance par position (important pour G4/G5)
+  const persistentPositions = positionalAnalysis.filter(pos => 
+    pos.regimeType === 'persistent' && pos.hurst > 0.65 && pos.confidence > 0.75
+  );
+  
+  if (persistentPositions.length >= 2) {
+    // Renforcement de l'harmonie pour les régimes cycliques stables
+    harmony = Math.min(0.85, harmony * 1.3 + 0.15);
+    // Renforcement de la stabilité
+    stability = Math.min(0.8, stability * 1.2 + 0.1);
+  }
+
+  // 4. Détection de paires positionnelles corrélées (ex: G4/G5)
+  const correlatedPairs = detectPositionalCorrelations(history);
+  if (correlatedPairs.length > 0 && correlatedPairs.some(pair => pair.correlation > 0.7)) {
+    harmony = Math.min(0.8, harmony * 1.4);
+  }
+
+  return { 
+    stability: parseFloat(stability.toFixed(2)), 
+    chaos: parseFloat(chaos.toFixed(2)), 
+    harmony: parseFloat(harmony.toFixed(2)) 
+  };
+};
+
+/**
+ * Calcule l'affinité de succession : Quels numéros (et leurs voisins) sortent le plus souvent
+ * après les numéros du dernier tirage ?
  */
 const calculatePostDrawAffinity = (history: DrawResult[], lastDraw: DrawResult): Record<number, number> => {
     const scores: Record<number, number> = {};
-    // Init scores
     for(let i=1; i<=90; i++) scores[i] = 0;
 
     if (history.length < 10) return scores;
 
-    // Analyse approfondie sur les 150 derniers tirages pour capter les cycles longs
     const depth = Math.min(history.length - 1, 150);
-    
     const lastWinners = lastDraw.gagnants;
     const lastMachine = lastDraw.machine || [];
     const lastMirrors = lastWinners.map(n => 91 - n);
 
     for (let i = 1; i < depth; i++) {
-        // history[i] est le tirage "passé" (contexte)
-        // history[i-1] est le tirage "suivant" (conséquence)
         const pastDraw = history[i];
         const nextDraw = history[i-1];
 
-        // 1. Correspondance Gagnants
         const winMatches = pastDraw.gagnants.filter(n => lastWinners.includes(n));
-        
-        // 2. Correspondance Machine (Si disponible)
         const macMatches = (pastDraw.machine || []).filter(n => lastMachine.includes(n));
-
-        // 3. Correspondance Miroirs (Symétrie Inverse)
         const mirrorMatches = pastDraw.gagnants.filter(n => lastMirrors.includes(n));
 
-        // Calcul du poids de pertinence de ce tirage passé
         let contextWeight = 0;
-        
-        // Les gagnants sont le signal le plus fort
         if (winMatches.length > 0) contextWeight += Math.pow(winMatches.length, 1.5) * 1.5;
-        
-        // La machine donne le contexte "ambiant"
         if (macMatches.length > 0) contextWeight += macMatches.length * 0.8;
-        
-        // Les miroirs indiquent une résonance inverse
         if (mirrorMatches.length > 0) contextWeight += mirrorMatches.length * 1.2;
 
         if (contextWeight > 0) {
             nextDraw.gagnants.forEach(nextNum => {
-                // Impact Direct
                 scores[nextNum] = (scores[nextNum] || 0) + (10 * contextWeight);
-
-                // Impact Voisinage (Glissement +1/-1)
                 const nPlus = nextNum === 90 ? 1 : nextNum + 1;
                 const nMinus = nextNum === 1 ? 90 : nextNum - 1;
-                
                 scores[nPlus] = (scores[nPlus] || 0) + (2 * contextWeight);
                 scores[nMinus] = (scores[nMinus] || 0) + (2 * contextWeight);
             });
         }
     }
 
-    // Normalisation 0-100
     const maxVal = Math.max(...Object.values(scores), 1);
     for(let i=1; i<=90; i++) {
         scores[i] = (scores[i] / maxVal) * 100;
@@ -169,27 +348,14 @@ const calculatePostDrawAffinity = (history: DrawResult[], lastDraw: DrawResult):
     return scores;
 };
 
-/**
- * Vérifie si l'ajout d'un numéro à une combinaison maintient sa validité structurelle.
- * (Filtres Stochastiques Avancés)
- */
 const isValidAddition = (currentCombo: number[], newNum: number): boolean => {
-    // Ne pas ajouter si déjà présent
     if (currentCombo.includes(newNum)) return false;
-
     const nextCombo = [...currentCombo, newNum].sort((a, b) => a - b);
-    
-    // 1. Somme Sigma (Uniquement pertinent si on approche des 5 numéros)
     if (nextCombo.length >= 4) {
         const sum = nextCombo.reduce((a, b) => a + b, 0);
-        // On vise une somme réaliste (130-330 couvre 90% des tirages normaux)
-        // Si on a 4 numéros et que la somme est déjà 300, ajouter un 80 est suicidaire.
         if (nextCombo.length === 5 && (sum < 130 || sum > 330)) return false;
-        if (nextCombo.length === 4 && sum > 300) return false; // Prévention
+        if (nextCombo.length === 4 && sum > 300) return false;
     }
-
-    // 2. Suites Consécutives (Max 2 numéros qui se suivent)
-    // Ex: 12-13-14 est très rare. 12-13 c'est ok.
     let consecutiveCount = 0;
     let hasTriple = false;
     for (let i = 0; i < nextCombo.length - 1; i++) {
@@ -200,22 +366,15 @@ const isValidAddition = (currentCombo: number[], newNum: number): boolean => {
             }
         }
     }
-    if (hasTriple) return false; // Interdit les triplés (1-2-3)
-    if (consecutiveCount > 2) return false; // Max 2 paires distinctes
-
-    // 3. Concentration par Dizaine (Max 3 par dizaine)
-    // Ex: 10-12-15-18-19 (Trop dense)
+    if (hasTriple) return false;
+    if (consecutiveCount > 2) return false;
     const decades = nextCombo.map(n => Math.floor((n - 1) / 10));
     const decadeCounts = decades.reduce((acc, d) => { acc[d] = (acc[d] || 0) + 1; return acc; }, {} as Record<number, number>);
     if (Object.values(decadeCounts).some(c => c > 3)) return false;
-
-    // 4. Équilibre Pair/Impair (Si la combi est pleine)
     if (nextCombo.length === 5) {
         const odds = nextCombo.filter(n => n % 2 !== 0).length;
-        // On évite 0 Impairs ou 5 Impairs (Très rare)
         if (odds === 0 || odds === 5) return false; 
     }
-
     return true;
 };
 
@@ -228,34 +387,25 @@ export async function generatePlatinumPrediction(
     const data = history || (await fetchResults(drawName)).data;
     if (data.length < 20) throw new Error("Historique insuffisant pour la fusion.");
 
-    // 1. Récupération des scores de base (Algorithmes standards)
     const scores = await precomputeBaseScores(drawName, data, precomputedMetrics);
-    
-    // 2. Calcul des scores de succession contextuelle (Le "Liant")
-    // On passe le dernier tirage complet pour avoir accès aux machines
     const successionScores = calculatePostDrawAffinity(data, data[0]);
 
     const combinations: PlatinumCombo[] = [];
     const pool = Object.keys(scores).map(Number);
 
-    // Algorithme de synthèse avec Tournoi + Filtres Structurels
     let attempts = 0;
-    const MAX_ATTEMPTS = 500; // Sécurité boucle infinie
+    const MAX_ATTEMPTS = 500;
 
     while (combinations.length < 5 && attempts < MAX_ATTEMPTS) {
         attempts++;
         const combo: number[] = [];
-        const tempPool = [...pool]; // Pool local pour ce ticket
+        const tempPool = [...pool];
         
         let abortTicket = false;
 
         while (combo.length < 5 && tempPool.length > 0) {
-            // Sélection par Tournoi : On prend N candidats au hasard et on garde le meilleur score pondéré
             let bestCandidate = -1;
             let bestVal = -Infinity;
-            
-            // Taille du tournoi : Plus c'est grand, plus on est "Greedy" (meilleurs scores). 
-            // Plus c'est petit, plus on laisse de la place au hasard (Chaos).
             const tournamentSize = 8 + Math.floor(userBias.chaos * 10);
 
             for(let k=0; k < tournamentSize; k++) { 
@@ -265,17 +415,14 @@ export async function generatePlatinumPrediction(
                 const b = scores[n];
                 const succScore = successionScores[n] || 0;
                 
-                // Formule Platinum v6 : Fusion Biaisée + Succession
                 const val = ((b.spectral || 0) * userBias.harmony) + 
                             ((b.momentum || 0) * userBias.stability) + 
-                            ((b.gap || 0) * userBias.chaos * 0.5) + // Gap moins impactant en tournoi
-                            (succScore * 0.7); // La succession est le facteur dominant en v6
+                            ((b.gap || 0) * userBias.chaos * 0.5) +
+                            (succScore * 0.7);
                 
-                // Ajout d'un bruit aléatoire basé sur le chaos utilisateur
                 const noise = (Math.random() - 0.5) * (userBias.chaos * 20);
 
                 if ((val + noise) > bestVal) {
-                    // VERIFICATION STRUCTURELLE AVANT SELECTION
                     if (isValidAddition(combo, n)) {
                         bestVal = val + noise;
                         bestCandidate = n;
@@ -285,12 +432,9 @@ export async function generatePlatinumPrediction(
             
             if (bestCandidate !== -1) {
                 combo.push(bestCandidate);
-                // On retire le candidat du pool temporaire
                 const removeIdx = tempPool.indexOf(bestCandidate);
                 if (removeIdx !== -1) tempPool.splice(removeIdx, 1);
             } else {
-                // Si on n'a trouvé aucun candidat valide dans ce tournoi (blocage structurel), on abandonne ce ticket
-                // pour ne pas le remplir avec des déchets.
                 abortTicket = true; 
                 break; 
             }
@@ -298,21 +442,16 @@ export async function generatePlatinumPrediction(
         
         if (!abortTicket && combo.length === 5) {
             combo.sort((a,b) => a-b);
-            
-            // Dédoublonnage des combinaisons
             const comboStr = combo.join('-');
             const exists = combinations.some(c => c.numbers.join('-') === comboStr);
             
             if (!exists) {
-                // Calcul du score final du ticket
                 let totalScore = 0;
                 combo.forEach(n => {
                     const b = scores[n];
                     const succ = successionScores[n] || 0;
                     totalScore += (b.spectral || 0) * 0.3 + (b.momentum || 0) * 0.3 + (succ * 0.4);
                 });
-                
-                // Normalisation Score
                 const normalizedScore = Math.min(100, Math.round(totalScore / 5 * 1.1));
 
                 combinations.push({
@@ -330,7 +469,6 @@ export async function generatePlatinumPrediction(
         }
     }
 
-    // Calcul des King Numbers (les numéros les plus récurrents dans les 5 combos)
     const freqMap: Record<number, number> = {};
     combinations.forEach(c => c.numbers.forEach(n => freqMap[n] = (freqMap[n] || 0) + 1));
     const kingNumbers = Object.entries(freqMap)
@@ -338,7 +476,6 @@ export async function generatePlatinumPrediction(
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
 
-    // Calcul des Hot Zones Spectrales (si metrics dispo)
     const spectralMetrics = precomputedMetrics?.spectral || await calculateSpectralMetricsAsync(data);
     const hotZonesSpectro = spectralMetrics.slice(0, 10).map((m: SpectralMetric) => m.number);
 
@@ -347,8 +484,8 @@ export async function generatePlatinumPrediction(
         targetSumRange: { min: 130, max: 330, reason: "Filtre Gaussien v6" },
         hotZonesSpectro,
         combinations: combinations.sort((a, b) => b.score - a.score),
-        confidence: 92, // Confiance accrue grâce aux filtres structurels
-        analysis: `Synthèse Platinum v6 : Succession contextuelle (G+M) et filtres structurels actifs. Biais: H${(userBias.harmony*100).toFixed(0)} S${(userBias.stability*100).toFixed(0)} C${(userBias.chaos*100).toFixed(0)}.`,
+        confidence: 92, 
+        analysis: `Synthèse Platinum v6 Adaptative : Biais H${(userBias.harmony*100).toFixed(0)} S${(userBias.stability*100).toFixed(0)} C${(userBias.chaos*100).toFixed(0)}.`,
         drawName,
         timestamp: Date.now()
     };
