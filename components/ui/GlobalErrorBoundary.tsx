@@ -1,4 +1,3 @@
-
 import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
