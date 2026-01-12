@@ -1,20 +1,21 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DRAW_SCHEDULE, SLOT_CONFIG } from '../constants';
 import { useNexus } from './NexusProvider';
-import { Clock, Target, Calendar, CheckCircle2, Lock, ChevronRight } from 'lucide-react';
+import { Clock, Target, Calendar, CheckCircle2, Lock, Zap } from 'lucide-react';
 
 const DAYS_ORDER = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 
 export const DrawSelector: React.FC = () => {
   const { drawName, setDrawName } = useNexus();
   
-  // Robust day detection
   const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
   const todayName = DAYS_ORDER[todayIndex];
   
   const [activeDay, setActiveDay] = useState(todayName);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  const daysContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
       const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -22,13 +23,11 @@ export const DrawSelector: React.FC = () => {
   }, []);
 
   const getDrawStatus = (timeStr: string) => {
-      // Comparison logic
       const dayDiff = DAYS_ORDER.indexOf(activeDay) - todayIndex;
       
-      if (dayDiff < 0) return 'closed'; // Past days
-      if (dayDiff > 0) return 'future'; // Future days
+      if (dayDiff < 0) return 'closed'; 
+      if (dayDiff > 0) return 'future'; 
 
-      // Current Day Logic
       const [h, m] = timeStr.split(':').map(Number);
       const drawTime = new Date();
       drawTime.setHours(h, m, 0, 0);
@@ -36,9 +35,9 @@ export const DrawSelector: React.FC = () => {
       
       const diffMinutes = (drawTime.getTime() - now.getTime()) / 60000;
 
-      if (diffMinutes < -60) return 'closed'; // Closed 1h ago
-      if (diffMinutes <= 0) return 'live'; // Active (0 to -60m)
-      if (diffMinutes < 120) return 'next'; // Coming soon (< 2h)
+      if (diffMinutes < -60) return 'closed'; 
+      if (diffMinutes <= 0) return 'live'; 
+      if (diffMinutes < 120) return 'next'; 
       return 'upcoming';
   };
 
@@ -47,7 +46,7 @@ export const DrawSelector: React.FC = () => {
   }, [activeDay]);
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in mb-8">
       {/* Header & Clock */}
       <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-3">
@@ -66,8 +65,8 @@ export const DrawSelector: React.FC = () => {
       </div>
 
       {/* Day Navigation */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-        {DAYS_ORDER.map((d, idx) => {
+      <div ref={daysContainerRef} className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+        {DAYS_ORDER.map((d) => {
             const isToday = d === todayName;
             const isActive = activeDay === d;
             return (
@@ -75,15 +74,15 @@ export const DrawSelector: React.FC = () => {
                     key={d}
                     onClick={() => setActiveDay(d)}
                     className={`
-                        relative px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
+                        relative px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
                         ${isActive 
-                            ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 scale-[1.02] z-10' 
+                            ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 border-indigo-500 text-white shadow-lg shadow-indigo-600/30 scale-[1.02] z-10' 
                             : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
                         }
                     `}
                 >
                     {d}
-                    {isToday && !isActive && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>}
+                    {isToday && !isActive && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981]"></span>}
                 </button>
             );
         })}
@@ -100,15 +99,18 @@ export const DrawSelector: React.FC = () => {
             let statusClasses = "border-slate-800 bg-slate-900 opacity-60 grayscale";
             let iconElement = <Lock size={14} className="text-slate-600"/>;
             let labelText = "Terminé";
+            let borderColor = "border-transparent";
 
             if (status === 'live') {
-                statusClasses = "border-emerald-500/50 bg-emerald-900/10 shadow-[0_0_20px_rgba(16,185,129,0.1)] opacity-100";
+                statusClasses = "border-emerald-500/30 bg-emerald-950/20 shadow-[0_0_30px_rgba(16,185,129,0.1)] opacity-100";
                 iconElement = <span className="flex h-2.5 w-2.5 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span></span>;
                 labelText = "En Cours";
+                borderColor = "border-emerald-500/50";
             } else if (status === 'next') {
-                statusClasses = "border-indigo-500/50 bg-indigo-900/10 opacity-100";
-                iconElement = <Clock size={14} className="text-indigo-400 animate-spin-slow"/>;
+                statusClasses = "border-indigo-500/30 bg-indigo-950/20 opacity-100";
+                iconElement = <Zap size={14} className="text-amber-400 animate-pulse"/>;
                 labelText = "Bientôt";
+                borderColor = "border-indigo-500/50";
             } else if (status === 'upcoming') {
                 statusClasses = "border-slate-700 bg-slate-900 opacity-100";
                 iconElement = <Clock size={14} className="text-slate-500"/>;
@@ -124,7 +126,8 @@ export const DrawSelector: React.FC = () => {
             }
 
             if (isActive) {
-                statusClasses = "bg-indigo-600 border-indigo-500 text-white shadow-2xl scale-[1.02] z-20 ring-1 ring-indigo-400 opacity-100";
+                statusClasses = "bg-gradient-to-br from-indigo-600 to-indigo-800 border-indigo-400 text-white shadow-2xl scale-[1.03] z-20 ring-2 ring-indigo-400/50 opacity-100";
+                borderColor = "border-indigo-400";
             }
 
             return (
@@ -132,8 +135,8 @@ export const DrawSelector: React.FC = () => {
                 key={name}
                 onClick={() => setDrawName(name)}
                 className={`
-                    p-5 rounded-[2rem] border transition-all duration-300 cursor-pointer group relative overflow-hidden flex flex-col justify-between h-32
-                    ${statusClasses}
+                    p-5 rounded-[2rem] border transition-all duration-300 cursor-pointer group relative overflow-hidden flex flex-col justify-between h-36
+                    ${statusClasses} ${!isActive ? borderColor : ''}
                 `}
               >
                 {/* Background Decor */}
@@ -142,7 +145,7 @@ export const DrawSelector: React.FC = () => {
                 <div className="flex justify-between items-start relative z-10">
                     <div>
                         <div className="flex items-center gap-2 mb-2">
-                            <span className="text-lg filter drop-shadow-md">{config.icon}</span>
+                            <span className="text-xl filter drop-shadow-md">{config.icon}</span>
                             <span className={`text-[9px] font-black uppercase tracking-widest ${isActive ? 'text-indigo-200' : config.color}`}>
                                 {config.label}
                             </span>
@@ -151,14 +154,14 @@ export const DrawSelector: React.FC = () => {
                             {name}
                         </h3>
                     </div>
-                    {isActive && <Target size={20} className="text-white animate-pulse" />}
+                    {isActive && <Target size={24} className="text-white animate-spin-slow" />}
                 </div>
                 
                 <div className={`mt-auto flex justify-between items-center relative z-10 pt-3 border-t ${isActive ? 'border-white/20' : 'border-white/5'}`}>
                     <span className={`font-mono text-xs font-bold flex items-center gap-2 ${isActive ? 'text-indigo-100' : 'text-slate-400'}`}>
                         {iconElement} {time}
                     </span>
-                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'}`}>
                         {labelText}
                     </span>
                 </div>

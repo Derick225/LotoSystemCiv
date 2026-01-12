@@ -1,6 +1,6 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff, Share2 } from 'lucide-react';
+import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff, Share2, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { useIsFetching } from '@tanstack/react-query';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
@@ -8,6 +8,7 @@ import { SonarPing } from '../ui/SonarPing';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
+import { useNexus } from '../NexusProvider';
 
 export type ViewMode = 'home' | 'admin' | 'lab';
 
@@ -39,8 +40,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   onLogout
 }) => {
   const isFetching = useIsFetching();
+  const { refreshData, currentDrawName } = useNexus();
   const [showPalette, setShowPalette] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   // Intégration V.O.I.C.E
   const { isListening, transcript, toggleListening } = useVoiceControl(
@@ -52,8 +55,26 @@ export const AppShell: React.FC<AppShellProps> = ({
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    
+    const handleOnline = () => {
+        setIsOnline(true);
+        audioEngine.play('success');
+        if (currentDrawName) refreshData(currentDrawName, true);
+    };
+    const handleOffline = () => {
+        setIsOnline(false);
+        audioEngine.play('error');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+        window.removeEventListener('scroll', handleScroll);
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+    };
+  }, [currentDrawName, refreshData]);
 
   const navItems: { id: ViewMode; icon: React.ReactNode; label: string }[] = [
       { id: 'home', icon: <Home size={18}/>, label: 'Station' },
@@ -83,10 +104,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         console.log('Partage annulé ou erreur', error);
       }
     } else {
-      // Fallback: Copy link
       try {
         await navigator.clipboard.writeText(window.location.href);
-        // Simple visual feedback since we don't have direct access to toast here
         const btn = document.getElementById('share-btn');
         if (btn) {
             const originalColor = btn.style.color;
@@ -111,6 +130,22 @@ export const AppShell: React.FC<AppShellProps> = ({
       <header className="fixed top-0 left-0 right-0 z-50 transition-all duration-500">
         <MarqueeTicker />
         
+        {/* Offline Banner */}
+        <AnimatePresence>
+            {!isOnline && (
+                <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest text-center overflow-hidden"
+                >
+                    <div className="py-1 flex items-center justify-center gap-2">
+                        <WifiOff size={12} /> Mode Hors-Ligne (Archive Locale)
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+        
         <div className={`mx-2 md:mx-4 mt-2 transition-all duration-500 ${scrolled ? 'scale-[0.98]' : 'scale-100'}`}>
             <div className={`container mx-auto px-4 md:px-6 h-16 md:h-20 rounded-[2rem] md:rounded-[2.5rem] border shadow-2xl transition-all duration-500 flex justify-between items-center safe-top
                 ${scrolled 
@@ -125,13 +160,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                     <div className="hidden lg:block">
                         <h1 className="text-xl font-black tracking-tighter leading-none text-white">NEXUS<span className="text-indigo-500">PRO</span></h1>
                         <div className="flex items-center gap-1.5 mt-1">
-                            <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></div>
+                            <div className={`w-1 h-1 rounded-full animate-pulse ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
                             <p className="text-[7px] font-black text-slate-500 uppercase tracking-[0.4em]">PLATINUM ELITE v11.5</p>
                         </div>
                     </div>
                 </div>
 
-                {/* V.O.I.C.E FEEDBACK CENTER (Mobile/Desktop) */}
+                {/* V.O.I.C.E FEEDBACK CENTER */}
                 <AnimatePresence>
                     {isListening && (
                         <motion.div 
@@ -188,7 +223,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
                     <div className="hidden sm:flex flex-col items-end mr-3 px-3 py-1 bg-black/20 rounded-xl border border-white/5 cursor-pointer hover:border-indigo-500/50 transition-all" onClick={() => setShowPalette(true)}>
                         <div className="flex items-center gap-2">
-                            <SonarPing />
+                            {isFetching > 0 ? <RefreshCw size={12} className="animate-spin text-indigo-400"/> : <SonarPing />}
                             <span className="text-[8px] font-mono text-slate-400 uppercase tracking-tighter">Flux: {isFetching > 0 ? 'Busy' : 'Live'}</span>
                         </div>
                     </div>
@@ -253,7 +288,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       </main>
 
       {/* MOBILE BOTTOM NAVIGATION - PREMIUM */}
-      <nav className="md:hidden fixed bottom-6 left-6 right-6 z-50">
+      <nav className="md:hidden fixed bottom-6 left-6 right-6 z-50 safe-bottom">
         <div className="glass-morphism bg-nexus-950/90 backdrop-blur-2xl p-2 rounded-[2.5rem] shadow-2xl border border-white/10 flex justify-between items-center">
             {navItems.map(btn => (
                 <button 

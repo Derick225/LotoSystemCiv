@@ -1,3 +1,4 @@
+
 // Fichier de constantes simplifié pour les fonctions Supabase Edge.
 
 export interface Draw { day: string; time: string; name: string; }

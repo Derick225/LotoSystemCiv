@@ -5,7 +5,7 @@ import {
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
   NexusContextType, OracleVocalContext
 } from '../types';
-import { lotteryService, checkAndSyncRecentResults } from '../services/lotteryService';
+import { lotteryService, checkAndSyncRecentResults, getNextScheduledDraw } from '../services/lotteryService';
 import { 
     calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
@@ -25,35 +25,40 @@ const NexusContext = createContext<NexusContextType | null>(null);
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast(); 
   
-  // Core State
-  const [drawName, setDrawNameState] = useState('Reveil');
+  // State: Core Identification
+  const [drawName, setDrawNameState] = useState(() => {
+      const next = getNextScheduledDraw();
+      return next ? next.name : 'Reveil';
+  });
+
+  // State: Data Layer
   const [history, setHistory] = useState<DrawResult[]>([]);
+  const [loading, setLoading] = useState(false); 
   
-  // Computed State (Lazy)
+  // State: Computed Metrics (Moved from useMemo to State to prevent render-blocking)
+  const [stats, setStats] = useState<{ number: number; count: number }[]>([]);
+  const [gaps, setGaps] = useState<{ number: number; gap: number }[]>([]);
+  const [volatility, setVolatility] = useState<{ score: number; status: string; trend: string } | null>(null);
+  const [regime, setRegime] = useState<{ hurst: number; regime: string } | null>(null);
+  const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
   const [fractal, setFractal] = useState<FractalMetric[]>([]);
-  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync('Reveil'));
-  const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
-  const [inspectingNumber, setInspectingNumber] = useState<number | null>(null);
-  
-  // Interaction State (HUD)
-  const [hoveredNumber, setHoveredNumber] = useState<number | null>(null);
-  
-  // Status Flags
-  const [loading, setLoading] = useState(false); 
-  const [computing, setComputing] = useState(false);
-  
-  const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); 
-  
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
-  const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [cliques, setCliques] = useState<any[]>([]);
-  const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
   const [calibration, setCalibration] = useState<BrierCalibration | null>(null);
+  const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
+
+  // State: User Interactions & Configuration
+  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync(drawName));
+  const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
+  const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
+  const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); 
+  const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Connection Check
   useEffect(() => {
       const checkConnection = async () => {
           if (!isSupabaseConfigured()) return;
@@ -65,24 +70,18 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       checkConnection();
   }, []);
 
-  // --- AUTOMATED FEEDBACK LOOP ---
-  // Surveille l'historique. Si un nouveau tirage arrive et que la dernière prédiction était mauvaise, lance l'auto-correction.
+  // Auto-Learning Trigger
   useEffect(() => {
       if (history.length > 0 && lastPrediction && drawName !== 'ALL') {
           const lastDraw = history[0];
-          // Vérifie si la prédiction correspond au dernier tirage (en supposant que lastPrediction était pour ce tirage)
-          // Dans un système réel, on lierait par ID, mais ici on check les hits
           const hits = lastPrediction.suggestedNumbers.filter(n => lastDraw.gagnants.includes(n)).length;
           
           if (hits < 2) {
-              // Performance faible détectée -> Auto-Correction
               const lastAutoLearn = localStorage.getItem(`auto_learn_${drawName}_${lastDraw.date}`);
               if (!lastAutoLearn) {
-                  console.log(`[Auto-Correction] Déclenchement pour ${drawName} (Hits: ${hits})`);
                   LearningService.triggerAutoLearning(drawName).then(res => {
                       if (res.improvement) {
                           showToast("🧬 Le système s'est auto-corrigé après le dernier résultat.", "info");
-                          // Recharger les poids
                           getAlgoWeights(drawName).then(w => setGlobalWeights(w));
                           localStorage.setItem(`auto_learn_${drawName}_${lastDraw.date}`, 'done');
                       }
@@ -92,27 +91,22 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [history, lastPrediction, drawName]);
 
+  // --- CORE DATA LOADING ---
   const loadData = useCallback(async () => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
 
     setLoading(true);
-    setComputing(true); 
     
-    // NETTOYAGE PRÉVENTIF
-    setHistory([]); 
-    setSpectral([]);
-    setFractal([]);
+    // Reset light states immediately
     setLastPrediction(null);
     setSmartInsights([]);
 
     try {
-        // 1. Chargement Historique (Strict Draw Isolation)
         const hist = await lotteryService.fetchHistory(drawName);
         
         if (abortControllerRef.current.signal.aborted) return;
 
-        // Auto-Repair Check
         if (hist.length === 0 && drawName !== 'ALL' && isSupabaseConfigured()) {
             await checkAndSyncRecentResults(drawName);
             const retriedHist = await lotteryService.fetchHistory(drawName);
@@ -122,30 +116,47 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setHistory(hist); 
         }
         
-        setLoading(false);
+        // 1. Synchronous Light Calculations (Non-blocking enough)
+        if (hist.length > 0) {
+            // Stats
+            const counts: Record<number, number> = {};
+            hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
+            setStats(Object.entries(counts)
+              .map(([n, c]) => ({ number: Number(n), count: c }))
+              .sort((a, b) => b.count - a.count));
 
-        // 2. Chargement Poids Specifiques (et potentiellement mis à jour par l'auto-learning précédent)
+            // Gaps
+            if (drawName !== 'ALL') {
+                const resGaps: { number: number; gap: number }[] = [];
+                for (let i = 1; i <= 90; i++) {
+                    let gap = 0;
+                    for (const draw of hist) {
+                        if (draw.gagnants.includes(i)) break;
+                        gap++;
+                    }
+                    resGaps.push({ number: i, gap });
+                }
+                setGaps(resGaps);
+            }
+
+            // Volatility & Regime
+            setVolatility(calculateVolatility(hist));
+            const reg = detectGameRegime(hist);
+            setRegime(reg ? { hurst: reg.hurst, regime: reg.regime } : null);
+        }
+
+        setLoading(false); // UI can show data now, heavy calcs continue
+
         getAlgoWeights(drawName).then(w => {
             if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
         });
 
-        // 3. Calculs HPC
         const activeHistory = hist.length === 0 ? [] : hist; 
 
         if (activeHistory.length > 0 && drawName !== 'ALL') {
             const computeSample = activeHistory.slice(0, 300); 
 
-            // --- AUTO-APPRENTISSAGE TRIGGER (Deep Check) ---
-            if (activeHistory.length >= 25 && isSupabaseConfigured()) {
-                LearningService.checkAndLearn(drawName, activeHistory[0]).then(status => {
-                    if (status && status.improvement) {
-                        showToast(status.message, "success");
-                        getAlgoWeights(drawName).then(w => setGlobalWeights(w));
-                    }
-                });
-            }
-            // ----------------------------------
-
+            // 2. Heavy Async Calculations
             const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateFractalMetricsAsync(computeSample),
@@ -163,8 +174,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setCorrelationMatrix(corr);
             setCliques(centrality);
 
-            const gaps = regData.map(r => ({ number: r.number, gap: r.currentGap }));
-            const insights = await generateSmartInsights(drawName, computeSample, spec, gaps, regData);
+            // Insights generation based on heavy metrics
+            const gapsData = regData.map(r => ({ number: r.number, gap: r.currentGap }));
+            const insights = await generateSmartInsights(drawName, computeSample, spec, gapsData, regData);
             setSmartInsights(insights);
 
             if (preds.length > 5) {
@@ -191,11 +203,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (e.name === 'AbortError') return;
         console.error("Nexus Kernel Error:", e);
         setHistory([]); 
-    } finally {
-        if (!abortControllerRef.current?.signal.aborted) {
-            setLoading(false);
-            setComputing(false);
-        }
+        setLoading(false);
     }
   }, [drawName, refreshTrigger, showToast]);
 
@@ -205,6 +213,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [loadData]);
+
+  // --- ACTIONS ---
 
   const setDrawName = useCallback((name: string) => {
       audioEngine.play('click');
@@ -220,32 +230,24 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [drawName]);
 
-  const stats = useMemo(() => {
-    const counts: Record<number, number> = {};
-    history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
-    return Object.entries(counts)
-      .map(([n, c]) => ({ number: Number(n), count: c }))
-      .sort((a, b) => b.count - a.count);
-  }, [history]);
+  const updateGlobalWeights = useCallback((w: AlgoWeights) => {
+      audioEngine.play('success'); 
+      setGlobalWeights(w); 
+      import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
+  }, [drawName]);
 
-  const gaps = useMemo(() => {
-    if (drawName === 'ALL') return [];
-    const res: { number: number; gap: number }[] = [];
-    for (let i = 1; i <= 90; i++) {
-      let gap = 0;
-      for (const draw of history) {
-        if (draw.gagnants.includes(i)) break;
-        gap++;
-      }
-      res.push({ number: i, gap });
-    }
-    return res;
-  }, [history, drawName]);
+  const setInspectingNumber = useCallback((n: number | null) => {
+      if(n) audioEngine.play('click');
+      setInspectingNumberState(n);
+  }, []);
 
-  const volatility = useMemo(() => history.length > 0 ? calculateVolatility(history) : null, [history]);
-  const regime = useMemo(() => history.length > 0 ? detectGameRegime(history) : null, [history]);
+  const setHoveredNumber = useCallback((n: number | null) => {
+      setHoveredNumberState(n);
+  }, []);
 
-  const contextValue: NexusContextType = {
+  const refresh = useCallback(() => refreshData(drawName, true), [drawName, refreshData]);
+
+  const contextValue: NexusContextType = useMemo(() => ({
     drawName,
     setDrawName,
     currentDrawName: drawName,
@@ -255,20 +257,16 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     stats,
     gaps,
     volatility,
-    regime: regime ? { hurst: regime.hurst, regime: regime.regime } : null,
+    regime,
     lastPrediction,
     setLastPrediction,
     inspectingNumber,
-    setInspectingNumber: (n) => { if(n) audioEngine.play('click'); setInspectingNumber(n); },
+    setInspectingNumber,
     smartInsights,
     globalWeights,
-    updateGlobalWeights: (w: AlgoWeights) => { 
-        audioEngine.play('success'); 
-        setGlobalWeights(w); 
-        import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
-    },
+    updateGlobalWeights,
     loading,
-    refresh: () => refreshData(drawName, true),
+    refresh,
     refreshData,
     correlationMatrix,
     regularity,
@@ -278,7 +276,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     vocalContext,
     hoveredNumber,
     setHoveredNumber
-  };
+  }), [
+    drawName, history, spectral, fractal, stats, gaps, volatility, regime, 
+    lastPrediction, inspectingNumber, smartInsights, globalWeights, 
+    loading, correlationMatrix, regularity, calibration, cliques, 
+    vocalContext, hoveredNumber
+  ]);
 
   return (
     <NexusContext.Provider value={contextValue}>

@@ -1,28 +1,18 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-/**
- * Récupère une variable d'environnement avec stratégie de repli multiple.
- * Supporte à la fois Vite (import.meta.env) et l'injection Node (process.env).
- */
 const getViteEnv = (key: string): string => {
-  // Vérification Vite (import.meta.env)
   if (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env as any)[key]) {
     return String((import.meta.env as any)[key]);
   }
-  
-  // Vérification Node (process.env)
   if (typeof process !== 'undefined' && process.env && process.env[key]) {
     return String(process.env[key]);
   }
-
   return '';
 };
 
-// Nettoyage des valeurs (suppression des guillemets accidentels et espaces)
 const cleanEnv = (val: string) => val.replace(/["']/g, '').trim();
 
-// Récupération des variables avec fallbacks
 const SUPABASE_URL = cleanEnv(getViteEnv('VITE_SUPABASE_URL'));
 const SUPABASE_ANON_KEY = cleanEnv(
   getViteEnv('VITE_SUPABASE_ANON_KEY') || 
@@ -30,133 +20,57 @@ const SUPABASE_ANON_KEY = cleanEnv(
   getViteEnv('VITE_SUPABASE_PUBLISHABLE_KEY')
 );
 
-/**
- * Vérifie que l’URL est valide (doit être une URL Supabase en HTTPS).
- */
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
     if (!url || url.includes('your-project-url') || url.includes('placeholder')) return false;
     const u = new URL(url);
-    return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
-  } catch {
-    return false;
-  }
+    return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost'));
+  } catch { return false; }
 };
 
-/**
- * Vérifie le format basique d'une clé Supabase (JWT).
- */
 const isValidSupabaseKey = (key: string): boolean => {
-  return key && key.length > 20 && key !== 'placeholder' && !key.includes('your-anon-key');
+  return key && key.length > 20 && key !== 'placeholder';
 };
 
-/**
- * Indique si la configuration minimale est présente et valide.
- */
 export const isSupabaseConfigured = (): boolean => {
-  const urlValid = isValidSupabaseUrl(SUPABASE_URL);
-  const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
-  
-  if (!urlValid || !keyValid) {
-      if (process.env.NODE_ENV === 'development') {
-          console.debug("[Nexus Config] Supabase non configuré ou clés invalides.", { url: SUPABASE_URL, keyLength: SUPABASE_ANON_KEY?.length });
-      }
-      return false;
-  }
-  return true;
+  return isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
 };
 
-/**
- * Fournit un diagnostic détaillé sur l'état de la configuration.
- */
 export const getSupabaseConfigDiagnostics = () => {
   const urlValid = isValidSupabaseUrl(SUPABASE_URL);
   const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
-
   return {
     isConfigured: urlValid && keyValid,
-    url: {
-      valid: urlValid,
-      value: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : '(Vide)',
-      error: !SUPABASE_URL ? "URL Manquante" : !urlValid ? "Format URL Invalide (doit commencer par https://)" : null
-    },
-    key: {
-      valid: keyValid,
-      value: SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 5)}...` : '(Vide)',
-      error: !SUPABASE_ANON_KEY ? "Clé Manquante" : !keyValid ? "Format Clé Invalide (trop courte ou placeholder)" : null
-    }
+    url: { valid: urlValid, value: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : '(Vide)', error: !SUPABASE_URL ? "URL Manquante" : !urlValid ? "Format URL Invalide" : null },
+    key: { valid: keyValid, value: SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 5)}...` : '(Vide)', error: !SUPABASE_ANON_KEY ? "Clé Manquante" : !keyValid ? "Clé Invalide" : null }
   };
 };
 
-// Configuration Fallback Safe
-// NOTE: L'URL placeholder doit être valide (sans espace final) pour éviter le crash de new URL()
 const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
 const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
 
-/**
- * Client Supabase singleton.
- */
-export const supabase: SupabaseClient = createClient(
-  SAFE_URL,
-  SAFE_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+export const supabase: SupabaseClient = createClient(SAFE_URL, SAFE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: typeof window !== 'undefined' ? window.localStorage : undefined },
+    global: { 
+        headers: { 'x-nexus-client': 'platinum-v12-prod' },
+        fetch: (url, options) => {
+            return fetch(url, { ...options, signal: AbortSignal.timeout(15000) }); // Global Timeout 15s
+        }
     },
-    global: {
-      headers: { 'x-nexus-client': 'platinum-v11-prod' },
-    },
-  }
-);
+});
 
-/**
- * Test de connexion simple et diagnostic.
- */
 export const testDatabaseConnection = async () => {
-  if (!isSupabaseConfigured()) {
-    return {
-      success: false,
-      error: "Configuration manquante. Avez-vous mis à jour le fichier .env avec les clés du nouveau projet ?",
-    };
-  }
-
+  if (!isSupabaseConfigured()) return { success: false, error: "Configuration manquante." };
   try {
     const start = performance.now();
-    // Requête légère HEAD pour vérifier l'accès
-    const { error, count } = await supabase
-      .from('draw_results')
-      .select('*', { count: 'exact', head: true });
-
+    const { error, count } = await supabase.from('draw_results').select('*', { count: 'exact', head: true });
     const latency = Math.round(performance.now() - start);
-
     if (error) {
-      console.error("[DB Test] Connection Failed:", error);
-      // Détection spécifique des erreurs courantes
-      if (error.code === '42P01') return { success: false, error: "La table 'draw_results' n'existe pas. Veuillez exécuter le script SQL dans Supabase.", code: error.code };
-      if (error.code === '28P01' || error.code === '42501') return { success: false, error: "Connexion refusée. Vérifiez vos clés API ou les politiques RLS.", code: error.code };
-      if (error.message.includes('fetch')) return { success: false, error: "Impossible de joindre Supabase. Vérifiez l'URL du projet.", code: 'NETWORK_ERROR' };
-      
-      return {
-        success: false,
-        error: error.message || "Erreur d'accès à la base de données.",
-        code: error.code || 'UNKNOWN',
-        latency,
-      };
+      if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Exécutez le script SQL.", code: error.code };
+      return { success: false, error: error.message, code: error.code || 'UNKNOWN', latency };
     }
-
-    return {
-      success: true,
-      count: count ?? 0,
-      latency,
-    };
+    return { success: true, count: count ?? 0, latency };
   } catch (err: any) {
-    console.error("[DB Test] Network Exception:", err);
-    return {
-      success: false,
-      error: err?.message || "Erreur réseau (CORS ou DNS).",
-    };
+    return { success: false, error: err?.message || "Erreur réseau (Timeout ou DNS)." };
   }
 };

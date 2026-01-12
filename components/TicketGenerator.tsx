@@ -7,7 +7,7 @@ import { saveTicket } from '../services/userPreferencesService';
 import { getFullOrchestrationAnalysis } from '../services/orchestrationService';
 import { useNexus } from './NexusProvider';
 import type { TicketAnalysisResult } from '../types';
-import { Wallet, Copy, RefreshCw, Cpu, Shield, Zap, AlertTriangle } from 'lucide-react';
+import { Wallet, Copy, RefreshCw, Cpu, Shield, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { TicketXRay } from './TicketXRay';
 
 interface TicketGeneratorProps {
@@ -20,7 +20,7 @@ type Strategy = 'safe' | 'balanced' | 'audacious' | 'chaos';
 
 export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbers, candidates, drawName = 'Unknown' }) => {
     const { showToast } = useToast();
-    const { history, stats, gaps, spectral } = useNexus(); // Accès aux données spectrales
+    const { history, stats, gaps, spectral } = useNexus(); 
     
     const [strategy, setStrategy] = useState<Strategy>('balanced');
     const [ticket, setTicket] = useState<number[]>([]);
@@ -28,7 +28,6 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
     const [isAuditing, setIsAuditing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
 
-    // Fonction de sélection pondérée (Roulette Wheel Selection)
     const selectWeighted = (pool: {n: number, w: number}[]) => {
         const totalWeight = pool.reduce((acc, item) => acc + item.w, 0);
         let random = Math.random() * totalWeight;
@@ -36,93 +35,85 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
             random -= item.w;
             if (random <= 0) return item.n;
         }
-        return pool[0].n; // Fallback
+        return pool[0].n;
     };
 
     const generateTicket = async () => {
         setIsGenerating(true);
-        let selection: Set<number> = new Set();
-        
-        try {
-            // --- STRATEGIE SAFE : Suivi strict de l'IA ---
-            if (strategy === 'safe') {
-                suggestedNumbers.slice(0, 5).forEach(n => selection.add(n));
-            }
+        // Utilisation de setTimeout pour débloquer le thread principal et afficher le loader
+        setTimeout(async () => {
+            let selection: Set<number> = new Set();
             
-            // --- STRATEGIE BALANCED : IA + Fréquence (King Numbers) ---
-            else if (strategy === 'balanced') {
-                suggestedNumbers.slice(0, 3).forEach(n => selection.add(n));
-                const hotNumbers = stats.slice(0, 10).map(s => s.number);
-                const availableHot = hotNumbers.filter(n => !selection.has(n));
-                
-                while (selection.size < 5 && availableHot.length > 0) {
-                    const idx = Math.floor(Math.random() * availableHot.length);
-                    selection.add(availableHot[idx]);
-                    availableHot.splice(idx, 1);
+            try {
+                if (strategy === 'safe') {
+                    suggestedNumbers.slice(0, 5).forEach(n => selection.add(n));
                 }
-            }
-            
-            // --- STRATEGIE AUDACIOUS : Orchestration (Patterns T-1) ---
-            else if (strategy === 'audacious') {
-                const orchestration = await getFullOrchestrationAnalysis(drawName, history);
-                const patternCandidates = orchestration.topCandidates.map(c => c.number);
-                suggestedNumbers.slice(0, 2).forEach(n => selection.add(n));
-                
-                const availablePatterns = patternCandidates.filter(n => !selection.has(n));
-                while (selection.size < 5 && availablePatterns.length > 0) {
-                    const idx = Math.floor(Math.random() * Math.min(5, availablePatterns.length)); 
-                    selection.add(availablePatterns[idx]);
-                    availablePatterns.splice(idx, 1);
+                else if (strategy === 'balanced') {
+                    suggestedNumbers.slice(0, 3).forEach(n => selection.add(n));
+                    const hotNumbers = stats.slice(0, 10).map(s => s.number);
+                    const availableHot = hotNumbers.filter(n => !selection.has(n));
+                    
+                    while (selection.size < 5 && availableHot.length > 0) {
+                        const idx = Math.floor(Math.random() * availableHot.length);
+                        selection.add(availableHot[idx]);
+                        availableHot.splice(idx, 1);
+                    }
                 }
-            }
-            
-            // --- STRATEGIE CHAOS : Contre-Tendance (Gaps Critiques) ---
-            else if (strategy === 'chaos') {
-                const coldNumbers = [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15).map(g => g.number);
-                while (selection.size < 5 && coldNumbers.length > 0) {
-                    const idx = Math.floor(Math.random() * coldNumbers.length);
-                    selection.add(coldNumbers[idx]);
-                    coldNumbers.splice(idx, 1);
+                else if (strategy === 'audacious') {
+                    const orchestration = await getFullOrchestrationAnalysis(drawName, history);
+                    const patternCandidates = orchestration.topCandidates.map(c => c.number);
+                    suggestedNumbers.slice(0, 2).forEach(n => selection.add(n));
+                    
+                    const availablePatterns = patternCandidates.filter(n => !selection.has(n));
+                    while (selection.size < 5 && availablePatterns.length > 0) {
+                        const idx = Math.floor(Math.random() * Math.min(5, availablePatterns.length)); 
+                        selection.add(availablePatterns[idx]);
+                        availablePatterns.splice(idx, 1);
+                    }
                 }
-            }
+                else if (strategy === 'chaos') {
+                    const coldNumbers = [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15).map(g => g.number);
+                    while (selection.size < 5 && coldNumbers.length > 0) {
+                        const idx = Math.floor(Math.random() * coldNumbers.length);
+                        selection.add(coldNumbers[idx]);
+                        coldNumbers.splice(idx, 1);
+                    }
+                }
 
-            // REMPLISSAGE INTELLIGENT (SMART FILL)
-            // Au lieu du random, on utilise l'énergie spectrale pour boucher les trous
-            if (selection.size < 5) {
-                // Création d'un pool pondéré par l'énergie spectrale
-                const weightedPool = Array.from({length: 90}, (_, i) => i + 1)
-                    .filter(n => !selection.has(n))
-                    .map(n => {
-                        const spec = spectral.find(s => s.number === n);
-                        // Poids minimal de 5 pour laisser une chance à tous
-                        return { n, w: spec ? spec.energy + 5 : 10 };
+                if (selection.size < 5) {
+                    const weightedPool = Array.from({length: 90}, (_, i) => i + 1)
+                        .filter(n => !selection.has(n))
+                        .map(n => {
+                            const spec = spectral.find(s => s.number === n);
+                            return { n, w: spec ? spec.energy + 5 : 10 };
+                        });
+
+                    while (selection.size < 5) {
+                        const pick = selectWeighted(weightedPool);
+                        selection.add(pick);
+                        const idx = weightedPool.findIndex(i => i.n === pick);
+                        if (idx !== -1) weightedPool.splice(idx, 1);
+                    }
+                }
+
+                const finalTicket = Array.from(selection).sort((a,b) => a-b);
+                setTicket(finalTicket);
+                
+                if (drawName !== 'Unknown') {
+                    setIsAuditing(true);
+                    analyzeTicketStrength(finalTicket, drawName).then(auditResult => {
+                        setAudit(auditResult);
+                        setIsAuditing(false);
                     });
-
-                while (selection.size < 5) {
-                    const pick = selectWeighted(weightedPool);
-                    selection.add(pick);
-                    // On retire le numéro du pool pour ne pas le reprendre
-                    const idx = weightedPool.findIndex(i => i.n === pick);
-                    if (idx !== -1) weightedPool.splice(idx, 1);
                 }
-            }
 
-            const finalTicket = Array.from(selection).sort((a,b) => a-b);
-            setTicket(finalTicket);
-            
-            if (drawName !== 'Unknown') {
-                setIsAuditing(true);
-                const auditResult = await analyzeTicketStrength(finalTicket, drawName);
-                setAudit(auditResult);
-                setIsAuditing(false);
+            } catch (e) {
+                console.error("Gen Error", e);
+                showToast("Erreur de génération vectorielle.", "error");
+            } finally {
+                setIsGenerating(false);
             }
-
-        } catch (e) {
-            console.error("Gen Error", e);
-            showToast("Erreur de génération vectorielle.", "error");
-        } finally {
-            setIsGenerating(false);
-        }
+        }, 50); // Petit délai pour laisser React rendre le state loading
     };
 
     const copyTicket = async () => {
@@ -185,7 +176,7 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
             </div>
 
             <div className="flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6 border-2 border-dashed border-gray-300 dark:border-gray-700 min-h-[140px] relative">
-                {ticket.length > 0 ? (
+                {ticket.length > 0 && !isGenerating ? (
                     <div className="animate-scale-in flex flex-col items-center gap-4 w-full relative z-10">
                         {isAuditing ? (
                             <span className="text-[10px] font-bold bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded animate-pulse text-gray-500">Audit en cours...</span>
@@ -223,12 +214,20 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ suggestedNumbe
                         )}
                     </div>
                 ) : (
-                    <div className="text-center">
-                        <p className="text-xs text-slate-400 mb-4 font-medium">Sélectionnez une stratégie pour calculer un ticket optimal.</p>
-                        <button onClick={generateTicket} disabled={isGenerating} className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg transition transform active:scale-95 flex items-center gap-2 mx-auto">
-                            {isGenerating ? <RefreshCw className="animate-spin" size={16}/> : getStrategyIcon(strategy)}
-                            Générer ma grille
-                        </button>
+                    <div className="text-center w-full">
+                        {isGenerating ? (
+                            <div className="flex flex-col items-center justify-center gap-3">
+                                <Loader2 className="animate-spin text-indigo-500" size={32} />
+                                <p className="text-xs font-black uppercase text-indigo-400 tracking-widest">Calcul Vectoriel...</p>
+                            </div>
+                        ) : (
+                            <>
+                                <p className="text-xs text-slate-400 mb-4 font-medium">Sélectionnez une stratégie pour calculer un ticket optimal.</p>
+                                <button onClick={generateTicket} className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg transition transform active:scale-95 flex items-center gap-2 mx-auto">
+                                    {getStrategyIcon(strategy)} Générer ma grille
+                                </button>
+                            </>
+                        )}
                     </div>
                 )}
             </div>

@@ -1,30 +1,26 @@
 
 import React, { useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { ProbabilityField } from '../ProbabilityField';
-import { Waves, Activity, BarChart2 } from 'lucide-react';
+import { Trophy, Clock, Flame } from 'lucide-react';
+import { NumberBall } from '../NumberBall';
 
 export const StatsTab: React.FC<{ drawName: string }> = () => {
-  const { stats, gaps, volatility, loading } = useNexus();
+  const { stats, gaps, loading } = useNexus();
 
-  // Si pas de données, loading ou skeleton
   if (loading || stats.length === 0) return <StatsSkeleton />;
 
-  // Préparation des données réelles pour les graphiques
-  const topNumbers = useMemo(() => stats.slice(0, 15), [stats]);
-  const topGaps = useMemo(() => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15), [gaps]);
+  const topNumbers = useMemo(() => stats.slice(0, 5), [stats]);
+  const topGaps = useMemo(() => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 5), [gaps]);
 
-  // Calcul pour la heatmap de probabilité (Score simple basé sur freq + gap)
+  // Calcul simplifié pour la matrice
   const probabilityScores = useMemo(() => {
       const scores: Record<number, number> = {};
       const maxFreq = stats[0]?.count || 1;
       const maxGap = Math.max(...gaps.map(g => g.gap)) || 1;
-
       stats.forEach(s => {
           const g = gaps.find(x => x.number === s.number)?.gap || 0;
-          // Formule simple : 60% Fréquence + 40% Retard (Gap)
           const score = ((s.count / maxFreq) * 60) + ((g / maxGap) * 40);
           scores[s.number] = Math.round(score);
       });
@@ -33,81 +29,53 @@ export const StatsTab: React.FC<{ drawName: string }> = () => {
 
   return (
     <div className="space-y-10 animate-fade-in pb-12">
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-125 transition-transform"><Activity className="w-12 h-12" /></div>
-                <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Volatilité (Sigma)</div>
-                <div className="text-3xl font-black">{volatility?.score ?? 0}%</div>
-                <div className={`text-[8px] font-bold uppercase mt-2 px-2 py-1 rounded w-fit ${volatility?.status === 'Chaos' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                    {volatility?.status}
-                </div>
-            </div>
-            {/* Autres KPIs simulés pour l'exemple mais basés sur la structure réelle */}
-            <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
-                <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Entropie Shannon</div>
-                <div className="text-3xl font-black">0.92</div>
-                <div className="h-1 w-full bg-slate-800 rounded-full mt-3 overflow-hidden">
-                    <div className="h-full bg-emerald-500" style={{ width: '92%' }}></div>
-                </div>
-            </div>
-            <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
-                <div className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1">Ecart Moyen</div>
-                <div className="text-3xl font-black">{Math.round(gaps.reduce((a,b)=>a+b.gap,0)/90)}</div>
-                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Tirages sans sortie</div>
-            </div>
-            <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-2xl">
-                <div className="text-[9px] font-black text-cyan-400 uppercase tracking-widest mb-1">Points Chauds</div>
-                <div className="text-3xl font-black">{topNumbers.length}</div>
-                <div className="text-[8px] text-slate-500 font-bold uppercase mt-2">Vecteurs actifs</div>
-            </div>
-        </div>
-
-        {/* Charts Grid */}
-        <div className="grid lg:grid-cols-2 gap-8">
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 dark:border-slate-700">
-                <h4 className="text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                    <BarChart2 className="text-indigo-500" size={16}/> Fréquence (Hot Vectors)
+        <div className="grid md:grid-cols-2 gap-8">
+            
+            {/* LES PLUS SORTIS (PODIUM) */}
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 dark:border-slate-700 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-6 opacity-5"><Flame size={80}/></div>
+                <h4 className="text-sm font-black text-slate-800 dark:text-white mb-8 flex items-center gap-2 uppercase tracking-widest">
+                    <Trophy className="text-amber-500" size={18}/> Les Champions (Forment)
                 </h4>
-                <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={topNumbers}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
-                            <XAxis dataKey="number" tick={{fontSize: 10, fontWeight: 'bold'}} axisLine={false} tickLine={false} />
-                            <Tooltip 
-                                cursor={{ fill: 'rgba(99, 102, 241, 0.05)' }}
-                                contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '11px' }} 
-                            />
-                            <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                                {topNumbers.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={index < 3 ? '#ef4444' : '#6366f1'} />
-                                ))}
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
+                <div className="space-y-4">
+                    {topNumbers.map((entry, index) => (
+                        <div key={entry.number} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-4">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs ${index === 0 ? 'bg-amber-400 text-white' : index === 1 ? 'bg-slate-300 text-slate-600' : 'bg-orange-300 text-white'}`}>
+                                    {index + 1}
+                                </div>
+                                <NumberBall number={entry.number} size="sm" />
+                            </div>
+                            <div className="text-right">
+                                <span className="block text-lg font-black text-slate-800 dark:text-white">{entry.count}</span>
+                                <span className="text-[9px] text-slate-400 font-bold uppercase">Sorties</span>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 dark:border-slate-700">
-                <h4 className="text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                    <Waves className="text-rose-500" size={16}/> Retard Critique (Cold Gaps)
+            {/* LES PLUS RETARDATAIRES (MONTRE) */}
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 dark:border-slate-700 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-6 opacity-5"><Clock size={80}/></div>
+                <h4 className="text-sm font-black text-slate-800 dark:text-white mb-8 flex items-center gap-2 uppercase tracking-widest">
+                    <Clock className="text-indigo-500" size={18}/> Les Absents (Retard)
                 </h4>
-                <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={topGaps}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
-                            <XAxis dataKey="number" tick={{fontSize: 10, fontWeight: 'bold'}} axisLine={false} tickLine={false} />
-                            <Tooltip 
-                                cursor={{ fill: 'rgba(244, 63, 94, 0.05)' }}
-                                contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '11px' }} 
-                            />
-                            <Bar dataKey="gap" radius={[6, 6, 0, 0]}>
-                                {topGaps.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.gap > 25 ? '#f43f5e' : '#cbd5e1'} />
-                                ))}
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
+                <div className="space-y-4">
+                    {topGaps.map((entry, index) => (
+                        <div key={entry.number} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-4">
+                                <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-black text-xs text-slate-500">
+                                    {index + 1}
+                                </div>
+                                <NumberBall number={entry.number} size="sm" />
+                            </div>
+                            <div className="text-right">
+                                <span className="block text-lg font-black text-indigo-500">{entry.gap}</span>
+                                <span className="text-[9px] text-slate-400 font-bold uppercase">Tirages sans voir</span>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
@@ -115,8 +83,8 @@ export const StatsTab: React.FC<{ drawName: string }> = () => {
         {/* Probability Heatmap */}
         <section>
             <div className="flex justify-between items-center mb-6 px-2">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tighter uppercase">Matrice de Probabilité</h3>
-                <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-slate-500 uppercase">Grille 90</span>
+                <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tighter uppercase">Carte de Chaleur</h3>
+                <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-slate-500 uppercase">1 à 90</span>
             </div>
             <ProbabilityField scores={probabilityScores} />
         </section>

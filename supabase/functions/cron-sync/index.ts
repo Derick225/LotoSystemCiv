@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
@@ -8,15 +9,42 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Mapping des noms pour normalisation
+// Mapping des noms pour normalisation stricte (API Externe -> Interne)
 const DRAW_NAMES_MAP: Record<string, string> = {
-  "REVEIL": "Reveil", "ETOILE": "Etoile", "AKWABA": "Akwaba", "MONDAY SPECIAL": "Monday Special",
-  "LA MATINALE": "La Matinale", "EMERGENCE": "Emergence", "SIKA": "Sika", "LUCKY TUESDAY": "Lucky Tuesday",
-  "PREMIERE HEURE": "Premiere Heure", "FORTUNE": "Fortune", "BARAKA": "Baraka", "MIDWEEK": "Midweek",
-  "KADO": "Kado", "PRIVILEGE": "Privilege", "MONNI": "Monni", "FORTUNE THURSDAY": "Fortune Thursday",
-  "CASH": "Cash", "SOLUTION": "Solution", "WARI": "Wari", "FRIDAY BONANZA": "Friday Bonanza",
-  "SOUTRA": "Soutra", "DIAMANT": "Diamant", "MOAYE": "Moaye", "NATIONAL": "National",
-  "BENEDICTION": "Benediction", "PRESTIGE": "Prestige", "AWALE": "Awale", "ESPOIR": "Espoir"
+  "REVEIL": "Reveil", 
+  "ETOILE": "Etoile", 
+  "AKWABA": "Akwaba", 
+  "MONDAY SPECIAL": "Monday Special",
+  
+  "LA MATINALE": "La Matinale", 
+  "EMERGENCE": "Emergence", 
+  "SIKA": "Sika", 
+  "LUCKY TUESDAY": "Lucky Tuesday",
+  
+  "PREMIERE HEURE": "Premiere Heure", 
+  "FORTUNE": "Fortune", 
+  "BARAKA": "Baraka", 
+  "MIDWEEK": "Midweek",
+  
+  "KADO": "Kado", 
+  "PRIVILEGE": "Privilege", 
+  "MONNI": "Monni", 
+  "FORTUNE THURSDAY": "Fortune Thursday",
+  
+  "CASH": "Cash", 
+  "SOLUTION": "Solution", 
+  "WARI": "Wari", 
+  "FRIDAY BONANZA": "Friday Bonanza",
+  
+  "SOUTRA": "Soutra", 
+  "DIAMANT": "Diamant", 
+  "MOAYE": "Moaye", 
+  "NATIONAL": "National",
+  
+  "BENEDICTION": "Benediction", 
+  "PRESTIGE": "Prestige", 
+  "AWALE": "Awale", 
+  "ESPOIR": "Espoir"
 };
 
 const formatMonth = (date: Date) => {
@@ -89,6 +117,7 @@ serve(async (req: Request) => {
                         let rawName = (draw.drawName || "").trim().toUpperCase();
                         rawName = rawName.replace(/^TIRAGE\s+/, "");
 
+                        // Normalisation stricte via la MAP
                         const canonicalName = DRAW_NAMES_MAP[rawName];
                         if (!canonicalName) continue;
 

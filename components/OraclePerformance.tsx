@@ -1,104 +1,57 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNexus } from './NexusProvider';
-import { ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { HeartPulse, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
 
 interface OraclePerformanceProps {
     drawName: string;
 }
 
 export const OraclePerformance: React.FC<OraclePerformanceProps> = ({ drawName }) => {
-    // Connexion directe au Cerveau Nexus
-    const { volatility: globalVolatility, history } = useNexus();
+    const { volatility } = useNexus();
     
-    const [volatility, setVolatility] = useState<{ score: number, status: string, trend: string } | null>(null);
-    const [historyData, setHistoryData] = useState<any[]>([]);
+    const [health, setHealth] = useState<{ status: string, color: string, message: string }>({ 
+        status: 'Calcul...', color: 'text-slate-400', message: 'Attente du signal...' 
+    });
     
     useEffect(() => {
-        // Utilisation de la volatilité calculée globalement si disponible
-        if (globalVolatility) {
-            setVolatility(globalVolatility);
-        } else {
-            // Fallback sûr par défaut si pas encore calculé
-            setVolatility({ score: 0, status: 'Analyse...', trend: 'steady' });
+        if (volatility) {
+            if (volatility.score > 60) {
+                setHealth({ status: 'Agité', color: 'text-rose-500', message: 'Le jeu est difficile et changeant.' });
+            } else if (volatility.score > 30) {
+                setHealth({ status: 'Normal', color: 'text-indigo-500', message: 'Le jeu est stable.' });
+            } else {
+                setHealth({ status: 'Excellent', color: 'text-emerald-500', message: 'Les conditions sont idéales.' });
+            }
         }
-
-        // Génération du graphe de pouls à partir de l'historique global
-        if (history.length > 0) {
-            const chartData = history.slice(0, 20).reverse().map(d => ({
-                date: d.date.slice(0, 5),
-                pulse: d.gagnants.reduce((a,b)=>a+b,0)
-            }));
-            setHistoryData(chartData);
-        }
-    }, [globalVolatility, history]);
-
-    if (!volatility) return null;
-
-    const getStatusColor = (status: string) => {
-        if (status === 'Stable') return 'text-green-500';
-        if (status === 'Chaos') return 'text-red-500';
-        if (status === 'Analyse...') return 'text-gray-400';
-        return 'text-yellow-500';
-    };
+    }, [volatility]);
 
     return (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 animate-fade-in relative overflow-hidden">
-            {/* Background Pulse Effect */}
-            <div className={`absolute -right-10 -top-10 w-40 h-40 rounded-full blur-[60px] opacity-20 ${volatility.status === 'Chaos' ? 'bg-red-600' : 'bg-green-500'}`}></div>
-
-            <div className="flex justify-between items-start mb-6 relative z-10">
+            <div className="flex items-center gap-6">
+                <div className={`p-4 rounded-full bg-slate-100 dark:bg-slate-900 ${health.color} animate-pulse`}>
+                    <HeartPulse size={40} />
+                </div>
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                        <span>🩺</span> Diagnostic Vital
-                    </h3>
-                    <p className="text-xs text-gray-500">Moniteur de stabilité stochastique</p>
-                </div>
-                <div className={`text-right ${getStatusColor(volatility.status)}`}>
-                    <div className="text-2xl font-black">{isNaN(volatility.score) ? '--' : volatility.score}%</div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider">Entropie</div>
+                    <h3 className="text-lg font-black text-gray-800 dark:text-white uppercase tracking-tight">Santé du Jeu</h3>
+                    <div className={`text-2xl font-black ${health.color}`}>{health.status}</div>
+                    <p className="text-xs text-gray-500 font-medium mt-1">{health.message}</p>
                 </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-6 relative z-10">
-                <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <div className="text-xs text-gray-400 uppercase font-bold mb-1">Régime</div>
-                    <div className={`font-bold text-lg ${getStatusColor(volatility.status)}`}>
-                        {volatility.status.toUpperCase()}
-                    </div>
+            
+            <div className="mt-6 grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
+                    <Activity size={20} className="text-slate-400 mb-1"/>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Activité</span>
+                    <span className="text-lg font-black text-slate-700 dark:text-white">{volatility?.score || 0}%</span>
                 </div>
-                <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <div className="text-xs text-gray-400 uppercase font-bold mb-1">Tendance</div>
-                    <div className="font-bold text-lg text-indigo-500">
-                        {volatility.trend === 'up' ? '↗️ Hausse' : volatility.trend === 'down' ? '↘️ Baisse' : '➡️ Stable'}
-                    </div>
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col items-center text-center">
+                    {volatility?.status === 'Chaos' ? <AlertTriangle size={20} className="text-rose-500 mb-1"/> : <CheckCircle2 size={20} className="text-emerald-500 mb-1"/>}
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Risque</span>
+                    <span className={`text-lg font-black ${volatility?.status === 'Chaos' ? 'text-rose-500' : 'text-emerald-500'}`}>
+                        {volatility?.status === 'Chaos' ? 'Élevé' : 'Faible'}
+                    </span>
                 </div>
-            </div>
-
-            {/* ECG Chart */}
-            <div className="h-24 w-full bg-gray-50 dark:bg-gray-900/30 rounded-lg overflow-hidden border border-gray-100 dark:border-gray-800 relative">
-                <div className="absolute top-2 left-2 text-[10px] font-mono text-gray-400">ECG (Somme Sigma)</div>
-                <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={historyData}>
-                        <defs>
-                            <linearGradient id="colorPulse" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={volatility.status === 'Chaos' ? '#ef4444' : '#10b981'} stopOpacity={0.3}/>
-                                <stop offset="95%" stopColor={volatility.status === 'Chaos' ? '#ef4444' : '#10b981'} stopOpacity={0}/>
-                            </linearGradient>
-                        </defs>
-                        <Area 
-                            type="monotone" 
-                            dataKey="pulse" 
-                            stroke={volatility.status === 'Chaos' ? '#ef4444' : '#10b981'} 
-                            strokeWidth={2} 
-                            fill="url(#colorPulse)" 
-                        />
-                    </AreaChart>
-                </ResponsiveContainer>
-            </div>
-
-            <div className="mt-4 text-xs text-gray-500 italic bg-white/50 dark:bg-black/20 p-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
-                "Le traitement algorithmique a été adapté automatiquement en fonction de ce diagnostic."
             </div>
         </div>
     );
