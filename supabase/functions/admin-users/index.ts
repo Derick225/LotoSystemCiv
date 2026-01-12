@@ -9,13 +9,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- CONFIGURATION CRITIQUE ---
-// Ajoutez ici votre email pour obtenir les droits Admin instantanément
-const SUPER_ADMIN_EMAILS = [
-    'admin@lotopro.com',
-    'votre_email@gmail.com' // <--- REMPLACEZ CECI PAR VOTRE EMAIL DE CONNEXION
-];
-
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -24,6 +17,10 @@ serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const superAdminEnv = Deno.env.get('SUPER_ADMIN_EMAILS') || '';
+    
+    // Parsing de la whitelist depuis l'env (séparé par des virgules)
+    const SUPER_ADMIN_EMAILS = superAdminEnv.split(',').map((e: string) => e.trim()).filter((e: string) => e.length > 0);
     
     if (!supabaseUrl || !supabaseKey) {
         throw new Error("Clé SUPABASE_SERVICE_ROLE_KEY manquante dans les secrets Supabase.");
@@ -47,7 +44,7 @@ serve(async (req: Request) => {
     if (dbRole !== 'admin' && !isWhitelisted) {
         return new Response(JSON.stringify({ 
             error: "Accès refusé: Vous n'êtes pas admin.",
-            detail: "Ajoutez votre email à SUPER_ADMIN_EMAILS dans le code de la fonction."
+            detail: "Votre email n'est pas dans la whitelist serveur (SUPER_ADMIN_EMAILS)."
         }), { 
             status: 403, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -60,16 +57,16 @@ serve(async (req: Request) => {
         const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
         if (error) throw error;
 
-        const userIds = users.map(u => u.id);
+        const userIds = users.map((u: any) => u.id);
         const { data: prefs } = await supabaseAdmin.from('user_preferences').select('user_id, subscription').in('user_id', userIds);
 
-        const enriched = users.map(u => ({
+        const enriched = users.map((u: any) => ({
             id: u.id,
             email: u.email,
             last_sign_in: u.last_sign_in_at,
             created_at: u.created_at,
             role: u.app_metadata?.role || 'user',
-            subscription: prefs?.find(p => p.user_id === u.id)?.subscription || null
+            subscription: prefs?.find((p: any) => p.user_id === u.id)?.subscription || null
         }));
 
         return new Response(JSON.stringify({ users: enriched }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

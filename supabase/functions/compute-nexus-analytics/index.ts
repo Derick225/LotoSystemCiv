@@ -11,16 +11,15 @@ const corsHeaders = {
 
 // --- MATH UTILS (Server Side) ---
 
-const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
+const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / (data.length || 1);
 
 const calculateStandardDeviation = (data: number[]) => {
     const mean = calculateMean(data);
-    const variance = data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / data.length;
+    const variance = data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (data.length || 1);
     return Math.sqrt(variance);
 };
 
 // Auto-corrélation pour détecter la cyclicité (Lag-k)
-// Mesure à quel point le signal se ressemble à lui-même avec un décalage k
 const calculateAutocorrelation = (data: number[], lag: number) => {
     const n = data.length;
     if (n <= lag) return 0;
@@ -85,6 +84,35 @@ const calculateHurst = (signal: number[]) => {
     return Math.max(0, Math.min(1, hurst));
 };
 
+// NOUVEAU : Calcul de l'entropie des écarts (Gap Entropy)
+// Mesure si les écarts sont prévisibles (faible entropie) ou aléatoires (haute entropie)
+const calculateGapEntropy = (signal: number[]) => {
+    const gaps = [];
+    let currentGap = 0;
+    for(const val of signal) {
+        if(val === 1) {
+            gaps.push(currentGap);
+            currentGap = 0;
+        } else {
+            currentGap++;
+        }
+    }
+    if (gaps.length < 2) return 0;
+    
+    const freq: Record<number, number> = {};
+    gaps.forEach(g => freq[g] = (freq[g] || 0) + 1);
+    
+    let entropy = 0;
+    const total = gaps.length;
+    Object.values(freq).forEach(count => {
+        const p = count / total;
+        if (p > 0) entropy -= p * Math.log2(p);
+    });
+    
+    // Normalisation approximative (max entropy pour un jeu uniforme ~ 6 bits)
+    return Math.min(1, entropy / 6);
+};
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -100,13 +128,13 @@ serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Récupération de l'historique (Optimisé: on ne prend que ce qui est nécessaire)
+    // 1. Récupération de l'historique (Optimisé)
     const { data: history, error: fetchError } = await supabaseAdmin
       .from('draw_results')
       .select('gagnants, date')
       .eq('draw_name', drawName)
       .order('date', { ascending: false })
-      .limit(250); // Augmenté à 250 pour meilleure précision Hurst
+      .limit(250); 
 
     if (fetchError || !history || history.length < 10) {
         return new Response(JSON.stringify({ message: "Insufficent data", drawName }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -127,11 +155,14 @@ serve(async (req: Request) => {
       const energy = calculateSpectralEnergy(signal);
       spectral.push({ number: num, energy, resonance: energy > 70 });
 
-      // Fractal
+      // Fractal & Gap Entropy
       const hurst = calculateHurst(signal);
+      const gapEnt = calculateGapEntropy(signal);
+      
       fractal.push({ 
           number: num, 
           hurst: parseFloat(hurst.toFixed(3)),
+          gapEntropy: parseFloat(gapEnt.toFixed(3)),
           regime: hurst > 0.6 ? 'PERSISTANT' : hurst < 0.4 ? 'ANTI-PERSISTANT' : 'RANDOM'
       });
     }
@@ -147,12 +178,25 @@ serve(async (req: Request) => {
     // Autocorrélation Lag-5 (Tendance hebdomadaire)
     const autoCorr5 = calculateAutocorrelation(sums, 5);
 
+    // Densité Spatiale Moyenne (Cluster Density)
+    // Mesure si les numéros ont tendance à sortir groupés (ex: 12, 13, 15)
+    let spatialDensity = 0;
+    history.slice(0, 50).forEach(d => {
+        const sorted = [...d.gagnants].sort((a,b)=>a-b);
+        let gapsSum = 0;
+        for(let i=0; i<sorted.length-1; i++) gapsSum += (sorted[i+1] - sorted[i]);
+        // Si les gaps sont petits, densité forte
+        if (gapsSum < 40) spatialDensity += 1;
+    });
+    spatialDensity = Math.min(100, (spatialDensity / 50) * 100);
+
     const volatility = {
         score: volScore,
         status: volScore > 60 ? 'Chaos' : volScore > 35 ? 'Volatile' : 'Stable',
         trend: sums[0] > calculateMean(sums) ? 'up' : 'down',
         autoCorrelation: parseFloat(autoCorr1.toFixed(3)),
-        weeklyCycle: parseFloat(autoCorr5.toFixed(3))
+        weeklyCycle: parseFloat(autoCorr5.toFixed(3)),
+        spatialDensity: Math.round(spatialDensity)
     };
 
     // 3. Sauvegarde en base (Upsert dans draw_analytics)

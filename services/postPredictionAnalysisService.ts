@@ -83,6 +83,8 @@ export const performForensicAnalysis = async (
                         }
                     }
                 });
+            } else {
+                missed.push({ number: win, reason: "Aucun signal détecté (Zone Morte)." });
             }
         }
     });
@@ -92,7 +94,10 @@ export const performForensicAnalysis = async (
     const scoreDivergence: { algo: string; impact: number }[] = [];
     const maxImpact = Math.max(...Object.values(algoImpacts), 1);
     Object.entries(algoImpacts).forEach(([algo, val]) => {
-        scoreDivergence.push({ algo, impact: Math.round((val / maxImpact) * 100) });
+        // On ignore les algos à impact négligeable
+        if (val > maxImpact * 0.1) {
+            scoreDivergence.push({ algo, impact: Math.round((val / maxImpact) * 100) });
+        }
     });
 
     return { 

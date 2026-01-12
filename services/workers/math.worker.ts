@@ -1,6 +1,6 @@
 
 /**
- * Nexus Production Math Worker v8.7 (Deep Resonance)
+ * Nexus Production Math Worker v9.0 (Deep Resonance + Clustering + Monte Carlo)
  * Traitement analytique lourd sur l'ENTIÈRETÉ de l'historique.
  */
 
@@ -9,8 +9,14 @@ export {};
 // Fix: Explicitly type self as Worker using safe casting
 const ctx = self as unknown as Worker;
 
-// Importation directe des fonctions mathématiques pures
-const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
+// --- UTILS INTERNES ---
+const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / (data.length || 1);
+
+const normalize = (val: number, min: number, max: number) => {
+    return (val - min) / (max - min) || 0;
+};
+
+// --- ALGORITHMES COMPLEXES ---
 
 const runEchoStateNetworkLocal = (signal: number[]): number => {
     if (signal.length < 20) return 0;
@@ -57,6 +63,162 @@ const runEchoStateNetworkLocal = (signal: number[]): number => {
     return Math.max(0, Math.min(100, prediction * 100));
 };
 
+const runKMeans = (history: any[]) => {
+    // 1. Préparation des données (Freq vs Gap)
+    const points: { id: number, x: number, y: number }[] = [];
+    const limit = Math.min(history.length, 100);
+    
+    // Calcul fréquences et écarts
+    const gaps: Record<number, number> = {};
+    const freqs: Record<number, number> = {};
+    
+    for(let n=1; n<=90; n++) {
+        let gap = 0;
+        let count = 0;
+        for(let i=0; i<limit; i++) {
+            if (history[i].gagnants.includes(n)) {
+                count++;
+                if (gap === 0 && i > 0) gap = i; // Premier gap rencontré
+            } else if (count === 0) {
+                gap++;
+            }
+        }
+        freqs[n] = count;
+        gaps[n] = gap;
+    }
+
+    // Normalisation
+    const maxFreq = Math.max(...Object.values(freqs), 1);
+    const maxGap = Math.max(...Object.values(gaps), 1);
+
+    for(let n=1; n<=90; n++) {
+        points.push({
+            id: n,
+            x: (gaps[n] / maxGap) * 100, // X = Retard (Gap)
+            y: (freqs[n] / maxFreq) * 100 // Y = Fréquence
+        });
+    }
+
+    // 2. Initialisation des Centroïdes (Fixes pour garantir la sémantique)
+    // Sprinter: Freq Haute, Gap Faible
+    // Dormeur: Freq Basse, Gap Haut
+    // Marathonien: Freq Moyenne, Gap Moyen
+    // Neutre: Le reste
+    let centroids = [
+        { name: 'Sprinter', x: 10, y: 90 }, 
+        { name: 'Dormeur', x: 90, y: 10 },
+        { name: 'Marathonien', x: 50, y: 50 },
+        { name: 'Neutre', x: 10, y: 10 }
+    ];
+
+    // 3. Boucle K-Means
+    const assignments: Record<number, string> = {};
+    
+    for (let iter = 0; iter < 20; iter++) {
+        // Assignment
+        points.forEach(p => {
+            let minDist = Infinity;
+            let bestCluster = 'Neutre';
+            
+            centroids.forEach(c => {
+                const dist = Math.sqrt(Math.pow(p.x - c.x, 2) + Math.pow(p.y - c.y, 2));
+                if (dist < minDist) {
+                    minDist = dist;
+                    bestCluster = c.name;
+                }
+            });
+            assignments[p.id] = bestCluster;
+        });
+
+        // Update Centroids
+        const newCentroids: Record<string, { sumX: number, sumY: number, count: number }> = {};
+        centroids.forEach(c => newCentroids[c.name] = { sumX: 0, sumY: 0, count: 0 });
+
+        points.forEach(p => {
+            const cluster = assignments[p.id];
+            newCentroids[cluster].sumX += p.x;
+            newCentroids[cluster].sumY += p.y;
+            newCentroids[cluster].count++;
+        });
+
+        centroids = centroids.map(c => {
+            const data = newCentroids[c.name];
+            if (data.count === 0) return c; // Pas de déplacement si vide
+            return {
+                name: c.name,
+                x: data.sumX / data.count,
+                y: data.sumY / data.count
+            };
+        });
+    }
+
+    // 4. Formatting Result
+    return points.map(p => ({
+        number: p.id,
+        x: Math.round(gaps[p.id]), // Renvoie les valeurs réelles pour l'affichage
+        y: freqs[p.id],
+        cluster: assignments[p.id]
+    }));
+};
+
+const runMonteCarlo = (history: any[]) => {
+    // 1. Matrice de transition (Markov)
+    const transitions: Record<number, number[]> = {};
+    for(let i=1; i<=90; i++) transitions[i] = [];
+    
+    // On apprend des 100 derniers tirages
+    const learnLimit = Math.min(history.length - 1, 100);
+    for(let i=0; i<learnLimit; i++) {
+        const current = history[i].gagnants;
+        const prev = history[i+1].gagnants;
+        
+        prev.forEach((p: number) => {
+            current.forEach((c: number) => {
+                if (transitions[p]) transitions[p].push(c);
+            });
+        });
+    }
+
+    // 2. Simulation (10,000 tirages)
+    const scores: Record<number, number> = {};
+    for(let i=1; i<=90; i++) scores[i] = 0;
+    
+    // Derniers numéros connus (Graine)
+    const lastDraw = history[0].gagnants;
+    
+    for(let sim=0; sim<5000; sim++) {
+        // On tire 5 numéros basés sur les probabilités de transition depuis le dernier tirage
+        const simulatedDraw = new Set<number>();
+        
+        // Pour chaque numéro du dernier tirage, on choisit un successeur probable
+        lastDraw.forEach((seed: number) => {
+            const potential = transitions[seed];
+            if (potential && potential.length > 0) {
+                const pick = potential[Math.floor(Math.random() * potential.length)];
+                simulatedDraw.add(pick);
+            } else {
+                // Fallback aléatoire
+                simulatedDraw.add(Math.floor(Math.random()*90)+1);
+            }
+        });
+        
+        // Complétion si < 5
+        while(simulatedDraw.size < 5) {
+            simulatedDraw.add(Math.floor(Math.random()*90)+1);
+        }
+        
+        simulatedDraw.forEach(n => scores[n]++);
+    }
+
+    // Normalisation 0-100
+    const maxVal = Math.max(...Object.values(scores), 1);
+    for(let i=1; i<=90; i++) scores[i] = (scores[i] / maxVal) * 100;
+    
+    return scores;
+};
+
+// --- HANDLER PRINCIPAL ---
+
 ctx.onmessage = async (e: MessageEvent) => {
     const { requestId, task, history, payload } = e.data;
     if (!history || history.length === 0) return;
@@ -84,6 +246,12 @@ ctx.onmessage = async (e: MessageEvent) => {
                 break;
             case 'stochastic_audit':
                 result = performStructuralAudit(history);
+                break;
+            case 'k_means_clustering':
+                result = runKMeans(history);
+                break;
+            case 'monte_carlo_simulation':
+                result = runMonteCarlo(history);
                 break;
             default:
                 throw new Error(`Task ${task} unknown`);
@@ -310,8 +478,6 @@ function calculateSpectralFFT(history: any[]) {
     }
 
     // 2. Normalisation Dynamique Relative (Scale 0-100 based on Global Max)
-    // Cela garantit que le "meilleur" numéro du tirage a toujours 100 (ou proche) et les autres sont relatifs à lui.
-    // Évite d'avoir tout le monde à 0 ou 1.
     const safeMax = globalMaxPower > 0 ? globalMaxPower : 1;
     
     const results = rawPowers.map(p => {
@@ -325,7 +491,6 @@ function calculateSpectralFFT(history: any[]) {
         };
     });
 
-    // Tri décroissant pour s'assurer que les pics sont en premier dans les listes
     return results.sort((a, b) => b.energy - a.energy);
 }
 

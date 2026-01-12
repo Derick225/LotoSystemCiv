@@ -2,10 +2,12 @@
 export {};
 
 /**
- * Nexus Random Forest Worker v3.0 (Classification Réelle)
+ * Nexus Random Forest Worker v3.1 (Type-Safe Edition)
  */
 
 interface Example { features: number[]; label: 0 | 1; }
+
+// Interface flexible pour supporter les noeuds feuilles (valeur) et les noeuds de décision (split)
 interface Node { 
     featureIdx?: number; 
     threshold?: number; 
@@ -71,7 +73,10 @@ function buildTree(data: Example[], depth: number): Node {
 
 function predict(node: Node, features: number[]): number {
     if (node.value !== undefined) return node.value;
-    return features[node.featureIdx!] <= node.threshold! 
-        ? predict(node.left!, features) 
-        : predict(node.right!, features);
+    // Protection safe : si le noeud n'est pas une feuille mais manque d'info, on retourne 0
+    if (node.featureIdx === undefined || node.threshold === undefined || !node.left || !node.right) return 0;
+    
+    return features[node.featureIdx] <= node.threshold 
+        ? predict(node.left, features) 
+        : predict(node.right, features);
 }

@@ -1,3 +1,4 @@
+
 import { DrawResult } from '../types';
 import { calculateShannonEntropy, calculateBenfordCompliance } from './mathService';
 
@@ -19,8 +20,47 @@ export interface ForensicAuditResult {
 }
 
 /**
- * Moteur d'Audit Forensique Sentinel v4.0.
- * Analyse les marqueurs de manipulation structurelle (Linéarité, Echo, Benford, Entropie).
+ * Détecte si un numéro suit un cycle temporel strict (ex: sort tous les 3 tirages exactement).
+ */
+const analyzeTemporalPatterns = (numbers: number[], history: DrawResult[], logs: string[], indicators: ForensicIndicator[]) => {
+    let temporalPoints = 0;
+    
+    // On analyse chaque numéro du tirage actuel
+    numbers.forEach(num => {
+        let gaps = [];
+        let lastIdx = -1;
+        // On remonte sur 30 tirages
+        for(let i=0; i<30; i++) {
+            if (history[i].gagnants.includes(num)) {
+                if (lastIdx !== -1) {
+                    gaps.push(i - lastIdx);
+                }
+                lastIdx = i;
+            }
+        }
+        
+        // Si on a assez de données et que les gaps sont identiques (variance nulle)
+        if (gaps.length >= 2) {
+            const isPeriodic = gaps.every(g => g === gaps[0]);
+            if (isPeriodic && gaps[0] > 1) {
+                const impact = 20;
+                indicators.push({
+                    label: `Cycle Mécanique N°${num}`,
+                    value: `Période ${gaps[0]}t`,
+                    severity: 'high',
+                    description: `Le numéro ${num} sort exactement tous les ${gaps[0]} tirages. Signature artificielle.`,
+                    impact
+                });
+                logs.push(`PATTERN : Périodicité stricte détectée sur ${num} (T=${gaps[0]}).`);
+                temporalPoints += impact;
+            }
+        }
+    });
+    return temporalPoints;
+};
+
+/**
+ * Moteur d'Audit Forensique Sentinel v4.1.
  */
 export const analyzeForManipulation = (numbers: number[], history: DrawResult[]): ForensicAuditResult => {
     const indicators: ForensicIndicator[] = [];
@@ -112,6 +152,9 @@ export const analyzeForManipulation = (numbers: number[], history: DrawResult[])
         logs.push(`NOTE : Entropie normalisée (${entropy.normalized.toFixed(2)}) indique une structure prédictible.`);
         suspicionPoints += impact;
     }
+
+    // 6. NOUVEAU : Analyse Temporelle (Cycles)
+    suspicionPoints += analyzeTemporalPatterns(numbers, history, logs, indicators);
 
     return {
         suspicionScore: Math.min(100, suspicionPoints),

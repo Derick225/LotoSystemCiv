@@ -11,7 +11,7 @@ const getViteEnv = (key: string): string => {
   return '';
 };
 
-const cleanEnv = (val: string) => val.replace(/["']/g, '').trim();
+const cleanEnv = (val: string) => val ? val.replace(/["']/g, '').trim() : '';
 
 const SUPABASE_URL = cleanEnv(getViteEnv('VITE_SUPABASE_URL'));
 const SUPABASE_ANON_KEY = cleanEnv(
@@ -24,7 +24,7 @@ const isValidSupabaseUrl = (url: string): boolean => {
   try {
     if (!url || url.includes('your-project-url') || url.includes('placeholder')) return false;
     const u = new URL(url);
-    return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost'));
+    return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
   } catch { return false; }
 };
 
@@ -46,31 +46,34 @@ export const getSupabaseConfigDiagnostics = () => {
   };
 };
 
-const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://placeholder.supabase.co';
-const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder';
+// Utilisation d'une URL factice valide syntaxiquement pour éviter le crash immédiat de createClient si non configuré
+// L'application doit vérifier isSupabaseConfigured() avant d'appeler les méthodes.
+const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://setup-required.local';
+const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder-key-must-be-long-enough-to-pass-validation';
 
 export const supabase: SupabaseClient = createClient(SAFE_URL, SAFE_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: typeof window !== 'undefined' ? window.localStorage : undefined },
     global: { 
         headers: { 'x-nexus-client': 'platinum-v12-prod' },
         fetch: (url, options) => {
-            return fetch(url, { ...options, signal: AbortSignal.timeout(15000) }); // Global Timeout 15s
+            return fetch(url, { ...options, signal: AbortSignal.timeout(20000) }); // Global Timeout 20s
         }
     },
 });
 
 export const testDatabaseConnection = async () => {
-  if (!isSupabaseConfigured()) return { success: false, error: "Configuration manquante." };
+  if (!isSupabaseConfigured()) return { success: false, error: "Configuration manquante (.env)" };
   try {
     const start = performance.now();
     const { error, count } = await supabase.from('draw_results').select('*', { count: 'exact', head: true });
     const latency = Math.round(performance.now() - start);
     if (error) {
       if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Exécutez le script SQL.", code: error.code };
+      if (error.message.includes('fetch')) return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
       return { success: false, error: error.message, code: error.code || 'UNKNOWN', latency };
     }
     return { success: true, count: count ?? 0, latency };
   } catch (err: any) {
-    return { success: false, error: err?.message || "Erreur réseau (Timeout ou DNS)." };
+    return { success: false, error: err?.message || "Erreur critique de connexion." };
   }
 };

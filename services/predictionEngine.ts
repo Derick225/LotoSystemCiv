@@ -4,7 +4,7 @@ import {
     calculateRegularity, calculateACValue, calculateGravityField, validateDataIntegrity, 
     calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, 
     calculateVolatility, calculateGapTrend, mathService, calculateShannonEntropy,
-    runMonteCarloSimulation, runLSTMPatternHeuristic, detectAnomalies
+    runMonteCarloSimulationAsync, runLSTMPatternHeuristic, detectAnomalies
 } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
@@ -25,31 +25,34 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     return normalized;
 };
 
-export const getDefaultWeights = (): AlgoWeights => normalizeWeights({
-    frequency: 0.12,
-    gap: 0.08,
-    spectral: 0.08,
-    fractal: 0.04,
-    wavelet: 0.08, 
-    resistance: 0.04, 
-    markov: 0.12,
-    spatial: 0.04,
-    momentum: 0.04,
-    equilibrium: 0.04,
-    bayes: 0.02,
-    orchestration: 0.02,
-    transformer: 0.02,
-    temporal: 0.03,
-    ai_intuition: 0.01,
-    digital_root: 0.01,
-    gap_velocity: 0.04,
-    poisson: 0.04, 
-    leader_succession: 0.01,
-    anti_consensus: 0.04,
-    monte_carlo: 0.05, // Nouveau
-    lstm_pattern: 0.05, // Nouveau
-    isolation_anomaly: 0.03 // Nouveau
-});
+export const getDefaultWeights = (): AlgoWeights => {
+    const weights: AlgoWeights = {
+        frequency: 0.12,
+        gap: 0.08,
+        spectral: 0.08,
+        fractal: 0.04,
+        wavelet: 0.08, 
+        resistance: 0.04, 
+        markov: 0.12,
+        spatial: 0.04,
+        momentum: 0.04,
+        equilibrium: 0.04,
+        bayes: 0.02,
+        orchestration: 0.02,
+        transformer: 0.02,
+        temporal: 0.03,
+        ai_intuition: 0.01,
+        digital_root: 0.01,
+        gap_velocity: 0.04,
+        poisson: 0.04, 
+        leader_succession: 0.01,
+        anti_consensus: 0.04,
+        monte_carlo: 0.05, // NOUVEAU : Simulation probabiliste
+        lstm_pattern: 0.05, // NOUVEAU : Séquençage récurrent
+        isolation_anomaly: 0.03 // NOUVEAU : Détection d'anomalies
+    };
+    return normalizeWeights(weights);
+};
 
 export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMin: 8,
@@ -210,9 +213,9 @@ export const generateMasterPrediction = async (
     const gravityField = calculateGravityField(history);
     const gapTrend = calculateGapTrend(history); 
     
-    // NOUVEAUX CALCULS
-    const monteCarloScores = runMonteCarloSimulation(history);
-    const lstmScores = runLSTMPatternHeuristic(history);
+    // NOUVEAUX CALCULS (Asynchrones réels)
+    const monteCarloScores = await runMonteCarloSimulationAsync(history);
+    const lstmScores = runLSTMPatternHeuristic(history); // Gardé sync pour l'instant (léger)
     const anomalyScores = detectAnomalies(history);
 
     const breakdown: Record<number, ScoreBreakdown> = {};
@@ -388,6 +391,7 @@ export const analyzeTicketStrength = async (nums: number[], _drawName: string): 
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
+    if (!weights) return "Consensus Nexus";
     const w = weights;
     if ((w.frequency || 0) > 0.25) return "Domination Fréquence";
     if ((w.spectral || 0) > 0.25) return "Résonance Harmonique";
