@@ -24,7 +24,7 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
 };
 
 const calculateFitness = (weights: AlgoWeights, history: DrawData[], metrics: any): number => {
-  const SAMPLE_SIZE = Math.min(history.length - 1, 30); // Limité pour perf
+  const SAMPLE_SIZE = Math.min(history.length - 1, 40); // Augmenté pour meilleure précision
   let totalScore = 0;
 
   for (let t = 0; t < SAMPLE_SIZE; t++) {
@@ -33,12 +33,25 @@ const calculateFitness = (weights: AlgoWeights, history: DrawData[], metrics: an
     
     target.forEach(num => {
       let nScore = 0;
-      // Fréquence
+      // Fréquence pondérée
       nScore += (metrics.freqMap[num] || 0) * (weights.frequency || 0.1);
       // Markov
       let markov = 0;
       prev.forEach(p => markov += (metrics.transitions[p]?.[num] || 0));
       nScore += markov * (weights.markov || 0.1) * 5;
+      
+      // Monte Carlo Boost (Simulation simple)
+      if (weights.monte_carlo && weights.monte_carlo > 0) {
+          // Si le numéro a une forte fréquence et un gap moyen, on considère qu'il aurait été "choisi" par MC
+          const freq = metrics.freqMap[num] || 0;
+          if (freq > 5) nScore += weights.monte_carlo * 20;
+      }
+
+      // Isolation Anomaly (Bonus si rare)
+      if (weights.isolation_anomaly && weights.isolation_anomaly > 0) {
+          const freq = metrics.freqMap[num] || 0;
+          if (freq < 2) nScore += weights.isolation_anomaly * 50; // Récompense la prédiction de rareté
+      }
       
       totalScore += nScore;
     });
@@ -46,17 +59,30 @@ const calculateFitness = (weights: AlgoWeights, history: DrawData[], metrics: an
   return totalScore;
 };
 
-const mutate = (weights: AlgoWeights): AlgoWeights => {
+const mutate = (weights: AlgoWeights, intensity: number = 0.3): AlgoWeights => {
   const mutant = { ...weights };
   const keys = Object.keys(mutant);
-  // Mutation légère
-  for(let i=0; i<2; i++) {
+  // Mutation sur 20% des gènes
+  const mutationsCount = Math.max(1, Math.floor(keys.length * 0.2));
+  
+  for(let i=0; i<mutationsCount; i++) {
       const keyToMutate = keys[Math.floor(Math.random() * keys.length)];
       if (keyToMutate) {
-          mutant[keyToMutate] = Math.max(0.01, Math.min(1, (mutant[keyToMutate] || 0) + (Math.random() - 0.5) * 0.3));
+          mutant[keyToMutate] = Math.max(0.01, Math.min(1, (mutant[keyToMutate] || 0) + (Math.random() - 0.5) * intensity));
       }
   }
   return normalizeWeights(mutant);
+};
+
+const crossover = (parent1: AlgoWeights, parent2: AlgoWeights): AlgoWeights => {
+    const child: AlgoWeights = {};
+    const keys = Object.keys(parent1);
+    
+    keys.forEach(k => {
+        // Mélange uniforme
+        child[k] = Math.random() > 0.5 ? parent1[k] : parent2[k];
+    });
+    return normalizeWeights(child);
 };
 
 serve(async (req: Request) => {
@@ -67,9 +93,9 @@ serve(async (req: Request) => {
     
     if (!drawName) throw new Error("Paramètre 'drawName' requis.");
 
-    // Time budget: 8 secondes max pour éviter le timeout de 10s
+    // Time budget: 9 secondes max pour éviter le timeout de 10s
     const startTime = Date.now();
-    const TIME_LIMIT_MS = 8000;
+    const TIME_LIMIT_MS = 9000;
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -100,40 +126,72 @@ serve(async (req: Request) => {
         });
     }
 
-    let bestWeights = normalizeWeights(baseWeights || { frequency: 0.5, markov: 0.5 });
-    let bestFitness = calculateFitness(bestWeights, historyData, metrics);
+    // Initialisation Population
+    let population: { weights: AlgoWeights, fitness: number }[] = [];
+    const generations = config?.generations || 30;
+    const popSize = config?.populationSize || 20;
+    
+    // On garde toujours les poids de base
+    population.push({ weights: normalizeWeights(baseWeights), fitness: calculateFitness(baseWeights, historyData, metrics) });
+    
+    // Remplissage avec mutations
+    for(let i=1; i<popSize; i++) {
+        const w = mutate(baseWeights, 0.8); // Mutation forte initiale
+        population.push({ weights: w, fitness: calculateFitness(w, historyData, metrics) });
+    }
 
-    const generations = config?.generations || 20;
-    const popSize = config?.populationSize || 15;
+    let bestSolution = population[0];
 
-    // Boucle d'évolution avec sécurité temps
+    // Boucle d'évolution
     for (let g = 0; g < generations; g++) {
-      // Check Time Budget
       if (Date.now() - startTime > TIME_LIMIT_MS) {
           console.warn("Time budget exceeded, stopping evolution early.");
           break;
       }
 
-      for (let p = 0; p < popSize; p++) {
-        const candidate = mutate(bestWeights);
-        const fitness = calculateFitness(candidate, historyData, metrics);
-        if (fitness > bestFitness) {
-          bestFitness = fitness;
-          bestWeights = candidate;
-        }
+      // Sélection (Tri par fitness décroissante)
+      population.sort((a, b) => b.fitness - a.fitness);
+      
+      // Elitisme (On garde le top 20% intact)
+      const eliteSize = Math.max(1, Math.floor(popSize * 0.2));
+      const nextGen = population.slice(0, eliteSize);
+      
+      if (population[0].fitness > bestSolution.fitness) {
+          bestSolution = population[0];
       }
+
+      // Reproduction
+      while (nextGen.length < popSize) {
+          // Tournoi simple pour choisir les parents
+          const p1 = population[Math.floor(Math.random() * (popSize / 2))]; // Top 50% chance
+          const p2 = population[Math.floor(Math.random() * popSize)];
+          
+          let childWeights = crossover(p1.weights, p2.weights);
+          
+          // Mutation adaptative (plus on avance, moins on mute)
+          const mutationIntensity = 0.5 * (1 - (g / generations));
+          if (Math.random() < 0.4) {
+              childWeights = mutate(childWeights, mutationIntensity);
+          }
+          
+          nextGen.push({
+              weights: childWeights,
+              fitness: calculateFitness(childWeights, historyData, metrics)
+          });
+      }
+      population = nextGen;
     }
 
-    // Sauvegarde asynchrone (on n'attend pas forcément le retour pour répondre si on est pressé, mais ici on le fait proprement)
+    // Sauvegarde asynchrone
     await supabase.from('algo_weights').upsert({
         draw_name: drawName,
-        weights: bestWeights,
+        weights: bestSolution.weights,
         updated_at: new Date().toISOString()
     });
 
     return new Response(JSON.stringify({ 
-      bestWeights, 
-      bestFitness,
+      bestWeights: bestSolution.weights, 
+      bestFitness: bestSolution.fitness,
       generations 
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

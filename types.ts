@@ -13,8 +13,8 @@ export interface AlgoWeights {
     gap: number;
     spectral: number;
     fractal: number;
-    wavelet: number; // NOUVEAU: Analyse temps-fréquence
-    resistance: number; // NOUVEAU: Niveaux de support technique
+    wavelet: number;
+    resistance: number;
     markov: number;
     spatial: number;
     momentum: number;
@@ -28,7 +28,10 @@ export interface AlgoWeights {
     gap_velocity: number;
     poisson: number;
     leader_succession: number;
-    anti_consensus: number; // NOUVEAU: Stratégie Contre-Intuitive (Black Swan)
+    anti_consensus: number;
+    monte_carlo: number; // NOUVEAU : Simulation probabiliste
+    lstm_pattern: number; // NOUVEAU : Séquençage récurrent
+    isolation_anomaly: number; // NOUVEAU : Détection d'anomalies
 }
 
 export interface SubscriptionState {

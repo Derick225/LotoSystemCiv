@@ -1,6 +1,11 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateHurstForNumber, calculateGravityField, validateDataIntegrity, calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, calculateVolatility, calculateGapTrend, mathService, calculateShannonEntropy } from './mathService';
+import { 
+    calculateRegularity, calculateACValue, calculateGravityField, validateDataIntegrity, 
+    calculateWaveletEnergy, calculateTechnicalResistance, calculatePoissonProbability, 
+    calculateVolatility, calculateGapTrend, mathService, calculateShannonEntropy,
+    runMonteCarloSimulation, runLSTMPatternHeuristic, detectAnomalies
+} from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
@@ -14,34 +19,36 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     const normalized = { ...weights };
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
         const val = Number(normalized[key]) || 0;
-        // Plafond de sécurité à 0.6 par algo pour éviter l'overfitting extrême
-        const capped = Math.min(val, total * 0.6);
+        const capped = Math.min(val, total * 0.6); // Sécurité anti-overfitting
         normalized[key] = parseFloat((capped / total).toFixed(4));
     });
     return normalized;
 };
 
 export const getDefaultWeights = (): AlgoWeights => normalizeWeights({
-    frequency: 0.15,
-    gap: 0.10,
-    spectral: 0.10,
-    fractal: 0.05,
-    wavelet: 0.10, 
-    resistance: 0.05, 
-    markov: 0.15,
-    spatial: 0.05,
-    momentum: 0.05,
-    equilibrium: 0.05,
+    frequency: 0.12,
+    gap: 0.08,
+    spectral: 0.08,
+    fractal: 0.04,
+    wavelet: 0.08, 
+    resistance: 0.04, 
+    markov: 0.12,
+    spatial: 0.04,
+    momentum: 0.04,
+    equilibrium: 0.04,
     bayes: 0.02,
-    orchestration: 0.03,
+    orchestration: 0.02,
     transformer: 0.02,
     temporal: 0.03,
     ai_intuition: 0.01,
     digital_root: 0.01,
-    gap_velocity: 0.05,
-    poisson: 0.05, 
+    gap_velocity: 0.04,
+    poisson: 0.04, 
     leader_succession: 0.01,
-    anti_consensus: 0.05
+    anti_consensus: 0.04,
+    monte_carlo: 0.05, // Nouveau
+    lstm_pattern: 0.05, // Nouveau
+    isolation_anomaly: 0.03 // Nouveau
 });
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -109,35 +116,31 @@ const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
 
 /**
  * AUTO-CALIBRATION: Analyse la "personnalité" mathématique du tirage
- * Cette fonction regarde l'historique STRICT du tirage concerné pour voir ce qui fonctionne.
  */
 const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, analysis: string } => {
-    // Si pas assez d'historique, on retourne les poids par défaut ou manuels
     if (history.length < 20) return { weights: normalizeWeights(baseWeights), analysis: "Données insuffisantes pour calibration." };
 
     const tuned = { ...baseWeights };
     const reportParts: string[] = [];
 
-    // 1. Analyse de la Volatilité Spécifique (Écart-type des sommes)
     const sums = history.slice(0, 30).map(d => d.gagnants.reduce((a, b) => a + b, 0));
     const meanSum = sums.reduce((a, b) => a + b, 0) / sums.length;
     const variance = sums.reduce((a, b) => a + Math.pow(b - meanSum, 2), 0) / sums.length;
     const stdDev = Math.sqrt(variance);
 
     if (stdDev > 50) {
-        // Jeu très volatile : On favorise le Chaos et la résistance
         tuned.anti_consensus = (tuned.anti_consensus || 0.05) * 2.0;
+        tuned.isolation_anomaly = (tuned.isolation_anomaly || 0.03) * 1.8; // Boost Anomaly en chaos
         tuned.resistance = (tuned.resistance || 0.05) * 1.5;
-        tuned.frequency = (tuned.frequency || 0.15) * 0.6; // La fréquence ment en cas de chaos
-        reportParts.push("Volatilité Haute -> Mode Chaos activé");
+        tuned.frequency = (tuned.frequency || 0.15) * 0.6;
+        reportParts.push("Volatilité Haute -> Mode Chaos & Anomalie");
     } else {
-        // Jeu stable : On favorise la fréquence et l'équilibre
         tuned.frequency = (tuned.frequency || 0.15) * 1.4;
+        tuned.lstm_pattern = (tuned.lstm_pattern || 0.05) * 1.5; // Boost LSTM en stable
         tuned.equilibrium = (tuned.equilibrium || 0.05) * 1.5;
-        reportParts.push("Jeu Stable -> Suivi de tendance");
+        reportParts.push("Jeu Stable -> Suivi de tendance LSTM");
     }
 
-    // 2. Analyse de la Répétition (Inertie)
     let repetitionCount = 0;
     for(let i=0; i < 20; i++) {
         const current = history[i].gagnants;
@@ -146,14 +149,12 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
     }
     const inertiaRate = repetitionCount / 20;
 
-    if (inertiaRate > 0.4) { // Plus de 40% des tirages ont une répétition
-        tuned.leader_succession = (tuned.leader_succession || 0.01) * 2.5; // Boost Markov/Succession
+    if (inertiaRate > 0.4) {
+        tuned.leader_succession = (tuned.leader_succession || 0.01) * 2.5;
         tuned.momentum = (tuned.momentum || 0.05) * 1.5;
         reportParts.push("Forte Inertie -> Boost Succession");
     }
 
-    // 3. Signature Spectrale & Vélocité Réelle
-    // Calcul de la puissance harmonique moyenne
     const spectralMap = mathService.calculateSpectral(history.slice(0, 50));
     const avgEnergy = spectralMap.reduce((acc, s) => acc + s.energy, 0) / (spectralMap.length || 1);
     
@@ -163,20 +164,10 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
         reportParts.push("Résonance Harmonique -> Boost Spectral");
     }
 
-    // Analyse de la vélocité des écarts
-    const gapTrend = calculateGapTrend(history);
-    if (gapTrend.trend === 'ACCELERATING') {
-        tuned.gap_velocity = (tuned.gap_velocity || 0.05) * 2.0;
-        tuned.gap = (tuned.gap || 0.10) * 0.8; // On joue l'accélération, pas l'écart brut
-        reportParts.push("Compression des Écarts -> Boost Vélocité");
-    }
-
-    // 4. Entropie pour Intuition IA
-    const entropy = calculateShannonEntropy(history.slice(0, 50));
-    if (entropy.normalized > 0.92) {
-        // Système très aléatoire, on fait confiance à l'intuition IA (Pattern recognition profond)
-        tuned.ai_intuition = (tuned.ai_intuition || 0.01) * 3.0;
-        reportParts.push("Entropie Max -> Boost Intuition IA");
+    // Boost Monte Carlo si l'échantillon est large
+    if (history.length > 200) {
+        tuned.monte_carlo = (tuned.monte_carlo || 0.05) * 1.5;
+        reportParts.push("Historique Riche -> Boost Monte Carlo");
     }
     
     return { 
@@ -185,9 +176,6 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
     };
 };
 
-/**
- * Calcule des poids optimaux basés uniquement sur l'historique (pour le Tuning Panel).
- */
 export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
     const base = getDefaultWeights();
     if (!history || history.length < 20) return base;
@@ -197,7 +185,6 @@ export const calculateOptimalWeights = (history: DrawResult[]): AlgoWeights => {
 
 /**
  * MOTEUR D'INFÉRENCE PLATINUM (ISOLÉ)
- * Utilise uniquement l'historique fourni en argument (qui doit être celui du tirage spécifique).
  */
 export const generateMasterPrediction = async (
     drawName: string, 
@@ -210,15 +197,12 @@ export const generateMasterPrediction = async (
 
     const integrity = validateDataIntegrity(history);
     
-    // 1. Détermination des Poids (Manuel ou Auto-Calibré)
     let baseWeights = weightsToUse || await getAlgoWeights(drawName);
     
-    // Si aucun poids personnalisé n'est fourni, on tente l'auto-calibration
     const { weights: optimizedWeights, analysis: tuningAnalysis } = weightsToUse 
         ? { weights: normalizeWeights(weightsToUse), analysis: "Mode Manuel" }
         : autoCalibrateWeights(drawName, baseWeights, history);
     
-    // 2. Calcul des Indicateurs Techniques (Scope: Ce tirage uniquement)
     const volatility = calculateVolatility(history);
     const regularity = calculateRegularity(history);
     const spectralMap = extraMetrics?.spectral || mathService.calculateSpectral(history.slice(0, 100));
@@ -226,10 +210,14 @@ export const generateMasterPrediction = async (
     const gravityField = calculateGravityField(history);
     const gapTrend = calculateGapTrend(history); 
     
+    // NOUVEAUX CALCULS
+    const monteCarloScores = runMonteCarloSimulation(history);
+    const lstmScores = runLSTMPatternHeuristic(history);
+    const anomalyScores = detectAnomalies(history);
+
     const breakdown: Record<number, ScoreBreakdown> = {};
     const transitions: Record<number, number> = {};
     
-    // Matrice de transition locale (Markov ordre 1 sur ce jeu)
     const lastWinners = history[0].gagnants;
     for(let i=0; i < Math.min(history.length - 1, 100); i++) {
         if (history[i+1].gagnants.some(n => lastWinners.includes(n))) {
@@ -237,7 +225,7 @@ export const generateMasterPrediction = async (
         }
     }
 
-    // 3. Scoring Vectoriel 1-90
+    // Scoring Vectoriel 1-90
     const scores = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const reg = regularity.find(r => r.number === num);
@@ -245,35 +233,28 @@ export const generateMasterPrediction = async (
         const frac = fractalMap.find((f: any) => f.number === num);
         const gravity = gravityField[num] || 0;
         
-        // Signal binaire local pour ondelettes
         const signal = history.slice(0, 32).map(d => d.gagnants.includes(num) ? 1 : 0);
-        
-        // Fréquence locale (50 derniers tirages de CE jeu)
         const localFreqCount = history.slice(0, 50).filter(h => h.gagnants.includes(num)).length;
         const freqScore = (localFreqCount / 50) * 500; 
 
-        // Gap Scoring
         const currentGap = reg?.currentGap || 0;
         let gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
         if (gapTrend.trend === 'ACCELERATING' && currentGap < 10) gapScore += 40;
         if (gapTrend.trend === 'DECELERATING' && currentGap > 20) gapScore += 40;
 
-        // Scores spécialisés
         const specScore = spec?.energy || 0;
         const markovScore = Math.min(100, (transitions[num] || 0) * 15);
         const spatialScore = Math.min(100, gravity * 50);
         const waveletScore = calculateWaveletEnergy(signal);
         const resistScore = calculateTechnicalResistance(num, history);
         
-        // Poisson
         const lambda = (localFreqCount / 50) * (90/5); 
         const poissonVal = calculatePoissonProbability(lambda, currentGap);
 
-        // Anti-Consensus (Si le numéro est trop "évident", on baisse son score en mode chaos)
         let antiConsensusScore = 0;
         const veryRecentFreq = history.slice(0, 10).filter(h => h.gagnants.includes(num)).length;
-        if (veryRecentFreq === 0) antiConsensusScore = 100; // Froid localement = Potentiel
-        else if (veryRecentFreq >= 2) antiConsensusScore = 0; // Trop chaud
+        if (veryRecentFreq === 0) antiConsensusScore = 100;
+        else if (veryRecentFreq >= 2) antiConsensusScore = 0;
 
         const nBreakdown: ScoreBreakdown = {
             ...getDefaultWeights(),
@@ -289,6 +270,11 @@ export const generateMasterPrediction = async (
             poisson: poissonVal,
             gap_velocity: gapTrend.trend !== 'STABLE' ? 80 : 40,
             anti_consensus: antiConsensusScore,
+            // Nouveaux scores
+            monte_carlo: monteCarloScores[num] || 0,
+            lstm_pattern: lstmScores[num] || 0,
+            isolation_anomaly: anomalyScores[num] || 0,
+            
             momentum: 50,
             orchestration: 0,
             equilibrium: 0,
@@ -307,14 +293,17 @@ export const generateMasterPrediction = async (
             rawScore += val * (weight as number);
         });
 
+        // Boost final pour les anomalies critiques si le poids Isolation est actif
+        if ((optimizedWeights.isolation_anomaly || 0) > 0.05 && anomalyScores[num] > 80) {
+            rawScore *= 1.2;
+        }
+
         return { num, score: sigmoid(rawScore) * 100 };
     });
 
-    // 4. Finalisation
     const sorted = scores.sort((a, b) => b.score - a.score);
     const suggested = sorted.slice(0, 5).map(s => s.num);
     
-    // Calcul de confiance basé sur la clarté du signal (écart entre le 1er et le 10ème)
     const signalClarity = sorted[0].score - sorted[10].score;
     let baseConfidence = Math.min(99, Math.round(70 + signalClarity));
     
@@ -330,10 +319,6 @@ export const generateMasterPrediction = async (
     };
 };
 
-/**
- * Calcul de correction par Gradient Descent (Apprentissage par Renforcement)
- * Utilise le rapport forensique pour ajuster les poids vers ce qui AURAIT marché.
- */
 export const calculateCorrectionsFromForensics = (
     currentWeights: AlgoWeights,
     currentRules: AdaptiveRules,
@@ -341,17 +326,14 @@ export const calculateCorrectionsFromForensics = (
 ): { newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } => {
     let newWeights = { ...currentWeights };
     const reasoning: string[] = [];
-    const LEARNING_RATE = 0.05; // Taux d'apprentissage modéré
+    const LEARNING_RATE = 0.05;
 
-    // 1. Analyse de Divergence (Quels algos avaient raison ?)
-    // scoreDivergence contient l'impact relatif des algos qui ont correctement prédit les numéros MANQUÉS
     if (report.scoreDivergence.length > 0) {
         report.scoreDivergence.forEach(div => {
             const key = div.algo.toLowerCase() as keyof AlgoWeights;
             const boost = (div.impact / 100) * LEARNING_RATE;
             
             if (newWeights[key] !== undefined) {
-                // Application du gradient positif
                 newWeights[key] = (Number(newWeights[key]) || 0) + boost;
                 if (boost > 0.01) {
                     reasoning.push(`Boost ${div.algo} (+${(boost*100).toFixed(1)}%) car il avait détecté des gagnants manqués.`);
@@ -360,32 +342,25 @@ export const calculateCorrectionsFromForensics = (
         });
     }
 
-    // 2. Pénalité en cas d'échec total (Anti-Overfitting)
     const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     if (hits === 0) {
-        // Si aucun hit, on augmente l'anti-consensus et l'équilibre pour "secouer" le modèle
         const chaosBoost = LEARNING_RATE * 1.5;
         newWeights.anti_consensus = (newWeights.anti_consensus || 0) + chaosBoost;
-        newWeights.equilibrium = (newWeights.equilibrium || 0) + chaosBoost;
+        newWeights.isolation_anomaly = (newWeights.isolation_anomaly || 0) + chaosBoost; // Tenter les anomalies
         
-        // On réduit légèrement les poids dominants actuels (qui ont échoué)
         Object.keys(newWeights).forEach(k => {
             const key = k as keyof AlgoWeights;
             if ((newWeights[key] || 0) > 0.15) {
-                newWeights[key] = (newWeights[key] || 0) * 0.95; // Pénalité de 5%
+                newWeights[key] = (newWeights[key] || 0) * 0.95;
             }
         });
         
-        reasoning.push("Échec critique détecté : Activation des protocoles de Chaos et réduction des dominants.");
+        reasoning.push("Échec critique détecté : Activation des protocoles de Chaos et Anomalie.");
     } else if (hits >= 3) {
-        // Renforcement positif : On touche peu aux poids si ça marche
         reasoning.push("Performance Élite : Stabilisation des poids actuels.");
     }
 
-    // 3. Ajustement des règles adaptatives (ex: fenêtre de gap critique)
     const newRules = { ...currentRules };
-    // Si beaucoup de numéros manqués avaient un gap > max actuel
-    // (Logique simplifiée ici, pourrait utiliser report.missedOpportunities plus en détail)
     
     return { 
         newWeights: normalizeWeights(newWeights), 
@@ -402,7 +377,6 @@ export const analyzeTicketStrength = async (nums: number[], _drawName: string): 
     if (ac < 7) { score -= 15; warnings.push("Faible complexité structurelle."); }
     if (sum < 150 || sum > 300) { score -= 10; warnings.push("Somme Sigma atypique."); }
     
-    // Ajout d'analyse de parité
     const odd = nums.filter(n => n % 2 !== 0).length;
     if (odd < 2 || odd > 3) { score -= 5; warnings.push("Déséquilibre Pair/Impair."); }
 
@@ -415,13 +389,12 @@ export const analyzeTicketStrength = async (nums: number[], _drawName: string): 
 
 export const getStrategyName = (weights: AlgoWeights): string => {
     const w = weights;
-    // Détection heuristique de la stratégie dominante
     if ((w.frequency || 0) > 0.25) return "Domination Fréquence";
     if ((w.spectral || 0) > 0.25) return "Résonance Harmonique";
-    if ((w.markov || 0) > 0.25) return "Transition de Phase";
+    if ((w.monte_carlo || 0) > 0.15) return "Simulation Stochastique";
+    if ((w.lstm_pattern || 0) > 0.15) return "Séquenceur Neural";
+    if ((w.isolation_anomaly || 0) > 0.15) return "Détecteur Anomalie";
     if ((w.gap || 0) > 0.25) return "Sniper d'Écarts";
-    if ((w.anti_consensus || 0) > 0.15) return "Contre-Intuitive";
     
-    // Si pas de dominance claire
     return "Consensus Nexus";
 };

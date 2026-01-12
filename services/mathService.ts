@@ -36,8 +36,6 @@ const getMathWorker = (): Worker | null => {
 
         mathWorkerInstance.onerror = (e) => {
             console.error("Math Worker Error:", e);
-            // On ne rejette pas tout globalement, mais le worker peut être instable.
-            // Idéalement on pourrait redémarrer le worker ici.
         };
     }
     return mathWorkerInstance;
@@ -45,27 +43,166 @@ const getMathWorker = (): Worker | null => {
 
 const runWorkerTask = async (task: string, history: DrawResult[], payload?: any): Promise<any> => {
     const worker = getMathWorker();
-    if (!worker) return null; // Fallback ou erreur SSR
+    if (!worker) return null; // Fallback
 
     return new Promise((resolve, reject) => {
         const requestId = Math.random().toString(36).substring(7);
-        
-        // Timeout de sécurité : si le worker ne répond pas en 30s, on rejette
         const timeout = window.setTimeout(() => {
             if (workerPendingPromises.has(requestId)) {
                 workerPendingPromises.delete(requestId);
-                reject(new Error(`Worker task ${task} timed out after 30s`));
+                reject(new Error(`Worker task ${task} timed out`));
             }
         }, 30000);
 
         workerPendingPromises.set(requestId, { resolve, reject, timeout });
-        
-        // Transfert de données optimisé : on n'envoie que le strict nécessaire
-        // history peut être gros, le worker doit gérer des données "lite" si possible
-        // Ici on envoie history tel quel car le worker en a besoin, mais attention à la taille.
         worker.postMessage({ requestId, task, history, payload });
     });
 };
+
+// --- NOUVEAUX ALGORITHMES AVANCÉS ---
+
+/**
+ * Simulation Monte Carlo
+ * Simule 10,000 tirages futurs basés sur les probabilités pondérées actuelles (Fréquence + Ecart).
+ */
+export const runMonteCarloSimulation = (history: DrawResult[]): Record<number, number> => {
+    const iterations = 10000;
+    const scores: Record<number, number> = {};
+    const weights: number[] = new Array(91).fill(0);
+    const N = Math.min(history.length, 50);
+    
+    // Calcul des poids de base (Fréquence récente + Ecart)
+    for (let i = 1; i <= 90; i++) {
+        let freq = 0;
+        let gap = 0;
+        let found = false;
+        
+        for (let j = 0; j < N; j++) {
+            if (history[j].gagnants.includes(i)) {
+                freq++;
+                if (!found) found = true;
+            } else if (!found) {
+                gap++;
+            }
+        }
+        // Formule de poids : Fréquence * (1 + Gap/20)
+        weights[i] = (freq + 1) * (1 + (gap / 20));
+    }
+
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+    // Simulation
+    for (let i = 0; i < iterations; i++) {
+        const draw = new Set<number>();
+        while (draw.size < 5) {
+            let r = Math.random() * totalWeight;
+            for (let num = 1; num <= 90; num++) {
+                r -= weights[num];
+                if (r <= 0) {
+                    draw.add(num);
+                    break;
+                }
+            }
+        }
+        draw.forEach(num => {
+            scores[num] = (scores[num] || 0) + 1;
+        });
+    }
+
+    // Normalisation 0-100
+    const maxScore = Math.max(...Object.values(scores));
+    const normalized: Record<number, number> = {};
+    for (let i = 1; i <= 90; i++) {
+        normalized[i] = ((scores[i] || 0) / maxScore) * 100;
+    }
+    return normalized;
+};
+
+/**
+ * LSTM Simplifié (Heuristic Pattern Sequencer)
+ * Analyse les micro-séquences de 3 tirages pour prédire la suite.
+ * Agit comme une mémoire à court terme pondérée.
+ */
+export const runLSTMPatternHeuristic = (history: DrawResult[]): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    if (history.length < 10) return scores;
+
+    // Fenêtre glissante de 3 tirages
+    const depth = Math.min(history.length - 3, 50);
+    
+    for (let i = 0; i < depth; i++) {
+        // Séquence actuelle observée : T-1, T-2
+        const t1 = history[i+1].gagnants;
+        const t2 = history[i+2].gagnants;
+        
+        // Cible : T (ce qu'on veut prédire)
+        const target = history[i].gagnants;
+        
+        // Poids temporel (plus c'est récent, plus c'est important)
+        const timeWeight = 1 - (i / depth);
+
+        // On cherche cette structure dans le passé plus lointain
+        for (let j = i + 1; j < depth; j++) {
+            const p1 = history[j+1].gagnants;
+            const p2 = history[j+2].gagnants;
+            
+            // Similitude Jaccard entre les contextes (T-1 vs P-1 et T-2 vs P-2)
+            const inter1 = t1.filter(n => p1.includes(n)).length;
+            const inter2 = t2.filter(n => p2.includes(n)).length;
+            
+            const similarity = (inter1 + inter2) / 10; // Max 1.0
+            
+            if (similarity > 0.3) {
+                // Si le contexte est similaire, on booste les numéros qui ont suivi (history[j])
+                const consequent = history[j].gagnants;
+                consequent.forEach(n => {
+                    scores[n] = (scores[n] || 0) + (similarity * timeWeight * 10);
+                });
+            }
+        }
+    }
+
+    // Normalisation
+    const maxVal = Math.max(...Object.values(scores), 1);
+    for(let i=1; i<=90; i++) {
+        scores[i] = Math.min(100, ((scores[i] || 0) / maxVal) * 100);
+    }
+    return scores;
+};
+
+/**
+ * Détection d'Anomalies (Isolation Forest Proxy)
+ * Identifie les numéros qui se comportent "bizarrement" (Écarts anormaux, fréquences aberrantes).
+ * Dans le loto, une anomalie peut être un signe de sortie imminente (correction statistique).
+ */
+export const detectAnomalies = (history: DrawResult[]): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    const reg = calculateRegularity(history);
+    
+    // Calcul des moyennes globales
+    const avgGlobalGap = reg.reduce((a, b) => a + b.avgGap, 0) / reg.length;
+    const avgGlobalStd = reg.reduce((a, b) => a + b.stdDev, 0) / reg.length;
+
+    reg.forEach(r => {
+        let anomalyScore = 0;
+        
+        // 1. Écart monstrueux (> 3x la moyenne historique du numéro)
+        if (r.currentGap > r.avgGap * 3) anomalyScore += 50;
+        
+        // 2. Régularité suspecte (StdDev trop faible = trop régulier pour du hasard)
+        if (r.stdDev < avgGlobalStd * 0.5 && r.lastGaps.length > 5) anomalyScore += 30;
+        
+        // 3. Fréquence aberrante (trop chaud ou trop froid par rapport au groupe)
+        const zScoreGap = (r.currentGap - avgGlobalGap) / avgGlobalStd;
+        if (Math.abs(zScoreGap) > 2.5) anomalyScore += 20;
+
+        scores[r.number] = Math.min(100, anomalyScore);
+    });
+
+    return scores;
+};
+
+// --- ANCIENNES FONCTIONS (CONSERVÉES) ---
 
 export const calculateACValue = (numbers: number[]): number => {
   const diffs = new Set();
@@ -135,71 +272,6 @@ export const calculatePoissonProbability = (lambda: number, k: number): number =
     else if (ratio > 2.5 && ratio <= 4.0) score = 100 - ((ratio - 2.5) * 20);
     else score = Math.max(5, 70 * Math.exp(-(ratio - 4))); 
     return Math.round(Math.max(0, Math.min(100, score)));
-};
-
-/**
- * Echo State Network (ESN) Déterministe
- */
-export const runEchoStateNetwork = (signal: number[]): number => {
-    if (signal.length < 20) return 0;
-    
-    const seed = signal.reduce((acc, val, i) => acc + val * (i + 1), 0);
-    const rng = new SeededRandom(seed);
-
-    const reservoirSize = 20;
-    const spectralRadius = 0.95;
-    const leakage = 0.3;
-    const trainLen = signal.length - 1;
-    
-    const W = Array.from({length: reservoirSize}, () => 
-        Array.from({length: reservoirSize}, () => (rng.next() - 0.5))
-    );
-    const Win = Array.from({length: reservoirSize}, () => (rng.next() - 0.5) * 2.0);
-    
-    let x = new Array(reservoirSize).fill(0);
-    const X_states: number[][] = []; 
-    const Y_target: number[] = [];
-    
-    for (let t = 0; t < trainLen; t++) {
-        const u = signal[t];
-        const newX = new Array(reservoirSize).fill(0);
-        for (let i = 0; i < reservoirSize; i++) {
-            let internalSum = 0;
-            for (let j = 0; j < reservoirSize; j++) {
-                internalSum += W[i][j] * x[j];
-            }
-            newX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u);
-        }
-        x = newX;
-        X_states.push([...x, 1]); 
-        Y_target.push(signal[t+1]);
-    }
-    
-    const W_out = new Array(reservoirSize + 1).fill(0);
-    for (let i = 0; i <= reservoirSize; i++) {
-        let num = 0, den = 0;
-        for (let t = 0; t < trainLen; t++) {
-            num += X_states[t][i] * Y_target[t];
-            den += X_states[t][i] * X_states[t][i];
-        }
-        W_out[i] = den !== 0 ? num / (den + 0.01) : 0;
-    }
-    
-    const u_last = signal[signal.length - 1];
-    const nextX = new Array(reservoirSize).fill(0);
-    for (let i = 0; i < reservoirSize; i++) {
-        let internalSum = 0;
-        for (let j = 0; j < reservoirSize; j++) {
-            internalSum += W[i][j] * x[j];
-        }
-        nextX[i] = (1 - leakage) * x[i] + leakage * Math.tanh(internalSum * spectralRadius + Win[i] * u_last);
-    }
-    
-    let prediction = 0;
-    for (let i = 0; i < reservoirSize; i++) prediction += W_out[i] * nextX[i];
-    prediction += W_out[reservoirSize]; 
-    
-    return Math.max(0, Math.min(100, prediction * 100));
 };
 
 export const calculateWaveletEnergy = (signal: number[]): number => {
@@ -292,8 +364,6 @@ export const calculateGravityField = (history: DrawResult[]): Record<number, num
     return gravity;
 };
 
-// --- SERVICES LOCAUX (Fallback et Helpers) ---
-
 export const mathService = {
   async fetchAnalytics(drawName: string, lastDate: string): Promise<{ spectral: SpectralMetric[], fractal: FractalMetric[] } | null> {
     if (!isSupabaseConfigured()) return null;
@@ -307,21 +377,12 @@ export const mathService = {
         if (data) {
             return { spectral: data.spectral, fractal: data.fractal };
         }
-        // Déclenche le calcul cloud en background si non trouvé
         supabase.functions.invoke('compute-nexus-analytics', { body: { drawName } });
         return null;
     } catch (e) { return null; }
   },
-
-  calculateSpectral(history: DrawResult[]): SpectralMetric[] {
-    // Version simplifiée synchrone pour fallback
-    return []; // Placeholder, on privilégie le worker
-  },
-
-  calculateFractal(history: DrawResult[]): FractalMetric[] {
-    // Version simplifiée synchrone pour fallback
-    return [];
-  }
+  calculateSpectral(history: DrawResult[]): SpectralMetric[] { return []; },
+  calculateFractal(history: DrawResult[]): FractalMetric[] { return []; }
 };
 
 export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; score: number; issues: string[] } => {
@@ -338,11 +399,7 @@ export const validateDataIntegrity = (history: DrawResult[]): { valid: boolean; 
             break;
         }
     }
-    return { 
-        valid: score > 50, 
-        score: Math.max(0, score), 
-        issues 
-    };
+    return { valid: score > 50, score: Math.max(0, score), issues };
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
@@ -353,9 +410,7 @@ export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Prom
     try {
         const res = await runWorkerTask('full_analysis', history);
         return res.spectral || [];
-    } catch {
-        return [];
-    }
+    } catch { return []; }
 };
 
 export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promise<FractalMetric[]> => {
@@ -366,18 +421,14 @@ export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promi
     try {
         const res = await runWorkerTask('full_analysis', history);
         return res.fractal || [];
-    } catch {
-        return [];
-    }
+    } catch { return []; }
 };
 
 export const calculateSuccessionMatrixAsync = async (history: DrawResult[]) => {
     try {
         const res = await runWorkerTask('succession_matrix', history);
         return res || { matrix: {}, totals: {} };
-    } catch {
-        return { matrix: {}, totals: {} };
-    }
+    } catch { return { matrix: {}, totals: {} }; }
 };
 
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
@@ -462,20 +513,18 @@ export const calculateVolatility = (history: DrawResult[]): { score: number, sta
 };
 
 export const detectGameRegime = (history: DrawResult[]) => {
-    // Calcul synchrone simplifié pour éviter de dépendre du worker si non dispo
     const N = Math.min(history.length, 50);
     if(N < 10) return { regime: 'NEUTRE', hurst: 0.5 };
     
-    // Heuristique simple basée sur la rémanence des numéros
     const recent = history.slice(0, 10).flatMap(d => d.gagnants);
     const unique = new Set(recent).size;
-    // Si peu de numéros uniques = répétition = persistant
     const ratio = unique / 50; 
-    const hurstApprox = 1 - ratio; // Simple proxy
+    const hurstApprox = 1 - ratio; 
     
     let regime = 'NEUTRE';
     if (hurstApprox > 0.6) regime = 'PERSISTANT';
     else if (hurstApprox < 0.4) regime = 'ANTI-PERSISTANT';
+    else if (ratio > 0.8) regime = 'CHAOS'; // Beaucoup de numéros uniques = chaos
     
     return { regime, hurst: hurstApprox };
 };
@@ -538,12 +587,10 @@ export const getVelocityScores = (history: DrawResult[]): Record<number, number>
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
-    // Calcul simplifié synchrone
     const N = Math.min(history.length, 50);
     let occurrences = 0;
     history.slice(0, N).forEach(d => { if(d.gagnants.includes(num)) occurrences++; });
     const freq = occurrences / N;
-    // Un proxy pour Hurst basé sur la fréquence locale
     const h = 0.5 + (freq - 0.05) * 5; 
     return { hurst: Math.max(0, Math.min(1, h)) };
 };
@@ -627,7 +674,6 @@ export const calculateFractalIndex = (history: DrawResult[]): number => {
 };
 
 export const performKMeansClusteringAsync = async (history: DrawResult[]): Promise<ClusterPoint[]> => {
-    // Version synchrone simplifiée pour éviter le blocage si worker indispo
     const reg = calculateRegularity(history);
     return reg.map(r => {
         const freq = history.slice(0, 30).filter(h => h.gagnants.includes(r.number)).length;
