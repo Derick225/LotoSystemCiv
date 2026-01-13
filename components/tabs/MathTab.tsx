@@ -9,7 +9,7 @@ import {
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { NumberBall } from '../NumberBall';
 import { InfoTooltip } from '../ui/InfoTooltip';
-import { RotateCw, Activity, Layers, Target, Scale, TrendingUp, AlertOctagon } from 'lucide-react';
+import { RotateCw, Activity, Layers, Target, Scale, TrendingUp, AlertOctagon, ThermometerSun, HelpCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface MathTabProps {
@@ -22,6 +22,10 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
   const [shadows, setShadows] = useState<ShadowNumbers | null>(null);
   const [trendData, setTrendData] = useState<TrendOscillatorPoint[]>([]);
   const [cusumData, setCusumData] = useState<{name: string, pos: number, neg: number, alert: boolean}[]>([]);
+  
+  // États simplifiés pour l'interface novice
+  const [cusumStatus, setCusumStatus] = useState<{ state: 'STABLE' | 'WARNING', message: string }>({ state: 'STABLE', message: 'Analyse...' });
+  const [tempStatus, setTempStatus] = useState<{ value: number, label: string, color: string }>({ value: 0, label: 'Neutre', color: 'text-slate-400' });
 
   useEffect(() => {
     if (history.length > 0) {
@@ -52,6 +56,12 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
         // Calcul Oscillateur
         const osc = calculateTrendOscillator(history, 40);
         setTrendData(osc);
+        
+        // Interprétation "Météo" pour novice (basée sur le dernier momentum)
+        const lastMomentum = osc[osc.length - 1]?.momentum || 0;
+        if (lastMomentum > 20) setTempStatus({ value: lastMomentum, label: 'Surchauffe (Gros Numéros)', color: 'text-orange-500' });
+        else if (lastMomentum < -20) setTempStatus({ value: lastMomentum, label: 'Glacial (Petits Numéros)', color: 'text-indigo-500' });
+        else setTempStatus({ value: lastMomentum, label: 'Tempéré (Équilibré)', color: 'text-emerald-500' });
 
         // Calcul CUSUM
         const cusum = calculateCUSUM(history.slice(0, 50));
@@ -60,8 +70,13 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
             pos: p,
             neg: cusum.negative[i],
             alert: cusum.alerts.includes(i)
-        })).reverse(); // On inverse pour l'affichage chronologique
+        })).reverse(); 
         setCusumData(chartData);
+
+        // Interprétation CUSUM pour novice
+        const isAlert = chartData.some(d => d.pos > 80 || d.neg > 80);
+        if (isAlert) setCusumStatus({ state: 'WARNING', message: "Détection d'une anomalie statistique forte. Le tirage ne semble pas naturel." });
+        else setCusumStatus({ state: 'STABLE', message: "Le flux est parfaitement aléatoire. Aucune manipulation détectée." });
     }
   }, [history]);
 
@@ -76,9 +91,9 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
       return (
           <div className="mt-4">
               <div className="flex justify-between text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">
-                  <span>Aggregation (-4)</span>
-                  <span className="text-slate-500">Mélange Idéal (0)</span>
-                  <span>Dispersion (+4)</span>
+                  <span>Trop Groupé</span>
+                  <span className="text-slate-500">Parfait</span>
+                  <span>Trop Dispersé</span>
               </div>
               <div className="h-6 w-full bg-slate-100 dark:bg-slate-700/50 rounded-2xl relative overflow-hidden border border-slate-200 dark:border-slate-800">
                   <div className="absolute top-0 bottom-0 left-[37.5%] right-[37.5%] bg-emerald-100 dark:bg-emerald-900/20 border-x border-emerald-200 dark:border-emerald-800"></div>
@@ -89,7 +104,7 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
               </div>
               <div className="text-center mt-3">
                   <span className={`text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full border ${isRandom ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                      Z-Score: {z.toFixed(2)}
+                      {isRandom ? "Mélange OK" : "Mélange Suspect"}
                   </span>
               </div>
           </div>
@@ -144,51 +159,78 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
             </div>
         )}
 
-        {/* CUSUM CONTROL CHART */}
+        {/* CUSUM CONTROL CHART (SIMPLIFIÉ) */}
         {cusumData.length > 0 && (
             <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                    <div>
+                <div className="flex flex-col md:flex-row justify-between items-start mb-6 gap-6">
+                    <div className="flex-1">
                         <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-3 uppercase tracking-tighter">
-                            <AlertOctagon className="text-rose-500" /> Contrôle Qualité (CUSUM)
+                            <AlertOctagon className={cusumStatus.state === 'WARNING' ? "text-rose-500" : "text-emerald-500"} /> 
+                            Détecteur de Biais (CUSUM)
                         </h3>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Détection de dérive moyenne (Biais Machine)</p>
+                        <div className={`mt-3 p-4 rounded-2xl border ${cusumStatus.state === 'WARNING' ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'} flex items-start gap-3`}>
+                            {cusumStatus.state === 'WARNING' ? <AlertOctagon size={18} className="shrink-0 mt-0.5"/> : <CheckCircle2 size={18} className="shrink-0 mt-0.5"/>}
+                            <div>
+                                <div className="text-xs font-black uppercase tracking-wide mb-1">État : {cusumStatus.state === 'WARNING' ? 'Anomalie' : 'Normal'}</div>
+                                <p className="text-[11px] font-medium leading-relaxed opacity-90">{cusumStatus.message}</p>
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex gap-4 text-[9px] font-bold uppercase">
-                        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> Dérive Positive</div>
-                        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Dérive Négative</div>
+                    
+                    <div className="w-full md:w-auto bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl max-w-xs">
+                        <div className="flex items-center gap-2 mb-2 text-indigo-500 font-bold text-[10px] uppercase tracking-widest">
+                            <HelpCircle size={12}/> Comprendre
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Si la courbe violette monte, le jeu sort trop de "gros" numéros. Si la courbe orange monte, il sort trop de "petits". Si tout est plat, le hasard est pur.
+                        </p>
                     </div>
                 </div>
 
-                <div className="h-64 w-full">
+                <div className="h-64 w-full relative">
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={cusumData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                             <XAxis hide />
                             <YAxis hide domain={['auto', 'auto']} />
                             <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
-                            <ReferenceLine y={80} stroke="#f43f5e" strokeDasharray="3 3" label={{ value: "SEUIL ALARME", fill: "#f43f5e", fontSize: 9 }} />
+                            <ReferenceLine y={80} stroke="#f43f5e" strokeDasharray="3 3" label={{ value: "ZONE ANORMALE", fill: "#f43f5e", fontSize: 9, position: 'insideBottomRight' }} />
                             
-                            <Line type="monotone" dataKey="pos" stroke="#6366f1" strokeWidth={2} dot={false} />
-                            <Line type="monotone" dataKey="neg" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="pos" stroke="#6366f1" strokeWidth={3} dot={false} name="Biais Gros Numéros" />
+                            <Line type="monotone" dataKey="neg" stroke="#f59e0b" strokeWidth={3} dot={false} name="Biais Petits Numéros" />
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
-                <p className="text-[9px] text-slate-400 text-center mt-2 italic">Une courbe dépassant le seuil rouge indique une anomalie statistique significative.</p>
             </div>
         )}
 
-        {/* OSCILLATEUR DE TENDANCE */}
+        {/* OSCILLATEUR DE TENDANCE (MÉTÉO) */}
         {trendData.length > 0 && (
             <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] shadow-xl border border-indigo-100 dark:border-indigo-900/50 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-6 opacity-5"><TrendingUp size={80} /></div>
+                <div className="absolute top-0 right-0 p-6 opacity-5"><ThermometerSun size={80} /></div>
                 
-                <div className="flex justify-between items-center mb-8 relative z-10">
-                    <div>
+                <div className="flex flex-col md:flex-row justify-between items-start mb-8 gap-6 relative z-10">
+                    <div className="flex-1">
                         <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-3 uppercase tracking-tighter">
-                            <Activity className="text-indigo-600" /> Oscillateur de Température
+                            <Activity className="text-indigo-600" /> Météo du Jeu
                         </h3>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Convergence Momentum (Chaud vs Froid)</p>
+                        <div className="mt-3 flex items-center gap-4">
+                            <div className="text-3xl font-black font-mono text-slate-700 dark:text-slate-200">
+                                {tempStatus.value > 0 ? `+${tempStatus.value.toFixed(1)}` : tempStatus.value.toFixed(1)}°
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase border bg-slate-50 dark:bg-slate-900 ${tempStatus.color}`}>
+                                {tempStatus.label}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div className="w-full md:w-auto bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl max-w-xs">
+                        <div className="flex items-center gap-2 mb-2 text-indigo-500 font-bold text-[10px] uppercase tracking-widest">
+                            <HelpCircle size={12}/> Lecture
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Quand la météo est "Chaude" (Barres Vertes), les sommes totales augmentent. Quand elle est "Froide" (Zone violette), les sommes diminuent. Jouez en conséquence (suivre ou contrer).
+                        </p>
                     </div>
                 </div>
 
@@ -199,10 +241,10 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
                             <XAxis dataKey="drawIndex" hide />
                             <YAxis hide domain={['auto', 'auto']} />
                             <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
-                            <ReferenceLine y={0} stroke="#94a3b8" opacity={0.3} />
+                            <ReferenceLine y={0} stroke="#94a3b8" opacity={0.3} strokeWidth={2} />
                             
-                            <Bar dataKey="momentum" fill="#10b981" radius={[2, 2, 0, 0]} barSize={4} />
-                            <Area type="monotone" dataKey="signal" stroke="#6366f1" strokeWidth={3} fill="url(#colorSignal)" fillOpacity={0.2} />
+                            <Bar dataKey="momentum" fill="#10b981" radius={[2, 2, 0, 0]} barSize={4} name="Chaleur (Momentum)" />
+                            <Area type="monotone" dataKey="signal" stroke="#6366f1" strokeWidth={3} fill="url(#colorSignal)" fillOpacity={0.2} name="Tendance de Fond" />
                             
                             <defs>
                                 <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
@@ -216,43 +258,42 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
             </div>
         )}
 
-        {/* RUNS TEST */}
+        {/* RUNS TEST (SIMPLIFIÉ) */}
         {report.runsTest && (
             <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] shadow-xl border border-indigo-100 dark:border-indigo-900/50">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                     <div>
                         <h3 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-3">
-                            <RotateCw className="text-indigo-600" /> Cycles & Entropie (Wald-Wolfowitz)
+                            <RotateCw className="text-indigo-600" /> Qualité du Mélange
                         </h3>
-                        <p className="text-xs text-slate-400 mt-1 uppercase font-bold tracking-widest">Test de randomisation séquentielle</p>
+                        <p className="text-xs text-slate-400 mt-1 uppercase font-bold tracking-widest">Test d'Entropie (Wald-Wolfowitz)</p>
                     </div>
                     <span className={`px-4 py-1.5 rounded-full text-[10px] font-black border tracking-widest uppercase ${report.runsTest.isRandom ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
-                        {report.runsTest.isRandom ? "Aléatoire Nominal" : "Biais Séquentiel Détecté"}
+                        {report.runsTest.isRandom ? "Brassage Naturel" : "Séquence Suspecte"}
                     </span>
                 </div>
                 
                 <div className="grid md:grid-cols-2 gap-12">
                     <div className="space-y-6">
                         <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl space-y-4 border border-slate-100 dark:border-slate-800">
-                            <InfoTooltip title="Nombre de Cycles (R)" content="Le nombre total de fois où la séquence a changé d'état (Passage au-dessus/en-dessous de la médiane).">
-                                <div className="flex justify-between items-center cursor-help">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase">Cycles Observés (R)</span>
-                                    <span className="text-sm font-black text-slate-800 dark:text-white">{report.runsTest.runs}</span>
-                                </div>
-                            </InfoTooltip>
+                            <div className="flex justify-between items-center cursor-help">
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Alternance (Cycles)</span>
+                                <span className="text-sm font-black text-slate-800 dark:text-white">{report.runsTest.runs}</span>
+                            </div>
                             
-                            <InfoTooltip title="Z-Score de Wald" content="Indique de combien d'écarts-types le mélange actuel dévie de l'aléatoire parfait (0).">
-                                <div className="flex justify-between items-center cursor-help">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase">Écart Normalisé (Z)</span>
-                                    <span className="text-sm font-black text-slate-800 dark:text-white">{report.runsTest.zScore.toFixed(2)}</span>
-                                </div>
-                            </InfoTooltip>
+                            <div className="flex justify-between items-center cursor-help">
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Score Z (Normalité)</span>
+                                <span className="text-sm font-black text-slate-800 dark:text-white">{report.runsTest.zScore.toFixed(2)}</span>
+                            </div>
                         </div>
+                        <p className="text-[10px] text-slate-400 italic leading-relaxed">
+                            Un score Z proche de 0 indique un mélange parfait. S'il dépasse +/- 1.96, la suite de numéros est mathématiquement improbable (trop groupée ou trop alternée).
+                        </p>
                     </div>
 
                     <div className="flex flex-col justify-center">
                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                             <Scale size={14}/> Qualité du Brassage Stochastique
+                             <Scale size={14}/> Jauge d'Aléatoire
                         </h4>
                         {renderZScoreGauge(report.runsTest.zScore)}
                     </div>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { calculateNetworkCentralityAsync, detectCommunities, calculateSuccessionMatrixAsync } from '../../services/mathService';
-import { Share2, Play, Pause, Activity, Target, GitMerge, GitCommit, Layers, MousePointer2, Users, ArrowRight, Sparkles, Zap, Info } from 'lucide-react';
+import { Share2, Play, Pause, Activity, Target, Users, ArrowRight, Info, Layers, RefreshCw } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 
 interface Node { 
@@ -27,6 +27,8 @@ interface Link {
 
 type ViewMode = 'correlation' | 'transition';
 
+const COMMUNITY_COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#f43f5e', '#a855f7'];
+
 export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { history, correlationMatrix } = useNexus();
     const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
@@ -34,6 +36,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [isSimulating, setIsSimulating] = useState(true);
     const [mode, setMode] = useState<ViewMode>('correlation');
     const [loadingGraph, setLoadingGraph] = useState(false);
+    const [activeCommunity, setActiveCommunity] = useState<number | null>(null);
     
     // Canvas & Physics Refs
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -42,32 +45,30 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const animationRef = useRef<number | null>(null);
     const dragRef = useRef<{ nodeId: number, startX: number, startY: number } | null>(null);
 
-    const COMMUNITY_COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#f43f5e', '#a855f7'];
-
     // Calcul des données du graphe
     useEffect(() => {
         if (history.length < 20) return;
         setLoadingGraph(true);
 
         const buildGraph = async () => {
-            // On prend les 50 numéros les plus influents pour ne pas surcharger la vue du novice
+            // On prend les 50 numéros les plus influents pour ne pas surcharger la vue
             const centralityScores = await calculateNetworkCentralityAsync(history);
-            const activeNumbers = centralityScores.sort((a: any, b: any) => b.normalized - a.normalized).slice(0, 50);
+            const activeNumbers = centralityScores.sort((a: any, b: any) => b.normalized - a.normalized).slice(0, 60);
             const activeIds = new Set<number>(activeNumbers.map((s: any) => s.number));
             
             // Détection de communautés (Tribus)
             const comms = detectCommunities(Array.from(activeIds), correlationMatrix);
 
             const newNodes: Node[] = activeNumbers.map((s: any, i: number) => {
-                const angle = (i / activeNumbers.length) * Math.PI * 2; // Cercle parfait au début
-                const radius = 200;
+                const angle = (i / activeNumbers.length) * Math.PI * 2; 
+                const radius = 250;
                 return {
                     id: s.number,
                     x: 400 + radius * Math.cos(angle),
                     y: 300 + radius * Math.sin(angle),
                     vx: 0, vy: 0,
                     community: comms[s.number] || 0,
-                    radius: Math.max(15, 12 + (s.normalized / 100) * 20), // Plus gros = Plus influent
+                    radius: Math.max(12, 10 + (s.normalized / 100) * 15), 
                     color: COMMUNITY_COLORS[(comms[s.number] || 0) % COMMUNITY_COLORS.length],
                     mass: 1 + (s.normalized / 100)
                 };
@@ -76,7 +77,6 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             const newLinks: Link[] = [];
 
             if (mode === 'correlation') {
-                // MODE "AMIS" (Affinité)
                 newNodes.forEach((u, i) => {
                     const affs = correlationMatrix[u.id]?.affinities || {};
                     Object.entries(affs).forEach(([vStr, weight]) => {
@@ -86,14 +86,12 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         const w = Number(weight);
                         const j = newNodes.findIndex(n => n.id === vId);
                         
-                        // On ne garde que les "Meilleurs Amis" (> 0.15) pour simplifier
                         if (j !== -1 && w > 0.15 && i < j) {
                             newLinks.push({ source: i, target: j, strength: w, type: 'bidirectional' });
                         }
                     });
                 });
             } else {
-                // MODE "SUITE" (Qui appelle qui ?)
                 const { matrix, totals } = await calculateSuccessionMatrixAsync(history);
                 newNodes.forEach((u, i) => {
                     const successors = matrix[u.id] || {};
@@ -106,7 +104,6 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         const probability = (count as number) / totalOccurrences;
                         const j = newNodes.findIndex(n => n.id === vId);
 
-                        // On ne garde que les appels forts (> 12%)
                         if (j !== -1 && probability > 0.12) {
                             newLinks.push({ source: i, target: j, strength: probability * 2, type: 'directed' });
                         }
@@ -118,10 +115,10 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             linksRef.current = newLinks;
             setLoadingGraph(false);
             
-            // Petit coup de boost physique au changement de mode pour reorganiser
+            // Re-boot physics
             nodesRef.current.forEach(n => {
-                n.vx = (Math.random() - 0.5) * 5;
-                n.vy = (Math.random() - 0.5) * 5;
+                n.vx = (Math.random() - 0.5) * 2;
+                n.vy = (Math.random() - 0.5) * 2;
             });
         };
 
@@ -145,16 +142,16 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 const nodes = nodesRef.current;
                 const links = linksRef.current;
 
-                // 1. Répulsion (Éviter la superposition)
+                // 1. Répulsion
                 for (let i = 0; i < nodes.length; i++) {
                     for (let j = i + 1; j < nodes.length; j++) {
                         const dx = nodes[i].x - nodes[j].x;
                         const dy = nodes[i].y - nodes[j].y;
                         const distSq = dx*dx + dy*dy || 1;
-                        const minDist = nodes[i].radius + nodes[j].radius + 20; // Marge de confort
+                        const minDist = nodes[i].radius + nodes[j].radius + 30;
                         
                         if (distSq < minDist * minDist * 4) { 
-                            const force = (1200 * nodes[i].mass * nodes[j].mass) / distSq;
+                            const force = (1500 * nodes[i].mass * nodes[j].mass) / distSq;
                             const fx = (dx / Math.sqrt(distSq)) * force;
                             const fy = (dy / Math.sqrt(distSq)) * force;
                             
@@ -164,7 +161,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     }
                 }
 
-                // 2. Attraction (Liens élastiques)
+                // 2. Attraction
                 links.forEach(link => {
                     const s = nodes[link.source];
                     const t = nodes[link.target];
@@ -172,8 +169,8 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     const dy = t.y - s.y;
                     const dist = Math.sqrt(dx*dx + dy*dy) || 1;
                     
-                    const targetDist = 120; // Distance idéale standard
-                    const force = (dist - targetDist) * 0.03 * link.strength;
+                    const targetDist = 150; 
+                    const force = (dist - targetDist) * 0.02 * link.strength;
                     
                     const fx = (dx/dist) * force;
                     const fy = (dy/dist) * force;
@@ -182,13 +179,13 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     if (!t.isFixed) { t.vx -= fx; t.vy -= fy; }
                 });
 
-                // 3. Gravité Centrale & Friction
+                // 3. Gravité Centrale & Friction (Dampening fort pour stabilité)
                 nodes.forEach(n => {
                     if (n.isFixed) return;
-                    n.vx += (center.x - n.x) * 0.012;
-                    n.vy += (center.y - n.y) * 0.012;
-                    n.vx *= 0.85; 
-                    n.vy *= 0.85;
+                    n.vx += (center.x - n.x) * 0.015;
+                    n.vy += (center.y - n.y) * 0.015;
+                    n.vx *= 0.82; // Friction forte
+                    n.vy *= 0.82;
                     n.x += n.vx;
                     n.y += n.vy;
                     
@@ -208,53 +205,50 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 const s = nodesRef.current[link.source];
                 const t = nodesRef.current[link.target];
                 
+                // Filtre Communauté
+                if (activeCommunity !== null && s.community !== activeCommunity && t.community !== activeCommunity) return;
+
                 const isActive = (selectedNode === null && hoveredNodeId === null) || 
                                  (selectedNode === s.id || selectedNode === t.id || hoveredNodeId === s.id || hoveredNodeId === t.id);
 
-                if (!isActive) return; // On cache les liens non pertinents
+                if (!isActive && activeCommunity === null) return; 
 
                 ctx.globalAlpha = isActive ? Math.min(1, link.strength * 2) : 0.05;
-                ctx.strokeStyle = mode === 'transition' ? '#6366f1' : s.color; // Indigo si flux, sinon couleur communauté
-                ctx.lineWidth = link.strength * 4;
+                ctx.strokeStyle = mode === 'transition' ? '#6366f1' : s.color;
+                ctx.lineWidth = link.strength * 3;
                 
                 ctx.beginPath();
                 ctx.moveTo(s.x, s.y);
                 ctx.lineTo(t.x, t.y);
                 ctx.stroke();
-
-                if (mode === 'transition') {
-                    const angle = Math.atan2(t.y - s.y, t.x - s.x);
-                    const endX = t.x - (t.radius + 5) * Math.cos(angle);
-                    const endY = t.y - (t.radius + 5) * Math.sin(angle);
-                    ctx.beginPath();
-                    ctx.arc(endX, endY, 3, 0, Math.PI * 2);
-                    ctx.fillStyle = '#6366f1';
-                    ctx.fill();
-                }
             });
             ctx.globalAlpha = 1;
 
             // Noeuds
             nodesRef.current.forEach(n => {
-                // Logique de Focus : Si un noeud est sélectionné, on grise les autres (sauf voisins)
-                let isDimmed = false;
-                if (selectedNode !== null) {
-                    const isDirect = n.id === selectedNode;
-                    const isNeighbor = linksRef.current.some(l => 
-                        (nodesRef.current[l.source].id === selectedNode && nodesRef.current[l.target].id === n.id) || 
-                        (nodesRef.current[l.target].id === selectedNode && nodesRef.current[l.source].id === n.id)
-                    );
-                    if (!isDirect && !isNeighbor) isDimmed = true;
-                } else if (hoveredNodeId !== null) {
-                    if (n.id !== hoveredNodeId) isDimmed = true;
+                // Filtre Communauté
+                const isInCommunity = activeCommunity === null || n.community === activeCommunity;
+                
+                let isDimmed = !isInCommunity;
+                if (isInCommunity) {
+                    if (selectedNode !== null) {
+                        const isDirect = n.id === selectedNode;
+                        const isNeighbor = linksRef.current.some(l => 
+                            (nodesRef.current[l.source].id === selectedNode && nodesRef.current[l.target].id === n.id) || 
+                            (nodesRef.current[l.target].id === selectedNode && nodesRef.current[l.source].id === n.id)
+                        );
+                        if (!isDirect && !isNeighbor) isDimmed = true;
+                    } else if (hoveredNodeId !== null) {
+                        if (n.id !== hoveredNodeId) isDimmed = true;
+                    }
                 }
 
                 ctx.globalAlpha = isDimmed ? 0.1 : 1;
                 
-                // Ombre
-                if (!isDimmed) {
+                // Glow effect pour noeuds importants
+                if (!isDimmed && n.radius > 18) {
                     ctx.shadowColor = n.color;
-                    ctx.shadowBlur = n.id === selectedNode ? 30 : 10;
+                    ctx.shadowBlur = 20;
                 } else {
                     ctx.shadowBlur = 0;
                 }
@@ -272,7 +266,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 // Texte
                 if (!isDimmed || n.mass > 1.2) {
                     ctx.fillStyle = '#fff';
-                    ctx.font = `bold ${Math.max(10, n.radius * 0.8)}px Inter`;
+                    ctx.font = `bold ${Math.max(10, n.radius * 0.7)}px Inter`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(n.id.toString(), n.x, n.y + 1);
@@ -287,7 +281,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
         runFrame();
         return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-    }, [isSimulating, hoveredNodeId, selectedNode, loadingGraph, mode]);
+    }, [isSimulating, hoveredNodeId, selectedNode, loadingGraph, mode, activeCommunity]);
 
     const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
         const canvas = canvasRef.current;
@@ -303,6 +297,8 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         const y = (clientY - rect.top) * scaleY;
 
         const hit = nodesRef.current.find(n => {
+            // Respect community filter click
+            if (activeCommunity !== null && n.community !== activeCommunity) return false;
             const dx = n.x - x;
             const dy = n.y - y;
             return dx*dx + dy*dy <= Math.pow(n.radius + 15, 2);
@@ -312,42 +308,9 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             dragRef.current = { nodeId: hit.id, startX: x, startY: y };
             hit.isFixed = true;
             hit.vx = 0; hit.vy = 0;
-            setSelectedNode(hit.id === selectedNode ? null : hit.id); // Toggle select
+            setSelectedNode(hit.id === selectedNode ? null : hit.id); 
         } else {
-            // Click dans le vide = Reset
             setSelectedNode(null);
-        }
-    };
-
-    const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-        const x = (clientX - rect.left) * (canvas.width / rect.width);
-        const y = (clientY - rect.top) * (canvas.height / rect.height);
-
-        if (dragRef.current) {
-            const node = nodesRef.current.find(n => n.id === dragRef.current!.nodeId);
-            if (node) { node.x = x; node.y = y; }
-        } else if (!('touches' in e)) {
-            const hit = nodesRef.current.find(n => (n.x-x)**2 + (n.y-y)**2 <= Math.pow(n.radius + 5, 2));
-            if (hit) {
-                canvas.style.cursor = 'pointer';
-                if (hoveredNodeId !== hit.id) setHoveredNodeId(hit.id);
-            } else {
-                canvas.style.cursor = 'default';
-                if (hoveredNodeId !== null) setHoveredNodeId(null);
-            }
-        }
-    };
-
-    const handlePointerUp = () => {
-        if (dragRef.current) {
-            const node = nodesRef.current.find(n => n.id === dragRef.current!.nodeId);
-            if (node) { node.isFixed = false; } // On relâche mais on garde la sélection
-            dragRef.current = null;
         }
     };
 
@@ -368,35 +331,65 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             .sort((a,b) => b.strength - a.strength)
             .slice(0, 5);
 
-        return { id: targetId, connections };
+        return { id: targetId, connections, community: nodesRef.current[targetIndex].community };
     }, [selectedNode, hoveredNodeId, loadingGraph, mode]);
+
+    // Communautés uniques
+    const communities = useMemo(() => {
+        const counts: Record<number, number> = {};
+        nodesRef.current.forEach(n => counts[n.community] = (counts[n.community] || 0) + 1);
+        return Object.entries(counts).map(([id, count]) => ({ id: parseInt(id), count, color: COMMUNITY_COLORS[parseInt(id) % COMMUNITY_COLORS.length] }));
+    }, [loadingGraph]);
 
     return (
         <div className="space-y-8 animate-fade-in pb-12">
             <div className="grid lg:grid-cols-12 gap-8">
                 
                 {/* GRAPHE PRINCIPAL */}
-                <div className="lg:col-span-8 bg-slate-950 p-6 rounded-[3rem] shadow-2xl border border-slate-800 relative overflow-hidden h-[600px] flex flex-col">
+                <div className="lg:col-span-8 bg-slate-950 p-6 rounded-[3rem] shadow-2xl border border-slate-800 relative overflow-hidden h-[650px] flex flex-col">
                     <div className="absolute top-6 left-8 z-20 flex flex-col gap-4 pointer-events-none">
                         <div className="flex items-center gap-3 pointer-events-auto bg-slate-900/50 p-2 rounded-2xl backdrop-blur-md border border-slate-800">
                             <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Share2 className="text-white" size={18}/></div>
                             <div>
-                                <h3 className="text-white font-black uppercase text-xs tracking-widest">Réseau Social</h3>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase">{nodesRef.current.length} membres actifs</p>
+                                <h3 className="text-white font-black uppercase text-xs tracking-widest">Topologie {mode === 'correlation' ? 'Sociale' : 'Temporelle'}</h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">{nodesRef.current.length} Vecteurs Actifs</p>
                             </div>
                         </div>
                         
                         <div className="bg-slate-900 p-1 rounded-2xl border border-slate-700 inline-flex pointer-events-auto shadow-xl">
                             <button onClick={() => setMode('correlation')} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all ${mode === 'correlation' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                                <Users size={12}/> Amis (Affinité)
+                                <Users size={12}/> Amis
                             </button>
                             <button onClick={() => setMode('transition')} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all ${mode === 'transition' ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                                <ArrowRight size={12}/> Suites (Appels)
+                                <ArrowRight size={12}/> Suites
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex-1 relative cursor-crosshair">
+                    {/* Légende Communautés */}
+                    <div className="absolute top-6 right-8 z-20 pointer-events-auto bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md max-w-[150px]">
+                        <h5 className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><Layers size={10}/> Tribus</h5>
+                        <div className="flex flex-wrap gap-2">
+                            <button 
+                                onClick={() => setActiveCommunity(null)} 
+                                className={`text-[8px] font-bold px-2 py-1 rounded border ${activeCommunity === null ? 'bg-white text-black border-white' : 'bg-slate-800 text-slate-400 border-slate-700'}`}
+                            >
+                                Tous
+                            </button>
+                            {communities.map(c => (
+                                <button
+                                    key={c.id}
+                                    onClick={() => setActiveCommunity(activeCommunity === c.id ? null : c.id)}
+                                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-transform ${activeCommunity === c.id ? 'scale-125 ring-2 ring-white' : 'opacity-70 hover:opacity-100'}`}
+                                    style={{ backgroundColor: c.color }}
+                                >
+                                    {c.count}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 relative cursor-crosshair rounded-[2rem] overflow-hidden bg-gradient-to-br from-slate-950 to-[#0b0f19]">
                         {loadingGraph && <div className="absolute inset-0 flex items-center justify-center z-30 bg-slate-950/80"><p className="text-indigo-400 font-black text-xs uppercase animate-pulse">Cartographie en cours...</p></div>}
                         <canvas 
                             ref={canvasRef} 
@@ -404,19 +397,33 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             height={600} 
                             className="w-full h-full touch-none"
                             onMouseDown={handlePointerDown}
-                            onMouseMove={handlePointerMove}
-                            onMouseUp={handlePointerUp}
-                            onMouseLeave={() => { handlePointerUp(); setHoveredNodeId(null); }}
-                            onTouchStart={handlePointerDown}
-                            onTouchMove={handlePointerMove}
-                            onTouchEnd={handlePointerUp}
+                            onMouseMove={(e) => {
+                                // Simple hover logic reused from original
+                                const canvas = canvasRef.current;
+                                if (!canvas) return;
+                                const rect = canvas.getBoundingClientRect();
+                                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                                const hit = nodesRef.current.find(n => (n.x-x)**2 + (n.y-y)**2 <= Math.pow(n.radius + 5, 2));
+                                if (hit && (activeCommunity === null || hit.community === activeCommunity)) {
+                                    canvas.style.cursor = 'pointer';
+                                    if (hoveredNodeId !== hit.id) setHoveredNodeId(hit.id);
+                                } else {
+                                    canvas.style.cursor = 'default';
+                                    if (hoveredNodeId !== null) setHoveredNodeId(null);
+                                }
+                            }}
+                            onMouseUp={() => { if (dragRef.current) nodesRef.current.find(n => n.id === dragRef.current!.nodeId)!.isFixed = false; dragRef.current = null; }}
+                            onMouseLeave={() => { if (dragRef.current) nodesRef.current.find(n => n.id === dragRef.current!.nodeId)!.isFixed = false; dragRef.current = null; setHoveredNodeId(null); }}
                         />
-                        <div className="absolute bottom-6 left-8 pointer-events-none text-[9px] text-slate-500 font-bold bg-slate-900/50 px-3 py-1 rounded-full border border-slate-800">
-                            <MousePointer2 size={10} className="inline mr-1"/> Touchez une boule pour isoler ses liens
-                        </div>
                     </div>
 
-                    <div className="absolute bottom-6 right-8 z-20">
+                    <div className="absolute bottom-6 right-8 z-20 flex gap-2">
+                        <button onClick={() => {
+                            nodesRef.current.forEach(n => { n.vx = (Math.random()-0.5)*5; n.vy = (Math.random()-0.5)*5; });
+                        }} className="p-3 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-all shadow-lg border border-white/5" title="Secouer">
+                            <RefreshCw size={16}/>
+                        </button>
                         <button onClick={() => setIsSimulating(!isSimulating)} className={`p-3 rounded-xl transition-all shadow-lg border border-white/5 ${isSimulating ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
                             {isSimulating ? <Pause size={16}/> : <Play size={16}/>}
                         </button>
@@ -427,7 +434,6 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="lg:col-span-4 space-y-6">
                     <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700 h-full flex flex-col relative overflow-hidden">
                         
-                        {/* Background Decor */}
                         <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
 
                         <div className="flex items-center gap-3 mb-6 relative z-10">
@@ -440,20 +446,22 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         {nodeStats ? (
                             <div className="space-y-8 animate-slide-up flex-1 relative z-10">
                                 <div className="text-center py-6 bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 relative">
-                                    <div className="absolute top-4 right-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Actif</div>
+                                    <div className="absolute top-4 right-4 text-[8px] font-black text-white px-2 py-1 rounded-full uppercase tracking-widest" style={{ backgroundColor: COMMUNITY_COLORS[nodeStats.community % 8] }}>
+                                        Tribu {nodeStats.community}
+                                    </div>
                                     <div className="flex justify-center mb-4 transform scale-125">
                                         <NumberBall number={nodeStats.id} size="lg" selected />
                                     </div>
                                     <div className="text-2xl font-black text-slate-800 dark:text-white mb-1">Numéro {nodeStats.id}</div>
                                     <div className="text-[10px] font-bold text-slate-500 uppercase">
-                                        {mode === 'correlation' ? 'Au centre de la tribu' : 'Source du flux'}
+                                        {mode === 'correlation' ? 'Nœud Central' : 'Source de Transition'}
                                     </div>
                                 </div>
 
                                 <div>
                                     <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                                         {mode === 'correlation' ? <Users size={12}/> : <ArrowRight size={12}/>}
-                                        {mode === 'correlation' ? 'Ses Meilleurs Amis' : 'Il appelle souvent...'}
+                                        {mode === 'correlation' ? 'Cercle Intime' : 'Prochain Arrêt'}
                                     </h5>
                                     
                                     <div className="space-y-3">
@@ -481,7 +489,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50 p-6">
                                 <Activity size={48} className="text-slate-300 dark:text-slate-600 mb-4 animate-pulse-slow"/>
                                 <p className="text-xs font-bold text-slate-400 max-w-[200px] leading-relaxed">
-                                    Touchez une boule sur le graphe pour voir qui sont ses alliés.
+                                    Touchez une boule sur le graphe pour révéler ses connexions.
                                 </p>
                             </div>
                         )}
@@ -489,9 +497,7 @@ export const NetworkTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="mt-auto p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-800 flex gap-3">
                             <Info size={16} className="text-indigo-500 shrink-0 mt-0.5" />
                             <p className="text-[10px] text-indigo-800 dark:text-indigo-300 font-medium leading-relaxed">
-                                {mode === 'correlation' 
-                                    ? "En mode **Amis**, les lignes montrent les numéros qui sortent souvent ensemble dans le même tirage."
-                                    : "En mode **Suites**, une ligne signifie que le numéro ciblé a tendance à sortir au tirage suivant."}
+                                Les couleurs représentent des "Tribus" de numéros qui évoluent ensemble. Filtrez-les via la légende pour y voir plus clair.
                             </p>
                         </div>
                     </div>
