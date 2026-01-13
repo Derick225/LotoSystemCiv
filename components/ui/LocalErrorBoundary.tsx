@@ -3,8 +3,6 @@ import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  // Allow key property explicitly to satisfy TypeScript strict checking in consumers
-  key?: React.Key;
 }
 
 interface State {

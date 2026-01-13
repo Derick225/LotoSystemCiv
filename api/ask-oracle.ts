@@ -10,16 +10,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function cleanJson(text: string) {
+    if (!text) return '{}';
+    return text.replace(/```json\n?|\n?```/g, '').trim();
+}
+
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { task, drawName, history, metrics, dataset, modelType, imageBase64, context } = await req.json();
+    const { task, drawName, history, metrics, dataset, modelType, imageBase64, context, report } = await req.json();
     const apiKey = process.env.API_KEY;
     
-    if (!apiKey) throw new Error("Clé API GEMINI non configurée (Vercel Env).");
+    if (!apiKey) throw new Error("Clé API GEMINI non configurée.");
 
     const genAI = new GoogleGenAI({ apiKey });
     let resultData;
@@ -30,12 +35,7 @@ export default async function handler(req: Request) {
         Rôle: Oracle Nexus, Expert Loterie (5/90).
         Contexte: Analyse du tirage "${drawName}".
         Données: ${JSON.stringify(history.slice(0, 10))}.
-        
         Tâche: Analyse stochastique concise.
-        1. Identifie le pattern dominant.
-        2. Suggère 3 numéros cibles.
-        3. Donne un score d'intuition.
-        4. Rédige une analyse logique Markdown.
         Format JSON strict.
       `;
 
@@ -59,7 +59,7 @@ export default async function handler(req: Request) {
             }
         }
       });
-      resultData = JSON.parse(response.text || '{}');
+      resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "narrative") {
       const response = await genAI.models.generateContent({
@@ -78,7 +78,24 @@ export default async function handler(req: Request) {
             }
         }
       });
-      resultData = JSON.parse(response.text || '{}');
+      resultData = JSON.parse(cleanJson(response.text) || '{}');
+
+    } else if (task === "simulation-audit") {
+        const response = await genAI.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `Agis comme un auditeur de risques financiers. Analyse ce rapport de backtesting de loterie et donne un avis critique court (3 phrases max) sur la viabilité de la stratégie.
+            Rapport: ${JSON.stringify(report).substring(0, 2000)}`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        audit: { type: Type.STRING }
+                    }
+                }
+            }
+        });
+        resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "vision-analysis") {
         const response = await genAI.models.generateContent({
@@ -116,7 +133,11 @@ export default async function handler(req: Request) {
                 }
             }
         });
-        resultData = JSON.parse(response.text || '{}');
+        resultData = JSON.parse(cleanJson(response.text) || '{}');
+    }
+
+    if (!resultData) {
+        throw new Error(`Task '${task}' non gérée ou réponse vide.`);
     }
 
     return new Response(JSON.stringify(resultData), {

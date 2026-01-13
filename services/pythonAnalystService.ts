@@ -1,5 +1,6 @@
 
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { isSupabaseConfigured } from './supabaseClient';
+import { invokeEdgeFunction } from './apiClient';
 import { DrawResult, PythonAnalysisResult, NotebookCell } from "../types";
 
 export const runDeepPythonAnalysis = async (
@@ -30,7 +31,8 @@ export const runDeepPythonAnalysis = async (
     try {
         if (onLog) onLog(`[CLOUD] Transmitting vector payload to Edge Function...`);
         
-        const { data, error } = await supabase.functions.invoke('ask-oracle', {
+        // Utilisation du client API unifié (Vercel Edge Proxy)
+        const { data, error } = await invokeEdgeFunction('ask-oracle', {
             body: {
                 task: 'python_kernel',
                 drawName,
@@ -44,13 +46,20 @@ export const runDeepPythonAnalysis = async (
             }
         });
 
-        if (error) throw new Error(error.message);
+        if (error) throw new Error(error.message || "Erreur de communication API");
         if (!data) throw new Error("Réponse vide du noyau distant.");
 
         if (onLog) {
             data.stdout?.forEach((line: string) => onLog(line));
             if (data.findings?.p_value) onLog(`[SUCCESS] Convergence atteinte. P-Value: ${data.findings.p_value}`);
         }
+
+        // Validation de structure minimale pour éviter le crash UI
+        const findings = data.findings || {
+            result_vector: [],
+            confidence_score: 0,
+            p_value: 1.0
+        };
 
         const cells: NotebookCell[] = [
             { id: 'c1', type: 'markdown', content: `## Analyse Avancée : ${modelType}\n**Cible** : ${drawName}\n**Dataset** : ${history.length} tirages` },
@@ -66,8 +75,8 @@ export const runDeepPythonAnalysis = async (
             modelType,
             stdout: data.stdout || [],
             script: data.script || "",
-            findings: data.findings,
-            insight: data.insight,
+            findings,
+            insight: data.insight || "Pas de conclusion générée.",
             cells
         };
 

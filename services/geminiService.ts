@@ -38,11 +38,11 @@ const generateFallbackReasoning = (drawName: string, history: DrawResult[]): Gem
     const hotNumbers = Object.entries(freq).sort((a,b) => b[1] - a[1]).slice(0, 5).map(x => parseInt(x[0]));
 
     return {
-        logicalAnalysis: `**[MODE DÉCONNECTÉ]** Lien Cloud inactif.\n\nAnalyse heuristique locale : concentration sur ${hotNumbers.slice(0,3).join(', ')}.`,
+        logicalAnalysis: `**[MODE HORS-LIGNE]** L'Oracle Cloud est inaccessible.\n\nAnalyse heuristique locale : concentration sur les fréquences récentes ${hotNumbers.slice(0,3).join(', ')}.`,
         patternType: "Heuristique Locale",
-        nextSequence: "Projection Simple",
+        nextSequence: "Projection Fréquentielle",
         anomalies: ["Connexion perdue"],
-        strategicAdvice: "Prudence.",
+        strategicAdvice: "Prudence, données IA non disponibles.",
         suggestedFocus: hotNumbers,
         intuitionScore: 50
     };
@@ -70,15 +70,19 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
             }
         });
 
-        if (error) throw error;
-        if (!data) throw new Error("Réponse vide");
+        if (error) {
+            console.warn("Oracle Edge Error:", error);
+            return generateFallbackReasoning(drawName, history);
+        }
+        
+        if (!data) throw new Error("Réponse vide de l'Oracle");
 
         const parsed = validateReasoningSchema(data);
         storage.setItem(cacheKey, JSON.stringify(parsed));
         return parsed;
 
     } catch (e: any) {
-        console.warn("Oracle Error:", e);
+        console.warn("Oracle Logic Error:", e);
         return generateFallbackReasoning(drawName, history);
     }
 };
@@ -94,18 +98,24 @@ export const generateSimulationAudit = async (reportData: any): Promise<string> 
         });
         if (error) throw error;
         return data?.audit || "Aucune réponse d'audit.";
-    } catch (e) { return "Audit IA temporairement indisponible."; }
+    } catch (e) { 
+        console.error("Simulation Audit Error:", e);
+        return "Audit IA temporairement indisponible."; 
+    }
 };
 
 export const parseResultFromImage = async (base64: string) => {
-    if (!isSupabaseConfigured()) throw new Error("Connexion Cloud requise.");
+    if (!isSupabaseConfigured()) throw new Error("Connexion Cloud requise pour la vision.");
     try {
         const { data, error } = await invokeEdgeFunction('vision-ocr', {
             body: { imageBase64: base64 }
         });
         if (error) throw error;
         return data;
-    } catch (e) { throw new Error("Échec OCR."); }
+    } catch (e) { 
+        console.error("OCR Error:", e);
+        throw new Error("Échec de l'analyse d'image."); 
+    }
 };
 
 export const analyzeChartSnapshot = async (base64Image: string, context: string): Promise<string> => {

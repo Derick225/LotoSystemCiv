@@ -144,7 +144,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                     </div>
                 )}
 
-                {status === 'completed' && result && (
+                {status === 'completed' && result && result.findings && (
                     <div className="space-y-8 animate-slide-up">
                         {/* Carte de Conclusion (Top Priority) */}
                         <div className="bg-white dark:bg-slate-800 p-8 rounded-[3.5rem] shadow-xl border border-slate-100 dark:border-slate-700 relative overflow-hidden">
@@ -156,15 +156,15 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                                     <div className="relative w-40 h-40 flex items-center justify-center mb-6">
                                         <svg className="w-full h-full transform -rotate-90">
                                             <circle cx="50%" cy="50%" r="45%" fill="none" stroke="#e2e8f0" strokeWidth="8" className="dark:stroke-slate-700" />
-                                            <circle cx="50%" cy="50%" r="45%" fill="none" stroke="#10b981" strokeWidth="8" strokeDasharray="283" strokeDashoffset={283 - (283 * result.findings.confidence_score / 100)} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+                                            <circle cx="50%" cy="50%" r="45%" fill="none" stroke="#10b981" strokeWidth="8" strokeDasharray="283" strokeDashoffset={283 - (283 * (result.findings?.confidence_score || 0) / 100)} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
                                         </svg>
                                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                            <span className="text-4xl font-black text-slate-800 dark:text-white">{result.findings.confidence_score.toFixed(0)}%</span>
+                                            <span className="text-4xl font-black text-slate-800 dark:text-white">{(result.findings?.confidence_score || 0).toFixed(0)}%</span>
                                             <span className="text-[9px] font-bold text-slate-400 uppercase">Confiance</span>
                                         </div>
                                     </div>
-                                    <div className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase text-center border ${getConfidenceLabel(result.findings.confidence_score).border} bg-opacity-10 text-slate-600 dark:text-slate-300`}>
-                                        {getConfidenceLabel(result.findings.confidence_score).text}
+                                    <div className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase text-center border ${getConfidenceLabel(result.findings?.confidence_score || 0).border} bg-opacity-10 text-slate-600 dark:text-slate-300`}>
+                                        {getConfidenceLabel(result.findings?.confidence_score || 0).text}
                                     </div>
                                 </div>
 
@@ -184,18 +184,18 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                                     <div className="bg-slate-50 dark:bg-slate-900/30 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-700/50">
                                         <div className="flex justify-between items-center mb-4">
                                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Top 5 Vecteurs (Probabilité)</h4>
-                                            <span className="text-[9px] font-bold bg-white dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-slate-500">P-Value: {result.findings.p_value}</span>
+                                            <span className="text-[9px] font-bold bg-white dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-slate-500">P-Value: {result.findings?.p_value ?? 'N/A'}</span>
                                         </div>
                                         
                                         {/* Chart Mini */}
                                         <div className="h-32 w-full mb-4">
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={result.findings.result_vector.map((n, i) => ({ n, prob: 100 - (i * 15) }))}> {/* Mock proba decreissante pour visuel */}
+                                                <BarChart data={(result.findings?.result_vector || []).map((n, i) => ({ n, prob: 100 - (i * 15) }))}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                                                     <XAxis dataKey="n" tick={{fontSize: 10, fontWeight: 'bold'}} axisLine={false} tickLine={false} />
                                                     <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '8px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px'}} />
                                                     <Bar dataKey="prob" radius={[4, 4, 0, 0]}>
-                                                        {result.findings.result_vector.map((_, index) => (
+                                                        {(result.findings?.result_vector || []).map((_, index) => (
                                                             <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#6366f1'} />
                                                         ))}
                                                     </Bar>
@@ -204,7 +204,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                                         </div>
 
                                         <div className="flex gap-3 flex-wrap justify-center">
-                                            {result.findings.result_vector.map((n, i) => (
+                                            {(result.findings?.result_vector || []).map((n, i) => (
                                                 <motion.div key={n} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: i * 0.1 }}>
                                                     <NumberBall number={n} size="md" isAttractor={i===0} />
                                                 </motion.div>
