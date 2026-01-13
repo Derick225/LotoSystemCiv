@@ -158,6 +158,45 @@ export const calculateShannonEntropy = (history: DrawResult[]): { normalized: nu
     return { normalized: entropy / maxEntropy };
 };
 
+// Implémentation réelle de la loi de Benford (Premier Chiffre)
+export const calculateBenfordCompliance = (numbers: number[]) => {
+    if (numbers.length === 0) return { score: 0 };
+    
+    // Distribution théorique de Benford pour les chiffres 1-9
+    const benfordProps = {
+        1: 0.301, 2: 0.176, 3: 0.125, 4: 0.097, 5: 0.079,
+        6: 0.067, 7: 0.058, 8: 0.051, 9: 0.046
+    };
+
+    const counts: Record<number, number> = {};
+    let totalValid = 0;
+
+    numbers.forEach(n => {
+        // On prend le premier chiffre significatif (1-9)
+        const str = n.toString();
+        const firstDigit = parseInt(str[0]);
+        if (firstDigit >= 1 && firstDigit <= 9) {
+            counts[firstDigit] = (counts[firstDigit] || 0) + 1;
+            totalValid++;
+        }
+    });
+
+    if (totalValid < 10) return { score: 50 }; // Echantillon trop faible
+
+    let chiSquare = 0;
+    for (let d = 1; d <= 9; d++) {
+        const observed = counts[d] || 0;
+        const expected = totalValid * (benfordProps as any)[d];
+        chiSquare += Math.pow(observed - expected, 2) / expected;
+    }
+
+    // Normalisation approximative du Chi2 vers un score 0-100
+    // Un Chi2 de 0 est parfait (100%). Un Chi2 > 20 est très divergent.
+    const compliance = Math.max(0, 100 - (chiSquare * 4));
+    
+    return { score: Math.round(compliance) };
+};
+
 export const runMonteCarloSimulationAsync = async (history: DrawResult[]): Promise<Record<number, number>> => {
     return await runMathWorker('monte_carlo_simulation', history);
 };
@@ -296,12 +335,6 @@ export const calculateCUSUM = (history: DrawResult[]) => {
         if (sp > 80 || sn > 80) alerts.push(i);
     }
     return { positive: pos.slice(1), negative: neg.slice(1), alerts };
-};
-
-export const calculateBenfordCompliance = (numbers: number[]) => {
-    const counts = Array(10).fill(0);
-    numbers.forEach(n => { const firstDigit = parseInt(n.toString()[0]); if (firstDigit >= 1 && firstDigit <= 9) counts[firstDigit]++; });
-    return { score: 85 };
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {

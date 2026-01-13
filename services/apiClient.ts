@@ -2,33 +2,19 @@
 import { supabase } from './supabaseClient';
 
 /**
- * Wrapper pour appeler les Edge Functions (maintenant sur Vercel /api)
- * Remplace supabase.functions.invoke pour une migration transparente.
+ * Wrapper pour appeler les Edge Functions Supabase.
+ * Utilise le client natif supabase.functions.invoke.
  */
 export const invokeEdgeFunction = async (functionName: string, options: { body?: any; headers?: any } = {}) => {
   try {
-    // Récupérer le token d'auth si disponible pour sécuriser l'appel
-    const { data: { session } } = await supabase.auth.getSession();
-    const authHeaders = session ? { 'Authorization': `Bearer ${session.access_token}` } : {};
-
-    const response = await fetch(`/api/${functionName}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        ...options.headers
-      },
-      body: JSON.stringify(options.body || {})
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body: options.body,
+      headers: options.headers
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return { data: null, error: new Error(data.error || response.statusText) };
-    }
-
-    return { data, error: null };
+    return { data, error };
   } catch (e: any) {
+    console.error(`Edge Function ${functionName} failed:`, e);
     return { data: null, error: e };
   }
 };

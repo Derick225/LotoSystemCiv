@@ -9,6 +9,32 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function cleanJson(text: string) {
+    if (!text) return '{}';
+    return text.replace(/```json\n?|\n?```/g, '').trim();
+}
+
+// Fonction utilitaire pour gérer le fallback de modèle en cas d'erreur de quota (429)
+async function generateWithFallback(genAI: any, primaryModel: string, params: any) {
+    const fallbackModel = "gemini-3-flash-preview";
+    try {
+        console.log(`Tentative avec le modèle primaire : ${primaryModel}`);
+        return await genAI.models.generateContent({ ...params, model: primaryModel });
+    } catch (e: any) {
+        // Détection large des erreurs de quota/ressource
+        const isQuotaError = e.status === 429 || 
+                             (e.message && (e.message.includes('429') || e.message.includes('quota') || e.message.includes('RESOURCE_EXHAUSTED')));
+        
+        if (isQuotaError && primaryModel !== fallbackModel) {
+            console.warn(`Quota dépassé pour ${primaryModel}. Bascule vers le fallback : ${fallbackModel}.`);
+            // Petite pause de sécurité
+            await new Promise(r => setTimeout(r, 1000));
+            return await genAI.models.generateContent({ ...params, model: fallbackModel });
+        }
+        throw e;
+    }
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -21,8 +47,6 @@ serve(async (req: Request) => {
     let resultData;
 
     if (task === "analyze") {
-      const modelName = "gemini-3-pro-preview";
-      // Prompt optimisé pour réduire les tokens et maximiser la précision
       const prompt = `
         Rôle: Oracle Nexus, Expert Loterie (5/90).
         Contexte: Analyse du tirage "${drawName}".
@@ -37,8 +61,8 @@ serve(async (req: Request) => {
         Format JSON strict requis.
       `;
 
-      const response = await genAI.models.generateContent({
-        model: modelName,
+      // Tentative avec Pro, fallback sur Flash
+      const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
         contents: prompt,
         config: { 
             responseMimeType: "application/json",
@@ -57,9 +81,10 @@ serve(async (req: Request) => {
             }
         }
       });
-      resultData = JSON.parse(response.text || '{}');
+      resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "narrative") {
+      // Narrative utilise Flash par défaut pour la vitesse
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Rédige un rapport flash exécutif (Analyste Contrarien) pour le tirage ${drawName}. Métriques: ${JSON.stringify(metrics)}.`,
@@ -76,7 +101,7 @@ serve(async (req: Request) => {
             }
         }
       });
-      resultData = JSON.parse(response.text || '{}');
+      resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "vision-analysis") {
         const response = await genAI.models.generateContent({
@@ -91,9 +116,10 @@ serve(async (req: Request) => {
         resultData = { analysis: response.text };
 
     } else if (task === "python_kernel") {
-        const response = await genAI.models.generateContent({
-            model: "gemini-3-pro-preview",
-            contents: `Simule un script Python Data Science (${modelType}) sur ce dataset réduit: ${JSON.stringify(dataset.slice(0, 30))}. Génère les logs (stdout) et les résultats JSON.`,
+        const prompt = `Simule un script Python Data Science (${modelType}) sur ce dataset réduit: ${JSON.stringify(dataset.slice(0, 30))}. Génère les logs (stdout) et les résultats JSON.`;
+        
+        const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
+            contents: prompt,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -114,7 +140,23 @@ serve(async (req: Request) => {
                 }
             }
         });
-        resultData = JSON.parse(response.text || '{}');
+        resultData = JSON.parse(cleanJson(response.text) || '{}');
+    } else if (task === "simulation-audit") {
+         const response = await genAI.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: `Agis comme un auditeur de risques financiers. Analyse ce rapport de backtesting de loterie et donne un avis critique court (3 phrases max) sur la viabilité de la stratégie.
+            Rapport: ${JSON.stringify(report).substring(0, 2000)}`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        audit: { type: Type.STRING }
+                    }
+                }
+            }
+        });
+        resultData = JSON.parse(cleanJson(response.text) || '{}');
     }
 
     return new Response(JSON.stringify(resultData), {
