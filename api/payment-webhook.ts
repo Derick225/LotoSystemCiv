@@ -14,7 +14,6 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    // CinetPay envoie souvent en x-www-form-urlencoded
     const formData = await req.formData();
     const transaction_id = formData.get('cpm_trans_id');
     

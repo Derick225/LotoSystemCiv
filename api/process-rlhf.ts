@@ -18,10 +18,6 @@ export default async function handler(req: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     
-    // Auth Check
-    const authHeader = req.headers.get('Authorization');
-    // ... Verification token optionnelle si besoin strict ...
-
     const { predictionId, rating, drawName, actualHits, user_comment } = await req.json();
 
     if (!predictionId) throw new Error("predictionId is required");

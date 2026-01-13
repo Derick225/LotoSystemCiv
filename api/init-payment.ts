@@ -45,9 +45,7 @@ export default async function handler(req: Request) {
         amount: amount,
         currency: "XOF",
         description: "Abonnement LotoPro Premium 30J",
-        // Adaptez l'URL de retour à votre domaine Vercel
         return_url: `${req.headers.get('origin') || 'https://lotopro.vercel.app'}/?payment=success`, 
-        // L'URL de notification doit être votre route Vercel
         notify_url: `https://${req.headers.get('host')}/api/payment-webhook`,
         channels: "ALL",
         metadata: JSON.stringify({ userId, plan: 'premium' })

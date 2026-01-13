@@ -45,13 +45,41 @@ export default async function handler(req: Request) {
     if (action === 'list') {
         const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
         if (error) throw error;
-        // ... (Logique de mapping identique à l'original)
-        return new Response(JSON.stringify({ users }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        
+        const userIds = users.map((u: any) => u.id);
+        const { data: prefs } = await supabaseAdmin.from('user_preferences').select('user_id, subscription').in('user_id', userIds);
+
+        const enriched = users.map((u: any) => ({
+            id: u.id,
+            email: u.email,
+            last_sign_in: u.last_sign_in_at,
+            created_at: u.created_at,
+            role: u.app_metadata?.role || 'user',
+            subscription: prefs?.find((p: any) => p.user_id === u.id)?.subscription || null
+        }));
+
+        return new Response(JSON.stringify({ users: enriched }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Implementer updateRole et delete de la même manière ...
+    if (action === 'updateRole') {
+        if (!userId || !role) throw new Error("Paramètres manquants.");
+        const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+            app_metadata: { role },
+            user_metadata: { role }
+        });
+        if (error) throw error;
+        return new Response(JSON.stringify({ success: true, user: data.user }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    if (action === 'delete') {
+        if (!userId) throw new Error("ID manquant.");
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+        if (error) throw error;
+        await supabaseAdmin.from('user_preferences').delete().eq('user_id', userId);
+        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
     
-    return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    throw new Error(`Action inconnue: ${action}`);
 
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

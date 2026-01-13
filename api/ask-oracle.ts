@@ -18,7 +18,7 @@ function cleanJson(text: string) {
 async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any) {
     const fallbackModel = "gemini-3-flash-preview";
     try {
-        // First attempt with primary model (usually Pro)
+        // First attempt with primary model
         return await genAI.models.generateContent({ ...params, model: primaryModel });
     } catch (e: any) {
         const isQuotaError = e.status === 429 || 
@@ -26,7 +26,6 @@ async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, pa
         
         if (isQuotaError && primaryModel !== fallbackModel) {
             console.warn(`Quota exceeded for ${primaryModel}. Switching to fallback: ${fallbackModel}.`);
-            // Add a small delay before retry to be safe
             await new Promise(r => setTimeout(r, 1000));
             return await genAI.models.generateContent({ ...params, model: fallbackModel });
         }
@@ -53,8 +52,14 @@ export default async function handler(req: Request) {
         Rôle: Oracle Nexus, Expert Loterie (5/90).
         Contexte: Analyse du tirage "${drawName}".
         Données: ${JSON.stringify(history.slice(0, 10))}.
+        
         Tâche: Analyse stochastique concise.
-        Format JSON strict.
+        1. Identifie le pattern dominant (ex: Miroir, Suite).
+        2. Suggère 3 numéros cibles (Focus).
+        3. Donne un score d'intuition (0-100).
+        4. Rédige une analyse logique Markdown.
+        
+        Format JSON strict requis.
       `;
 
       const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
@@ -79,10 +84,9 @@ export default async function handler(req: Request) {
       resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "narrative") {
-      // Narrative uses Flash by default, no need for fallback logic from Pro
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Rédige un rapport flash exécutif pour le tirage ${drawName}. Métriques: ${JSON.stringify(metrics)}.`,
+        contents: `Rédige un rapport flash exécutif (Analyste Contrarien) pour le tirage ${drawName}. Métriques: ${JSON.stringify(metrics)}.`,
         config: { 
             responseMimeType: "application/json",
             responseSchema: {

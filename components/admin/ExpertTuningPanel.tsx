@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
-import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, calculateOptimalWeights } from '../../services/predictionEngine';
+import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules } from '../../services/predictionEngine';
 import { LearningService } from '../../services/learningService'; // Import du nouveau service
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';

@@ -20,7 +20,7 @@ export interface ForensicAuditResult {
 }
 
 // Constantes scientifiques
-const MIN_HISTORY_SIZE = 30;
+const MIN_HISTORY_SIZE = 10;
 const BENFORD_MIN_SAMPLE = 500;
 const CRITICAL_VARIANCE = 8.0 * 0.7; // Seuil statistique pour 5 numéros sur 1-90
 const AVG_THEORETICAL_SUM = (1 + 90) / 2 * 5; // 227.5
@@ -78,12 +78,19 @@ const analyzeTemporalPatterns = (numbers: number[], history: DrawResult[], logs:
  * @param numbers - Les 5 numéros gagnants du tirage à auditer
  * @param history - Les 30+ tirages précédents pour contexte
  * @returns Audit complet avec score de suspicion (0-100)
- * @throws Error si history.length < MIN_HISTORY_SIZE
  */
 export const analyzeForManipulation = (numbers: number[], history: DrawResult[]): ForensicAuditResult => {
-  // Tolérance pour les petits historiques, mais warning dans les logs
-  if (history.length < 10) {
-      console.warn("Audit forensique : Historique très faible, résultats peu fiables.");
+  // Tolérance pour les petits historiques
+  if (history.length < 5) {
+      // Retour neutre si pas assez de données
+      return {
+          suspicionScore: 0,
+          indicators: [],
+          riggedProbability: 0,
+          entropyCollapse: false,
+          benfordCompliance: 100,
+          evidenceLogs: ["Historique insuffisant pour l'audit."]
+      };
   }
 
   const indicators: ForensicIndicator[] = [];
@@ -101,27 +108,30 @@ export const analyzeForManipulation = (numbers: number[], history: DrawResult[])
   
   const entropy = calculateShannonEntropy(history.slice(0, 100)) || { normalized: 1.0 };
   
-  // 1. Analyse de la Variance des Gaps
+  // 1. Analyse de la Variance des Gaps (Harmonie Linéaire)
   const gaps = [];
   for (let i = 0; i < sorted.length - 1; i++) {
     gaps.push(sorted[i + 1] - sorted[i]);
   }
   
   // Calcul de la variance des écarts internes
-  const avgGap = gaps.reduce((a,b) => a+b, 0) / gaps.length;
-  const gapVariance = gaps.reduce((acc, g) => acc + Math.pow(g - avgGap, 2), 0) / gaps.length;
-  
-  if (gapVariance < CRITICAL_VARIANCE) {
-    const impact = 45;
-    indicators.push({
-      label: "Harmonie Linéaire",
-      value: `σ²=${gapVariance.toFixed(2)}`,
-      severity: 'high',
-      description: "Régularité des écarts statistiquement impossible. Signature probable de sélection humaine.",
-      impact
-    });
-    logs.push(`ALERTE: Variance gaps ${gapVariance.toFixed(2)} < seuil ${CRITICAL_VARIANCE}`);
-    suspicionPoints += impact;
+  if (gaps.length > 0) {
+      const avgGap = gaps.reduce((a,b) => a+b, 0) / gaps.length;
+      const gapVariance = gaps.reduce((acc, g) => acc + Math.pow(g - avgGap, 2), 0) / gaps.length;
+      
+      // Si la variance est trop faible, cela signifie que les numéros sont espacés trop régulièrement (suspect)
+      if (gapVariance < CRITICAL_VARIANCE) {
+        const impact = 45;
+        indicators.push({
+          label: "Harmonie Linéaire",
+          value: `σ²=${gapVariance.toFixed(2)}`,
+          severity: 'high',
+          description: "Régularité des écarts statistiquement impossible. Signature probable de sélection humaine.",
+          impact
+        });
+        logs.push(`ALERTE: Variance gaps ${gapVariance.toFixed(2)} < seuil ${CRITICAL_VARIANCE}`);
+        suspicionPoints += impact;
+      }
   }
 
   // 2. Test Benford
@@ -244,7 +254,7 @@ export const generateShadowOracleVector = (history: DrawResult[], oracleScores: 
     }
   }
 
-  // Strategie Gamma: Anti-consensus pur
+  // Strategie Gamma: Anti-consensus pur (Scores moyens-hauts mais pas top)
   const shadowCandidates = scores.filter(s => s.score > 38 && !superFavorites.has(s.num))
     .sort((a, b) => b.score - a.score);
   

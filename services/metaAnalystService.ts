@@ -5,7 +5,7 @@ import { calculateSpectralMetricsAsync } from './mathService';
 import { fetchResults } from './lotteryService';
 
 /**
- * Nexus MetaAnalyst v6.1 (Version Générique Adaptative)
+ * Nexus MetaAnalyst v6.2 (Anti-Succession Edition)
  * Couche d'abstraction qui fusionne les signaux faibles pour générer des "Super Combinaisons".
  * S'adapte automatiquement aux régimes statistiques de chaque tirage.
  */
@@ -350,27 +350,28 @@ const calculatePostDrawAffinity = (history: DrawResult[], lastDraw: DrawResult):
 
 const isValidAddition = (currentCombo: number[], newNum: number): boolean => {
     if (currentCombo.includes(newNum)) return false;
+
+    // --- RÈGLE ANTI-SUCCESSION STRICTE ---
+    // On interdit tout numéro adjacent à ceux déjà sélectionnés (ex: si 12 est là, 11 et 13 sont interdits)
+    if (currentCombo.some(n => Math.abs(n - newNum) === 1)) return false;
+
     const nextCombo = [...currentCombo, newNum].sort((a, b) => a - b);
+    
+    // --- CONTRAINTE DE SOMME DÉSACTIVÉE (Demande Utilisateur) ---
+    // La somme n'est plus une priorité absolue.
+    /* 
     if (nextCombo.length >= 4) {
         const sum = nextCombo.reduce((a, b) => a + b, 0);
         if (nextCombo.length === 5 && (sum < 130 || sum > 330)) return false;
         if (nextCombo.length === 4 && sum > 300) return false;
     }
-    let consecutiveCount = 0;
-    let hasTriple = false;
-    for (let i = 0; i < nextCombo.length - 1; i++) {
-        if (nextCombo[i+1] === nextCombo[i] + 1) {
-            consecutiveCount++;
-            if (i < nextCombo.length - 2 && nextCombo[i+2] === nextCombo[i] + 2) {
-                hasTriple = true;
-            }
-        }
-    }
-    if (hasTriple) return false;
-    if (consecutiveCount > 2) return false;
+    */
+
+    // Répartition par dizaine : Max 2 par dizaine pour forcer l'étalement (vs 3 auparavant)
     const decades = nextCombo.map(n => Math.floor((n - 1) / 10));
     const decadeCounts = decades.reduce((acc, d) => { acc[d] = (acc[d] || 0) + 1; return acc; }, {} as Record<number, number>);
-    if (Object.values(decadeCounts).some(c => c > 3)) return false;
+    if (Object.values(decadeCounts).some(c => c > 2)) return false;
+
     if (nextCombo.length === 5) {
         const odds = nextCombo.filter(n => n % 2 !== 0).length;
         if (odds === 0 || odds === 5) return false; 
@@ -457,7 +458,7 @@ export async function generatePlatinumPrediction(
                 combinations.push({
                     numbers: combo,
                     score: normalizedScore,
-                    tags: ["Platinum v6", "Structure+"],
+                    tags: ["Platinum v6.1", "Flex-Sum"],
                     breakdown: { 
                         harmony: Math.round(userBias.harmony * 100), 
                         stability: Math.round(userBias.stability * 100), 
@@ -481,11 +482,11 @@ export async function generatePlatinumPrediction(
 
     return {
         kingNumbers, 
-        targetSumRange: { min: 130, max: 330, reason: "Filtre Gaussien v6" },
+        targetSumRange: { min: 0, max: 450, reason: "Flexibilité Totale" },
         hotZonesSpectro,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: 92, 
-        analysis: `Synthèse Platinum v6 Adaptative : Biais H${(userBias.harmony*100).toFixed(0)} S${(userBias.stability*100).toFixed(0)} C${(userBias.chaos*100).toFixed(0)}.`,
+        analysis: `Synthèse Platinum v6.1 (No-Seq / Flex-Sum) : Biais H${(userBias.harmony*100).toFixed(0)} S${(userBias.stability*100).toFixed(0)} C${(userBias.chaos*100).toFixed(0)}.`,
         drawName,
         timestamp: Date.now()
     };

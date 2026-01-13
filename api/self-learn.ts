@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
-  maxDuration: 60, // Augmentation du timeout pour le calcul intensif
+  maxDuration: 60,
 };
 
 const corsHeaders = {
@@ -14,7 +14,7 @@ const CONFIG = {
     POPULATION_SIZE: 20,
     GENERATIONS: 15,
     SAMPLE_DEPTH: 25,
-    TIME_LIMIT_MS: 50000 // 50s pour Node
+    TIME_LIMIT_MS: 50000 
 };
 
 const WEIGHT_KEYS = [

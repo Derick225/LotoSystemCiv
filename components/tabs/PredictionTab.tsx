@@ -11,7 +11,7 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
-import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface PredictionTabProps { drawName: string; }
@@ -22,7 +22,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   const { 
     history, lastPrediction, setLastPrediction, loading: nexusLoading, 
     spectral, fractal, velocity, cliques, calibration, volatility, regime,
-    globalWeights
+    globalWeights // ADN Global (Training + Forensic + Learning)
   } = useNexus();
   
   const [computingIA, setComputingIA] = useState(false);
@@ -45,15 +45,16 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
     }
     
     setComputingIA(true);
-    showToast(`Analyse contextuelle pour ${drawName}...`, "info");
+    showToast(`Inférence avec l'ADN ${strategyMode}...`, "info");
 
     startTransition(async () => {
         try {
-          // L'inférence utilise désormais l'historique spécifique pour l'auto-calibrage
+          // Injection CRITIQUE de l'ADN (globalWeights) dans le moteur
+          // Cela force le respect des poids appris lors de l'entraînement et des forensics
           const res = await generateMasterPrediction(
               drawName, 
               history, 
-              undefined, // On laisse l'auto-calibrage déterminer les poids si nécessaire
+              globalWeights, // <--- C'est ici que l'ADN est imposé
               { spectral, fractal, velocity, cliques }
           );
 
@@ -61,8 +62,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
               setLastPrediction(res);
               await savePredictionToHistory(drawName, res);
               
-              setStrategyMode(getStrategyName(res.usedWeights || globalWeights)); 
-              showToast("Inférence terminée. ADN spécifique appliqué.", "success");
+              showToast("Prédiction générée selon l'ADN actif.", "success");
           }
         } catch (e: any) {
           console.error("IA Collision:", e);
@@ -71,7 +71,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           if (isMounted.current) setComputingIA(false);
         }
     });
-  }, [drawName, history, spectral, fractal, velocity, cliques, setLastPrediction, showToast, globalWeights]);
+  }, [drawName, history, spectral, fractal, velocity, cliques, setLastPrediction, showToast, globalWeights, strategyMode]);
 
   const getRegimeIcon = () => {
       if (!regime) return <Binary size={18} />;
@@ -105,7 +105,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 <Sparkles size={40} className="text-indigo-600" />
             </div>
             <h3 className="text-3xl font-black mb-4 tracking-tighter text-slate-800 dark:text-white">Système Prêt</h3>
-            <p className="text-slate-500 text-center max-w-sm mb-10 font-medium">L'infrastructure est stable. Prêt à extraire les vecteurs pour <strong>{drawName}</strong>.</p>
+            <div className="flex items-center gap-2 mb-10 px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700">
+                <Lock size={12} className="text-emerald-500"/>
+                <span className="text-xs font-bold text-slate-500">ADN Actif : {strategyMode}</span>
+            </div>
             <button 
                 onClick={loadPrediction} 
                 className="group px-12 py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2.5rem] font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 transition-all transform active:scale-95 flex items-center gap-4 text-sm"
@@ -151,15 +154,18 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 </div>
             </div>
 
-            {/* DNA Radar Mini - Specific for this draw */}
-            <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center">
-                <div className="flex items-center gap-2 mb-2">
+            {/* DNA Radar Mini - DNA Lock Visualization */}
+            <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center relative overflow-hidden">
+                <div className="absolute top-2 right-4 flex items-center gap-1 text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                    <Lock size={8} /> Sync
+                </div>
+                <div className="flex items-center gap-2 mb-2 mt-2">
                     <h4 className="text-[8px] font-black text-slate-400 uppercase flex items-center gap-1">
                         <Fingerprint size={10}/> ADN {drawName}
                     </h4>
                 </div>
                 <AlgoRadar weights={lastPrediction.usedWeights || globalWeights} height={100} />
-                <div className="mt-1 text-[8px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded">
+                <div className="mt-1 text-[8px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded truncate max-w-[140px]">
                     {strategyMode}
                 </div>
             </div>
@@ -224,8 +230,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 <div className="bg-slate-900 border border-indigo-500/30 p-8 rounded-[3rem] shadow-2xl h-full flex flex-col justify-center items-center text-center">
                     <h4 className="text-white font-black text-lg mb-4">Focus IA</h4>
                     <p className="text-slate-400 text-xs leading-relaxed px-4">
-                        Ces vecteurs ont été sélectionnés car ils maximisent l'algorithme <strong>{strategyMode}</strong> qui a historiquement 
-                        une bonne performance sur {drawName}.
+                        Ces vecteurs sont générés en appliquant strictement l'ADN <strong>{strategyMode}</strong>, fruit de la fusion de l'entraînement et de l'analyse forensique.
                     </p>
                 </div>
             </div>

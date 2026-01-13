@@ -43,6 +43,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             }
         };
         const prepCorrection = async () => {
+            // Lecture des poids ACTUELS (ADN courant) pour appliquer une mutation relative
             const currentWeights = await getAlgoWeights(report.drawName);
             const currentRules = getAdaptiveRules(report.drawName);
             const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
@@ -57,8 +58,10 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         if (!correctionPlan) return;
         setApplying(true);
         try {
+            // Mise à jour de l'ADN Global et Persistance (via NexusProvider -> saveAlgoWeights)
             updateGlobalWeights(correctionPlan.newWeights);
-            showToast("🧬 Mutation génétique appliquée avec succès.", "success");
+            
+            showToast("🧬 ADN Muté & Sauvegardé : Le système a appris.", "success");
             setTimeout(onClose, 1500);
         } catch(e) {
             showToast("Erreur d'assimilation.", "error");
@@ -91,8 +94,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             setFeedbackSent(true);
             showToast("Signal RL envoyé au Cloud.", "success");
             
-            if (userRating === 'Incohérente' || userRating === 'Standard') {
-                handleApplyCorrection();
+            // Si la prédiction était mauvaise, on propose immédiatement d'appliquer la correction
+            if ((userRating === 'Incohérente' || userRating === 'Standard') && correctionPlan && correctionPlan.reasoning.length > 0) {
+               // On laisse l'utilisateur cliquer sur le bouton "Appliquer le Gradient" pour confirmer la mutation
             }
 
         } catch (e) {
@@ -103,7 +107,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
     
-    // ... (Reste du composant d'affichage identique) ...
+    // ... (Le reste de l'affichage reste identique, juste le câblage de handleApplyCorrection a changé) ...
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
             case 'Hit': return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700';

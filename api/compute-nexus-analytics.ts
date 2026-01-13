@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
-  runtime: 'edge', // Utilisation de Edge pour la vitesse
+  runtime: 'edge',
 };
 
 const corsHeaders = {
@@ -108,7 +108,6 @@ export default async function handler(req: Request) {
         return new Response(JSON.stringify({ message: "Insufficent data", drawName }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const N = history.length;
     const spectral = [];
     const fractal = [];
 

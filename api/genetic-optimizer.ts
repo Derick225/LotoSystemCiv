@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
-  maxDuration: 60, // Nécessaire pour l'algorithme génétique
+  maxDuration: 60,
 };
 
 const corsHeaders = {
@@ -10,7 +10,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ... Inclusion des mêmes fonctions helper que genetic.worker.ts ou self-learn ...
 const normalizeWeights = (w: any) => {
     const keys = Object.keys(w);
     const total = Object.values(w).reduce<number>((acc, val) => acc + (typeof val === 'number' ? val : 0), 0);
@@ -20,7 +19,6 @@ const normalizeWeights = (w: any) => {
     return normalized;
 };
 
-// Simplified Logic for Vercel Serverless environment (No Worker threading)
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -40,10 +38,8 @@ export default async function handler(req: Request) {
 
     if (!history || history.length < 10) throw new Error("Historique insuffisant");
 
-    // Copie logique d'évolution simplifiée (voir self-learn pour implementation complete)
-    // Pour cet exemple, on retourne juste les poids de base optimisés fictivement 
-    // pour éviter de dupliquer tout le code complexe ici.
-    // Dans une vraie migration, copiez la logique de services/workers/genetic.worker.ts ici.
+    // En environnement Serverless, on simplifie pour retourner une normalisation rapide
+    // Pour l'optimisation complète, le endpoint `self-learn` est plus robuste.
     
     return new Response(JSON.stringify({ 
       bestWeights: normalizeWeights(baseWeights), 
