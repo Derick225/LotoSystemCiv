@@ -15,6 +15,25 @@ function cleanJson(text: string) {
     return text.replace(/```json\n?|\n?```/g, '').trim();
 }
 
+async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any) {
+    const fallbackModel = "gemini-3-flash-preview";
+    try {
+        // First attempt with primary model (usually Pro)
+        return await genAI.models.generateContent({ ...params, model: primaryModel });
+    } catch (e: any) {
+        const isQuotaError = e.status === 429 || 
+                             (e.message && (e.message.includes('429') || e.message.includes('quota') || e.message.includes('RESOURCE_EXHAUSTED')));
+        
+        if (isQuotaError && primaryModel !== fallbackModel) {
+            console.warn(`Quota exceeded for ${primaryModel}. Switching to fallback: ${fallbackModel}.`);
+            // Add a small delay before retry to be safe
+            await new Promise(r => setTimeout(r, 1000));
+            return await genAI.models.generateContent({ ...params, model: fallbackModel });
+        }
+        throw e;
+    }
+}
+
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -30,7 +49,6 @@ export default async function handler(req: Request) {
     let resultData;
 
     if (task === "analyze") {
-      const modelName = "gemini-3-pro-preview";
       const prompt = `
         Rôle: Oracle Nexus, Expert Loterie (5/90).
         Contexte: Analyse du tirage "${drawName}".
@@ -39,8 +57,7 @@ export default async function handler(req: Request) {
         Format JSON strict.
       `;
 
-      const response = await genAI.models.generateContent({
-        model: modelName,
+      const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
         contents: prompt,
         config: { 
             responseMimeType: "application/json",
@@ -62,6 +79,7 @@ export default async function handler(req: Request) {
       resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "narrative") {
+      // Narrative uses Flash by default, no need for fallback logic from Pro
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Rédige un rapport flash exécutif pour le tirage ${drawName}. Métriques: ${JSON.stringify(metrics)}.`,
@@ -110,9 +128,10 @@ export default async function handler(req: Request) {
         resultData = { analysis: response.text };
 
     } else if (task === "python_kernel") {
-        const response = await genAI.models.generateContent({
-            model: "gemini-3-pro-preview",
-            contents: `Simule un script Python Data Science (${modelType}) sur ce dataset réduit: ${JSON.stringify(dataset.slice(0, 30))}. Génère les logs (stdout) et les résultats JSON.`,
+        const prompt = `Simule un script Python Data Science (${modelType}) sur ce dataset réduit: ${JSON.stringify(dataset.slice(0, 30))}. Génère les logs (stdout) et les résultats JSON.`;
+        
+        const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
+            contents: prompt,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {

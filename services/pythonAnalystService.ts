@@ -46,7 +46,25 @@ export const runDeepPythonAnalysis = async (
             }
         });
 
-        if (error) throw new Error(error.message || "Erreur de communication API");
+        if (error) {
+            // Tentative de parsing d'erreur structurée
+            let errMsg = error.message;
+            try {
+                if (errMsg.includes('{')) {
+                    const parsedErr = JSON.parse(errMsg.substring(errMsg.indexOf('{')));
+                    if (parsedErr.error && parsedErr.error.message) {
+                        errMsg = parsedErr.error.message;
+                    }
+                }
+            } catch (e) { /* ignore parse error */ }
+            
+            // Traduction des erreurs courantes
+            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+                throw new Error("Surcharge temporaire des serveurs IA (Quota). Veuillez réessayer dans quelques instants.");
+            }
+            throw new Error(errMsg || "Erreur de communication API");
+        }
+
         if (!data) throw new Error("Réponse vide du noyau distant.");
 
         if (onLog) {
@@ -83,6 +101,6 @@ export const runDeepPythonAnalysis = async (
     } catch (e: any) {
         console.error("Python Kernel Error:", e);
         if (onLog) onLog(`[CRITICAL] Kernel Panic: ${e.message}`);
-        throw new Error(`Échec de l'analyse distante: ${e.message}`);
+        throw new Error(`Échec analyse: ${e.message}`);
     }
 };
