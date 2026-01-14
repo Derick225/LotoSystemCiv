@@ -29,9 +29,9 @@ export interface AlgoWeights {
     poisson: number;
     leader_succession: number;
     anti_consensus: number;
-    monte_carlo: number; // NOUVEAU : Simulation probabiliste
-    lstm_pattern: number; // NOUVEAU : Séquençage récurrent
-    isolation_anomaly: number; // NOUVEAU : Détection d'anomalies
+    monte_carlo: number; 
+    lstm_pattern: number; 
+    isolation_anomaly: number; 
 }
 
 export interface StrategyBias {
@@ -293,7 +293,7 @@ export interface PlatinumCombo {
 }
 
 export interface PlatinumResult {
-    id: string; // Ajouté pour compatibilité
+    id: string;
     kingNumbers: { number: number, count: number }[];
     targetSumRange: { min: number, max: number, reason: string };
     hotZonesSpectro: number[];
@@ -302,7 +302,7 @@ export interface PlatinumResult {
     analysis: string;
     drawName: string;
     timestamp: number;
-    nextDraw?: { expectedDate: string; predictedNumbers: number[] }; // Ajouté pour compatibilité
+    nextDraw?: { expectedDate: string; predictedNumbers: number[] }; 
 }
 
 export interface GeminiReasoning {

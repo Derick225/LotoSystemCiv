@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
@@ -12,12 +11,7 @@ interface State {
   error: Error | null;
 }
 
-/**
- * LocalErrorBoundary - Targeted Module Error Isolation
- * Catches errors in children, displays fallback UI, and allows recovery.
- * Refactored to use constructor for maximum compatibility.
- */
-export class LocalErrorBoundary extends React.Component<Props, State> {
+export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -34,15 +28,12 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
   }
 
   handleReload = () => {
-    // Détection des erreurs de chargement de module (Chunk missing)
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
     
     if (isChunkError) {
-        // Si c'est une erreur de chunk, on doit recharger la page pour avoir le nouvel index
         window.location.reload();
     } else {
-        // Sinon, on tente juste de remonter le composant React
         this.setState({ hasError: false, error: null });
     }
   };

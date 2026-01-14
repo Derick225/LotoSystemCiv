@@ -19,7 +19,6 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     const normalized = { ...weights };
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
         const val = Number(normalized[key]) || 0;
-        // On autorise des pics plus élevés pour respecter les stratégies "Sniper" issues du Training
         const capped = Math.min(val, total * 0.8); 
         normalized[key] = parseFloat((capped / total).toFixed(4));
     });
@@ -118,10 +117,6 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 
 const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
 
-/**
- * AUTO-CALIBRATION: Analyse la "personnalité" mathématique du tirage
- * N'est utilisé QUE si aucun poids personnalisé (ADN) n'est fourni.
- */
 const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, analysis: string } => {
     if (history.length < 20) return { weights: normalizeWeights(baseWeights), analysis: "Données insuffisantes pour calibration." };
 
@@ -152,10 +147,6 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
     };
 };
 
-/**
- * MOTEUR D'INFÉRENCE PLATINUM (ISOLÉ)
- * Respecte strictement l'ADN (weightsToUse) s'il est fourni.
- */
 export const generateMasterPrediction = async (
     drawName: string, 
     history: DrawResult[],
@@ -166,11 +157,8 @@ export const generateMasterPrediction = async (
     if (!history || history.length < 5) throw new Error("Historique vide ou insuffisant pour ce tirage.");
 
     const integrity = validateDataIntegrity(history);
-    
     let baseWeights = weightsToUse || await getAlgoWeights(drawName);
     
-    // CRITIQUE : Si des poids sont fournis (Training/Forensic/Manual), on les utilise TELS QUELS.
-    // Pas d'auto-calibration qui viendrait "polluer" l'ADN optimisé.
     const { weights: optimizedWeights, analysis: tuningAnalysis } = weightsToUse 
         ? { weights: normalizeWeights(weightsToUse), analysis: "🧬 ADN Entraîné/Optimisé (Strict)" }
         : autoCalibrateWeights(drawName, baseWeights, history);
@@ -196,7 +184,6 @@ export const generateMasterPrediction = async (
         }
     }
 
-    // Scoring Vectoriel 1-90
     const scores = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const reg = regularity.find(r => r.number === num);
@@ -256,12 +243,19 @@ export const generateMasterPrediction = async (
 
         breakdown[num] = nBreakdown;
 
-        // FUSION PONDÉRÉE STRICTE
         let rawScore = 0;
         Object.entries(optimizedWeights).forEach(([key, weight]) => {
             const val = (nBreakdown as any)[key] || 0;
             rawScore += val * (weight as number);
         });
+
+        // BONUS SYNERGIE ORACLE BASE (Amélioration v7.1)
+        let synergyBonus = 0;
+        if (specScore > 80 && currentGap > 10 && currentGap < 20) synergyBonus += 15;
+        if (frac?.regime === 'PERSISTANT' && localFreqCount > 5) synergyBonus += 10;
+        if (frac?.regime === 'ANTI-PERSISTANT' && currentGap > 25) synergyBonus += 20;
+        
+        rawScore += synergyBonus * 0.1;
 
         return { num, score: sigmoid(rawScore) * 100 };
     });
@@ -291,9 +285,8 @@ export const calculateCorrectionsFromForensics = (
 ): { newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } => {
     let newWeights = { ...currentWeights };
     const reasoning: string[] = [];
-    const LEARNING_RATE = 0.08; // Augmenté pour une adaptation plus rapide
+    const LEARNING_RATE = 0.08; 
 
-    // Ajustement basé sur les divergences observées
     if (report.scoreDivergence.length > 0) {
         report.scoreDivergence.forEach(div => {
             const key = div.algo.toLowerCase() as keyof AlgoWeights;
@@ -310,7 +303,6 @@ export const calculateCorrectionsFromForensics = (
 
     const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     if (hits === 0) {
-        // Punition des stratégies dominantes qui ont échoué
         const keys = Object.keys(newWeights) as Array<keyof AlgoWeights>;
         keys.forEach(k => {
             if ((newWeights[k] || 0) > 0.2) {
@@ -318,7 +310,6 @@ export const calculateCorrectionsFromForensics = (
             }
         });
         
-        // Activation protocoles de secours
         newWeights.anti_consensus = (newWeights.anti_consensus || 0) + 0.05;
         newWeights.isolation_anomaly = (newWeights.isolation_anomaly || 0) + 0.05;
         
@@ -356,7 +347,6 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     if (!weights) return "Consensus Nexus";
     const w = weights;
     
-    // Detection précise de l'ADN dominant
     const entries = Object.entries(w).sort((a,b) => (b[1]||0) - (a[1]||0));
     const top = entries[0];
     

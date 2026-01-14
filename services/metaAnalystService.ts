@@ -1,8 +1,6 @@
 
 import { 
   PlatinumResult, 
-  PlatinumCombo, 
-  ScoreBreakdown, 
   DrawResult, 
   SpectralMetric,
   StrategyBias 
@@ -61,8 +59,6 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 /**
  * Fonction PRINCIPALE - Obtient la prédiction optimale pour UN tirage spécifique
- * @param drawName - Nom exact du tirage à analyser
- * @returns Prédiction complète avec analyse cyclique
  */
 export async function getOptimalPrediction(drawName: string): Promise<{
   selectedDraw: string;
@@ -71,7 +67,6 @@ export async function getOptimalPrediction(drawName: string): Promise<{
   analysis: string;
   timestamp: number;
 }> {
-  // Étape 1: Charger et valider le tirage spécifié
   console.log(`[AutoCycle] 🔍 Analysing draw: ${drawName}`);
 
   let history: DrawResult[];
@@ -116,9 +111,6 @@ Entropie: ${(analysis.metrics.entropy*100).toFixed(0)}%
 Hurst: ${analysis.metrics.hurst.toFixed(2)}
 Bias: Chaos=${(analysis.bias.chaos*100).toFixed(0)}% | Stab=${(analysis.bias.stability*100).toFixed(0)}% | Harm=${(analysis.bias.harmony*100).toFixed(0)}%
   `.trim();
-
-  console.log('[AutoCycle] 📊 Analysis:', analysisLog);
-  console.log('[AutoCycle] 🔮 Prediction:', prediction.kingNumbers.map(k => k.number).join('-'));
 
   return {
     selectedDraw: analysis.drawName,
@@ -337,7 +329,7 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
  * Sauvegarde l'historique Platinum (Placeholder)
  */
 export function savePlatinumHistory(result: PlatinumResult) {
-    // Logique de persistance (ex: localStorage ou Supabase)
+    // Logique de persistance
     try {
         const key = `nexus_platinum_${result.drawName}_latest`;
         localStorage.setItem(key, JSON.stringify(result));
@@ -357,7 +349,7 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
     return cached.result;
   }
 
-  // Calcul des poids auto-optimisés (Utilisation de l'existant ou auto-calib)
+  // Calcul des poids auto-optimisés
   const autoWeights = await getAlgoWeights(analysis.drawName);
   
   // Génération de la prédiction principale
@@ -369,11 +361,9 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
   );
 
   // Génération du vecteur anti-consensus (shadow)
-  // Note: On passe les scores du masterPred comme proxy pour oracleScores
   const oracleScores: Record<number, number> = {};
   if (masterPred.breakdown) {
       Object.entries(masterPred.breakdown).forEach(([k, v]) => {
-          // Score moyen simple
           const vals = Object.values(v).filter((x): x is number => typeof x === 'number');
           oracleScores[Number(k)] = vals.reduce((a, b) => a + b, 0) / vals.length;
       });
@@ -392,7 +382,7 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
 
   // Création du résultat Platinum
   const result: PlatinumResult = {
-    id: crypto.randomUUID(), // Utilisation native
+    id: crypto.randomUUID(), 
     kingNumbers: finalKingNumbers.map((n, i) => ({ number: n, count: 5 - i })),
     combinations: [{
       numbers: finalKingNumbers,
@@ -416,7 +406,7 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
     drawName: analysis.drawName,
     timestamp: Date.now(),
     nextDraw: {
-      expectedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Approximation
+      expectedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       predictedNumbers: finalKingNumbers
     }
   };
@@ -426,7 +416,7 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
 }
 
 /**
- * Export pour compatibilité descendante et utilisation par les composants existants
+ * Export pour compatibilité descendante
  */
 export async function generatePlatinumPrediction(
     drawName: string, 
@@ -436,7 +426,6 @@ export async function generatePlatinumPrediction(
 ): Promise<PlatinumResult> {
   const data = history || (await fetchResults(drawName)).data;
   const analysis = await analyzeDrawCycle(drawName, data);
-  // Si un bias est fourni manuellement (via l'UI), on l'utilise, sinon auto
   if (bias) analysis.bias = bias;
   return generateOptimalPrediction(analysis);
 }

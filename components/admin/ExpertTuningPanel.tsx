@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
 import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules } from '../../services/predictionEngine';
@@ -14,17 +13,14 @@ interface ExpertTuningPanelProps {
 
 export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDrawName }) => {
     const { showToast } = useToast();
-    // Connexion au Cerveau Global pour accéder aux poids en temps réel
     const { globalWeights, updateGlobalWeights, refreshData, history } = useNexus();
     
-    // État local pour l'édition manuelle
     const [localWeights, setLocalWeights] = useState<AlgoWeights>(globalWeights);
     const [rules, setRules] = useState<AdaptiveRules>(getDefaultRules());
     const [isDirty, setIsDirty] = useState(false);
     const [isCalibrating, setIsCalibrating] = useState(false);
     const [lastLearnStatus, setLastLearnStatus] = useState<string | null>(null);
     
-    // Synchronisation initiale quand le draw change ou quand le global change
     useEffect(() => {
         setLocalWeights(globalWeights);
         const loadedRules = getAdaptiveRules(selectedDrawName);
@@ -38,7 +34,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
 
     const totalWeight = useMemo((): number => {
         const vals = Object.values(localWeights);
-        return vals.reduce((a: number, b: unknown) => a + (Number(b) || 0), 0);
+        return vals.reduce((a, b) => a + (Number(b) || 0), 0);
     }, [localWeights]);
 
     const handleWeightChange = (key: keyof AlgoWeights, value: string) => {
@@ -62,7 +58,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         showToast("Poids normalisés à 1.0", "info");
     };
 
-    // --- AUTO-APPRENTISSAGE RÉEL ---
     const handleDeepLearning = async () => {
         if (history.length < 20) {
             showToast("Données insuffisantes pour le Deep Learning (Min 20).", "error");
@@ -73,15 +68,10 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         showToast("🧬 Démarrage du cycle génétique...", "info");
 
         try {
-            // Lancement de l'optimisation serveur
             const result = await LearningService.triggerAutoLearning(selectedDrawName);
             
             if (result.improvement) {
-                // Rafraîchir les données pour récupérer les nouveaux poids depuis le contexte/DB
-                // Note: LearningService a déjà mis à jour le LocalStorage via saveAlgoWeights
-                // Mais pour mettre à jour l'UI React via NexusProvider, on force un refreshData qui rechargera les poids
                 await refreshData(selectedDrawName, true);
-                
                 showToast("✅ Mutation réussie ! L'ADN a évolué.", "success");
                 setLastLearnStatus("Adaptation : À l'instant");
             } else {
@@ -100,11 +90,10 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                 performSave(localWeights);
             } else {
                 handleAutoNormalize();
-                // On utilise une version normalisée immédiate
                 const normalized = { ...localWeights };
-                const t = Object.values(normalized).reduce((a: number, b: any) => a + (Number(b) || 0), 0);
+                const t = Object.values(normalized).reduce((a, b) => a + (Number(b) || 0), 0);
                 (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(k => {
-                    const val = normalized[k];
+                    const val = Number(normalized[k]);
                     normalized[k] = parseFloat(((val || 0) / t).toFixed(4));
                 });
                 performSave(normalized);
@@ -117,7 +106,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     const performSave = (weightsToSave: AlgoWeights) => {
         updateGlobalWeights(weightsToSave);
         saveAdaptiveRules(selectedDrawName, rules);
-        // Force refresh pour propager partout
         refreshData(selectedDrawName, true);
         setIsDirty(false);
         showToast(`Profil ${selectedDrawName} sauvegardé manuellement.`, "success");
@@ -126,7 +114,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     return (
         <div className="space-y-6 animate-fade-in">
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                {/* Visualizer and Actions */}
                 <div className="xl:col-span-5 space-y-6">
                     <div className="bg-slate-900 text-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl relative overflow-hidden border border-slate-800 group">
                         <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-[80px] group-hover:bg-indigo-500/20 transition-all duration-700"></div>
@@ -187,7 +174,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     </div>
                 </div>
 
-                {/* Sliders Grid */}
                 <div className="xl:col-span-7 bg-white dark:bg-slate-800 p-6 md:p-10 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-100 dark:border-slate-700 shadow-xl overflow-hidden relative">
                     <div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/5 rounded-full blur-[60px]"></div>
                     <div className="flex justify-between items-center mb-10">
@@ -218,13 +204,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                                 </div>
                             </div>
                         ))}
-                    </div>
-                    
-                    <div className="mt-10 p-5 bg-slate-50 dark:bg-slate-950 rounded-[1.8rem] border border-slate-100 dark:border-slate-900 flex items-start gap-4">
-                        <Activity className="text-indigo-500 shrink-0 mt-0.5" size={18} />
-                        <p className="text-[10px] text-slate-500 font-medium leading-relaxed italic">
-                            "Le mode <strong>Deep RL</strong> simule des milliers de parties sur l'historique récent pour trouver la combinaison de poids qui aurait maximisé les gains. Il ajuste automatiquement les curseurs pour vous."
-                        </p>
                     </div>
                 </div>
             </div>
