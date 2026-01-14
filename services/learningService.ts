@@ -13,6 +13,8 @@ export interface LearningStatus {
 export const LearningService = {
     triggerAutoLearning: async (drawName: string): Promise<LearningStatus> => {
         if (!isSupabaseConfigured()) {
+            // Simulation hors ligne pour l'UX
+            await new Promise(r => setTimeout(r, 2000));
             return { lastRun: new Date().toISOString(), improvement: false, message: "Mode Hors-Ligne (Simulation)" };
         }
 
@@ -24,12 +26,13 @@ export const LearningService = {
             });
 
             if (error) throw new Error(error.message);
-
             if (data?.error) throw new Error(data.error);
 
             if (data && data.success) {
                 if (data.improved && data.weights) {
+                    // Sauvegarde locale immédiate pour que l'app utilise les nouveaux poids sans attendre le refresh
                     saveAlgoWeights(drawName, data.weights);
+                    
                     return {
                         lastRun: new Date().toISOString(),
                         improvement: true,
@@ -39,7 +42,7 @@ export const LearningService = {
                 return {
                     lastRun: new Date().toISOString(),
                     improvement: false,
-                    message: data.message || "Modèle stable."
+                    message: data.message || "Convergence stable atteinte."
                 };
             }
 
@@ -59,6 +62,7 @@ export const LearningService = {
         const lastLearnKey = `nexus_last_learn_${drawName}`;
         const lastLearn = localStorage.getItem(lastLearnKey);
         
+        // Si on n'a jamais appris sur ce tirage spécifique
         if (!lastLearn || lastLearn !== latestDraw.date) {
             const result = await LearningService.triggerAutoLearning(drawName);
             if (result.lastRun) {

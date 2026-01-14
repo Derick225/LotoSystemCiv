@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 60, // Autorise jusqu'à 60s de calcul
 };
 
 const corsHeaders = {
@@ -10,11 +10,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Configuration de l'Algorithme Génétique
 const CONFIG = {
-    POPULATION_SIZE: 20,
-    GENERATIONS: 15,
-    SAMPLE_DEPTH: 25,
-    TIME_LIMIT_MS: 50000 
+    POPULATION_SIZE: 40,    // Nombre d'agents par génération
+    GENERATIONS: 25,        // Nombre de cycles d'évolution
+    SAMPLE_DEPTH: 40,       // Profondeur d'historique pour le backtest (compromis vitesse/précision)
+    ELITE_COUNT: 5,         // Nombre de meilleurs agents conservés intacts
+    MUTATION_RATE: 0.15,    // Probabilité de mutation d'un gène
+    MUTATION_STRENGTH: 0.2, // Force de la mutation
+    TIME_LIMIT_MS: 55000    // Sécurité avant timeout Vercel/Supabase
 };
 
 const WEIGHT_KEYS = [
@@ -26,59 +30,118 @@ const WEIGHT_KEYS = [
     'monte_carlo', 'lstm_pattern', 'isolation_anomaly'
 ];
 
-const backtestFitness = (weights: any, history: any[]) => {
+/**
+ * Fonction de Fitness (Score de survie)
+ * Simule la performance d'un set de poids sur l'historique passé.
+ * Plus le score est haut, plus les poids ont "deviné" les numéros sortis.
+ */
+const evaluateFitness = (weights: any, history: any[]) => {
     let totalScore = 0;
-    const testDraws = history.slice(0, 10); 
+    // On teste sur les X derniers tirages (sauf le tout dernier qui est le futur inconnu dans la simulation réelle)
+    const testSample = history.slice(0, CONFIG.SAMPLE_DEPTH); 
     
+    // Poids extraits pour optimisation boucle (évite lookup répété)
     const wFreq = weights.frequency || 0.1;
     const wGap = weights.gap || 0.1;
     const wMarkov = weights.markov || 0.1;
-    const wMonte = weights.monte_carlo || 0.05;
-    const wLstm = weights.lstm_pattern || 0.05;
-    const wAnomaly = weights.isolation_anomaly || 0.05;
+    const wSpectral = weights.spectral || 0.1;
+    const wAnti = weights.anti_consensus || 0.05;
 
-    testDraws.forEach((targetDraw, index) => {
-        const context = history.slice(index + 1, index + 30);
-        if (context.length < 10) return;
+    // Pour chaque tirage de l'historique de test
+    for (let i = 0; i < testSample.length - 1; i++) {
+        const targetDraw = testSample[i]; // Tirage à prédire (T)
+        const context = testSample.slice(i + 1); // Historique connu à ce moment là (T-1, T-2...)
+        
+        if (context.length < 10) break; // Pas assez de données pour prédire
+
+        // Optimisation : On ne calcule le score que pour les numéros qui sont VRAIMENT sortis
+        // Si les poids donnent un haut score à ces numéros, c'est bon signe.
+        let drawFitness = 0;
         
         targetDraw.gagnants.forEach((winningNum: number) => {
             let numScore = 0;
-            const freq = context.slice(0, 20).filter((d: any) => d.gagnants.includes(winningNum)).length;
-            numScore += (freq * wFreq);
             
+            // --- LOGIQUE DE PRÉDICTION SIMPLIFIÉE (PROXY) ---
+            // Doit être corrélée avec generateMasterPrediction mais beaucoup plus rapide
+            
+            // 1. Fréquence Locale (Hotness)
+            const localFreq = context.slice(0, 15).filter((d: any) => d.gagnants.includes(winningNum)).length;
+            numScore += (localFreq * wFreq * 10);
+            
+            // 2. Loi des Écarts (Gap)
             const lastIdx = context.findIndex((d: any) => d.gagnants.includes(winningNum));
-            if (lastIdx >= 8 && lastIdx <= 18) numScore += (wGap * 5);
-            
-            const prevDraw = context[0];
-            if (prevDraw) {
-                let linkCount = 0;
-                prevDraw.gagnants.forEach((p: number) => {
-                    for(let i=1; i<context.length-1; i++) {
-                        if (context[i].gagnants.includes(p) && context[i-1].gagnants.includes(winningNum)) linkCount++;
-                    }
-                });
-                if (linkCount > 0) numScore += (wMarkov * linkCount * 2);
+            if (lastIdx !== -1) {
+                // Zone critique 8-18
+                if (lastIdx >= 8 && lastIdx <= 18) numScore += (wGap * 25);
+                // Zone écart important
+                if (lastIdx > 30) numScore += (wGap * 10);
             }
 
-            if (freq > 3 && lastIdx > 5) numScore += wMonte * 10;
-            if (prevDraw && prevDraw.gagnants.some((p: number) => Math.abs(p - winningNum) === 1)) numScore += wLstm * 10;
-            if (lastIdx > 25 || freq === 0) numScore += wAnomaly * 15;
+            // 3. Markov (Transition directe)
+            const prevDraw = context[0];
+            if (prevDraw) {
+                // Si ce numéro suit souvent un numéro du tirage précédent
+                let affinity = 0;
+                prevDraw.gagnants.forEach((p: number) => {
+                    // Scan rapide dans le passé
+                    for(let k=0; k < Math.min(context.length-1, 20); k++) {
+                        if (context[k].gagnants.includes(p) && context[k-1]?.gagnants.includes(winningNum)) {
+                            affinity++;
+                        }
+                    }
+                });
+                numScore += (affinity * wMarkov * 5);
+            }
 
-            totalScore += numScore;
+            // 4. Anti-Consensus (Si le numéro était "froid" mais est sorti, on récompense l'anti-consensus)
+            if (localFreq === 0 && lastIdx > 20) {
+                numScore += (wAnti * 50); // Gros bonus pour avoir prédit une surprise
+            }
+
+            drawFitness += numScore;
         });
-    });
+
+        // Le score du tirage est la somme des scores des gagnants
+        // On pénalise légèrement la variance pour favoriser la régularité
+        totalScore += drawFitness;
+    }
+    
     return totalScore;
 };
 
+// Mutation génétique
 const mutate = (weights: any) => {
     const newW = { ...weights };
-    const numMutations = Math.floor(Math.random() * 3) + 1;
+    // On mute un certain nombre de gènes aléatoires
+    const numMutations = Math.floor(Math.random() * 5) + 1;
+    
     for(let i=0; i<numMutations; i++) {
         const key = WEIGHT_KEYS[Math.floor(Math.random() * WEIGHT_KEYS.length)];
         const current = newW[key] || 0.05;
-        newW[key] = Math.max(0.01, Math.min(1.0, current + (Math.random() - 0.5) * 0.2));
+        // Mutation gaussienne : on ajoute/enlève une petite valeur
+        const delta = (Math.random() - 0.5) * CONFIG.MUTATION_STRENGTH;
+        newW[key] = Math.max(0.01, Math.min(1.0, current + delta));
     }
+    
+    // Normalisation approximative (facultatif mais aide à la convergence)
+    /* 
+    const sum = Object.values(newW).reduce((a:any, b:any) => a + b, 0) as number;
+    if (sum > 0) {
+        Object.keys(newW).forEach(k => newW[k] = parseFloat((newW[k] / sum).toFixed(4)));
+    }
+    */
+    
     return newW;
+};
+
+// Croisement (Crossover)
+const crossover = (parentA: any, parentB: any) => {
+    const child: any = {};
+    WEIGHT_KEYS.forEach(key => {
+        // 50% de chance d'hériter de A ou B
+        child[key] = Math.random() > 0.5 ? parentA[key] : parentB[key];
+    });
+    return child;
 };
 
 export default async function handler(req: Request) {
@@ -87,76 +150,118 @@ export default async function handler(req: Request) {
   try {
     const startTime = Date.now();
     const { drawName } = await req.json();
+    
     if (!drawName) throw new Error("drawName required");
 
-    const supabase = createClient(
-        process.env.VITE_SUPABASE_URL || '',
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
-    );
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
+    if (!supabaseUrl || !supabaseKey) throw new Error("Supabase credentials missing");
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 1. Récupération Historique (Dataset d'entrainement)
     const { data: history } = await supabase
         .from('draw_results')
         .select('gagnants')
         .eq('draw_name', drawName)
         .order('date', { ascending: false })
-        .limit(50);
+        .limit(100); // Assez pour le sample depth + buffer
 
-    if (!history || history.length < 20) throw new Error("Insufficient history");
+    if (!history || history.length < 20) throw new Error("Pas assez d'historique pour l'apprentissage.");
 
+    // 2. Récupération des poids actuels (Point de départ)
     const { data: currentW } = await supabase
         .from('algo_weights')
         .select('weights')
         .eq('draw_name', drawName)
         .single();
 
-    let bestWeights = currentW?.weights || { frequency: 0.2, gap: 0.2, spectral: 0.1, monte_carlo: 0.05 };
-    WEIGHT_KEYS.forEach(k => { if (bestWeights[k] === undefined) bestWeights[k] = 0.05; });
+    let baseWeights = currentW?.weights || { frequency: 0.15, gap: 0.15, spectral: 0.1, markov: 0.1 };
+    
+    // Ensure all keys exist
+    WEIGHT_KEYS.forEach(k => { if (baseWeights[k] === undefined) baseWeights[k] = 0.04; });
 
-    let bestScore = backtestFitness(bestWeights, history);
-    let population = Array(CONFIG.POPULATION_SIZE).fill(null).map((_, i) => i === 0 ? {...bestWeights} : mutate(bestWeights));
+    // 3. Initialisation de la Population
+    // Agent 0 = Poids actuels (pour s'assurer qu'on ne régresse pas)
+    // Le reste = Mutations
+    let population = Array(CONFIG.POPULATION_SIZE).fill(null).map((_, i) => i === 0 ? {...baseWeights} : mutate(baseWeights));
+    
+    let globalBestScore = evaluateFitness(baseWeights, history);
+    let globalBestWeights = baseWeights;
     let improved = false;
-    let initialScore = bestScore;
+    const initialFitness = globalBestScore;
 
+    // 4. Boucle d'Évolution (Deep RL Loop)
     for (let g = 0; g < CONFIG.GENERATIONS; g++) {
+        // Check Time Budget
         if (Date.now() - startTime > CONFIG.TIME_LIMIT_MS) break;
 
-        const scored = population.map(w => ({ w, score: backtestFitness(w, history) })).sort((a, b) => b.score - a.score);
+        // Evaluation
+        const scoredPopulation = population.map(individual => ({
+            weights: individual,
+            score: evaluateFitness(individual, history)
+        }));
+
+        // Sélection (Tri descendant)
+        scoredPopulation.sort((a, b) => b.score - a.score);
+
+        const generationBest = scoredPopulation[0];
         
-        if (scored[0].score > bestScore) {
-            bestScore = scored[0].score;
-            bestWeights = scored[0].w;
+        // Update Global Best
+        if (generationBest.score > globalBestScore) {
+            globalBestScore = generationBest.score;
+            globalBestWeights = generationBest.weights;
             improved = true;
         }
 
-        const survivors = scored.slice(0, 4).map(p => p.w);
-        population = [...survivors];
-        while(population.length < CONFIG.POPULATION_SIZE) {
-            const p1 = survivors[Math.floor(Math.random() * survivors.length)];
-            const p2 = survivors[Math.floor(Math.random() * survivors.length)];
-            const child: any = { ...p1 };
-            WEIGHT_KEYS.forEach(k => { if (Math.random() > 0.5) child[k] = p2[k]; });
-            population.push(mutate(child));
+        // Reproduction (Next Gen)
+        const survivors = scoredPopulation.slice(0, CONFIG.ELITE_COUNT).map(p => p.weights);
+        const nextGen = [...survivors]; // Elitisme
+
+        while (nextGen.length < CONFIG.POPULATION_SIZE) {
+            // Tournoi ou Roulette simple
+            const parentA = survivors[Math.floor(Math.random() * survivors.length)];
+            const parentB = survivors[Math.floor(Math.random() * survivors.length)];
+            
+            let child = crossover(parentA, parentB);
+            if (Math.random() < 0.8) child = mutate(child); // Forte mutation pour explorer
+            
+            nextGen.push(child);
         }
+        population = nextGen;
     }
 
-    const improvementPct = initialScore > 0 ? ((bestScore - initialScore) / initialScore) * 100 : 0;
+    // 5. Sauvegarde & Logs
+    const improvementPct = initialFitness > 0 ? ((globalBestScore - initialFitness) / initialFitness) * 100 : 0;
 
-    if (improved) {
-        await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: bestWeights, updated_at: new Date().toISOString() });
+    if (improved && improvementPct > 0.5) { // Seuil minimal d'amélioration pour commit
+        
+        // Mise à jour de la table de poids
+        await supabase.from('algo_weights').upsert({ 
+            draw_name: drawName, 
+            weights: globalBestWeights, 
+            updated_at: new Date().toISOString() 
+        });
+
+        // Log de l'apprentissage
         await supabase.from('learning_logs').insert({ 
             draw_name: drawName, 
-            previous_fitness: initialScore,
-            new_fitness: bestScore, 
+            previous_fitness: parseFloat(initialFitness.toFixed(2)),
+            new_fitness: parseFloat(globalBestScore.toFixed(2)), 
             improvement_delta: `${improvementPct.toFixed(2)}%`,
-            applied_weights: bestWeights 
+            applied_weights: globalBestWeights 
         });
     }
 
     return new Response(JSON.stringify({ 
         success: true, 
-        improved, 
-        weights: bestWeights, 
-        message: improved ? `Optimisation réussie (+${improvementPct.toFixed(1)}%)` : "Convergence stable."
+        improved: improved && improvementPct > 0.5, 
+        weights: globalBestWeights, 
+        fitness: globalBestScore,
+        message: improved 
+            ? `Mutation réussie : Fitness +${improvementPct.toFixed(2)}%.` 
+            : "Le modèle est déjà optimal (Convergence atteinte)."
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {

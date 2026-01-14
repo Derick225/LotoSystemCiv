@@ -17,13 +17,10 @@ interface State {
  * Now smarter: Reloads page on ChunkLoadErrors.
  */
 export class LocalErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-    };
-  }
+  public state: State = {
+    hasError: false,
+    error: null,
+  };
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
