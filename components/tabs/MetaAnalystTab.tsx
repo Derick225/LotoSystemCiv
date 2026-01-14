@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { generatePlatinumPrediction, savePlatinumHistory, type StrategyBias, calculateOptimalUserBias } from '../../services/metaAnalystService';
+import { generatePlatinumPrediction, savePlatinumHistory, calculateOptimalUserBias } from '../../services/metaAnalystService';
 import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
 import { useNexus } from '../NexusProvider';
-import type { PlatinumResult } from '../../types';
+import type { PlatinumResult, StrategyBias } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';

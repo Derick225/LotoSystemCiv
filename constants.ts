@@ -44,12 +44,12 @@ export const DRAW_SCHEDULE: Record<string, Record<string, string>> = {
   },
 };
 
-// Métadonnées visuelles pour les créneaux horaires
+// Métadonnées visuelles pour les créneaux horaires - Design Expert
 export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: string }> = {
-    '10:00': { color: 'text-amber-400', icon: '🌅', label: 'Matin' },
-    '13:00': { color: 'text-blue-400', icon: '☀️', label: 'Zénith' },
-    '16:00': { color: 'text-orange-400', icon: '🌤️', label: 'Après-Midi' },
-    '18:15': { color: 'text-indigo-400', icon: '🌙', label: 'Soir' }
+    '10:00': { color: 'text-amber-400', icon: '🌅', label: 'Morning' },
+    '13:00': { color: 'text-blue-400', icon: '☀️', label: 'Zenith' },
+    '16:00': { color: 'text-orange-400', icon: '🌤️', label: 'Daylight' },
+    '18:15': { color: 'text-indigo-400', icon: '🌙', label: 'Twilight' }
 };
 
 // Liste plate pour les itérations rapides et les sélecteurs

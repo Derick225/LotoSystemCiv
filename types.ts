@@ -34,6 +34,12 @@ export interface AlgoWeights {
     isolation_anomaly: number; // NOUVEAU : Détection d'anomalies
 }
 
+export interface StrategyBias {
+    stability: number;
+    chaos: number;
+    harmony: number;
+}
+
 export interface SubscriptionState {
     status: 'trial' | 'active' | 'expired';
     daysLeft: number;
@@ -287,6 +293,7 @@ export interface PlatinumCombo {
 }
 
 export interface PlatinumResult {
+    id: string; // Ajouté pour compatibilité
     kingNumbers: { number: number, count: number }[];
     targetSumRange: { min: number, max: number, reason: string };
     hotZonesSpectro: number[];
@@ -295,6 +302,7 @@ export interface PlatinumResult {
     analysis: string;
     drawName: string;
     timestamp: number;
+    nextDraw?: { expectedDate: string; predictedNumbers: number[] }; // Ajouté pour compatibilité
 }
 
 export interface GeminiReasoning {

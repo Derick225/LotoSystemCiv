@@ -102,9 +102,10 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                 handleAutoNormalize();
                 // On utilise une version normalisée immédiate
                 const normalized = { ...localWeights };
-                const t = Object.values(normalized).reduce((a: number, b: unknown) => a + (Number(b) || 0), 0);
+                const t = Object.values(normalized).reduce((a: number, b: any) => a + (Number(b) || 0), 0);
                 (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(k => {
-                    normalized[k] = parseFloat(((normalized[k] || 0) / t).toFixed(4));
+                    const val = normalized[k];
+                    normalized[k] = parseFloat(((val || 0) / t).toFixed(4));
                 });
                 performSave(normalized);
             }
@@ -204,7 +205,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                                         {String(key).replace('_', ' ')}
                                     </label>
                                     <span className={`text-[10px] md:text-xs font-mono font-black px-2.5 py-1 rounded-xl border shadow-sm min-w-[50px] text-center ${localWeights[key] !== globalWeights[key] ? 'bg-amber-100 text-amber-600 border-amber-200' : 'bg-indigo-50 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800/60'}`}>
-                                        {(((localWeights[key] as number) ?? 0) * 100).toFixed(1)}%
+                                        {(Number(localWeights[key] ?? 0) * 100).toFixed(1)}%
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-4">
