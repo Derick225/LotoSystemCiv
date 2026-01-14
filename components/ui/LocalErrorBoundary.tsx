@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
@@ -16,7 +17,7 @@ interface State {
  * Catches errors in children, displays fallback UI, and allows recovery.
  * Refactored to use constructor for maximum compatibility.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,

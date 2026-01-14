@@ -78,41 +78,48 @@ const AppContent: React.FC = () => {
   });
 
   useEffect(() => {
+    let isMounted = true;
     const checkAuthAndSub = async () => {
       setAuthLoading(true);
       
-      const currentSession = await authService.getSession();
-      setSession(currentSession);
-      
-      const savedSettings = getSettings();
-      audioEngine.setEnabled(savedSettings.sound);
-      
-      if (currentSession?.user) {
-        await hydrateUserData(currentSession.user.id);
-        
-        const syncedSettings = getSettings();
-        if (syncedSettings.theme !== 'system') setTheme(syncedSettings.theme);
-
-        const adminStatus = authService.isAdminUser(currentSession.user);
-        setIsAdmin(adminStatus);
-        
-        if (adminStatus) {
-            setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
-        } else {
-            const subState = await checkSubscriptionStatus(currentSession.user.id);
-            setSubscription(subState);
+      try {
+          const currentSession = await authService.getSession();
+          if (!isMounted) return;
+          setSession(currentSession);
+          
+          const savedSettings = getSettings();
+          audioEngine.setEnabled(savedSettings.sound);
+          
+          if (currentSession?.user) {
+            await hydrateUserData(currentSession.user.id);
             
-            // ACTIVER LE LISTENER REALTIME POUR PAIEMENT INSTANTANÉ
-            const unsubscribe = subscribeToSubscriptionUpdates(currentSession.user.id, (newSub) => {
-                setSubscription(newSub);
-                if (newSub.status === 'active') {
-                    showToast("Accès débloqué en temps réel !", "success");
-                    audioEngine.play('success');
-                }
-            });
-        }
+            const syncedSettings = getSettings();
+            if (syncedSettings.theme !== 'system') setTheme(syncedSettings.theme);
+
+            const adminStatus = authService.isAdminUser(currentSession.user);
+            setIsAdmin(adminStatus);
+            
+            if (adminStatus) {
+                setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
+            } else {
+                const subState = await checkSubscriptionStatus(currentSession.user.id);
+                setSubscription(subState);
+                
+                // ACTIVER LE LISTENER REALTIME POUR PAIEMENT INSTANTANÉ
+                const unsubscribe = subscribeToSubscriptionUpdates(currentSession.user.id, (newSub) => {
+                    setSubscription(newSub);
+                    if (newSub.status === 'active') {
+                        showToast("Accès débloqué en temps réel !", "success");
+                        audioEngine.play('success');
+                    }
+                });
+            }
+          }
+      } catch (e) {
+          console.error("Auth Check Error", e);
+      } finally {
+          if (isMounted) setAuthLoading(false);
       }
-      setAuthLoading(false);
 
       const params = new URLSearchParams(window.location.search);
       if (params.get('payment') === 'success') {
@@ -125,6 +132,7 @@ const AppContent: React.FC = () => {
       }
 
       const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+        if (!isMounted) return;
         setSession(newSession);
         if (newSession?.user) {
           await hydrateUserData(newSession.user.id);
@@ -147,6 +155,8 @@ const AppContent: React.FC = () => {
     };
 
     checkAuthAndSub();
+    
+    return () => { isMounted = false; };
   }, [showToast]);
 
   useEffect(() => {

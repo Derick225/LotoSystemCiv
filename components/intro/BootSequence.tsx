@@ -23,27 +23,37 @@ export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
     ];
 
     useEffect(() => {
-        audioEngine.play('boot');
-        
         let timeouts: number[] = [];
 
-        bootSteps.forEach((s, i) => {
-            const t = window.setTimeout(() => {
-                setStep(i + 1);
-                setLogs(prev => [...prev, s.text]);
-                if (i < bootSteps.length - 1) audioEngine.play('click');
-                else audioEngine.play('success');
-            }, s.delay);
-            timeouts.push(t);
-        });
+        const runSequence = async () => {
+            try {
+                audioEngine.play('boot');
+            } catch (e) {
+                console.warn("Audio boot failed", e);
+            }
+            
+            bootSteps.forEach((s, i) => {
+                const t = window.setTimeout(() => {
+                    setStep(i + 1);
+                    setLogs(prev => [...prev, s.text]);
+                    try {
+                        if (i < bootSteps.length - 1) audioEngine.play('click');
+                        else audioEngine.play('success');
+                    } catch (e) { /* ignore audio error */ }
+                }, s.delay);
+                timeouts.push(t);
+            });
 
-        const finalT = window.setTimeout(() => {
-            onComplete();
-        }, 4200);
-        timeouts.push(finalT);
+            const finalT = window.setTimeout(() => {
+                onComplete();
+            }, 4200);
+            timeouts.push(finalT);
+        };
+
+        runSequence();
 
         return () => timeouts.forEach(clearTimeout);
-    }, []);
+    }, [onComplete]);
 
     return (
         <div className="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center font-mono text-slate-300">
