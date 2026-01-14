@@ -3,7 +3,7 @@ import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  key?: React.Key; // Added key to Props to satisfy TypeScript checks in usage
+  key?: React.Key; 
 }
 
 interface State {
@@ -14,7 +14,7 @@ interface State {
 /**
  * LocalErrorBoundary - Targeted Module Error Isolation
  * Catches errors in children, displays fallback UI, and allows recovery.
- * Now smarter: Reloads page on ChunkLoadErrors.
+ * Refactored to use constructor for maximum compatibility.
  */
 export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {

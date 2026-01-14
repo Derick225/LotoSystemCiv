@@ -35,9 +35,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
 
     }, [selectedDrawName, globalWeights]);
 
-    const totalWeight = useMemo(() => {
-        const vals = Object.values(localWeights) as number[];
-        return vals.reduce((a, b) => a + (b || 0), 0);
+    const totalWeight = useMemo((): number => {
+        const vals = Object.values(localWeights);
+        return vals.reduce((a, b) => a + (Number(b) || 0), 0);
     }, [localWeights]);
 
     const handleWeightChange = (key: keyof AlgoWeights, value: string) => {
@@ -53,7 +53,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         keys.forEach(k => {
             const currentVal = normalized[k];
             if (currentVal !== undefined) {
-                normalized[k] = parseFloat(((currentVal as number) / (totalWeight as number)).toFixed(4));
+                normalized[k] = parseFloat(((currentVal as number) / totalWeight).toFixed(4));
             }
         });
         setLocalWeights(normalized);

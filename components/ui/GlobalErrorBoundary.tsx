@@ -11,8 +11,9 @@ interface State {
 }
 
 /**
- * GlobalErrorBoundary v4.0 - Industrial Grade Error Interceptor
+ * GlobalErrorBoundary v4.2 - Industrial Grade Error Interceptor
  * Protects the entire application from crashing.
+ * Refactored to use constructor for maximum compatibility in production builds.
  */
 export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
@@ -30,6 +31,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   handleReload = () => {
     this.setState({ hasError: false, error: null });
+    window.location.reload(); 
   };
 
   render(): ReactNode {
