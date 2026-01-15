@@ -1,6 +1,7 @@
 
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity } from './mathService';
+import { detectPositionalCycles } from '../utils/mathUtils';
 
 // Helper interne pour extraire le mois d'une date (format flexible)
 const extractMonth = (dateStr: string): number => {
@@ -75,12 +76,16 @@ export const getCyclicCandidates = async (_drawName: string, history: DrawResult
     const candidates: CyclicCandidate[] = [];
 
     regularity.forEach((reg: NumberRegularity) => {
-        if (reg.stdDev < 5.0 && reg.lastGaps.length >= 2) {
+        // Utilisation de la détection de cycle centralisée
+        const cycleAnalysis = detectPositionalCycles(reg.lastGaps);
+
+        if (cycleAnalysis.hasCycle) {
             const diff = Math.abs(reg.currentGap - reg.avgGap);
             
+            // On vérifie si on est proche de la moyenne ou en léger retard tolérable
             if (diff <= 2.5 || (reg.currentGap > reg.avgGap && reg.currentGap < reg.avgGap * 1.5)) {
                 
-                const precisionScore = (10 - reg.stdDev) * 8; 
+                const precisionScore = cycleAnalysis.strength;
                 const imminenceScore = (3 - Math.min(3, diff)) * 15;
                 const stabilityBonus = (1 / (Math.abs(reg.lastGaps[0] - (reg.lastGaps[1] || 0)) + 1)) * 20;
 

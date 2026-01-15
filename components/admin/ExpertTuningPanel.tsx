@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
 import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules } from '../../services/predictionEngine';
@@ -33,7 +34,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     }, [selectedDrawName, globalWeights]);
 
     const totalWeight = useMemo((): number => {
-        const vals = Object.values(localWeights);
+        const vals = Object.values(localWeights) as number[];
         return vals.reduce((a, b) => a + (Number(b) || 0), 0);
     }, [localWeights]);
 
@@ -91,9 +92,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
             } else {
                 handleAutoNormalize();
                 const normalized = { ...localWeights };
-                const t = Object.values(normalized).reduce((a, b) => a + (Number(b) || 0), 0);
+                const t = (Object.values(normalized) as number[]).reduce((a, b) => a + (Number(b) || 0), 0);
                 (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(k => {
-                    const val = Number(normalized[k]);
+                    const val = normalized[k];
                     normalized[k] = parseFloat(((val || 0) / t).toFixed(4));
                 });
                 performSave(normalized);

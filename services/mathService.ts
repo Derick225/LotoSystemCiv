@@ -6,6 +6,15 @@ import type {
     NumberRegularity, TopFollowerAnalysis, ProjectionItem,
     ClusterPoint
 } from '../types';
+import { 
+    calculateMean, 
+    calculateStandardDeviation, 
+    calculateSeriesVolatility, 
+    calculateHurstForSeries 
+} from '../utils/mathUtils';
+
+// Export des fonctions utilitaires pour compatibilité avec d'autres fichiers qui les importaient d'ici
+export { calculateMean, calculateStandardDeviation, calculateHurstForSeries };
 
 const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): Promise<any> => {
     return new Promise((resolve, reject) => {
@@ -22,14 +31,6 @@ const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): 
         const simplifiedHistory = history.map(h => ({ gagnants: h.gagnants, date: h.date, machine: h.machine }));
         worker.postMessage({ requestId, task, history: simplifiedHistory, payload });
     });
-};
-
-export const calculateMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / (data.length || 1);
-
-export const calculateStandardDeviation = (data: number[]) => {
-    const mean = calculateMean(data);
-    const variance = data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (data.length || 1);
-    return Math.sqrt(variance);
 };
 
 export const calculateDigitalRoot = (n: number): number => (n - 1) % 9 + 1;
@@ -132,14 +133,10 @@ export const calculatePoissonProbability = (lambda: number, k: number): number =
 };
 
 export const calculateVolatility = (history: DrawResult[]) => {
-    if (history.length < 10) return { score: 0, status: 'Unknown', trend: 'Flat' };
+    // Préparation des données pour l'utilitaire générique
     const sums = history.map(d => d.gagnants.reduce((a, b) => a + b, 0));
-    const stdDev = calculateStandardDeviation(sums);
-    const score = Math.min(100, Math.round(stdDev));
-    const recentMean = calculateMean(sums.slice(0, 5));
-    const globalMean = calculateMean(sums);
-    const trend = recentMean > globalMean ? 'Rising' : 'Falling';
-    return { score, status: score > 60 ? 'Chaos' : score > 30 ? 'Volatile' : 'Stable', trend };
+    // Utilisation de l'utilitaire centralisé
+    return calculateSeriesVolatility(sums);
 };
 
 export const calculateGapTrend = (history: DrawResult[]) => ({ trend: 'STABLE', velocity: 0 });
@@ -267,9 +264,14 @@ export const getNumberDetailedMetrics = async (number: number, history: DrawResu
         }
     });
     const historyGraph = history.slice(0, 20).map(d => d.gagnants.includes(number) ? 1 : 0).reverse();
+    
+    // Calcul R/S local pour ce numéro
+    const signal = history.map(d => (d.gagnants.includes(number) ? 1 : 0));
+    const calculatedHurst = calculateHurstForSeries(signal);
+
     return {
         temperature: (spec?.energy || 0),
-        hurst: frac?.hurst || 0.5,
+        hurst: frac?.hurst || calculatedHurst,
         lastGap: stat?.currentGap || 0,
         avgGap: stat?.avgGap || 0,
         stdDev: stat?.stdDev || 0,
@@ -391,7 +393,8 @@ export const getMomentumScores = async (history: DrawResult[]) => {
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]) => {
-    return { hurst: 0.5 };
+    const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
+    return { hurst: calculateHurstForSeries(signal) };
 };
 
 export const mathService = {

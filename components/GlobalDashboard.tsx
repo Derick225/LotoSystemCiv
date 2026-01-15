@@ -12,7 +12,7 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, 
-    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { useIsFetching } from '@tanstack/react-query';
@@ -144,7 +144,7 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
 
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const { regime, volatility, refreshData, history } = useNexus(); 
+    const { regime, volatility, refreshData, history, rlState } = useNexus(); 
     const { data: recentGlobalResults, refetch: refetchGlobal } = useGlobalMarketHistory();
     const isFetchingGlobal = useIsFetching();
     
@@ -276,10 +276,14 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                 <Activity size={16} className="text-indigo-400" />
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropie (Σ) : <span className="text-white">{volatility?.score || 0}%</span></span>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <Signal size={16} className="text-emerald-400" />
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sat-Link : <span className="text-emerald-500">ACTIF</span></span>
-                            </div>
+                            {rlState && (
+                                <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
+                                    <BrainCircuit size={16} className="text-amber-400" />
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                        Auto-Calib: <span className="text-amber-500">{(rlState.totalCorrection * 100).toFixed(0)}%</span>
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

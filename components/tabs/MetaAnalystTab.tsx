@@ -69,7 +69,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             if (isMounted.current) {
                 setResult(data);
                 savePlatinumHistory(data);
-                if (!loading) showToast("Fusion Platinum v5.0 stabilisée.", "success");
+                if (!loading) showToast("Fusion Platinum v7.1 (AutoCycle) stabilisée.", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast(e.message || "Erreur de fusion Platinum", "error");
@@ -102,7 +102,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div className="text-center lg:text-left w-full">
                         <div className="flex items-center justify-center lg:justify-start gap-3 mb-4">
                             <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg">
-                                Platinum Engine v5.0
+                                Platinum Engine v7.1
+                            </div>
+                            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 text-[9px] font-black uppercase">
+                                <ShieldCheck size={12}/> AutoCycle Active
                             </div>
                         </div>
                         <h2 className="text-3xl md:text-6xl font-black text-slate-800 dark:text-white tracking-tighter leading-none mb-6">
@@ -157,7 +160,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <Target size={60} className="text-indigo-500 mb-6 animate-pulse-slow" />
                         <h3 className="text-2xl font-black text-white mb-2">{result ? result.kingNumbers.length : 0} King Numbers</h3>
                         <p className="text-slate-400 text-xs font-medium max-w-xs leading-relaxed">
-                            Les "King Numbers" sont les vecteurs qui survivent à toutes les stratégies simultanées.
+                            Les "King Numbers" sont les vecteurs qui survivent à la fusion (Oracle + Shadow).
                         </p>
                         <div className="flex gap-3 mt-6 justify-center flex-wrap">
                             {result?.kingNumbers.map((k, i) => (
@@ -181,7 +184,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 <Layers size={20} className="text-indigo-600" /> Vecteurs Synthétisés
                             </h3>
                             <span className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-slate-500 uppercase">
-                                Top 5 Fusion
+                                Top Fusion
                             </span>
                         </div>
 

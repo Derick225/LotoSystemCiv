@@ -3,7 +3,9 @@ import {
   PlatinumResult, 
   DrawResult, 
   SpectralMetric,
-  StrategyBias 
+  StrategyBias,
+  CycleAnalysis,
+  PlatinumCombo
 } from '../types';
 import { 
   getAlgoWeights, 
@@ -14,7 +16,10 @@ import {
   calculateShannonEntropy,
   calculateVolatility,
   detectGameRegime,
-  validateDataIntegrity
+  validateDataIntegrity,
+  calculateRegularity,
+  calculateMean,
+  calculateStandardDeviation
 } from './mathService';
 import { fetchResults } from './lotteryService';
 import { generateShadowOracleVector } from './forensicAuditService';
@@ -26,7 +31,7 @@ import { generateShadowOracleVector } from './forensicAuditService';
  * 1. Analyse l'historique UNIQUE du tirage sélectionné
  * 2. Détection automatique de phase cyclique
  * 3. Auto-calibration des paramètres (bias, poids)
- * 4. Génération de prédiction avec ajustements dynamiques
+ * 4. Génération de prédiction avec ajustements dynamiques (Master + Shadow + CyclePriority)
  */
 
 interface CyclePhase {
@@ -48,6 +53,7 @@ interface DrawAnalysis {
     hurst: number;
     dataQuality: number;
   };
+  gapTrend: CycleAnalysis; 
 }
 
 // Cache intelligent avec invalidation par date
@@ -108,7 +114,7 @@ Tirage: ${analysis.drawName}
 Phase: ${analysis.phase.phase} (conf: ${(analysis.phase.confidence*100).toFixed(0)}%)
 Volatilité: ${analysis.metrics.volatility}%
 Entropie: ${(analysis.metrics.entropy*100).toFixed(0)}%
-Hurst: ${analysis.metrics.hurst.toFixed(2)}
+Cycle Gap: [${analysis.gapTrend.activeWindow.min}-${analysis.gapTrend.activeWindow.max}] (Avg: ${analysis.gapTrend.avgWinningGap.toFixed(1)})
 Bias: Chaos=${(analysis.bias.chaos*100).toFixed(0)}% | Stab=${(analysis.bias.stability*100).toFixed(0)}% | Harm=${(analysis.bias.harmony*100).toFixed(0)}%
   `.trim();
 
@@ -119,6 +125,92 @@ Bias: Chaos=${(analysis.bias.chaos*100).toFixed(0)}% | Stab=${(analysis.bias.sta
     analysis: analysisLog,
     timestamp: Date.now()
   };
+}
+
+/**
+ * Analyse de la Tendance des Écarts (Gap Trend)
+ * Détermine la fenêtre d'écart (min/max) qui produit le plus de gagnants actuellement.
+ */
+function analyzeGapTrend(history: DrawResult[]): CycleAnalysis {
+    const SAMPLE_SIZE = Math.min(history.length - 1, 30);
+    const winningGaps: number[] = [];
+    
+    // Calcul rétrospectif des écarts des gagnants
+    for (let i = 0; i < SAMPLE_SIZE; i++) {
+        const target = history[i];
+        const past = history.slice(i + 1);
+        
+        target.gagnants.forEach(n => {
+            // Trouver l'index de la précédente sortie
+            const gap = past.findIndex(d => d.gagnants.includes(n));
+            // Si jamais sorti dans l'historique dispo, on ignore ou on met une valeur max
+            if (gap !== -1) winningGaps.push(gap);
+        });
+    }
+    
+    if (winningGaps.length === 0) {
+        return { trend: 'BALANCED', activeWindow: { min: 5, max: 20 }, avgWinningGap: 12 };
+    }
+    
+    // Stats des écarts gagnants
+    const mean = calculateMean(winningGaps);
+    const stdDev = calculateStandardDeviation(winningGaps);
+    
+    // Définition de la fenêtre prioritaire (Current Sweet Spot)
+    // On prend +/- 0.6 Sigma autour de la moyenne actuelle des sorties
+    // Cela crée une fenêtre dynamique adaptée au comportement récent
+    const minWindow = Math.max(0, Math.floor(mean - (0.6 * stdDev)));
+    const maxWindow = Math.ceil(mean + (0.6 * stdDev));
+    
+    let trend: CycleAnalysis['trend'] = 'BALANCED';
+    if (mean < 8) trend = 'HOT_REPEATER';
+    else if (mean > 22) trend = 'COLD_RETURN';
+    
+    return {
+        trend,
+        activeWindow: { min: minWindow, max: maxWindow },
+        avgWinningGap: mean
+    };
+}
+
+/**
+ * Génère une prédiction basée spécifiquement sur le Cycle Prioritaire (Gap Trend)
+ */
+function generateCyclePrediction(
+    history: DrawResult[], 
+    gapAnalysis: CycleAnalysis,
+    spectralData: SpectralMetric[]
+): number[] {
+    const regularity = calculateRegularity(history);
+    const { min, max } = gapAnalysis.activeWindow;
+    
+    // 1. Filtrage : On ne garde que les numéros dont l'écart ACTUEL est dans la fenêtre
+    let candidates = regularity.filter(r => r.currentGap >= min && r.currentGap <= max);
+    
+    // 2. Scoring "Urgence du Cycle"
+    // On privilégie les numéros qui sont proches de leur écart moyen personnel
+    // ET qui ont une bonne énergie spectrale
+    const scoredCandidates = candidates.map(c => {
+        const gapDeviation = Math.abs(c.currentGap - c.avgGap);
+        // Score de "Justesse" par rapport à sa propre moyenne
+        const precisionScore = 100 / (1 + gapDeviation);
+        
+        const spectralInfo = spectralData.find(s => s.number === c.number);
+        const energyScore = spectralInfo ? spectralInfo.energy : 0;
+        
+        // Formule : 60% Précision Cycle + 40% Énergie Spectrale
+        return {
+            number: c.number,
+            score: (precisionScore * 0.6) + (energyScore * 0.4)
+        };
+    });
+    
+    // 3. Sélection Top 5
+    return scoredCandidates
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+        .map(c => c.number)
+        .sort((a, b) => a - b);
 }
 
 /**
@@ -155,6 +247,9 @@ async function analyzeDrawCycle(
   // Calcul du bias adaptatif
   const bias = calculateDynamicBias(volatility, entropy, regime);
 
+  // Analyse du cycle d'écarts (NOUVEAU)
+  const gapTrend = analyzeGapTrend(history);
+
   // Score de priorité (0-100)
   const priorityScore = calculatePriorityScore({
     phase,
@@ -175,7 +270,8 @@ async function analyzeDrawCycle(
       entropy: entropy.normalized,
       hurst: regime.hurst,
       dataQuality: validateDataIntegrity(history).score
-    }
+    },
+    gapTrend // Ajouté à l'analyse globale
   };
 
   ANALYSIS_CACHE.set(cacheKey, { analysis, expiry: Date.now() + CACHE_TTL });
@@ -342,25 +438,25 @@ export function savePlatinumHistory(result: PlatinumResult) {
  * Génère une prédiction optimale pour un tirage analysé
  */
 async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<PlatinumResult> {
-  const cacheKey = `${analysis.drawName}:${analysis.history[0].date}:v7`;
+  const cacheKey = `${analysis.drawName}:${analysis.history[0].date}:v7.2`; // Version bump
   const cached = PREDICTION_CACHE.get(cacheKey);
   
   if (cached && Date.now() < cached.expiry) {
     return cached.result;
   }
 
-  // Calcul des poids auto-optimisés
   const autoWeights = await getAlgoWeights(analysis.drawName);
   
-  // Génération de la prédiction principale
+  // 1. Prédiction Principale (Master - Oracle Base)
+  const spectralData = await calculateSpectralMetricsAsync(analysis.history);
+  
   const masterPred = await generateMasterPrediction(
     analysis.drawName,
     analysis.history,
     autoWeights,
-    { spectral: await calculateSpectralMetricsAsync(analysis.history) }
+    { spectral: spectralData }
   );
 
-  // Génération du vecteur anti-consensus (shadow)
   const oracleScores: Record<number, number> = {};
   if (masterPred.breakdown) {
       Object.entries(masterPred.breakdown).forEach(([k, v]) => {
@@ -374,27 +470,53 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
     oracleScores
   );
 
-  // Fusion intelligente: 70% Master + 30% Shadow
+  // 2. Fusion (Combinaison #1) : 70% Master + 30% Shadow
   const finalKingNumbers = [
     ...masterPred.suggestedNumbers.slice(0, 3),
     ...shadowVector.slice(0, 2)
   ].filter((n, i, arr) => arr.indexOf(n) === i).sort((a, b) => a - b);
 
-  // Création du résultat Platinum
+  if (finalKingNumbers.length < 5) {
+      const remaining = masterPred.candidates.filter(n => !finalKingNumbers.includes(n));
+      finalKingNumbers.push(...remaining.slice(0, 5 - finalKingNumbers.length));
+  }
+  finalKingNumbers.sort((a, b) => a - b);
+
+  // 3. Cycle Prioritaire (Combinaison #2) : Basée sur la tendance Gap Min/Max
+  const cycleVector = generateCyclePrediction(
+      analysis.history, 
+      analysis.gapTrend, 
+      spectralData
+  );
+
+  // Construction du résultat avec les 2 combinaisons
   const result: PlatinumResult = {
     id: crypto.randomUUID(), 
     kingNumbers: finalKingNumbers.map((n, i) => ({ number: n, count: 5 - i })),
-    combinations: [{
-      numbers: finalKingNumbers,
-      score: masterPred.confidence,
-      tags: ['AutoCycle v7', 'Master+Shadow Fusion'],
-      breakdown: {
-        harmony: Math.round(analysis.bias.harmony * 100),
-        stability: Math.round(analysis.bias.stability * 100),
-        chaos: Math.round(analysis.bias.chaos * 100),
-        pattern: masterPred.confidence
-      }
-    }],
+    combinations: [
+        {
+          numbers: finalKingNumbers,
+          score: masterPred.confidence,
+          tags: ['Fusion: Oracle + Shadow', 'Haute Confiance'],
+          breakdown: {
+            harmony: Math.round(analysis.bias.harmony * 100),
+            stability: Math.round(analysis.bias.stability * 100),
+            chaos: Math.round(analysis.bias.chaos * 100),
+            pattern: masterPred.confidence
+          }
+        },
+        {
+          numbers: cycleVector,
+          score: Math.round(masterPred.confidence * 0.9), // Score estimé
+          tags: [`Cycle Gap [${analysis.gapTrend.activeWindow.min}-${analysis.gapTrend.activeWindow.max}]`, analysis.gapTrend.trend === 'HOT_REPEATER' ? 'Mode Répétition' : 'Mode Retour Froid'],
+          breakdown: {
+            harmony: 80, // Forte cohérence interne
+            stability: analysis.gapTrend.trend === 'HOT_REPEATER' ? 90 : 30,
+            chaos: analysis.gapTrend.trend === 'COLD_RETURN' ? 80 : 20,
+            pattern: 85
+          }
+        }
+    ],
     targetSumRange: {
       min: finalKingNumbers.reduce((a, b) => a + b, 0) - 10,
       max: finalKingNumbers.reduce((a, b) => a + b, 0) + 10,
@@ -402,13 +524,14 @@ async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<Platin
     },
     hotZonesSpectro: masterPred.candidates.slice(0, 10),
     confidence: masterPred.confidence,
-    analysis: `AutoCycle: ${analysis.phase.phase} phase | ${analysis.metrics.volatility}% vol | Entropy ${(analysis.metrics.entropy*100).toFixed(0)}%`,
+    analysis: `AutoCycle: ${analysis.phase.phase} | GapTrend: ${analysis.gapTrend.trend}`,
     drawName: analysis.drawName,
     timestamp: Date.now(),
     nextDraw: {
       expectedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       predictedNumbers: finalKingNumbers
-    }
+    },
+    cycleAnalysis: analysis.gapTrend // Métadonnées pour l'UI
   };
 
   PREDICTION_CACHE.set(cacheKey, { result, expiry: Date.now() + CACHE_TTL });

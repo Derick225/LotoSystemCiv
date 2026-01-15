@@ -8,9 +8,6 @@ import {
 } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
-/**
- * Normalise un objet AlgoWeights pour que la somme soit exactement 1.0
- */
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     const values = Object.values(weights).map(v => Number(v) || 0);
     const total = values.reduce((a, b) => a + b, 0);
@@ -27,29 +24,11 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 
 export const getDefaultWeights = (): AlgoWeights => {
     const weights: AlgoWeights = {
-        frequency: 0.12,
-        gap: 0.08,
-        spectral: 0.08,
-        fractal: 0.04,
-        wavelet: 0.08, 
-        resistance: 0.04, 
-        markov: 0.12,
-        spatial: 0.04,
-        momentum: 0.04,
-        equilibrium: 0.04,
-        bayes: 0.02,
-        orchestration: 0.02,
-        transformer: 0.02,
-        temporal: 0.03,
-        ai_intuition: 0.01,
-        digital_root: 0.01,
-        gap_velocity: 0.04,
-        poisson: 0.04, 
-        leader_succession: 0.01,
-        anti_consensus: 0.04,
-        monte_carlo: 0.05,
-        lstm_pattern: 0.05,
-        isolation_anomaly: 0.03
+        frequency: 0.12, gap: 0.08, spectral: 0.08, fractal: 0.04, wavelet: 0.08, 
+        resistance: 0.04, markov: 0.12, spatial: 0.04, momentum: 0.04, equilibrium: 0.04,
+        bayes: 0.02, orchestration: 0.02, transformer: 0.02, temporal: 0.03, ai_intuition: 0.01,
+        digital_root: 0.01, gap_velocity: 0.04, poisson: 0.04, leader_succession: 0.01,
+        anti_consensus: 0.04, monte_carlo: 0.05, lstm_pattern: 0.05, isolation_anomaly: 0.03
     };
     return normalizeWeights(weights);
 };
@@ -60,7 +39,6 @@ export const getDefaultRules = (): AdaptiveRules => ({
 });
 
 // --- STORAGE UTILS ---
-
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
     const clean = normalizeWeights(weights);
     localStorage.setItem(`weights_${drawName}`, JSON.stringify(clean));
@@ -71,9 +49,7 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
                 weights: clean,
                 updated_at: new Date().toISOString()
             });
-        } catch (e) {
-            console.warn("Cloud weights sync error", e);
-        }
+        } catch (e) { console.warn("Cloud weights sync error", e); }
     }
 };
 
@@ -83,12 +59,7 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
 
     if (isSupabaseConfigured() && navigator.onLine) {
         try {
-            const { data } = await supabase
-                .from('algo_weights')
-                .select('weights')
-                .eq('draw_name', drawName)
-                .single();
-
+            const { data } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
             if (data && data.weights) {
                 const normalized = normalizeWeights(data.weights);
                 localStorage.setItem(`weights_${drawName}`, JSON.stringify(normalized));
@@ -114,15 +85,12 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
 };
 
 // --- CORE ENGINE LOGIC ---
-
 const sigmoid = (t: number) => 1 / (1 + Math.exp(-0.1 * (t - 50)));
 
 const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, history: DrawResult[]): { weights: AlgoWeights, analysis: string } => {
     if (history.length < 20) return { weights: normalizeWeights(baseWeights), analysis: "Données insuffisantes pour calibration." };
-
     const tuned = { ...baseWeights };
     const reportParts: string[] = [];
-
     const sums = history.slice(0, 30).map(d => d.gagnants.reduce((a, b) => a + b, 0));
     const meanSum = sums.reduce((a, b) => a + b, 0) / sums.length;
     const variance = sums.reduce((a, b) => a + Math.pow(b - meanSum, 2), 0) / sums.length;
@@ -140,11 +108,7 @@ const autoCalibrateWeights = (drawName: string, baseWeights: AlgoWeights, histor
         tuned.equilibrium = (tuned.equilibrium || 0.05) * 1.5;
         reportParts.push("Jeu Stable -> Suivi de tendance LSTM");
     }
-
-    return { 
-        weights: normalizeWeights(tuned), 
-        analysis: reportParts.join(' | ') 
-    };
+    return { weights: normalizeWeights(tuned), analysis: reportParts.join(' | ') };
 };
 
 export const generateMasterPrediction = async (
@@ -154,13 +118,15 @@ export const generateMasterPrediction = async (
     extraMetrics?: any
 ): Promise<Prediction> => {
     
-    if (!history || history.length < 5) throw new Error("Historique vide ou insuffisant pour ce tirage.");
+    if (!history || history.length < 5) throw new Error("Historique vide ou insuffisant.");
 
     const integrity = validateDataIntegrity(history);
     let baseWeights = weightsToUse || await getAlgoWeights(drawName);
     
+    // Auto-Calibration est maintenant une surcouche optionnelle si les poids ne sont pas figés
+    // Mais on préfère utiliser les poids RL (Reinforcement Learning) s'ils sont fournis
     const { weights: optimizedWeights, analysis: tuningAnalysis } = weightsToUse 
-        ? { weights: normalizeWeights(weightsToUse), analysis: "🧬 ADN Entraîné/Optimisé (Strict)" }
+        ? { weights: normalizeWeights(weightsToUse), analysis: "🧬 ADN Entraîné (Strict)" }
         : autoCalibrateWeights(drawName, baseWeights, history);
     
     const volatility = calculateVolatility(history);
@@ -231,14 +197,7 @@ export const generateMasterPrediction = async (
             monte_carlo: monteCarloScores[num] || 0,
             lstm_pattern: lstmScores[num] || 0,
             isolation_anomaly: anomalyScores[num] || 0,
-            momentum: 50,
-            orchestration: 0,
-            equilibrium: 0,
-            bayes: 0,
-            ai_intuition: 0,
-            digital_root: 0,
-            leader_succession: 0,
-            transformer: 0
+            momentum: 50, orchestration: 0, equilibrium: 0, bayes: 0, ai_intuition: 0, digital_root: 0, leader_succession: 0, transformer: 0
         };
 
         breakdown[num] = nBreakdown;
@@ -249,23 +208,34 @@ export const generateMasterPrediction = async (
             rawScore += val * (weight as number);
         });
 
-        // BONUS SYNERGIE ORACLE BASE (Amélioration v7.1)
-        let synergyBonus = 0;
-        if (specScore > 80 && currentGap > 10 && currentGap < 20) synergyBonus += 15;
-        if (frac?.regime === 'PERSISTANT' && localFreqCount > 5) synergyBonus += 10;
-        if (frac?.regime === 'ANTI-PERSISTANT' && currentGap > 25) synergyBonus += 20;
+        // --- ORACLE BASE SYNERGY (NON-LINEAR BOOST) ---
+        // 1. Confluence Spectrale + Gap : Le numéro a de l'énergie ET il est dans la zone de tir
+        if (specScore > 80 && currentGap > 10 && currentGap < 20) {
+            rawScore += 15; 
+        }
         
-        rawScore += synergyBonus * 0.1;
+        // 2. Confluence Fractale : Ajustement selon le régime
+        // Si Persistent (Tendance) -> On booste si fréquence locale haute
+        if (frac?.regime === 'PERSISTANT' && localFreqCount > 5) {
+            rawScore += 10;
+        }
+        // Si Anti-Persistent (Retour Moyenne) -> On booste si Gap élevé
+        if (frac?.regime === 'ANTI-PERSISTANT' && currentGap > 25) {
+            rawScore += 20;
+        }
+
+        // 3. Technical Breakout : GapVelocity + Resistance
+        if (gapTrend.trend === 'ACCELERATING' && resistScore > 50) {
+            rawScore += 12;
+        }
 
         return { num, score: sigmoid(rawScore) * 100 };
     });
 
     const sorted = scores.sort((a, b) => b.score - a.score);
     const suggested = sorted.slice(0, 5).map(s => s.num);
-    
     const signalClarity = sorted[0].score - sorted[10].score;
     let baseConfidence = Math.min(99, Math.round(70 + signalClarity));
-    
     if (integrity.score < 80) baseConfidence *= 0.8;
 
     return {
@@ -274,7 +244,8 @@ export const generateMasterPrediction = async (
         confidence: baseConfidence,
         analysis: `${tuningAnalysis}. Volatilité: ${volatility.score}%.`,
         breakdown,
-        usedWeights: optimizedWeights
+        usedWeights: optimizedWeights,
+        timestamp: Date.now() // Timestamp pour le tracking RL
     };
 };
 
@@ -291,12 +262,9 @@ export const calculateCorrectionsFromForensics = (
         report.scoreDivergence.forEach(div => {
             const key = div.algo.toLowerCase() as keyof AlgoWeights;
             const boost = (div.impact / 100) * LEARNING_RATE;
-            
             if (newWeights[key] !== undefined) {
                 newWeights[key] = (Number(newWeights[key]) || 0) + boost;
-                if (boost > 0.01) {
-                    reasoning.push(`Renforcement ${div.algo} (+${(boost*100).toFixed(1)}%) suite à la détection post-mortem.`);
-                }
+                if (boost > 0.01) reasoning.push(`Renforcement ${div.algo} (+${(boost*100).toFixed(1)}%)`);
             }
         });
     }
@@ -304,25 +272,15 @@ export const calculateCorrectionsFromForensics = (
     const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     if (hits === 0) {
         const keys = Object.keys(newWeights) as Array<keyof AlgoWeights>;
-        keys.forEach(k => {
-            if ((newWeights[k] || 0) > 0.2) {
-                newWeights[k] = (newWeights[k] || 0) * 0.9;
-            }
-        });
-        
+        keys.forEach(k => { if ((newWeights[k] || 0) > 0.2) newWeights[k] = (newWeights[k] || 0) * 0.9; });
         newWeights.anti_consensus = (newWeights.anti_consensus || 0) + 0.05;
         newWeights.isolation_anomaly = (newWeights.isolation_anomaly || 0) + 0.05;
-        
-        reasoning.push("Échec total : Mutation divergente activée (Anti-Consensus + Anomalie).");
+        reasoning.push("Échec total : Mutation divergente activée.");
     } else if (hits >= 3) {
         reasoning.push("ADN Performant : Consolidation des acquis.");
     }
 
-    return { 
-        newWeights: normalizeWeights(newWeights), 
-        newRules: currentRules, 
-        reasoning 
-    };
+    return { newWeights: normalizeWeights(newWeights), newRules: currentRules, reasoning };
 };
 
 export const analyzeTicketStrength = async (nums: number[], _drawName: string): Promise<TicketAnalysisResult> => {
@@ -332,10 +290,8 @@ export const analyzeTicketStrength = async (nums: number[], _drawName: string): 
     const warnings = [];
     if (ac < 7) { score -= 15; warnings.push("Faible complexité structurelle."); }
     if (sum < 150 || sum > 300) { score -= 10; warnings.push("Somme Sigma atypique."); }
-    
     const odd = nums.filter(n => n % 2 !== 0).length;
     if (odd < 2 || odd > 3) { score -= 5; warnings.push("Déséquilibre Pair/Impair."); }
-
     return {
         score: Math.max(0, Math.min(100, score + (ac * 5))),
         verdict: score > 70 ? "Vecteur Élite" : score > 50 ? "Vecteur Standard" : "Fragile",
@@ -345,24 +301,15 @@ export const analyzeTicketStrength = async (nums: number[], _drawName: string): 
 
 export const getStrategyName = (weights: AlgoWeights): string => {
     if (!weights) return "Consensus Nexus";
-    const w = weights;
-    
-    const entries = Object.entries(w).sort((a,b) => (b[1]||0) - (a[1]||0));
+    const entries = Object.entries(weights).sort((a,b) => (b[1]||0) - (a[1]||0));
     const top = entries[0];
-    
     if (top && (top[1] as number) > 0.2) {
         const nameMap: Record<string, string> = {
-            frequency: "Domination Fréquence",
-            gap: "Sniper d'Écarts",
-            spectral: "Résonance Harmonique",
-            markov: "Chaîne de Markov",
-            monte_carlo: "Simulation Stochastique",
-            lstm_pattern: "Séquenceur Neural",
-            isolation_anomaly: "Détecteur Anomalie",
-            anti_consensus: "Contrarien"
+            frequency: "Domination Fréquence", gap: "Sniper d'Écarts", spectral: "Résonance Harmonique",
+            markov: "Chaîne de Markov", monte_carlo: "Simulation Stochastique", lstm_pattern: "Séquenceur Neural",
+            isolation_anomaly: "Détecteur Anomalie", anti_consensus: "Contrarien"
         };
         return nameMap[top[0]] || `Dominante ${top[0]}`;
     }
-    
     return "Hybride Équilibré";
 };

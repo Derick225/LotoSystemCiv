@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getFullOrchestrationAnalysis } from '../../services/orchestrationService';
+import { getFullOrchestrationAnalysis, analyzeShortTermMimicry } from '../../services/orchestrationService';
 import { useNexus } from '../NexusProvider';
-import type { OrchestrationMetrics, DrawResult } from '../../types';
+import type { OrchestrationMetrics, DrawResult, MimicryMetric } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { OrchestrationRadar } from '../OrchestrationRadar';
-import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy } from 'lucide-react';
 
 interface OrchestrationTabProps { drawName: string; }
 
@@ -124,10 +124,48 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
     );
 };
 
+// --- COMPOSANT MIMICRY CARD ---
+const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
+    return (
+        <div className="bg-slate-50 dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-lg">
+            <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-3">
+                <Copy size={16} className="text-amber-500"/> Mimétisme Séquentiel (3 Derniers)
+            </h4>
+            
+            {mimicry.length === 0 ? (
+                <div className="text-center text-xs text-slate-400 italic py-6">
+                    Aucun pattern de répétition immédiate détecté sur T, T-1, T-2.
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {mimicry.slice(0, 4).map((m, i) => (
+                        <div key={m.number} className="flex items-center justify-between p-3 rounded-2xl bg-white dark:bg-black/20 border border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-3">
+                                <NumberBall number={m.number} size="sm" />
+                                <div>
+                                    <div className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase">{m.type}</div>
+                                    <div className="text-[9px] font-mono text-slate-400">Source: {m.sourceDraw}</div>
+                                </div>
+                            </div>
+                            <div className="flex flex-col items-end">
+                                <span className={`text-sm font-black ${m.score >= 50 ? 'text-emerald-500' : 'text-indigo-500'}`}>{m.score}pts</span>
+                                <div className="h-1 w-12 bg-slate-200 dark:bg-slate-700 rounded-full mt-1">
+                                    <div className={`h-full rounded-full ${m.score >= 50 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min(100, m.score)}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) => {
     const { history, loading: nexusLoading } = useNexus();
     const [metrics, setMetrics] = useState<OrchestrationMetrics | null>(null);
     const [prevDraw, setPrevDraw] = useState<DrawResult | null>(null);
+    const [mimicryData, setMimicryData] = useState<MimicryMetric[]>([]);
     const [loading, setLoading] = useState(true);
     const [expandedCard, setExpandedCard] = useState<number | null>(null); 
     const isMounted = useRef(true);
@@ -138,9 +176,15 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             setLoading(true);
             try {
                 if (history.length > 2 && isMounted.current) {
-                    const res = await getFullOrchestrationAnalysis(drawName, history);
+                    // Calcul parallèle
+                    const [res, mim] = await Promise.all([
+                        getFullOrchestrationAnalysis(drawName, history),
+                        Promise.resolve(analyzeShortTermMimicry(history))
+                    ]);
+                    
                     if (isMounted.current) {
                         setMetrics(res);
+                        setMimicryData(mim);
                         setPrevDraw(history[0]); 
                     }
                 }
@@ -188,11 +232,17 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                         <VectorFlowChart prevDraw={prevDraw.gagnants} candidates={metrics.topCandidates.map(c => c.number)} />
                     </div>
                 )}
-                <div className="bg-white dark:bg-slate-800 p-8 rounded-[3.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
-                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-8 flex items-center gap-3">
-                        <Activity size={18} className="text-rose-500"/> Spectre des Menaces Hebdo
-                    </h4>
-                    <OrchestrationRadar drawName={drawName} />
+                
+                <div className="space-y-8">
+                    {/* Mimicry Card (Nouvel ajout) */}
+                    <MimicryCard mimicry={mimicryData} />
+
+                    <div className="bg-white dark:bg-slate-800 p-8 rounded-[3.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-8 flex items-center gap-3">
+                            <Activity size={18} className="text-rose-500"/> Spectre des Menaces Hebdo
+                        </h4>
+                        <OrchestrationRadar drawName={drawName} />
+                    </div>
                 </div>
             </div>
 

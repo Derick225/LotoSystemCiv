@@ -1,5 +1,5 @@
 
-import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics } from '../types';
+import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric } from '../types';
 import { calculateSuccessionMatrixAsync } from './mathService';
 
 export interface OrchestrationConfig {
@@ -70,6 +70,63 @@ export const analyzePredictionError = (drawName: string, actualDraw: DrawResult,
     }
     
     return { auditLessons: lessons };
+};
+
+/**
+ * Analyse le mimétisme séquentiel sur les 3 derniers tirages (T vs T-1, T vs T-2).
+ * Détecte les répétitions exactes et les effets de voisinage immédiat.
+ */
+export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] => {
+    if (history.length < 3) return [];
+    
+    // T = Dernier tirage (history[0])
+    // T-1 = Avant-dernier (history[1])
+    // T-2 = Ante-pénultième (history[2])
+    const t0 = history[0];
+    const t1 = history[1];
+    const t2 = history[2];
+    
+    const metrics: MimicryMetric[] = [];
+
+    // On analyse chaque numéro du dernier tirage pour voir d'où il vient
+    t0.gagnants.forEach(n => {
+        let score = 0;
+        let type: MimicryMetric['type'] = 'Complexe';
+        let sourceSet = new Set<string>();
+
+        // Check T-1 (Impact Fort)
+        if (t1.gagnants.includes(n)) { 
+            score += 50; 
+            type = 'Direct'; 
+            sourceSet.add('T-1'); 
+        } else if (t1.gagnants.includes(n-1) || t1.gagnants.includes(n+1)) { 
+            score += 15; 
+            if(score < 30) type = 'Voisin'; 
+            sourceSet.add('T-1'); 
+        }
+
+        // Check T-2 (Impact Latent)
+        if (t2.gagnants.includes(n)) { 
+            score += 30; 
+            if(type === 'Complexe') type = 'Lag'; 
+            sourceSet.add('T-2'); 
+        } else if (t2.gagnants.includes(n-1) || t2.gagnants.includes(n+1)) { 
+            score += 10; 
+            if(type === 'Complexe') type = 'Voisin'; 
+            sourceSet.add('T-2'); 
+        }
+
+        if (score > 0) {
+            metrics.push({ 
+                number: n, 
+                score, 
+                type, 
+                sourceDraw: Array.from(sourceSet).join(' & ') || 'Mixte' 
+            });
+        }
+    });
+
+    return metrics.sort((a,b) => b.score - a.score);
 };
 
 export const calculateOrchestrationScores = (history: DrawResult[], config: OrchestrationConfig = DEFAULT_CONFIG): Record<number, number> => {

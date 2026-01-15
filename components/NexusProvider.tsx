@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
-  NexusContextType, OracleVocalContext
+  NexusContextType, OracleVocalContext, RLState
 } from '../types';
 import { lotteryService, checkAndSyncRecentResults, getNextScheduledDraw } from '../services/lotteryService';
 import { 
@@ -14,7 +14,8 @@ import {
 } from '../services/mathService';
 import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
-import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
+import { getPredictionHistoryAsync, calculateHistoricalPerformance, savePredictionToHistory } from '../services/predictionHistoryService';
+import { ReinforcementLearningService } from '../services/reinforcementLearningService';
 import { LearningService } from '../services/learningService'; 
 import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast'; 
@@ -51,6 +52,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // State: User Interactions & Configuration
   const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync(drawName));
   const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
+  const [rlState, setRlState] = useState<RLState | null>(null);
+
   const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
@@ -70,26 +73,52 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       checkConnection();
   }, []);
 
-  // Auto-Learning Trigger
+  // --- REINFORCEMENT LEARNING LOOP (AUTO-CALIBRATION) ---
   useEffect(() => {
-      if (history.length > 0 && lastPrediction && drawName !== 'ALL') {
-          const lastDraw = history[0];
-          const hits = lastPrediction.suggestedNumbers.filter(n => lastDraw.gagnants.includes(n)).length;
+      // Déclenche l'apprentissage si un nouveau résultat arrive et qu'on a une prédiction récente en mémoire
+      // qui correspond au tirage précédent (donc le résultat est "nouveau" par rapport à la prédiction)
+      
+      const checkAndTrain = async () => {
+          if (history.length < 2 || !lastPrediction || drawName === 'ALL') return;
+
+          const lastDraw = history[0]; // Le tout dernier résultat
           
-          if (hits < 2) {
-              const lastAutoLearn = localStorage.getItem(`auto_learn_${drawName}_${lastDraw.date}`);
-              if (!lastAutoLearn) {
-                  LearningService.triggerAutoLearning(drawName).then(res => {
-                      if (res.improvement) {
-                          showToast("🧬 Le système s'est auto-corrigé après le dernier résultat.", "info");
-                          getAlgoWeights(drawName).then(w => setGlobalWeights(w));
-                          localStorage.setItem(`auto_learn_${drawName}_${lastDraw.date}`, 'done');
-                      }
-                  });
+          // On vérifie si la dernière prédiction a été faite AVANT ce tirage
+          // (Simple check: si la prédiction ne contient pas ce tirage dans son dataset, mais ici on simplifie)
+          // On utilise une clé de stockage pour ne pas apprendre 2 fois le même tirage
+          
+          const rlKey = `nexus_rl_${drawName}_${lastDraw.date}`;
+          const alreadyLearned = localStorage.getItem(rlKey);
+
+          if (!alreadyLearned) {
+              // Lancement du cycle RL
+              try {
+                  const { newWeights, state, log } = await ReinforcementLearningService.processDrawResult(
+                      drawName,
+                      lastDraw,
+                      lastPrediction,
+                      globalWeights
+                  );
+                  
+                  // Mise à jour de l'ADN (Poids)
+                  updateGlobalWeights(newWeights);
+                  setRlState(state);
+                  
+                  // Marqueur pour ne pas répéter
+                  localStorage.setItem(rlKey, 'done');
+                  
+                  // Feedback UI Discret
+                  showToast(`🧠 ${log}`, "success");
+                  
+              } catch (e) {
+                  console.error("RL Loop Error", e);
               }
           }
-      }
-  }, [history, lastPrediction, drawName]);
+      };
+
+      checkAndTrain();
+  }, [history, lastPrediction, drawName, globalWeights]);
+
 
   // --- CORE DATA LOADING ---
   const loadData = useCallback(async () => {
@@ -99,7 +128,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
     
     // Reset light states immediately
-    setLastPrediction(null);
     setSmartInsights([]);
 
     try {
@@ -147,9 +175,14 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         setLoading(false); // UI can show data now, heavy calcs continue
 
+        // Chargement des poids persistants
         getAlgoWeights(drawName).then(w => {
             if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
         });
+
+        // Chargement de l'état RL
+        const savedRLState = localStorage.getItem(`rl_state_${drawName}`);
+        if (savedRLState) setRlState(JSON.parse(savedRLState));
 
         const activeHistory = hist.length === 0 ? [] : hist; 
 
@@ -179,7 +212,11 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const insights = await generateSmartInsights(drawName, computeSample, spec, gapsData, regData);
             setSmartInsights(insights);
 
-            if (preds.length > 5) {
+            if (preds.length > 0) {
+                // On récupère la dernière prédiction stockée pour le cycle RL
+                const latestPred = preds[0].prediction;
+                setLastPrediction(latestPred);
+
                 const perf = calculateHistoricalPerformance(preds, activeHistory);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
@@ -231,7 +268,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [drawName]);
 
   const updateGlobalWeights = useCallback((w: AlgoWeights) => {
-      audioEngine.play('success'); 
+      // Pas de son ici pour ne pas spammer lors de l'auto-learn
       setGlobalWeights(w); 
       import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
   }, [drawName]);
@@ -275,12 +312,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cliques,
     vocalContext,
     hoveredNumber,
-    setHoveredNumber
+    setHoveredNumber,
+    rlState
   }), [
     drawName, history, spectral, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, 
     loading, correlationMatrix, regularity, calibration, cliques, 
-    vocalContext, hoveredNumber
+    vocalContext, hoveredNumber, rlState
   ]);
 
   return (

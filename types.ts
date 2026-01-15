@@ -34,6 +34,13 @@ export interface AlgoWeights {
     isolation_anomaly: number; 
 }
 
+export interface RLState {
+    lastCalibration: number; // Timestamp
+    learningRate: number; // Alpha (vitesse d'apprentissage)
+    streak: number; // Nombre de succès/échecs consécutifs
+    totalCorrection: number; // Somme des ajustements
+}
+
 export interface StrategyBias {
     stability: number;
     chaos: number;
@@ -70,6 +77,7 @@ export interface Prediction {
     analysis: string;
     breakdown?: Record<number, ScoreBreakdown>;
     usedWeights?: AlgoWeights;
+    timestamp?: number; // Added for RL tracking
 }
 
 export interface SmartInsight {
@@ -131,6 +139,8 @@ export interface NexusContextType {
     // Interaction UI
     hoveredNumber: number | null;
     setHoveredNumber: (n: number | null) => void;
+    // RL State
+    rlState: RLState | null;
 }
 
 // Forensic and history types
@@ -148,6 +158,13 @@ export interface ForensicReport {
     matches: ForensicEvidence[];
     missedOpportunities: { number: number; reason: string }[];
     scoreDivergence: { algo: string; impact: number }[];
+}
+
+export interface MimicryMetric {
+    number: number;
+    score: number;
+    type: 'Direct' | 'Lag' | 'Voisin' | 'Complexe';
+    sourceDraw: string;
 }
 
 export interface PredictionHistoryItem {
@@ -292,6 +309,12 @@ export interface PlatinumCombo {
     breakdown: { stability: number, chaos: number, harmony: number, pattern: number };
 }
 
+export interface CycleAnalysis {
+    trend: 'HOT_REPEATER' | 'COLD_RETURN' | 'BALANCED';
+    activeWindow: { min: number, max: number };
+    avgWinningGap: number;
+}
+
 export interface PlatinumResult {
     id: string;
     kingNumbers: { number: number, count: number }[];
@@ -303,6 +326,7 @@ export interface PlatinumResult {
     drawName: string;
     timestamp: number;
     nextDraw?: { expectedDate: string; predictedNumbers: number[] }; 
+    cycleAnalysis?: CycleAnalysis;
 }
 
 export interface GeminiReasoning {
