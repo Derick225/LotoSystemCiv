@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -12,9 +12,9 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.2 - Module Isolation
- * Fix: Explicitly using the named Component import to ensure correct base class linkage and property access (setState, props).
+ * Fix: Explicitly using React.Component to ensure correct base class linkage and property access (setState, props).
  */
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -30,7 +30,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
     }
   }
 
-  // Use arrow function to preserve 'this' context, now correctly linked via 'extends Component'
+  // Use arrow function to preserve 'this' context, now correctly linked via 'extends React.Component'
   private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
@@ -38,6 +38,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
+        // Fix: access setState through base class members
         this.setState({ hasError: false, error: null });
     }
   };
@@ -59,7 +60,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
           </div>
           <button 
             onClick={this.handleReload} 
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2"
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2"
           >
             <RefreshCw size={12} /> {isNetwork ? 'Reconnexion' : 'Restaurer'}
           </button>
@@ -68,6 +69,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
     }
 
     // props is correctly identified as a member of Component
+    // Fix: access children from the component's props property
     return this.props.children;
   }
 }

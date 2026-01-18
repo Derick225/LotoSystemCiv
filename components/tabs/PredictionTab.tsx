@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useRef, useCallback, useTransition } from 'react';
 import { motion } from 'framer-motion';
 import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -164,8 +165,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                     <div className="mt-10 p-5 bg-white/5 rounded-[2rem] border border-white/5 flex items-center gap-4 relative z-10">
                         <Layers size={24} className="text-indigo-500" />
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
-                            {/* FIX: Changed &gt; to > for clarity, though valid in JSX text, consistency prevents parser confusion */}
-                            "Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% indique une convergence synaptique de haute certitude."
+                            "Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score &gt; 80% indique une convergence synaptique de haute certitude."
                         </p>
                     </div>
                 </div>
@@ -183,7 +183,6 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             <div className="relative z-10 flex flex-col xl:flex-row justify-between items-center gap-12 text-center xl:text-left">
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
-                        {/* FIX: Replaced HTML entity &gt; with standard > operator inside template literal expression */}
                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-500" : "bg-emerald-400"}`}></div>
                         <span className="text-[10px] font-black uppercase tracking-widest">ADN : {strategyMode.toUpperCase()}</span>
                     </div>
