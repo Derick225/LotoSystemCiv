@@ -1,5 +1,4 @@
-
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -13,7 +12,7 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.2 - Module Isolation
- * Fix: Explicitly using React.Component to ensure compatibility with TS environments.
+ * Fix: Explicitly using React.Component to ensure compatibility with TS environments and access to setState/props.
  */
 export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
@@ -31,6 +30,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     }
   }
 
+  // Fix: Explicit use of React.Component ensures setState is available
   private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
@@ -67,6 +67,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
+    // Fix: Explicit use of React.Component ensures this.props is available
     return this.props.children;
   }
 }

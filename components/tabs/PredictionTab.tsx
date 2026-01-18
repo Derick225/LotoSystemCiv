@@ -1,8 +1,9 @@
-
 import React, { useState, useEffect, useRef, useCallback, useTransition } from 'react';
+// Added missing import for motion
+import { motion } from 'framer-motion';
 import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
-import { ExportService } from '../../services/reportService';
+import { ExportService } from '../../services/exportService';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { OraclePerformance } from '../OraclePerformance'; 
@@ -11,7 +12,8 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
-import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock } from 'lucide-react';
+import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
+import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock, Layers, Network } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface PredictionTabProps { drawName: string; }
@@ -22,7 +24,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   const { 
     history, lastPrediction, setLastPrediction, loading: nexusLoading, 
     spectral, fractal, velocity, cliques, calibration, volatility, regime,
-    globalWeights // ADN Global (Training + Forensic + Learning)
+    globalWeights, rlState
   } = useNexus();
   
   const [computingIA, setComputingIA] = useState(false);
@@ -45,40 +47,30 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
     }
     
     setComputingIA(true);
-    showToast(`Inférence avec l'ADN ${strategyMode}...`, "info");
+    showToast(`Convergence Nexus en cours...`, "info");
 
     startTransition(async () => {
         try {
-          // Injection CRITIQUE de l'ADN (globalWeights) dans le moteur
-          // Cela force le respect des poids appris lors de l'entraînement et des forensics
           const res = await generateMasterPrediction(
               drawName, 
               history, 
-              globalWeights, // <--- C'est ici que l'ADN est imposé
+              globalWeights,
               { spectral, fractal, velocity, cliques }
           );
 
           if (isMounted.current) {
               setLastPrediction(res);
               await savePredictionToHistory(drawName, res);
-              
-              showToast("Prédiction générée selon l'ADN actif.", "success");
+              showToast("Vecteurs de convergence stabilisés.", "success");
           }
         } catch (e: any) {
-          console.error("IA Collision:", e);
+          console.error("Nexus Collision:", e);
           showToast("Échec Inférence.", "error");
         } finally {
           if (isMounted.current) setComputingIA(false);
         }
     });
-  }, [drawName, history, spectral, fractal, velocity, cliques, setLastPrediction, showToast, globalWeights, strategyMode]);
-
-  const getRegimeIcon = () => {
-      if (!regime) return <Binary size={18} />;
-      if (regime.hurst > 0.6) return <TrendingUp size={18} />;
-      if (regime.hurst < 0.4) return <Equal size={18} />;
-      return <Shuffle size={18} />;
-  };
+  }, [drawName, history, spectral, fractal, velocity, cliques, setLastPrediction, showToast, globalWeights]);
 
   const getRiskLevel = (vol: number) => {
       if (vol < 30) return { label: 'Faible', color: 'text-emerald-500', bg: 'bg-emerald-500/10', icon: <ShieldCheck size={16}/> };
@@ -92,9 +84,9 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
               <div className="w-24 h-24 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
               <Cpu className="absolute inset-0 m-auto text-indigo-600 w-10 h-10 animate-pulse" />
           </div>
-          <div className="text-center">
-            <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest">Calcul Neural Adaptatif</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Décodage de la signature {drawName}...</p>
+          <div className="text-center px-6">
+            <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest">Inférence Multimodale</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Fusion des moteurs Stochastique, ML et Fractal...</p>
           </div>
       </div>
   );
@@ -104,16 +96,16 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center mb-8 shadow-inner">
                 <Sparkles size={40} className="text-indigo-600" />
             </div>
-            <h3 className="text-3xl font-black mb-4 tracking-tighter text-slate-800 dark:text-white">Système Prêt</h3>
+            <h3 className="text-3xl font-black mb-4 tracking-tighter text-slate-800 dark:text-white">Nexus Prêt</h3>
             <div className="flex items-center gap-2 mb-10 px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700">
                 <Lock size={12} className="text-emerald-500"/>
-                <span className="text-xs font-bold text-slate-500">ADN Actif : {strategyMode}</span>
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Stratégie Active : {strategyMode}</span>
             </div>
             <button 
                 onClick={loadPrediction} 
                 className="group px-12 py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2.5rem] font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 transition-all transform active:scale-95 flex items-center gap-4 text-sm"
             >
-                <Zap size={20} className="fill-current group-hover:animate-pulse" /> ÉXÉCUTER INFÉRENCE
+                <Zap size={20} className="fill-current group-hover:animate-pulse" /> ÉXÉCUTER SCAN CONSENSUS
             </button>
         </div>
   );
@@ -123,81 +115,82 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   return (
     <div className={`space-y-8 animate-fade-in pb-16 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
         
-        {/* Synthèse Expert & KPIs */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {/* Regime Card */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-125 transition-transform"><Target size={48}/></div>
-                <div className="flex items-center gap-4 relative z-10">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-indigo-600 text-white shadow-lg">
-                        {getRegimeIcon()}
+        {/* Consensus Monitoring Area */}
+        <div className="grid lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-8">
+                <div className="bg-slate-950 p-8 rounded-[3.5rem] border border-indigo-500/20 shadow-2xl h-full flex flex-col justify-between overflow-hidden relative group">
+                    <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:rotate-6 transition-transform"><Target size={120} /></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-10">
+                            <div>
+                                <h4 className="text-indigo-400 font-black text-xs uppercase tracking-[0.4em] mb-1">Analyse Triple-Noyau</h4>
+                                <h3 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Moniteur de Consensus</h3>
+                            </div>
+                            <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.0</div>
+                        </div>
+
+                        <div className="space-y-8">
+                            {(lastPrediction as any).consensus?.map((c: any) => (
+                                <div key={c.engine} className="space-y-2">
+                                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                                        <span className="text-slate-500">{c.engine.replace('_', ' ')}</span>
+                                        <span className="text-indigo-400">{c.score}% Match</span>
+                                    </div>
+                                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                        <motion.div 
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${c.score}%` }}
+                                            transition={{ duration: 1.5, ease: "easeOut" }}
+                                            className="h-full bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" 
+                                        />
+                                    </div>
+                                    <div className="flex gap-1.5 mt-2">
+                                        {c.topNumbers.slice(0, 5).map((n: number) => (
+                                            <span key={n} className="text-[9px] font-mono font-bold text-slate-500 bg-white/5 px-1.5 py-0.5 rounded">{n}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                    <div>
-                        <h3 className="font-black text-slate-400 text-[9px] uppercase tracking-widest">Régime {drawName}</h3>
-                        <span className="text-xs font-black dark:text-white leading-tight block max-w-[120px]">
-                            {regime ? (regime.hurst > 0.6 ? "Tendance Persistante" : regime.hurst < 0.4 ? "Retour Moyenne" : "Chaos") : "Analyse..."}
-                        </span>
-                    </div>
-                </div>
-            </div>
-            
-            {/* Risk Card */}
-            <div className={`p-6 rounded-[2.5rem] border shadow-sm flex flex-col justify-center relative overflow-hidden ${risk.bg} border-${risk.color.split('-')[1]}-200`}>
-                <div className="flex items-center gap-4 relative z-10">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg bg-white ${risk.color}`}>
-                        {risk.icon}
-                    </div>
-                    <div>
-                        <h3 className="font-black text-slate-500 text-[9px] uppercase tracking-widest">Volatilité Locale</h3>
-                        <span className={`text-xs font-black leading-tight block ${risk.color}`}>{risk.label} ({volatility?.score || 0}%)</span>
+                    
+                    <div className="mt-10 p-5 bg-white/5 rounded-[2rem] border border-white/5 flex items-center gap-4 relative z-10">
+                        <Layers size={24} className="text-indigo-500" />
+                        <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
+                            "Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% indique une convergence synaptique de haute certitude."
+                        </p>
                     </div>
                 </div>
             </div>
 
-            {/* DNA Radar Mini - DNA Lock Visualization */}
-            <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-4 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col items-center relative overflow-hidden">
-                <div className="absolute top-2 right-4 flex items-center gap-1 text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                    <Lock size={8} /> Sync
-                </div>
-                <div className="flex items-center gap-2 mb-2 mt-2">
-                    <h4 className="text-[8px] font-black text-slate-400 uppercase flex items-center gap-1">
-                        <Fingerprint size={10}/> ADN {drawName}
-                    </h4>
-                </div>
-                <AlgoRadar weights={lastPrediction.usedWeights || globalWeights} height={100} />
-                <div className="mt-1 text-[8px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded truncate max-w-[140px]">
-                    {strategyMode}
-                </div>
-            </div>
-            
-            {/* Calibration Meter */}
-            <div className="lg:col-span-1">
-                {calibration && <ReliabilityMeter calibration={calibration} />}
+            <div className="lg:col-span-4 space-y-6">
+                <NeuralEvolutionDashboard rlState={rlState} drawName={drawName} />
+                <ReliabilityMeter calibration={calibration!} />
             </div>
         </div>
 
-        {/* Zone Principale de l'Oracle */}
+        {/* Global Result Hero */}
         <div className="bg-slate-950 rounded-[4rem] p-8 md:p-14 text-white shadow-2xl relative overflow-hidden group border border-white/5">
             <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 pointer-events-none group-hover:bg-indigo-600/20 transition-all duration-1000"></div>
             <div className="relative z-10 flex flex-col xl:flex-row justify-between items-center gap-12 text-center xl:text-left">
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
-                        <ThermometerSun size={14} className={(volatility?.score ?? 0) > 60 ? "text-orange-500" : "text-emerald-400"} />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Algorithme : {strategyMode.toUpperCase()}</span>
+                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-500" : "bg-emerald-400"}`}></div>
+                        <span className="text-[10px] font-black uppercase tracking-widest">ADN : {strategyMode.toUpperCase()}</span>
                     </div>
                     <h2 className="text-5xl md:text-8xl font-black tracking-tighter mb-8 leading-none">Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span></h2>
                     
                     <div className="bg-white/5 p-6 rounded-3xl border border-white/5 backdrop-blur-sm mb-8 text-left">
-                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={12}/> Verdict Spécifique</h5>
+                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={12}/> Inférence Nexus</h5>
                         <p className="text-slate-300 text-sm italic font-medium leading-relaxed">
-                            "{lastPrediction.analysis.replace(/Analyse complétée pour .*?\./, '')}"
+                            "{lastPrediction.analysis}"
                         </p>
                     </div>
 
                     <div className="flex flex-wrap gap-4 items-center justify-center xl:justify-start">
                         <button onClick={loadPrediction} disabled={computingIA} className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/40 transition-all flex items-center gap-4 active:scale-95">
                             {computingIA ? <RefreshCw className="animate-spin" size={20}/> : <Zap size={20} className="fill-current" />} 
-                            RECALCULER
+                            RÉGÉNÉRER
                         </button>
                         <button onClick={() => ExportService.generatePredictionPDF(drawName, lastPrediction)} className="p-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[1.8rem] transition shadow-xl group/btn">
                             <FileText className="text-slate-500 group-hover/btn:text-white transition-colors" size={24} />
@@ -207,7 +200,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                 
                 <div className="bg-black/40 backdrop-blur-3xl p-10 md:p-14 rounded-[4rem] border border-white/10 shadow-inner flex flex-col items-center min-w-[340px] transform hover:scale-[1.02] transition-all duration-500">
                     <span className="text-[11px] uppercase tracking-[0.4em] font-black text-indigo-400 mb-12 flex items-center gap-2">
-                        <Magnet size={14}/> Attracteurs
+                        <Magnet size={14}/> Attracteurs Alpha
                     </span>
                     <div className="flex gap-5">
                         {lastPrediction.suggestedNumbers.slice(0, 5).map((n: number) => (
@@ -220,18 +213,6 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                             />
                         ))}
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <div className="grid lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-8"><OraclePerformance drawName={drawName} /></div>
-            <div className="lg:col-span-4">
-                <div className="bg-slate-900 border border-indigo-500/30 p-8 rounded-[3rem] shadow-2xl h-full flex flex-col justify-center items-center text-center">
-                    <h4 className="text-white font-black text-lg mb-4">Focus IA</h4>
-                    <p className="text-slate-400 text-xs leading-relaxed px-4">
-                        Ces vecteurs sont générés en appliquant strictement l'ADN <strong>{strategyMode}</strong>, fruit de la fusion de l'entraînement et de l'analyse forensique.
-                    </p>
                 </div>
             </div>
         </div>
