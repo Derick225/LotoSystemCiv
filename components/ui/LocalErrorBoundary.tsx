@@ -12,9 +12,9 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.2 - Module Isolation
- * Fix: Explicitly using React.Component to ensure compatibility with TS environments and access to setState/props.
+ * Fix: Explicitly using the named Component import to ensure correct base class linkage and property access (setState, props).
  */
-export class LocalErrorBoundary extends React.Component<Props, State> {
+export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -30,7 +30,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     }
   }
 
-  // Fix: Explicit use of React.Component ensures setState is available
+  // Use arrow function to preserve 'this' context, now correctly linked via 'extends Component'
   private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
@@ -67,7 +67,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // Fix: Explicit use of React.Component ensures this.props is available
+    // props is correctly identified as a member of Component
     return this.props.children;
   }
 }

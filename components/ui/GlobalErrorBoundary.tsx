@@ -12,9 +12,9 @@ interface State {
 
 /**
  * GlobalErrorBoundary v4.2 - Secure Error Interception
- * Fix: Explicitly using React.Component to ensure compatibility with TS environments and access to setState/props.
+ * Fix: Explicitly using the named Component import to ensure correct base class linkage and property access (setState, props).
  */
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -28,7 +28,7 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Explicit use of React.Component ensures setState is available
+  // Use arrow function to preserve 'this' context, now correctly linked via 'extends Component'
   private handleReload = () => {
     // Reset local state for recovery attempt
     this.setState({ hasError: false, error: null });
@@ -60,7 +60,7 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // Fix: Explicit use of React.Component ensures this.props is available
+    // props is correctly identified as a member of Component
     return this.props.children;
   }
 }

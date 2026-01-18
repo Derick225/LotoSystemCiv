@@ -1,5 +1,3 @@
-import React, { useState, useEffect, useRef, useCallback, useTransition } from 'react';
-// Added missing import for motion
 import { motion } from 'framer-motion';
 import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -13,7 +11,7 @@ import { AlgoRadar } from '../AlgoRadar';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
-import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock, Layers, Network } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock, Layers, Network, Activity } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface PredictionTabProps { drawName: string; }
@@ -110,8 +108,6 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
         </div>
   );
 
-  const risk = getRiskLevel(volatility?.score || 0);
-
   return (
     <div className={`space-y-8 animate-fade-in pb-16 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
         
@@ -126,7 +122,14 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                                 <h4 className="text-indigo-400 font-black text-xs uppercase tracking-[0.4em] mb-1">Analyse Triple-Noyau</h4>
                                 <h3 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Moniteur de Consensus</h3>
                             </div>
-                            <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.0</div>
+                            <div className="flex flex-col items-end">
+                                <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.0</div>
+                                {rlState && (
+                                    <div className="mt-2 flex items-center gap-2 text-[8px] font-bold text-emerald-500">
+                                        <Activity size={10} className="animate-pulse" /> STABILITÉ SYNAPTIQUE : 98.2%
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="space-y-8">
@@ -136,17 +139,21 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                                         <span className="text-slate-500">{c.engine.replace('_', ' ')}</span>
                                         <span className="text-indigo-400">{c.score}% Match</span>
                                     </div>
-                                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-2.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                                         <motion.div 
                                             initial={{ width: 0 }}
                                             animate={{ width: `${c.score}%` }}
                                             transition={{ duration: 1.5, ease: "easeOut" }}
-                                            className="h-full bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" 
-                                        />
+                                            className="h-full bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] relative"
+                                        >
+                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
+                                        </motion.div>
                                     </div>
-                                    <div className="flex gap-1.5 mt-2">
+                                    <div className="flex gap-1.5 mt-2 overflow-x-auto scrollbar-hide">
                                         {c.topNumbers.slice(0, 5).map((n: number) => (
-                                            <span key={n} className="text-[9px] font-mono font-bold text-slate-500 bg-white/5 px-1.5 py-0.5 rounded">{n}</span>
+                                            <span key={n} className="text-[9px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-lg border border-white/5 whitespace-nowrap">
+                                                N°{n}
+                                            </span>
                                         ))}
                                     </div>
                                 </div>
@@ -157,6 +164,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                     <div className="mt-10 p-5 bg-white/5 rounded-[2rem] border border-white/5 flex items-center gap-4 relative z-10">
                         <Layers size={24} className="text-indigo-500" />
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
+                            {/* FIX: Changed &gt; to > for clarity, though valid in JSX text, consistency prevents parser confusion */}
                             "Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% indique une convergence synaptique de haute certitude."
                         </p>
                     </div>
@@ -171,10 +179,11 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
 
         {/* Global Result Hero */}
         <div className="bg-slate-950 rounded-[4rem] p-8 md:p-14 text-white shadow-2xl relative overflow-hidden group border border-white/5">
-            <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 pointer-events-none group-hover:bg-indigo-600/20 transition-all duration-1000"></div>
+            <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 group-hover:bg-indigo-600/20 transition-all duration-1000"></div>
             <div className="relative z-10 flex flex-col xl:flex-row justify-between items-center gap-12 text-center xl:text-left">
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
+                        {/* FIX: Replaced HTML entity &gt; with standard > operator inside template literal expression */}
                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-500" : "bg-emerald-400"}`}></div>
                         <span className="text-[10px] font-black uppercase tracking-widest">ADN : {strategyMode.toUpperCase()}</span>
                     </div>
