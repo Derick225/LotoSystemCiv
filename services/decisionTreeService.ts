@@ -1,4 +1,3 @@
-
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
 import ForestWorker from './workers/forest.worker.ts?worker';
 
@@ -86,11 +85,9 @@ export const runDecisionForest = async (
 
     return new Promise((resolve, reject) => {
         const worker = new ForestWorker();
-        
         worker.onmessage = (e) => {
             const { votes } = e.data;
             worker.terminate();
-            
             const finalVotes: ForestVote[] = votes.map((v: any) => ({
                 candidate: v.number,
                 score: Math.round(v.score),
@@ -98,41 +95,24 @@ export const runDecisionForest = async (
                 decisionPath: { id: 'root', type: 'condition', label: 'Forest Consensus', children: [] } as DecisionNode,
                 features: { isConsensusTrap: v.score > 85 && shadowMode }
             }));
-
             const filtered = shadowMode 
                 ? finalVotes.filter(v => v.score > 35 && v.score < 75)
                 : finalVotes.filter(v => v.score >= minScore);
-
-            resolve({ 
-                votes: filtered.sort((a, b) => b.score - a.score).slice(0, 20),
-                dataset 
-            });
+            resolve({ votes: filtered.sort((a, b) => b.score - a.score).slice(0, 20), dataset });
         };
-
-        worker.onerror = (err) => {
-            worker.terminate();
-            reject(err);
-        };
-
-        worker.postMessage({ 
-            dataset, 
-            candidates, 
-            config: { numTrees: 80, maxDepth: 6 } 
-        });
+        worker.onerror = (err) => { worker.terminate(); reject(err); };
+        worker.postMessage({ dataset, candidates, config: { numTrees: 80, maxDepth: 6 } });
     });
 };
 
 export const calculateFeatureImportance = (dataset: any[], activeFeatures: string[]): Record<string, number> => {
     if (!dataset || dataset.length === 0) return {};
-
     const importance: Record<string, number> = {};
     const n = dataset.length;
     const meanY = dataset.reduce((acc, d) => acc + d.label, 0) / n;
-
     activeFeatures.forEach((label, idx) => {
         const meanX = dataset.reduce((acc, d) => acc + d.features[idx], 0) / n;
         let num = 0, denX = 0, denY = 0;
-
         dataset.forEach((d) => {
             const x = d.features[idx];
             const y = d.label;
@@ -140,10 +120,8 @@ export const calculateFeatureImportance = (dataset: any[], activeFeatures: strin
             denX += Math.pow(x - meanX, 2);
             denY += Math.pow(y - meanY, 2);
         });
-
         const correlation = denX > 0 && denY > 0 ? Math.abs(num / Math.sqrt(denX * denY)) : 0;
         importance[label] = Math.round(correlation * 100);
     });
-
     return importance;
 };

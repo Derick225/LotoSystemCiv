@@ -11,7 +11,7 @@ interface State {
   error: Error | null;
 }
 
-// Fixed: Explicitly using Component from 'react' to ensure setState and props are correctly inherited and typed
+// Fix: Using Component from 'react' and removing override modifiers causing errors.
 export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -22,17 +22,16 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  handleReload = () => {
-    // Fixed: setState is now recognized from Component base class
+  private handleReload = () => {
     this.setState({ hasError: false, error: null });
     window.location.reload(); 
   };
 
-  render(): ReactNode {
+  public render(): ReactNode {
     if (this.state.hasError) {
       const msg = getUserFriendlyError(this.state.error);
       return (
@@ -56,7 +55,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fixed: props is now recognized from Component base class
     return this.props.children;
   }
 }

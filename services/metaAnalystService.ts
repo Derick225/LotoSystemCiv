@@ -2,553 +2,111 @@
 import { 
   PlatinumResult, 
   DrawResult, 
-  SpectralMetric,
   StrategyBias,
-  CycleAnalysis,
-  PlatinumCombo
+  PlatinumCombo,
+  ScoreBreakdown
 } from '../types';
 import { 
   getAlgoWeights, 
   generateMasterPrediction
 } from './predictionEngine';
 import { 
-  calculateSpectralMetricsAsync,
-  calculateShannonEntropy,
-  calculateVolatility,
-  detectGameRegime,
-  validateDataIntegrity,
-  calculateRegularity,
-  calculateMean,
-  calculateStandardDeviation
+    calculateVolatility, 
+    calculateShannonEntropy, 
+    detectGameRegime,
+    calculateMean,
+    calculateStandardDeviation
 } from './mathService';
-import { fetchResults } from './lotteryService';
-import { generateShadowOracleVector } from './forensicAuditService';
 
-/**
- * Nexus AutoCycle v7.1 - Tirage Unique Edition
- * 
- * Fonctionnement:
- * 1. Analyse l'historique UNIQUE du tirage sélectionné
- * 2. Détection automatique de phase cyclique
- * 3. Auto-calibration des paramètres (bias, poids)
- * 4. Génération de prédiction avec ajustements dynamiques (Master + Shadow + CyclePriority)
- */
+const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
 
-interface CyclePhase {
-  phase: 'peak' | 'trough' | 'ascending' | 'descending' | 'chaotic';
-  confidence: number;
-  daysToPeak: number;
-  spectralResonance: number;
-}
-
-interface DrawAnalysis {
-  drawName: string;
-  history: DrawResult[];
-  phase: CyclePhase;
-  priorityScore: number;
-  bias: StrategyBias;
-  metrics: {
-    volatility: number;
-    entropy: number;
-    hurst: number;
-    dataQuality: number;
-  };
-  gapTrend: CycleAnalysis; 
-}
-
-// Cache intelligent avec invalidation par date
-const ANALYSIS_CACHE = new Map<string, { analysis: DrawAnalysis, expiry: number }>();
-const PREDICTION_CACHE = new Map<string, { result: PlatinumResult, expiry: number }>();
-
-// Durée de validité du cache (5 minutes)
-const CACHE_TTL = 5 * 60 * 1000;
-
-/**
- * Fonction PRINCIPALE - Obtient la prédiction optimale pour UN tirage spécifique
- */
-export async function getOptimalPrediction(drawName: string): Promise<{
-  selectedDraw: string;
-  priorityScore: number;
-  prediction: PlatinumResult;
-  analysis: string;
-  timestamp: number;
-}> {
-  console.log(`[AutoCycle] 🔍 Analysing draw: ${drawName}`);
-
-  let history: DrawResult[];
-  try {
-    const { data } = await fetchResults(drawName);
-    history = data;
-  } catch (error: any) {
-    throw new Error(`❌ Impossible de charger le tirage "${drawName}": ${error.message}`);
-  }
-
-  // Validation stricte
-  const integrity = validateDataIntegrity(history);
-  if (integrity.issues.length > 0 && integrity.score < 50) {
-    throw new Error(`❌ Tirage invalide: ${integrity.issues.join(', ')}`);
-  }
-
-  if (history.length < 30) {
-    throw new Error(`❌ Historique insuffisant: ${history.length} tirages (minimum: 30)`);
-  }
-
-  // Vérifier la fraîcheur des données
-  if (history.length > 0) {
-      const lastDrawDate = new Date(history[0].date);
-      const daysSinceLast = (Date.now() - lastDrawDate.getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSinceLast > 7) {
-        console.warn(`[AutoCycle] ⚠️ Données obsolètes: ${Math.floor(daysSinceLast)} jours`);
-      }
-  }
-
-  // Étape 2: Analyse cyclique détaillée
-  const analysis = await analyzeDrawCycle(drawName, history);
-  
-  // Étape 3: Générer prédiction optimale
-  const prediction = await generateOptimalPrediction(analysis);
-
-  // Étape 4: Logging
-  const analysisLog = `
-Tirage: ${analysis.drawName}
-Phase: ${analysis.phase.phase} (conf: ${(analysis.phase.confidence*100).toFixed(0)}%)
-Volatilité: ${analysis.metrics.volatility}%
-Entropie: ${(analysis.metrics.entropy*100).toFixed(0)}%
-Cycle Gap: [${analysis.gapTrend.activeWindow.min}-${analysis.gapTrend.activeWindow.max}] (Avg: ${analysis.gapTrend.avgWinningGap.toFixed(1)})
-Bias: Chaos=${(analysis.bias.chaos*100).toFixed(0)}% | Stab=${(analysis.bias.stability*100).toFixed(0)}% | Harm=${(analysis.bias.harmony*100).toFixed(0)}%
-  `.trim();
-
-  return {
-    selectedDraw: analysis.drawName,
-    priorityScore: analysis.priorityScore,
-    prediction,
-    analysis: analysisLog,
-    timestamp: Date.now()
-  };
-}
-
-/**
- * Analyse de la Tendance des Écarts (Gap Trend)
- * Détermine la fenêtre d'écart (min/max) qui produit le plus de gagnants actuellement.
- */
-function analyzeGapTrend(history: DrawResult[]): CycleAnalysis {
-    const SAMPLE_SIZE = Math.min(history.length - 1, 30);
-    const winningGaps: number[] = [];
-    
-    // Calcul rétrospectif des écarts des gagnants
-    for (let i = 0; i < SAMPLE_SIZE; i++) {
-        const target = history[i];
-        const past = history.slice(i + 1);
-        
-        target.gagnants.forEach(n => {
-            // Trouver l'index de la précédente sortie
-            const gap = past.findIndex(d => d.gagnants.includes(n));
-            // Si jamais sorti dans l'historique dispo, on ignore ou on met une valeur max
-            if (gap !== -1) winningGaps.push(gap);
-        });
-    }
-    
-    if (winningGaps.length === 0) {
-        return { trend: 'BALANCED', activeWindow: { min: 5, max: 20 }, avgWinningGap: 12 };
-    }
-    
-    // Stats des écarts gagnants
-    const mean = calculateMean(winningGaps);
-    const stdDev = calculateStandardDeviation(winningGaps);
-    
-    // Définition de la fenêtre prioritaire (Current Sweet Spot)
-    // On prend +/- 0.6 Sigma autour de la moyenne actuelle des sorties
-    // Cela crée une fenêtre dynamique adaptée au comportement récent
-    const minWindow = Math.max(0, Math.floor(mean - (0.6 * stdDev)));
-    const maxWindow = Math.ceil(mean + (0.6 * stdDev));
-    
-    let trend: CycleAnalysis['trend'] = 'BALANCED';
-    if (mean < 8) trend = 'HOT_REPEATER';
-    else if (mean > 22) trend = 'COLD_RETURN';
-    
-    return {
-        trend,
-        activeWindow: { min: minWindow, max: maxWindow },
-        avgWinningGap: mean
-    };
-}
-
-/**
- * Génère une prédiction basée spécifiquement sur le Cycle Prioritaire (Gap Trend)
- */
-function generateCyclePrediction(
+export const precomputeBaseScores = async (
+    drawName: string, 
     history: DrawResult[], 
-    gapAnalysis: CycleAnalysis,
-    spectralData: SpectralMetric[]
-): number[] {
-    const regularity = calculateRegularity(history);
-    const { min, max } = gapAnalysis.activeWindow;
-    
-    // 1. Filtrage : On ne garde que les numéros dont l'écart ACTUEL est dans la fenêtre
-    let candidates = regularity.filter(r => r.currentGap >= min && r.currentGap <= max);
-    
-    // 2. Scoring "Urgence du Cycle"
-    // On privilégie les numéros qui sont proches de leur écart moyen personnel
-    // ET qui ont une bonne énergie spectrale
-    const scoredCandidates = candidates.map(c => {
-        const gapDeviation = Math.abs(c.currentGap - c.avgGap);
-        // Score de "Justesse" par rapport à sa propre moyenne
-        const precisionScore = 100 / (1 + gapDeviation);
-        
-        const spectralInfo = spectralData.find(s => s.number === c.number);
-        const energyScore = spectralInfo ? spectralInfo.energy : 0;
-        
-        // Formule : 60% Précision Cycle + 40% Énergie Spectrale
-        return {
-            number: c.number,
-            score: (precisionScore * 0.6) + (energyScore * 0.4)
-        };
-    });
-    
-    // 3. Sélection Top 5
-    return scoredCandidates
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-        .map(c => c.number)
-        .sort((a, b) => a - b);
-}
+    metrics?: any
+): Promise<Record<number, ScoreBreakdown>> => {
+    const now = Date.now();
+    const cached = SCORE_CACHE.get(drawName);
+    if (cached && (now - cached.ts < 3600000)) return cached.data;
+    const weights = await getAlgoWeights(drawName);
+    const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
+    const data = masterPred.breakdown || {};
+    SCORE_CACHE.set(drawName, { data, ts: now });
+    return data;
+};
 
-/**
- * Analyse la phase cyclique d'UN tirage spécifique
- */
-async function analyzeDrawCycle(
-  drawName: string, 
-  history: DrawResult[]
-): Promise<DrawAnalysis> {
-  const cacheKey = `${drawName}:${history[0].date}:${history.length}`;
-  const cached = ANALYSIS_CACHE.get(cacheKey);
-  
-  if (cached && Date.now() < cached.expiry) {
-    return cached.analysis;
-  }
-
-  // Métrics de base
-  const volatility = calculateVolatility(history);
-  const entropy = calculateShannonEntropy(history.slice(0, 50));
-  const regime = detectGameRegime(history);
-  
-  // Analyse spectrale avec gestion d'erreur
-  let spectral: SpectralMetric[] = [];
-  try {
-    spectral = await calculateSpectralMetricsAsync(history);
-  } catch (error: any) {
-    console.warn(`[AutoCycle] Spectral analysis failed: ${error.message}`);
-    spectral = [];
-  }
-
-  // Détection de phase
-  const phase = detectSpectralPhase(spectral, history);
-  
-  // Calcul du bias adaptatif
-  const bias = calculateDynamicBias(volatility, entropy, regime);
-
-  // Analyse du cycle d'écarts (NOUVEAU)
-  const gapTrend = analyzeGapTrend(history);
-
-  // Score de priorité (0-100)
-  const priorityScore = calculatePriorityScore({
-    phase,
-    volatility,
-    entropy,
-    regime,
-    dataQuality: validateDataIntegrity(history).score
-  });
-
-  const analysis: DrawAnalysis = {
-    drawName,
-    history,
-    phase,
-    priorityScore,
-    bias,
-    metrics: {
-      volatility: volatility.score,
-      entropy: entropy.normalized,
-      hurst: regime.hurst,
-      dataQuality: validateDataIntegrity(history).score
-    },
-    gapTrend // Ajouté à l'analyse globale
-  };
-
-  ANALYSIS_CACHE.set(cacheKey, { analysis, expiry: Date.now() + CACHE_TTL });
-  return analysis;
-}
-
-/**
- * Détecte la phase cyclique actuelle via analyse spectrale
- */
-function detectSpectralPhase(
-  spectral: SpectralMetric[], 
-  history: DrawResult[]
-): CyclePhase {
-  if (!spectral || spectral.length === 0) {
-    return {
-      phase: 'chaotic',
-      confidence: 0.3,
-      daysToPeak: 7,
-      spectralResonance: 0
-    };
-  }
-
-  const energies = spectral.map(s => s.energy);
-  const avgEnergy = energies.reduce((a, b) => a + b, 0) / energies.length;
-  const maxEnergy = Math.max(...energies);
-  const dominant = spectral.find(s => s.energy === maxEnergy);
-
-  // Analyse de l'historique récent
-  const recent = history.slice(0, 10);
-  let trendUp = false;
-  if (recent.length >= 2) {
-    const recentSums = recent.map(d => d.gagnants.reduce((a, b) => a + b, 0));
-    trendUp = recentSums[0] > recentSums[recentSums.length - 1];
-  }
-
-  let phase: CyclePhase['phase'] = 'chaotic';
-  let confidence = 0.5;
-  let daysToPeak = 7;
-
-  if (maxEnergy > 75 && dominant) {
-    if (trendUp) {
-      phase = 'peak';
-      confidence = 0.85;
-      daysToPeak = 0;
-    } else {
-      phase = 'descending';
-      confidence = 0.7;
-      daysToPeak = 3;
-    }
-  } else if (avgEnergy < 30) {
-    phase = 'trough';
-    confidence = 0.6;
-    daysToPeak = 5;
-  }
-
-  return {
-    phase,
-    confidence,
-    daysToPeak,
-    spectralResonance: avgEnergy
-  };
-}
-
-/**
- * Calcule le bias dynamiquement selon les métriques détectées
- */
-function calculateDynamicBias(
-  volatility: ReturnType<typeof calculateVolatility>,
-  entropy: ReturnType<typeof calculateShannonEntropy>,
-  regime: ReturnType<typeof detectGameRegime>
-): StrategyBias {
-  let stability = 0.5;
-  let chaos = 0.3;
-  let harmony = 0.5;
-
-  // Volatilité élevée → Plus de chaos
-  if (volatility.score > 60) {
-    chaos = Math.min(0.85, 0.3 + (volatility.score - 60) / 100);
-    stability = Math.max(0.15, 0.5 - (volatility.score - 60) / 150);
-  }
-
-  // Entropie élevée → Encore plus de chaos
-  if (entropy.normalized > 0.9) {
-    chaos = Math.min(0.9, chaos + 0.15);
-    stability = Math.max(0.1, stability - 0.1);
-  }
-
-  // Hurst persistant → Plus de stabilité/harmonie
-  if (regime.hurst > 0.65) {
-    stability = Math.min(0.8, stability + 0.2);
-    harmony = Math.min(0.8, harmony + 0.15);
-  }
-
-  return {
-    stability: parseFloat(stability.toFixed(2)),
-    chaos: parseFloat(chaos.toFixed(2)),
-    harmony: parseFloat(harmony.toFixed(2))
-  };
-}
-
-/**
- * Calcule le score de priorité pour UN tirage
- */
-function calculatePriorityScore(params: {
-  phase: CyclePhase;
-  volatility: ReturnType<typeof calculateVolatility>;
-  entropy: ReturnType<typeof calculateShannonEntropy>;
-  regime: ReturnType<typeof detectGameRegime>;
-  dataQuality: number;
-}): number {
-  let score = 50; // Base neutre
-
-  // Phase cyclique favorable = +20pts
-  if (params.phase.phase === 'peak' || params.phase.phase === 'ascending') {
-    score += params.phase.confidence * 20;
-  }
-
-  // Volatilité modérée = +15pts
-  if (params.volatility.score > 30 && params.volatility.score < 70) {
-    score += 15;
-  }
-
-  // Entropie équilibrée = +10pts
-  if (params.entropy.normalized > 0.85 && params.entropy.normalized < 0.95) {
-    score += 10;
-  }
-
-  // Qualité de données élevée = +5pts
-  score += (params.dataQuality / 100) * 5;
-
-  // Bonus si Hurst proche de 0.5 (cycle naturel)
-  if (Math.abs(params.regime.hurst - 0.5) < 0.1) {
-    score += 5;
-  }
-
-  return Math.min(100, Math.max(0, score));
-}
-
-/**
- * Calculateur de Biais Utilisateur Optimal
- * Retourne le biais suggéré pour le draw actuel
- */
 export function calculateOptimalUserBias(drawName: string, history: DrawResult[]): StrategyBias {
     const vol = calculateVolatility(history);
-    const ent = calculateShannonEntropy(history.slice(0, 50));
+    const ent = calculateShannonEntropy(history);
     const reg = detectGameRegime(history);
-    return calculateDynamicBias(vol, ent, reg);
+    let stability = 0.5, chaos = 0.3, harmony = 0.5;
+    if (vol.score > 60) { chaos = 0.7; stability = 0.3; }
+    if (ent.normalized > 0.9) { chaos = 0.8; }
+    if (reg.hurst > 0.6) { stability = 0.8; harmony = 0.7; }
+    return { stability, chaos, harmony };
 }
 
-/**
- * Sauvegarde l'historique Platinum (Placeholder)
- */
-export function savePlatinumHistory(result: PlatinumResult) {
-    // Logique de persistance
-    try {
-        const key = `nexus_platinum_${result.drawName}_latest`;
-        localStorage.setItem(key, JSON.stringify(result));
-    } catch (e) {
-        console.warn("Failed to save Platinum result locally");
-    }
-}
-
-/**
- * Génère une prédiction optimale pour un tirage analysé
- */
-async function generateOptimalPrediction(analysis: DrawAnalysis): Promise<PlatinumResult> {
-  const cacheKey = `${analysis.drawName}:${analysis.history[0].date}:v7.2`; // Version bump
-  const cached = PREDICTION_CACHE.get(cacheKey);
-  
-  if (cached && Date.now() < cached.expiry) {
-    return cached.result;
-  }
-
-  const autoWeights = await getAlgoWeights(analysis.drawName);
-  
-  // 1. Prédiction Principale (Master - Oracle Base)
-  const spectralData = await calculateSpectralMetricsAsync(analysis.history);
-  
-  const masterPred = await generateMasterPrediction(
-    analysis.drawName,
-    analysis.history,
-    autoWeights,
-    { spectral: spectralData }
-  );
-
-  const oracleScores: Record<number, number> = {};
-  if (masterPred.breakdown) {
-      Object.entries(masterPred.breakdown).forEach(([k, v]) => {
-          const vals = Object.values(v).filter((x): x is number => typeof x === 'number');
-          oracleScores[Number(k)] = vals.reduce((a, b) => a + b, 0) / vals.length;
-      });
-  }
-  
-  const shadowVector = generateShadowOracleVector(
-    analysis.history,
-    oracleScores
-  );
-
-  // 2. Fusion (Combinaison #1) : 70% Master + 30% Shadow
-  const finalKingNumbers = [
-    ...masterPred.suggestedNumbers.slice(0, 3),
-    ...shadowVector.slice(0, 2)
-  ].filter((n, i, arr) => arr.indexOf(n) === i).sort((a, b) => a - b);
-
-  if (finalKingNumbers.length < 5) {
-      const remaining = masterPred.candidates.filter(n => !finalKingNumbers.includes(n));
-      finalKingNumbers.push(...remaining.slice(0, 5 - finalKingNumbers.length));
-  }
-  finalKingNumbers.sort((a, b) => a - b);
-
-  // 3. Cycle Prioritaire (Combinaison #2) : Basée sur la tendance Gap Min/Max
-  const cycleVector = generateCyclePrediction(
-      analysis.history, 
-      analysis.gapTrend, 
-      spectralData
-  );
-
-  // Construction du résultat avec les 2 combinaisons
-  const result: PlatinumResult = {
-    id: crypto.randomUUID(), 
-    kingNumbers: finalKingNumbers.map((n, i) => ({ number: n, count: 5 - i })),
-    combinations: [
-        {
-          numbers: finalKingNumbers,
-          score: masterPred.confidence,
-          tags: ['Fusion: Oracle + Shadow', 'Haute Confiance'],
-          breakdown: {
-            harmony: Math.round(analysis.bias.harmony * 100),
-            stability: Math.round(analysis.bias.stability * 100),
-            chaos: Math.round(analysis.bias.chaos * 100),
-            pattern: masterPred.confidence
-          }
-        },
-        {
-          numbers: cycleVector,
-          score: Math.round(masterPred.confidence * 0.9), // Score estimé
-          tags: [`Cycle Gap [${analysis.gapTrend.activeWindow.min}-${analysis.gapTrend.activeWindow.max}]`, analysis.gapTrend.trend === 'HOT_REPEATER' ? 'Mode Répétition' : 'Mode Retour Froid'],
-          breakdown: {
-            harmony: 80, // Forte cohérence interne
-            stability: analysis.gapTrend.trend === 'HOT_REPEATER' ? 90 : 30,
-            chaos: analysis.gapTrend.trend === 'COLD_RETURN' ? 80 : 20,
-            pattern: 85
-          }
-        }
-    ],
-    targetSumRange: {
-      min: finalKingNumbers.reduce((a, b) => a + b, 0) - 10,
-      max: finalKingNumbers.reduce((a, b) => a + b, 0) + 10,
-      reason: 'AutoCycle Adaptive'
-    },
-    hotZonesSpectro: masterPred.candidates.slice(0, 10),
-    confidence: masterPred.confidence,
-    analysis: `AutoCycle: ${analysis.phase.phase} | GapTrend: ${analysis.gapTrend.trend}`,
-    drawName: analysis.drawName,
-    timestamp: Date.now(),
-    nextDraw: {
-      expectedDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      predictedNumbers: finalKingNumbers
-    },
-    cycleAnalysis: analysis.gapTrend // Métadonnées pour l'UI
-  };
-
-  PREDICTION_CACHE.set(cacheKey, { result, expiry: Date.now() + CACHE_TTL });
-  return result;
-}
-
-/**
- * Export pour compatibilité descendante
- */
 export async function generatePlatinumPrediction(
     drawName: string, 
-    history?: DrawResult[],
-    metrics?: any,
-    bias?: StrategyBias
+    history: DrawResult[],
+    precomputedMetrics?: any,
+    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.2 }
 ): Promise<PlatinumResult> {
-  const data = history || (await fetchResults(drawName)).data;
-  const analysis = await analyzeDrawCycle(drawName, data);
-  if (bias) analysis.bias = bias;
-  return generateOptimalPrediction(analysis);
+    const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
+    const combinations: PlatinumCombo[] = [];
+    const pool = Object.keys(scores).map(Number);
+
+    for (let i = 0; i < 5; i++) {
+        const combo: number[] = [];
+        const tempPool = [...pool];
+        while (combo.length < 5 && tempPool.length > 0) {
+            let bestCandidate = -1, bestVal = -1;
+            const tourneySize = Math.min(10, tempPool.length);
+            for(let k=0; k<tourneySize; k++) {
+                const idx = Math.floor(Math.random() * tempPool.length);
+                const n = tempPool[idx];
+                const b = scores[n];
+                const val = ((b.spectral || 0) * userBias.harmony) + ((b.momentum || 50) * userBias.stability) + ((b.gap || 0) * userBias.chaos);
+                if (val > bestVal) { bestVal = val; bestCandidate = n; }
+            }
+            if (bestCandidate !== -1) { combo.push(bestCandidate); tempPool.splice(tempPool.indexOf(bestCandidate), 1); }
+        }
+        combo.sort((a,b) => a-b);
+        let totalScore = 0;
+        combo.forEach(n => {
+            const b = scores[n];
+            totalScore += ((b.spectral || 0) * userBias.harmony) + ((b.momentum || 50) * userBias.stability) + ((b.gap || 0) * userBias.chaos);
+        });
+        const normalizedScore = Math.min(99, Math.round(totalScore / (5 * (userBias.harmony + userBias.stability + userBias.chaos + 0.1))));
+        combinations.push({
+            numbers: combo,
+            score: normalizedScore,
+            tags: ["Synthèse Platinum"],
+            breakdown: { harmony: Math.round(userBias.harmony * 100), stability: Math.round(userBias.stability * 100), chaos: Math.round(userBias.chaos * 100), pattern: normalizedScore }
+        });
+    }
+
+    const recurrence: Record<number, number> = {};
+    combinations.forEach(c => c.numbers.forEach(n => recurrence[n] = (recurrence[n] || 0) + 1));
+    const kingNumbers = Object.entries(recurrence).map(([n, count]) => ({ number: parseInt(n), count })).sort((a, b) => b.count - a.count).slice(0, 7);
+
+    return {
+        id: crypto.randomUUID(),
+        kingNumbers, 
+        targetSumRange: { min: 150, max: 300, reason: "Équilibre Gaussien" },
+        hotZonesSpectro: combinations[0].numbers,
+        combinations: combinations.sort((a, b) => b.score - a.score),
+        confidence: combinations[0].score,
+        analysis: `Synthèse Platinum générée avec un biais : Harmonie ${(userBias.harmony*100).toFixed(0)}%, Stabilité ${(userBias.stability*100).toFixed(0)}%, Chaos ${(userBias.chaos*100).toFixed(0)}%.`,
+        drawName,
+        timestamp: Date.now()
+    };
 }
+
+// Fix: Adding savePlatinumHistory requested in MetaAnalystTab.tsx
+export const savePlatinumHistory = (result: PlatinumResult) => {
+    const key = `platinum_hist_${result.drawName}`;
+    const existingStr = localStorage.getItem(key);
+    const existing = existingStr ? JSON.parse(existingStr) : [];
+    localStorage.setItem(key, JSON.stringify([result, ...existing].slice(0, 10)));
+};

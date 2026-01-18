@@ -12,7 +12,7 @@ interface State {
   error: Error | null;
 }
 
-// Fixed: Explicitly using Component from 'react' to ensure setState and props are correctly inherited and typed
+// Fix: Using Component from 'react' and removing override modifiers causing errors.
 export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -23,25 +23,24 @@ export class LocalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  handleReload = () => {
+  private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
     
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fixed: setState is now recognized from Component base class
         this.setState({ hasError: false, error: null });
     }
   };
 
-  render(): ReactNode {
+  public render(): ReactNode {
     if (this.state.hasError) {
       const isNetwork = this.state.error?.message?.includes('fetch') || this.state.error?.message?.includes('network');
       
@@ -66,7 +65,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fixed: props is now recognized from Component base class
     return this.props.children;
   }
 }
