@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -11,8 +11,11 @@ interface State {
   error: Error | null;
 }
 
-// Fix: Using Component from 'react' and removing override modifiers causing errors.
-export class GlobalErrorBoundary extends Component<Props, State> {
+/**
+ * GlobalErrorBoundary v4.2 - Secure Error Interception
+ * Fix: Explicitly using React.Component to ensure compatibility with TS environments.
+ */
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -27,7 +30,9 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   }
 
   private handleReload = () => {
+    // Reset local state for recovery attempt
     this.setState({ hasError: false, error: null });
+    // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 

@@ -1,10 +1,9 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  key?: React.Key; 
 }
 
 interface State {
@@ -12,8 +11,11 @@ interface State {
   error: Error | null;
 }
 
-// Fix: Using Component from 'react' and removing override modifiers causing errors.
-export class LocalErrorBoundary extends Component<Props, State> {
+/**
+ * LocalErrorBoundary v4.2 - Module Isolation
+ * Fix: Explicitly using React.Component to ensure compatibility with TS environments.
+ */
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
