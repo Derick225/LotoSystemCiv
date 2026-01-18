@@ -3,16 +3,16 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
-  NexusContextType, OracleVocalContext, RLState
+  NexusContextType, OracleVocalContext, RLState, PositionalRegime
 } from '../types';
 import { lotteryService, checkAndSyncRecentResults, getNextScheduledDraw } from '../services/lotteryService';
 import { 
     calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
     calculateNetworkCentralityAsync, calculateSpectralMetricsAsync,
-    calculateFractalMetricsAsync
+    calculateFractalMetricsAsync, calculatePositionalRegimes
 } from '../services/mathService';
-import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
+import { getAlgoWeightsSync, getAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance, savePredictionToHistory } from '../services/predictionHistoryService';
 import { ReinforcementLearningService } from '../services/reinforcementLearningService';
@@ -36,7 +36,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [history, setHistory] = useState<DrawResult[]>([]);
   const [loading, setLoading] = useState(false); 
   
-  // State: Computed Metrics (Moved from useMemo to State to prevent render-blocking)
+  // State: Computed Metrics
   const [stats, setStats] = useState<{ number: number; count: number }[]>([]);
   const [gaps, setGaps] = useState<{ number: number; gap: number }[]>([]);
   const [volatility, setVolatility] = useState<{ score: number; status: string; trend: string } | null>(null);
@@ -44,6 +44,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [regularity, setRegularity] = useState<NumberRegularity[]>([]);
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
   const [fractal, setFractal] = useState<FractalMetric[]>([]);
+  const [positionalRegimes, setPositionalRegimes] = useState<PositionalRegime[]>([]);
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
   const [cliques, setCliques] = useState<any[]>([]);
   const [calibration, setCalibration] = useState<BrierCalibration | null>(null);
@@ -75,23 +76,14 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // --- REINFORCEMENT LEARNING LOOP (AUTO-CALIBRATION) ---
   useEffect(() => {
-      // Déclenche l'apprentissage si un nouveau résultat arrive et qu'on a une prédiction récente en mémoire
-      // qui correspond au tirage précédent (donc le résultat est "nouveau" par rapport à la prédiction)
-      
       const checkAndTrain = async () => {
           if (history.length < 2 || !lastPrediction || drawName === 'ALL') return;
 
-          const lastDraw = history[0]; // Le tout dernier résultat
-          
-          // On vérifie si la dernière prédiction a été faite AVANT ce tirage
-          // (Simple check: si la prédiction ne contient pas ce tirage dans son dataset, mais ici on simplifie)
-          // On utilise une clé de stockage pour ne pas apprendre 2 fois le même tirage
-          
+          const lastDraw = history[0]; 
           const rlKey = `nexus_rl_${drawName}_${lastDraw.date}`;
           const alreadyLearned = localStorage.getItem(rlKey);
 
           if (!alreadyLearned) {
-              // Lancement du cycle RL
               try {
                   const { newWeights, state, log } = await ReinforcementLearningService.processDrawResult(
                       drawName,
@@ -99,23 +91,15 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       lastPrediction,
                       globalWeights
                   );
-                  
-                  // Mise à jour de l'ADN (Poids)
                   updateGlobalWeights(newWeights);
                   setRlState(state);
-                  
-                  // Marqueur pour ne pas répéter
                   localStorage.setItem(rlKey, 'done');
-                  
-                  // Feedback UI Discret
                   showToast(`🧠 ${log}`, "success");
-                  
               } catch (e) {
                   console.error("RL Loop Error", e);
               }
           }
       };
-
       checkAndTrain();
   }, [history, lastPrediction, drawName, globalWeights]);
 
@@ -126,34 +110,27 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     abortControllerRef.current = new AbortController();
 
     setLoading(true);
-    
-    // Reset light states immediately
     setSmartInsights([]);
 
     try {
         const hist = await lotteryService.fetchHistory(drawName);
-        
         if (abortControllerRef.current.signal.aborted) return;
 
         if (hist.length === 0 && drawName !== 'ALL' && isSupabaseConfigured()) {
             await checkAndSyncRecentResults(drawName);
             const retriedHist = await lotteryService.fetchHistory(drawName);
             setHistory(retriedHist);
-            if (retriedHist.length > 0) showToast(`Données restaurées pour ${drawName}`, "success");
         } else {
             setHistory(hist); 
         }
         
-        // 1. Synchronous Light Calculations (Non-blocking enough)
         if (hist.length > 0) {
-            // Stats
             const counts: Record<number, number> = {};
             hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             setStats(Object.entries(counts)
               .map(([n, c]) => ({ number: Number(n), count: c }))
               .sort((a, b) => b.count - a.count));
 
-            // Gaps
             if (drawName !== 'ALL') {
                 const resGaps: { number: number; gap: number }[] = [];
                 for (let i = 1; i <= 90; i++) {
@@ -167,20 +144,17 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 setGaps(resGaps);
             }
 
-            // Volatility & Regime
             setVolatility(calculateVolatility(hist));
             const reg = detectGameRegime(hist);
             setRegime(reg ? { hurst: reg.hurst, regime: reg.regime } : null);
         }
 
-        setLoading(false); // UI can show data now, heavy calcs continue
+        setLoading(false);
 
-        // Chargement des poids persistants
         getAlgoWeights(drawName).then(w => {
             if (!abortControllerRef.current?.signal.aborted) setGlobalWeights(w);
         });
 
-        // Chargement de l'état RL
         const savedRLState = localStorage.getItem(`rl_state_${drawName}`);
         if (savedRLState) setRlState(JSON.parse(savedRLState));
 
@@ -189,7 +163,10 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (activeHistory.length > 0 && drawName !== 'ALL') {
             const computeSample = activeHistory.slice(0, 300); 
 
-            // 2. Heavy Async Calculations
+            // NOUVEAU: Analyse positionnelle
+            const posRegimes = calculatePositionalRegimes(computeSample);
+            setPositionalRegimes(posRegimes);
+
             const [spec, frac, regData, corr, centrality, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateFractalMetricsAsync(computeSample),
@@ -207,16 +184,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setCorrelationMatrix(corr);
             setCliques(centrality);
 
-            // Insights generation based on heavy metrics
             const gapsData = regData.map(r => ({ number: r.number, gap: r.currentGap }));
             const insights = await generateSmartInsights(drawName, computeSample, spec, gapsData, regData);
             setSmartInsights(insights);
 
             if (preds.length > 0) {
-                // On récupère la dernière prédiction stockée pour le cycle RL
                 const latestPred = preds[0].prediction;
                 setLastPrediction(latestPred);
-
                 const perf = calculateHistoricalPerformance(preds, activeHistory);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
@@ -268,7 +242,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [drawName]);
 
   const updateGlobalWeights = useCallback((w: AlgoWeights) => {
-      // Pas de son ici pour ne pas spammer lors de l'auto-learn
       setGlobalWeights(w); 
       import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
   }, [drawName]);

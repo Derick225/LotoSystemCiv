@@ -34,6 +34,12 @@ export interface AlgoWeights {
     isolation_anomaly: number; 
 }
 
+export interface PositionalRegime {
+    position: number;
+    regime: 'CHAOTIC' | 'PERSISTENT' | 'BIMODAL' | 'STABLE';
+    hurst: number;
+}
+
 export interface RLState {
     lastCalibration: number; // Timestamp
     learningRate: number; // Alpha (vitesse d'apprentissage)
@@ -160,13 +166,6 @@ export interface ForensicReport {
     scoreDivergence: { algo: string; impact: number }[];
 }
 
-export interface MimicryMetric {
-    number: number;
-    score: number;
-    type: 'Direct' | 'Lag' | 'Voisin' | 'Complexe';
-    sourceDraw: string;
-}
-
 export interface PredictionHistoryItem {
     id: string;
     timestamp: number;
@@ -204,6 +203,14 @@ export interface OrchestrationPattern {
     type: PatternType;
     count: number;
     intensity: number;
+}
+
+// Added MimicryMetric to fix export errors in orchestration components/services
+export interface MimicryMetric {
+    number: number;
+    score: number;
+    type: 'Direct' | 'Voisin' | 'Lag' | 'Complexe';
+    sourceDraw: string;
 }
 
 export interface MathAnalysisReport {

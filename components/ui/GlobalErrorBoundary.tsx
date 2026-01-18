@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -10,7 +11,8 @@ interface State {
   error: Error | null;
 }
 
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Fixed: Explicitly using Component from 'react' to ensure setState and props are correctly inherited and typed
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -25,6 +27,7 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
   }
 
   handleReload = () => {
+    // Fixed: setState is now recognized from Component base class
     this.setState({ hasError: false, error: null });
     window.location.reload(); 
   };
@@ -53,6 +56,7 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
+    // Fixed: props is now recognized from Component base class
     return this.props.children;
   }
 }

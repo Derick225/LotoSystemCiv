@@ -4,7 +4,7 @@ import { invokeEdgeFunction } from './apiClient';
 import type { 
     DrawResult, SpectralMetric, FractalMetric, 
     NumberRegularity, TopFollowerAnalysis, ProjectionItem,
-    ClusterPoint
+    ClusterPoint, PositionalRegime
 } from '../types';
 import { 
     calculateMean, 
@@ -31,6 +31,36 @@ const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): 
         const simplifiedHistory = history.map(h => ({ gagnants: h.gagnants, date: h.date, machine: h.machine }));
         worker.postMessage({ requestId, task, history: simplifiedHistory, payload });
     });
+};
+
+/**
+ * Calcule l'exposant de Hurst pour chacune des 5 positions du tirage
+ * Permet de détecter si une position est "dirigée" ou chaotique.
+ */
+export const calculatePositionalRegimes = (history: DrawResult[]): PositionalRegime[] => {
+    if (history.length < 20) return [];
+    
+    const results: PositionalRegime[] = [];
+    
+    for (let pos = 0; pos < 5; pos++) {
+        const series = history.map(h => h.gagnants.slice().sort((a,b) => a-b)[pos]);
+        const hurst = calculateHurstForSeries(series);
+        
+        let regime: PositionalRegime['regime'] = 'STABLE';
+        if (hurst > 0.65) regime = 'PERSISTENT';
+        else if (hurst < 0.35) regime = 'CHAOTIC';
+        else {
+            // Test de bimodalité simple (variance des écarts)
+            const gaps = [];
+            for(let i=0; i<series.length-1; i++) gaps.push(Math.abs(series[i+1] - series[i]));
+            const stdDev = calculateStandardDeviation(gaps);
+            if (stdDev > 25) regime = 'BIMODAL';
+        }
+
+        results.push({ position: pos + 1, regime, hurst });
+    }
+    
+    return results;
 };
 
 export const calculateDigitalRoot = (n: number): number => (n - 1) % 9 + 1;
@@ -202,6 +232,11 @@ export const runLSTMPatternHeuristic = (history: DrawResult[]): Record<number, n
     const scores: Record<number, number> = {};
     history.slice(0, 10).forEach((d, i) => { d.gagnants.forEach(n => { scores[n] = (scores[n] || 0) + (10 - i); }); });
     return scores;
+};
+
+export const runEchoStateNetworkLocal = (signal: number[]): number => {
+    // Proxy simple car le code réel est dans le worker
+    return Math.random() * 100;
 };
 
 export const detectAnomalies = (history: DrawResult[]): Record<number, number> => {
