@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -13,15 +14,17 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
- * Fix: Explicitly using React.Component and initializing state to fix missing setState/props.
+ * Fix: Explicitly using Component from react to ensure state/props/setState resolution in strictly typed environments.
  */
-export class LocalErrorBoundary extends React.Component<Props, State> {
+// Fix: Use Component directly from react to ensure base class properties like setState and props are correctly resolved by TypeScript
+export class LocalErrorBoundary extends Component<Props, State> {
+  public state: State = {
+    hasError: false,
+    error: null,
+  };
+
   constructor(props: Props) {
     super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-    };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -35,7 +38,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
   }
 
   private handleReload = () => {
-    // Fix: Correct usage of this.state.
+    // Fix: Accessing state via inherited this.state.
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -43,13 +46,13 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: Correct usage of this.setState via inheritance.
+        // Fix: Correct usage of this.setState via inheritance from Component.
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    // Fix: Accessing state and props now correctly typed.
+    // Fix: Accessing state and props now correctly typed via inheritance from Component.
     const { hasError, error } = this.state;
     const { children } = this.props;
 

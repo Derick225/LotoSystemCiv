@@ -1,7 +1,7 @@
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
-import { Layers, Box, Activity } from 'lucide-react';
+import { Activity, Wind, AlertTriangle, ShieldCheck, Gauge } from 'lucide-react';
 import { useNexus } from './NexusProvider';
 
 interface ChaosAttractorProps {
@@ -10,112 +10,74 @@ interface ChaosAttractorProps {
 
 export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     const { regime, volatility } = useNexus();
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
     
-    const rotationRef = useRef({ x: 0, y: 0 });
-    const animationFrameRef = useRef<number | null>(null);
-
-    const points3D = useMemo(() => {
-        if (history.length < 3) return [];
-        const sums = history.map(d => d.gagnants.reduce((a, b) => a + b, 0));
-        const pts = [];
-        const minS = 15, maxS = 300; 
-        
-        for (let i = 0; i < Math.min(sums.length - 2, 60); i++) {
-            const x = ((sums[i] - minS) / (maxS - minS)) * 2 - 1;
-            const y = ((sums[i+1] - minS) / (maxS - minS)) * 2 - 1;
-            const z = ((sums[i+2] - minS) / (maxS - minS)) * 2 - 1;
-            pts.push({ x, y, z, sum: sums[i] });
-        }
-        return pts;
-    }, [history]);
-
-    const getRegimeColor = () => {
-        const r = regime?.regime || 'NOMINAL';
-        if (r === 'CHAOS') return '#f43f5e';
-        if (r === 'PERSISTANT') return '#6366f1';
-        if (r === 'RETOUR MOYENNE') return '#10b981';
-        return '#94a3b8';
-    };
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const render = () => {
-            const width = canvas.width;
-            const height = canvas.height;
-            const cx = width / 2;
-            const cy = height / 2;
-            const scale = Math.min(width, height) * 0.4;
-
-            ctx.fillStyle = 'rgba(2, 6, 23, 0.2)';
-            ctx.fillRect(0, 0, width, height);
-
-            const color = getRegimeColor();
-            rotationRef.current.y += 0.005;
-            rotationRef.current.x += 0.002;
-
-            const cosY = Math.cos(rotationRef.current.y);
-            const sinY = Math.sin(rotationRef.current.y);
-            const cosX = Math.cos(rotationRef.current.x);
-            const sinX = Math.sin(rotationRef.current.x);
-
-            ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 0.5;
-
-            points3D.forEach((p, i) => {
-                let x1 = p.x * cosY - p.z * sinY;
-                let z1 = p.z * cosY + p.x * sinY;
-                let y2 = p.y * cosX - z1 * sinX;
-                let z2 = z1 * cosX + p.y * sinX;
-
-                const perspective = 2 / (2 + z2);
-                const x2D = x1 * scale * perspective + cx;
-                const y2D = y2 * scale * perspective + cy;
-                
-                if (i === 0) ctx.moveTo(x2D, y2D);
-                else ctx.lineTo(x2D, y2D);
-
-                ctx.fillStyle = color;
-                ctx.globalAlpha = (z2 + 1) / 2;
-                ctx.fillRect(x2D - 1, y2D - 1, 3 * perspective, 3 * perspective);
-            });
-            
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            animationFrameRef.current = requestAnimationFrame(render);
+    const turbulence = volatility?.score || 50;
+    
+    const status = useMemo(() => {
+        if (turbulence > 75) return { 
+            label: "TEMPÊTE (Hasard pur)", 
+            color: "text-rose-500", 
+            bg: "bg-rose-500/10",
+            desc: "Le jeu est imprévisible. Évitez les grosses mises.",
+            icon: <AlertTriangle className="text-rose-500" size={32} />
         };
-
-        render();
-        return () => { if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current); };
-    }, [points3D, regime]);
-
-    useEffect(() => {
-        const resize = () => {
-            if (containerRef.current && canvasRef.current) {
-                canvasRef.current.width = containerRef.current.clientWidth;
-                canvasRef.current.height = containerRef.current.clientHeight;
-            }
+        if (turbulence > 40) return { 
+            label: "BRÈSE (Variable)", 
+            color: "text-indigo-400", 
+            bg: "bg-indigo-500/10",
+            desc: "Le jeu alterne entre logique et surprise.",
+            icon: <Wind className="text-indigo-400" size={32} />
         };
-        resize();
-        window.addEventListener('resize', resize);
-        return () => window.removeEventListener('resize', resize);
-    }, []);
+        return { 
+            label: "CALME (Régularité)", 
+            color: "text-emerald-500", 
+            bg: "bg-emerald-500/10",
+            desc: "Les patterns historiques sont respectés. Idéal pour l'IA.",
+            icon: <ShieldCheck className="text-emerald-500" size={32} />
+        };
+    }, [turbulence]);
 
     return (
-        <div ref={containerRef} className="bg-slate-950 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden h-[300px]">
-            <div className="absolute top-4 left-6 z-10 pointer-events-none">
-                <div className="flex items-center gap-2">
-                    <Box size={14} className="text-indigo-400" />
-                    <span className="text-[10px] font-black text-white uppercase tracking-widest">Chaos Attractor 3D</span>
+        <div className="bg-slate-950 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden p-8">
+            <div className="flex justify-between items-center mb-8">
+                <div className="flex items-center gap-3">
+                    <Gauge size={16} className="text-indigo-400" />
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">Moniteur de Turbulence</span>
                 </div>
             </div>
-            <canvas ref={canvasRef} className="w-full h-full cursor-move" />
+
+            <div className="flex flex-col items-center text-center space-y-6">
+                <div className={`p-6 rounded-full ${status.bg} shadow-2xl relative group`}>
+                    <div className="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/20 animate-spin-slow"></div>
+                    {status.icon}
+                </div>
+
+                <div>
+                    <h3 className={`text-2xl font-black uppercase tracking-tighter ${status.color}`}>
+                        {status.label}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-2 font-medium max-w-[200px] mx-auto leading-relaxed">
+                        {status.desc}
+                    </p>
+                </div>
+
+                <div className="w-full space-y-2">
+                    <div className="flex justify-between text-[8px] font-black text-slate-500 uppercase tracking-widest">
+                        <span>Linaire</span>
+                        <span>Turbulent</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                        <div 
+                            className={`h-full transition-all duration-1000 ${turbulence > 75 ? 'bg-rose-500' : turbulence > 40 ? 'bg-indigo-500' : 'bg-emerald-500'}`}
+                            style={{ width: `${turbulence}%` }}
+                        ></div>
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-400">{turbulence}% de décalage stochastique</div>
+                </div>
+            </div>
+            
+            {/* Décoration radar subtile */}
+            <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
         </div>
     );
 };

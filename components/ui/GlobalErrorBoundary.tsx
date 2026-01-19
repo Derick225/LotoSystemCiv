@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -12,15 +13,17 @@ interface State {
 
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
- * Fix: Explicitly using React.Component to fix missing setState/props.
+ * Fix: Explicitly using Component from react to ensure state/props/setState resolution in strictly typed environments.
  */
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Fix: Use Component directly from react to ensure base class properties like setState and props are correctly resolved by TypeScript
+export class GlobalErrorBoundary extends Component<Props, State> {
+  public state: State = {
+    hasError: false,
+    error: null,
+  };
+
   constructor(props: Props) {
     super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-    };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -33,14 +36,14 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
 
   private handleReload = () => {
     // Reset state via Component method
-    /* Fix: setState is now correctly recognized via inheritance */
+    /* Fix: setState is now correctly recognized via inheritance from Component */
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
   public render(): ReactNode {
-    // Fix: Accessing state and props now correctly typed via inheritance.
+    // Fix: Accessing state and props now correctly typed via inheritance from Component.
     const { hasError, error } = this.state;
     const { children } = this.props;
 
