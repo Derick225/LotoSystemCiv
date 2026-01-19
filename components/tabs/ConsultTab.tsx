@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
     fetchNextDrawProjections, 
@@ -118,14 +117,8 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
           else if (globalScore >= 58) { verdict = "Vecteur Actif"; color = "text-indigo-500"; }
           else if (globalScore <= 35) { verdict = "Retrait Signal"; color = "text-rose-500"; }
 
-          // CALCUL DYNAMIQUE DU PROFIL IDÉAL
-          // On moyenne les stats des 50 derniers numéros sortis pour savoir à quoi ressemble un "gagnant"
-          const recentWinners = history.slice(0, 10).flatMap(d => d.gagnants);
-          const avgGap = recentWinners.length ? 15 : 18; // Valeur par défaut si pas d'historique
-          // Simulation simplifiée des moyennes pour l'exemple, dans une implémentation plus lourde on calculerait la moyenne réelle
           const idealMatch = {
-              gap: Math.min(100, (avgGap / 20) * 100), 
-              energy: 75, // Moyenne observée des gagnants
+              energy: 75,
               velocity: 60,
               hurst: 55
           };
@@ -137,7 +130,7 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
                 physics: { spectralEnergy: spectralScore, spatialHeat: Math.round(Number(spatial)), velocity: Math.round(Number(velocity)), momentum: Math.round((momentumScores[num] || 0) / 10), hurst: Math.round(hurstInfo.hurst * 100) }, 
                 social: { affinities: sortedAffinities, nemesis, following: associated.following.map(f => ({ num: f.number, count: f.count })) }, 
                 prediction: { probability: globalScore, verdict, color },
-                idealMatch
+                idealMatch: { ...idealMatch, gap: 50 }
               });
           }
       } catch (e) { 
@@ -222,13 +215,13 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
           case 'projection':
               return (
                   <div className="animate-slide-up space-y-6">
-                      <div className="bg-slate-900 p-8 rounded-[3rem] text-white flex flex-col md:flex-row justify-between items-center gap-6 border border-slate-800">
-                          <div>
-                              <h3 className="text-2xl font-black flex items-center gap-3"><Zap className="text-indigo-400"/> Inférence J+1</h3>
-                              <p className="text-slate-400 text-sm mt-1">Modélisation markovienne des transitions immédiates.</p>
+                      <div className="bg-slate-900 p-6 md:p-8 rounded-[3rem] text-white flex flex-col md:flex-row justify-between items-center gap-6 border border-slate-800">
+                          <div className="text-center md:text-left">
+                              <h3 className="text-xl md:text-2xl font-black flex items-center justify-center md:justify-start gap-3"><Zap className="text-indigo-400"/> Inférence J+1</h3>
+                              <p className="text-slate-400 text-xs md:text-sm mt-1">Modélisation markovienne des transitions immédiates.</p>
                           </div>
-                          <button onClick={handleProjection} disabled={projLoading} className="px-8 py-3 bg-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-xl active:scale-95">
-                              {projLoading ? <RefreshCw className="animate-spin" size={16}/> : <Target size={16}/>} RELANCER SCAN
+                          <button onClick={handleProjection} disabled={projLoading} className="w-full md:w-auto px-8 py-3 bg-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl active:scale-95">
+                              {projLoading ? <RefreshCw className="animate-spin" size={16}/> : <Target size={16}/>} RELANCER
                           </button>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -245,29 +238,29 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
           case 'anti-fraud':
               return (
                   <div className="animate-slide-up space-y-8">
-                        <div className="bg-slate-950 p-8 rounded-[3rem] border border-rose-500/20 shadow-2xl relative overflow-hidden group">
+                        <div className="bg-slate-950 p-6 md:p-8 rounded-[3rem] border border-rose-500/20 shadow-2xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-10 opacity-5 group-hover:rotate-12 transition-transform duration-1000"><ShieldAlert size={120} className="text-rose-500"/></div>
-                            <h3 className="text-2xl font-black text-white flex items-center gap-4 mb-6"><Microscope className="text-rose-500" /> Moniteur Forensique Sentinel</h3>
+                            <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-4 mb-6"><Microscope className="text-rose-500" /> Moniteur Forensique</h3>
                             <div className="grid md:grid-cols-2 gap-10">
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-5 gap-2">
                                         {fraudInputs.map((val, idx) => (
-                                            <input key={idx} type="number" value={val} onChange={(e) => { const n = [...fraudInputs]; n[idx] = e.target.value; setFraudInputs(n); }} className="w-full h-12 bg-white/5 border border-white/10 rounded-xl text-center text-white font-black text-xl outline-none focus:border-rose-500" placeholder="?" />
+                                            <input key={idx} type="number" value={val} onChange={(e) => { const n = [...fraudInputs]; n[idx] = e.target.value; setFraudInputs(n); }} className="w-full h-10 md:h-12 bg-white/5 border border-white/10 rounded-xl text-center text-white font-black text-base md:text-xl outline-none focus:border-rose-500" placeholder="?" />
                                         ))}
                                     </div>
                                     <div className="flex gap-4">
                                         <button onClick={handleAuditFraud} disabled={fraudLoading} className="flex-1 py-4 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-[10px] tracking-widest">
-                                            {fraudLoading ? <RefreshCw className="animate-spin" size={16}/> : <Scan size={16}/>} ANALYSER SÉQUENCE
+                                            {fraudLoading ? <RefreshCw className="animate-spin" size={16}/> : <Scan size={16}/>} ANALYSER
                                         </button>
                                         <button onClick={handleGenerateShadowOracle} disabled={fraudLoading} className="p-4 bg-slate-800 text-slate-400 rounded-2xl hover:text-white transition-colors" title="Oracle Shadow"><Ghost size={20}/></button>
                                     </div>
                                 </div>
                                 <div className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex flex-col justify-center items-center text-center">
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Suspicion de Manipulation</div>
-                                    <div className={`text-6xl font-black ${fraudAudit ? (fraudAudit.suspicionScore > 60 ? 'text-rose-500' : 'text-emerald-400') : 'text-slate-800'}`}>
+                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Suspicion Manipulation</div>
+                                    <div className={`text-5xl md:text-6xl font-black ${fraudAudit ? (fraudAudit.suspicionScore > 60 ? 'text-rose-500' : 'text-emerald-400') : 'text-slate-800'}`}>
                                         {fraudAudit ? fraudAudit.suspicionScore + '%' : '--'}
                                     </div>
-                                    <p className="text-[10px] text-slate-500 mt-4 italic">"Analyse de linéarité, écho T-1 et conformité Benford."</p>
+                                    <p className="text-[10px] text-slate-500 mt-4 italic max-w-xs">Analyse linéarité, écho T-1 et conformité Benford.</p>
                                 </div>
                             </div>
                         </div>
@@ -276,35 +269,35 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
           case 'single':
               return (
                   <div className="animate-slide-up space-y-6">
-                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-8">
+                        <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-8">
                             <div className="relative">
-                                <input type="number" value={numberInput} onChange={(e) => setNumberInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleConsultSingle()} className="w-24 h-24 rounded-full border-4 border-indigo-600 dark:bg-slate-900 text-center text-4xl font-black outline-none focus:ring-4 ring-indigo-500/20" placeholder="?" />
+                                <input type="number" value={numberInput} onChange={(e) => setNumberInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleConsultSingle()} className="w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-indigo-600 dark:bg-slate-900 text-center text-3xl md:text-4xl font-black outline-none focus:ring-4 ring-indigo-500/20" placeholder="?" />
                                 <div className="absolute -bottom-2 -right-2 bg-indigo-600 text-white p-2 rounded-lg shadow-lg"><Search size={16}/></div>
                             </div>
-                            <div className="flex-1">
-                                <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Diagnostic Quantum</h3>
-                                <p className="text-slate-500 text-sm mt-1">Saisissez un vecteur pour extraire son empreinte stochastique complète.</p>
+                            <div className="flex-1 text-center md:text-left">
+                                <h3 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Diagnostic Quantum</h3>
+                                <p className="text-slate-500 text-xs md:text-sm mt-1">Saisissez un vecteur pour extraire son empreinte stochastique.</p>
                             </div>
-                            <button onClick={handleConsultSingle} disabled={loading} className="px-10 py-5 bg-slate-900 text-white font-black rounded-2xl shadow-xl transition-all hover:bg-indigo-600">
+                            <button onClick={handleConsultSingle} disabled={loading} className="w-full md:w-auto px-8 py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl transition-all hover:bg-indigo-600 uppercase text-[10px] tracking-widest">
                                 {loading ? 'ÉXÉCUTION...' : 'EXTRAIRE PROFIL'}
                             </button>
                         </div>
                         {quantumProfile && (
                             <div className="grid lg:grid-cols-3 gap-6 animate-scale-in">
-                                <div className="bg-slate-900 p-8 rounded-[3rem] text-white flex flex-col items-center justify-between">
+                                <div className="bg-slate-900 p-8 rounded-[3rem] text-white flex flex-col items-center justify-between min-h-[300px]">
                                     <NumberBall number={quantumProfile.number} size="xl" />
-                                    <div className={`text-2xl font-black mt-6 ${quantumProfile.prediction.color}`}>{quantumProfile.prediction.verdict}</div>
-                                    <div className="text-6xl font-black mt-4">{quantumProfile.prediction.probability}%</div>
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Confiance Oracle</div>
+                                    <div className={`text-xl md:text-2xl font-black mt-6 ${quantumProfile.prediction.color}`}>{quantumProfile.prediction.verdict}</div>
+                                    <div className="text-5xl md:text-6xl font-black mt-4">{quantumProfile.prediction.probability}%</div>
+                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-2">Confiance Oracle</div>
                                 </div>
-                                <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-sm border border-slate-100 space-y-6">
+                                <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 space-y-6">
                                     <div className="flex justify-between items-center mb-4">
-                                        <h4 className="font-black text-slate-400 uppercase text-[10px] tracking-[0.3em]">Empreinte Physique vs Idéal</h4>
+                                        <h4 className="font-black text-slate-400 uppercase text-[10px] tracking-[0.3em]">Profil Physique vs Idéal</h4>
                                         <span className="text-[9px] bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded text-slate-500 font-bold uppercase">Radar Match</span>
                                     </div>
                                     
                                     <div className="grid md:grid-cols-2 gap-8">
-                                        <div className="h-48 w-full">
+                                        <div className="h-48 md:h-56 w-full">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <RadarChart cx="50%" cy="50%" outerRadius="70%" data={[
                                                     { subject: 'Energy', A: quantumProfile.physics.spectralEnergy, B: quantumProfile.idealMatch.energy, fullMark: 100 },
@@ -314,7 +307,7 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
                                                     { subject: 'Momentum', A: quantumProfile.physics.momentum * 10, B: 60, fullMark: 100 },
                                                 ]}>
                                                     <PolarGrid stroke="#e5e7eb" />
-                                                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: '#94a3b8', fontWeight: 'bold' }} />
+                                                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 8, fill: '#94a3b8', fontWeight: 'bold' }} />
                                                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
                                                     <Radar name="Actuel" dataKey="A" stroke="#6366f1" strokeWidth={2} fill="#6366f1" fillOpacity={0.4} />
                                                     <Radar name="Idéal" dataKey="B" stroke="#10b981" strokeWidth={1} fill="#10b981" fillOpacity={0.1} strokeDasharray="4 4" />
@@ -322,16 +315,16 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
                                                 </RadarChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4 h-fit">
+                                        <div className="grid grid-cols-2 gap-3 md:gap-4 h-fit">
                                             {[
                                                 { label: 'Énergie Spectrale', val: quantumProfile.physics.spectralEnergy + '%' },
                                                 { label: 'Densité Spatiale', val: quantumProfile.physics.spatialHeat + '%' },
                                                 { label: 'Vélocité Flux', val: quantumProfile.physics.velocity + 't' },
                                                 { label: 'Hurst Index', val: (quantumProfile.physics.hurst / 100).toFixed(2) }
                                             ].map(stat => (
-                                                <div key={stat.label} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100">
-                                                    <div className="text-xs font-black text-slate-800 dark:text-white">{stat.val}</div>
-                                                    <div className="text-[8px] font-bold text-slate-500 uppercase">{stat.label}</div>
+                                                <div key={stat.label} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
+                                                    <div className="text-[11px] font-black text-slate-800 dark:text-white leading-none">{stat.val}</div>
+                                                    <div className="text-[7px] md:text-[8px] font-bold text-slate-500 uppercase mt-1">{stat.label}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -347,27 +340,29 @@ export const ConsultTab: React.FC<ConsultTabProps> = ({ drawName }) => {
   };
 
   return (
-    <div className="space-y-10 animate-fade-in pb-20 w-full overflow-hidden">
-      <div className="overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4 md:mx-0 md:px-0">
-        <div className="flex gap-2 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-max border border-slate-200 dark:border-slate-700 shadow-inner">
-            {[
-                { id: 'single', icon: <Atom size={16}/>, label: 'Quantum Profile' },
-                { id: 'projection', icon: <Zap size={16}/>, label: 'Inférence J+1' },
-                { id: 'anti-fraud', icon: <ShieldAlert size={16}/>, label: 'Moniteur Forensique' },
-                { id: 'crossdraw', icon: <Share2 size={16}/>, label: 'Translocation' },
-                { id: 'leaders', icon: <TrendingUp size={16}/>, label: 'Vecteurs Leaders' },
-            ].map(m => (
-                <button 
-                    key={m.id} 
-                    onClick={() => setMode(m.id as any)} 
-                    className={`px-6 py-3.5 rounded-[1.8rem] text-[10px] font-black transition-all whitespace-nowrap flex items-center gap-3 ${mode === m.id ? 'bg-white dark:bg-slate-700 shadow-xl text-indigo-600 dark:text-white scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                    {m.icon} {m.label}
-                </button>
-            ))}
+    <div className="space-y-6 md:space-y-10 animate-fade-in pb-20 w-full overflow-hidden px-1 md:px-0">
+      <div className="relative">
+        <div className="overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4 mask-fade-right">
+            <div className="flex gap-2 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[1.8rem] md:rounded-[2.5rem] w-max border border-slate-200 dark:border-slate-700 shadow-inner">
+                {[
+                    { id: 'single', icon: <Atom size={16}/>, label: 'Quantum' },
+                    { id: 'projection', icon: <Zap size={16}/>, label: 'J+1' },
+                    { id: 'anti-fraud', icon: <ShieldAlert size={16}/>, label: 'Audit' },
+                    { id: 'crossdraw', icon: <Share2 size={16}/>, label: 'Transloc' },
+                    { id: 'leaders', icon: <TrendingUp size={16}/>, label: 'Leaders' },
+                ].map(m => (
+                    <button 
+                        key={m.id} 
+                        onClick={() => setMode(m.id as any)} 
+                        className={`px-5 py-2.5 md:py-3.5 rounded-[1.5rem] md:rounded-[1.8rem] text-[9px] md:text-[10px] font-black transition-all whitespace-nowrap flex items-center gap-2.5 flex-shrink-0 ${mode === m.id ? 'bg-white dark:bg-slate-700 shadow-xl text-indigo-600 dark:text-white scale-105 z-10' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                        {m.icon} <span>{m.label}</span>
+                    </button>
+                ))}
+            </div>
         </div>
       </div>
-      <div className="transition-all duration-500">
+      <div className="transition-all duration-500 min-h-[400px]">
         {renderContent()}
       </div>
     </div>

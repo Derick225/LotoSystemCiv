@@ -1,4 +1,3 @@
-
 import React, { useState, Suspense, lazy, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { SmartInsights } from '../SmartInsights';
@@ -22,44 +21,62 @@ export const SignalHub: React.FC = () => {
     const [activeSubTab, setActiveSubTab] = useState('stats');
 
     const tabs = [
-        { id: 'stats', label: 'Statistiques', icon: BarChart2, color: 'text-indigo-500' },
-        { id: 'spectral', label: 'Spectral FFT', icon: Waves, color: 'text-purple-500' },
-        { id: 'fractal', label: 'Fractal Hurst', icon: Layers, color: 'text-emerald-500' },
-        { id: 'math', label: 'Arithmétique', icon: Activity, color: 'text-rose-500' },
-        { id: 'temporal', label: 'Temporel', icon: Clock, color: 'text-amber-500' },
+        { id: 'stats', label: 'Stats', icon: BarChart2, color: 'text-indigo-500' },
+        { id: 'spectral', label: 'Spectral', icon: Waves, color: 'text-purple-500' },
+        { id: 'fractal', label: 'Météo', icon: Layers, color: 'text-emerald-500' },
+        { id: 'math', label: 'Maths', icon: Activity, color: 'text-rose-500' },
+        { id: 'temporal', label: 'Temps', icon: Clock, color: 'text-amber-500' },
         { id: 'academy', label: 'Academy', icon: BookOpen, color: 'text-white' }
     ];
 
     return (
-        <div className="space-y-8 animate-fade-in w-full">
+        <div className="space-y-6 md:space-y-8 animate-fade-in w-full px-1 md:px-0">
             <SmartInsights drawName={activeDraw} />
 
-            <div className="grid lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8">
-                    <div className="overflow-x-auto scrollbar-hide pb-2 mb-8">
-                        <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-fit border border-slate-200 dark:border-slate-700 shadow-inner">
-                            {tabs.map((tab) => (
-                                <button 
-                                    key={tab.id}
-                                    onClick={() => setActiveSubTab(tab.id)}
-                                    className={`
-                                        px-5 py-3 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap
-                                        ${activeSubTab === tab.id 
-                                            ? 'bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white' 
-                                            : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-                                        }
-                                    `}
-                                >
-                                    <tab.icon size={14} className={activeSubTab === tab.id ? tab.color : ''} />
-                                    {tab.label}
-                                </button>
-                            ))}
+            <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
+                <div className="lg:col-span-8 space-y-6 min-w-0">
+                    {/* Navigation Onglets Mobile Optimized avec Fading Edge */}
+                    <div className="relative">
+                        <div className="overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4 mask-fade-right">
+                            <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-[2.5rem] w-max border border-slate-200 dark:border-slate-700 shadow-inner">
+                                {tabs.map((tab) => (
+                                    <button 
+                                        key={tab.id}
+                                        onClick={() => setActiveSubTab(tab.id)}
+                                        className={`
+                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap flex-shrink-0
+                                            ${activeSubTab === tab.id 
+                                                ? 'bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white' 
+                                                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                                            }
+                                        `}
+                                    >
+                                        <tab.icon size={14} className={activeSubTab === tab.id ? tab.color : ''} />
+                                        <span>{tab.label}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
+                        {/* CSS Mask Inline Style pour compatibilité immédiate */}
+                        <style dangerouslySetInnerHTML={{ __html: `
+                            .mask-fade-right {
+                                -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+                                mask-image: linear-gradient(to right, black 85%, transparent 100%);
+                            }
+                            @media (min-width: 1024px) {
+                                .mask-fade-right { -webkit-mask-image: none; mask-image: none; }
+                            }
+                        `}} />
                     </div>
 
-                    <div className="min-h-[500px] transition-all duration-500">
+                    <div className="min-h-[400px] transition-all duration-500">
                         <LocalErrorBoundary key={activeSubTab}>
-                            <Suspense fallback={<div className="py-32 text-center animate-pulse text-slate-400 font-bold uppercase text-[10px]">Chargement du moteur...</div>}>
+                            <Suspense fallback={
+                                <div className="py-20 flex flex-col items-center justify-center gap-4">
+                                    <RefreshCw className="animate-spin text-indigo-500" size={32} />
+                                    <p className="text-slate-500 font-bold uppercase text-[9px] tracking-widest">Calcul du module...</p>
+                                </div>
+                            }>
                                 {activeSubTab === 'stats' && <StatsTab drawName={activeDraw} />}
                                 {activeSubTab === 'spectral' && <SpectralTab drawName={activeDraw} />}
                                 {activeSubTab === 'fractal' && <FractalTab drawName={activeDraw} />}
@@ -72,13 +89,15 @@ export const SignalHub: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Chaos Attractor Sidebar Widget */}
+                {/* Sidebar Widget : Attracteur */}
                 <div className="lg:col-span-4 space-y-6">
                     <ChaosAttractor history={history} />
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl">
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Box size={12}/> Lecture de l'Espace</h4>
-                        <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
-                            L'attracteur ci-dessus montre la trajectoire stochastique du jeu. Une spirale régulière indique un jeu cyclique prévisible. Un nuage diffus indique un régime de bruit blanc pur.
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <Box size={12} className="text-indigo-500"/> Analyse Contextuelle
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                            Les graphiques ci-contre isolent les singularités mathématiques. Une forte "énergie" spectral suggère une sortie imminente par résonance cyclique.
                         </p>
                     </div>
                 </div>
