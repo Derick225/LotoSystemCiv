@@ -1,7 +1,6 @@
-
 import React, { useMemo } from 'react';
 import { NumberBall } from './NumberBall';
-import { Target, Globe, Activity, Layers, TrendingUp, ArrowUpRight, ArrowDownRight, ThermometerHole } from 'lucide-react';
+import { Target, Globe, Activity, Layers, TrendingUp, ArrowUpRight, ArrowDownRight, Thermometer } from 'lucide-react';
 
 interface ProbabilityFieldProps {
     scores: Record<number, number>;
@@ -46,7 +45,7 @@ export const ProbabilityField: React.FC<ProbabilityFieldProps> = ({ scores }) =>
             <div className="bg-slate-950 p-4 md:p-8 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden">
                 <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-3">
-                        <ThermometerHole className="text-indigo-400" size={20} />
+                        <Thermometer className="text-indigo-400" size={20} />
                         <h4 className="text-white font-black text-sm uppercase tracking-widest">Matrice de Pression Thermique</h4>
                     </div>
                 </div>
