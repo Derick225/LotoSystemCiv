@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -13,9 +13,9 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
- * Fix: Explicitly using Component from react to ensure state/props/setState resolution in strictly typed environments.
+ * Fix: Explicitly using React.Component to ensure state/props/setState resolution in strictly typed environments.
  */
-// Added React.Component inheritance to resolve missing setState/state/props property errors
+// Fix: Use React.Component to ensure inheritance of React component members (setState, props)
 export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -46,17 +46,17 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Correct usage of this.setState via inheritance from Component.
-        // Fix: Explicitly calling inherited setState from React.Component
+        // Correct usage of this.setState via inheritance from React.Component.
+        // Fix: Explicitly calling inherited setState from React.Component to resolve property missing error
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    // Accessing state and props now correctly typed via inheritance from Component.
+    // Accessing state and props now correctly typed via inheritance from React.Component.
     // Fix: Accessing inherited state from React.Component
     const { hasError, error } = this.state;
-    // Fix: Accessing inherited props from React.Component
+    // Fix: Accessing inherited props from React.Component to resolve property missing error
     const { children } = this.props;
 
     if (hasError) {

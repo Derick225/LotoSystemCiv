@@ -2,26 +2,23 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
-  NexusContextType, OracleVocalContext, RLState, PositionalRegime
+  NexusContextType, RLState
 } from '../types';
-import { lotteryService, checkAndSyncRecentResults, getNextScheduledDraw } from '../services/lotteryService';
+import { lotteryService, getNextScheduledDraw } from '../services/lotteryService';
 import { 
     calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
-    calculateNetworkCentralityAsync, calculateSpectralMetricsAsync,
+    calculateSpectralMetricsAsync,
     calculateFractalMetricsAsync, calculateWaveletMetricsAsync
 } from '../services/mathService';
-import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
+import { getAlgoWeightsSync } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
-import { ReinforcementLearningService } from '../services/reinforcementLearningService';
 import { useToast } from './ui/Toast'; 
-import { isSupabaseConfigured } from '../services/supabaseClient'; 
 
 const NexusContext = createContext<NexusContextType | null>(null);
 
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { showToast } = useToast(); 
   const [drawName, setDrawNameState] = useState(() => {
       const next = getNextScheduledDraw();
       return next ? next.name : 'Reveil';
@@ -41,7 +38,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
   const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync(drawName));
   const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
-  const [rlState, setRlState] = useState<RLState | null>(null);
   const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
@@ -59,7 +55,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHistory(hist); 
         
         if (hist.length > 0) {
-            // Stats de base synchronisées
             const counts: Record<number, number> = {};
             hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             setStats(Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count));
@@ -78,7 +73,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         if (hist.length > 10 && drawName !== 'ALL') {
             const computeSample = hist.slice(0, 300); 
-            // Pipeline HPC : Calculs complexes déportés
             const [spec, wav, frac, regData, corr, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateWaveletMetricsAsync(computeSample),
@@ -99,8 +93,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setSmartInsights(insights);
 
             if (preds.length > 0) {
-                const latestPred = preds[0].prediction;
-                setLastPrediction(latestPred);
+                setLastPrediction(preds[0].prediction);
                 const perf = calculateHistoricalPerformance(preds, hist);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
@@ -121,16 +114,20 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
   }, [drawName]);
 
-  const contextValue: any = useMemo(() => ({
+  const contextValue = useMemo(() => ({
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading,
-    correlationMatrix, regularity, calibration, hoveredNumber, rlState,
+    correlationMatrix, regularity, calibration, hoveredNumber,
     setDrawName: setDrawNameState,
     setLastPrediction, setInspectingNumber: setInspectingNumberState,
     updateGlobalWeights, setHoveredNumber: setHoveredNumberState,
     refresh: () => loadData(),
     refreshData: (name: string, force?: boolean) => { if(force) setRefreshTrigger(t => t+1); setDrawNameState(name); }
-  }), [drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, correlationMatrix, regularity, calibration, hoveredNumber, rlState]);
+  }), [
+    drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
+    lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, 
+    correlationMatrix, regularity, calibration, hoveredNumber, loadData
+  ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;
 };

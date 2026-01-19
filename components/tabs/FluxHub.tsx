@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -14,7 +13,6 @@ import { HeatmapCalendar } from '../HeatmapCalendar';
 
 export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   const { currentDrawName, refreshData, loading } = useNexus();
-  // Fix: Corrected hook usage from showToast() to useToast()
   const { showToast } = useToast();
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,9 +44,9 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   if (loading && history.length === 0) return <ListSkeleton />;
 
   return (
-    <div className="space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-2 md:px-0">
-        {/* Controls Bar */}
-        <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700 sticky top-32 z-30 mx-auto w-full">
+    <div className="space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-1 md:px-0">
+        {/* Controls Bar - Amélioration Mobile: static par défaut, sticky seulement sur desktop pour éviter l'overlap */}
+        <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700 relative lg:sticky lg:top-[158px] z-30 mx-auto w-full mb-2 lg:mb-0">
             <div className="flex items-center gap-3 px-2 w-full md:w-auto">
                 <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400">
                     <Activity size={18} />
