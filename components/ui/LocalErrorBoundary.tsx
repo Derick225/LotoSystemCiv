@@ -1,8 +1,10 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
+// --- FIX: Added key?: any to allow React internal key prop in TS ---
 interface Props {
   children?: ReactNode;
+  key?: any;
 }
 
 interface State {
@@ -12,16 +14,17 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.2 - Module Isolation
- * Fix: Use named Component import and constructor to ensure correct base class linkage and property access (setState, props).
+ * FIX: Use Component directly from react to solve 'setState' and 'props' not existing.
  */
 export class LocalErrorBoundary extends Component<Props, State> {
-  // Use constructor for proper initialization and to ensure inheritance is correctly handled by TS
+  // Use state initialization outside constructor for cleaner type-safety
+  public state: State = {
+    hasError: false,
+    error: null,
+  };
+
   constructor(props: Props) {
     super(props);
-    this.state = {
-      hasError: false,
-      error: null,
-    };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -34,7 +37,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
     }
   }
 
-  // Use arrow function to preserve 'this' context, now correctly linked via constructor
   private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
@@ -72,7 +74,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Access children from props
     return this.props.children;
   }
 }

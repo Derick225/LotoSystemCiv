@@ -5,14 +5,10 @@ import { savePredictionToHistory } from '../../services/predictionHistoryService
 import { ExportService } from '../../services/exportService';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { OraclePerformance } from '../OraclePerformance'; 
-import { OracleAnalyticsDashboard } from '../OracleAnalyticsDashboard'; 
 import { ReliabilityMeter } from '../ReliabilityMeter';
-import { AlgoRadar } from '../AlgoRadar';
-import { QuantumTensionField } from '../QuantumTensionField';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
-import { FileText, Cpu, Sparkles, Zap, Target, Binary, ThermometerSun, RefreshCw, Equal, TrendingUp, Shuffle, Dna, Info, AlertTriangle, ShieldCheck, Magnet, Fingerprint, Lock, Layers, Network, Activity } from 'lucide-react';
+import { FileText, Cpu, Sparkles, Zap, Target, Binary, RefreshCw, Activity, Info, Magnet, Lock, Layers, Network } from 'lucide-react';
 import { useNexus } from '../NexusProvider';
 
 interface PredictionTabProps { drawName: string; }
@@ -22,8 +18,8 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   const [isPending, startTransition] = useTransition();
   const { 
     history, lastPrediction, setLastPrediction, loading: nexusLoading, 
-    spectral, fractal, wavelet, regularity, calibration, volatility, regime,
-    globalWeights, rlState
+    spectral, fractal, wavelet, regularity, calibration, volatility,
+    globalWeights, rlState, correlationMatrix
   } = useNexus();
   
   const [computingIA, setComputingIA] = useState(false);
@@ -50,12 +46,12 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
 
     startTransition(async () => {
         try {
-          // Transmission explicite des métriques d'ondelettes
+          // Transmission explicite des métriques complexes au moteur
           const res = await generateMasterPrediction(
               drawName, 
               history, 
               globalWeights,
-              { spectral, fractal, wavelet, regularity }
+              { spectral, fractal, wavelet, regularity, correlationMatrix }
           );
 
           if (isMounted.current) {
@@ -70,10 +66,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           if (isMounted.current) setComputingIA(false);
         }
     });
-  }, [drawName, history, spectral, fractal, wavelet, regularity, setLastPrediction, showToast, globalWeights]);
+  }, [drawName, history, spectral, fractal, wavelet, regularity, correlationMatrix, setLastPrediction, showToast, globalWeights]);
 
   if (nexusLoading || (computingIA && !lastPrediction)) return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 animate-fade-in bg-slate-900/10 rounded-[4rem] border border-dashed border-indigo-200">
+      <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 animate-fade-in bg-slate-900/10 rounded-[4rem] border border-dashed border-indigo-200 dark:border-slate-800">
           <div className="relative">
               <div className="w-24 h-24 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
               <Cpu className="absolute inset-0 m-auto text-indigo-600 w-10 h-10 animate-pulse" />
@@ -119,10 +115,10 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                                 <h3 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Moniteur de Consensus</h3>
                             </div>
                             <div className="flex flex-col items-end">
-                                <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.1</div>
+                                <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Noyau v12.2</div>
                                 {rlState && (
                                     <div className="mt-2 flex items-center gap-2 text-[8px] font-bold text-emerald-500">
-                                        <Activity size={10} className="animate-pulse" /> STABILITÉ SYNAPTIQUE : 98.2%
+                                        <Activity size={10} className="animate-pulse" /> STABILITÉ SYNAPTIQUE : {(100 - rlState.learningRate * 100).toFixed(1)}%
                                     </div>
                                 )}
                             </div>
@@ -140,13 +136,13 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                                             initial={{ width: 0 }}
                                             animate={{ width: `${c.score}%` }}
                                             transition={{ duration: 1.5, ease: "easeOut" }}
-                                            className="h-full bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] relative"
+                                            className={`h-full relative shadow-[0_0_15px_rgba(99,102,241,0.5)] ${c.engine === 'STOCHASTIC' ? 'bg-indigo-500' : c.engine === 'MACHINE_LEARNING' ? 'bg-purple-500' : 'bg-emerald-500'}`}
                                         >
                                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer"></div>
                                         </motion.div>
                                     </div>
                                     <div className="flex gap-1.5 mt-2 overflow-x-auto scrollbar-hide">
-                                        {c.topNumbers.slice(0, 5).map((n: number) => (
+                                        {c.topNumbers.slice(0, 6).map((n: number) => (
                                             <span key={n} className="text-[9px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-lg border border-white/5 whitespace-nowrap">
                                                 N°{n}
                                             </span>
@@ -160,7 +156,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                     <div className="mt-10 p-5 bg-white/5 rounded-[2rem] border border-white/5 flex items-center gap-4 relative z-10">
                         <Layers size={24} className="text-indigo-500" />
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
-                            {"Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% indique une convergence synaptique de haute certitude."}
+                            {"Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% sur un moteur indique une convergence synaptique de haute certitude."}
                         </p>
                     </div>
                 </div>
@@ -178,7 +174,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             <div className="relative z-10 flex flex-col xl:flex-row justify-between items-center gap-12 text-center xl:text-left">
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
-                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-50" : "bg-emerald-400"}`}></div>
+                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-500" : "bg-emerald-400"}`}></div>
                         <span className="text-[10px] font-black uppercase tracking-widest">ADN : {strategyMode.toUpperCase()}</span>
                     </div>
                     <h2 className="text-5xl md:text-8xl font-black tracking-tighter mb-8 leading-none">Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span></h2>
@@ -220,12 +216,9 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             </div>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8">
-            {lastPrediction.breakdown && <QuantumTensionField breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />}
+        <div className="grid lg:grid-cols-1 gap-8">
             {lastPrediction.breakdown && <NeuralHeatmapGrid breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />}
         </div>
-        
-        <OracleAnalyticsDashboard breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />
     </div>
   );
 };

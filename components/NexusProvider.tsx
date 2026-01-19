@@ -9,17 +9,14 @@ import {
     calculateVolatility, calculateRegularity, 
     detectGameRegime, calculateCorrelationMatrixAsync,
     calculateNetworkCentralityAsync, calculateSpectralMetricsAsync,
-    calculateFractalMetricsAsync, calculatePositionalRegimes,
-    calculateWaveletMetricsAsync
+    calculateFractalMetricsAsync, calculateWaveletMetricsAsync
 } from '../services/mathService';
-import { getAlgoWeightsSync, getAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
+import { getAlgoWeightsSync, getAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
-import { getPredictionHistoryAsync, calculateHistoricalPerformance, savePredictionToHistory } from '../services/predictionHistoryService';
+import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
 import { ReinforcementLearningService } from '../services/reinforcementLearningService';
-import { LearningService } from '../services/learningService'; 
-import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast'; 
-import { testDatabaseConnection, isSupabaseConfigured } from '../services/supabaseClient'; 
+import { isSupabaseConfigured } from '../services/supabaseClient'; 
 
 const NexusContext = createContext<NexusContextType | null>(null);
 
@@ -39,9 +36,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [spectral, setSpectral] = useState<SpectralMetric[]>([]);
   const [wavelet, setWavelet] = useState<{number: number, energy: number}[]>([]);
   const [fractal, setFractal] = useState<FractalMetric[]>([]);
-  const [positionalRegimes, setPositionalRegimes] = useState<PositionalRegime[]>([]);
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
-  const [cliques, setCliques] = useState<any[]>([]);
   const [calibration, setCalibration] = useState<BrierCalibration | null>(null);
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
   const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync(drawName));
@@ -50,29 +45,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
-  const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const checkAndTrain = async () => {
-        if (history.length < 2 || !lastPrediction || drawName === 'ALL') return;
-        const lastDraw = history[0]; 
-        const rlKey = `nexus_rl_${drawName}_${lastDraw.date}`;
-        if (!localStorage.getItem(rlKey)) {
-            try {
-                const { newWeights, state, log } = await ReinforcementLearningService.processDrawResult(
-                    drawName, lastDraw, lastPrediction, globalWeights
-                );
-                updateGlobalWeights(newWeights);
-                setRlState(state);
-                localStorage.setItem(rlKey, 'done');
-                showToast(`🧠 ${log}`, "success");
-            } catch (e) { console.error("RL Loop Error", e); }
-        }
-    };
-    checkAndTrain();
-  }, [history, lastPrediction, drawName, globalWeights]);
 
   const loadData = useCallback(async () => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -85,6 +59,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHistory(hist); 
         
         if (hist.length > 0) {
+            // Stats de base synchronisées
             const counts: Record<number, number> = {};
             hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             setStats(Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count));
@@ -101,15 +76,15 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegime(reg ? { hurst: reg.hurst, regime: reg.regime } : null);
         }
 
-        if (hist.length > 0 && drawName !== 'ALL') {
+        if (hist.length > 10 && drawName !== 'ALL') {
             const computeSample = hist.slice(0, 300); 
-            const [spec, wav, frac, regData, corr, centrality, preds] = await Promise.all([
+            // Pipeline HPC : Calculs complexes déportés
+            const [spec, wav, frac, regData, corr, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateWaveletMetricsAsync(computeSample),
                 calculateFractalMetricsAsync(computeSample),
                 Promise.resolve(calculateRegularity(computeSample)),
                 calculateCorrelationMatrixAsync(computeSample),
-                calculateNetworkCentralityAsync(computeSample),
                 getPredictionHistoryAsync(drawName)
             ]);
             
@@ -119,7 +94,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setFractal(frac);
             setRegularity(regData);
             setCorrelationMatrix(corr);
-            setCliques(centrality);
 
             const insights = await generateSmartInsights(drawName, computeSample, spec, regData.map(r => ({ number: r.number, gap: r.currentGap })), regData);
             setSmartInsights(insights);
@@ -136,7 +110,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 });
             }
         } 
-    } catch (e: any) { if (e.name !== 'AbortError') setLoading(false); }
+    } catch (e: any) { if (e.name !== 'AbortError') console.error("Nexus Load Error:", e); }
     finally { setLoading(false); }
   }, [drawName, refreshTrigger]);
 
@@ -150,13 +124,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const contextValue: any = useMemo(() => ({
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading,
-    correlationMatrix, regularity, calibration, cliques, hoveredNumber, rlState,
+    correlationMatrix, regularity, calibration, hoveredNumber, rlState,
     setDrawName: setDrawNameState,
     setLastPrediction, setInspectingNumber: setInspectingNumberState,
     updateGlobalWeights, setHoveredNumber: setHoveredNumberState,
     refresh: () => loadData(),
     refreshData: (name: string, force?: boolean) => { if(force) setRefreshTrigger(t => t+1); setDrawNameState(name); }
-  }), [drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, correlationMatrix, regularity, calibration, cliques, hoveredNumber, rlState]);
+  }), [drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, correlationMatrix, regularity, calibration, hoveredNumber, rlState]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;
 };
