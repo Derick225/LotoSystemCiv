@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -36,65 +35,65 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
     const [showXRay, setShowXRay] = useState(false);
     
     return (
-        <div className="relative overflow-hidden rounded-[4rem] p-8 md:p-14 text-white shadow-2xl group border border-white/5 mb-12 transition-all duration-700 bg-slate-950 mx-auto w-full">
+        <div className="relative overflow-hidden rounded-[2.5rem] md:rounded-[4rem] p-6 md:p-14 text-white shadow-2xl group border border-white/5 mb-12 transition-all duration-700 bg-slate-950 mx-auto w-full">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/60 via-slate-900 to-black opacity-90"></div>
             
             <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
 
             <div className="relative z-10">
-                <div className="flex flex-col lg:flex-row gap-12 items-center justify-between">
-                    <div className="flex-1 space-y-8 text-center lg:text-left w-full">
-                        <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4">
+                <div className="flex flex-col lg:flex-row gap-8 lg:gap-12 items-center justify-between">
+                    <div className="flex-1 space-y-6 md:space-y-8 text-center lg:text-left w-full">
+                        <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 md:gap-4">
                             <motion.div 
                               initial={{ opacity: 0, x: -20 }}
                               animate={{ opacity: 1, x: 0 }}
-                              className="inline-flex items-center gap-2.5 px-5 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/30 text-[10px] font-black uppercase tracking-[0.3em] text-indigo-300"
+                              className="inline-flex items-center gap-2.5 px-3 md:px-5 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/30 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] text-indigo-300"
                             >
-                                <Signal size={14} className="text-indigo-400 animate-pulse" /> Signal Entrant • {result.drawName}
+                                <Signal size={12} className="text-indigo-400 animate-pulse" /> Signal Entrant • {result.drawName}
                             </motion.div>
-                            <div className="inline-flex items-center gap-2.5 px-5 py-2 bg-emerald-500/10 rounded-full border border-emerald-500/30 text-[10px] font-black uppercase tracking-[0.3em] text-emerald-400">
-                                <ShieldCheck size={14} /> {result.date}
+                            <div className="inline-flex items-center gap-2.5 px-3 md:px-5 py-2 bg-emerald-500/10 rounded-full border border-emerald-500/30 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] text-emerald-400">
+                                <ShieldCheck size={12} /> {result.date}
                             </div>
                         </div>
                         
-                        <h2 className="text-5xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl uppercase">
+                        <h2 className="text-4xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl uppercase break-words">
                             {result.drawName || 'TERMINAL'}
                         </h2>
                         
-                        <div className="flex flex-wrap gap-4 justify-center lg:justify-start">
+                        <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
                             <InfoTooltip title="Somme Sigma (Σ)" content="Masse numérique totale du tirage. Moyenne théorique: 227.5.">
-                                <div className="px-6 py-4 bg-black/40 rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
-                                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Somme Σ</span>
-                                    <span className={`text-2xl font-mono font-black ${Math.abs(metrics.sum - 227.5) > 50 ? 'text-rose-400' : 'text-emerald-400'}`}>{metrics.sum}</span>
+                                <div className="px-4 md:px-6 py-3 md:py-4 bg-black/40 rounded-2xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[100px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
+                                    <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Somme Σ</span>
+                                    <span className={`text-xl md:text-2xl font-mono font-black ${Math.abs(metrics.sum - 227.5) > 50 ? 'text-rose-400' : 'text-emerald-400'}`}>{metrics.sum}</span>
                                 </div>
                             </InfoTooltip>
 
                             <InfoTooltip title="Complexité Arithmétique" content="Score d'imprévisibilité structurelle (0-10).">
-                                <div className="px-6 py-4 bg-black/40 rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
-                                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Complexité</span>
-                                    <span className="text-2xl font-mono font-black text-indigo-400">{metrics.acValue}/10</span>
+                                <div className="px-4 md:px-6 py-3 md:py-4 bg-black/40 rounded-2xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[100px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
+                                    <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Complexité</span>
+                                    <span className="text-xl md:text-2xl font-mono font-black text-indigo-400">{metrics.acValue}/10</span>
                                 </div>
                             </InfoTooltip>
 
                             <button 
                                 onClick={(e) => { e.stopPropagation(); audioEngine.play('click'); setShowXRay(!showXRay); }}
-                                className={`px-6 py-4 rounded-3xl border flex flex-col items-center min-w-[120px] transition-all transform active:scale-95 shadow-xl
+                                className={`px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl border flex flex-col items-center min-w-[100px] md:min-w-[120px] transition-all transform active:scale-95 shadow-xl
                                   ${showXRay 
                                     ? 'bg-indigo-600 border-indigo-400 shadow-indigo-500/30' 
                                     : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
                             >
-                                <span className="text-[9px] font-black uppercase tracking-widest mb-1.5 opacity-60">Diagnostic</span>
+                                <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest mb-1.5 opacity-60">Diagnostic</span>
                                 <div className="flex items-center gap-2">
-                                    <Microscope size={16} />
-                                    <span className="text-xs font-black uppercase tracking-widest">Rayon-X</span>
+                                    <Microscope size={14} />
+                                    <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Rayon-X</span>
                                 </div>
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex flex-col items-center gap-10 bg-black/40 p-10 md:p-14 rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden w-full lg:w-auto">
+                    <div className="flex flex-col items-center gap-6 md:gap-10 bg-black/40 p-6 md:p-14 rounded-[3rem] md:rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden w-full lg:w-auto">
                         <div className="absolute inset-0 bg-indigo-600/5 opacity-30" />
-                        <div className="flex gap-3 md:gap-5 relative z-10 justify-center">
+                        <div className="flex gap-2 md:gap-5 relative z-10 justify-center flex-wrap">
                             {result.gagnants.map((n, i) => (
                                 <motion.div 
                                     key={n} 
@@ -103,20 +102,20 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                                     transition={{ delay: i * 0.1, type: "spring" }}
                                     className="transform hover:scale-110 transition-transform duration-500"
                                 >
-                                    <NumberBall number={n} size="lg" isAttractor={i===0} confidence={92} />
+                                    <NumberBall number={n} size={window.innerWidth < 640 ? 'sm' : 'lg'} isAttractor={i===0} confidence={92} />
                                 </motion.div>
                             ))}
                         </div>
                         
-                        <div className="flex items-center gap-8 w-full px-4 relative z-10">
+                        <div className="flex items-center gap-4 md:gap-8 w-full px-2 md:px-4 relative z-10">
                             <div className="h-px flex-1 bg-white/10"></div>
-                            <div className="flex items-center gap-5">
-                                <span className="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] flex items-center gap-2">
-                                    <Binary size={14} /> Machine Loop
+                            <div className="flex items-center gap-3 md:gap-5">
+                                <span className="text-[8px] md:text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] flex items-center gap-2 whitespace-nowrap">
+                                    <Binary size={12} /> Machine Loop
                                 </span>
-                                <div className="flex gap-3">
+                                <div className="flex gap-2 md:gap-3">
                                     {result.machine?.map((n) => (
-                                        <span key={n} className="text-sm font-mono font-black text-slate-400 opacity-50 hover:opacity-100 transition-opacity">{n}</span>
+                                        <span key={n} className="text-xs md:text-sm font-mono font-black text-slate-400 opacity-50 hover:opacity-100 transition-opacity">{n}</span>
                                     ))}
                                 </div>
                             </div>
@@ -131,7 +130,7 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        className="mt-12 overflow-hidden border-t border-white/10 pt-8"
+                        className="mt-8 md:mt-12 overflow-hidden border-t border-white/10 pt-6 md:pt-8"
                       >
                           <TicketXRay numbers={result.gagnants} score={Math.round((metrics.acValue/10)*100)} showTitle={false} />
                       </motion.div>
@@ -190,7 +189,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 const [h, m] = next.time.split(':').map(Number);
                 const targetDate = new Date();
                 targetDate.setHours(h, m, 0, 0);
-                // Si l'heure cible est passée aujourd'hui, mais que getNextScheduledDraw renvoie une date future (logique), on s'assure que targetDate correspond
                 if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
                 
                 const diffMs = targetDate.getTime() - now.getTime();
@@ -257,45 +255,37 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const isEmptyState = !latestResult && !loadingSummary && summary.every(s => s.result === null);
 
     return (
-        <div className="space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
+        <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
             
             {/* Core Status Monitoring Bar */}
-            <div className="bg-slate-900/50 backdrop-blur-xl p-8 rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-10 mx-auto w-full">
-                <div className="flex items-center gap-6">
-                    <div className="p-5 bg-indigo-600 rounded-[2rem] shadow-2xl shadow-indigo-600/30 text-white group hover:rotate-6 transition-all">
-                        <Monitor size={32} />
+            <div className="bg-slate-900/50 backdrop-blur-xl p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 md:gap-10 mx-auto w-full">
+                <div className="flex items-center gap-4 md:gap-6">
+                    <div className="p-4 md:p-5 bg-indigo-600 rounded-2xl md:rounded-[2rem] shadow-2xl shadow-indigo-600/30 text-white group hover:rotate-6 transition-all">
+                        <Monitor size={24} className="md:w-8 md:h-8" />
                     </div>
                     <div>
-                        <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Console Maître</h2>
-                        <div className="flex flex-wrap items-center gap-6 mt-3">
+                        <h2 className="text-xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">Console Maître</h2>
+                        <div className="flex flex-wrap items-center gap-3 md:gap-6 mt-2 md:mt-3">
                             <div className="flex items-center gap-2">
-                                <HeartPulse size={16} className="text-rose-500 animate-pulse" />
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Calculateur IA : <span className="text-white">{regime?.regime || 'IDLE'}</span></span>
+                                <HeartPulse size={14} className="text-rose-500 animate-pulse" />
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Calculateur IA : <span className="text-white">{regime?.regime || 'IDLE'}</span></span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <Activity size={16} className="text-indigo-400" />
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropie (Σ) : <span className="text-white">{volatility?.score || 0}%</span></span>
+                                <Activity size={14} className="text-indigo-400" />
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropie (Σ) : <span className="text-white">{volatility?.score || 0}%</span></span>
                             </div>
-                            {rlState && (
-                                <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
-                                    <BrainCircuit size={16} className="text-amber-400" />
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                        Auto-Calib: <span className="text-amber-500">{(rlState.totalCorrection * 100).toFixed(0)}%</span>
-                                    </span>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
                 
-                <div className="flex gap-4">
+                <div className="flex gap-4 w-full md:w-auto">
                     <button 
                         onClick={handleManualSync}
                         disabled={fullSyncing}
-                        className="group px-10 py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center gap-4 active:scale-95 disabled:opacity-50"
+                        className="group flex-1 md:flex-none px-6 md:px-10 py-4 md:py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50"
                     >
-                        <RefreshCw size={18} className={`${fullSyncing ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform duration-700 text-indigo-400`} />
-                        <span className="text-xs font-black uppercase tracking-widest text-white">Cloud Sync Pulse</span>
+                        <RefreshCw size={16} className={`${fullSyncing ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform duration-700 text-indigo-400`} />
+                        <span className="text-[10px] md:text-xs font-black uppercase tracking-widest text-white">Sync Cloud</span>
                     </button>
                 </div>
             </div>
@@ -303,23 +293,23 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
             <WatchlistMonitor />
 
             {isEmptyState ? (
-                <div className="bg-slate-900 border border-slate-800 p-12 rounded-[4rem] text-center shadow-2xl relative overflow-hidden mx-auto w-full">
+                <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] md:rounded-[4rem] text-center shadow-2xl relative overflow-hidden mx-auto w-full">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] -mr-32 -mt-32"></div>
                     <div className="relative z-10 flex flex-col items-center gap-6">
                         <div className="p-6 bg-white/5 rounded-full mb-4 animate-bounce-subtle">
-                            <Database size={48} className="text-indigo-400" />
+                            <Database size={40} className="text-indigo-400 md:w-12 md:h-12" />
                         </div>
-                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Base de Données Vierge</h2>
-                        <p className="text-slate-400 max-w-lg mx-auto text-sm font-medium">
-                            Le noyau Nexus ne détecte aucune donnée historique. Cela peut arriver lors de la première installation.
+                        <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">Base Vierge</h2>
+                        <p className="text-slate-400 max-w-lg mx-auto text-xs md:text-sm font-medium">
+                            Le noyau Nexus ne détecte aucune donnée historique.
                         </p>
                         <button 
                             onClick={handleInjectDemo}
                             disabled={fullSyncing}
-                            className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-3"
+                            className="px-6 md:px-8 py-3 md:py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-3"
                         >
                             {fullSyncing ? <RefreshCw className="animate-spin" size={16}/> : <Database size={16}/>}
-                            Injecter Données de Démo
+                            Injecter Démo
                         </button>
                     </div>
                 </div>
@@ -329,37 +319,37 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
 
             {!isEmptyState && (
                 <>
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-10">
                         {/* PROCHAIN TIRAGE WIDGET */}
                         <motion.div 
                           initial={{ opacity: 0, scale: 0.98 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className={`lg:col-span-8 rounded-[4rem] p-10 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
+                          className={`lg:col-span-8 rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
                         >
                             <div className={`absolute top-0 right-0 w-[600px] h-[600px] rounded-full blur-[160px] -mr-48 -mt-48 transition-colors duration-1000 ${nextDraw?.isUrgent ? 'bg-rose-500/20' : 'bg-indigo-600/10'}`}></div>
                             
                             <div className="relative z-10 flex flex-col h-full">
                                 <div className="flex justify-between items-start">
-                                    <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
-                                        <Clock className={`w-5 h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
-                                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">
+                                    <div className="inline-flex items-center gap-3 px-4 md:px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
+                                        <Clock className={`w-4 h-4 md:w-5 md:h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
+                                        <span className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-300">
                                             {nextDraw ? `${nextDraw.day} ${nextDraw.time}` : 'En attente...'}
                                         </span>
                                     </div>
                                     {nextDraw?.isUrgent && (
-                                        <span className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-xl animate-pulse shadow-lg shadow-rose-600/40">Fermeture Imminente</span>
+                                        <span className="px-3 md:px-4 py-1 md:py-1.5 bg-rose-600 text-white text-[8px] md:text-[9px] font-black uppercase rounded-lg animate-pulse shadow-lg shadow-rose-600/40">Urgent</span>
                                     )}
                                 </div>
 
-                                <div className="mt-14 mb-10 text-center md:text-left">
-                                    <h3 className="text-4xl md:text-7xl font-black tracking-tighter leading-tight truncate uppercase">
-                                        {nextDraw ? nextDraw.name : 'Vecteur Temporel...'}
+                                <div className="mt-8 md:mt-14 mb-8 md:mb-10 text-center md:text-left">
+                                    <h3 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight truncate uppercase">
+                                        {nextDraw ? nextDraw.name : 'Vecteur...'}
                                     </h3>
-                                    <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-4">Ouverture du flux dans :</p>
+                                    <p className="text-slate-500 font-bold uppercase text-[10px] md:text-xs tracking-widest mt-2 md:mt-4">Ouverture du flux dans :</p>
                                 </div>
 
-                                <div className="bg-black/50 backdrop-blur-3xl rounded-[3rem] p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
-                                    <div className={`text-6xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
+                                <div className="bg-black/50 backdrop-blur-3xl rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
+                                    <div className={`text-5xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
                                         {nextDraw ? nextDraw.timeLeft : '00:00:00'}
                                     </div>
                                 </div>
@@ -367,11 +357,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         </motion.div>
 
                         {/* TOP FREQUENCE 7J */}
-                        <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[4rem] p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full">
-                            <h3 className="font-black text-white flex items-center gap-4 mb-10 text-2xl tracking-tight uppercase justify-center lg:justify-start">
-                                <Flame className="w-7 h-7 text-orange-500" /> High-Heat 7d
+                        <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full min-h-[400px]">
+                            <h3 className="font-black text-white flex items-center gap-3 mb-8 md:mb-10 text-xl md:text-2xl tracking-tight uppercase justify-center lg:justify-start">
+                                <Flame className="w-6 h-6 md:w-7 md:h-7 text-orange-500" /> High-Heat 7d
                             </h3>
-                            <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
                                 {globalHot.length === 0 ? (
                                     [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
                                 ) : 
@@ -381,14 +371,14 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                       initial={{ opacity: 0, x: 20 }}
                                       animate={{ opacity: 1, x: 0 }}
                                       transition={{ delay: i * 0.1 }}
-                                      className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-white/5 hover:border-indigo-500/30 transition-all group"
+                                      className="flex items-center justify-between p-4 rounded-xl md:rounded-2xl bg-black/40 border border-white/5 hover:border-indigo-500/30 transition-all group"
                                     >
                                         <div className="flex items-center gap-4">
                                             <span className="text-[10px] font-black text-slate-600 group-hover:text-indigo-400">#{i+1}</span>
                                             <NumberBall number={stat.number} size="sm" confidence={Math.round(80 - i * 3)} />
                                         </div>
                                         <div className="text-right">
-                                            <span className="text-xl font-mono font-black text-white">{stat.count}</span>
+                                            <span className="text-lg md:text-xl font-mono font-black text-white">{stat.count}</span>
                                             <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Signaux</div>
                                         </div>
                                     </motion.div>
@@ -398,24 +388,24 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     </div>
 
                     {/* FLUX DU JOUR SELECTOR & GRID */}
-                    <section className="mt-20">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-10 px-4">
+                    <section className="mt-12 md:mt-20">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-8 md:mb-10 px-2 md:px-4">
                             <div className="text-center md:text-left w-full">
-                                <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
-                                <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-2">Séquences temporelles disponibles</p>
+                                <h2 className="text-2xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">Programme <span className="text-indigo-500">{selectedDay}</span></h2>
+                                <p className="text-[9px] md:text-[11px] text-slate-500 font-bold uppercase tracking-widest mt-1 md:mt-2">Séquences temporelles disponibles</p>
                             </div>
                             
                             <button 
                                 onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
-                                className="mx-auto md:mx-0 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
+                                className="mx-auto md:mx-0 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
                             >
                                 <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
-                                Voir tout l'historique
+                                Archives Globales
                             </button>
                         </div>
 
-                        {/* Day Selector */}
-                        <div className="flex gap-2 overflow-x-auto pb-4 mb-8 scrollbar-hide px-2 justify-start md:justify-center">
+                        {/* Day Selector - Scrollable horizontal sur mobile */}
+                        <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2">
                             {uiDays.map(d => (
                                 <button
                                     key={d}
@@ -424,7 +414,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         setSelectedDay(d);
                                     }}
                                     className={`
-                                        px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
+                                        px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
                                         ${selectedDay === d 
                                             ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105' 
                                             : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
@@ -436,9 +426,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             ))}
                         </div>
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8 px-2 md:px-0">
                             {loadingSummary ? (
-                                [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[3rem] animate-pulse border border-white/5 mx-auto w-full"></div>)
+                                [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[2.5rem] md:rounded-[3rem] animate-pulse border border-white/5 mx-auto w-full"></div>)
                             ) :
                             summary.map((item, idx) => {
                                 const isCompleted = item.result !== null;
@@ -452,42 +442,42 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ delay: idx * 0.1 }}
                                         onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
-                                        className={`group p-8 rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
+                                        className={`group p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
                                     >
-                                        <div className="flex justify-between items-start mb-8 relative z-10">
+                                        <div className="flex justify-between items-start mb-6 md:mb-8 relative z-10">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-xl">{config.icon}</span>
-                                                <span className={`text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-slate-400'}`}>{item.time}</span>
+                                                <span className="text-lg md:text-xl">{config.icon}</span>
+                                                <span className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500' : 'text-slate-400'}`}>{item.time}</span>
                                             </div>
                                             {isCompleted ? <Signal size={12} className="text-emerald-500 animate-pulse" /> : isNext && <Clock size={12} className="text-indigo-400 animate-spin"/>}
                                         </div>
 
-                                        <h3 className="font-black text-2xl text-white mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">{item.name}</h3>
+                                        <h3 className="font-black text-xl md:text-2xl text-white mb-6 md:mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">{item.name}</h3>
                                         
                                         <div className="mt-auto relative z-10">
                                             {item.result ? (
-                                                <div className="space-y-6">
-                                                    <div className="flex gap-2.5 flex-wrap justify-center sm:justify-start">
+                                                <div className="space-y-4 md:space-y-6">
+                                                    <div className="flex gap-2 flex-wrap justify-center sm:justify-start">
                                                         {item.result.gagnants.map((n) => (
-                                                            <div key={n} className="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[10px] font-black">{n}</div>
+                                                            <div key={n} className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[9px] md:text-[10px] font-black">{n}</div>
                                                         ))}
                                                     </div>
-                                                    <div className="flex items-center justify-between pt-6 border-t border-white/5">
-                                                        <div className="flex items-center gap-2 text-[9px] font-black text-slate-500 uppercase group-hover:text-slate-300">
+                                                    <div className="flex items-center justify-between pt-4 md:pt-6 border-t border-white/5">
+                                                        <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-black text-slate-500 uppercase group-hover:text-slate-300">
                                                             <Microscope size={12} /> Analyser
                                                         </div>
                                                         <ArrowUpRight size={14} className="text-slate-600 group-hover:text-indigo-300 transition-all"/>
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <div className="py-8 bg-black/20 rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3 group-hover:bg-black/40 transition-colors">
+                                                <div className="py-6 md:py-8 bg-black/20 rounded-[2rem] md:rounded-[2.5rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-3 group-hover:bg-black/40 transition-colors">
                                                     {isNext ? (
                                                         <>
-                                                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
-                                                            <span className="text-[9px] text-indigo-400 font-black uppercase tracking-widest">En cours...</span>
+                                                            <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-ping"></div>
+                                                            <span className="text-[8px] md:text-[9px] text-indigo-400 font-black uppercase tracking-widest">En cours...</span>
                                                         </>
                                                     ) : (
-                                                        <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">À venir</span>
+                                                        <span className="text-[8px] md:text-[9px] text-slate-600 font-black uppercase tracking-widest">À venir</span>
                                                     )}
                                                 </div>
                                             )}

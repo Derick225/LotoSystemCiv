@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
 import { checkAndSyncRecentResults, fetchResults } from '../services/lotteryService';
@@ -25,7 +24,6 @@ export const UserWallet: React.FC = () => {
     const [showKelly, setShowKelly] = useState(false);
     const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
     
-    // Financials
     const [totalWinnings, setTotalWinnings] = useState(0);
     const [totalSpent, setTotalSpent] = useState(0);
     const [financialHistory, setFinancialHistory] = useState<any[]>([]);
@@ -38,7 +36,6 @@ export const UserWallet: React.FC = () => {
         setTickets(saved);
         setBankroll(getBankroll());
 
-        // Charge l'abonnement
         const session = await authService.getSession();
         if (session?.user) {
             const sub = await checkSubscriptionStatus(session.user.id);
@@ -53,7 +50,7 @@ export const UserWallet: React.FC = () => {
                 try {
                     const { data } = await fetchResults(name); 
                     newResultsMap[name] = data;
-                } catch (e) { console.warn(`Failed to load results for ${name}`); }
+                } catch (e) { console.warn(`Failed load: ${name}`); }
             }
         }));
         
@@ -69,12 +66,10 @@ export const UserWallet: React.FC = () => {
             if (session?.user) {
                 await hydrateUserData(session.user.id);
                 await loadWallet();
-                showToast("Portefeuille synchronisé depuis le Cloud.", "success");
-            } else {
-                showToast("Connectez-vous pour synchroniser.", "info");
+                showToast("Sync Cloud OK.", "success");
             }
         } catch (e) {
-            showToast("Erreur de synchronisation.", "error");
+            showToast("Erreur Sync.", "error");
         } finally {
             setSyncingWallet(false);
         }
@@ -85,20 +80,19 @@ export const UserWallet: React.FC = () => {
         try {
             const count = await checkAndSyncRecentResults();
             await loadWallet();
-            if (count > 0) showToast(`${count} nouveaux tirages synchronisés.`, "success");
-            else showToast("Aucun nouveau résultat détecté.", "info");
+            showToast(count > 0 ? `${count} nouveaux tirages.` : "À jour.", "success");
         } catch(e) {
-            showToast("Erreur de scan.", "error");
+            showToast("Erreur scan.", "error");
         } finally {
             setScanning(false);
         }
     };
 
     const handleClaim = async (ticket: SavedTicket, winAmount: number) => {
-        if (confirm(`Encaisser ${winAmount.toLocaleString()} F ? Le ticket sera archivé.`)) {
+        if (confirm(`Encaisser ${winAmount.toLocaleString()} F ?`)) {
             updateBankroll(winAmount);
             await archiveTicket(ticket.id);
-            showToast("Gain ajouté au capital !", "success");
+            showToast("Gain ajouté !", "success");
             loadWallet();
         }
     };
@@ -161,7 +155,7 @@ export const UserWallet: React.FC = () => {
 
     const handleDelete = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        if(confirm('Supprimer ce ticket ?')) {
+        if(confirm('Supprimer ?')) {
             await deleteTicket(id);
             loadWallet();
         }
@@ -187,35 +181,34 @@ export const UserWallet: React.FC = () => {
     };
 
     return (
-        <div className="animate-fade-in space-y-8 pb-20">
-            {/* Subscription Status Card - EXPERT UI */}
+        <div className="animate-fade-in space-y-6 md:space-y-8 pb-20 px-1 md:px-0">
             {subscription && (
-                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 rounded-[2.5rem] shadow-xl border border-indigo-500/30 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><Crown size={120} /></div>
-                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
-                        <div className="flex items-center gap-4">
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${subscription.plan === 'premium' ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
-                                <Crown size={28} />
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-5 md:p-6 rounded-[2rem] md:rounded-[2.5rem] shadow-xl border border-indigo-500/30 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><Crown size={80} className="md:w-[120px] md:h-[120px]" /></div>
+                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6">
+                        <div className="flex items-center gap-4 w-full md:w-auto">
+                            <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg ${subscription.plan === 'premium' ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                                <Crown size={24} className="md:w-7 md:h-7" />
                             </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white uppercase tracking-tight">Statut Membre</h3>
-                                <div className="flex items-center gap-2 mt-1">
-                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
-                                        {subscription.status === 'active' ? 'Premium Actif' : 'Essai Gratuit'}
+                            <div className="flex-1">
+                                <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-tight">Membre Platinum</h3>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                    <span className={`text-[8px] md:text-[10px] font-black uppercase px-2 py-0.5 rounded border ${subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
+                                        {subscription.status === 'active' ? 'Actif' : 'Essai'}
                                     </span>
-                                    <span className="text-[10px] text-slate-400 font-bold">• Expire dans {subscription.daysLeft} jours</span>
+                                    <span className="text-[9px] md:text-[10px] text-slate-400 font-bold whitespace-nowrap">{subscription.daysLeft} jours restants</span>
                                 </div>
                             </div>
                         </div>
                         
-                        <div className="flex gap-4">
-                            <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-2">
-                                <ShieldCheck size={16} className="text-emerald-400" />
-                                <span className="text-[10px] font-bold text-slate-300 uppercase">IA Débloquée</span>
+                        <div className="flex gap-2 w-full md:w-auto overflow-x-auto scrollbar-hide">
+                            <div className="px-3 py-1.5 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2 whitespace-nowrap flex-1 md:flex-none justify-center">
+                                <ShieldCheck size={14} className="text-emerald-400" />
+                                <span className="text-[8px] font-bold text-slate-300 uppercase">IA Active</span>
                             </div>
-                            <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 flex items-center gap-2">
-                                <Sparkles size={16} className="text-amber-400" />
-                                <span className="text-[10px] font-bold text-slate-300 uppercase">Analyses Platinum</span>
+                            <div className="px-3 py-1.5 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2 whitespace-nowrap flex-1 md:flex-none justify-center">
+                                <Sparkles size={14} className="text-amber-400" />
+                                <span className="text-[8px] font-bold text-slate-300 uppercase">Full Access</span>
                             </div>
                         </div>
                     </div>
@@ -223,36 +216,36 @@ export const UserWallet: React.FC = () => {
             )}
 
             {/* Financial Dashboard */}
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
-                <div className="relative z-10 grid lg:grid-cols-2 gap-8">
+            <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
+                <div className="relative z-10 flex flex-col lg:grid lg:grid-cols-2 gap-6 md:gap-8">
                     <div>
                         <div className="flex justify-between items-start mb-6">
                             <div>
-                                <h2 className="text-3xl font-black tracking-tighter mb-2 flex items-center gap-3 text-slate-900 dark:text-white">
-                                    <Briefcase className="text-emerald-500" /> Capital Actif
+                                <h2 className="text-2xl md:text-3xl font-black tracking-tighter mb-2 flex items-center gap-2 text-slate-900 dark:text-white">
+                                    <Briefcase className="text-emerald-500" size={24} /> Portefeuille
                                 </h2>
-                                <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Bankroll Réel</p>
+                                <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[10px] tracking-widest">Bankroll Actuel</p>
                             </div>
                             <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col items-end text-emerald-600 dark:text-emerald-400">
-                                <span className="text-[10px] font-black uppercase tracking-widest">Solde Disponible</span>
-                                <span className="text-3xl font-black">{bankroll.toLocaleString()} F</span>
+                                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest">Disponible</span>
+                                <span className="text-2xl md:text-3xl font-black whitespace-nowrap">{bankroll.toLocaleString()} F</span>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-3 md:gap-4">
                             <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">Mises en Jeu</div>
-                                <div className="text-xl font-black text-slate-700 dark:text-slate-200">{totalSpent.toLocaleString()} F</div>
+                                <div className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase mb-1">Mises Total</div>
+                                <div className="text-base md:text-xl font-black text-slate-700 dark:text-slate-200 whitespace-nowrap">{totalSpent.toLocaleString()} F</div>
                             </div>
                             <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <div className="text-[10px] font-black text-emerald-500 uppercase mb-1">Gains Potentiels</div>
-                                <div className="text-xl font-black text-emerald-600 dark:text-emerald-400">{totalWinnings.toLocaleString()} F</div>
+                                <div className="text-[8px] md:text-[10px] font-black text-emerald-500 uppercase mb-1">Gains Estimés</div>
+                                <div className="text-base md:text-xl font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{totalWinnings.toLocaleString()} F</div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="h-40 w-full bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 relative">
-                        <div className="absolute top-2 left-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Evolution Capital</div>
+                    <div className="h-32 md:h-40 w-full bg-slate-50 dark:bg-slate-900 rounded-2xl p-3 md:p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
+                        <div className="absolute top-2 left-4 text-[8px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest z-10">Evolution Performance</div>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={financialHistory}>
                                 <defs>
@@ -260,7 +253,7 @@ export const UserWallet: React.FC = () => {
                                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                                     </linearGradient>
                                 </defs>
-                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
+                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '9px' }} />
                                 <Area type="monotone" dataKey="balance" stroke="#10b981" strokeWidth={2} fill="url(#colorBal)" />
                             </AreaChart>
                         </ResponsiveContainer>
@@ -268,30 +261,30 @@ export const UserWallet: React.FC = () => {
                 </div>
             </div>
 
-            {/* Smart Tools Bar */}
-            <div className="flex gap-4 overflow-x-auto scrollbar-hide">
+            {/* Smart Tools Bar - Scrollable horizontal sur mobile */}
+            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
                 <button 
                     onClick={() => setShowKelly(!showKelly)}
-                    className={`flex items-center gap-2 px-6 py-4 rounded-[2rem] border transition-all whitespace-nowrap ${showKelly ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                    className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 rounded-2xl md:rounded-[2rem] border transition-all whitespace-nowrap ${showKelly ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
                 >
-                    <Calculator size={18} />
-                    <span className="text-xs font-black uppercase tracking-widest">Calculateur Kelly</span>
+                    <Calculator size={16} />
+                    <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Kelly</span>
                 </button>
                 <button 
                     onClick={handleScanLive}
                     disabled={scanning}
-                    className="flex items-center gap-2 px-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl md:rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
                 >
-                    <RefreshCw size={18} className={scanning ? 'animate-spin' : ''} />
-                    {scanning ? 'Scan en cours...' : 'Scan Résultats Live'}
+                    <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
+                    {scanning ? '...' : 'Scan Live'}
                 </button>
                 <button 
                     onClick={handleSyncWallet}
                     disabled={syncingWallet}
-                    className="flex items-center gap-2 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl md:rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
                 >
-                    <CloudDownload size={18} className={syncingWallet ? 'animate-bounce' : ''} />
-                    {syncingWallet ? 'Sync...' : 'Sync Cloud'}
+                    <CloudDownload size={16} className={syncingWallet ? 'animate-bounce' : ''} />
+                    Sync
                 </button>
             </div>
 
@@ -300,20 +293,21 @@ export const UserWallet: React.FC = () => {
             {/* Active Tickets List */}
             <div className="space-y-4">
                 <div className="flex justify-between items-center px-2">
-                    <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                        <Coins size={14} /> Tickets Actifs ({tickets.length})
+                    <h3 className="text-[11px] md:text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <Coins size={14} /> Mes Tickets ({tickets.length})
                     </h3>
                 </div>
 
                 {loading ? (
-                    <div className="p-12 text-center animate-pulse text-slate-400 font-black uppercase text-[10px]">Chargement du portefeuille...</div>
+                    <div className="p-12 text-center animate-pulse text-slate-400 font-black uppercase text-[9px]">Calcul...</div>
                 ) : tickets.length === 0 ? (
-                    <div className="p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[3rem]">
-                        <Search className="mx-auto text-slate-300 mb-4" size={32} />
-                        <p className="text-slate-400 font-black uppercase text-xs">Aucun ticket actif</p>
+                    <div className="p-10 md:p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[2rem] md:rounded-[3rem] bg-white/5">
+                        <Search className="mx-auto text-slate-300 mb-4 opacity-50" size={32} />
+                        <p className="text-slate-400 font-black uppercase text-[10px]">Aucun ticket archivé</p>
                     </div>
                 ) : (
-                    tickets.map(ticket => {
+                    <div className="grid gap-3">
+                    {tickets.map(ticket => {
                         const { status, hits, win, drawDate } = getTicketStatus(ticket);
                         const isExpanded = expandedTicketId === ticket.id;
                         
@@ -321,74 +315,72 @@ export const UserWallet: React.FC = () => {
                             <div 
                                 key={ticket.id} 
                                 onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}
-                                className={`bg-white dark:bg-slate-800 p-5 rounded-[2.5rem] border shadow-sm flex flex-col relative overflow-hidden group transition-all cursor-pointer ${isExpanded ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-300'}`}
+                                className={`bg-white dark:bg-slate-800 p-4 md:p-5 rounded-[2rem] md:rounded-[2.5rem] border shadow-sm flex flex-col relative overflow-hidden group transition-all cursor-pointer ${isExpanded ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-300'}`}
                             >
-                                {win > 0 && <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>}
+                                {win > 0 && <div className="absolute top-0 left-0 w-1 md:w-1.5 h-full bg-emerald-500"></div>}
                                 
-                                <div className="flex flex-col md:flex-row items-center gap-6">
+                                <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6">
                                     <div className="flex-1 w-full md:w-auto">
                                         <div className="flex justify-between items-start mb-3">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-black uppercase text-white bg-slate-900 px-3 py-1 rounded-full">{ticket.drawName}</span>
-                                                <span className="text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
+                                                <span className="text-[8px] md:text-[10px] font-black uppercase text-white bg-slate-900 px-2.5 py-1 rounded-lg">{ticket.drawName}</span>
+                                                <span className="text-[8px] md:text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
                                             </div>
-                                            <button onClick={(e) => handleDelete(e, ticket.id)} className="text-slate-300 hover:text-rose-500 transition p-2 rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={14}/></button>
+                                            <button onClick={(e) => handleDelete(e, ticket.id)} className="text-slate-300 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={14}/></button>
                                         </div>
-                                        <div className="flex gap-2 justify-center md:justify-start">
+                                        <div className="flex gap-1.5 md:gap-2 justify-center md:justify-start flex-wrap">
                                             {ticket.numbers.map(n => <NumberBall key={n} number={n} size="sm" />)}
                                         </div>
                                     </div>
 
-                                    {/* Status Section */}
-                                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 dark:border-slate-800">
+                                    <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-50 dark:border-slate-700">
                                         {status === 'checked' ? (
                                             <div className="text-right">
                                                 {win > 0 ? (
-                                                    <div className="flex flex-col items-end gap-2">
-                                                        <div className="text-emerald-500 font-black text-lg flex items-center justify-end gap-2">
-                                                            <Trophy size={16}/> {win.toLocaleString()} F
+                                                    <div className="flex flex-col items-end gap-1.5">
+                                                        <div className="text-emerald-500 font-black text-base md:text-lg flex items-center justify-end gap-1.5">
+                                                            <Trophy size={14}/> {win.toLocaleString()} F
                                                         </div>
                                                         <button 
                                                             onClick={(e) => { e.stopPropagation(); handleClaim(ticket, win); }}
-                                                            className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase shadow-lg hover:bg-emerald-600 transition active:scale-95 flex items-center gap-2"
+                                                            className="px-3 py-1 bg-emerald-500 text-white rounded-lg text-[8px] font-black uppercase shadow-lg hover:bg-emerald-600 transition"
                                                         >
-                                                            <Download size={12}/> Encaisser
+                                                            Claim
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <>
-                                                        <div className="text-slate-400 font-bold text-sm flex items-center justify-end gap-2">
-                                                            <AlertCircle size={16}/> Perdu
+                                                    <div className="flex flex-col items-end">
+                                                        <div className="text-slate-400 font-bold text-[10px] md:text-xs flex items-center gap-1.5">
+                                                            <AlertCircle size={12}/> Non Gagnant
                                                         </div>
-                                                        <div className="text-[10px] font-bold text-slate-300 uppercase">Tirage {drawDate}</div>
-                                                    </>
+                                                        <div className="text-[8px] font-bold text-slate-300 uppercase">Archive {drawDate}</div>
+                                                    </div>
                                                 )}
                                             </div>
                                         ) : (
-                                            <div className="flex flex-col items-end gap-2">
-                                                <div className="flex items-center gap-2 text-slate-400 bg-slate-50 dark:bg-slate-900/50 px-3 py-1.5 rounded-xl">
-                                                    <Clock size={12} />
-                                                    <span className="text-[9px] font-black uppercase">En Attente</span>
-                                                </div>
+                                            <div className="flex items-center gap-1.5 text-slate-400 bg-slate-50 dark:bg-slate-900/50 px-2.5 py-1 rounded-lg">
+                                                <Clock size={10} className="animate-spin-slow" />
+                                                <span className="text-[8px] md:text-[9px] font-black uppercase">En Attente</span>
                                             </div>
                                         )}
-                                        <div className={`p-2 rounded-full transition-transform duration-300 ${isExpanded ? 'bg-indigo-100 text-indigo-600 rotate-180' : 'text-slate-400'}`}>
-                                            <ChevronDown size={16} />
+                                        <div className={`p-1.5 rounded-full transition-all ${isExpanded ? 'bg-indigo-100 text-indigo-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
+                                            <ChevronDown size={14} />
                                         </div>
                                     </div>
                                 </div>
                                 
                                 {isExpanded && (
-                                    <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4 cursor-default" onClick={(e) => e.stopPropagation()}>
-                                        <TicketXRay numbers={ticket.numbers} score={50} />
-                                        <div className="mt-2 text-center text-[9px] font-bold text-slate-400">
-                                            Stratégie : {ticket.strategy || 'Manuelle'}
+                                    <div className="mt-4 border-t border-slate-50 dark:border-slate-700 pt-4 cursor-default animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                                        <TicketXRay numbers={ticket.numbers} score={50} showTitle={false} />
+                                        <div className="mt-3 text-center text-[8px] md:text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                                            {ticket.strategy || 'Strategie Inconnue'}
                                         </div>
                                     </div>
                                 )}
                             </div>
                         );
-                    })
+                    })}
+                    </div>
                 )}
             </div>
         </div>

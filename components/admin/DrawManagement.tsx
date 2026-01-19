@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
@@ -178,44 +177,32 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         const preview: PreviewRow[] = [];
 
         lines.forEach((line, index) => {
-            // Ignorer l'entête si présent (détection heuristique)
             if (index === 0 && (line.toLowerCase().includes('date') || line.toLowerCase().includes('g1'))) return;
 
-            // Nettoyage et split (support virgule, point-virgule et tabulation)
-            // Priorité: Tabulation (Excel) > Point-virgule > Virgule
             let separator = ',';
             if (line.includes('\t')) separator = '\t';
             else if (line.includes(';')) separator = ';';
             
-            // Nettoyage des caractères invisibles et espaces
             const cleanLine = line.replace(/['"]/g, '').trim();
             const parts = cleanLine.split(separator).map(p => p.trim()).filter(p => p !== '');
 
             if (parts.length < 6) {
-                const spaceParts = cleanLine.split(/\s+/).map(p => p.trim());
-                if (spaceParts.length >= 6) {
-                     // Auto-detect space separated
-                } else {
-                    preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet (min 6 colonnes)', rawLine: line });
-                    return;
-                }
+                preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet', rawLine: line });
+                return;
             }
 
             const dateStr = parts[0];
             const winners = parts.slice(1, 6).map(Number);
-            const machine = parts.slice(6, 11).map(Number).filter(n => !isNaN(n)); // Machine optionnelle
+            const machine = parts.slice(6, 11).map(Number).filter(n => !isNaN(n)); 
 
-            // Validation
             let isValid = true;
             let error = '';
 
-            // Check Date (Simple format check)
             if (!dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/) && !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                isValid = false; error = 'Date invalide (DD/MM/YYYY ou YYYY-MM-DD)';
+                isValid = false; error = 'Date invalide';
             }
-            // Check Winners
             if (winners.some(isNaN) || winners.length !== 5 || new Set(winners).size !== 5 || winners.some(n => n < 1 || n > 90)) {
-                isValid = false; error = 'Numéros gagnants invalides';
+                isValid = false; error = 'Numéros invalides';
             }
 
             preview.push({
@@ -231,13 +218,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         setPreviewData(preview);
         setImportStep('preview');
         setViewFilter('all');
-        
-        const validCount = preview.filter(r => r.isValid).length;
-        if (validCount === 0 && preview.length > 0) {
-            showToast("Attention: Aucune donnée valide détectée.", "error");
-        } else if (preview.length > 0) {
-            showToast(`${validCount} lignes valides prêtes.`, "success");
-        }
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -268,9 +248,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
         setIsImporting(true);
         try {
-            // DEDOUBLONNAGE CRITIQUE : Postgres interdit de mettre à jour la même ligne 2x dans le même batch
             const uniqueMap = new Map();
-            
             validRows.forEach(row => {
                 uniqueMap.set(row.date, {
                     draw_name: drawName,
@@ -282,26 +260,18 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             });
 
             const batch = Array.from(uniqueMap.values());
-
-            if (batch.length < validRows.length) {
-                const diff = validRows.length - batch.length;
-                showToast(`${diff} doublons ignorés automatiquement (Date identique).`, "info");
-            }
-
             await bulkAddResults(drawName, batch);
-            showToast(`${batch.length} tirages importés avec succès.`, "success");
+            showToast(`${batch.length} tirages importés.`, "success");
             setPreviewData([]);
             setImportStep('upload');
-            setPasteContent('');
             loadData();
         } catch (e: any) {
-            showToast(`Erreur Import: ${e.message}`, "error");
+            showToast(`Erreur: ${e.message}`, "error");
         } finally {
             setIsImporting(false);
         }
     };
 
-    // Calculs pour l'affichage Preview
     const validCount = useMemo(() => previewData.filter(r => r.isValid).length, [previewData]);
     const errorCount = useMemo(() => previewData.filter(r => !r.isValid).length, [previewData]);
     const filteredPreview = useMemo(() => {
@@ -311,114 +281,102 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     }, [previewData, viewFilter]);
 
     return (
-        <div className="space-y-6 animate-fade-in w-full max-w-7xl mx-auto">
+        <div className="space-y-6 animate-fade-in w-full max-w-7xl mx-auto px-2 md:px-0">
             {/* Header Actions Card */}
-            <div className="bg-slate-900 text-white p-4 md:p-6 rounded-[2.2rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between shadow-2xl border border-slate-800 gap-4 mx-auto w-full">
-                <div className="flex items-center gap-4 w-full sm:w-auto justify-center sm:justify-start">
-                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20"><History size={22} className="text-white" /></div>
+            <div className="bg-slate-900 text-white p-4 md:p-6 rounded-[2.2rem] md:rounded-[3rem] flex flex-col md:flex-row items-center justify-between shadow-2xl border border-slate-800 gap-4 w-full">
+                <div className="flex items-center gap-4 w-full md:w-auto">
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg"><History size={20} className="text-white" /></div>
                     <div>
-                        <span className="text-[9px] font-black uppercase tracking-[0.2em] text-indigo-400">Registre Master</span>
-                        <h4 className="text-lg md:text-xl font-black leading-none">{drawName}</h4>
+                        <span className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] text-indigo-400">Registre Master</span>
+                        <h4 className="text-base md:text-xl font-black leading-none">{drawName}</h4>
                     </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto justify-center sm:justify-end overflow-x-auto scrollbar-hide">
-                    <button onClick={() => setActiveSubTab('manual')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'manual' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
-                        <Pencil size={14}/> Saisie
+                <div className="flex gap-2 w-full md:w-auto overflow-x-auto scrollbar-hide pb-1">
+                    <button onClick={() => setActiveSubTab('manual')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'manual' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                        <Pencil size={12}/> Saisie
                     </button>
-                    <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
-                        <LayoutGrid size={14}/> Import
+                    <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                        <LayoutGrid size={12}/> Import
                     </button>
-                    <button onClick={() => setActiveSubTab('audit')} className={`flex-1 sm:flex-none px-4 py-3 rounded-xl transition-all border border-white/5 text-[9px] font-black uppercase flex items-center justify-center gap-2 ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
-                        <Stethoscope size={14}/> Audit
+                    <button onClick={() => setActiveSubTab('audit')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                        <Stethoscope size={12}/> Audit
                     </button>
                 </div>
             </div>
 
             {/* TAB CONTENT: MANUAL ENTRY */}
             {activeSubTab === 'manual' && (
-                <div className="grid md:grid-cols-2 gap-8 mx-auto w-full">
+                <div className="flex flex-col md:grid md:grid-cols-2 gap-8 w-full">
                     {/* Formulaire */}
-                    <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
-                        <div className="flex justify-between items-center mb-8">
+                    <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
+                        <div className="flex justify-between items-center mb-6 md:mb-8">
                             <h3 className="font-black text-slate-700 dark:text-white uppercase tracking-tight flex items-center gap-2">
-                                {isEditing ? <Pencil size={18}/> : <Plus size={18}/>}
-                                {isEditing ? 'Modification' : 'Nouveau Résultat'}
+                                {isEditing ? <Pencil size={16}/> : <Plus size={16}/>}
+                                {isEditing ? 'Modif.' : 'Nouveau'}
                             </h3>
-                            {isEditing && <button onClick={resetForm} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:rotate-180 transition-transform"><RotateCcw size={16}/></button>}
+                            {isEditing && <button onClick={resetForm} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full"><RotateCcw size={14}/></button>}
                         </div>
 
                         <div className="space-y-6">
                             <div>
-                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 block">Date du Tirage</label>
+                                <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-2 block">Date</label>
                                 <div className="relative">
-                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full p-4 pl-12 bg-slate-50 dark:bg-slate-900 rounded-2xl font-bold text-slate-700 dark:text-white border-2 border-transparent focus:border-indigo-500 outline-none transition-all" />
-                                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full p-3.5 md:p-4 pl-10 md:pl-12 bg-slate-50 dark:bg-slate-900 rounded-2xl font-bold text-slate-700 dark:text-white border-2 border-transparent focus:border-indigo-500 outline-none transition-all" />
+                                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                                 </div>
                             </div>
 
                             <div>
-                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
-                                    <span>Numéros Gagnants</span>
-                                    <span className="text-indigo-500 flex items-center gap-1"><Sparkles size={10}/> 5 requis</span>
+                                <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
+                                    <span>Gagnants</span>
+                                    <span className="text-indigo-500 flex items-center gap-1 text-[8px]"><Sparkles size={10}/> 5</span>
                                 </label>
-                                <div className="flex gap-2">
+                                <div className="grid grid-cols-5 gap-2">
                                     {formWin.map((val, idx) => (
-                                        <input key={`win-${idx}`} type="number" min="1" max="90" value={val} onChange={(e) => { const n = [...formWin]; n[idx] = e.target.value; setFormWin(n); }} className="w-full aspect-square text-center font-black text-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl border-2 border-indigo-100 dark:border-indigo-800 focus:border-indigo-500 outline-none transition-all placeholder-indigo-200" placeholder={(idx+1).toString()} />
+                                        <input key={`win-${idx}`} type="number" min="1" max="90" value={val} onChange={(e) => { const n = [...formWin]; n[idx] = e.target.value; setFormWin(n); }} className="w-full aspect-square text-center font-black text-base md:text-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-xl border-2 border-indigo-100 dark:border-indigo-800 focus:border-indigo-500 outline-none transition-all" placeholder={(idx+1).toString()} />
                                     ))}
                                 </div>
                             </div>
 
                             <div>
-                                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
-                                    <span>Numéros Machine (Optionnel)</span>
-                                    <span className="text-slate-500 flex items-center gap-1"><Binary size={10}/> Machine</span>
+                                <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
+                                    <span>Machine</span>
+                                    <span className="text-slate-500 flex items-center gap-1 text-[8px]"><Binary size={10}/> Opt.</span>
                                 </label>
-                                <div className="flex gap-2">
+                                <div className="grid grid-cols-5 gap-2">
                                     {formMac.map((val, idx) => (
-                                        <input key={`mac-${idx}`} type="number" min="1" max="90" value={val} onChange={(e) => { const n = [...formMac]; n[idx] = e.target.value; setFormMac(n); }} className="w-full aspect-square text-center font-bold text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all placeholder-slate-200" placeholder="-" />
+                                        <input key={`mac-${idx}`} type="number" min="1" max="90" value={val} onChange={(e) => { const n = [...formMac]; n[idx] = e.target.value; setFormMac(n); }} className="w-full aspect-square text-center font-bold text-sm md:text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all" placeholder="-" />
                                     ))}
                                 </div>
                             </div>
 
                             <div className="pt-4 flex gap-4">
-                                <button onClick={() => isScanning ? stopCamera() : startCamera()} className={`p-4 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 ${isScanning ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
-                                    <Camera size={20} />
+                                <button onClick={() => isScanning ? stopCamera() : startCamera()} className={`p-3.5 md:p-4 rounded-2xl transition-all shadow-lg flex items-center justify-center ${isScanning ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+                                    <Camera size={18} />
                                 </button>
-                                <button onClick={handleSave} disabled={isSaving} className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/20 transition-all active:scale-[0.98] uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50">
-                                    {isSaving ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
-                                    {isEditing ? 'Mettre à jour' : 'Enregistrer'}
+                                <button onClick={handleSave} disabled={isSaving} className="flex-1 py-3.5 md:py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl transition-all active:scale-[0.98] uppercase tracking-widest text-[10px] md:text-xs flex items-center justify-center gap-2">
+                                    {isSaving ? <RefreshCw className="animate-spin" size={14}/> : <Save size={14}/>}
+                                    Enregistrer
                                 </button>
                             </div>
-
-                            {/* Camera Viewport */}
-                            {isScanning && (
-                                <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-indigo-500 mt-4 animate-scale-in">
-                                    <video ref={videoRef} className="w-full h-48 object-cover" autoPlay playsInline muted></video>
-                                    <canvas ref={canvasRef} className="hidden"></canvas>
-                                    <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                                        <button onClick={captureAndParse} className="px-6 py-2 bg-white text-indigo-600 rounded-full font-black text-xs uppercase shadow-lg hover:scale-105 transition">Capturer</button>
-                                    </div>
-                                    <div className="absolute inset-0 border-2 border-white/30 pointer-events-none flex items-center justify-center"><div className="w-3/4 h-1/2 border-2 border-dashed border-white/50 rounded-lg"></div></div>
-                                </div>
-                            )}
                         </div>
                     </div>
 
                     {/* Liste Historique */}
-                    <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-[3rem] border border-slate-200 dark:border-slate-800 h-[600px] flex flex-col">
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 px-2">Derniers Enregistrements</h4>
-                        <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-                            {results.map(r => (
-                                <div key={r.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex justify-between items-center group hover:border-indigo-300 transition-all">
+                    <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 dark:border-slate-800 h-[500px] md:h-[600px] flex flex-col">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Derniers Enregistrements</h4>
+                        <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                            {results.slice(0, 50).map(r => (
+                                <div key={r.id} className="bg-white dark:bg-slate-800 p-3 md:p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex justify-between items-center group">
                                     <div>
-                                        <div className="text-xs font-black text-slate-800 dark:text-white">{r.date}</div>
-                                        <div className="flex gap-1 mt-1.5">
-                                            {r.gagnants.map(n => <span key={n} className="w-5 h-5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[9px] font-bold">{n}</span>)}
+                                        <div className="text-[10px] md:text-xs font-black text-slate-800 dark:text-white">{r.date}</div>
+                                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                                            {r.gagnants.map(n => <span key={n} className="w-5 h-5 md:w-6 md:h-6 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[8px] md:text-[9px] font-bold">{n}</span>)}
                                         </div>
                                     </div>
-                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => { setIsEditing(true); setEditId(r.id); setFormWin(r.gagnants.map(String)); if(r.machine) setFormMac(r.machine.map(String)); }} className="p-2 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg hover:text-indigo-600"><Pencil size={14}/></button>
-                                        <button onClick={() => { if(confirm('Supprimer ?')) deleteResult(drawName, r.id).then(loadData); }} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-lg hover:bg-rose-100"><Trash2 size={14}/></button>
+                                    <div className="flex gap-1 md:gap-2">
+                                        <button onClick={() => { setIsEditing(true); setEditId(r.id); setFormWin(r.gagnants.map(String)); if(r.machine) setFormMac(r.machine.map(String)); }} className="p-2 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg hover:text-indigo-600"><Pencil size={12}/></button>
+                                        <button onClick={() => { if(confirm('Supprimer ?')) deleteResult(drawName, r.id).then(loadData); }} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-lg"><Trash2 size={12}/></button>
                                     </div>
                                 </div>
                             ))}
@@ -429,180 +387,83 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: BULK IMPORT */}
             {activeSubTab === 'bulk' && (
-                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl transition-all mx-auto w-full">
-                    
-                    {importStep === 'upload' && (
+                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl w-full">
+                    {importStep === 'upload' ? (
                         <div className="animate-slide-up">
-                            <div className="flex justify-between items-center mb-8">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                                 <div className="flex items-center gap-3">
                                     <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-2xl"><Upload size={20}/></div>
                                     <div>
-                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Import de Masse</h3>
-                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Support CSV & Copier-Coller</p>
+                                        <h3 className="font-black text-slate-800 dark:text-white uppercase text-sm md:text-base">Import de Masse</h3>
+                                        <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">CSV ou Copier-Coller</p>
                                     </div>
                                 </div>
-                                <button onClick={downloadTemplate} className="text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Télécharger Modèle CSV</button>
+                                <button onClick={downloadTemplate} className="text-[10px] md:text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Modèle CSV</button>
                             </div>
 
-                            {/* MODE SWITCHER */}
-                            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-fit mx-auto sm:mx-0">
-                                <button 
-                                    onClick={() => setUploadMode('text')} 
-                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                    <Clipboard size={14}/> Copier/Coller
-                                </button>
-                                <button 
-                                    onClick={() => setUploadMode('file')} 
-                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                    Fichier (CSV)
-                                </button>
+                            <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-full md:w-fit overflow-x-auto scrollbar-hide">
+                                <button onClick={() => setUploadMode('text')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400'}`}><Clipboard size={14}/> Copier/Coller</button>
+                                <button onClick={() => setUploadMode('file')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400'}`}>Fichier</button>
                             </div>
 
                             {uploadMode === 'file' ? (
-                                <>
-                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.json" className="hidden" />
-                                    
-                                    <div 
-                                        onClick={() => fileInputRef.current?.click()}
-                                        className="w-full h-48 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all group"
-                                    >
-                                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-900 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                                            <FileSpreadsheet size={32} className="text-slate-400 group-hover:text-indigo-500" />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Cliquez ou Glissez votre fichier CSV</p>
-                                            <p className="text-xs text-slate-400 mt-1">Format: Date, G1, G2, G3, G4, G5, [M1..M5]</p>
-                                        </div>
-                                    </div>
-                                </>
+                                <div onClick={() => fileInputRef.current?.click()} className="w-full h-40 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-[2rem] flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 transition-all">
+                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="hidden" />
+                                    <FileSpreadsheet size={32} className="text-slate-400" />
+                                    <p className="text-xs font-bold text-slate-500">Choisir un fichier CSV</p>
+                                </div>
                             ) : (
                                 <div className="space-y-4">
-                                    <textarea
-                                        value={pasteContent}
-                                        onChange={(e) => setPasteContent(e.target.value)}
-                                        className="w-full h-48 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 font-mono text-xs text-slate-600 dark:text-slate-300 focus:border-indigo-500 focus:ring-4 ring-indigo-500/10 outline-none transition-all resize-none"
-                                        placeholder={`Collez vos données ici...\nFormats acceptés:\n01/01/2024, 5, 12, 34, 56, 89\n02/01/2024; 10; 20; 30; 40; 50\n03/01/2024 \t 1 \t 2 \t 3 \t 4 \t 5`}
-                                    />
-                                    <div className="flex justify-end">
-                                        <button 
-                                            onClick={() => processRawData(pasteContent)}
-                                            disabled={!pasteContent.trim()}
-                                            className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                        >
-                                            <Binary size={16}/> Analyser le contenu
-                                        </button>
-                                    </div>
+                                    <textarea value={pasteContent} onChange={(e) => setPasteContent(e.target.value)} className="w-full h-40 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 font-mono text-[10px] text-slate-600 dark:text-slate-300 focus:border-indigo-500 outline-none transition-all resize-none" placeholder="01/01/2024, 5, 12, 34, 56, 89" />
+                                    <button onClick={() => processRawData(pasteContent)} disabled={!pasteContent.trim()} className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase shadow-xl disabled:opacity-50">Analyser</button>
                                 </div>
                             )}
                         </div>
-                    )}
-
-                    {importStep === 'preview' && (
+                    ) : (
                         <div className="animate-slide-up space-y-6">
-                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-3">
-                                        <h3 className="font-black text-slate-800 dark:text-white uppercase">Validation</h3>
-                                        <div className="flex gap-2">
-                                            <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-[10px] font-bold text-slate-500">{previewData.length} Total</span>
-                                            <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 rounded text-[10px] font-bold text-emerald-600">{validCount} Valides</span>
-                                            {errorCount > 0 && <span className="px-2 py-0.5 bg-rose-100 dark:bg-rose-900/30 rounded text-[10px] font-bold text-rose-600">{errorCount} Erreurs</span>}
-                                        </div>
+                            <div className="flex flex-col gap-4">
+                                <div className="flex justify-between items-center">
+                                    <h3 className="font-black text-slate-800 dark:text-white uppercase text-sm">Aperçu</h3>
+                                    <div className="flex gap-1">
+                                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-bold">{validCount} Valides</span>
+                                        {errorCount > 0 && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded text-[9px] font-bold">{errorCount} Erreurs</span>}
                                     </div>
                                 </div>
-                                <div className="flex gap-2 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
-                                    <button onClick={() => setViewFilter('all')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'all' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Tous</button>
-                                    <button onClick={() => setViewFilter('valid')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'valid' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600' : 'text-slate-500'}`}>Valides</button>
-                                    <button onClick={() => setViewFilter('error')} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition ${viewFilter === 'error' ? 'bg-white dark:bg-slate-700 shadow text-rose-600' : 'text-slate-500'}`}>Erreurs</button>
+                                <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                                    <button onClick={() => setViewFilter('all')} className={`flex-1 py-2 text-[9px] font-bold rounded-lg transition ${viewFilter === 'all' ? 'bg-white dark:bg-slate-700 shadow' : 'text-slate-500'}`}>Tous</button>
+                                    <button onClick={() => setViewFilter('valid')} className={`flex-1 py-2 text-[9px] font-bold rounded-lg transition ${viewFilter === 'valid' ? 'bg-white dark:bg-slate-700 shadow' : 'text-slate-500'}`}>OK</button>
+                                    <button onClick={() => setViewFilter('error')} className={`flex-1 py-2 text-[9px] font-bold rounded-lg transition ${viewFilter === 'error' ? 'bg-white dark:bg-slate-700 shadow' : 'text-slate-500'}`}>Error</button>
                                 </div>
-                                <button onClick={() => { setImportStep('upload'); setPreviewData([]); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600"><X size={16}/></button>
                             </div>
 
-                            {/* TABLEAU AVEC OVERFLOW POUR MOBILE */}
-                            <div className="max-h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
-                                <div className="w-full overflow-x-auto">
-                                    <table className="w-full text-left text-xs min-w-[600px] table-auto mx-auto">
-                                        <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10 shadow-sm">
-                                            <tr>
-                                                <th className="p-4 font-black text-slate-500 uppercase w-12 text-center">État</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Date</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Gagnants</th>
-                                                <th className="p-4 font-black text-slate-500 uppercase text-center">Machine</th>
+                            <div className="overflow-x-auto custom-scrollbar border border-slate-200 dark:border-slate-700 rounded-2xl max-h-[300px]">
+                                <table className="w-full text-[10px] md:text-xs">
+                                    <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0">
+                                        <tr className="text-left text-slate-500 font-black uppercase">
+                                            <th className="p-3">Stat</th>
+                                            <th className="p-3">Date</th>
+                                            <th className="p-3">Gagnants</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {filteredPreview.map((row, i) => (
+                                            <tr key={i} className={row.isValid ? '' : 'bg-rose-50 dark:bg-rose-900/10'}>
+                                                <td className="p-3">{row.isValid ? <CheckCircle2 size={14} className="text-emerald-500"/> : <AlertTriangle size={14} className="text-rose-500"/>}</td>
+                                                <td className="p-3 font-mono font-bold">{row.date}</td>
+                                                <td className="p-3">
+                                                    <div className="flex gap-1">
+                                                        {row.gagnants.map((n, j) => <span key={j} className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[8px]">{n}</span>)}
+                                                    </div>
+                                                </td>
                                             </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {filteredPreview.map((row, i) => (
-                                                <tr key={i} className={row.isValid ? 'hover:bg-slate-50 dark:hover:bg-slate-900/30' : 'bg-rose-50/50 dark:bg-rose-900/10'}>
-                                                    <td className="p-4 text-center">
-                                                        {row.isValid 
-                                                            ? <CheckCircle2 size={16} className="text-emerald-500 mx-auto"/> 
-                                                            : <div className="group relative inline-block">
-                                                                <AlertTriangle size={16} className="text-rose-500 cursor-help mx-auto"/>
-                                                                <div className="absolute left-6 top-0 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-xl z-20 hidden group-hover:block">
-                                                                    {row.error}
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                    </td>
-                                                    <td className="p-4 font-mono font-bold text-slate-700 dark:text-slate-300 text-center">{row.date}</td>
-                                                    <td className="p-4 text-center">
-                                                        {row.gagnants.length > 0 ? (
-                                                            <div className="flex gap-1 justify-center">
-                                                                {row.gagnants.map((n, j) => (
-                                                                    <span key={j} className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">{n}</span>
-                                                                ))}
-                                                            </div>
-                                                        ) : <span className="text-slate-400 italic">Vide</span>}
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <div className="flex gap-1 justify-center">
-                                                            {row.machine.map((n, j) => (
-                                                                <span key={j} className="w-6 h-6 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center justify-center text-[10px] font-bold">{n}</span>
-                                                            ))}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {filteredPreview.length === 0 && (
-                                                <tr>
-                                                    <td colSpan={4} className="p-10 text-center text-slate-400 italic flex flex-col items-center gap-2">
-                                                        <Filter size={24} className="opacity-50"/>
-                                                        <span>Aucun élément dans cette vue.</span>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
 
-                            <div className="flex justify-between items-center pt-6 border-t border-slate-100 dark:border-slate-800">
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide flex items-center gap-2">
-                                    {errorCount > 0 ? (
-                                        <>
-                                            <span className="flex items-center gap-1 text-amber-500"><AlertTriangle size={12}/> Attention :</span> 
-                                            {errorCount} lignes invalides seront ignorées.
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="flex items-center gap-1 text-emerald-500"><CheckCircle2 size={12}/> Parfait :</span> 
-                                            Toutes les lignes sont valides.
-                                        </>
-                                    )}
-                                </div>
-                                <div className="flex gap-4">
-                                    <button onClick={() => setImportStep('upload')} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white transition text-xs uppercase tracking-wider">Annuler</button>
-                                    <button 
-                                        onClick={confirmImport} 
-                                        disabled={isImporting || validCount === 0} 
-                                        className={`px-8 py-3 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center gap-2 disabled:opacity-50 active:scale-95 transition-all ${errorCount > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
-                                    >
-                                        {isImporting ? <RefreshCw className="animate-spin" size={16}/> : <Save size={16}/>}
-                                        {validCount > 0 ? `Importer ${validCount} Valides` : 'Aucune donnée'}
-                                    </button>
-                                </div>
+                            <div className="flex gap-3 justify-end">
+                                <button onClick={() => setImportStep('upload')} className="px-6 py-2.5 text-slate-500 font-bold text-[10px] uppercase">Annuler</button>
+                                <button onClick={confirmImport} disabled={isImporting || validCount === 0} className="px-8 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-emerald-500/20 disabled:opacity-50">Confirmer</button>
                             </div>
                         </div>
                     )}
@@ -611,7 +472,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             {/* TAB CONTENT: AUDIT */}
             {activeSubTab === 'audit' && (
-                <DataIntegrityMonitor drawName={drawName} />
+                <div className="w-full mx-auto">
+                    <DataIntegrityMonitor drawName={drawName} />
+                </div>
             )}
         </div>
     );

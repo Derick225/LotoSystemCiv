@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, calculateOptimalUserBias } from '../../services/metaAnalystService';
 import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
@@ -160,12 +159,12 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                             <div className="absolute inset-0 bg-indigo-500/5 rounded-full animate-pulse-slow"></div>
                             <ResponsiveContainer width="100%" height="100%">
                                 <RadarChart cx="50%" cy="50%" outerRadius="80%" data={[
-                                    /* Added explicit casting to resolve left-hand side arithmetic type errors */
-                                    { subject: 'Stabilité', A: Number(bias.stability) * 100 },
-                                    { subject: 'Chaos', A: Number(bias.chaos) * 100 },
-                                    { subject: 'Harmony', A: Number(bias.harmony) * 100 },
-                                    { subject: 'Wavelet', A: Number(bias.wavelet) * 100 },
-                                    { subject: 'Structure', A: Number(bias.orchestration) * 100 },
+                                    /* Fix: Explicitly casting bias properties to number to avoid arithmetic operation errors */
+                                    { subject: 'Stabilité', A: (bias.stability as number) * 100 },
+                                    { subject: 'Chaos', A: (bias.chaos as number) * 100 },
+                                    { subject: 'Harmony', A: (bias.harmony as number) * 100 },
+                                    { subject: 'Wavelet', A: (bias.wavelet as number) * 100 },
+                                    { subject: 'Structure', A: (bias.orchestration as number) * 100 },
                                 ]}>
                                     <PolarGrid stroke="#334155" />
                                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />

@@ -16,16 +16,17 @@ export default async function handler(req: Request) {
   try {
     const { imageBase64 } = await req.json();
     const apiKey = process.env.API_KEY;
-    if (!apiKey) throw new Error("API_KEY not configured");
+    if (!apiKey) throw new Error("API_KEY non configurée.");
 
     const ai = new GoogleGenAI({ apiKey });
 
+    // Utilisation de 2.5 Flash pour une vision ultra-rapide et précise
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image', 
       contents: {
         parts: [
           { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
-          { text: "Extrais la date (format DD/MM/YYYY) et les 5 numéros gagnants. JSON strict." }
+          { text: "Agis comme un scanner de haute précision. Extrais : 1. La date (format YYYY-MM-DD), 2. Les 5 numéros gagnants, 3. Les 5 numéros machine. Retourne un JSON pur sans texte additionnel." }
         ]
       },
       config: {
@@ -33,11 +34,11 @@ export default async function handler(req: Request) {
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            date: { type: Type.STRING },
-            gagnants: { type: Type.ARRAY, items: { type: Type.INTEGER } },
-            machine: { type: Type.ARRAY, items: { type: Type.INTEGER } }
+            date: { type: Type.STRING, description: "Date format YYYY-MM-DD" },
+            gagnants: { type: Type.ARRAY, items: { type: Type.INTEGER }, description: "Exactement 5 numéros" },
+            machine: { type: Type.ARRAY, items: { type: Type.INTEGER }, description: "Optionnel" }
           },
-          required: ["gagnants"]
+          required: ["gagnants", "date"]
         }
       }
     });

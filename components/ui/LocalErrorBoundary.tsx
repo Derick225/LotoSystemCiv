@@ -1,4 +1,3 @@
-
 import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
@@ -14,7 +13,7 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
- * Fix: Properly utilizing React.Component methods and members.
+ * Fix: Explicitly using React.Component and initializing state to fix missing setState/props.
  */
 export class LocalErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
@@ -36,6 +35,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
   }
 
   private handleReload = () => {
+    // Fix: Correct usage of this.state.
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -43,12 +43,13 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Reset state via Component method
+        // Fix: Correct usage of this.setState via inheritance.
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
+    // Fix: Accessing state and props now correctly typed.
     const { hasError, error } = this.state;
     const { children } = this.props;
 
