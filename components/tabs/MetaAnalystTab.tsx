@@ -10,7 +10,7 @@ import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, ShieldCheck, Activity, Target, 
     Layers, Zap, Sparkles, RefreshCw,
-    Sliders, Waves, Gauge, ChevronDown, Dna, LayoutTemplate, Wand2
+    Sliders, Waves, Gauge, ChevronDown, Dna, LayoutTemplate, Wand2, Binary, Network
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, Cell, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip } from 'recharts';
 
@@ -27,11 +27,15 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
     
     const [bias, setBias] = useState<StrategyBias>(() => {
-        const saved = getFusionConfig();
-        if (saved.stability === 0.5 && saved.chaos === 0.3 && saved.harmony === 0.7) {
-             return saved; 
-        }
-        return saved;
+        const saved = getFusionConfig() as StrategyBias;
+        // Migration safe si clés manquantes
+        return {
+            stability: saved.stability ?? 0.5,
+            chaos: saved.chaos ?? 0.3,
+            harmony: saved.harmony ?? 0.5,
+            wavelet: saved.wavelet ?? 0.4,
+            orchestration: saved.orchestration ?? 0.4
+        };
     });
     
     const isMounted = useRef(true);
@@ -46,14 +50,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     }, [drawName, history, nexusLoading]);
 
     useEffect(() => {
-        saveFusionConfig(bias);
+        saveFusionConfig(bias as any);
     }, [bias]);
 
     const handleAutoTune = () => {
         if (history.length < 20) return;
         const optimal = calculateOptimalUserBias(drawName, history);
         setBias(optimal);
-        showToast(`Biais optimisé : S${(optimal.stability*10).toFixed(0)} C${(optimal.chaos*10).toFixed(0)} H${(optimal.harmony*10).toFixed(0)}`, "success");
+        showToast("Biais synchronisés avec le régime du flux.", "success");
     };
 
     const runMetaAnalysis = async () => {
@@ -69,7 +73,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             if (isMounted.current) {
                 setResult(data);
                 savePlatinumHistory(data);
-                if (!loading) showToast("Fusion Platinum v7.1 (AutoCycle) stabilisée.", "success");
+                if (!loading) showToast("Synthèse Platinum v7.1 stabilisée.", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast(e.message || "Erreur de fusion Platinum", "error");
@@ -78,12 +82,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         }
     };
 
-    const applyPreset = (preset: 'balanced' | 'chaos' | 'stable' | 'harmonic') => {
+    const applyPreset = (preset: 'balanced' | 'chaos' | 'stable' | 'harmonic' | 'quantum') => {
         switch(preset) {
-            case 'balanced': setBias({ stability: 0.5, chaos: 0.5, harmony: 0.5 }); break;
-            case 'chaos': setBias({ stability: 0.2, chaos: 0.9, harmony: 0.4 }); break;
-            case 'stable': setBias({ stability: 0.9, chaos: 0.1, harmony: 0.6 }); break;
-            case 'harmonic': setBias({ stability: 0.6, chaos: 0.3, harmony: 0.95 }); break;
+            case 'balanced': setBias({ stability: 0.5, chaos: 0.5, harmony: 0.5, wavelet: 0.5, orchestration: 0.5 }); break;
+            case 'chaos': setBias({ stability: 0.2, chaos: 0.9, harmony: 0.4, wavelet: 0.8, orchestration: 0.3 }); break;
+            case 'stable': setBias({ stability: 0.9, chaos: 0.1, harmony: 0.6, wavelet: 0.2, orchestration: 0.8 }); break;
+            case 'harmonic': setBias({ stability: 0.6, chaos: 0.3, harmony: 0.95, wavelet: 0.4, orchestration: 0.6 }); break;
+            case 'quantum': setBias({ stability: 0.4, chaos: 0.6, harmony: 0.3, wavelet: 1.0, orchestration: 0.5 }); break;
         }
         showToast(`Profil ${preset.toUpperCase()} chargé.`, "info");
     };
@@ -124,33 +129,48 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                             </div>
 
                             <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-hide pb-2 w-full max-w-[85vw] md:max-w-full touch-pan-x">
-                                <button onClick={() => applyPreset('balanced')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 transition flex items-center gap-1 whitespace-nowrap flex-shrink-0"><LayoutTemplate size={10}/> Équilibré</button>
-                                <button onClick={() => applyPreset('stable')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-emerald-100 hover:text-emerald-600 transition flex items-center gap-1 whitespace-nowrap flex-shrink-0"><Gauge size={10}/> Stable</button>
-                                <button onClick={() => applyPreset('chaos')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition flex items-center gap-1 whitespace-nowrap flex-shrink-0"><Zap size={10}/> Chaos</button>
-                                <button onClick={() => applyPreset('harmonic')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-purple-100 hover:text-purple-600 transition flex items-center gap-1 whitespace-nowrap flex-shrink-0"><Waves size={10}/> Spectral</button>
+                                <button onClick={() => applyPreset('balanced')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-indigo-100 transition whitespace-nowrap flex-shrink-0">Équilibré</button>
+                                <button onClick={() => applyPreset('stable')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-emerald-100 transition whitespace-nowrap flex-shrink-0">Stable</button>
+                                <button onClick={() => applyPreset('chaos')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-rose-100 transition whitespace-nowrap flex-shrink-0">Chaos</button>
+                                <button onClick={() => applyPreset('harmonic')} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg text-[9px] font-bold uppercase text-slate-600 dark:text-slate-400 hover:bg-purple-100 transition whitespace-nowrap flex-shrink-0">Spectral</button>
+                                <button onClick={() => applyPreset('quantum')} className="px-3 py-1.5 bg-indigo-900 text-white rounded-lg text-[9px] font-bold uppercase hover:bg-indigo-700 transition whitespace-nowrap flex-shrink-0">Quantum</button>
                             </div>
                             
-                            <div className="space-y-4">
+                            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
-                                        <span className="flex items-center gap-1"><Waves size={10}/> Harmonie Spectrale</span>
+                                        <span className="flex items-center gap-1"><Waves size={10}/> Harmonie (FFT)</span>
                                         <span className="text-purple-600 dark:text-purple-400">{Math.round(bias.harmony * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.harmony} onChange={(e) => setBias(p => ({...p, harmony: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-purple-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
-                                        <span className="flex items-center gap-1"><Gauge size={10}/> Stabilité (Moyenne)</span>
+                                        <span className="flex items-center gap-1"><Gauge size={10}/> Stabilité (Tendance)</span>
                                         <span className="text-emerald-600 dark:text-emerald-400">{Math.round(bias.stability * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.stability} onChange={(e) => setBias(p => ({...p, stability: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-emerald-500" />
                                 </div>
                                 <div>
                                     <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
-                                        <span className="flex items-center gap-1"><Zap size={10}/> Entropie (Chaos)</span>
+                                        <span className="flex items-center gap-1"><Zap size={10}/> Entropie (Ecarts)</span>
                                         <span className="text-rose-600 dark:text-rose-400">{Math.round(bias.chaos * 100)}%</span>
                                     </div>
                                     <input type="range" min="0" max="1" step="0.1" value={bias.chaos} onChange={(e) => setBias(p => ({...p, chaos: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-rose-500" />
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
+                                        <span className="flex items-center gap-1"><Binary size={10}/> Impulsion (Wavelet)</span>
+                                        <span className="text-amber-600 dark:text-amber-400">{Math.round(bias.wavelet * 100)}%</span>
+                                    </div>
+                                    <input type="range" min="0" max="1" step="0.1" value={bias.wavelet} onChange={(e) => setBias(p => ({...p, wavelet: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-amber-500" />
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-[9px] font-bold text-slate-500 uppercase mb-1">
+                                        <span className="flex items-center gap-1"><Network size={10}/> Structure (Orch.)</span>
+                                        <span className="text-blue-600 dark:text-blue-400">{Math.round(bias.orchestration * 100)}%</span>
+                                    </div>
+                                    <input type="range" min="0" max="1" step="0.1" value={bias.orchestration} onChange={(e) => setBias(p => ({...p, orchestration: parseFloat(e.target.value)}))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-blue-500" />
                                 </div>
                             </div>
                         </div>
@@ -158,19 +178,21 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
                     <div className="relative h-64 md:h-full min-h-[300px] bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl flex flex-col items-center justify-center text-center">
                         <Target size={60} className="text-indigo-500 mb-6 animate-pulse-slow" />
-                        <h3 className="text-2xl font-black text-white mb-2">{result ? result.kingNumbers.length : 0} King Numbers</h3>
-                        <p className="text-slate-400 text-xs font-medium max-w-xs leading-relaxed">
-                            Les "King Numbers" sont les vecteurs qui survivent à la fusion (Oracle + Shadow).
-                        </p>
-                        <div className="flex gap-3 mt-6 justify-center flex-wrap">
-                            {result?.kingNumbers.map((k, i) => (
-                                <div key={k.number} className="relative group cursor-help">
-                                    <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[8px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-900 z-10 shadow-lg">
-                                        {k.count}
-                                    </div>
-                                    <NumberBall number={k.number} size="md" isAttractor={true} />
-                                </div>
-                            ))}
+                        <h3 className="text-2xl font-black text-white mb-2">Profil de Résonance</h3>
+                        <div className="h-56 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={[
+                                    { subject: 'Stabilité', A: bias.stability * 100, fullMark: 100 },
+                                    { subject: 'Chaos', A: bias.chaos * 100, fullMark: 100 },
+                                    { subject: 'Harmony', A: bias.harmony * 100, fullMark: 100 },
+                                    { subject: 'Wavelet', A: bias.wavelet * 100, fullMark: 100 },
+                                    { subject: 'Structure', A: bias.orchestration * 100, fullMark: 100 },
+                                ]}>
+                                    <PolarGrid stroke="#334155" />
+                                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
+                                    <Radar name="Biais" dataKey="A" stroke="#6366f1" fill="#6366f1" fillOpacity={0.5} />
+                                </RadarChart>
+                            </ResponsiveContainer>
                         </div>
                     </div>
                 </div>
@@ -218,19 +240,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-wrap gap-2 mt-4 relative z-20">
-                                    {combo.tags.map((tag, tIdx) => (
-                                        <span key={tIdx} className="text-[8px] font-black uppercase px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 border border-slate-200 dark:border-slate-600">
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-
                                 {expandedIdx === idx && (
                                     <div className="mt-6 animate-slide-up grid md:grid-cols-2 gap-6 pt-6 border-t border-slate-100 dark:border-slate-800">
                                         <div>
                                             <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                                <Dna size={12}/> Génome de la Combinaison
+                                                <Dna size={12}/> Génome de Fusion
                                             </h5>
                                             {combo.breakdown && (
                                                 <div className="h-40 w-full">
@@ -238,13 +252,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                                         <RadarChart cx="50%" cy="50%" outerRadius="70%" data={[
                                                             { subject: 'Stabilité', A: combo.breakdown.stability, fullMark: 100 },
                                                             { subject: 'Chaos', A: combo.breakdown.chaos, fullMark: 100 },
-                                                            { subject: 'Harmonie', A: combo.breakdown.harmony, fullMark: 100 },
-                                                            { subject: 'Pattern', A: combo.breakdown.pattern, fullMark: 100 },
+                                                            { subject: 'Harmony', A: combo.breakdown.harmony, fullMark: 100 },
+                                                            { subject: 'Wavelet', A: combo.breakdown.wavelet, fullMark: 100 },
+                                                            { subject: 'Structure', A: combo.breakdown.orchestration, fullMark: 100 },
                                                         ]}>
                                                             <PolarGrid stroke="#e5e7eb" strokeOpacity={0.2} />
                                                             <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 9, fontWeight: 'bold' }} />
                                                             <Radar name="ADN" dataKey="A" stroke="#6366f1" strokeWidth={2} fill="#6366f1" fillOpacity={0.4} />
-                                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
                                                         </RadarChart>
                                                     </ResponsiveContainer>
                                                 </div>
@@ -262,7 +276,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div className="lg:col-span-4 space-y-6">
                         <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
                             <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-6 flex items-center gap-2">
-                                <Activity size={16} className="text-emerald-500"/> Zones Chaudes (Spectral)
+                                <Activity size={16} className="text-emerald-500"/> Zones Chaudes
                             </h4>
                             <div className="h-48 w-full">
                                 <ResponsiveContainer width="100%" height="100%">
@@ -276,7 +290,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
-                            <p className="text-[9px] text-slate-400 text-center font-bold mt-4">Top 10 des numéros par densité spectrale brute.</p>
+                            <p className="text-[9px] text-slate-400 text-center font-bold mt-4">Top des numéros par densité spectrale brute.</p>
                         </div>
                     </div>
                 </div>

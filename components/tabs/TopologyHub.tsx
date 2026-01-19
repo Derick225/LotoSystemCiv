@@ -1,12 +1,11 @@
-
 import React, { useState, Suspense, lazy } from 'react';
-import { Grid, GitBranch, Calculator, RefreshCw, Share2, Terminal } from 'lucide-react';
+import { Grid, GitBranch, Calculator, RefreshCw, Users, Terminal } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 
 const SpatialTab = lazy(() => import('./SpatialTab').then(m => ({ default: m.SpatialTab })));
+const SynergyTab = lazy(() => import('./SynergyTab').then(m => ({ default: m.SynergyTab })));
 const DecisionTreeTab = lazy(() => import('./DecisionTreeTab').then(m => ({ default: m.DecisionTreeTab })));
 const CombinationsTab = lazy(() => import('./CombinationsTab').then(m => ({ default: m.CombinationsTab })));
-const NetworkTab = lazy(() => import('./NetworkTab').then(m => ({ default: m.NetworkTab })));
 const PythonAnalystTab = lazy(() => import('./PythonAnalystTab').then(m => ({ default: m.PythonAnalystTab })));
 
 interface TopologyHubProps { drawName: string; }
@@ -14,17 +13,17 @@ interface TopologyHubProps { drawName: string; }
 const TabLoader = () => (
     <div className="flex flex-col items-center justify-center py-24 gap-4 animate-pulse">
         <RefreshCw className="animate-spin text-indigo-500" />
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Calcul Topology...</p>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analyse Structurelle...</p>
     </div>
 );
 
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
-    const [subTab, setSubTab] = useState<'spatial' | 'network' | 'decision' | 'combinations' | 'python'>('spatial');
+    const [subTab, setSubTab] = useState<'spatial' | 'synergy' | 'decision' | 'combinations' | 'python'>('spatial');
 
     const renderTab = () => {
         switch (subTab) {
             case 'spatial': return <SpatialTab drawName={drawName} />;
-            case 'network': return <NetworkTab drawName={drawName} />;
+            case 'synergy': return <SynergyTab drawName={drawName} />;
             case 'decision': return <DecisionTreeTab drawName={drawName} />;
             case 'combinations': return <CombinationsTab drawName={drawName} />;
             case 'python': return <PythonAnalystTab drawName={drawName} />;
@@ -42,10 +41,10 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                     <Grid size={16}/> Géométrie
                 </button>
                 <button 
-                    onClick={() => setSubTab('network')} 
-                    className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'network' ? 'bg-white dark:bg-slate-700 shadow-md text-blue-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                    onClick={() => setSubTab('synergy')} 
+                    className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'synergy' ? 'bg-white dark:bg-slate-700 shadow-md text-blue-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                    <Share2 size={16}/> Réseau
+                    <Users size={16}/> Synergie
                 </button>
                 <button 
                     onClick={() => setSubTab('decision')} 

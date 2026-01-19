@@ -51,6 +51,8 @@ export interface StrategyBias {
     stability: number;
     chaos: number;
     harmony: number;
+    wavelet: number;      // Ajouté pour Platinum Fusion
+    orchestration: number; // Ajouté pour Platinum Fusion
 }
 
 export interface SubscriptionState {
@@ -314,7 +316,7 @@ export interface PlatinumCombo {
     numbers: number[];
     score: number;
     tags: string[];
-    breakdown: { stability: number, chaos: number, harmony: number, pattern: number };
+    breakdown: { stability: number, chaos: number, harmony: number, pattern: number, wavelet: number, orchestration: number };
 }
 
 export interface CycleAnalysis {

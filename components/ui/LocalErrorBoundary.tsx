@@ -1,4 +1,4 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -12,13 +12,17 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.2 - Module Isolation
- * Fix: Explicitly using React.Component to ensure correct base class linkage and property access (setState, props).
+ * Fix: Use named Component import and constructor to ensure correct base class linkage and property access (setState, props).
  */
-export class LocalErrorBoundary extends React.Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+export class LocalErrorBoundary extends Component<Props, State> {
+  // Use constructor for proper initialization and to ensure inheritance is correctly handled by TS
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
@@ -30,7 +34,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     }
   }
 
-  // Use arrow function to preserve 'this' context, now correctly linked via 'extends React.Component'
+  // Use arrow function to preserve 'this' context, now correctly linked via constructor
   private handleReload = () => {
     const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
                          this.state.error?.message?.includes('Importing a module script failed');
@@ -38,7 +42,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: access setState through base class members
+        // Reset state
         this.setState({ hasError: false, error: null });
     }
   };
@@ -68,8 +72,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // props is correctly identified as a member of Component
-    // Fix: access children from the component's props property
+    // Access children from props
     return this.props.children;
   }
 }

@@ -1,4 +1,4 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -12,13 +12,17 @@ interface State {
 
 /**
  * GlobalErrorBoundary v4.2 - Secure Error Interception
- * Fix: Explicitly using React.Component to ensure correct base class linkage and property access (setState, props).
+ * Fix: Use named Component import and constructor to ensure correct base class linkage and property access (setState, props).
  */
-export class GlobalErrorBoundary extends React.Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+export class GlobalErrorBoundary extends Component<Props, State> {
+  // Use constructor for proper initialization and to ensure inheritance is correctly handled by TS
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
@@ -28,10 +32,9 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Use arrow function to preserve 'this' context, now correctly linked via 'extends React.Component'
+  // Use arrow function to preserve 'this' context, now correctly linked via constructor
   private handleReload = () => {
     // Reset local state for recovery attempt
-    // Fix: access setState through base class members
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
@@ -61,8 +64,7 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
       );
     }
 
-    // props is correctly identified as a member of Component
-    // Fix: access children from the component's props property
+    // Access children from props
     return this.props.children;
   }
 }

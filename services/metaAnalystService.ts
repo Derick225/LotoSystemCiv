@@ -39,18 +39,20 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     const vol = calculateVolatility(history);
     const ent = calculateShannonEntropy(history);
     const reg = detectGameRegime(history);
-    let stability = 0.5, chaos = 0.3, harmony = 0.5;
-    if (vol.score > 60) { chaos = 0.7; stability = 0.3; }
-    if (ent.normalized > 0.9) { chaos = 0.8; }
-    if (reg.hurst > 0.6) { stability = 0.8; harmony = 0.7; }
-    return { stability, chaos, harmony };
+    let stability = 0.5, chaos = 0.3, harmony = 0.5, wavelet = 0.4, orchestration = 0.4;
+    
+    if (vol.score > 60) { chaos = 0.7; stability = 0.3; wavelet = 0.7; }
+    if (ent.normalized > 0.9) { chaos = 0.8; orchestration = 0.2; }
+    if (reg.hurst > 0.6) { stability = 0.8; harmony = 0.7; orchestration = 0.8; }
+    
+    return { stability, chaos, harmony, wavelet, orchestration };
 }
 
 export async function generatePlatinumPrediction(
     drawName: string, 
     history: DrawResult[],
     precomputedMetrics?: any,
-    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.2 }
+    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.2, wavelet: 0.4, orchestration: 0.4 }
 ): Promise<PlatinumResult> {
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
     const combinations: PlatinumCombo[] = [];
@@ -66,7 +68,14 @@ export async function generatePlatinumPrediction(
                 const idx = Math.floor(Math.random() * tempPool.length);
                 const n = tempPool[idx];
                 const b = scores[n];
-                const val = ((b.spectral || 0) * userBias.harmony) + ((b.momentum || 50) * userBias.stability) + ((b.gap || 0) * userBias.chaos);
+                // FUSION MULTI-VECTEURS
+                const val = 
+                    ((b.spectral || 0) * userBias.harmony) + 
+                    ((b.momentum || 50) * userBias.stability) + 
+                    ((b.gap || 0) * userBias.chaos) +
+                    ((b.wavelet || 0) * userBias.wavelet) +
+                    ((b.orchestration || 0) * userBias.orchestration);
+
                 if (val > bestVal) { bestVal = val; bestCandidate = n; }
             }
             if (bestCandidate !== -1) { combo.push(bestCandidate); tempPool.splice(tempPool.indexOf(bestCandidate), 1); }
@@ -75,14 +84,29 @@ export async function generatePlatinumPrediction(
         let totalScore = 0;
         combo.forEach(n => {
             const b = scores[n];
-            totalScore += ((b.spectral || 0) * userBias.harmony) + ((b.momentum || 50) * userBias.stability) + ((b.gap || 0) * userBias.chaos);
+            totalScore += 
+                ((b.spectral || 0) * userBias.harmony) + 
+                ((b.momentum || 50) * userBias.stability) + 
+                ((b.gap || 0) * userBias.chaos) +
+                ((b.wavelet || 0) * userBias.wavelet) +
+                ((b.orchestration || 0) * userBias.orchestration);
         });
-        const normalizedScore = Math.min(99, Math.round(totalScore / (5 * (userBias.harmony + userBias.stability + userBias.chaos + 0.1))));
+        
+        const totalBiasWeight = userBias.harmony + userBias.stability + userBias.chaos + userBias.wavelet + userBias.orchestration + 0.1;
+        const normalizedScore = Math.min(99, Math.round(totalScore / (5 * totalBiasWeight)));
+        
         combinations.push({
             numbers: combo,
             score: normalizedScore,
             tags: ["Synthèse Platinum"],
-            breakdown: { harmony: Math.round(userBias.harmony * 100), stability: Math.round(userBias.stability * 100), chaos: Math.round(userBias.chaos * 100), pattern: normalizedScore }
+            breakdown: { 
+                harmony: Math.round(userBias.harmony * 100), 
+                stability: Math.round(userBias.stability * 100), 
+                chaos: Math.round(userBias.chaos * 100),
+                wavelet: Math.round(userBias.wavelet * 100),
+                orchestration: Math.round(userBias.orchestration * 100),
+                pattern: normalizedScore 
+            }
         });
     }
 
@@ -97,13 +121,12 @@ export async function generatePlatinumPrediction(
         hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: combinations[0].score,
-        analysis: `Synthèse Platinum générée avec un biais : Harmonie ${(userBias.harmony*100).toFixed(0)}%, Stabilité ${(userBias.stability*100).toFixed(0)}%, Chaos ${(userBias.chaos*100).toFixed(0)}%.`,
+        analysis: `Synthèse Platinum générée. Biais: Harmonie ${(userBias.harmony*100).toFixed(0)}%, Stabilité ${(userBias.stability*100).toFixed(0)}%, Chaos ${(userBias.chaos*100).toFixed(0)}%, Impulsion ${(userBias.wavelet*100).toFixed(0)}%, Structure ${(userBias.orchestration*100).toFixed(0)}%.`,
         drawName,
         timestamp: Date.now()
     };
 }
 
-// Fix: Adding savePlatinumHistory requested in MetaAnalystTab.tsx
 export const savePlatinumHistory = (result: PlatinumResult) => {
     const key = `platinum_hist_${result.drawName}`;
     const existingStr = localStorage.getItem(key);
