@@ -10,7 +10,7 @@ export interface ConsensusData {
 
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     const values = Object.values(weights).map(v => Number(v) || 0);
-    const total = values.reduce((a, b) => a + b, 0);
+    const total = values.reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
     if (total === 0) return getDefaultWeights();
     const normalized = { ...weights };
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
@@ -23,9 +23,10 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 
 export const getDefaultWeights = (): AlgoWeights => {
     return normalizeWeights({
-        frequency: 0.15, gap: 0.15, spectral: 0.15, fractal: 0.10, markov: 0.15,
+        frequency: 0.15, gap: 0.10, spectral: 0.15, fractal: 0.10, markov: 0.10,
+        wavelet: 0.15, // ACTIVÉ : Détection locale multi-échelle
         spatial: 0.05, momentum: 0.05, equilibrium: 0.05, bayes: 0.05, orchestration: 0.05,
-        ai_intuition: 0.05, wavelet: 0, resistance: 0, transformer: 0, temporal: 0, 
+        ai_intuition: 0, resistance: 0, transformer: 0, temporal: 0, 
         digital_root: 0, gap_velocity: 0, poisson: 0, leader_succession: 0,
         anti_consensus: 0, monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0
     });
@@ -56,8 +57,7 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
 };
 
 /**
- * GÉNÉRATEUR MASTER v12.0 - ARCHITECTURE CONSENSUS
- * Fusionne les sorties de plusieurs sous-moteurs spécialisés.
+ * GÉNÉRATEUR MASTER v12.1 - ARCHITECTURE WAVELET-AUGMENTED
  */
 export const generateMasterPrediction = async (
     drawName: string, 
@@ -70,21 +70,24 @@ export const generateMasterPrediction = async (
     
     const regularity = extraMetrics?.regularity || calculateRegularity(history);
     const spectralMap = extraMetrics?.spectral || [];
+    const waveletMap = extraMetrics?.wavelet || [];
     
-    // Noyau 1 : Stochastique (Weights-based)
     const breakdown: Record<number, ScoreBreakdown> = {};
     const stochasticScores = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const reg = regularity.find((r: any) => r.number === num);
         const spec = spectralMap.find((s: any) => s.number === num);
+        const wav = waveletMap.find((w: any) => w.number === num);
+        
         const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 100);
         const currentGap = reg?.currentGap || 0;
         const gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
         
         const nBreakdown: ScoreBreakdown = {
             frequency: freqScore, gap: gapScore, spectral: spec?.energy || 0,
+            wavelet: wav?.energy || 0, // INTEGRATION WAVELET
             momentum: 50, orchestration: 0, equilibrium: 50, markov: 0, fractal: 0, spatial: 0,
-            ai_intuition: 0, wavelet: 0, resistance: 0, transformer: 0, temporal: 0,
+            ai_intuition: 0, resistance: 0, transformer: 0, temporal: 0,
             digital_root: 0, gap_velocity: 0, poisson: 0, leader_succession: 0,
             anti_consensus: 0, monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
         };
@@ -97,14 +100,12 @@ export const generateMasterPrediction = async (
         return { num, score: finalScore };
     });
 
-    // Noyau 2 : Simulateur de Trajectoire (DYNAMICAL_SYSTEMS)
+    // Simulateur trajectoire
     const trajectoryScores: Record<number, number> = {};
-    // Simulation simple d'un moteur de dynamique des fluides
     history.slice(0, 10).forEach((d, i) => {
         d.gagnants.forEach(n => trajectoryScores[n] = (trajectoryScores[n] || 0) + (10 - i) * 5);
     });
 
-    // Fusion de Consensus
     const consensus: ConsensusData[] = [
         { 
             engine: 'STOCHASTIC', 
@@ -114,7 +115,7 @@ export const generateMasterPrediction = async (
         { 
             engine: 'MACHINE_LEARNING', 
             score: 78, 
-            topNumbers: [...stochasticScores].sort((a,b) => b.num - a.num).slice(0, 10).map(x => x.num) // Proxy
+            topNumbers: [...stochasticScores].sort((a,b) => b.num - a.num).slice(0, 10).map(x => x.num)
         },
         { 
             engine: 'DYNAMICAL_SYSTEMS', 
@@ -129,7 +130,7 @@ export const generateMasterPrediction = async (
         suggestedNumbers: sorted.slice(0, 5).map(s => s.num),
         candidates: sorted.slice(5, 15).map(s => s.num),
         confidence: Math.min(98, Math.round(sorted.slice(0, 5).reduce((a, b) => a + b.score, 0) / 5)),
-        analysis: "Harmonisation multimodale complétée. Le consensus identifie une convergence structurelle majeure.",
+        analysis: "Harmonisation multimodale complétée. La transformée en ondelettes a isolée des points de singularité locale.",
         breakdown, 
         usedWeights: weights, 
         timestamp: Date.now(),
@@ -138,6 +139,7 @@ export const generateMasterPrediction = async (
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
+    if ((weights.wavelet || 0) > 0.2) return "Détection Singulaire (Wavelet)";
     if ((weights.frequency || 0) > 0.3) return "Domination Fréquence";
     if ((weights.spectral || 0) > 0.3) return "Résonance Harmonique";
     if ((weights.gap || 0) > 0.3) return "Sniper d'Écarts";

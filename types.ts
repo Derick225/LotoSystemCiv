@@ -122,6 +122,7 @@ export interface NexusContextType {
     history: DrawResult[];
     spectral: SpectralMetric[];
     fractal: FractalMetric[];
+    wavelet: {number: number, energy: number}[];
     stats: { number: number; count: number }[];
     gaps: { number: number; gap: number }[];
     volatility: { score: number; status: string; trend: string } | null;

@@ -1,4 +1,3 @@
-
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { invokeEdgeFunction } from './apiClient';
 import type { 
@@ -15,9 +14,6 @@ import {
 
 export { calculateMean, calculateStandardDeviation, calculateHurstForSeries };
 
-/**
- * Exécute une tâche lourde via Web Worker pour ne pas geler l'UI.
- */
 const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): Promise<any> => {
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/math.worker.ts', import.meta.url), { type: 'module' });
@@ -34,17 +30,17 @@ const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): 
     });
 };
 
-// --- SERVICES DE SCORING ---
+export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promise<{number: number, energy: number}[]> => {
+    return await runMathWorker('wavelet_analysis', history);
+};
 
 export const getMomentumScores = async (history: DrawResult[]): Promise<Record<number, number>> => {
     const scores: Record<number, number> = {};
     const depth = Math.min(history.length, 25);
-    // Plus le numéro sort récemment, plus son momentum est élevé (Décroissance linéaire)
     history.slice(0, depth).forEach((d, i) => {
         const weight = (depth - i) / depth;
         d.gagnants.forEach(n => scores[n] = (scores[n] || 0) + (weight * 100));
     });
-    // Normalisation 0-100
     const max = Math.max(...Object.values(scores), 1);
     Object.keys(scores).forEach(n => scores[Number(n)] = Math.round((scores[Number(n)] / max) * 100));
     return scores;
@@ -54,15 +50,11 @@ export const getVelocityScores = async (history: DrawResult[]): Promise<Record<n
     const regularity = calculateRegularity(history);
     const scores: Record<number, number> = {};
     regularity.forEach(r => {
-        // Vélocité = Distance moyenne / (Distance actuelle + 1)
-        // Si vélocité > 1, le numéro est en avance sur son cycle
         const velocity = r.avgGap / (r.currentGap + 1);
         scores[r.number] = Math.min(100, Math.round(velocity * 25));
     });
     return scores;
 };
-
-// --- ANALYSE DE RÉGIME ---
 
 export const calculateVolatility = (history: DrawResult[]) => {
     if (!history || history.length < 5) return { score: 0, status: 'Initialisation', trend: 'steady' };
@@ -81,26 +73,15 @@ export const detectGameRegime = (history: DrawResult[]) => {
     return { regime: h > 0.58 ? 'PERSISTANT' : h < 0.42 ? 'RETOUR MOYENNE' : 'STABLE', hurst: h };
 };
 
-// --- ADDED FIX: calculatePositionalRegimes member ---
-/**
- * Calcule le régime Hurst pour chaque position de tirage (1er sorti, 2ème, etc. après tri).
- */
 export const calculatePositionalRegimes = (history: DrawResult[]): PositionalRegime[] => {
     const results: PositionalRegime[] = [];
     for (let pos = 0; pos < 5; pos++) {
-        // On extrait le n-ième numéro de chaque tirage après tri croissant pour une analyse structurelle
         const series = history.map(d => [...d.gagnants].sort((a, b) => a - b)[pos]);
         const h = calculateHurstForSeries(series);
-        
         let regime: 'CHAOTIC' | 'PERSISTENT' | 'BIMODAL' | 'STABLE' = 'STABLE';
         if (h > 0.6) regime = 'PERSISTENT';
         else if (h < 0.4) regime = 'CHAOTIC';
-        
-        results.push({
-            position: pos + 1,
-            hurst: h,
-            regime
-        });
+        results.push({ position: pos + 1, hurst: h, regime });
     }
     return results;
 };
@@ -112,13 +93,11 @@ export const calculateShannonEntropy = (history: DrawResult[]) => {
     let h = 0;
     Object.values(counts).forEach(c => {
         const p = c / total;
-        h -= p * Math.log2(p);
+        if(p > 0) h -= p * Math.log2(p);
     });
     const maxH = Math.log2(90);
     return { normalized: h / maxH };
 };
-
-// --- TESTS STATISTIQUES ---
 
 export const calculateRunsTest = (series: number[]) => {
     if (series.length < 2) return { runs: 0, zScore: 0, isRandom: true };
@@ -169,8 +148,6 @@ export const calculateCUSUM = (history: DrawResult[]) => {
     return { positive: positive.slice(1), negative: negative.slice(1), alerts };
 };
 
-// --- SERVICES ASYNCHRONES (WORKER) ---
-
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]) => {
     return await runMathWorker('pearson_matrix', history);
 };
@@ -202,8 +179,6 @@ export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: nu
 export const getFollowersAnalysisAsync = async (history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
     return await runMathWorker('followers_analysis', history);
 };
-
-// --- UTILITAIRES DE CALCUL ---
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     return Array.from({ length: 90 }, (_, i) => {
@@ -282,7 +257,7 @@ export const calculateChiSquare = (freqMap: Record<number, number>, totalObserva
 export const detectCommunities = (numbers: number[], matrix: any): Record<number, number> => {
     const communities: Record<number, number> = {};
     numbers.forEach((n, i) => {
-        communities[n] = i % 8; // Simulation simple pour la topologie
+        communities[n] = i % 8; 
     });
     return communities;
 };

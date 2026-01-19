@@ -22,7 +22,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
   const [isPending, startTransition] = useTransition();
   const { 
     history, lastPrediction, setLastPrediction, loading: nexusLoading, 
-    spectral, fractal, velocity, cliques, calibration, volatility, regime,
+    spectral, fractal, wavelet, regularity, calibration, volatility, regime,
     globalWeights, rlState
   } = useNexus();
   
@@ -50,11 +50,12 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
 
     startTransition(async () => {
         try {
+          // Transmission explicite des métriques d'ondelettes
           const res = await generateMasterPrediction(
               drawName, 
               history, 
               globalWeights,
-              { spectral, fractal, velocity, cliques }
+              { spectral, fractal, wavelet, regularity }
           );
 
           if (isMounted.current) {
@@ -69,13 +70,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           if (isMounted.current) setComputingIA(false);
         }
     });
-  }, [drawName, history, spectral, fractal, velocity, cliques, setLastPrediction, showToast, globalWeights]);
-
-  const getRiskLevel = (vol: number) => {
-      if (vol < 30) return { label: 'Faible', color: 'text-emerald-500', bg: 'bg-emerald-500/10', icon: <ShieldCheck size={16}/> };
-      if (vol < 60) return { label: 'Modéré', color: 'text-amber-500', bg: 'bg-amber-500/10', icon: <Info size={16}/> };
-      return { label: 'Élevé', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: <AlertTriangle size={16}/> };
-  };
+  }, [drawName, history, spectral, fractal, wavelet, regularity, setLastPrediction, showToast, globalWeights]);
 
   if (nexusLoading || (computingIA && !lastPrediction)) return (
       <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 animate-fade-in bg-slate-900/10 rounded-[4rem] border border-dashed border-indigo-200">
@@ -85,7 +80,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
           </div>
           <div className="text-center px-6">
             <h3 className="text-xl font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest">Inférence Multimodale</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Fusion des moteurs Stochastique, ML et Fractal...</p>
+            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2">Fusion des moteurs Stochastique, ML et Ondelettes...</p>
           </div>
       </div>
   );
@@ -124,7 +119,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                                 <h3 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">Moniteur de Consensus</h3>
                             </div>
                             <div className="flex flex-col items-end">
-                                <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.0</div>
+                                <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black uppercase text-indigo-300">Vecteur v12.1</div>
                                 {rlState && (
                                     <div className="mt-2 flex items-center gap-2 text-[8px] font-bold text-emerald-500">
                                         <Activity size={10} className="animate-pulse" /> STABILITÉ SYNAPTIQUE : 98.2%
@@ -165,7 +160,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
                     <div className="mt-10 p-5 bg-white/5 rounded-[2rem] border border-white/5 flex items-center gap-4 relative z-10">
                         <Layers size={24} className="text-indigo-500" />
                         <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
-                            "Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score &gt; 80% indique une convergence synaptique de haute certitude."
+                            {"Le consensus est calculé par l'agrégation pondérée des moteurs probabilistes. Un score > 80% indique une convergence synaptique de haute certitude."}
                         </p>
                     </div>
                 </div>
@@ -183,7 +178,7 @@ export const PredictionTab: React.FC<PredictionTabProps> = ({ drawName }) => {
             <div className="relative z-10 flex flex-col xl:flex-row justify-between items-center gap-12 text-center xl:text-left">
                 <div className="flex-1">
                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10 mb-8">
-                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-500" : "bg-emerald-400"}`}></div>
+                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${(volatility?.score ?? 0) > 60 ? "bg-rose-50" : "bg-emerald-400"}`}></div>
                         <span className="text-[10px] font-black uppercase tracking-widest">ADN : {strategyMode.toUpperCase()}</span>
                     </div>
                     <h2 className="text-5xl md:text-8xl font-black tracking-tighter mb-8 leading-none">Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span></h2>
