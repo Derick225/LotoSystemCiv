@@ -1,7 +1,7 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
-// --- FIX: Added key?: any to allow React internal key prop in TS ---
 interface Props {
   children?: ReactNode;
   key?: any;
@@ -13,18 +13,16 @@ interface State {
 }
 
 /**
- * LocalErrorBoundary v4.2 - Module Isolation
- * FIX: Use Component directly from react to solve 'setState' and 'props' not existing.
+ * LocalErrorBoundary v4.5 - Module Isolation
+ * Fix: Properly utilizing React.Component methods and members.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
-  // Use state initialization outside constructor for cleaner type-safety
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
-
+export class LocalErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -38,20 +36,24 @@ export class LocalErrorBoundary extends Component<Props, State> {
   }
 
   private handleReload = () => {
-    const isChunkError = this.state.error?.message?.includes('dynamically imported module') || 
-                         this.state.error?.message?.includes('Importing a module script failed');
+    const { error } = this.state;
+    const isChunkError = error?.message?.includes('dynamically imported module') || 
+                         error?.message?.includes('Importing a module script failed');
     
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Reset state
+        // Reset state via Component method
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    if (this.state.hasError) {
-      const isNetwork = this.state.error?.message?.includes('fetch') || this.state.error?.message?.includes('network');
+    const { hasError, error } = this.state;
+    const { children } = this.props;
+
+    if (hasError) {
+      const isNetwork = error?.message?.includes('fetch') || error?.message?.includes('network');
       
       return (
         <div className="p-6 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 rounded-[2rem] border-2 border-dashed border-slate-200 dark:border-slate-800 text-center animate-fade-in flex flex-col items-center justify-center gap-4 h-full min-h-[200px]">
@@ -61,7 +63,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
           <div>
             <p className="font-black text-xs uppercase tracking-widest text-slate-800 dark:text-white mb-1">Module Indisponible</p>
             <p className="text-[10px] opacity-70 max-w-[200px] mx-auto leading-relaxed">
-              {this.state.error?.message || "Erreur de rendu"}
+              {error?.message || "Erreur de rendu"}
             </p>
           </div>
           <button 
@@ -74,6 +76,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return this.props.children;
+    return children;
   }
 }

@@ -41,25 +41,25 @@ export interface PositionalRegime {
 }
 
 export interface RLState {
-    lastCalibration: number; // Timestamp
-    learningRate: number; // Alpha (vitesse d'apprentissage)
-    streak: number; // Nombre de succès/échecs consécutifs
-    totalCorrection: number; // Somme des ajustements
+    lastCalibration: number;
+    learningRate: number;
+    streak: number;
+    totalCorrection: number;
 }
 
 export interface StrategyBias {
     stability: number;
     chaos: number;
     harmony: number;
-    wavelet: number;      // Ajouté pour Platinum Fusion
-    orchestration: number; // Ajouté pour Platinum Fusion
+    wavelet: number;
+    orchestration: number;
 }
 
 export interface SubscriptionState {
     status: 'trial' | 'active' | 'expired';
     daysLeft: number;
-    expiresAt: string; // ISO Date
-    start_date?: string; // ISO Date
+    expiresAt: string;
+    start_date?: string;
     plan: 'free' | 'premium';
 }
 
@@ -85,7 +85,7 @@ export interface Prediction {
     analysis: string;
     breakdown?: Record<number, ScoreBreakdown>;
     usedWeights?: AlgoWeights;
-    timestamp?: number; // Added for RL tracking
+    timestamp?: number;
 }
 
 export interface SmartInsight {
@@ -113,10 +113,6 @@ export interface BrierCalibration {
     sampleSize: number;
 }
 
-export interface OracleVocalContext {
-    targets: number[];
-}
-
 export interface NexusContextType {
     drawName: string;
     setDrawName: (n: string) => void;
@@ -142,22 +138,10 @@ export interface NexusContextType {
     correlationMatrix: any;
     regularity: NumberRegularity[];
     calibration: BrierCalibration | null;
-    velocity: Record<number, number>;
-    cliques: any[];
-    vocalContext: any;
-    // Interaction UI
     hoveredNumber: number | null;
     setHoveredNumber: (n: number | null) => void;
-    // RL State
     rlState: RLState | null;
-}
-
-// Forensic and history types
-export interface ForensicEvidence {
-    predicted: number;
-    actual: number | null;
-    errorType: 'Hit' | 'Voisin' | 'Miroir' | 'Shadow' | 'None';
-    delta: string;
+    vocalContext: OracleVocalContext | null;
 }
 
 export interface ForensicReport {
@@ -169,174 +153,36 @@ export interface ForensicReport {
     scoreDivergence: { algo: string; impact: number }[];
 }
 
-export interface PredictionHistoryItem {
-    id: string;
-    timestamp: number;
-    drawName: string;
-    prediction: Prediction;
-    drawResultId: string | null;
-    feedback?: PredictionFeedback;
-}
-
-export interface PredictionFeedback {
-    keyLearning: string;
-    userRating: 'Visionnaire' | 'Standard' | 'Incohérente';
-    userComment?: string;
-}
-
-export interface TopFollowerAnalysis {
-    leader: number;
-    followers: { number: number; count: number; probability: number }[];
-}
-
-export interface ProjectionItem {
-    number: number;
-    probability: number;
-}
-
-export interface LearningSession {
-    id: string;
-    timestamp: number;
-    improvement: number;
-}
-
-export type PatternType = 'Miroir' | 'Voisin' | 'Transfert Machine' | 'Répétition' | 'Leurre Machine' | 'Suite' | 'Finale' | 'Dizaine';
-
-export interface OrchestrationPattern {
-    type: PatternType;
-    count: number;
-    intensity: number;
-}
-
-// Added MimicryMetric to fix export errors in orchestration components/services
-export interface MimicryMetric {
-    number: number;
-    score: number;
-    type: 'Direct' | 'Voisin' | 'Lag' | 'Complexe';
-    sourceDraw: string;
-}
-
-export interface MathAnalysisReport {
-    parity: { odd: number; even: number };
-    lowHigh: { low: number; high: number };
-    sumHistory: { date: string, sum: number, avg: number }[];
-    finales: { digit: number, count: number }[];
-    consecutiveStats: { count: number, percentage: number };
-    runsTest: { runs: number; zScore: number; isRandom: boolean };
-}
-
-export interface ShadowNumbers {
-    sumModulo: number;
-    firstCompliment: number;
-    lastCompliment: number;
-    gapLink: number;
-    goldenNumber: number;
-}
-
-export interface TrendOscillatorPoint {
-    drawIndex: number;
-    momentum: number;
-    signal: number;
-}
-
-export interface BarycenterPoint {
-    x: number;
-    y: number;
-    drawIndex?: number;
-}
-
-export interface TrainingResult {
-    date: string;
-    drawName: string;
-    predictedNumbers: number[];
-    actualWinningNumbers: number[];
-    hits: number[];
-    hitCount: number;
-    isJackpot: boolean;
-    confidence: number;
-    breakdown?: Record<number, ScoreBreakdown>;
-}
-
-export interface TrainingReport {
-    totalTests: number;
-    totalHits: number;
-    averageHits: number;
-    successRate: number;
-    stabilityScore: number;
-    stabilityLabel: string;
-    winDistribution: { zero: number, one: number, two: number, three: number, four: number, five: number };
-    history: TrainingResult[];
-    score: number;
-    learnedPatternsSummary: any;
-    regimeInfo: { regime: string, hurst: number };
-}
-
-export interface SavedTicket {
-    id: string;
-    drawName: string;
-    numbers: number[];
-    strategy: string;
-    createdAt: number;
-    status: 'active' | 'archived';
-}
-
-export interface SpatialCluster {
-    id: string;
-    center: { x: number; y: number };
-    numbers: number[];
-    density: number;
-    potential: number;
-    color: string;
-}
-
-export interface SpatialMetrics {
-    gridDensity: number[];
-    detectedPatterns: any[];
-    barycenter: BarycenterPoint;
-    advancedClusters: SpatialCluster[];
-    gravityWells: any[];
-}
-
-export interface DecisionNode {
-    id: string;
-    type: 'condition' | 'leaf';
-    label: string;
-    children: DecisionNode[];
-}
-
-export interface ForestVote {
-    candidate: number;
-    score: number;
-    votes: { temporal: number; spatial: number; structural: number };
-    decisionPath: DecisionNode;
-    features: { isConsensusTrap: boolean };
+export interface DetailedNumberMetrics {
+    temperature: number;
+    hurst: number;
+    lastGap: number;
+    avgGap: number;
+    nextProb: number;
+    spectralEnergy: number;
+    stdDev: number;
+    historyGraph: number[];
+    affinity: number[];
+    nemesis: number[];
 }
 
 export interface PlatinumCombo {
     numbers: number[];
     score: number;
-    tags: string[];
-    breakdown: { stability: number, chaos: number, harmony: number, pattern: number, wavelet: number, orchestration: number };
-}
-
-export interface CycleAnalysis {
-    trend: 'HOT_REPEATER' | 'COLD_RETURN' | 'BALANCED';
-    activeWindow: { min: number, max: number };
-    avgWinningGap: number;
+    breakdown: any;
+    tags?: string[];
 }
 
 export interface PlatinumResult {
     id: string;
     kingNumbers: { number: number, count: number }[];
-    targetSumRange: { min: number, max: number, reason: string };
-    hotZonesSpectro: number[];
     combinations: PlatinumCombo[];
     confidence: number;
     analysis: string;
     drawName: string;
     timestamp: number;
-    nextDraw?: { expectedDate: string; predictedNumbers: number[] }; 
-    cycleAnalysis?: CycleAnalysis;
+    targetSumRange?: { min: number, max: number, reason: string };
+    hotZonesSpectro?: number[];
 }
 
 export interface GeminiReasoning {
@@ -362,18 +208,92 @@ export interface Draw {
     name: string;
 }
 
-export interface DetectedPattern {
-    type: string;
-    count: number;
-    impact: number;
-}
-
 export interface OrchestrationMetrics {
     globalScore: number;
-    activePatterns: DetectedPattern[];
     topCandidates: { number: number; score: number; reasons: string[] }[];
     backtestAccuracy: number;
-    narrativeLesson: string;
+    activePatterns: any[];
+    narrativeLesson?: string;
+}
+
+export interface MimicryMetric {
+    number: number;
+    score: number;
+    type: string;
+    sourceDraw: string;
+}
+
+export interface ProjectionItem {
+    number: number;
+    probability: number;
+}
+
+export interface TopFollowerAnalysis {
+    leader: number;
+    followers: { number: number; count: number; probability: number }[];
+}
+
+export interface PredictionHistoryItem {
+    id: string;
+    timestamp: number;
+    drawName: string;
+    prediction: Prediction;
+    drawResultId: string | null;
+    feedback?: PredictionFeedback;
+}
+
+export interface LearningSession {
+    timestamp: number;
+    metrics: any;
+}
+
+export interface OrchestrationPattern {
+    type: PatternType;
+    count: number;
+}
+
+export interface PredictionFeedback {
+    keyLearning: string;
+    userRating: 'Visionnaire' | 'Standard' | 'Incohérente';
+    userComment: string;
+}
+
+export type PatternType = 'Miroir' | 'Voisin' | 'Transfert Machine' | 'Répétition' | 'Leurre Machine' | 'Suite' | 'Finale' | 'Dizaine';
+
+export interface MathAnalysisReport {
+    parity: { odd: number; even: number };
+    lowHigh: { low: number; high: number };
+    sumHistory: { date: string; sum: number; avg: number }[];
+    finales: { digit: number; count: number }[];
+    consecutiveStats: { count: number; percentage: number };
+    runsTest: { runs: number; zScore: number; isRandom: boolean };
+}
+
+export interface ShadowNumbers {
+    sumModulo: number;
+    firstCompliment: number;
+    lastCompliment: number;
+    gapLink: number;
+    goldenNumber: number;
+}
+
+export interface TrendOscillatorPoint {
+    drawIndex: number;
+    momentum: number;
+    signal: number;
+}
+
+export interface ClusterPoint {
+    number: number;
+    x: number;
+    y: number;
+    cluster: string;
+}
+
+export interface BarycenterPoint {
+    x: number;
+    y: number;
+    drawIndex?: number;
 }
 
 export interface AdaptiveRules {
@@ -381,8 +301,90 @@ export interface AdaptiveRules {
     criticalZoneMax: number;
 }
 
+export interface TicketAnalysisResult {
+    score: number;
+    verdict: string;
+    warnings: string[];
+}
+
+export interface TrainingReport {
+    totalTests: number;
+    totalHits: number;
+    averageHits: number;
+    successRate: number;
+    stabilityScore: number;
+    stabilityLabel: string;
+    winDistribution: { zero: number; one: number; two: number; three: number; four: number; five: number };
+    history: TrainingResult[];
+    score: number;
+    learnedPatternsSummary: any;
+    regimeInfo: { regime: string; hurst: number };
+}
+
+export interface TrainingResult {
+    date: string;
+    drawName: string;
+    predictedNumbers: number[];
+    actualWinningNumbers: number[];
+    hits: number[];
+    hitCount: number;
+    isJackpot: boolean;
+    confidence: number;
+    breakdown: any;
+}
+
+export interface SavedTicket {
+    id: string;
+    createdAt: number;
+    numbers: number[];
+    drawName: string;
+    strategy: string;
+    status: 'active' | 'archived';
+}
+
+export interface SpatialMetrics {
+    gridDensity: number[];
+    detectedPatterns: any[];
+    barycenter: BarycenterPoint;
+    advancedClusters: SpatialCluster[];
+    gravityWells: any[];
+}
+
+export interface SpatialCluster {
+    id: string;
+    center: BarycenterPoint;
+    numbers: number[];
+    density: number;
+    potential: number;
+    color: string;
+}
+
+export interface ForestVote {
+    candidate: number;
+    score: number;
+    votes: { temporal: number; spatial: number; structural: number };
+    decisionPath: DecisionNode;
+    features: { isConsensusTrap: boolean };
+}
+
+export interface DecisionNode {
+    id: string;
+    type: 'condition' | 'leaf';
+    label: string;
+    children: DecisionNode[];
+}
+
+export interface DetectedPattern {
+    type: PatternType;
+    count: number;
+    impact: number;
+}
+
 export interface OptimizationResult {
-    bestChromosome: { weights: AlgoWeights; rules: AdaptiveRules; fitness: number };
+    bestChromosome: {
+        weights: AlgoWeights;
+        rules: AdaptiveRules;
+    };
     timeElapsed: number;
     totalEvaluations: number;
 }
@@ -397,6 +399,13 @@ export interface GeneticConfig {
     earlyStopGenerations: number;
 }
 
+export interface ForensicEvidence {
+    predicted: number;
+    actual: number | null;
+    errorType: 'Hit' | 'Voisin' | 'Miroir' | 'Shadow' | 'None';
+    delta: string;
+}
+
 export interface AntColonyPath {
     numbers: number[];
     pheromoneDensity: number;
@@ -404,58 +413,14 @@ export interface AntColonyPath {
     isOracleBiased?: boolean;
 }
 
-export interface TicketAnalysisResult {
-    score: number;
-    verdict: string;
-    warnings: string[];
-}
-
-export interface NotebookCell {
-    id: string;
-    type: 'code' | 'markdown' | 'output';
-    content: string;
-}
-
-export interface PythonAnalysisResult {
-    id?: string;
-    timestamp?: number;
-    drawName?: string;
-    modelType?: string;
-    script: string;
-    stdout: string[];
-    findings: {
-        method: string;
-        result_vector: number[];
-        confidence_score: number;
-        p_value: number;
-    };
-    insight: string;
-    cells?: NotebookCell[];
-}
-
-export interface NumberGap {
-    number: number;
-    gap: number;
-}
-
-export interface EntropyMetric {
-    normalized: number;
-}
-
-export interface ChiSquareMetric {
-    score: number;
-}
-
 export interface MonthStats {
     monthIndex: number;
     topNumbers: { number: number; count: number }[];
 }
 
-export interface ClusterPoint {
+export interface NumberGap {
     number: number;
-    x: number;
-    y: number;
-    cluster: string;
+    gap: number;
 }
 
 export interface ClusterSummary {
@@ -466,15 +431,37 @@ export interface ClusterSummary {
     icon: string;
 }
 
-export interface DetailedNumberMetrics {
-    temperature: number;
-    hurst: number;
-    lastGap: number;
-    avgGap: number;
-    nextProb: number;
-    spectralEnergy: number;
-    stdDev: number;
-    historyGraph: number[];
-    affinity: number[];
-    nemesis: number[];
+export interface EntropyMetric {
+    normalized: number;
+}
+
+export interface ChiSquareMetric {
+    score: number;
+    pValue: number;
+}
+
+export interface OracleVocalContext {
+    targets: number[];
+}
+
+export interface PythonAnalysisResult {
+    id: string;
+    timestamp: number;
+    drawName: string;
+    modelType: string;
+    stdout: string[];
+    script: string;
+    findings: {
+        result_vector: number[];
+        confidence_score: number;
+        p_value: number;
+    };
+    insight: string;
+    cells: NotebookCell[];
+}
+
+export interface NotebookCell {
+    id: string;
+    type: 'markdown' | 'code' | 'output';
+    content: string;
 }

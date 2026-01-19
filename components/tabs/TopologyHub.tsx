@@ -1,5 +1,5 @@
 import React, { useState, Suspense, lazy } from 'react';
-import { Grid, GitBranch, Calculator, RefreshCw, Users, Terminal } from 'lucide-react';
+import { Grid, GitBranch, Calculator, RefreshCw, Users, Terminal, Network } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 
 const SpatialTab = lazy(() => import('./SpatialTab').then(m => ({ default: m.SpatialTab })));
@@ -7,6 +7,7 @@ const SynergyTab = lazy(() => import('./SynergyTab').then(m => ({ default: m.Syn
 const DecisionTreeTab = lazy(() => import('./DecisionTreeTab').then(m => ({ default: m.DecisionTreeTab })));
 const CombinationsTab = lazy(() => import('./CombinationsTab').then(m => ({ default: m.CombinationsTab })));
 const PythonAnalystTab = lazy(() => import('./PythonAnalystTab').then(m => ({ default: m.PythonAnalystTab })));
+const NeuralArchitectureTab = lazy(() => import('./NeuralArchitectureTab').then(m => ({ default: m.NeuralArchitectureTab })));
 
 interface TopologyHubProps { drawName: string; }
 
@@ -18,7 +19,7 @@ const TabLoader = () => (
 );
 
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
-    const [subTab, setSubTab] = useState<'spatial' | 'synergy' | 'decision' | 'combinations' | 'python'>('spatial');
+    const [subTab, setSubTab] = useState<'spatial' | 'synergy' | 'decision' | 'combinations' | 'python' | 'neural'>('spatial');
 
     const renderTab = () => {
         switch (subTab) {
@@ -27,6 +28,7 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
             case 'decision': return <DecisionTreeTab drawName={drawName} />;
             case 'combinations': return <CombinationsTab drawName={drawName} />;
             case 'python': return <PythonAnalystTab drawName={drawName} />;
+            case 'neural': return <NeuralArchitectureTab />;
             default: return null;
         }
     };
@@ -39,6 +41,12 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                     className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'spatial' ? 'bg-white dark:bg-slate-700 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                 >
                     <Grid size={16}/> Géométrie
+                </button>
+                <button 
+                    onClick={() => setSubTab('neural')} 
+                    className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'neural' ? 'bg-white dark:bg-slate-700 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    <Network size={16}/> Architecture
                 </button>
                 <button 
                     onClick={() => setSubTab('synergy')} 

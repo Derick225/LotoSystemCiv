@@ -1,4 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -11,18 +12,16 @@ interface State {
 }
 
 /**
- * GlobalErrorBoundary v4.2 - Secure Error Interception
- * FIX: Use Component directly from react to solve 'setState' and 'props' not existing.
+ * GlobalErrorBoundary v4.5 - Secure Error Interception
+ * Fix: Properly utilizing React.Component methods and members.
  */
-export class GlobalErrorBoundary extends Component<Props, State> {
-  // Use state initialization outside constructor for cleaner type-safety
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
-
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -34,15 +33,18 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   }
 
   private handleReload = () => {
-    // Reset local state for recovery attempt
+    // Reset state via Component method
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
   public render(): ReactNode {
-    if (this.state.hasError) {
-      const msg = getUserFriendlyError(this.state.error);
+    const { hasError, error } = this.state;
+    const { children } = this.props;
+
+    if (hasError) {
+      const msg = getUserFriendlyError(error);
       return (
         <div className="min-h-screen flex items-center justify-center bg-nexus-950 p-4 font-sans safe-top safe-bottom">
           <div className="bg-white dark:bg-slate-800 p-10 rounded-[3rem] shadow-2xl max-w-lg w-full text-center border border-slate-700 relative overflow-hidden animate-scale-in">
@@ -64,6 +66,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return this.props.children;
+    return children;
   }
 }
