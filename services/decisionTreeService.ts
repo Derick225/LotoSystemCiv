@@ -1,3 +1,4 @@
+
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
 import ForestWorker from './workers/forest.worker.ts?worker';
 
@@ -16,7 +17,10 @@ const extractNumericFeatures = (num: number, results: DrawResult[], globalConsen
         return arr.includes(target);
     };
 
-    const freq20 = recent20.filter(r => checkIncludes(r.gagnants, num)).length;
+    // Fréquence amortie (Logistique/Racine)
+    const rawFreq20 = recent20.filter(r => checkIncludes(r.gagnants, num)).length;
+    const freqSignal = rawFreq20 >= 3 ? 1 : (rawFreq20 / 3); // Plafonné pour éviter le sur-poids
+    
     const consensus = globalConsensusMap[num] || 0;
     
     let gap = 0;
@@ -26,8 +30,8 @@ const extractNumericFeatures = (num: number, results: DrawResult[], globalConsen
     
     const allFeatures = [
         (gap >= 8 && gap <= 18) ? 1 : 0, 
-        freq20 >= 3 ? 1 : 0,             
-        (consensus < 40 && freq20 >= 2) ? 1 : 0, 
+        freqSignal,             
+        (consensus < 40 && rawFreq20 >= 1) ? 1 : 0, 
         consensus > 85 ? 1 : 0,          
         (checkIncludes(lastDraw?.gagnants, num - 1) || checkIncludes(lastDraw?.gagnants, num + 1)) ? 1 : 0, 
         (checkIncludes(lastDraw?.machine, num)) ? 1 : 0, 

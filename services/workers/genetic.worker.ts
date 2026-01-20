@@ -2,15 +2,13 @@
 export {};
 
 /**
- * Darwin Genetic Worker v4.1 (Entropy-Regularized Edition)
- * Optimisé pour la synthèse stochastique ROBUSTE avec régularisation par entropie.
+ * Darwin Genetic Worker v4.2 (Balance Edition)
  */
 
 interface DrawResultLite { gagnants: number[]; machine?: number[]; }
 interface AlgoWeights { [key: string]: number | undefined; }
 interface AdaptiveRules { criticalZoneMin: number; criticalZoneMax: number; }
 
-// Fix: Explicit typing for self
 const ctx = self as unknown as Worker;
 
 const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
@@ -27,12 +25,11 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
     return normalized;
 };
 
-// Fonction utilitaire pour calculer l'entropie d'un ensemble de prédictions
 const calculatePredictionEntropy = (predictions: number[]): number => {
     const freq: Record<number, number> = {};
     predictions.forEach(n => freq[n] = (freq[n] || 0) + 1);
     let entropy = 0;
-    const total = predictions.length;
+    const total = predictions.length || 1;
     Object.values(freq).forEach(c => {
         const p = c / total;
         entropy -= p * Math.log2(p);
@@ -41,8 +38,7 @@ const calculatePredictionEntropy = (predictions: number[]): number => {
 };
 
 /**
- * Fitness Multi-Objectif : Sharpe Ratio + Entropy Penalty
- * Punit les stratégies qui prédisent toujours les mêmes numéros (faible entropie).
+ * Fitness Multi-Objectif rééquilibrée
  */
 const evaluate = (w: AlgoWeights, r: AdaptiveRules, history: DrawResultLite[], depth: number): number => {
     const limit = Math.min(history.length - 1, depth);
@@ -59,31 +55,24 @@ const evaluate = (w: AlgoWeights, r: AdaptiveRules, history: DrawResultLite[], d
 
         let drawScore = 0;
         
-        // Simulation rapide de prédiction pour collecter les numéros "choisis" par ces poids
-        // On ne fait pas un calcul complet coûteux, mais une approximation
-        const candidates = [];
-        
-        // On évalue chaque gagnant réel pour voir si les poids l'auraient favorisé
         target.gagnants.forEach(n => {
-            // 1. Fréquence
-            const freq = past.slice(0, 25).filter(d => d.gagnants.includes(n)).length;
-            let score = freq * (w.frequency || 0.05) * 4;
+            // 1. Fréquence Amortie (Racine)
+            const rawFreq = past.slice(0, 25).filter(d => d.gagnants.includes(n)).length;
+            const freqSignal = Math.sqrt(rawFreq) * 2;
+            let score = freqSignal * (w.frequency || 0.05);
             
-            // 2. Résonance
+            // 2. Résonance Temporelle (Priorisée)
             let gap = 50;
-            for(let j=0; j<25; j++) { if(past[j]?.gagnants.includes(n)) { gap = j; break; } }
-            if (gap >= cMin && gap <= cMax) score += 15 * (w.temporal || 0.05);
+            for(let j=0; j<past.length; j++) { if(past[j]?.gagnants.includes(n)) { gap = j; break; } }
+            if (gap >= cMin && gap <= cMax) score += 20 * (w.temporal || 0.1);
 
-            // 3. Poisson (Nouveau)
-            const lambda = (freq / 25) * (90/5);
-            const poissonP = (Math.exp(-lambda) * Math.pow(lambda, gap)); // Approx
-            score += poissonP * (w.poisson || 0.05) * 100;
+            // 3. Poisson
+            const lambda = (rawFreq / 25) * (90/5);
+            const poissonP = (Math.exp(-lambda) * Math.pow(lambda, gap));
+            score += poissonP * (w.poisson || 0.05) * 80;
 
             drawScore += score;
-            
-            // Pour l'entropie, on triche un peu en considérant que si le score est haut, 
-            // le numéro aurait été prédit.
-            if (score > 1.5) allPredictedNumbers.push(n);
+            if (score > 1.2) allPredictedNumbers.push(n);
         });
 
         returns.push(drawScore);
@@ -91,16 +80,13 @@ const evaluate = (w: AlgoWeights, r: AdaptiveRules, history: DrawResultLite[], d
 
     if (returns.length === 0) return 0;
 
-    // Calcul Sharpe Ratio
     const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
     const variance = returns.reduce((acc, val) => acc + Math.pow(val - avgReturn, 2), 0) / returns.length;
     const stdDev = Math.sqrt(variance);
     const sharpeRatio = avgReturn / (stdDev + 1); 
 
-    // Pénalité d'Entropie (Regularization)
-    // On veut que l'algo explore une variété de numéros, pas qu'il sur-apprenne sur quelques uns
     const entropy = calculatePredictionEntropy(allPredictedNumbers);
-    const entropyBonus = entropy * 0.1; // Petit bonus pour la diversité
+    const entropyBonus = entropy * 0.2; 
 
     return (sharpeRatio + entropyBonus) * 1000;
 };

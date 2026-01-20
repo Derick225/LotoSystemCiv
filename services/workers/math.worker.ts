@@ -1,5 +1,6 @@
+
 /**
- * Nexus Production Math Worker v10.0 (High Performance Computing Edition)
+ * Nexus Production Math Worker v10.1 (HPC Balance Edition)
  */
 
 export {};
@@ -47,8 +48,6 @@ ctx.onmessage = async (e: MessageEvent) => {
         ctx.postMessage({ requestId, error: err.message });
     }
 };
-
-// --- REAL IMPLEMENTATIONS ---
 
 function calculateSuccession(history: any[]) {
     const matrix: Record<number, Record<number, number>> = {};
@@ -101,6 +100,7 @@ function calculatePearsonMatrix(history: any[]) {
                 den1 += d1 * d1;
                 den2 += d2 * d2;
             }
+            // Corrélation normalisée
             const r = num / (Math.sqrt(den1 * den2) || 1);
             if (r > 0.05) affinities[j] = parseFloat(r.toFixed(3));
         }
@@ -110,27 +110,25 @@ function calculatePearsonMatrix(history: any[]) {
 }
 
 function calculateKMeans(history: any[]) {
-    // Features: X = Ecart actuel, Y = Fréquence (20t)
     const points = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         let gap = 0;
         for (let j = 0; j < history.length; j++) {
             if (history[j].gagnants.includes(num)) { gap = j; break; }
         }
-        const freq = history.slice(0, 20).filter(d => d.gagnants.includes(num)).length;
+        // Fréquence amortie pour le clustering
+        const freq = Math.sqrt(history.slice(0, 25).filter(d => d.gagnants.includes(num)).length);
         return { number: num, x: gap, y: freq, cluster: 'Neutre' };
     });
 
-    // Centroids initiaux manuels pour types métier
     const centroids = [
-        { x: 2, y: 5, type: 'Sprinter' },
-        { x: 18, y: 2, type: 'Marathonien' },
-        { x: 35, y: 0, type: 'Dormeur' },
+        { x: 2, y: 3, type: 'Sprinter' },
+        { x: 18, y: 1.5, type: 'Marathonien' },
+        { x: 35, y: 0.5, type: 'Dormeur' },
         { x: 10, y: 1, type: 'Neutre' }
     ];
 
-    // 5 itérations k-means
-    for (let iter = 0; iter < 5; iter++) {
+    for (let iter = 0; iter < 8; iter++) {
         points.forEach(p => {
             let minDist = Infinity;
             centroids.forEach(c => {
@@ -151,12 +149,11 @@ function calculateKMeans(history: any[]) {
 }
 
 function calculatePageRank(history: any[]) {
-    // Simule l'importance relative des numéros dans le réseau de co-occurrence
-    const matrix = calculatePearsonMatrix(history.slice(0, 50));
+    const matrix = calculatePearsonMatrix(history.slice(0, 80));
     const scores: Record<number, number> = {};
     for(let i=1; i<=90; i++) scores[i] = 1/90;
 
-    for (let iter = 0; iter < 10; iter++) {
+    for (let iter = 0; iter < 12; iter++) {
         const nextScores: Record<number, number> = {};
         for(let i=1; i<=90; i++) {
             let rank = 0.15 / 90;
@@ -164,6 +161,7 @@ function calculatePageRank(history: any[]) {
                 const v = parseInt(vStr);
                 const affs = data.affinities;
                 const weight = affs[i] || 0;
+                // On réduit le poids sortant des noeuds trop centraux (trop fréquents)
                 const totalOut = Object.values(affs).reduce((a:any,b:any)=>a+b, 0) as number;
                 if (totalOut > 0) rank += 0.85 * (scores[v] * (weight / totalOut));
             });
@@ -172,14 +170,16 @@ function calculatePageRank(history: any[]) {
         Object.assign(scores, nextScores);
     }
     const maxS = Math.max(...Object.values(scores));
-    return Object.entries(scores).map(([n, s]) => ({ number: parseInt(n), normalized: Math.round((s/maxS)*100) }));
+    return Object.entries(scores).map(([n, s]) => ({ 
+        number: parseInt(n), 
+        normalized: Math.round(Math.sqrt(s/maxS)*100) 
+    }));
 }
 
 function calculateWaveletScan(history: any[]) {
     const results = [];
     for (let num = 1; num <= 90; num++) {
         const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
-        // Haar Wavelet simplification
         let energy = 0;
         for (let i = 0; i < Math.min(signal.length - 1, 32); i += 2) {
             energy += Math.pow(signal[i] - signal[i+1], 2);
@@ -260,7 +260,11 @@ function calculateProjections(history: any[], lastWinners: number[]) {
     });
 
     return Object.entries(probs)
-        .map(([n, p]) => ({ number: parseInt(n), probability: Math.round((p / lastWinners.length) * 100) }))
+        .map(([n, p]) => ({ 
+            number: parseInt(n), 
+            // Probabilité amortie
+            probability: Math.round(Math.sqrt(p / lastWinners.length) * 100) 
+        }))
         .sort((a, b) => b.probability - a.probability)
         .slice(0, 10);
 }

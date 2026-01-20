@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
@@ -11,10 +12,9 @@ import {
     calculateSpectralMetricsAsync,
     calculateFractalMetricsAsync, calculateWaveletMetricsAsync
 } from '../services/mathService';
-import { getAlgoWeightsSync } from '../services/predictionEngine';
+import { getAlgoWeights, saveAlgoWeights } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
-import { useToast } from './ui/Toast'; 
 
 const NexusContext = createContext<NexusContextType | null>(null);
 
@@ -36,7 +36,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [correlationMatrix, setCorrelationMatrix] = useState<any>({});
   const [calibration, setCalibration] = useState<BrierCalibration | null>(null);
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
-  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(getAlgoWeightsSync(drawName));
+  const [globalWeights, setGlobalWeights] = useState<AlgoWeights>(() => ({}) as any);
   const [lastPrediction, setLastPrediction] = useState<Prediction | null>(null);
   const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
@@ -50,6 +50,10 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
 
     try {
+        // Chargement des POIDS d'abord (Priorité Cloud)
+        const weights = await getAlgoWeights(drawName);
+        setGlobalWeights(weights);
+
         const hist = await lotteryService.fetchHistory(drawName);
         if (abortControllerRef.current.signal.aborted) return;
         setHistory(hist); 
@@ -109,9 +113,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const updateGlobalWeights = useCallback((w: AlgoWeights) => {
+  const updateGlobalWeights = useCallback(async (w: AlgoWeights) => {
       setGlobalWeights(w); 
-      import('../services/predictionEngine').then(mod => mod.saveAlgoWeights(drawName, w));
+      await saveAlgoWeights(drawName, w);
   }, [drawName]);
 
   const contextValue = useMemo(() => ({
@@ -126,7 +130,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }), [
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, 
-    correlationMatrix, regularity, calibration, hoveredNumber, loadData
+    correlationMatrix, regularity, calibration, hoveredNumber, loadData, updateGlobalWeights
   ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;

@@ -1,3 +1,4 @@
+
 import { DrawResult, AlgoWeights } from '../types';
 
 const INITIAL_BANKROLL = 50000; 
@@ -16,22 +17,27 @@ export interface BacktestReport {
     history: { date: string, balance: number, bet: number, hits: number, profit: number }[];
 }
 
-// Version interne rapide pour la simulation massive
+// Version interne rapide rééquilibrée
 const quickPredict = (history: any[], weights: AlgoWeights): number[] => {
     const scores = new Float32Array(91).fill(0);
     const limit = Math.min(history.length, 30);
-    const freqWeight = weights.frequency || 0.2;
+    
+    // Fréquence avec amortissement racinaire
+    const freqWeight = weights.frequency || 0.08;
     for(let i=0; i<limit; i++) {
-        history[i].gagnants.forEach((n: number) => scores[n] += freqWeight);
+        history[i].gagnants.forEach((n: number) => {
+            scores[n] += freqWeight * (1 / Math.sqrt(i + 1));
+        });
     }
-    const markovWeight = weights.markov || 0.15;
+    
+    const markovWeight = weights.markov || 0.18;
     if(history.length > 1) {
         const last = history[0].gagnants;
         for(let i=0; i<limit-1; i++) {
             const current = history[i].gagnants;
             const prev = history[i+1].gagnants;
             if (prev.some((p: number) => last.includes(p))) {
-                current.forEach((n: number) => scores[n] += markovWeight * 2);
+                current.forEach((n: number) => scores[n] += markovWeight * 1.5);
             }
         }
     }
@@ -83,9 +89,6 @@ export const runSurvivalSimulation = async (
     });
 };
 
-/**
- * Lance 3 simulations en parallèle pour comparer les rendements.
- */
 export const runComparativeSimulation = async (
     drawName: string,
     history: DrawResult[],

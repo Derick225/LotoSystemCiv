@@ -15,9 +15,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending Component explicitly instead of React.Component to ensure TypeScript correctly recognizes base class members like setState and props
+// Fix: Extending Component directly to ensure TypeScript correctly recognizes base class members like setState and props
 export class LocalErrorBoundary extends Component<Props, State> {
-  // Fix: Removed 'override' as it was causing issues with base class detection in this environment
   public state: State = {
     hasError: false,
     error: null,
@@ -31,14 +30,14 @@ export class LocalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard lifecycle method; removed 'override'
+  // Fix: Standard lifecycle method
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  // Fix: Correct usage of setState and state within arrow function inherited from Component
+  // Fix: Accessing state inherited from Component via arrow function
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -47,12 +46,12 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Correctly using setState inherited from Component
+        // Fix: Correctly using setState inherited from base Component
         this.setState({ hasError: false, error: null });
     }
   };
 
-  // Fix: Standard render method; removed 'override' and correctly access state and props from Component
+  // Fix: Standard render method; correctly access state and props from Component
   public render(): ReactNode {
     const { hasError, error } = this.state;
     const { children } = this.props;

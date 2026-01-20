@@ -1,6 +1,7 @@
 
 import { AlgoWeights, DrawResult, Prediction, RLState } from '../types';
 import { saveAlgoWeights, normalizeWeights } from './predictionEngine';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const LEARNING_RATE_BASE = 0.05; 
 const MOMENTUM = 0.9; 
@@ -20,11 +21,10 @@ export const ReinforcementLearningService = {
         currentWeights: AlgoWeights
     ): Promise<{ newWeights: AlgoWeights; state: RLState; log: string }> => {
         
-        let state = getRLState(drawName);
+        let state = await getRLState(drawName);
         let log = "";
         
         const hits = lastPrediction.suggestedNumbers.filter(n => lastDraw.gagnants.includes(n)).length;
-        const candidateHits = lastPrediction.candidates.filter(n => lastDraw.gagnants.includes(n)).length;
         
         if (hits >= 2) {
             state.streak = Math.max(0, state.streak + 1);
@@ -75,8 +75,12 @@ export const ReinforcementLearningService = {
         
         state.totalCorrection += totalChange;
         state.lastCalibration = Date.now();
-        saveRLState(drawName, state);
-        await saveAlgoWeights(drawName, normalizedWeights);
+        
+        // Sauvegarde synchrone locale et asynchrone cloud
+        await Promise.all([
+            saveRLState(drawName, state),
+            saveAlgoWeights(drawName, normalizedWeights)
+        ]);
 
         log += ` Mutation Sigma : ${(totalChange * 100).toFixed(2)}%.`;
 
@@ -84,7 +88,19 @@ export const ReinforcementLearningService = {
     }
 };
 
-const getRLState = (drawName: string): RLState => {
+const getRLState = async (drawName: string): Promise<RLState> => {
+    // Tentative Cloud
+    if (isSupabaseConfigured() && navigator.onLine) {
+        try {
+            const { data } = await supabase
+                .from('user_preferences')
+                .select('settings')
+                .single();
+            // On peut stocker l'état RL dans les settings utilisateur ou une table dédiée
+            if (data?.settings?.rlStates?.[drawName]) return data.settings.rlStates[drawName];
+        } catch { /* proceed to local */ }
+    }
+
     try {
         const raw = localStorage.getItem(`rl_state_${drawName}`);
         return raw ? JSON.parse(raw) : getInitialState();
@@ -93,6 +109,27 @@ const getRLState = (drawName: string): RLState => {
     }
 };
 
-const saveRLState = (drawName: string, state: RLState) => {
+const saveRLState = async (drawName: string, state: RLState) => {
     localStorage.setItem(`rl_state_${drawName}`, JSON.stringify(state));
+    
+    if (isSupabaseConfigured()) {
+        try {
+            // Sauvegarde de l'état de calibration dans les préférences pour portabilité
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                const { data } = await supabase.from('user_preferences').select('settings').eq('user_id', session.user.id).single();
+                const settings = data?.settings || {};
+                if (!settings.rlStates) settings.rlStates = {};
+                settings.rlStates[drawName] = state;
+                
+                await supabase.from('user_preferences').upsert({
+                    user_id: session.user.id,
+                    settings,
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.warn("RL State sync failed");
+        }
+    }
 };

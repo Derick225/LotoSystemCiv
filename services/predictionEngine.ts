@@ -1,9 +1,10 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v13.0 - APEX KERNEL
+ * NEXUS PREDICTION ENGINE v14.0 - PERSISTENCE & APEX KERNEL
  */
 
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
@@ -17,38 +18,99 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 };
 
 export const getDefaultWeights = (): AlgoWeights => normalizeWeights({
-    frequency: 0.15, gap: 0.10, spectral: 0.15, fractal: 0.05, markov: 0.15,
-    wavelet: 0.10, orchestration: 0.10, momentum: 0.10, equilibrium: 0.05,
-    ai_intuition: 0.05, digital_root: 0.0, gap_velocity: 0.0, isolation_anomaly: 0.0
+    frequency: 0.08, 
+    gap: 0.12,
+    spectral: 0.18, 
+    fractal: 0.08, 
+    markov: 0.18,
+    wavelet: 0.12, 
+    orchestration: 0.12, 
+    momentum: 0.07, 
+    equilibrium: 0.05,
+    ai_intuition: 0.00, 
+    digital_root: 0.0, 
+    gap_velocity: 0.0, 
+    isolation_anomaly: 0.0
 } as any);
 
-// Fix: Added missing getDefaultRules required by ExpertTuningPanel.tsx
 export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMin: 12,
     criticalZoneMax: 18
 });
 
-export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
-    localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights));
+/**
+ * Sauvegarde persistante (Local + Cloud)
+ */
+export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights, rules?: AdaptiveRules) => {
+    // 1. Sauvegarde Locale (Réactivité)
+    const dataToSave = {
+        weights,
+        rules: rules || getAdaptiveRules(drawName),
+        updatedAt: new Date().toISOString()
+    };
+    localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(dataToSave));
+    localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights)); // Backward compat
+
+    // 2. Synchronisation Cloud (Pérennité)
+    if (isSupabaseConfigured()) {
+        try {
+            await supabase.from('algo_weights').upsert({
+                draw_name: drawName,
+                weights: dataToSave,
+                updated_at: new Date().toISOString()
+            });
+        } catch (e) {
+            console.warn("Cloud Sync weights failed:", e);
+        }
+    }
 };
 
 export const getAlgoWeightsSync = (drawName: string): AlgoWeights => {
-    const raw = localStorage.getItem(`weights_${drawName}`);
-    return raw ? JSON.parse(raw) : getDefaultWeights();
+    const raw = localStorage.getItem(`nexus_config_${drawName}`);
+    if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.weights || getDefaultWeights();
+    }
+    const legacy = localStorage.getItem(`weights_${drawName}`);
+    return legacy ? JSON.parse(legacy) : getDefaultWeights();
 };
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
+    // Tentative de récupération Cloud si connecté
+    if (isSupabaseConfigured() && navigator.onLine) {
+        try {
+            const { data } = await supabase
+                .from('algo_weights')
+                .select('weights')
+                .eq('draw_name', drawName)
+                .single();
+            
+            if (data?.weights?.weights) {
+                // Refresh cache local
+                localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(data.weights));
+                return data.weights.weights;
+            }
+        } catch (e) { /* Fallback to local */ }
+    }
     return getAlgoWeightsSync(drawName);
 };
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
-    const raw = localStorage.getItem(`rules_${drawName}`);
-    return raw ? JSON.parse(raw) : getDefaultRules();
+    const raw = localStorage.getItem(`nexus_config_${drawName}`);
+    if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.rules || getDefaultRules();
+    }
+    const legacy = localStorage.getItem(`rules_${drawName}`);
+    return legacy ? JSON.parse(legacy) : getDefaultRules();
 };
 
-export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
-    localStorage.setItem(`rules_${drawName}`, JSON.stringify(rules));
+export const saveAdaptiveRules = async (drawName: string, rules: AdaptiveRules) => {
+    const weights = await getAlgoWeights(drawName);
+    await saveAlgoWeights(drawName, weights, rules);
 };
+
+// ... Reste des fonctions d'analyse inchangées ...
 
 export const analyzeTicketStrength = async (numbers: number[], drawName: string): Promise<TicketAnalysisResult> => {
     const ac = calculateACValue(numbers);
@@ -74,7 +136,6 @@ export const generateMasterPrediction = async (
     const correlationMap = metrics?.correlationMatrix || {};
     const lastWinners = history[0].gagnants;
     
-    // Calcul de l'Entropie globale pour réguler la confiance
     const entropy = calculateShannonEntropy(history.slice(0, 50));
     const chaosFactor = Math.max(0.5, 1 - (entropy.normalized - 0.85));
 
@@ -84,7 +145,8 @@ export const generateMasterPrediction = async (
         const reg = regularity.find((r: any) => r.number === num);
         const spec = metrics?.spectral?.find((s: any) => s.number === num);
         
-        const freqScore = (history.filter(h => h.gagnants.includes(num)).length / history.length) * 100;
+        const rawFreq = history.filter(h => h.gagnants.includes(num)).length;
+        const freqScore = (Math.sqrt(rawFreq) / Math.sqrt(history.length)) * 100;
         
         let markovScore = 0;
         lastWinners.forEach(lw => {
@@ -102,7 +164,7 @@ export const generateMasterPrediction = async (
             markov: Math.min(100, markovScore * 2),
             equilibrium: equilibriumScore,
             wavelet: metrics?.wavelet?.find((w: any) => w.number === num)?.energy || 0,
-            momentum: history.slice(0, 8).filter(h => h.gagnants.includes(num)).length * 20,
+            momentum: Math.sqrt(history.slice(0, 8).filter(h => h.gagnants.includes(num)).length) * 40,
             orchestration: 50, fractal: 50, spatial: 50, ai_intuition: 50, 
             resistance: 50, transformer: 0, temporal: 0, digital_root: digitalRoot * 10,
             gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0,
@@ -123,20 +185,14 @@ export const generateMasterPrediction = async (
     const top5 = sorted.slice(0, 5).map(s => s.num);
     const acScore = calculateACValue(top5);
     
-    // Calcul de confiance multi-factoriel APEX
     let baseConfidence = (sorted[0].score + sorted[4].score) / 2;
-    // Malus si AC trop bas, Malus si Chaos trop haut
     let finalConfidence = Math.round(baseConfidence * (acScore / 8) * chaosFactor);
-
-    let analysis = `Apex v13.0 Synchro. `;
-    if (entropy.normalized > 0.95) analysis += `ALERTE : Entropie critique. Le flux est quasi-aléatoire. `;
-    else if (chaosFactor > 0.9) analysis += `Régime structurel stable détecté. `;
 
     return {
         suggestedNumbers: top5,
         candidates: sorted.slice(5, 15).map(s => s.num),
         confidence: Math.min(98, Math.max(25, finalConfidence)),
-        analysis: analysis + `Confluence majeure sur ${top5.slice(0,2).join(' & ')}.`,
+        analysis: `Apex v14.0 Synchro. Équilibre fréquentiel respecté. Focus sur la cohérence structurelle.`,
         breakdown,
         usedWeights: weights,
         timestamp: Date.now()
@@ -150,7 +206,6 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     return "Consensus Nexus Apex";
 };
 
-// Fix: Added missing calculateCorrectionsFromForensics required by PredictionForensics.tsx
 export const calculateCorrectionsFromForensics = (
     currentWeights: AlgoWeights, 
     currentRules: AdaptiveRules, 
@@ -164,9 +219,10 @@ export const calculateCorrectionsFromForensics = (
             const key = div.algo as keyof AlgoWeights;
             if (newWeights[key] !== undefined) {
                 const currentVal = Number(newWeights[key]) || 0;
-                const adjustment = (div.impact / 100) * 0.05;
+                const cap = key === 'frequency' ? 0.02 : 0.05;
+                const adjustment = (div.impact / 100) * cap;
                 newWeights[key] = currentVal + adjustment;
-                reasoning.push(`Adaptation ADN : Renforcement du module ${div.algo} (+${(adjustment * 100).toFixed(1)}%).`);
+                reasoning.push(`Adaptation ADN : Ajustement du module ${div.algo} (+${(adjustment * 100).toFixed(1)}%).`);
             }
         });
     }
@@ -175,7 +231,7 @@ export const calculateCorrectionsFromForensics = (
     const hits = report.matches.filter(m => m.errorType === 'Hit').length;
     if (hits === 0) {
         newRules.criticalZoneMax = Math.min(45, newRules.criticalZoneMax + 1);
-        reasoning.push("Élargissement du filtre temporel critique basé sur le décalage observé.");
+        reasoning.push("Élargissement du filtre temporel critique.");
     }
 
     return {

@@ -2,7 +2,7 @@
 export {};
 
 /**
- * Nexus ACO Worker v4.5 (Oracle-Biased Edition)
+ * Nexus ACO Worker v4.6 (Balanced & Oracle-Biased Edition)
  */
 
 interface AntPath { path: number[]; score: number; }
@@ -13,9 +13,8 @@ const RHO = 0.15;
 const Q = 100;     
 const MAX_PHEROMONE = 8.0;
 const MIN_PHEROMONE = 0.05;
-const ORACLE_BOOST = 4.0; // Boost initial pour les phéromones Oracle
+const ORACLE_BOOST = 4.0;
 
-// Fix: Explicit typing for self
 const ctx = self as unknown as Worker;
 
 ctx.onmessage = (e: MessageEvent) => {
@@ -30,10 +29,8 @@ ctx.onmessage = (e: MessageEvent) => {
     const generations = config?.generations || 40;
     const oracleTargets = vocalContext?.targets || [];
 
-    // Initialisation des phéromones avec BIAIS ORACLE
     const pheromones = new Float32Array((numNodes + 1) * (numNodes + 1)).fill(MIN_PHEROMONE);
     
-    // Si l'Oracle a des cibles, on pré-dépose de la phéromone sur ces nœuds
     if (oracleTargets.length > 0) {
         oracleTargets.forEach((t: number) => {
             for (let i = 1; i <= 90; i++) {
@@ -44,7 +41,7 @@ ctx.onmessage = (e: MessageEvent) => {
         });
     }
 
-    const heuristic = new Float32Array((numNodes + 1) * (numNodes + 1)).fill(0.1);
+    const rawHeuristic = new Float32Array((numNodes + 1) * (numNodes + 1)).fill(0);
     const recentHistory = history.slice(0, 60);
     
     recentHistory.forEach((draw: { gagnants: number[] }) => {
@@ -53,11 +50,17 @@ ctx.onmessage = (e: MessageEvent) => {
             for (let j = i + 1; j < nums.length; j++) {
                 const u = nums[i], v = nums[j];
                 if (u > 90 || v > 90) continue;
-                heuristic[u * (numNodes + 1) + v] += 1;
-                heuristic[v * (numNodes + 1) + u] += 1;
+                rawHeuristic[u * (numNodes + 1) + v] += 1;
+                rawHeuristic[v * (numNodes + 1) + u] += 1;
             }
         }
     });
+
+    // Amortissement racinaire de l'heuristique pour réduire la dominance fréquentielle
+    const heuristic = new Float32Array((numNodes + 1) * (numNodes + 1));
+    for (let i = 0; i < rawHeuristic.length; i++) {
+        heuristic[i] = Math.sqrt(rawHeuristic[i]) + 0.1;
+    }
 
     let globalBestPath: number[] = [];
     let globalBestScore = -Infinity;
@@ -69,7 +72,6 @@ ctx.onmessage = (e: MessageEvent) => {
             const path: number[] = [];
             const visited = new Set<number>();
             
-            // L'ant a plus de chance de démarrer sur une cible Oracle
             let current: number;
             if (oracleTargets.length > 0 && Math.random() < 0.4) {
                 current = oracleTargets[Math.floor(Math.random() * oracleTargets.length)];
@@ -98,6 +100,8 @@ ctx.onmessage = (e: MessageEvent) => {
                     sum += p;
                 }
 
+                if (sum === 0) break;
+
                 let r = Math.random() * sum;
                 let nextNode = nodes[nodes.length - 1];
                 for (let i = 0; i < probs.length; i++) {
@@ -110,13 +114,13 @@ ctx.onmessage = (e: MessageEvent) => {
                 current = nextNode;
             }
 
-            // Calcul du score (Heuristique + Pheromone match)
+            if (path.length < 5) continue;
+
             let score = 0;
             const sorted = [...path].sort((a,b)=>a-b);
             for(let i=0; i<4; i++) {
                 for(let j=i+1; j<5; j++) {
                     score += heuristic[sorted[i] * (numNodes + 1) + sorted[j]];
-                    // Bonus si le chemin contient des cibles Oracle
                     if (oracleTargets.includes(sorted[i])) score += 5;
                     if (oracleTargets.includes(sorted[j])) score += 5;
                 }
@@ -124,6 +128,7 @@ ctx.onmessage = (e: MessageEvent) => {
             iterationPaths.push({ path: sorted, score });
         }
 
+        if (iterationPaths.length === 0) continue;
         iterationPaths.sort((a,b) => b.score - a.score);
         const bestIter = iterationPaths[0];
         
@@ -132,12 +137,10 @@ ctx.onmessage = (e: MessageEvent) => {
             globalBestPath = bestIter.path;
         }
 
-        // Évaporation
         for (let i = 0; i < pheromones.length; i++) {
             pheromones[i] = Math.max(MIN_PHEROMONE, pheromones[i] * (1 - RHO));
         }
 
-        // Dépôt (Meilleur de l'itération)
         const deposit = Q / (Math.max(1, 100 / bestIter.score));
         for (let i = 0; i < 4; i++) {
             for (let j = i+1; j < 5; j++) {

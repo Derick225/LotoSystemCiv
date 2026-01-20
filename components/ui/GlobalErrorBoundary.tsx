@@ -14,9 +14,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Extending Component explicitly instead of React.Component to ensure TypeScript correctly recognizes base class members like setState and props
+// Fix: Extending Component directly to ensure TypeScript correctly recognizes base class members like setState and props
 export class GlobalErrorBoundary extends Component<Props, State> {
-  // Fix: Removed 'override' as it was causing issues with base class detection in this environment
   public state: State = {
     hasError: false,
     error: null,
@@ -30,12 +29,12 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard method signature for componentDidCatch using explicit ErrorInfo type; removed 'override'
+  // Fix: Standard method signature for componentDidCatch using explicit ErrorInfo type
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Accessing setState from Component via arrow function to maintain correct 'this' context
+  // Fix: Accessing setState from base Component via arrow function to maintain correct 'this' context
   private handleReload = () => {
     // Correctly using setState inherited from Component
     this.setState({ hasError: false, error: null });
@@ -43,9 +42,8 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     window.location.reload(); 
   };
 
-  // Fix: Standard render method inherited from Component; removed 'override'
   public render(): ReactNode {
-    // Accessing state and props correctly through Component inheritance
+    // Fix: Accessing state and props correctly through Component inheritance
     const { hasError, error } = this.state;
     const { children } = this.props;
 
