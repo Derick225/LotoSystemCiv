@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { Mic, MicOff, X, RefreshCw, Radio, Activity, Waves, AlertTriangle, Command } from 'lucide-react';
@@ -311,9 +312,9 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     };
 
     return (
-        <div className="fixed bottom-28 md:bottom-6 right-6 z-[80] flex flex-col items-end gap-4 pointer-events-none">
+        <div className="fixed bottom-32 right-6 z-[80] flex flex-col items-end gap-4 pointer-events-none md:bottom-6">
             {isActive && (
-                <div className="bg-slate-900/95 backdrop-blur-xl border border-indigo-500/50 p-5 rounded-[2.5rem] shadow-2xl w-80 animate-slide-up pointer-events-auto overflow-hidden">
+                <div className="bg-slate-900/95 backdrop-blur-xl border border-indigo-500/50 p-5 rounded-[2.5rem] shadow-2xl w-80 animate-slide-up pointer-events-auto overflow-hidden mb-4">
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-3 text-indigo-400">
                             <Radio size={18} className="animate-pulse" />

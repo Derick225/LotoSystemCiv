@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -14,10 +14,11 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
- * Fix: Use Component directly and ensure property access is correctly typed via inheritance.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
-  public override state: State = {
+// Fix: Use React.Component to ensure inheritance is properly recognized by TypeScript
+export class LocalErrorBoundary extends React.Component<Props, State> {
+  // Fix: Correctly initialize state for class component
+  public state: State = {
     hasError: false,
     error: null,
   };
@@ -30,13 +31,14 @@ export class LocalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Removed 'override' to ensure compatibility across TS environments
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  // Fix: Explicitly use this.state and this.setState via inherited Component properties
+  // Fix: Inheritance resolution allows access to setState and state method within arrow function
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -45,12 +47,14 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
+        // Fix: Accessing setState through React.Component inheritance
         this.setState({ hasError: false, error: null });
     }
   };
 
-  public override render(): ReactNode {
-    // Fix: Accessing state and props inherited from Component
+  // Fix: Removed 'override' and correctly access state/props from base React.Component class
+  public render(): ReactNode {
+    // Fix: props and state are accessed correctly through inheritance from React.Component
     const { hasError, error } = this.state;
     const { children } = this.props;
 
@@ -70,7 +74,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
           </div>
           <button 
             onClick={this.handleReload} 
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2"
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center justify-center gap-2"
           >
             <RefreshCw size={12} /> {isNetwork ? 'Reconnexion' : 'Restaurer'}
           </button>

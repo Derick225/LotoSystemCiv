@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -13,10 +13,11 @@ interface State {
 
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
- * Fix: Use Component directly and ensure property access is correctly typed via inheritance.
  */
-export class GlobalErrorBoundary extends Component<Props, State> {
-  public override state: State = {
+// Fix: Use React.Component to ensure inheritance is properly recognized by TypeScript
+export class GlobalErrorBoundary extends React.Component<Props, State> {
+  // Fix: Correctly initialize state for class component
+  public state: State = {
     hasError: false,
     error: null,
   };
@@ -29,19 +30,22 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Removed 'override' to ensure compatibility across TS environments
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Explicitly use inherited setState from React.Component class
+  // Fix: Inheritance resolution allows access to setState method within arrow function
   private handleReload = () => {
+    // Fix: Accessing setState through React.Component inheritance
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  public override render(): ReactNode {
-    // Fix: Accessing state and props inherited from Component
+  // Fix: Removed 'override' and correctly access state/props from base React.Component class
+  public render(): ReactNode {
+    // Fix: props and state are correctly accessed through inheritance from React.Component
     const { hasError, error } = this.state;
     const { children } = this.props;
 
