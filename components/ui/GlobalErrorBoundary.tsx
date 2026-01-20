@@ -1,5 +1,5 @@
 
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,10 +14,10 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Use React.Component to ensure inheritance is properly recognized by TypeScript
-export class GlobalErrorBoundary extends React.Component<Props, State> {
-  // Fix: Correctly initialize state for class component
-  public state: State = {
+// Fix: Extending Component explicitly to ensure TypeScript recognizes setState, state, and props
+export class GlobalErrorBoundary extends Component<Props, State> {
+  // Fix: Explicitly typed state using override to ensure it matches the base class member
+  public override state: State = {
     hasError: false,
     error: null,
   };
@@ -30,22 +30,22 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Removed 'override' to ensure compatibility across TS environments
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Standard method signature for componentDidCatch using explicit ErrorInfo type and override
+  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Inheritance resolution allows access to setState method within arrow function
+  // Fix: Correct usage of setState within arrow function in class component
   private handleReload = () => {
-    // Fix: Accessing setState through React.Component inheritance
+    // Accessing setState from the base Component class correctly through inheritance
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  // Fix: Removed 'override' and correctly access state/props from base React.Component class
-  public render(): ReactNode {
-    // Fix: props and state are correctly accessed through inheritance from React.Component
+  // Fix: Correctly access state and props from base Component class in render using override
+  public override render(): ReactNode {
+    // Accessing state and props correctly through Component inheritance
     const { hasError, error } = this.state;
     const { children } = this.props;
 
