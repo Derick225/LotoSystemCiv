@@ -1,9 +1,9 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
-  children?: ReactNode;
+  children?: React.ReactNode;
   key?: any;
 }
 
@@ -15,8 +15,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending Component directly to ensure TypeScript correctly recognizes base class members like setState and props
-export class LocalErrorBoundary extends Component<Props, State> {
+// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState and props
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -30,8 +30,8 @@ export class LocalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard lifecycle method
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Standard lifecycle method using React.ErrorInfo
+  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
@@ -52,7 +52,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
   };
 
   // Fix: Standard render method; correctly access state and props from Component
-  public render(): ReactNode {
+  public render(): React.ReactNode {
     const { hasError, error } = this.state;
     const { children } = this.props;
 

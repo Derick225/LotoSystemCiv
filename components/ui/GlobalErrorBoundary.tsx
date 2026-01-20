@@ -1,9 +1,9 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
-  children?: ReactNode;
+  children?: React.ReactNode;
 }
 
 interface State {
@@ -14,8 +14,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Extending Component directly to ensure TypeScript correctly recognizes base class members like setState and props
-export class GlobalErrorBoundary extends Component<Props, State> {
+// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState and props
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -29,8 +29,8 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard method signature for componentDidCatch using explicit ErrorInfo type
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Standard method signature for componentDidCatch using explicit React.ErrorInfo type
+  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
@@ -42,7 +42,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     window.location.reload(); 
   };
 
-  public render(): ReactNode {
+  public render(): React.ReactNode {
     // Fix: Accessing state and props correctly through Component inheritance
     const { hasError, error } = this.state;
     const { children } = this.props;
