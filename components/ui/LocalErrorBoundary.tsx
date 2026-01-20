@@ -1,9 +1,9 @@
 
-import React from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
-  children?: React.ReactNode;
+  children?: ReactNode;
   key?: any;
 }
 
@@ -15,8 +15,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState and props
-export class LocalErrorBoundary extends React.Component<Props, State> {
+// Explicitly import Component to ensure TypeScript correctly recognizes base class members like setState and props
+export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -30,14 +30,14 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard lifecycle method using React.ErrorInfo
-  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  // Explicitly use ErrorInfo from 'react' for the lifecycle method
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  // Fix: Accessing state inherited from Component via arrow function
+  // Arrow function to preserve 'this' context for inherited state and setState access
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -46,13 +46,13 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: Correctly using setState inherited from base Component
+        // Accessing setState from the explicitly extended Component class
         this.setState({ hasError: false, error: null });
     }
   };
 
-  // Fix: Standard render method; correctly access state and props from Component
-  public render(): React.ReactNode {
+  public render(): ReactNode {
+    // Accessing state and props now that Component is explicitly inherited and typed
     const { hasError, error } = this.state;
     const { children } = this.props;
 

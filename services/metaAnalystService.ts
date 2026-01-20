@@ -32,6 +32,7 @@ export const precomputeBaseScores = async (
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
     
+    // Initialisation sécurité pour le spectre complet
     for (let i = 1; i <= 90; i++) {
         if (!data[i]) {
             data[i] = { 
@@ -52,41 +53,42 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     
     let stability = 0.5, chaos = 0.3, harmony = 0.5, wavelet = 0.4, orchestration = 0.4;
     
-    if (vol.score > 60) { chaos = 0.7; stability = 0.3; wavelet = 0.7; }
-    if (ent.normalized > 0.9) { chaos = 0.8; orchestration = 0.2; }
+    if (vol.score > 60) { chaos = 0.7; stability = 0.3; }
+    if (ent.normalized > 0.9) { chaos = 0.8; harmony = 0.2; }
     if (reg.regime === 'PERSISTANT') { stability = 0.8; harmony = 0.7; orchestration = 0.8; }
     
     return { stability, chaos, harmony, wavelet, orchestration };
 }
 
 /**
- * GÉNÉRATION PLATINUM FUSION v8.0
- * Procédure : Synergies T-1 -> Orchestrations (-1/+1) -> Tamis Algorithmique
+ * GÉNÉRATION PLATINUM FUSION v8.5
+ * PROTOCOLE : SYNERGIES T-1 -> ORCHESTRATIONS (-1/+1) -> TAMISAGE ALGORITHMIQUE
  */
 export async function generatePlatinumPrediction(
     drawName: string, 
     history: DrawResult[],
     precomputedMetrics?: any,
-    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.2, wavelet: 0.4, orchestration: 0.4 }
+    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.5, wavelet: 0.4, orchestration: 0.4 }
 ): Promise<PlatinumResult> {
-    if (!history || history.length < 5) throw new Error("Historique insuffisant pour la fusion.");
+    if (!history || history.length < 5) throw new Error("Historique insuffisant.");
 
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
     const lastWinners = history[0].gagnants;
     const correlationMatrix = precomputedMetrics?.correlationMatrix || {};
 
-    // --- PHASE 1 : EXTRACTION DES SYNERGIES T-1 ---
+    // --- ÉTAPE 1 : EXTRACTION DES SYNERGIES DES NUMÉROS T-1 ---
     const synergyPool = new Set<number>();
     lastWinners.forEach(num => {
         const affinities = correlationMatrix[num]?.affinities || {};
         Object.entries(affinities).forEach(([targetStr, strength]) => {
-            if (Number(strength) > 0.15) { // Seuil de synergie significative
+            // Seuil de synergie significative (ajusté pour la qualité)
+            if (Number(strength) > 0.18) { 
                 synergyPool.add(parseInt(targetStr));
             }
         });
     });
 
-    // --- PHASE 2 : EXPANSION PAR ORCHESTRATION (-1 et +1 des synergies) ---
+    // --- ÉTAPE 2 : EXPANSION PAR ORCHESTRATIONS (-1 et +1 des synergies) ---
     const orchestrationPool = new Set<number>();
     synergyPool.forEach(syn => {
         orchestrationPool.add(syn);
@@ -94,22 +96,22 @@ export async function generatePlatinumPrediction(
         if (syn < 90) orchestrationPool.add(syn + 1);
     });
 
-    // Conversion en pool de travail pour le tamis
+    // Conversion en pool de travail
     let targetPool = Array.from(orchestrationPool);
 
-    // Sécurité : Si le pool de synergies est trop restreint, on complète avec les meilleurs scores globaux
+    // Sécurité stochastique : Si le pool est trop restreint, on injecte les meilleurs potentiels globaux
     if (targetPool.length < 15) {
         const topGlobal = Object.keys(scores)
             .map(Number)
             .sort((a, b) => (scores[b].spectral + scores[b].momentum) - (scores[a].spectral + scores[a].momentum))
             .slice(0, 20);
-        topGlobal.forEach(n => orchestrationPool.add(n));
-        targetPool = Array.from(orchestrationPool);
+        topGlobal.forEach(n => targetPool.includes(n) ? null : targetPool.push(n));
     }
 
-    // --- PHASE 3 : LE TAMIS PLATINUM (Tournament sur le pool filtré) ---
+    // --- ÉTAPE 3 : LE TAMIS DE FUSION (Passage des orchestrations dans les filtres IA) ---
     const combinations: PlatinumCombo[] = [];
 
+    // On génère 5 combinaisons par tournoi sur le pool restreint
     for (let i = 0; i < 5; i++) {
         const combo: number[] = [];
         const tempPool = [...targetPool];
@@ -118,14 +120,14 @@ export async function generatePlatinumPrediction(
             let bestCandidate = -1;
             let bestVal = -Infinity;
             
-            // Tournoi stochastique focalisé sur le pool d'orchestration
-            const tourneySize = Math.min(10, tempPool.length);
+            // Tournoi stochastique sur le pool d'orchestration
+            const tourneySize = Math.min(8, tempPool.length);
             for(let k = 0; k < tourneySize; k++) {
                 const idx = Math.floor(Math.random() * tempPool.length);
                 const n = tempPool[idx];
                 const b = scores[n];
                 
-                // Formule de tamisage pondéré
+                // Formule du Tamis Platinum pondéré par les réglages utilisateur
                 const val = 
                     ((b.spectral || 0) * userBias.harmony) + 
                     ((b.momentum || 50) * userBias.stability) + 
@@ -145,32 +147,20 @@ export async function generatePlatinumPrediction(
             }
         }
         
-        combo.sort((a,b) => a - b);
+        combo.sort((a, b) => a - b);
         
-        // Calcul du score de cohérence final pour ce ticket tamisé
+        // Calcul du score de cohérence final (0-100)
         let totalScore = 0;
         combo.forEach(n => {
             const b = scores[n];
-            totalScore += 
-                ((b.spectral || 0) * userBias.harmony) + 
-                ((b.momentum || 50) * userBias.stability) + 
-                ((b.gap || 0) * userBias.chaos) +
-                ((b.wavelet || 0) * userBias.wavelet) +
-                ((b.orchestration || 0) * userBias.orchestration);
+            totalScore += (b.spectral * 0.4 + b.momentum * 0.3 + b.markov * 0.3);
         });
         
-        const avgBias = (userBias.harmony + userBias.stability + userBias.chaos + userBias.wavelet + userBias.orchestration) / 5;
-        const finalScore = Math.min(99, Math.round(totalScore / (5 * (avgBias + 0.1))));
-
         combinations.push({
             numbers: combo,
-            score: finalScore,
-            tags: i === 0 ? ["Fusion Alpha"] : ["Vecteur Tamisé"],
-            breakdown: { 
-                synergy_match: true,
-                orchestration_level: targetPool.length,
-                fusion_score: finalScore
-            }
+            score: Math.min(99, Math.round(totalScore / 5)),
+            tags: i === 0 ? ["Vecteur Alpha"] : ["Optimisé"],
+            breakdown: { synergy_depth: targetPool.length }
         });
     }
 
@@ -184,11 +174,11 @@ export async function generatePlatinumPrediction(
     return {
         id: crypto.randomUUID(),
         kingNumbers, 
-        targetSumRange: { min: 140, max: 310, reason: "Biais Sigma Platinum" },
+        targetSumRange: { min: 150, max: 280, reason: "Biais Synergie-Orch" },
         hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: combinations[0].score,
-        analysis: `Fusion opérée sur un pool de ${targetPool.length} vecteurs (Synergies T-1 + Orchestrations). Le tamisage favorise la zone ${kingNumbers.slice(0,1).map(k=>k.number)}.`,
+        analysis: `Fusion opérée sur un pool filtré de ${targetPool.length} vecteurs (Synergies T-1 + Orchestrations). Le tamisage favorise la résonance spectrale sur la zone ${kingNumbers.slice(0, 2).map(k=>k.number).join(', ')}.`,
         drawName,
         timestamp: Date.now()
     };

@@ -1,9 +1,9 @@
 
-import React from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 interface State {
@@ -14,8 +14,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState and props
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Explicitly import Component to ensure TypeScript correctly recognizes base class members like setState and props
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -29,21 +29,21 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard method signature for componentDidCatch using explicit React.ErrorInfo type
-  public componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  // Explicitly use ErrorInfo from 'react' to define the method signature
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Accessing setState from base Component via arrow function to maintain correct 'this' context
+  // Arrow function used to maintain correct 'this' context for inherited setState
   private handleReload = () => {
-    // Correctly using setState inherited from Component
+    // Accessing setState from the explicitly extended Component class
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  public render(): React.ReactNode {
-    // Fix: Accessing state and props correctly through Component inheritance
+  public render(): ReactNode {
+    // Accessing state and props now that Component is explicitly inherited and typed
     const { hasError, error } = this.state;
     const { children } = this.props;
 
