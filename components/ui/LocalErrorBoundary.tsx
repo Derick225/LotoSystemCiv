@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -15,10 +15,10 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending Component explicitly to ensure TypeScript recognizes setState, state, and props
-export class LocalErrorBoundary extends Component<Props, State> {
-  // Fix: Explicitly typed state using override to ensure it matches the base class member
-  public override state: State = {
+// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState, state, and props
+export class LocalErrorBoundary extends React.Component<Props, State> {
+  // Fix: Removed 'override' as it was causing issues with base class detection in this environment
+  public state: State = {
     hasError: false,
     error: null,
   };
@@ -31,16 +31,15 @@ export class LocalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Standard method signature for componentDidCatch using explicit ErrorInfo type and override
-  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  // Fix: Standard lifecycle method; removed 'override'
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  // Fix: Correct usage of setState and state within arrow function in class component
+  // Fix: Correct usage of setState and state within arrow function inherited from React.Component
   private handleReload = () => {
-    // Accessing state through Component inheritance correctly
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -48,14 +47,12 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Accessing setState through Component inheritance correctly
         this.setState({ hasError: false, error: null });
     }
   };
 
-  // Fix: Correctly access state and props from base Component class in render using override
-  public override render(): ReactNode {
-    // Accessing state and props correctly through Component inheritance
+  // Fix: Standard render method; removed 'override' and correctly access state and props from React.Component
+  public render(): ReactNode {
     const { hasError, error } = this.state;
     const { children } = this.props;
 
