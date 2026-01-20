@@ -282,7 +282,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                         </div>
                         <div className="mt-6 p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
                             <p className="text-[9px] text-indigo-300 font-medium italic leading-relaxed">
-                                "Conseil Elite : Une synergie > 40% indique une dépendance structurelle forte. Jouer ces numéros séparément réduit vos chances mathématiques."
+                                "Conseil Elite : Une synergie &gt; 40% indique une dépendance structurelle forte. Jouer ces numéros séparément réduit vos chances mathématiques."
                             </p>
                         </div>
                     </div>

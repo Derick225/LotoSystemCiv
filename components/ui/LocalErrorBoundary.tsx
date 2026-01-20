@@ -1,5 +1,5 @@
 
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -15,8 +15,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState, state, and props
-export class LocalErrorBoundary extends React.Component<Props, State> {
+// Fix: Extending Component explicitly instead of React.Component to ensure TypeScript correctly recognizes base class members like setState and props
+export class LocalErrorBoundary extends Component<Props, State> {
   // Fix: Removed 'override' as it was causing issues with base class detection in this environment
   public state: State = {
     hasError: false,
@@ -38,7 +38,7 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     }
   }
 
-  // Fix: Correct usage of setState and state within arrow function inherited from React.Component
+  // Fix: Correct usage of setState and state within arrow function inherited from Component
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -47,11 +47,12 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
+        // Correctly using setState inherited from Component
         this.setState({ hasError: false, error: null });
     }
   };
 
-  // Fix: Standard render method; removed 'override' and correctly access state and props from React.Component
+  // Fix: Standard render method; removed 'override' and correctly access state and props from Component
   public render(): ReactNode {
     const { hasError, error } = this.state;
     const { children } = this.props;

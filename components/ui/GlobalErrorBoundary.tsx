@@ -1,5 +1,5 @@
 
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,8 +14,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Extending React.Component explicitly to ensure TypeScript correctly recognizes base class members like setState, state, and props
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Fix: Extending Component explicitly instead of React.Component to ensure TypeScript correctly recognizes base class members like setState and props
+export class GlobalErrorBoundary extends Component<Props, State> {
   // Fix: Removed 'override' as it was causing issues with base class detection in this environment
   public state: State = {
     hasError: false,
@@ -35,16 +35,17 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: Accessing setState from React.Component via arrow function to maintain correct 'this' context
+  // Fix: Accessing setState from Component via arrow function to maintain correct 'this' context
   private handleReload = () => {
+    // Correctly using setState inherited from Component
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  // Fix: Standard render method inherited from React.Component; removed 'override'
+  // Fix: Standard render method inherited from Component; removed 'override'
   public render(): ReactNode {
-    // Accessing state and props correctly through React.Component inheritance
+    // Accessing state and props correctly through Component inheritance
     const { hasError, error } = this.state;
     const { children } = this.props;
 
