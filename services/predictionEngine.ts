@@ -1,188 +1,186 @@
-import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
-import { calculateRegularity, calculateACValue, calculateVolatility, detectGameRegime } from './mathService';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
 
-export interface ConsensusData {
-    engine: 'STOCHASTIC' | 'MACHINE_LEARNING' | 'DYNAMICAL_SYSTEMS';
-    score: number;
-    topNumbers: number[];
-}
+import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
+import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
+
+/**
+ * NEXUS PREDICTION ENGINE v13.0 - APEX KERNEL
+ */
 
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
-    const values = Object.values(weights).map(v => Number(v) || 0);
-    const total = values.reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+    const total = Object.values(weights).reduce((a, b) => a + (Number(b) || 0), 0);
     if (total === 0) return getDefaultWeights();
     const normalized = { ...weights };
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
-        const val = Number(normalized[key]) || 0;
-        normalized[key] = parseFloat((val / total).toFixed(4));
+        normalized[key] = parseFloat(((Number(normalized[key]) || 0) / total).toFixed(4));
     });
     return normalized;
 };
 
-export const getDefaultWeights = (): AlgoWeights => {
-    return normalizeWeights({
-        frequency: 0.15, gap: 0.10, spectral: 0.15, fractal: 0.05, markov: 0.10,
-        wavelet: 0.15, orchestration: 0.10, spatial: 0.05, momentum: 0.10, 
-        equilibrium: 0.05, bayes: 0, ai_intuition: 0, resistance: 0, transformer: 0, 
-        temporal: 0, digital_root: 0, gap_velocity: 0, poisson: 0, 
-        leader_succession: 0, anti_consensus: 0, monte_carlo: 0, 
-        lstm_pattern: 0, isolation_anomaly: 0
-    });
+export const getDefaultWeights = (): AlgoWeights => normalizeWeights({
+    frequency: 0.15, gap: 0.10, spectral: 0.15, fractal: 0.05, markov: 0.15,
+    wavelet: 0.10, orchestration: 0.10, momentum: 0.10, equilibrium: 0.05,
+    ai_intuition: 0.05, digital_root: 0.0, gap_velocity: 0.0, isolation_anomaly: 0.0
+} as any);
+
+// Fix: Added missing getDefaultRules required by ExpertTuningPanel.tsx
+export const getDefaultRules = (): AdaptiveRules => ({
+    criticalZoneMin: 12,
+    criticalZoneMax: 18
+});
+
+export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
+    localStorage.setItem(`weights_${drawName}`, JSON.stringify(weights));
 };
 
-// --- FIX: Add getAlgoWeightsSync for NexusProvider initialization ---
 export const getAlgoWeightsSync = (drawName: string): AlgoWeights => {
-    const rawLocal = localStorage.getItem(`weights_${drawName}`);
-    return rawLocal ? normalizeWeights(JSON.parse(rawLocal)) : getDefaultWeights();
+    const raw = localStorage.getItem(`weights_${drawName}`);
+    return raw ? JSON.parse(raw) : getDefaultWeights();
 };
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
-    const rawLocal = localStorage.getItem(`weights_${drawName}`);
-    if (isSupabaseConfigured() && navigator.onLine) {
-        try {
-            const { data } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
-            if (data?.weights) return normalizeWeights(data.weights);
-        } catch (e) {}
-    }
-    return rawLocal ? normalizeWeights(JSON.parse(rawLocal)) : getDefaultWeights();
-};
-
-export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
-    const clean = normalizeWeights(weights);
-    localStorage.setItem(`weights_${drawName}`, JSON.stringify(clean));
-    if (isSupabaseConfigured()) {
-        try { await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: clean, updated_at: new Date().toISOString() }); } catch (e) {}
-    }
-};
-
-export const generateMasterPrediction = async (
-    drawName: string, 
-    history: DrawResult[],
-    weightsToUse?: AlgoWeights,
-    extraMetrics?: any
-): Promise<Prediction & { consensus?: ConsensusData[] }> => {
-    const weights = weightsToUse || await getAlgoWeights(drawName);
-    if (!history || history.length < 5) throw new Error("Dataset insuffisant.");
-    
-    const regularity = extraMetrics?.regularity || calculateRegularity(history);
-    const spectralMap = extraMetrics?.spectral || [];
-    const waveletMap = extraMetrics?.wavelet || [];
-    const correlationMap = extraMetrics?.correlationMatrix || {};
-    
-    const breakdown: Record<number, ScoreBreakdown> = {};
-    const stochasticScores = Array.from({ length: 90 }, (_, i) => {
-        const num = i + 1;
-        const reg = regularity.find((r: any) => r.number === num);
-        const spec = spectralMap.find((s: any) => s.number === num);
-        const wav = waveletMap.find((w: any) => w.number === num);
-        
-        // Calcul des composantes de base
-        const freqScore = ((history.filter(h => h.gagnants.includes(num)).length / history.length) * 100);
-        const currentGap = reg?.currentGap || 0;
-        const gapScore = (currentGap >= 8 && currentGap <= 18) ? 100 : (currentGap > 30 ? 60 : 20);
-        
-        // Momentum (Recent frequency)
-        const recentFreq = history.slice(0, 10).filter(h => h.gagnants.includes(num)).length;
-        const momentumScore = recentFreq * 10;
-
-        // Orchestration (Transition strength)
-        let orchestrationScore = 0;
-        const lastWinners = history[0].gagnants;
-        lastWinners.forEach(lw => {
-           const strength = correlationMap[lw]?.affinities?.[num] || 0;
-           if (strength > 0.15) orchestrationScore += (strength * 20);
-        });
-
-        const nBreakdown: ScoreBreakdown = {
-            frequency: freqScore, gap: gapScore, spectral: spec?.energy || 0,
-            wavelet: wav?.energy || 0, momentum: momentumScore, 
-            orchestration: Math.min(100, orchestrationScore),
-            markov: 0, fractal: 0, spatial: 0, ai_intuition: 0, resistance: 0,
-            transformer: 0, temporal: 0, digital_root: 0, gap_velocity: 0,
-            poisson: 0, leader_succession: 0, anti_consensus: 0, monte_carlo: 0,
-            lstm_pattern: 0, isolation_anomaly: 0, bayes: 0, equilibrium: 50
-        };
-        breakdown[num] = nBreakdown;
-        
-        let finalScore = 0;
-        (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(key => { 
-            finalScore += ((nBreakdown as any)[key] || 0) * (weights[key] || 0); 
-        });
-        return { num, score: finalScore };
-    });
-
-    const sorted = stochasticScores.sort((a, b) => b.score - a.score);
-    const confidence = Math.min(98, Math.round(sorted.slice(0, 5).reduce((a, b) => a + b.score, 0) / 5));
-
-    const consensus: ConsensusData[] = [
-        { engine: 'STOCHASTIC', score: Math.round(confidence * 0.95), topNumbers: sorted.slice(0, 10).map(x => x.num) },
-        { engine: 'MACHINE_LEARNING', score: Math.round(confidence * 0.88), topNumbers: sorted.slice(5, 15).map(x => x.num) },
-        { engine: 'DYNAMICAL_SYSTEMS', score: Math.round(confidence * 0.72), topNumbers: sorted.filter(x => x.score > 40).slice(0, 10).map(x => x.num) }
-    ];
-    
-    return {
-        suggestedNumbers: sorted.slice(0, 5).map(s => s.num),
-        candidates: sorted.slice(5, 15).map(s => s.num),
-        confidence,
-        analysis: `Convergence multi-spectrale v12.2. Analyse Haar-Wavelet complétée. Forte tension détectée sur les vecteurs ${sorted.slice(0,3).map(x=>x.num).join(', ')}.`,
-        breakdown, 
-        usedWeights: weights, 
-        timestamp: Date.now(),
-        consensus
-    };
-};
-
-// --- FIX: Add calculateCorrectionsFromForensics for PredictionForensics integration ---
-export const calculateCorrectionsFromForensics = (
-    currentWeights: AlgoWeights, 
-    currentRules: AdaptiveRules, 
-    report: ForensicReport
-) => {
-    const newWeights = { ...currentWeights };
-    const reasoning: string[] = [];
-    
-    // Analyse des hits manqués pour ajuster les poids
-    report.scoreDivergence.forEach(div => {
-        const key = div.algo.toLowerCase() as keyof AlgoWeights;
-        if (newWeights[key] !== undefined) {
-            const adjustment = (div.impact / 100) * 0.05;
-            newWeights[key] = Math.min(1.0, (newWeights[key] || 0) + adjustment);
-            reasoning.push(`Augmentation de l'influence ${div.algo} (+${(adjustment*100).toFixed(1)}%)`);
-        }
-    });
-
-    return {
-        newWeights: normalizeWeights(newWeights),
-        newRules: { ...currentRules },
-        reasoning
-    };
-};
-
-export const getStrategyName = (weights: AlgoWeights): string => {
-    if ((weights.wavelet || 0) > 0.15) return "Impulsion Locale (Wavelet)";
-    if ((weights.orchestration || 0) > 0.15) return "Synchro-Transitionnelle";
-    if ((weights.frequency || 0) > 0.3) return "Domination Fréquence";
-    return "Consensus Nexus Platinum";
-};
-
-export const analyzeTicketStrength = async (nums: number[], drawName: string): Promise<TicketAnalysisResult> => {
-    const ac = calculateACValue(nums);
-    const sum = nums.reduce((a,b) => a+b, 0);
-    let score = 50;
-    const warnings = [];
-    if (ac < 7) { score -= 15; warnings.push("Faible complexité structurelle."); }
-    if (sum < 150 || sum > 300) { score -= 10; warnings.push("Somme Sigma atypique."); }
-    return { score: Math.max(0, Math.min(100, score + (ac * 5))), verdict: score > 70 ? "Vecteur Élite" : "Vecteur Standard", warnings };
+    return getAlgoWeightsSync(drawName);
 };
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
     const raw = localStorage.getItem(`rules_${drawName}`);
-    return raw ? JSON.parse(raw) : { criticalZoneMin: 8, criticalZoneMax: 18 };
+    return raw ? JSON.parse(raw) : getDefaultRules();
 };
 
 export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
     localStorage.setItem(`rules_${drawName}`, JSON.stringify(rules));
 };
 
-export const getDefaultRules = (): AdaptiveRules => ({ criticalZoneMin: 8, criticalZoneMax: 18 });
+export const analyzeTicketStrength = async (numbers: number[], drawName: string): Promise<TicketAnalysisResult> => {
+    const ac = calculateACValue(numbers);
+    const sum = numbers.reduce((a, b) => a + b, 0);
+    const score = Math.min(100, (ac / 8) * 60 + (sum > 150 && sum < 300 ? 40 : 20));
+    return {
+        score,
+        verdict: score > 75 ? "Excellent" : "Moyen",
+        warnings: ac < 6 ? ["Structure trop simple"] : []
+    };
+};
+
+export const generateMasterPrediction = async (
+    drawName: string, 
+    history: DrawResult[],
+    weightsToUse?: AlgoWeights,
+    metrics?: any
+): Promise<Prediction> => {
+    const weights = weightsToUse || getAlgoWeightsSync(drawName);
+    if (!history || history.length < 10) throw new Error("Dataset insuffisant.");
+
+    const regularity = metrics?.regularity || calculateRegularity(history);
+    const correlationMap = metrics?.correlationMatrix || {};
+    const lastWinners = history[0].gagnants;
+    
+    // Calcul de l'Entropie globale pour réguler la confiance
+    const entropy = calculateShannonEntropy(history.slice(0, 50));
+    const chaosFactor = Math.max(0.5, 1 - (entropy.normalized - 0.85));
+
+    const breakdown: Record<number, ScoreBreakdown> = {};
+    const masterScores = Array.from({ length: 90 }, (_, i) => {
+        const num = i + 1;
+        const reg = regularity.find((r: any) => r.number === num);
+        const spec = metrics?.spectral?.find((s: any) => s.number === num);
+        
+        const freqScore = (history.filter(h => h.gagnants.includes(num)).length / history.length) * 100;
+        
+        let markovScore = 0;
+        lastWinners.forEach(lw => {
+           const strength = correlationMap[lw]?.affinities?.[num] || 0;
+           if (strength > 0.2) markovScore += (strength * 100);
+        });
+
+        const digitalRoot = calculateDigitalRoot(num);
+        const equilibriumScore = (digitalRoot >= 4 && digitalRoot <= 6) ? 80 : 40;
+
+        const nBreakdown: ScoreBreakdown = {
+            frequency: freqScore,
+            gap: reg?.currentGap > (reg?.avgGap || 18) ? 90 : 30,
+            spectral: spec?.energy || 0,
+            markov: Math.min(100, markovScore * 2),
+            equilibrium: equilibriumScore,
+            wavelet: metrics?.wavelet?.find((w: any) => w.number === num)?.energy || 0,
+            momentum: history.slice(0, 8).filter(h => h.gagnants.includes(num)).length * 20,
+            orchestration: 50, fractal: 50, spatial: 50, ai_intuition: 50, 
+            resistance: 50, transformer: 0, temporal: 0, digital_root: digitalRoot * 10,
+            gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0,
+            monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
+        };
+        
+        breakdown[num] = nBreakdown;
+        
+        let finalScore = 0;
+        (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(k => {
+            finalScore += (nBreakdown[k] || 0) * (weights[k] || 0);
+        });
+
+        return { num, score: finalScore };
+    });
+
+    const sorted = masterScores.sort((a, b) => b.score - a.score);
+    const top5 = sorted.slice(0, 5).map(s => s.num);
+    const acScore = calculateACValue(top5);
+    
+    // Calcul de confiance multi-factoriel APEX
+    let baseConfidence = (sorted[0].score + sorted[4].score) / 2;
+    // Malus si AC trop bas, Malus si Chaos trop haut
+    let finalConfidence = Math.round(baseConfidence * (acScore / 8) * chaosFactor);
+
+    let analysis = `Apex v13.0 Synchro. `;
+    if (entropy.normalized > 0.95) analysis += `ALERTE : Entropie critique. Le flux est quasi-aléatoire. `;
+    else if (chaosFactor > 0.9) analysis += `Régime structurel stable détecté. `;
+
+    return {
+        suggestedNumbers: top5,
+        candidates: sorted.slice(5, 15).map(s => s.num),
+        confidence: Math.min(98, Math.max(25, finalConfidence)),
+        analysis: analysis + `Confluence majeure sur ${top5.slice(0,2).join(' & ')}.`,
+        breakdown,
+        usedWeights: weights,
+        timestamp: Date.now()
+    };
+};
+
+export const getStrategyName = (weights: AlgoWeights): string => {
+    if (weights.markov > 0.2) return "Markovien Apex";
+    if (weights.spectral > 0.2) return "Résonance de Phase";
+    if (weights.gap > 0.2) return "Cycle Inversé";
+    return "Consensus Nexus Apex";
+};
+
+// Fix: Added missing calculateCorrectionsFromForensics required by PredictionForensics.tsx
+export const calculateCorrectionsFromForensics = (
+    currentWeights: AlgoWeights, 
+    currentRules: AdaptiveRules, 
+    report: ForensicReport
+): { newWeights: AlgoWeights; newRules: AdaptiveRules; reasoning: string[] } => {
+    const newWeights = { ...currentWeights };
+    const reasoning: string[] = [];
+
+    if (report.scoreDivergence && report.scoreDivergence.length > 0) {
+        report.scoreDivergence.forEach(div => {
+            const key = div.algo as keyof AlgoWeights;
+            if (newWeights[key] !== undefined) {
+                const currentVal = Number(newWeights[key]) || 0;
+                const adjustment = (div.impact / 100) * 0.05;
+                newWeights[key] = currentVal + adjustment;
+                reasoning.push(`Adaptation ADN : Renforcement du module ${div.algo} (+${(adjustment * 100).toFixed(1)}%).`);
+            }
+        });
+    }
+
+    const newRules = { ...currentRules };
+    const hits = report.matches.filter(m => m.errorType === 'Hit').length;
+    if (hits === 0) {
+        newRules.criticalZoneMax = Math.min(45, newRules.criticalZoneMax + 1);
+        reasoning.push("Élargissement du filtre temporel critique basé sur le décalage observé.");
+    }
+
+    return {
+        newWeights: normalizeWeights(newWeights),
+        newRules,
+        reasoning
+    };
+};

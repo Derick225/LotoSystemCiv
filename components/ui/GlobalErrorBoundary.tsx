@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -12,11 +13,10 @@ interface State {
 
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
- * Fix: Explicitly using React.Component to ensure state/props/setState resolution in strictly typed environments.
+ * Fix: Use Component directly and ensure property access is correctly typed via inheritance.
  */
-// Fix: Use React.Component to ensure inheritance of React component members (setState, props)
-export class GlobalErrorBoundary extends React.Component<Props, State> {
-  public state: State = {
+export class GlobalErrorBoundary extends Component<Props, State> {
+  public override state: State = {
     hasError: false,
     error: null,
   };
@@ -29,23 +29,20 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
+  // Fix: Explicitly use inherited setState from React.Component class
   private handleReload = () => {
-    // Reset state via Component method
-    // Fix: Explicitly calling inherited setState from React.Component to resolve property missing error
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  public render(): ReactNode {
-    // Accessing state and props via inherited context
-    // Fix: Accessing inherited state from React.Component
+  public override render(): ReactNode {
+    // Fix: Accessing state and props inherited from Component
     const { hasError, error } = this.state;
-    // Fix: Accessing inherited props from React.Component to resolve property missing error
     const { children } = this.props;
 
     if (hasError) {

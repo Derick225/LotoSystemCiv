@@ -1,11 +1,11 @@
-
 import React, { useEffect, useState } from 'react';
 import { useNexus } from './NexusProvider';
 import { getNumberDetailedMetrics } from '../services/mathService';
 import type { DetailedNumberMetrics } from '../types';
 import { NumberBall } from './NumberBall';
-import { Activity, X, TrendingUp, Radio, Network, Thermometer, Zap } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, Tooltip } from 'recharts';
+import { SpectralWaveform } from './SpectralWaveform';
+import { Activity, X, TrendingUp, Radio, Network, Thermometer, Zap, Waves } from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis } from 'recharts';
 
 export const QuantumInspector: React.FC = () => {
     const { inspectingNumber, setInspectingNumber, history, spectral, fractal } = useNexus();
@@ -32,7 +32,7 @@ export const QuantumInspector: React.FC = () => {
                         <NumberBall number={inspectingNumber} size="xl" glow />
                         <div>
                             <h3 className="text-3xl font-black text-white tracking-tighter uppercase">Vecteur {inspectingNumber}</h3>
-                            <p className="text-xs font-mono text-indigo-400 mt-1 uppercase tracking-widest">Status: {metrics?.temperature && metrics.temperature > 70 ? 'CRITIQUE' : 'NOMINAL'}</p>
+                            <p className="text-xs font-mono text-indigo-400 mt-1 uppercase tracking-widest">Kernel v13.0 • Phase Stochastique</p>
                         </div>
                     </div>
                     <button onClick={() => setInspectingNumber(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-colors"><X size={24} className="text-slate-400" /></button>
@@ -59,6 +59,14 @@ export const QuantumInspector: React.FC = () => {
                                         <div className="text-[8px] font-black text-slate-500 uppercase mt-1">{stat.label}</div>
                                     </div>
                                 ))}
+                            </div>
+
+                            {/* WAVEFORM VISUALIZATION */}
+                            <div className="space-y-4">
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2"><Waves size={12} className="text-indigo-400"/> Vague de Résonance Cyclique</h4>
+                                <div className="h-40 w-full bg-black/40 rounded-[2.5rem] border border-white/5 overflow-hidden">
+                                    <SpectralWaveform energy={metrics.temperature} hurst={metrics.hurst} />
+                                </div>
                             </div>
 
                             <div className="space-y-4">
@@ -94,7 +102,7 @@ export const QuantumInspector: React.FC = () => {
 
                 <div className="p-8 border-t border-white/5 bg-black/20">
                     <p className="text-[10px] text-slate-500 font-medium leading-relaxed italic text-center">
-                        "L'analyse quantique suggère que ce vecteur est actuellement en phase de {metrics?.hurst && metrics.hurst > 0.6 ? 'persistance forte' : 'bruit stochastique'}. Surveillez les zones de synergie."
+                        "L'analyse Apex v13 suggère une phase de {metrics?.hurst && metrics.hurst > 0.6 ? 'compression énergétique' : 'dispersion entropique'}. Prudence sur les vecteurs isolés."
                     </p>
                 </div>
             </div>

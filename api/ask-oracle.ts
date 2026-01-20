@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 
 export const config = {
   runtime: 'edge',
@@ -9,6 +9,35 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Définition des outils pour l'Agent de Décision Actionnable
+const toolDeclarations: FunctionDeclaration[] = [
+    {
+        name: "analyzeDrawDynamics",
+        description: "Analyse en profondeur les dynamiques d'un tirage spécifique (volatilité, cycles, régime).",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                drawName: { type: Type.STRING, description: "Nom du tirage" },
+                depth: { type: Type.INTEGER, description: "Nombre de tirages passés à analyser (max 50)" }
+            },
+            required: ["drawName"]
+        }
+    },
+    {
+        name: "requestTicketSynthesis",
+        description: "Génère des combinaisons optimisées (tickets) basées sur des critères spécifiques.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                drawName: { type: Type.STRING, description: "Nom du tirage" },
+                ticketCount: { type: Type.INTEGER, description: "Nombre de tickets à générer (1-5)" },
+                riskProfile: { type: Type.STRING, enum: ["PRUDENT", "BALANCED", "CHAOS"], description: "Profil de risque" }
+            },
+            required: ["drawName", "ticketCount"]
+        }
+    }
+];
+
 function cleanJson(text: string) {
     if (!text) return '{}';
     return text.replace(/```json\n?|\n?```/g, '').trim();
@@ -18,9 +47,8 @@ async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, pa
     const fallbackModel = "gemini-3-flash-preview";
     const config: any = { ...params.config };
     
-    // Activer la réflexion profonde pour les modèles Pro
     if (primaryModel.includes('pro')) {
-        config.thinkingConfig = { thinkingBudget: 4000 };
+        config.thinkingConfig = { thinkingBudget: 4000 }; 
     }
 
     try {
@@ -45,16 +73,41 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { task, drawName, history, metrics, dataset, modelType, imageBase64, context, report } = await req.json();
+    const { task, drawName, history, metrics, dataset, modelType, userInput, currentContext } = await req.json();
     const apiKey = process.env.API_KEY;
     
     if (!apiKey) throw new Error("API_KEY manquante.");
 
     const genAI = new GoogleGenAI({ apiKey });
-    let resultData;
 
-    if (task === "analyze") {
-      const prompt = `Rôle: Oracle Nexus Platinum. Analyse du tirage "${drawName}". Historique: ${JSON.stringify(history.slice(0, 15))}. Effectue une analyse stochastique profonde. Identifie les anomalies de cycle et propose une stratégie. JSON strict requis.`;
+    if (task === "chat") {
+        const systemPrompt = `Tu es l'Agent Tactique Nexus Apex v13.0, l'intelligence suprême de LotoPro Platinum.
+        Ton rôle est d'assister les utilisateurs dans leur prise de décision décisionnelle.
+        Contexte actuel pour ${drawName} :
+        - Régime détecté : ${currentContext?.regime || 'Inconnu'}
+        - Prédiction IA : ${JSON.stringify(currentContext?.lastPrediction)}
+        
+        Tu as accès à des outils pour analyser l'historique ou générer des tickets. Utilise-les si l'utilisateur demande une action concrète.
+        Ton ton est industriel, précis et ultra-professionnel. Pas de blabla inutile.`;
+
+        const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
+            contents: userInput,
+            config: { 
+                systemInstruction: systemPrompt,
+                tools: [{ functionDeclarations: toolDeclarations }]
+            }
+        });
+
+        // Gemini peut retourner du texte OU des appels de fonctions
+        return new Response(JSON.stringify({ 
+            response: response.text,
+            functionCalls: response.functionCalls
+        }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+
+    } else if (task === "analyze") {
+      const prompt = `Rôle: Oracle Nexus Platinum. Analyse du tirage "${drawName}". Historique: ${JSON.stringify(history.slice(0, 15))}. Effectue une analyse stochastique profonde incluant l'entropie spectrale.`;
       
       const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
         contents: prompt,
@@ -75,28 +128,41 @@ export default async function handler(req: Request) {
             }
         }
       });
-      resultData = JSON.parse(cleanJson(response.text) || '{}');
-
-    } else if (task === "narrative") {
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Rédige un rapport flash narratif. Métriques: ${JSON.stringify(metrics)}.`,
-        config: { responseMimeType: "application/json" }
+      return new Response(JSON.stringify(JSON.parse(cleanJson(response.text) || '{}')), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      resultData = JSON.parse(cleanJson(response.text) || '{}');
 
     } else if (task === "python_kernel") {
-        const prompt = `Simule un script Python scientifique (${modelType}) sur : ${JSON.stringify(dataset.slice(0, 40))}. Retourne findings JSON.`;
+        const prompt = `Simule un script Python scientifique (${modelType}) sur : ${JSON.stringify(dataset.slice(0, 40))}.`;
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: prompt,
-            config: { responseMimeType: "application/json" }
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        script: { type: Type.STRING },
+                        stdout: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        findings: {
+                            type: Type.OBJECT,
+                            properties: {
+                                result_vector: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                                confidence_score: { type: Type.NUMBER },
+                                p_value: { type: Type.NUMBER }
+                            }
+                        },
+                        insight: { type: Type.STRING }
+                    },
+                    required: ["script", "stdout", "findings", "insight"]
+                }
+            }
         });
-        resultData = JSON.parse(cleanJson(response.text) || '{}');
+        return new Response(JSON.stringify(JSON.parse(cleanJson(response.text) || '{}')), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
     }
 
-    return new Response(JSON.stringify(resultData), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ error: "Task not found" }), { status: 404, headers: corsHeaders });
 
   } catch (error: any) {
     return new Response(

@@ -3,18 +3,18 @@ import { PredictionTab } from './PredictionTab';
 import { MetaAnalystTab } from './MetaAnalystTab';
 import { IntelligenceTab } from './IntelligenceTab';
 import { OrchestrationTab } from './OrchestrationTab';
+import { TacticalChatTab } from './TacticalChatTab';
 import { useNexus } from '../NexusProvider';
 import { getStrategyName } from '../../services/predictionEngine';
-import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target } from 'lucide-react';
+import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, MessageSquareCode } from 'lucide-react';
 import { OracleLiveAssistant } from '../OracleLiveAssistant';
 
 interface OracleHubProps { drawName: string; }
 
 export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
-    // Récupération du régime calculé globalement par le Provider
     const { regime: globalRegime, loading: nexusLoading, globalWeights } = useNexus();
     
-    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch'>('oracle');
+    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat'>('oracle');
     const [activeStrategy, setActiveStrategy] = useState("Standard");
     
     useEffect(() => {
@@ -25,6 +25,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
 
     const subTabs = [
         { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
+        { id: 'chat', label: 'Tactical Chat', icon: <MessageSquareCode size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
         { id: 'platinum', label: 'Platinum Fusion', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
         { id: 'intel', label: 'IA Narrative', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
         { id: 'orch', label: 'Orchestration', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' }
@@ -59,21 +60,15 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                         {globalRegime?.regime === 'CHAOS' ? <AlertTriangle size={16}/> : <ShieldCheck size={16}/>}
                         <span className="text-[10px] font-black uppercase">Régime {globalRegime?.regime || 'Analyse...'}</span>
                     </div>
-                    
-                    <div className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                        <Target size={16} className="text-slate-500" />
-                        <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 truncate max-w-[150px]" title={activeStrategy}>
-                            Strat: {activeStrategy}
-                        </span>
-                    </div>
                 </div>
             </div>
 
-            <div className="animate-slide-up transition-all duration-500">
-                {subTab === 'oracle' ? <PredictionTab drawName={drawName} /> : 
-                 subTab === 'platinum' ? <MetaAnalystTab drawName={drawName} /> : 
-                 subTab === 'intel' ? <IntelligenceTab drawName={drawName} /> : 
-                 <OrchestrationTab drawName={drawName} />}
+            <div className="animate-slide-up transition-all duration-500 min-h-[600px]">
+                {subTab === 'oracle' && <PredictionTab drawName={drawName} />}
+                {subTab === 'chat' && <TacticalChatTab drawName={drawName} />}
+                {subTab === 'platinum' && <MetaAnalystTab drawName={drawName} />}
+                {subTab === 'intel' && <IntelligenceTab drawName={drawName} />}
+                {subTab === 'orch' && <OrchestrationTab drawName={drawName} />}
             </div>
             
             <OracleLiveAssistant drawName={drawName} />

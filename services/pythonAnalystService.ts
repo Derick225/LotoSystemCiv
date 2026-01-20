@@ -1,4 +1,3 @@
-
 import { isSupabaseConfigured } from './supabaseClient';
 import { invokeEdgeFunction } from './apiClient';
 import { DrawResult, PythonAnalysisResult, NotebookCell } from "../types";
@@ -11,15 +10,10 @@ export const runDeepPythonAnalysis = async (
     onLog?: (msg: string) => void
 ): Promise<PythonAnalysisResult> => {
     
-    // Initial logs
     if (onLog) {
-        onLog(`[SYSTEM] Initializing Neural Python Kernel v12.0...`);
+        onLog(`[SYSTEM] Initiating Neural Python Kernel v12.0...`);
         onLog(`[CONFIG] Model selected: ${modelType}`);
         onLog(`[DATA] Loading ${history.length} frames from registry...`);
-    }
-
-    if (!isSupabaseConfigured()) {
-        throw new Error("Connexion Cloud requise pour le moteur d'inférence Python.");
     }
 
     const dataset = history.slice(0, 100).map(d => ({
@@ -29,61 +23,43 @@ export const runDeepPythonAnalysis = async (
     }));
 
     try {
-        if (onLog) onLog(`[CLOUD] Transmitting vector payload to Edge Function...`);
+        if (onLog) onLog(`[CLOUD] Transmitting vector payload to Edge Node...`);
         
-        // Utilisation du client API unifié (Vercel Edge Proxy)
         const { data, error } = await invokeEdgeFunction('ask-oracle', {
             body: {
                 task: 'python_kernel',
                 drawName,
                 dataset,
-                modelType,
-                config: {
-                    iterations: 1000,
-                    depth: 10,
-                    learning_rate: 0.01
-                }
+                modelType
             }
         });
 
         if (error) {
-            // Tentative de parsing d'erreur structurée
-            let errMsg = error.message;
-            try {
-                if (errMsg.includes('{')) {
-                    const parsedErr = JSON.parse(errMsg.substring(errMsg.indexOf('{')));
-                    if (parsedErr.error && parsedErr.error.message) {
-                        errMsg = parsedErr.error.message;
-                    }
-                }
-            } catch (e) { /* ignore parse error */ }
-            
-            // Traduction des erreurs courantes
-            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-                throw new Error("Surcharge temporaire des serveurs IA (Quota). Veuillez réessayer dans quelques instants.");
+            let errMsg = error.message || "Erreur de communication";
+            if (errMsg.includes('429') || errMsg.includes('quota')) {
+                errMsg = "Surcharge temporaire de l'Oracle. Veuillez patienter 60s.";
             }
-            throw new Error(errMsg || "Erreur de communication API");
+            throw new Error(errMsg);
         }
 
         if (!data) throw new Error("Réponse vide du noyau distant.");
 
-        if (onLog) {
-            data.stdout?.forEach((line: string) => onLog(line));
-            if (data.findings?.p_value) onLog(`[SUCCESS] Convergence atteinte. P-Value: ${data.findings.p_value}`);
-        }
-
-        // Validation de structure minimale pour éviter le crash UI
-        const findings = data.findings || {
-            result_vector: [],
-            confidence_score: 0,
-            p_value: 1.0
-        };
-
         const cells: NotebookCell[] = [
-            { id: 'c1', type: 'markdown', content: `## Analyse Avancée : ${modelType}\n**Cible** : ${drawName}\n**Dataset** : ${history.length} tirages` },
-            { id: 'c2', type: 'code', content: data.script || "# Script auto-généré par le noyau" },
-            { id: 'c3', type: 'output', content: data.stdout?.join('\n') || "Execution completed." },
-            { id: 'c4', type: 'markdown', content: `### Synthèse Stochastique\n${data.insight || "Analyse terminée."}` }
+            { 
+                id: 'c1', 
+                type: 'markdown', 
+                content: `### Analyse Scientifique : ${modelType}\nLe noyau a initialisé une session de Data Science sur le tirage **${drawName}**. Le dataset comprend ${history.length} séquences historiques.` 
+            },
+            { 
+                id: 'c2', 
+                type: 'code', 
+                content: data.script || "# Python script generation failed" 
+            },
+            { 
+                id: 'c3', 
+                type: 'output', 
+                content: data.stdout?.join('\n') || "Process executed with zero output." 
+            }
         ];
 
         return {
@@ -93,14 +69,14 @@ export const runDeepPythonAnalysis = async (
             modelType,
             stdout: data.stdout || [],
             script: data.script || "",
-            findings,
-            insight: data.insight || "Pas de conclusion générée.",
+            findings: data.findings || { result_vector: [], confidence_score: 0, p_value: 1.0 },
+            insight: data.insight || "Analyse terminée sans conclusion narrative.",
             cells
         };
 
     } catch (e: any) {
         console.error("Python Kernel Error:", e);
         if (onLog) onLog(`[CRITICAL] Kernel Panic: ${e.message}`);
-        throw new Error(`Échec analyse: ${e.message}`);
+        throw e;
     }
 };

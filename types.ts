@@ -8,6 +8,17 @@ export interface DrawResult {
     version: number;
 }
 
+export interface ChatMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: number;
+    metadata?: {
+        suggestedNumbers?: number[];
+        confidence?: number;
+    };
+}
+
 export interface AlgoWeights {
     frequency: number;
     gap: number;
@@ -458,6 +469,12 @@ export interface PythonAnalysisResult {
     };
     insight: string;
     cells: NotebookCell[];
+}
+
+export interface NotebookCell {
+    id: string;
+    type: 'markdown' | 'code' | 'output';
+    content: string;
 }
 
 export interface NotebookCell {

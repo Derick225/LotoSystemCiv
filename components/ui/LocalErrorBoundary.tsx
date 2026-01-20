@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -13,11 +14,10 @@ interface State {
 
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
- * Fix: Explicitly using React.Component to ensure state/props/setState resolution in strictly typed environments.
+ * Fix: Use Component directly and ensure property access is correctly typed via inheritance.
  */
-// Fix: Use React.Component to ensure inheritance of React component members (setState, props)
-export class LocalErrorBoundary extends React.Component<Props, State> {
-  public state: State = {
+export class LocalErrorBoundary extends Component<Props, State> {
+  public override state: State = {
     hasError: false,
     error: null,
   };
@@ -30,15 +30,14 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
+  // Fix: Explicitly use this.state and this.setState via inherited Component properties
   private handleReload = () => {
-    // Accessing state via inherited this.state.
-    // Fix: Accessing inherited state from React.Component
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -46,17 +45,13 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Correct usage of this.setState via inheritance from React.Component.
-        // Fix: Explicitly calling inherited setState from React.Component to resolve property missing error
         this.setState({ hasError: false, error: null });
     }
   };
 
-  public render(): ReactNode {
-    // Accessing state and props now correctly typed via inheritance from React.Component.
-    // Fix: Accessing inherited state from React.Component
+  public override render(): ReactNode {
+    // Fix: Accessing state and props inherited from Component
     const { hasError, error } = this.state;
-    // Fix: Accessing inherited props from React.Component to resolve property missing error
     const { children } = this.props;
 
     if (hasError) {
