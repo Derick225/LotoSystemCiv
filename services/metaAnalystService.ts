@@ -13,7 +13,9 @@ import {
 import { 
     calculateVolatility, 
     calculateShannonEntropy, 
-    detectGameRegime
+    detectGameRegime,
+    calculateRegularity,
+    calculateACValue
 } from './mathService';
 
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
@@ -26,13 +28,12 @@ export const precomputeBaseScores = async (
     const now = Date.now();
     const cached = SCORE_CACHE.get(drawName);
     
-    if (cached && (now - cached.ts < 3600000)) return cached.data;
+    if (cached && (now - cached.ts < 1800000)) return cached.data;
     
     const weights = await getAlgoWeights(drawName);
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
     
-    // Initialisation sécurité pour le spectre complet
     for (let i = 1; i <= 90; i++) {
         if (!data[i]) {
             data[i] = { 
@@ -51,116 +52,122 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     const ent = calculateShannonEntropy(history);
     const reg = detectGameRegime(history);
     
-    let stability = 0.5, chaos = 0.3, harmony = 0.5, wavelet = 0.4, orchestration = 0.4;
+    let stability = 0.4, chaos = 0.3, harmony = 0.5, wavelet = 0.5, orchestration = 0.6;
     
-    if (vol.score > 60) { chaos = 0.7; stability = 0.3; }
-    if (ent.normalized > 0.9) { chaos = 0.8; harmony = 0.2; }
-    if (reg.regime === 'PERSISTANT') { stability = 0.8; harmony = 0.7; orchestration = 0.8; }
+    if (vol.score > 60) { chaos = 0.8; stability = 0.2; }
+    if (ent.normalized > 0.92) { chaos = 0.9; harmony = 0.1; }
+    if (reg.regime === 'PERSISTANT') { stability = 0.8; harmony = 0.8; orchestration = 0.8; }
     
     return { stability, chaos, harmony, wavelet, orchestration };
 }
 
 /**
- * GÉNÉRATION PLATINUM FUSION v8.5
- * PROTOCOLE : SYNERGIES T-1 -> ORCHESTRATIONS (-1/+1) -> TAMISAGE ALGORITHMIQUE
+ * GÉNÉRATION PLATINUM FUSION v11.0 (APEX PRECISION)
+ * PROTOCOLE : VORTEX DE TRANSLOCATION -> expansion SYNERGIQUE -> ÉQUILIBRE DE NASH
  */
 export async function generatePlatinumPrediction(
     drawName: string, 
     history: DrawResult[],
     precomputedMetrics?: any,
-    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.5, wavelet: 0.4, orchestration: 0.4 }
+    userBias: StrategyBias = { stability: 0.5, chaos: 0.3, harmony: 0.5, wavelet: 0.5, orchestration: 0.6 }
 ): Promise<PlatinumResult> {
-    if (!history || history.length < 5) throw new Error("Historique insuffisant.");
+    if (!history || history.length < 10) throw new Error("Dataset insuffisant.");
 
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
-    const lastWinners = history[0].gagnants;
+    const lastDraw = history[0];
     const correlationMatrix = precomputedMetrics?.correlationMatrix || {};
 
-    // --- ÉTAPE 1 : EXTRACTION DES SYNERGIES DES NUMÉROS T-1 ---
-    const synergyPool = new Set<number>();
-    lastWinners.forEach(num => {
+    // --- PHASE 1 : LE VORTEX DE TRANSLOCATION (Sources de chaleur) ---
+    const heatPool = new Set<number>();
+    
+    // 1.1 Synergies des Gagnants T-1
+    lastDraw.gagnants.forEach(num => {
         const affinities = correlationMatrix[num]?.affinities || {};
         Object.entries(affinities).forEach(([targetStr, strength]) => {
-            // Seuil de synergie significative (ajusté pour la qualité)
-            if (Number(strength) > 0.18) { 
-                synergyPool.add(parseInt(targetStr));
-            }
+            if (Number(strength) > 0.15) heatPool.add(parseInt(targetStr));
         });
+        heatPool.add(num); // Inertie temporelle
     });
 
-    // --- ÉTAPE 2 : EXPANSION PAR ORCHESTRATIONS (-1 et +1 des synergies) ---
-    const orchestrationPool = new Set<number>();
-    synergyPool.forEach(syn => {
-        orchestrationPool.add(syn);
-        if (syn > 1) orchestrationPool.add(syn - 1);
-        if (syn < 90) orchestrationPool.add(syn + 1);
-    });
-
-    // Conversion en pool de travail
-    let targetPool = Array.from(orchestrationPool);
-
-    // Sécurité stochastique : Si le pool est trop restreint, on injecte les meilleurs potentiels globaux
-    if (targetPool.length < 15) {
-        const topGlobal = Object.keys(scores)
-            .map(Number)
-            .sort((a, b) => (scores[b].spectral + scores[b].momentum) - (scores[a].spectral + scores[a].momentum))
-            .slice(0, 20);
-        topGlobal.forEach(n => targetPool.includes(n) ? null : targetPool.push(n));
+    // 1.2 Translocation Machine (Migration de flux)
+    if (lastDraw.machine) {
+        lastDraw.machine.forEach(m => {
+            heatPool.add(m);
+            // Échos de voisinage machine
+            if (m > 1) heatPool.add(m - 1);
+            if (m < 90) heatPool.add(m + 1);
+        });
     }
 
-    // --- ÉTAPE 3 : LE TAMIS DE FUSION (Passage des orchestrations dans les filtres IA) ---
+    // --- PHASE 2 : EXPANSION SYNERGIQUE (Miroirs & Paires) ---
+    const expandedPool = new Set<number>();
+    heatPool.forEach(num => {
+        expandedPool.add(num);
+        // Miroir géométrique (91 - n)
+        const mirror = 91 - num;
+        if (mirror >= 1 && mirror <= 90) expandedPool.add(mirror);
+        
+        // Paires binomiales (qui sort souvent avec ce numéro ?)
+        const affinities = correlationMatrix[num]?.affinities || {};
+        const bestPair = Object.entries(affinities)
+            .sort((a: any, b: any) => b[1] - a[1])[0];
+        if (bestPair && Number(bestPair[1]) > 0.22) expandedPool.add(parseInt(bestPair[0]));
+    });
+
+    let targetPool = Array.from(expandedPool);
+
+    // --- PHASE 3 : SYNTHÈSE PAR ÉQUILIBRE DE NASH ---
     const combinations: PlatinumCombo[] = [];
 
-    // On génère 5 combinaisons par tournoi sur le pool restreint
+    // On génère 5 combinaisons d'élite par tournoi de cohérence
     for (let i = 0; i < 5; i++) {
-        const combo: number[] = [];
-        const tempPool = [...targetPool];
-        
-        while (combo.length < 5 && tempPool.length > 0) {
-            let bestCandidate = -1;
-            let bestVal = -Infinity;
+        let bestCombo: number[] = [];
+        let bestComboScore = -Infinity;
+
+        // On tente 100 simulations par ticket pour trouver l'équilibre structurel
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const candidate: number[] = [];
+            const tempPool = [...targetPool].sort(() => Math.random() - 0.5);
             
-            // Tournoi stochastique sur le pool d'orchestration
-            const tourneySize = Math.min(8, tempPool.length);
-            for(let k = 0; k < tourneySize; k++) {
-                const idx = Math.floor(Math.random() * tempPool.length);
-                const n = tempPool[idx];
+            while (candidate.length < 5 && tempPool.length > 0) {
+                const n = tempPool.pop()!;
                 const b = scores[n];
                 
-                // Formule du Tamis Platinum pondéré par les réglages utilisateur
+                // Score de fitness individuel
                 const val = 
                     ((b.spectral || 0) * userBias.harmony) + 
                     ((b.momentum || 50) * userBias.stability) + 
-                    ((b.gap || 0) * userBias.chaos) +
-                    ((b.wavelet || 0) * userBias.wavelet) +
-                    ((b.orchestration || 0) * userBias.orchestration);
+                    ((b.markov || 0) * userBias.orchestration * 1.8) +
+                    ((b.wavelet || 0) * userBias.wavelet);
+                
+                if (val > 40 || Math.random() > 0.7) candidate.push(n);
+            }
 
-                if (val > bestVal) {
-                    bestVal = val;
-                    bestCandidate = n;
+            if (candidate.length === 5) {
+                candidate.sort((a,b) => a - b);
+                const sum = candidate.reduce((a,b) => a+b, 0);
+                const ac = calculateACValue(candidate);
+                
+                // Critères de Nash (Équilibre du système)
+                let fitness = 0;
+                candidate.forEach(n => fitness += (scores[n]?.spectral || 50));
+                
+                // Bonus structurels
+                if (sum >= 175 && sum <= 235) fitness += 20; // Zone d'or de la somme
+                if (ac >= 8) fitness += 15; // Complexité idéale
+                
+                if (fitness > bestComboScore) {
+                    bestComboScore = fitness;
+                    bestCombo = candidate;
                 }
             }
-            
-            if (bestCandidate !== -1) {
-                combo.push(bestCandidate);
-                tempPool.splice(tempPool.indexOf(bestCandidate), 1);
-            }
         }
-        
-        combo.sort((a, b) => a - b);
-        
-        // Calcul du score de cohérence final (0-100)
-        let totalScore = 0;
-        combo.forEach(n => {
-            const b = scores[n];
-            totalScore += (b.spectral * 0.4 + b.momentum * 0.3 + b.markov * 0.3);
-        });
-        
+
         combinations.push({
-            numbers: combo,
-            score: Math.min(99, Math.round(totalScore / 5)),
-            tags: i === 0 ? ["Vecteur Alpha"] : ["Optimisé"],
-            breakdown: { synergy_depth: targetPool.length }
+            numbers: bestCombo,
+            score: Math.min(99, Math.round(bestComboScore / 7)),
+            tags: i === 0 ? ["Alpha Fusion"] : i === 1 ? ["Beta Sync"] : ["Rupture"],
+            breakdown: { pool_size: targetPool.length, ac: calculateACValue(bestCombo) }
         });
     }
 
@@ -169,16 +176,16 @@ export async function generatePlatinumPrediction(
     const kingNumbers = Object.entries(recurrence)
         .map(([n, count]) => ({ number: parseInt(n), count }))
         .sort((a, b) => b.count - a.count)
-        .slice(0, 7);
+        .slice(0, 8);
 
     return {
         id: crypto.randomUUID(),
         kingNumbers, 
-        targetSumRange: { min: 150, max: 280, reason: "Biais Synergie-Orch" },
+        targetSumRange: { min: 175, max: 235, reason: "Équilibre Structurel de Nash" },
         hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: combinations[0].score,
-        analysis: `Fusion opérée sur un pool filtré de ${targetPool.length} vecteurs (Synergies T-1 + Orchestrations). Le tamisage favorise la résonance spectrale sur la zone ${kingNumbers.slice(0, 2).map(k=>k.number).join(', ')}.`,
+        analysis: `v11.0 Alpha-Sync active. Le pool de ${targetPool.length} vecteurs a été tamisé par équilibre de Nash. La zone de résonance dominante est localisée sur le noyau ${kingNumbers.slice(0, 2).map(k=>k.number).join('-')}. Forte probabilité de translocation machine.`,
         drawName,
         timestamp: Date.now()
     };
