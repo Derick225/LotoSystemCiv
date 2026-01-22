@@ -50,7 +50,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
 
     try {
-        // Chargement des POIDS d'abord (Priorité Cloud)
         const weights = await getAlgoWeights(drawName);
         setGlobalWeights(weights);
 
@@ -75,8 +74,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegime(reg ? { hurst: reg.hurst, regime: reg.regime } : null);
         }
 
-        if (hist.length > 10 && drawName !== 'ALL') {
-            const computeSample = hist.slice(0, 300); 
+        // Profondeur 50t pour l'analyse asynchrone
+        if (hist.length >= 10 && drawName !== 'ALL') {
+            const computeSample = hist.slice(0, 350); 
             const [spec, wav, frac, regData, corr, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(computeSample),
                 calculateWaveletMetricsAsync(computeSample),
@@ -101,7 +101,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const perf = calculateHistoricalPerformance(preds, hist);
                 setCalibration({
                     overallScore: 0.25 - (perf.accuracy / 100),
-                    reliability: Math.min(100, Math.round(perf.accuracy * 3.5)),
+                    reliability: Math.min(100, Math.round(perf.accuracy * 3.8)), // Ajustement calibration
                     bias: 'NEUTRAL',
                     sampleSize: perf.analyzedDrawsCount
                 });

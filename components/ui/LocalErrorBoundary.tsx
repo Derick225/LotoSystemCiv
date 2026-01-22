@@ -15,7 +15,7 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Explicitly extend Component from named imports to ensure TypeScript correctly recognizes inherited base class members
+// Fix: Extending Component directly to ensure TypeScript correctly recognizes inherited base class members like setState, state and props.
 export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -39,6 +39,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
 
   // Arrow function to preserve 'this' context for inherited state and setState access
   private handleReload = () => {
+    // Fix: Accessing state from the inherited Component class
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -46,13 +47,13 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: setState is now correctly recognized as an inherited member from the base Component class
+        // Fix: Using setState from the inherited Component class
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    // Fix: state and props are now correctly recognized as inherited members from the base Component class
+    // Fix: Accessing state and props from the inherited Component class
     const { hasError, error } = this.state;
     const { children } = this.props;
 

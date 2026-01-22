@@ -14,7 +14,7 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Explicitly extend Component from named imports to ensure TypeScript correctly recognizes inherited base class members
+// Fix: Extending Component directly from named import to ensure TypeScript correctly recognizes inherited base class members.
 export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
