@@ -1,5 +1,4 @@
-
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,8 +13,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Extending Component directly from named import to ensure TypeScript correctly recognizes inherited base class members.
-export class GlobalErrorBoundary extends Component<Props, State> {
+// Fix: Inherit from React.Component directly to ensure inherited members like setState, props and state are correctly typed
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -36,14 +35,14 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   // Arrow function used to maintain correct 'this' context for inherited setState
   private handleReload = () => {
-    // Fix: setState is now correctly recognized as an inherited member from the base Component class
+    // Fix: Correctly using inherited setState from React.Component
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
   public render(): ReactNode {
-    // Fix: state and props are now correctly recognized as inherited members from the base Component class
+    // Fix: Accessing inherited state and props from React.Component
     const { hasError, error } = this.state;
     const { children } = this.props;
 

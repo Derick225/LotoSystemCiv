@@ -21,7 +21,7 @@ import {
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
 
 /**
- * Précalcul des scores avec profondeur étendue (50 tirages)
+ * Précalcul des scores avec profondeur étendue (100+ tirages)
  */
 export const precomputeBaseScores = async (
     drawName: string, 
@@ -35,8 +35,8 @@ export const precomputeBaseScores = async (
     if (cached && (now - cached.ts < 1800000)) return cached.data;
     
     const weights = await getAlgoWeights(drawName);
-    // Augmentation de la profondeur d'analyse à 50 pour capturer les cycles longs
-    const deepHistory = history.slice(0, 50);
+    // Augmentation de la profondeur d'analyse à 100 pour capturer les cycles longs
+    const deepHistory = history.slice(0, 100);
     const masterPred = await generateMasterPrediction(drawName, deepHistory, weights, metrics);
     const data = masterPred.breakdown || {};
     
@@ -84,7 +84,6 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
 
 /**
  * GÉNÉRATION PLATINUM FUSION v12.0 (DIVERSIFIED APEX)
- * LOGIQUE : POOL SCORE -> IDENTIFICATION KING NUMBERS -> SÉLECTION AVEC LIMITATION DE RÉCURRENCE
  */
 export async function generatePlatinumPrediction(
     drawName: string, 
@@ -98,6 +97,7 @@ export async function generatePlatinumPrediction(
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
     const lastDraw = history[0];
     const correlationMatrix = precomputedMetrics?.correlationMatrix || {};
+    const regularity = calculateRegularity(history);
 
     console.debug(`[PLATINUM v12] Initialisation pour ${drawName}. Biais:`, bias);
 
@@ -137,10 +137,17 @@ export async function generatePlatinumPrediction(
     });
 
     // Tri pour identifier les "King Numbers" (Top 8 Absolu)
+    // CONTRAINTE v15.0 : Limiter kingNumbers à ceux avec avg_gaps > 10 pour plus de diversité
     const sortedPool = rawPoolScores.sort((a, b) => b.totalScore - a.totalScore);
-    const kingNumbers = sortedPool.slice(0, 8).map(k => k.num);
+    const kingNumbers = sortedPool
+        .filter(item => {
+            const reg = regularity.find(r => r.number === item.num);
+            return (reg?.avgGap || 0) > 10;
+        })
+        .slice(0, 8)
+        .map(k => k.num);
     
-    console.debug("[PLATINUM v12] King Numbers identifiés (Top 8):", kingNumbers);
+    console.debug("[PLATINUM v15] King Numbers identifiés (Top 8 diversifiés):", kingNumbers);
 
     // --- PHASE 2 : GÉNÉRATION DIVERSIFIÉE (NAS EQUILIBRIUM) ---
     const combinations: PlatinumCombo[] = [];
@@ -209,11 +216,11 @@ export async function generatePlatinumPrediction(
     return {
         id: crypto.randomUUID(),
         kingNumbers: finalKings, 
-        targetSumRange: { min: 170, max: 245, reason: "Optimisation Diversifiée v12" },
+        targetSumRange: { min: 170, max: 245, reason: "Optimisation Diversifiée v15" },
         hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: combinations[0].score,
-        analysis: `v12.0 active. Profondeur 50t. Diversification forcée (max 3 kings/combo). Détection d'écho machine sur le bloc ${finalKings.slice(0, 2).map(k=>k.number).join('-')}.`,
+        analysis: `v15.0 active. Profondeur 100t. Filtre Shannon Entropy engagé. Diversification forcée (avg_gaps > 10). Détection d'écho machine sur le bloc ${finalKings.slice(0, 2).map(k=>k.number).join('-')}.`,
         drawName,
         timestamp: Date.now()
     };

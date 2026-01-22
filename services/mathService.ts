@@ -7,7 +7,7 @@ import type {
 } from '../types';
 
 /**
- * NEXUS MATH SERVICE v12.5 - INDUSTRIAL CORE
+ * NEXUS MATH SERVICE v13.0 - ADVANCED STOCHASTIC KERNEL
  */
 
 export const calculateMean = (data: number[]): number => 
@@ -52,7 +52,13 @@ export const calculateDigitalRoot = (n: number): number => (n - 1) % 9 + 1;
 export const calculateShannonEntropy = (history: DrawResult[]) => {
     const counts: Record<number, number> = {};
     let total = 0;
-    history.forEach(d => d.gagnants.forEach(n => { counts[n] = (counts[n] || 0) + 1; total++; }));
+    // Filtrage des dates futures (ex: 2026) pour éviter le biais temporel
+    const validHistory = history.filter(d => {
+        const year = new Date(d.date).getFullYear();
+        return year <= new Date().getFullYear();
+    });
+
+    validHistory.forEach(d => d.gagnants.forEach(n => { counts[n] = (counts[n] || 0) + 1; total++; }));
     let h = 0;
     Object.values(counts).forEach(c => {
         const p = c / total;
@@ -101,9 +107,13 @@ export const detectGameRegime = (history: DrawResult[]) => {
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const results: NumberRegularity[] = [];
+    // Ajustement profondeur 100+ pour les calculs de gaps
+    const depth = Math.min(history.length, 120);
+    const subHistory = history.slice(0, depth);
+
     for (let i = 1; i <= 90; i++) {
         const appearances: number[] = [];
-        history.forEach((draw, idx) => { if (draw.gagnants.includes(i)) appearances.push(idx); });
+        subHistory.forEach((draw, idx) => { if (draw.gagnants.includes(i)) appearances.push(idx); });
         if (appearances.length < 2) {
             results.push({ number: i, avgGap: 18, stdDev: 0, currentGap: appearances[0] ?? 50, lastGaps: [], nextExpectedIn: 18 });
             continue;
@@ -132,20 +142,16 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
     };
 };
 
-/**
- * Fix: Export missing functions required by lotteryService.ts
- */
 export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]): Promise<ProjectionItem[]> => {
-    return runMathWorker('next_projections', history, { lastNumbers });
+    // Exclusion des dates futures
+    const validHistory = history.filter(d => new Date(d.date).getFullYear() <= new Date().getFullYear());
+    return runMathWorker('next_projections', validHistory, { lastNumbers });
 };
 
 export const getFollowersAnalysisAsync = async (history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
     return runMathWorker('followers_analysis', history);
 };
 
-/**
- * Fix: Export missing functions required by ConsultTab.tsx
- */
 export const getMomentumScores = async (history: DrawResult[]): Promise<Record<number, number>> => {
     const scores: Record<number, number> = {};
     const recent = history.slice(0, 10);
@@ -173,9 +179,6 @@ export const calculateHurstForNumber = (num: number, history: DrawResult[]): { h
     return { hurst: calculateHurstForSeries(signal) };
 };
 
-/**
- * Fix: Export missing functions required by MathTab.tsx
- */
 export const calculateShadowNumbers = (draw: DrawResult): ShadowNumbers => {
     const sum = draw.gagnants.reduce((a, b) => a + b, 0);
     return {
@@ -187,7 +190,6 @@ export const calculateShadowNumbers = (draw: DrawResult): ShadowNumbers => {
     };
 };
 
-// Fix: calculateRunsTest now returns the 'runs' property required by MathAnalysisReport in types.ts
 export const calculateRunsTest = (data: number[]): { runs: number, zScore: number, isRandom: boolean } => {
     if (data.length < 2) return { runs: 0, zScore: 0, isRandom: true };
     const median = 45.5;
@@ -218,9 +220,6 @@ export const calculateCUSUM = (data: number[]): number[] => {
     return data.map(v => { sum += (v - mean); return sum; });
 };
 
-/**
- * Fix: Export missing functions required by SpatialTab.tsx
- */
 export const predictBarycenterShift = (trajectory: BarycenterPoint[]): BarycenterPoint => {
     if (trajectory.length < 2) return { x: 4.5, y: 4.0 };
     const last = trajectory[trajectory.length - 1];
@@ -228,9 +227,6 @@ export const predictBarycenterShift = (trajectory: BarycenterPoint[]): Barycente
     return { x: last.x + (last.x - prev.x), y: last.y + (last.y - prev.y) };
 };
 
-/**
- * Fix: Export missing functions required by IntelligenceTab.tsx
- */
 export const calculateChiSquare = (freqMap: Record<number, number>, total: number): ChiSquareMetric => {
     const expected = total / 90;
     let score = 0;
@@ -246,16 +242,10 @@ export const calculateFractalIndex = (history: DrawResult[]): number => {
     return calculateHurstForSeries(signal);
 };
 
-/**
- * Fix: Export missing functions required by ClusteringTab.tsx
- */
 export const performKMeansClusteringAsync = async (history: DrawResult[]): Promise<ClusterPoint[]> => {
     return runMathWorker('k_means_clustering', history);
 };
 
-/**
- * Fix: Export missing functions required by NetworkTab.tsx
- */
 export const detectCommunities = (activeIds: number[], matrix: any): Record<number, number> => {
     const communities: Record<number, number> = {};
     activeIds.forEach((id, i) => {
@@ -264,9 +254,6 @@ export const detectCommunities = (activeIds: number[], matrix: any): Record<numb
     return communities;
 };
 
-/**
- * Fix: Export missing function required by forensicAuditService.ts
- */
 export const calculateBenfordCompliance = (sample: number[]): { score: number } => {
     const firstDigits = sample.map(n => parseInt(n.toString()[0]));
     const counts: Record<number, number> = {};
@@ -280,9 +267,6 @@ export const calculateBenfordCompliance = (sample: number[]): { score: number } 
     return { score: Math.max(0, 100 - diff * 200) };
 };
 
-/**
- * Fix: Export missing function required by SimilarityFinder.tsx
- */
 export const findHistoricalMatches = (currentDraw: DrawResult, history: DrawResult[], limit: number) => {
     const matches = history
         .filter(h => h.id !== currentDraw.id)

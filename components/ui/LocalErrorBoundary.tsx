@@ -1,10 +1,8 @@
-
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  key?: any;
 }
 
 interface State {
@@ -15,8 +13,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Extending Component directly to ensure TypeScript correctly recognizes inherited base class members like setState, state and props.
-export class LocalErrorBoundary extends Component<Props, State> {
+// Fix: Inherit from React.Component directly to ensure inherited members like setState, props and state are correctly typed
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -39,7 +37,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
 
   // Arrow function to preserve 'this' context for inherited state and setState access
   private handleReload = () => {
-    // Fix: Accessing state from the inherited Component class
+    // Fix: Accessing inherited state from React.Component
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -47,13 +45,13 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: Using setState from the inherited Component class
+        // Fix: Correctly using inherited setState from React.Component
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    // Fix: Accessing state and props from the inherited Component class
+    // Fix: Accessing inherited state and props from React.Component
     const { hasError, error } = this.state;
     const { children } = this.props;
 
