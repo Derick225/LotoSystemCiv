@@ -16,9 +16,10 @@ export const AdminPanel: React.FC = () => {
     
     return (
         <div className="space-y-8 animate-fade-in pb-20">
-            <header className="sticky top-[80px] z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-6 rounded-b-[3rem] shadow-xl border-x border-b border-indigo-100 dark:border-indigo-900/30 flex flex-col md:flex-row justify-between items-center gap-6">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg"><Server size={22}/></div>
+            {/* Header corrigé : relative sur mobile, sticky sur desktop */}
+            <header className="relative md:sticky top-0 md:top-[110px] lg:top-[85px] z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-6 rounded-[2rem] md:rounded-b-[3rem] md:rounded-t-none shadow-xl border border-indigo-100 dark:border-indigo-900/30 flex flex-col md:flex-row justify-between items-center gap-6 mb-8 md:mb-0">
+                <div className="flex items-center gap-4 w-full md:w-auto">
+                    <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shrink-0"><Server size={22}/></div>
                     <div>
                         <h2 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter leading-none">Master Node Control</h2>
                         <div className="flex items-center gap-2 mt-1">
@@ -28,7 +29,7 @@ export const AdminPanel: React.FC = () => {
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full">
+                <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide w-full md:max-w-full">
                     {[
                         { id: 'tuning', label: 'Tuning', icon: <Sliders size={14}/> },
                         { id: 'training', label: 'Training', icon: <BrainCircuit size={14}/> },
@@ -51,7 +52,7 @@ export const AdminPanel: React.FC = () => {
             <main className="px-4 animate-slide-up">
                 {activeTab !== 'database' && activeTab !== 'users' && (
                     <div className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                        <div className="relative group min-w-[280px]">
+                        <div className="relative group w-full md:min-w-[280px] md:w-auto">
                             <select 
                                 value={selectedDraw} 
                                 onChange={(e) => setSelectedDraw(e.target.value)} 

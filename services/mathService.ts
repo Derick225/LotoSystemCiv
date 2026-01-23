@@ -1,4 +1,3 @@
-
 import type { 
     DrawResult, SpectralMetric, FractalMetric, 
     NumberRegularity, TopFollowerAnalysis, ProjectionItem,
@@ -106,7 +105,7 @@ export const detectGameRegime = (history: DrawResult[]) => {
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const results: NumberRegularity[] = [];
-    // Ajustement v15.2 : Profondeur étendue à 120+ pour capturer les cycles longs
+    // Ajustement v15.2 : Profondeur étendue à 150+ pour capturer les cycles longs
     const depth = Math.min(history.length, 150);
     const subHistory = history.slice(0, depth);
 

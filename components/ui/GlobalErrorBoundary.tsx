@@ -1,5 +1,4 @@
-
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,36 +13,33 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Inherit from React.Component explicitly to ensure proper type resolution for setState and props
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Fix: Use destructuring import for Component to ensure proper type resolution for inheritance
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
   };
 
-  constructor(props: Props) {
-    super(props);
-  }
-
+  // Fix: Static method for error boundary state updates with explicit return type
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  // Explicitly use ErrorInfo from 'react' to define the method signature
+  // Fix: Use ErrorInfo type from react import for componentDidCatch
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Arrow function used to maintain correct 'this' context for inherited setState
+  // Fix: handleReload as arrow function ensures correct 'this' and access to setState from parent Component
   private handleReload = () => {
-    // Fix: Properly accessing setState from the base React.Component class
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
+  // Fix: Explicitly return ReactNode and access instance members correctly
   public render(): ReactNode {
-    // Fix: Accessing inherited state and props from React.Component with correct instance binding
+    // Fix: Access state and props from the Component class members
     const { hasError, error } = this.state;
     const { children } = this.props;
 
