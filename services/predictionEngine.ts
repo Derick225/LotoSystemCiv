@@ -1,9 +1,10 @@
+
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v15.1 - DIVERSIFIED APEX KERNEL
+ * NEXUS PREDICTION ENGINE v15.2 - SELF-HEALING RECURSIVE KERNEL
  */
 
 const calculateVariance = (nums: number[]): number => {
@@ -19,6 +20,7 @@ export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): 
         const ent = calculateShannonEntropy(history.slice(0, 100));
         const vol = calculateVolatility(history);
         
+        // Calcul du taux d'overlap machine (winners vs machine T-1)
         let overlaps = 0;
         let count = 0;
         for (let i = 0; i < Math.min(history.length - 1, 20); i++) {
@@ -29,9 +31,11 @@ export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): 
         }
         const overlapRate = count > 0 ? overlaps / count : 0;
 
+        // Règle v15.2 : Réduction equilibrium si overlap_rate < 5% pour se concentrer sur le spectral
         if (overlapRate < 0.05) {
             normalized.equilibrium = 0.03;
-            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.5;
+            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.6;
+            normalized.wavelet = (Number(normalized.wavelet) || 0.1) * 1.4; // Boost wavelet si patterns émergents
         }
 
         if (ent.normalized > 0.88 || vol.score > 65) {
@@ -39,11 +43,21 @@ export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): 
             normalized.markov = (Number(normalized.markov) || 0) + boost;
             
             if (ent.normalized > 0.92) {
-                // Priorité Gap vs Freq si distribution skewed
+                // Régime chaotique : On favorise l'orchestration pour capturer les suites complexes
                 normalized.frequency = (Number(normalized.frequency) || 0.1) * 0.3; 
                 normalized.gap = (Number(normalized.gap) || 0.1) * 1.8;
-                normalized.orchestration = (Number(normalized.orchestration) || 0.1) * 1.4;
+                normalized.orchestration = (Number(normalized.orchestration) || 0.1) * 1.5;
             }
+        }
+
+        const recent = history.slice(0, 5);
+        let overlapFound = 0;
+        recent.forEach(d => {
+            if (d.machine) overlapFound += d.gagnants.filter(n => d.machine?.includes(n)).length;
+        });
+        
+        if (overlapFound > 0) {
+            normalized.orchestration = (Number(normalized.orchestration) || 0.1) * 1.5;
         }
     }
 
@@ -87,6 +101,10 @@ export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMax: 18
 });
 
+/**
+ * MOTEUR DE BACKTEST RÉCURSIF v15.2
+ * Analyse la performance sur les 30 derniers tirages pour auto-ajuster les règles.
+ */
 export const runBacktestSimulation = async (
     drawName: string,
     history: DrawResult[],
@@ -101,15 +119,23 @@ export const runBacktestSimulation = async (
     for (let i = 0; i < Math.min(testHistory.length - 10, 15); i++) {
         const target = testHistory[i].gagnants;
         const context = testHistory.slice(i + 1);
-        if (testHistory[i+1]?.machine) overlaps += target.filter(n => testHistory[i+1].machine?.includes(n)).length;
+        
+        // Tracking des overlaps machine réels pour la comparaison
+        if (testHistory[i+1]?.machine) {
+            overlaps += target.filter(n => testHistory[i+1].machine?.includes(n)).length;
+        }
 
         const scores = Array.from({ length: 90 }, (_, k) => {
             const num = k + 1;
             const freq = context.filter(h => h.gagnants.includes(num)).length;
             const lastSeen = context.findIndex(h => h.gagnants.includes(num));
             const gap = lastSeen === -1 ? 50 : lastSeen;
+            
+            // Comparaison freq-based vs gap-based
             let s = Math.sqrt(freq) * (weights.frequency || 0.1) * 10;
-            if (gap >= currentRules.criticalZoneMin && gap <= currentRules.criticalZoneMax) s += (weights.gap || 0.2) * 50;
+            if (gap >= currentRules.criticalZoneMin && gap <= currentRules.criticalZoneMax) {
+                s += (weights.gap || 0.2) * 60; // Priorité Gap augmentée en simulation
+            }
             return { num, score: s };
         }).sort((a, b) => b.score - a.score);
 
@@ -121,15 +147,18 @@ export const runBacktestSimulation = async (
     const avgHits = testsCount > 0 ? totalHits / testsCount : 0;
     const hitRate = (avgHits / 5) * 100;
     let newRules = { ...currentRules };
-    let log = `Backtest: ${avgHits.toFixed(2)}h/t. `;
+    let log = `[BT] Hits/Draw: ${avgHits.toFixed(2)}. Overlaps: ${overlaps}. `;
 
+    // Auto-ajustement v15.2 : Élargir criticalZoneMax si hit rate < 35%
     if (hitRate < 35) {
-        newRules.criticalZoneMax = Math.min(45, newRules.criticalZoneMax + 2);
-        log += "Expanding MaxZone. ";
+        newRules.criticalZoneMax = Math.min(45, newRules.criticalZoneMax + 3);
+        log += "Window Expanded. ";
     }
+    
+    // Si overlaps restent à 0, priorité absolue au Gap-based
     if (overlaps === 0) {
-        newRules.criticalZoneMin = Math.max(5, newRules.criticalZoneMin - 2);
-        log += "Overlap 0: Gap Priority.";
+        newRules.criticalZoneMin = Math.max(6, newRules.criticalZoneMin - 2);
+        log += "Gap Priority Active.";
     }
 
     return { hitRate, newRules, avgHits, log };
@@ -142,20 +171,23 @@ export const generateMasterPrediction = async (
     metrics?: any,
     options: { runBacktest?: boolean } = {}
 ): Promise<Prediction> => {
-    // Filtrage Temporel : Ignorer les projections futures (ex: 2026)
+    // Filtrage v15.2 : Élimination des biais temporels (dates futures ex: 2026)
     const validHistory = history.filter(d => {
-        const dDate = d.date.includes('/') ? new Date(parseInt(d.date.split('/')[2]), parseInt(d.date.split('/')[1])-1, parseInt(d.date.split('/')[0])) : new Date(d.date);
-        return dDate.getFullYear() <= new Date().getFullYear();
+        const year = d.date.includes('/') 
+            ? parseInt(d.date.split('/')[2]) 
+            : new Date(d.date).getFullYear();
+        return year <= new Date().getFullYear();
     });
 
     let weights = normalizeWeights(weightsToUse || getAlgoWeightsSync(drawName), validHistory);
     let rules = getAdaptiveRules(drawName);
 
-    let backtestLog = "";
+    let backtestSummary = "";
     if (options.runBacktest && validHistory.length > 25) {
         const bt = await runBacktestSimulation(drawName, validHistory, weights, rules);
         rules = bt.newRules;
-        backtestLog = bt.log;
+        backtestSummary = ` [BT Accuracy: ${bt.avgHits.toFixed(2)}h/t]`;
+        console.debug(`[KERNEL] ${bt.log}`);
         await saveAdaptiveRules(drawName, rules);
     }
 
@@ -205,32 +237,21 @@ export const generateMasterPrediction = async (
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
     
-    // --- BOUCLE DE SÉLECTION DIVERSIFIÉE (VAR MIN 10) ---
+    // Sélection avec contrainte de variance min 10 pour diversité
     let selection: number[] = [];
     let idx = 0;
-    const MIN_VARIANCE_TARGET = 10;
-    
     while (selection.length < 5 && idx < sorted.length) {
         const candidate = sorted[idx];
         const testSelection = [...selection, candidate.num];
-        
         if (testSelection.length > 1) {
             const currentVar = calculateVariance(testSelection);
-            // Rejet si trop concentré et distribution skewed détectée
-            if (isSkewed && currentVar < MIN_VARIANCE_TARGET && idx < 20) {
+            if (isSkewed && currentVar < 10 && idx < 20) {
                 idx++;
                 continue;
             }
         }
         selection.push(candidate.num);
         idx++;
-    }
-
-    // Ré-échantillonnage si variance finale toujours trop basse en mode skewed
-    if (isSkewed && calculateVariance(selection) < 8) {
-        console.debug("[DNA] Resampling required: variance too low for skewed dist.");
-        const adjustedWeights = { ...weights, gap: (weights.gap || 0.1) * 1.5, frequency: (weights.frequency || 0.1) * 0.5 };
-        return generateMasterPrediction(drawName, validHistory, adjustedWeights, metrics, { runBacktest: false });
     }
 
     const acScore = calculateACValue(selection);
@@ -240,7 +261,7 @@ export const generateMasterPrediction = async (
         suggestedNumbers: selection.sort((a,b) => a - b),
         candidates: sorted.slice(5, 15).map(s => s.num),
         confidence: Math.min(99, Math.max(25, Math.round(sorted[0].score * (acScore / 8)))),
-        analysis: `Apex v15.1 [${isSkewed ? 'SKEWED' : 'NOMINAL'}]. Variance: ${finalVariance.toFixed(1)}. ${backtestLog}`,
+        analysis: `Apex v15.2 [Rules: ${rules.criticalZoneMin}-${rules.criticalZoneMax}]. Variance: ${finalVariance.toFixed(1)}.${backtestSummary}`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
         timestamp: Date.now()

@@ -1,10 +1,9 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  // Explicitly allow key prop to avoid assignment errors in JSX
-  key?: React.Key;
 }
 
 interface State {
@@ -15,8 +14,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Inherit from Component directly to ensure inherited members like setState, props and state are correctly typed
-export class LocalErrorBoundary extends Component<Props, State> {
+// Fix: Inherit from React.Component explicitly to ensure inherited members like setState, props and state are correctly typed
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -39,7 +38,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
 
   // Arrow function to preserve 'this' context for inherited state and setState access
   private handleReload = () => {
-    // Fix: Accessing inherited state from Component
+    // Fix: Accessing inherited state from React.Component
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
                          error?.message?.includes('Importing a module script failed');
@@ -47,13 +46,13 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: Correctly using inherited setState from Component
+        // Fix: Correctly using inherited setState from the base React.Component class
         this.setState({ hasError: false, error: null });
     }
   };
 
   public render(): ReactNode {
-    // Fix: Accessing inherited state and props from Component
+    // Fix: Accessing inherited state and props from React.Component with correct typing
     const { hasError, error } = this.state;
     const { children } = this.props;
 

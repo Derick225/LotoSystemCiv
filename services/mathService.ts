@@ -7,7 +7,7 @@ import type {
 } from '../types';
 
 /**
- * NEXUS MATH SERVICE v13.0 - ADVANCED STOCHASTIC KERNEL
+ * NEXUS MATH SERVICE v15.2 - TEMPORAL SAFETY & DEEP DATA KERNEL
  */
 
 export const calculateMean = (data: number[]): number => 
@@ -33,8 +33,6 @@ export const calculateHurstForSeries = (signal: number[]): number => {
     return Math.max(0, Math.min(1, Math.log(R / S) / Math.log(N)));
 };
 
-// --- CALCULS DE STRUCTURE ---
-
 export const calculateACValue = (numbers: number[]): number => {
     if (numbers.length < 2) return 0;
     const diffs = new Set<number>();
@@ -52,9 +50,12 @@ export const calculateDigitalRoot = (n: number): number => (n - 1) % 9 + 1;
 export const calculateShannonEntropy = (history: DrawResult[]) => {
     const counts: Record<number, number> = {};
     let total = 0;
-    // Filtrage des dates futures (ex: 2026) pour éviter le biais temporel
+    
+    // Filtrage v15.2 : Ignorer les dates futures (projections non historiques)
     const validHistory = history.filter(d => {
-        const year = new Date(d.date).getFullYear();
+        const year = d.date.includes('/') 
+            ? parseInt(d.date.split('/')[2]) 
+            : new Date(d.date).getFullYear();
         return year <= new Date().getFullYear();
     });
 
@@ -66,8 +67,6 @@ export const calculateShannonEntropy = (history: DrawResult[]) => {
     });
     return { normalized: h / Math.log2(90) };
 };
-
-// --- INTERFACE WORKER ---
 
 const runMathWorker = (task: string, history: DrawResult[], payload: any = {}): Promise<any> => {
     return new Promise((resolve, reject) => {
@@ -107,8 +106,8 @@ export const detectGameRegime = (history: DrawResult[]) => {
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const results: NumberRegularity[] = [];
-    // Ajustement profondeur 100+ pour les calculs de gaps
-    const depth = Math.min(history.length, 120);
+    // Ajustement v15.2 : Profondeur étendue à 120+ pour capturer les cycles longs
+    const depth = Math.min(history.length, 150);
     const subHistory = history.slice(0, depth);
 
     for (let i = 1; i <= 90; i++) {
@@ -143,8 +142,10 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
 };
 
 export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]): Promise<ProjectionItem[]> => {
-    // Exclusion des dates futures
-    const validHistory = history.filter(d => new Date(d.date).getFullYear() <= new Date().getFullYear());
+    const validHistory = history.filter(d => {
+        const year = d.date.includes('/') ? parseInt(d.date.split('/')[2]) : new Date(d.date).getFullYear();
+        return year <= new Date().getFullYear();
+    });
     return runMathWorker('next_projections', validHistory, { lastNumbers });
 };
 

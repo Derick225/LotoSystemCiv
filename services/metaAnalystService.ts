@@ -1,3 +1,4 @@
+
 import { 
   PlatinumResult, 
   DrawResult, 
@@ -37,13 +38,12 @@ export const precomputeBaseScores = async (
     if (cached && (now - cached.ts < 3600000)) return cached.data;
     
     const weights = await getAlgoWeights(drawName);
-    // Profondeur augmentée à 100+ pour capturer les cycles de rupture
+    // Profondeur augmentée à 120+ pour capturer les cycles de rupture
     const deepHistory = history.slice(0, 120);
     const masterPred = await generateMasterPrediction(drawName, deepHistory, weights, metrics, { runBacktest: true });
     
     const data = masterPred.breakdown || {};
     
-    // Remplissage des vecteurs manquants (protection stochastique)
     for (let i = 1; i <= 90; i++) {
         if (!data[i]) {
             data[i] = { 
@@ -57,9 +57,6 @@ export const precomputeBaseScores = async (
     return data;
 };
 
-/**
- * Calcule le biais optimal en fonction du régime du flux.
- */
 export function calculateOptimalUserBias(drawName: string, history: DrawResult[]): StrategyBias {
     const vol = calculateVolatility(history);
     const ent = calculateShannonEntropy(history);
@@ -83,7 +80,7 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
 }
 
 /**
- * GÉNÉRATION PLATINUM FUSION v15.1 (TOURNAMENT EDITION)
+ * GÉNÉRATION PLATINUM FUSION v15.2 (DIVERSIFIED KING EDITION)
  */
 export async function generatePlatinumPrediction(
     drawName: string, 
@@ -99,7 +96,7 @@ export async function generatePlatinumPrediction(
     const pool = Object.keys(scores).map(Number);
 
     // --- PHASE 1 : IDENTIFICATION DES KING NUMBERS (DIVERSIFIÉS) ---
-    // Contrainte v15 : avgGap > 10 pour éviter la saturation fréquentielle
+    // Contrainte v15.2 : avgGap > 10 pour éviter la saturation fréquentielle sur les tops fréquences
     const rawKingPool = pool.map(n => {
         const b = scores[n];
         const val = ((b.spectral || 0) * bias.harmony) + 
@@ -112,7 +109,7 @@ export async function generatePlatinumPrediction(
     const kingNumbers = rawKingPool
         .filter(item => {
             const reg = regularity.find(r => r.number === item.num);
-            return (reg?.avgGap || 0) > 10;
+            return (reg?.avgGap || 0) > 10; // Filtrage des numéros trop fréquents
         })
         .sort((a, b) => b.val - a.val)
         .slice(0, 8)
@@ -125,24 +122,19 @@ export async function generatePlatinumPrediction(
         let bestCombo: number[] = [];
         let maxFitness = -Infinity;
 
-        // 100 cycles de sélection par ticket pour l'équilibre de Nash
         for (let attempt = 0; attempt < 100; attempt++) {
             const candidate: number[] = [];
             const tempPool = [...pool];
             let kingCount = 0;
 
             while (candidate.length < 5 && tempPool.length > 0) {
-                // LOGIQUE TOURNOI v5.3 : Sélection pondérée
                 let bestInTournament = -1;
                 let topTournamentScore = -Infinity;
 
-                // Tirage de 8 candidats pour comparaison
                 for (let k = 0; k < 8; k++) {
                     const idx = Math.floor(Math.random() * tempPool.length);
                     const n = tempPool[idx];
                     const b = scores[n];
-                    
-                    // Formule de Score Composite
                     const score = ((b.spectral || 0) * bias.harmony) + 
                                   ((b.momentum || 0) * bias.stability) + 
                                   ((b.gap || 0) * bias.chaos);
@@ -155,12 +147,10 @@ export async function generatePlatinumPrediction(
 
                 if (bestInTournament !== -1) {
                     const isKing = kingNumbers.includes(bestInTournament);
-                    // Contrainte de diversité : Max 3 King Numbers par ticket
                     if (isKing && kingCount >= 3) {
                         tempPool.splice(tempPool.indexOf(bestInTournament), 1);
                         continue;
                     }
-
                     if (isKing) kingCount++;
                     candidate.push(bestInTournament);
                     tempPool.splice(tempPool.indexOf(bestInTournament), 1);
@@ -168,8 +158,6 @@ export async function generatePlatinumPrediction(
             }
 
             candidate.sort((a, b) => a - b);
-            
-            // Évaluation de la fitness structurelle
             const sum = candidate.reduce((a, b) => a + b, 0);
             const ac = calculateACValue(candidate);
             let fitness = candidate.reduce((acc, n) => acc + (scores[n].spectral || 0), 0);
@@ -199,11 +187,11 @@ export async function generatePlatinumPrediction(
     return {
         id: crypto.randomUUID(),
         kingNumbers: kingNumbers.map(n => ({ number: n, count: 1 })), 
-        targetSumRange: { min: 170, max: 245, reason: "Équilibre de Nash (Tournament Edition)" },
+        targetSumRange: { min: 170, max: 245, reason: "Équilibre v15.2 (avg_gap > 10)" },
         hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: Math.round(combinations[0].score * 0.95),
-        analysis: `Synthèse v15.1 active. Tournoi stochastique complété. Biais : Harmonie ${(bias.harmony*100).toFixed(0)}%, Stabilité ${(bias.stability*100).toFixed(0)}%, Chaos ${(bias.chaos*100).toFixed(0)}%. Diversité KingNumbers garantie (avg_gap > 10).`,
+        analysis: `Synthèse v15.2 active. Biais : Harmonie ${(bias.harmony*100).toFixed(0)}%, Stabilité ${(bias.stability*100).toFixed(0)}%, Chaos ${(bias.chaos*100).toFixed(0)}%. Diversité KingNumbers forcée (avg_gap > 10).`,
         drawName,
         timestamp: Date.now()
     };
