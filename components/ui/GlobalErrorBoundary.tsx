@@ -1,8 +1,10 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
   children?: ReactNode;
+  // Explicitly allow key prop for usage in lists or transitions
+  key?: React.Key;
 }
 
 interface State {
@@ -13,8 +15,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Inherit from React.Component directly to ensure inherited members like setState, props and state are correctly typed
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+// Fix: Inherit from Component directly to ensure inherited members like setState, props and state are correctly typed
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -35,14 +37,14 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
 
   // Arrow function used to maintain correct 'this' context for inherited setState
   private handleReload = () => {
-    // Fix: Correctly using inherited setState from React.Component
+    // Fix: Correctly using inherited setState from Component
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
   public render(): ReactNode {
-    // Fix: Accessing inherited state and props from React.Component
+    // Fix: Accessing inherited state and props from Component
     const { hasError, error } = this.state;
     const { children } = this.props;
 
