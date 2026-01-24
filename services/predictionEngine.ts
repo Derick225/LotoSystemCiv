@@ -1,65 +1,14 @@
+
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v15.2 - SELF-HEALING RECURSIVE KERNEL
+ * NEXUS PREDICTION ENGINE v15.4 - SELF-HEALING RECURSIVE KERNEL
  */
-
-const calculateVariance = (nums: number[]): number => {
-    if (nums.length === 0) return 0;
-    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
-    return nums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / nums.length;
-};
 
 export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): AlgoWeights => {
     let normalized = { ...weights };
-    
-    if (history && history.length > 10) {
-        const ent = calculateShannonEntropy(history.slice(0, 100));
-        const vol = calculateVolatility(history);
-        
-        // Calcul du taux d'overlap machine (winners vs machine T-1)
-        let overlaps = 0;
-        let count = 0;
-        for (let i = 0; i < Math.min(history.length - 1, 20); i++) {
-            if (history[i+1].machine) {
-                overlaps += history[i].gagnants.filter(n => history[i+1].machine?.includes(n)).length;
-                count += 5;
-            }
-        }
-        const overlapRate = count > 0 ? overlaps / count : 0;
-
-        // Règle v15.2 : Réduction equilibrium si overlap_rate < 5% pour se concentrer sur le spectral
-        if (overlapRate < 0.05) {
-            normalized.equilibrium = 0.03;
-            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.6;
-            normalized.wavelet = (Number(normalized.wavelet) || 0.1) * 1.4; // Boost wavelet si patterns émergents
-        }
-
-        if (ent.normalized > 0.88 || vol.score > 65) {
-            const boost = 0.05;
-            normalized.markov = (Number(normalized.markov) || 0) + boost;
-            
-            if (ent.normalized > 0.92) {
-                // Régime chaotique : On favorise l'orchestration pour capturer les suites complexes
-                normalized.frequency = (Number(normalized.frequency) || 0.1) * 0.3; 
-                normalized.gap = (Number(normalized.gap) || 0.1) * 1.8;
-                normalized.orchestration = (Number(normalized.orchestration) || 0.1) * 1.5;
-            }
-        }
-
-        const recent = history.slice(0, 5);
-        let overlapFound = 0;
-        recent.forEach(d => {
-            if (d.machine) overlapFound += d.gagnants.filter(n => d.machine?.includes(n)).length;
-        });
-        
-        if (overlapFound > 0) {
-            normalized.orchestration = (Number(normalized.orchestration) || 0.1) * 1.5;
-        }
-    }
-
     const total = Object.values(normalized).reduce((a, b) => a + (Number(b) || 0), 0);
     if (total === 0) return getDefaultWeights();
     
@@ -70,29 +19,12 @@ export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): 
 };
 
 export const getDefaultWeights = (): AlgoWeights => ({
-    frequency: 0.05,
-    gap: 0.22,
-    spectral: 0.22,
-    fractal: 0.08, 
-    markov: 0.18,
-    wavelet: 0.10, 
-    orchestration: 0.10, 
-    momentum: 0.05, 
-    equilibrium: 0.03,
-    ai_intuition: 0.0, 
-    digital_root: 0.0, 
-    gap_velocity: 0.0, 
-    isolation_anomaly: 0.0,
-    resistance: 0.0,
-    spatial: 0.0,
-    bayes: 0.0,
-    transformer: 0.0,
-    temporal: 0.0,
-    poisson: 0.0,
-    leader_succession: 0.0,
-    anti_consensus: 0.0,
-    monte_carlo: 0.0,
-    lstm_pattern: 0.0
+    frequency: 0.08, gap: 0.25, spectral: 0.20, fractal: 0.08, 
+    markov: 0.15, wavelet: 0.08, orchestration: 0.08, momentum: 0.05, 
+    equilibrium: 0.03, ai_intuition: 0.0, digital_root: 0.0, gap_velocity: 0.0, 
+    isolation_anomaly: 0.0, resistance: 0.0, spatial: 0.0, bayes: 0.0,
+    transformer: 0.0, temporal: 0.0, poisson: 0.0, leader_succession: 0.0,
+    anti_consensus: 0.0, monte_carlo: 0.0, lstm_pattern: 0.0
 } as any);
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -100,100 +32,22 @@ export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMax: 18
 });
 
-/**
- * MOTEUR DE BACKTEST RÉCURSIF v15.2
- * Analyse la performance sur les 30 derniers tirages pour auto-ajuster les règles.
- */
-export const runBacktestSimulation = async (
-    drawName: string,
-    history: DrawResult[],
-    weights: AlgoWeights,
-    currentRules: AdaptiveRules
-): Promise<{ hitRate: number; newRules: AdaptiveRules; avgHits: number; log: string }> => {
-    const testHistory = history.slice(0, 30);
-    let totalHits = 0;
-    let testsCount = 0;
-    let overlaps = 0;
-
-    for (let i = 0; i < Math.min(testHistory.length - 10, 15); i++) {
-        const target = testHistory[i].gagnants;
-        const context = testHistory.slice(i + 1);
-        
-        // Tracking des overlaps machine réels pour la comparaison
-        if (testHistory[i+1]?.machine) {
-            overlaps += target.filter(n => testHistory[i+1].machine?.includes(n)).length;
-        }
-
-        const scores = Array.from({ length: 90 }, (_, k) => {
-            const num = k + 1;
-            const freq = context.filter(h => h.gagnants.includes(num)).length;
-            const lastSeen = context.findIndex(h => h.gagnants.includes(num));
-            const gap = lastSeen === -1 ? 50 : lastSeen;
-            
-            // Comparaison freq-based vs gap-based
-            let s = Math.sqrt(freq) * (weights.frequency || 0.1) * 10;
-            if (gap >= currentRules.criticalZoneMin && gap <= currentRules.criticalZoneMax) {
-                s += (weights.gap || 0.2) * 60; // Priorité Gap augmentée en simulation
-            }
-            return { num, score: s };
-        }).sort((a, b) => b.score - a.score);
-
-        const selection = scores.slice(0, 5).map(s => s.num);
-        totalHits += selection.filter(n => target.includes(n)).length;
-        testsCount++;
-    }
-
-    const avgHits = testsCount > 0 ? totalHits / testsCount : 0;
-    const hitRate = (avgHits / 5) * 100;
-    let newRules = { ...currentRules };
-    let log = `[BT] Hits/Draw: ${avgHits.toFixed(2)}. Overlaps: ${overlaps}. `;
-
-    // Auto-ajustement v15.2 : Élargir criticalZoneMax si hit rate < 35%
-    if (hitRate < 35) {
-        newRules.criticalZoneMax = Math.min(45, newRules.criticalZoneMax + 3);
-        log += "Window Expanded. ";
-    }
-    
-    // Si overlaps restent à 0, priorité absolue au Gap-based
-    if (overlaps === 0) {
-        newRules.criticalZoneMin = Math.max(6, newRules.criticalZoneMin - 2);
-        log += "Gap Priority Active.";
-    }
-
-    return { hitRate, newRules, avgHits, log };
-};
-
 export const generateMasterPrediction = async (
     drawName: string, 
     history: DrawResult[],
     weightsToUse?: AlgoWeights,
-    metrics?: any,
-    options: { runBacktest?: boolean } = {}
+    metrics?: any
 ): Promise<Prediction> => {
-    // Filtrage v15.2 : Élimination des biais temporels (dates futures ex: 2026)
     const validHistory = history.filter(d => {
-        const year = d.date.includes('/') 
-            ? parseInt(d.date.split('/')[2]) 
-            : new Date(d.date).getFullYear();
+        const year = d.date.includes('/') ? parseInt(d.date.split('/')[2]) : new Date(d.date).getFullYear();
         return year <= new Date().getFullYear();
     });
 
-    let weights = normalizeWeights(weightsToUse || getAlgoWeightsSync(drawName), validHistory);
+    let baseWeights = weightsToUse || await getAlgoWeights(drawName);
+    let weights = normalizeWeights(baseWeights, validHistory);
     let rules = getAdaptiveRules(drawName);
 
-    let backtestSummary = "";
-    if (options.runBacktest && validHistory.length > 25) {
-        const bt = await runBacktestSimulation(drawName, validHistory, weights, rules);
-        rules = bt.newRules;
-        backtestSummary = ` [BT Accuracy: ${bt.avgHits.toFixed(2)}h/t]`;
-        console.debug(`[KERNEL] ${bt.log}`);
-        await saveAdaptiveRules(drawName, rules);
-    }
-
     const deepHistory = validHistory.slice(0, 120);
-    const entropy = calculateShannonEntropy(deepHistory);
-    const isSkewed = entropy.normalized > 0.92;
-    
     const regularity = metrics?.regularity || calculateRegularity(deepHistory);
     const correlationMap = metrics?.correlationMatrix || {};
     const lastWinners = deepHistory[0]?.gagnants || [];
@@ -207,21 +61,18 @@ export const generateMasterPrediction = async (
         let markovScore = 0;
         lastWinners.forEach(lw => {
            const strength = correlationMap[lw]?.affinities?.[num] || 0;
-           if (strength > 0.2) markovScore += (strength * 100);
+           if (strength > 0.15) markovScore += (strength * 100);
         });
 
         const nBreakdown: ScoreBreakdown = {
             frequency: (Math.sqrt(freq) / Math.sqrt(deepHistory.length)) * 100,
             gap: (reg?.currentGap || 50) >= rules.criticalZoneMin && (reg?.currentGap || 50) <= rules.criticalZoneMax ? 95 : 25,
             spectral: spec?.energy || 0,
-            markov: Math.min(100, markovScore * 2.2),
+            markov: Math.min(100, markovScore * 2.5),
             momentum: Math.sqrt(deepHistory.slice(0, 12).filter(h => h.gagnants.includes(num)).length) * 45,
             equilibrium: calculateDigitalRoot(num) * 5,
             wavelet: metrics?.wavelet?.find((w: any) => w.number === num)?.energy || 0,
-            orchestration: 50, fractal: 50, spatial: 50, ai_intuition: 50, 
-            resistance: 50, transformer: 0, temporal: 0, digital_root: 0,
-            gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0,
-            monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
+            orchestration: 50, fractal: 50, spatial: 50, ai_intuition: 50, resistance: 50, transformer: 0, temporal: 0, digital_root: 0, gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0, monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
         };
         
         let finalScore = 0;
@@ -229,115 +80,76 @@ export const generateMasterPrediction = async (
             finalScore += (nBreakdown[k] || 0) * (Number(weights[k]) || 0);
         });
 
-        if (isSkewed && freq < (deepHistory.length * 5 / 90)) finalScore += 20;
-
         return { num, score: finalScore, breakdown: nBreakdown };
     });
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
-    
-    // Sélection avec contrainte de variance min 10 pour diversité
-    let selection: number[] = [];
-    let idx = 0;
-    while (selection.length < 5 && idx < sorted.length) {
-        const candidate = sorted[idx];
-        const testSelection = [...selection, candidate.num];
-        if (testSelection.length > 1) {
-            const currentVar = calculateVariance(testSelection);
-            if (isSkewed && currentVar < 10 && idx < 20) {
-                idx++;
-                continue;
-            }
-        }
-        selection.push(candidate.num);
-        idx++;
-    }
-
+    const selection = sorted.slice(0, 5).map(s => s.num).sort((a,b) => a-b);
     const acScore = calculateACValue(selection);
-    const finalVariance = calculateVariance(selection);
 
     return {
-        suggestedNumbers: selection.sort((a,b) => a - b),
+        suggestedNumbers: selection,
         candidates: sorted.slice(5, 15).map(s => s.num),
-        confidence: Math.min(99, Math.max(25, Math.round(sorted[0].score * (acScore / 8)))),
-        analysis: `Apex v15.2 [Rules: ${rules.criticalZoneMin}-${rules.criticalZoneMax}]. Variance: ${finalVariance.toFixed(1)}.${backtestSummary}`,
+        confidence: Math.min(99, Math.round(sorted[0].score * (acScore / 8.5))),
+        analysis: `Apex v15.4. Précision structurelle : ${acScore}/10.`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
         timestamp: Date.now()
     };
 };
 
-export const getAlgoWeightsSync = (drawName: string): AlgoWeights => {
-    const raw = localStorage.getItem(`nexus_config_${drawName}`);
-    if (raw) return JSON.parse(raw).weights || getDefaultWeights();
-    return getDefaultWeights();
-};
-
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
     if (isSupabaseConfigured() && navigator.onLine) {
         try {
             const { data } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
-            if (data?.weights?.weights) return data.weights.weights;
+            if (data?.weights) return data.weights;
         } catch (e) { }
     }
-    return getAlgoWeightsSync(drawName);
+    const raw = localStorage.getItem(`nexus_config_${drawName}`);
+    return raw ? JSON.parse(raw).weights : getDefaultWeights();
 };
 
-export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights, rules?: AdaptiveRules) => {
-    const dataToSave = { weights, rules: rules || getAdaptiveRules(drawName), updatedAt: new Date().toISOString() };
+export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
+    const dataToSave = { weights, rules: getAdaptiveRules(drawName), updatedAt: new Date().toISOString() };
     localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(dataToSave));
     if (isSupabaseConfigured()) {
-        try {
-            await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: dataToSave, updated_at: new Date().toISOString() });
-        } catch (e) { }
+        await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: weights, updated_at: new Date().toISOString() });
     }
 };
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
     const raw = localStorage.getItem(`nexus_config_${drawName}`);
-    if (raw) return JSON.parse(raw).rules || getDefaultRules();
-    return getDefaultRules();
+    return raw ? JSON.parse(raw).rules : getDefaultRules();
 };
 
 export const saveAdaptiveRules = async (drawName: string, rules: AdaptiveRules) => {
     const weights = await getAlgoWeights(drawName);
-    await saveAlgoWeights(drawName, weights, rules);
+    const dataToSave = { weights, rules, updatedAt: new Date().toISOString() };
+    localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(dataToSave));
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
-    if (weights.markov > 0.2) return "Markovien Apex";
-    if (weights.spectral > 0.2) return "Résonance de Phase";
-    if (weights.gap > 0.2) return "Cycle Inversé";
-    return "Consensus Nexus Apex";
+    const entries = Object.entries(weights) as [string, any][];
+    const dominant = entries.reduce((a, b) => (Number(a[1]) || 0) > (Number(b[1]) || 0) ? a : b);
+    const names: Record<string, string> = { frequency: 'Inertie', gap: 'Écart Récursif', spectral: 'Résonance FFT', markov: 'Lien Séquentiel' };
+    return names[dominant[0]] || 'Nexus APEX';
 };
 
-export const calculateCorrectionsFromForensics = (
-    currentWeights: AlgoWeights, 
-    currentRules: AdaptiveRules, 
-    report: ForensicReport
-): { newWeights: AlgoWeights; newRules: AdaptiveRules; reasoning: string[] } => {
-    const newWeights = { ...currentWeights };
-    const reasoning: string[] = [];
-    if (report.scoreDivergence) {
-        report.scoreDivergence.forEach(div => {
-            const key = div.algo as keyof AlgoWeights;
-            if (newWeights[key] !== undefined) {
-                const adjustment = (div.impact / 100) * 0.05;
-                newWeights[key] = (Number(newWeights[key]) || 0) + adjustment;
-                reasoning.push(`Mutation ADN : Ajustement ${div.algo} (+${(adjustment * 100).toFixed(1)}%).`);
-            }
-        });
-    }
-    return { newWeights: normalizeWeights(newWeights), newRules: { ...currentRules }, reasoning };
-};
-
-export const analyzeTicketStrength = async (numbers: number[], drawName: string): Promise<TicketAnalysisResult> => {
+export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {
     const ac = calculateACValue(numbers);
-    const varN = calculateVariance(numbers);
-    const score = Math.min(100, (ac / 8) * 50 + (varN > 200 ? 50 : 25));
     return {
-        score,
-        verdict: score > 75 ? "Excellent" : "Moyen",
-        warnings: varN < 50 ? ["Numéros trop proches"] : []
+        score: Math.min(100, Math.round((ac / 10) * 100)),
+        verdict: ac >= 8 ? "Optimale" : "Équilibrée",
+        warnings: ac < 7 ? ["Structure trop prévisible"] : []
     };
+};
+
+export const calculateCorrectionsFromForensics = (currentWeights: AlgoWeights, _rules: AdaptiveRules, report: ForensicReport) => {
+    const newWeights = { ...currentWeights };
+    if (report.scoreDivergence.length > 0) {
+        const top = report.scoreDivergence[0];
+        const key = top.algo as keyof AlgoWeights;
+        if (newWeights[key] !== undefined) newWeights[key] = (Number(newWeights[key]) || 0) + 0.05;
+    }
+    return { newWeights: normalizeWeights(newWeights), newRules: _rules, reasoning: ["Optimisation par divergence"] };
 };

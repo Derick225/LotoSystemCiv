@@ -13,7 +13,7 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Destructure Component from react import to ensure setState and props are correctly inherited and visible
+// Fix: Correct inheritance from React.Component to allow property access
 export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -32,7 +32,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
     }
   }
 
-  // Fix: handleReload as arrow function ensures correct 'this' context for accessing instance methods like setState
+  // Fix: handleReload now correctly accesses Component context
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -45,9 +45,8 @@ export class LocalErrorBoundary extends Component<Props, State> {
     }
   };
 
-  // Fix: Use ReactNode return type for render method
+  // Fix: render now correctly accesses Component context
   public render(): ReactNode {
-    // Fix: Access state and props directly from the Component instance
     const { hasError, error } = this.state;
     const { children } = this.props;
 

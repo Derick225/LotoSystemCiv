@@ -39,7 +39,8 @@ export const precomputeBaseScores = async (
     const weights = await getAlgoWeights(drawName);
     // Profondeur augmentée à 120+ pour capturer les cycles de rupture
     const deepHistory = history.slice(0, 120);
-    const masterPred = await generateMasterPrediction(drawName, deepHistory, weights, metrics, { runBacktest: true });
+    // Fix: remove 5th argument { runBacktest: true } which is not expected by generateMasterPrediction
+    const masterPred = await generateMasterPrediction(drawName, deepHistory, weights, metrics);
     
     const data = masterPred.breakdown || {};
     

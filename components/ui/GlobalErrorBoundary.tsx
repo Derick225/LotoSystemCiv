@@ -13,7 +13,7 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Use destructuring import for Component to ensure proper type resolution for inheritance
+// Fix: Correct inheritance from React.Component to allow property access
 export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
@@ -25,21 +25,20 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  // Fix: Use ErrorInfo type from react import for componentDidCatch
+  // Fix: Use ErrorInfo type for componentDidCatch
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: handleReload as arrow function ensures correct 'this' and access to setState from parent Component
+  // Fix: handleReload now correctly accesses Component context
   private handleReload = () => {
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  // Fix: Explicitly return ReactNode and access instance members correctly
+  // Fix: render now correctly accesses Component context
   public render(): ReactNode {
-    // Fix: Access state and props from the Component class members
     const { hasError, error } = this.state;
     const { children } = this.props;
 

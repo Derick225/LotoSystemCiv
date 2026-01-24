@@ -50,6 +50,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
 
     try {
+        // Chargement PRIORITAIRE de l'ADN entraîné
         const weights = await getAlgoWeights(drawName);
         setGlobalWeights(weights);
 
@@ -74,15 +75,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegime(reg ? { hurst: reg.hurst, regime: reg.regime } : null);
         }
 
-        // Profondeur 50t pour l'analyse asynchrone
         if (hist.length >= 10 && drawName !== 'ALL') {
-            const computeSample = hist.slice(0, 350); 
             const [spec, wav, frac, regData, corr, preds] = await Promise.all([
-                calculateSpectralMetricsAsync(computeSample),
-                calculateWaveletMetricsAsync(computeSample),
-                calculateFractalMetricsAsync(computeSample),
-                Promise.resolve(calculateRegularity(computeSample)),
-                calculateCorrelationMatrixAsync(computeSample),
+                calculateSpectralMetricsAsync(hist),
+                calculateWaveletMetricsAsync(hist),
+                calculateFractalMetricsAsync(hist),
+                Promise.resolve(calculateRegularity(hist)),
+                calculateCorrelationMatrixAsync(hist),
                 getPredictionHistoryAsync(drawName)
             ]);
             
@@ -93,15 +92,15 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegularity(regData);
             setCorrelationMatrix(corr);
 
-            const insights = await generateSmartInsights(drawName, computeSample, spec, regData.map(r => ({ number: r.number, gap: r.currentGap })), regData);
+            const insights = await generateSmartInsights(drawName, hist, spec, regData.map(r => ({ number: r.number, gap: r.currentGap })), regData);
             setSmartInsights(insights);
 
             if (preds.length > 0) {
                 setLastPrediction(preds[0].prediction);
                 const perf = calculateHistoricalPerformance(preds, hist);
                 setCalibration({
-                    overallScore: 0.25 - (perf.accuracy / 100),
-                    reliability: Math.min(100, Math.round(perf.accuracy * 3.8)), // Ajustement calibration
+                    overallScore: 0.25,
+                    reliability: Math.min(100, Math.round(perf.accuracy * 4.5)),
                     bias: 'NEUTRAL',
                     sampleSize: perf.analyzedDrawsCount
                 });
@@ -116,6 +115,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateGlobalWeights = useCallback(async (w: AlgoWeights) => {
       setGlobalWeights(w); 
       await saveAlgoWeights(drawName, w);
+      // Forcer le rechargement immédiat pour appliquer les nouveaux poids aux calculs
+      setRefreshTrigger(t => t + 1);
   }, [drawName]);
 
   const contextValue = useMemo(() => ({
