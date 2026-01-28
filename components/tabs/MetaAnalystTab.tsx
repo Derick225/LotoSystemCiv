@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, calculateOptimalUserBias } from '../../services/metaAnalystService';
 import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
@@ -111,7 +110,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <p className={`text-sm font-bold transition-all duration-500 ${step >= 1 ? 'text-white' : 'text-slate-700'}`}>1. Analyse Structurelle (Machine/Organique)</p>
                     <p className={`text-sm font-bold transition-all duration-500 ${step >= 2 ? 'text-white' : 'text-slate-700'}`}>2. Sélection Duale (Hot/Correction Sigma)</p>
                     <p className={`text-sm font-bold transition-all duration-500 ${step >= 3 ? 'text-white' : 'text-slate-700'}`}>3. Injection de Diversité Stochastique</p>
-                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 4 ? 'text-white' : 'text-slate-700'}`}>4. Validation Volatilité (AC > 6)</p>
+                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 4 ? 'text-white' : 'text-slate-700'}`}>4. Validation Volatilité (AC &gt; 6)</p>
                 </div>
             </div>
         </div>
