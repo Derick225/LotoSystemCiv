@@ -164,4 +164,55 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                             `}>
                                 <div className="flex items-center gap-2 mb-3 opacity-50">
                                     {msg.role === 'assistant' ? <Bot size={14}/> : <User size={14}/>}
-                                    <span className="
+                                    <span className="text-[10px] font-black uppercase tracking-widest">{msg.role === 'user' ? 'Opérateur' : 'Nexus Core'}</span>
+                                </div>
+                                <div className={`text-xs md:text-sm font-medium leading-relaxed ${msg.role === 'assistant' ? 'font-mono' : ''}`}>
+                                    {msg.role === 'assistant' ? <SafeMarkdown text={msg.content} /> : msg.content}
+                                </div>
+                            </div>
+                        </motion.div>
+                    ))}
+                </AnimatePresence>
+                
+                {isLoading && (
+                    <div className="flex justify-start animate-pulse">
+                        <div className="bg-slate-800/50 p-6 rounded-[2.5rem] rounded-tl-none border border-white/5 flex gap-2">
+                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></div>
+                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Input Area */}
+            <div className="p-6 bg-slate-900 border-t border-white/5">
+                <div className="flex gap-4 items-end bg-black/30 p-2 rounded-[2.5rem] border border-white/10 focus-within:border-indigo-500/50 transition-colors">
+                    <div className="pl-4 pb-4 text-indigo-500">
+                        <Terminal size={20} />
+                    </div>
+                    <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSend();
+                            }
+                        }}
+                        placeholder="Ordonnez une simulation, demandez un avis tactique..."
+                        className="flex-1 bg-transparent border-none text-slate-200 placeholder-slate-600 focus:ring-0 resize-none py-4 max-h-32 text-sm font-medium custom-scrollbar outline-none"
+                        rows={1}
+                    />
+                    <button 
+                        onClick={handleSend}
+                        disabled={!input.trim() || isLoading}
+                        className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                    >
+                        {isLoading ? <RefreshCw className="animate-spin" size={20}/> : <Send size={20}/>}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};

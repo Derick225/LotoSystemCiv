@@ -11,8 +11,7 @@ import {
     Brain, ShieldCheck, Zap, RefreshCw, 
     Wand2, Dna, Crown, Star, Filter, 
     Gauge, Activity, FileText, ChevronDown, Binary, Sparkles, Shuffle,
-    // Fix: Added missing Database import from lucide-react
-    Database
+    Database, Flame, Snowflake, Leaf
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -44,14 +43,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
     const runMetaAnalysis = async () => {
         if (history.length < 25) {
-             showToast("Dataset insuffisant (Min 25 pour v12).", "error");
+             showToast("Dataset insuffisant (Min 25 pour v16).", "error");
              return;
         }
         setLoading(true);
         setStep(1);
         
         try {
-            // Simulation visuelle du Vortex v12
+            // Simulation visuelle du Vortex
             setTimeout(() => setStep(2), 600);
             setTimeout(() => setStep(3), 1200);
             setTimeout(() => setStep(4), 1800);
@@ -66,10 +65,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             if (isMounted.current) {
                 setResult(data);
                 savePlatinumHistory(data);
-                showToast("Noyau Platinum v12.0 diversifié.", "success");
+                showToast("Noyau Platinum v16.1 synchronisé.", "success");
             }
         } catch (e: any) {
-            if (isMounted.current) showToast("Collision de noyau", "error");
+            if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
         } finally {
             if (isMounted.current) {
                 setLoading(false);
@@ -82,7 +81,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         const optimal = calculateOptimalUserBias(drawName, history);
         setBias(optimal);
         saveFusionConfig(optimal as any);
-        showToast("ADN stochastique synchronisé.", "success");
+        if (optimal.orchestration < 0.2) {
+            showToast("Mode Organique activé (Pas de machine détectée).", "info");
+        } else {
+            showToast("Paramètres ajustés sur l'historique CSV.", "success");
+        }
     };
 
     const BIAS_LABELS: Record<string, { label: string, desc: string, icon: any }> = {
@@ -103,12 +106,12 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             </div>
 
             <div className="text-center space-y-4 relative z-10">
-                <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs">Platinum Fusion v12.0</p>
+                <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs">Platinum Fusion v16.1</p>
                 <div className="space-y-2">
-                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 1 ? 'text-white' : 'text-slate-700'}`}>1. Extension de la mémoire (Profondeur 50)</p>
-                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 2 ? 'text-white' : 'text-slate-700'}`}>2. Analyse de Translocation Machine</p>
-                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 3 ? 'text-white' : 'text-slate-700'}`}>3. Injection de Diversité (Contrainte 3/5)</p>
-                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 4 ? 'text-white' : 'text-slate-700'}`}>4. Équilibre de Nash Finalisé</p>
+                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 1 ? 'text-white' : 'text-slate-700'}`}>1. Analyse Structurelle (Machine/Organique)</p>
+                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 2 ? 'text-white' : 'text-slate-700'}`}>2. Sélection Duale (Hot/Correction Sigma)</p>
+                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 3 ? 'text-white' : 'text-slate-700'}`}>3. Injection de Diversité Stochastique</p>
+                    <p className={`text-sm font-bold transition-all duration-500 ${step >= 4 ? 'text-white' : 'text-slate-700'}`}>4. Validation Volatilité (AC > 6)</p>
                 </div>
             </div>
         </div>
@@ -120,11 +123,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
                 <div className="bg-indigo-600/10 border border-indigo-500/20 px-4 py-2 rounded-xl flex items-center gap-3 shrink-0">
                     <Shuffle size={14} className="text-indigo-400" />
-                    <span className="text-[10px] font-black uppercase text-indigo-300">Diversification v12 active</span>
+                    <span className="text-[10px] font-black uppercase text-indigo-300">Data-Driven Bias</span>
                 </div>
                 <div className="bg-emerald-600/10 border border-emerald-500/20 px-4 py-2 rounded-xl flex items-center gap-3 shrink-0">
                     <Database size={14} className="text-emerald-400" />
-                    <span className="text-[10px] font-black uppercase text-emerald-300">Profondeur HPC: 50tirages</span>
+                    <span className="text-[10px] font-black uppercase text-emerald-300">Deep History Scan</span>
                 </div>
             </div>
 
@@ -134,10 +137,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 <div className="relative z-10 grid lg:grid-cols-12 gap-12 items-start">
                     <div className="lg:col-span-7 space-y-10">
                         <div>
-                            <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full w-fit mb-4">KERNEL APEX v12.0</div>
+                            <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full w-fit mb-4">KERNEL APEX v16.1</div>
                             <h2 className="text-4xl md:text-6xl font-black tracking-tighter leading-none">Neural <span className="text-indigo-500">Synthesizer</span></h2>
                             <p className="text-slate-400 mt-6 text-sm md:text-base font-medium leading-relaxed">
-                                Le moteur v12.0 force une diversité maximale en limitant la récurrence des favoris. Il scanne 50 tirages pour stabiliser les cycles harmoniques.
+                                Le moteur v16.1 détecte automatiquement si le jeu inclut une machine ou non. En mode "Organique", il compense l'absence de données machine par une analyse accrue de la volatilité et des écarts.
                             </p>
                         </div>
 
@@ -176,7 +179,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                             
                             <div className="flex flex-col gap-4">
                                 <button onClick={handleAutoTune} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition-all">
-                                    <Wand2 size={16}/> Calibration ADN
+                                    <Wand2 size={16}/> Calibration Auto (CSV)
                                 </button>
                                 <button onClick={runMetaAnalysis} disabled={loading} className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-2xl shadow-indigo-600/30 font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center gap-4 transition-all active:scale-[0.98] disabled:opacity-50">
                                     {loading ? <RefreshCw className="animate-spin" size={22}/> : <Sparkles size={22}/>} Lancer Fusion
@@ -187,14 +190,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="p-6 bg-amber-500/10 rounded-[2.5rem] border border-amber-500/20 flex gap-4">
                             <Binary size={24} className="text-amber-500 shrink-0" />
                             <p className="text-[11px] text-amber-300 font-medium leading-relaxed italic">
-                                "La contrainte anti-concentration v12 force l'IA à explorer les vecteurs de rupture au lieu de saturer sur les favoris."
+                                "L'analyse hybride 'Sigma-Correction' cible les zones de probabilité négligées par la foule pour contrer la volatilité extrême."
                             </p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Résultats v12 */}
+            {/* Résultats v16 */}
             {result && (
                 <div className="space-y-8 animate-slide-up">
                     <div className="bg-gradient-to-br from-indigo-600 to-indigo-900 p-10 rounded-[4rem] shadow-2xl relative overflow-hidden text-white">
@@ -202,7 +205,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
                             <div className="text-center md:text-left">
                                 <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter flex items-center justify-center md:justify-start gap-4">
-                                    <Star fill="currentColor" className="text-amber-400" size={32}/> Vecteurs Maîtres v12
+                                    <Star fill="currentColor" className="text-amber-400" size={32}/> Vecteurs Maîtres v16
                                 </h3>
                                 <p className="text-indigo-100 text-xs font-bold uppercase tracking-[0.2em] mt-2 opacity-80">Noyaux d'ancrage du pool thermique</p>
                             </div>
@@ -210,9 +213,17 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 {result.kingNumbers.slice(0, 4).map(king => (
                                     <div key={king.number} className="flex flex-col items-center gap-3 bg-white/10 p-6 rounded-[2.5rem] backdrop-blur-md border border-white/20 hover:bg-white/20 transition-all cursor-help group/k">
                                         <NumberBall number={king.number} size="md" isAttractor />
-                                        <div className="text-center">
-                                            <div className="text-xl font-black">{king.count}</div>
-                                            <div className="text-[8px] font-bold uppercase opacity-50 tracking-widest">Récurrence</div>
+                                        <div className="flex flex-col items-center">
+                                            {/* Badge Hot/Cold */}
+                                            {king.count === 2 ? (
+                                                <span className="flex items-center gap-1 text-[8px] font-black uppercase text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded border border-rose-500/30">
+                                                    <Flame size={8} fill="currentColor"/> HOT
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-[8px] font-black uppercase text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded border border-cyan-500/30">
+                                                    <Leaf size={8} fill="currentColor"/> ORGANIC
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -267,7 +278,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div className="bg-slate-900 p-10 rounded-[3.5rem] border border-indigo-500/10 relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-6 opacity-5"><FileText size={100} /></div>
                         <h4 className="text-white font-black uppercase text-sm mb-6 flex items-center gap-3">
-                            <Activity size={18} className="text-indigo-500" /> Synthèse de l'Oracle v12.0
+                            <Activity size={18} className="text-indigo-500" /> Synthèse de l'Oracle v16.1
                         </h4>
                         <p className="text-slate-400 text-sm md:text-base leading-relaxed italic font-medium max-w-5xl">
                             "{result.analysis}"

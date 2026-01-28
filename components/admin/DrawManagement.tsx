@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
@@ -170,13 +171,14 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         setFormDate(new Date().toISOString().split('T')[0]);
     };
 
-    // --- BULK IMPORT LOGIC ---
+    // --- BULK IMPORT LOGIC (ROBUST PARSING) ---
 
     const processRawData = (content: string) => {
         const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
         const preview: PreviewRow[] = [];
 
         lines.forEach((line, index) => {
+            // Skip header if looks like header
             if (index === 0 && (line.toLowerCase().includes('date') || line.toLowerCase().includes('g1'))) return;
 
             let separator = ',';
@@ -184,7 +186,8 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             else if (line.includes(';')) separator = ';';
             
             const cleanLine = line.replace(/['"]/g, '').trim();
-            const parts = cleanLine.split(separator).map(p => p.trim()).filter(p => p !== '');
+            // Split et trim, mais garder les positions vides pour détecter la structure
+            const parts = cleanLine.split(separator).map(p => p.trim());
 
             if (parts.length < 6) {
                 preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet', rawLine: line });
@@ -192,8 +195,18 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             }
 
             const dateStr = parts[0];
-            const winners = parts.slice(1, 6).map(Number);
-            const machine = parts.slice(6, 11).map(Number).filter(n => !isNaN(n)); 
+            // Extract Gagnants (columns 1-5)
+            const winners = parts.slice(1, 6).map(p => {
+                const n = parseInt(p, 10);
+                return (!isNaN(n) && n > 0) ? n : null;
+            }).filter((n): n is number => n !== null);
+
+            // Extract Machine (columns 6-10), handle empty strings safely
+            const machine = parts.slice(6, 11).map(p => {
+                if (!p) return null;
+                const n = parseInt(p, 10);
+                return (!isNaN(n) && n > 0) ? n : null;
+            }).filter((n): n is number => n !== null);
 
             let isValid = true;
             let error = '';
@@ -201,14 +214,14 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             if (!dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/) && !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
                 isValid = false; error = 'Date invalide';
             }
-            if (winners.some(isNaN) || winners.length !== 5 || new Set(winners).size !== 5 || winners.some(n => n < 1 || n > 90)) {
-                isValid = false; error = 'Numéros invalides';
+            if (winners.length !== 5 || new Set(winners).size !== 5 || winners.some(n => n < 1 || n > 90)) {
+                isValid = false; error = 'Gagnants invalides';
             }
 
             preview.push({
                 date: dateStr,
                 gagnants: winners,
-                machine: machine.length === 5 ? machine : [],
+                machine: machine.length === 5 ? machine : [], // Only valid if 5 numbers
                 isValid,
                 error,
                 rawLine: line
@@ -443,6 +456,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                             <th className="p-3">Stat</th>
                                             <th className="p-3">Date</th>
                                             <th className="p-3">Gagnants</th>
+                                            <th className="p-3">Machine</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -454,6 +468,13 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                                     <div className="flex gap-1">
                                                         {row.gagnants.map((n, j) => <span key={j} className="w-5 h-5 rounded bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-[8px]">{n}</span>)}
                                                     </div>
+                                                </td>
+                                                <td className="p-3">
+                                                    {row.machine.length > 0 ? (
+                                                        <div className="flex gap-1">
+                                                            {row.machine.map((n, j) => <span key={j} className="w-5 h-5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 flex items-center justify-center text-[8px]">{n}</span>)}
+                                                        </div>
+                                                    ) : <span className="text-[8px] text-slate-400 italic">Vide</span>}
                                                 </td>
                                             </tr>
                                         ))}

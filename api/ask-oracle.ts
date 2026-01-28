@@ -90,7 +90,7 @@ export default async function handler(req: Request) {
         - Capital utilisateur (Bankroll) : ${currentContext?.bankroll ? currentContext.bankroll + ' FCFA' : 'Non spécifié'}
         
         Tu as accès à des outils pour analyser l'historique ou générer des tickets. Utilise-les si l'utilisateur demande une action concrète.
-        Si le capital est bas (< 5000), conseille la prudence.
+        Si le capital est bas (< 5000 FCFA), conseille impérativement la prudence et des mises réduites.
         Ton ton est industriel, précis et ultra-professionnel. Pas de blabla inutile.`;
 
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
