@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 
 export const config = {
@@ -86,8 +87,10 @@ export default async function handler(req: Request) {
         Contexte actuel pour ${drawName} :
         - Régime détecté : ${currentContext?.regime || 'Inconnu'}
         - Prédiction IA : ${JSON.stringify(currentContext?.lastPrediction)}
+        - Capital utilisateur (Bankroll) : ${currentContext?.bankroll ? currentContext.bankroll + ' FCFA' : 'Non spécifié'}
         
         Tu as accès à des outils pour analyser l'historique ou générer des tickets. Utilise-les si l'utilisateur demande une action concrète.
+        Si le capital est bas (< 5000), conseille la prudence.
         Ton ton est industriel, précis et ultra-professionnel. Pas de blabla inutile.`;
 
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {

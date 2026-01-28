@@ -14,26 +14,22 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Use React.Component explicitly to resolve 'Property setState/props does not exist' errors in specific environments
-export class LocalErrorBoundary extends React.Component<Props, State> {
+export class LocalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
   };
 
-  // Fix: Static method for error boundary state updates
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  // Fix: Use ErrorInfo type for lifecycle method
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
         console.warn("Module Failure Intercepted:", error, errorInfo);
     }
   }
 
-  // Fix: handleReload now correctly accesses Component context
   private handleReload = () => {
     const { error } = this.state;
     const isChunkError = error?.message?.includes('dynamically imported module') || 
@@ -42,14 +38,11 @@ export class LocalErrorBoundary extends React.Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
-        // Fix: Access setState from the React.Component base class
         this.setState({ hasError: false, error: null });
     }
   };
 
-  // Fix: render now correctly accesses Component context
   public render(): ReactNode {
-    // Fix: Access state and props from the React.Component instance
     const { hasError, error } = this.state;
     const { children } = this.props;
 

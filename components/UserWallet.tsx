@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
 import { checkAndSyncRecentResults, fetchResults } from '../services/lotteryService';
@@ -5,15 +6,18 @@ import { checkSubscriptionStatus } from '../services/subscriptionService';
 import { authService } from '../services/authService';
 import type { SavedTicket, DrawResult, SubscriptionState } from '../types';
 import { NumberBall } from './NumberBall';
-import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles, CloudDownload } from 'lucide-react';
+import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles, CloudDownload, Activity } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from 'recharts';
 import { TicketXRay } from './TicketXRay';
 import { LOTO_PAYOUTS } from '../constants';
 import { useToast } from './ui/Toast';
 import { KellyCalculator } from './KellyCalculator';
+import { useNexus } from './NexusProvider';
 
 export const UserWallet: React.FC = () => {
     const { showToast } = useToast();
+    const { spectral } = useNexus(); // Pour l'audit de pertinence en temps réel
+    
     const [tickets, setTickets] = useState<SavedTicket[]>([]);
     const [resultsMap, setResultsMap] = useState<Record<string, DrawResult[]>>({});
     const [loading, setLoading] = useState(true);
@@ -180,6 +184,16 @@ export const UserWallet: React.FC = () => {
         return { status: 'checked', hits, win, drawDate: match.date };
     };
 
+    // Calcul de la pertinence actuelle (Score Spectral Moyen)
+    const getRelevance = (numbers: number[]) => {
+        if (spectral.length === 0) return null;
+        const totalEnergy = numbers.reduce((acc, n) => {
+            const s = spectral.find(x => x.number === n);
+            return acc + (s?.energy || 0);
+        }, 0);
+        return Math.round(totalEnergy / numbers.length);
+    };
+
     return (
         <div className="animate-fade-in space-y-6 md:space-y-8 pb-20 px-1 md:px-0">
             {subscription && (
@@ -310,6 +324,7 @@ export const UserWallet: React.FC = () => {
                     {tickets.map(ticket => {
                         const { status, hits, win, drawDate } = getTicketStatus(ticket);
                         const isExpanded = expandedTicketId === ticket.id;
+                        const relevance = getRelevance(ticket.numbers);
                         
                         return (
                             <div 
@@ -331,6 +346,13 @@ export const UserWallet: React.FC = () => {
                                         <div className="flex gap-1.5 md:gap-2 justify-center md:justify-start flex-wrap">
                                             {ticket.numbers.map(n => <NumberBall key={n} number={n} size="sm" />)}
                                         </div>
+                                        
+                                        {/* PERTINENCE ACTUELLE (NEW) */}
+                                        {relevance !== null && status === 'pending' && (
+                                            <div className={`mt-2 flex items-center gap-1 text-[9px] font-black uppercase ${relevance > 70 ? 'text-emerald-500' : relevance > 40 ? 'text-indigo-400' : 'text-slate-500'}`}>
+                                                <Activity size={10} /> Pertinence Actuelle : {relevance}%
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-50 dark:border-slate-700">

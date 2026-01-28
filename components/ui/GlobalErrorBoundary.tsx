@@ -14,34 +14,27 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Use React.Component explicitly to resolve 'Property setState/props does not exist' errors in specific environments
-export class GlobalErrorBoundary extends React.Component<Props, State> {
+export class GlobalErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
   };
 
-  // Fix: Static method for error boundary state updates with explicit return type
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  // Fix: Use ErrorInfo type for componentDidCatch
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS CRITICAL FAILURE:', error, errorInfo);
   }
 
-  // Fix: handleReload now correctly accesses Component context
   private handleReload = () => {
-    // Fix: Access setState from the React.Component base class
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
   };
 
-  // Fix: render now correctly accesses Component context
   public render(): ReactNode {
-    // Fix: Access state and props from the React.Component instance
     const { hasError, error } = this.state;
     const { children } = this.props;
 

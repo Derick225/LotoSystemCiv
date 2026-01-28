@@ -1,11 +1,11 @@
 
 import React from 'react';
 import { useNexus } from '../NexusProvider';
-import { Activity, X } from 'lucide-react';
+import { Activity, X, Microscope, ArrowRight } from 'lucide-react';
 import { getNumberColor } from '../../constants';
 
 export const GlobalNumberHUD: React.FC = () => {
-    const { hoveredNumber, setHoveredNumber, stats, gaps, spectral } = useNexus();
+    const { hoveredNumber, setHoveredNumber, setInspectingNumber, stats, gaps, spectral } = useNexus();
 
     if (!hoveredNumber) return null;
 
@@ -28,6 +28,12 @@ export const GlobalNumberHUD: React.FC = () => {
 
     const handleClose = () => setHoveredNumber(null);
 
+    const handleDeepScan = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setInspectingNumber(hoveredNumber);
+        setHoveredNumber(null);
+    };
+
     return (
         <div 
             className="fixed inset-0 z-[150] flex items-center justify-center px-6 animate-scale-in bg-black/60 backdrop-blur-sm"
@@ -35,7 +41,7 @@ export const GlobalNumberHUD: React.FC = () => {
         >
             <div 
                 className="bg-slate-900/95 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-6 shadow-2xl flex flex-col items-center gap-6 min-w-[280px] max-w-sm w-full relative overflow-hidden pointer-events-auto"
-                onClick={(e) => e.stopPropagation()} // Empêche la fermeture au clic sur la carte
+                onClick={(e) => e.stopPropagation()} 
             >
                 {/* Close Button */}
                 <button 
@@ -62,25 +68,33 @@ export const GlobalNumberHUD: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl">
+                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl border border-white/5">
                             <span className="text-[8px] font-bold text-slate-400 uppercase mb-1">Sorties</span>
                             <span className="text-xl font-black text-white flex items-center gap-1">
                                 {freq}
                             </span>
                         </div>
-                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl">
+                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl border border-white/5">
                             <span className="text-[8px] font-bold text-slate-400 uppercase mb-1">Écart</span>
                             <span className="text-xl font-black text-white flex items-center gap-1">
                                 {gap}
                             </span>
                         </div>
-                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl">
+                        <div className="flex flex-col items-center p-2 bg-white/5 rounded-2xl border border-white/5">
                             <span className="text-[8px] font-bold text-slate-400 uppercase mb-1">Énergie</span>
-                            <span className="text-xl font-black text-white flex items-center gap-1">
+                            <span className={`text-xl font-black flex items-center gap-1 ${energy > 70 ? 'text-emerald-400' : 'text-white'}`}>
                                 {Math.round(energy)}%
                             </span>
                         </div>
                     </div>
+
+                    <button 
+                        onClick={handleDeepScan}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 group"
+                    >
+                        <Microscope size={16} /> Analyse Profonde
+                        <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                    </button>
                 </div>
             </div>
         </div>

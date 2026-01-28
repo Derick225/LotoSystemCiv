@@ -3,11 +3,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNexus } from '../NexusProvider';
 import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import { saveTicket } from '../../services/userPreferencesService';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { ReliabilityMeter } from '../ReliabilityMeter';
-import { Zap, Cpu, Activity, Info, ShieldCheck, Layers, Binary, Target, RefreshCw } from 'lucide-react';
+import { Zap, Cpu, Activity, Info, ShieldCheck, Layers, Binary, Target, RefreshCw, Wallet, Save } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
@@ -40,6 +41,16 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             setIsComputing(false);
         }
     }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, setLastPrediction, showToast]);
+
+    const handleQuickSave = async () => {
+        if (!lastPrediction) return;
+        await saveTicket({
+            numbers: lastPrediction.suggestedNumbers,
+            drawName,
+            strategy: `Oracle AI (${lastPrediction.confidence}%)`
+        });
+        showToast("Prédiction sauvegardée dans le Portefeuille.", "success");
+    };
 
     if (nexusLoading) return <div className="p-20 text-center animate-pulse text-indigo-500">Synchronisation des neurones...</div>;
 
@@ -75,26 +86,36 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         Confiance <span className="text-indigo-500">{lastPrediction.confidence}%</span>
                                     </h2>
                                 </div>
-                                <div className="text-right">
-                                    <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black text-slate-400 uppercase mb-2">Build 12.5.4</div>
+                                <div className="flex flex-col items-end gap-2">
+                                    <div className="px-3 py-1 bg-white/10 rounded-full border border-white/10 text-[9px] font-black text-slate-400 uppercase">Build 12.5.4</div>
                                     <div className="text-xs font-bold text-emerald-400 uppercase tracking-widest">{getStrategyName(lastPrediction.usedWeights!)}</div>
                                 </div>
                             </div>
 
-                            <div className="flex gap-4 md:gap-8 justify-center lg:justify-start mb-12 flex-wrap">
-                                {lastPrediction.suggestedNumbers.map((n, i) => (
-                                    <motion.div 
-                                        key={n} 
-                                        initial={{ scale: 0, rotate: -20 }} 
-                                        animate={{ scale: 1, rotate: 0 }} 
-                                        transition={{ delay: i * 0.1, type: 'spring' }}
-                                    >
-                                        <NumberBall number={n} size="lg" isAttractor={i < 2} />
-                                    </motion.div>
-                                ))}
+                            <div className="flex flex-col md:flex-row gap-8 items-center justify-between mb-12">
+                                <div className="flex gap-3 md:gap-6 justify-center flex-wrap">
+                                    {lastPrediction.suggestedNumbers.map((n, i) => (
+                                        <motion.div 
+                                            key={n} 
+                                            initial={{ scale: 0, rotate: -20 }} 
+                                            animate={{ scale: 1, rotate: 0 }} 
+                                            transition={{ delay: i * 0.1, type: 'spring' }}
+                                        >
+                                            <NumberBall number={n} size="lg" isAttractor={i < 2} />
+                                        </motion.div>
+                                    ))}
+                                </div>
+                                
+                                <button 
+                                    onClick={handleQuickSave}
+                                    className="px-6 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center gap-2 transition-all active:scale-95"
+                                >
+                                    <Save size={16} /> <span className="hidden md:inline">Sauvegarder</span>
+                                </button>
                             </div>
 
-                            <div className="bg-white/5 p-6 rounded-3xl border border-white/5 backdrop-blur-md">
+                            <div className="bg-white/5 p-6 rounded-3xl border border-white/5 backdrop-blur-md flex gap-4">
+                                <Info className="text-indigo-400 shrink-0 mt-1" size={20} />
                                 <p className="text-slate-300 text-sm italic font-medium leading-relaxed">
                                     "{lastPrediction.analysis}"
                                 </p>
