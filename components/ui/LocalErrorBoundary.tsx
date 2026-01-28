@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
@@ -13,8 +14,8 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-// Fix: Correct inheritance from React.Component to allow property access
-export class LocalErrorBoundary extends Component<Props, State> {
+// Fix: Use React.Component explicitly to resolve 'Property setState/props does not exist' errors in specific environments
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -41,12 +42,14 @@ export class LocalErrorBoundary extends Component<Props, State> {
     if (isChunkError) {
         window.location.reload();
     } else {
+        // Fix: Access setState from the React.Component base class
         this.setState({ hasError: false, error: null });
     }
   };
 
   // Fix: render now correctly accesses Component context
   public render(): ReactNode {
+    // Fix: Access state and props from the React.Component instance
     const { hasError, error } = this.state;
     const { children } = this.props;
 

@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
@@ -16,57 +15,39 @@ const WEIGHT_KEYS = [
 ];
 
 /**
- * MOTEUR DE FITNESS ULTRA-RAPIDE v15.4
- * Utilise des scores pré-calculés pour éviter les boucles imbriquées
+ * FITNESS EVALUATOR v15.5 (ULTRA-FAST)
+ * Calcule l'efficacité des poids contre la matrice de signal pré-calculée.
  */
-const evaluateFitness = (weights: any, signalMatrix: any) => {
-    let totalScore = 0;
-    
-    // On évalue la capacité des poids à "amplifier" les bons numéros
-    // basés sur les 90 vecteurs de la matrice de signal.
+const evaluateGenome = (weights: any, signalMatrix: Record<number, any>) => {
+    let fitness = 0;
     for (let i = 1; i <= 90; i++) {
         const sig = signalMatrix[i];
         if (!sig) continue;
 
-        const nScore = 
+        const score = 
             (sig.freq * (weights.frequency || 0.1)) +
-            (sig.isGapMatch ? (weights.gap || 0.2) * 50 : 0) +
-            (sig.markov * (weights.markov || 0.1) * 10) +
-            (sig.momentum * (weights.momentum || 0.05) * 5);
+            (sig.isGapMatch ? (weights.gap || 0.2) * 40 : 0) +
+            (sig.markov * (weights.markov || 0.1) * 15) +
+            (sig.momentum * (weights.momentum || 0.05) * 8);
         
-        // On récompense si le numéro est effectivement sorti récemment (signal.actual)
-        if (sig.wasRecentlyOut) {
-            totalScore += nScore;
-        } else {
-            totalScore -= nScore * 0.2; // Pénalité pour les faux positifs
-        }
+        if (sig.hitRecently) fitness += score;
+        else fitness -= score * 0.12; // Pénalité de faux positif
     }
-    return totalScore;
-};
-
-const mutate = (w: any, strength: number) => {
-    const next = { ...w };
-    const keysToMutate = WEIGHT_KEYS.filter(() => Math.random() > 0.7);
-    keysToMutate.forEach(k => {
-        next[k] = Math.max(0.01, Math.min(1.0, (next[k] || 0.1) + (Math.random() - 0.5) * strength));
-    });
-    return next;
+    return fitness;
 };
 
 export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const start = Date.now();
+    const startTime = Date.now();
     const { drawName } = await req.json();
     
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
-    if (!supabaseUrl || !supabaseKey) throw new Error("Config SQL manquante");
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(
+        process.env.VITE_SUPABASE_URL || '',
+        process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    );
 
-    // 1. Récupération optimisée des données
     const { data: history } = await supabase
         .from('draw_results')
         .select('gagnants')
@@ -74,52 +55,50 @@ export default async function handler(req: Request) {
         .order('date', { ascending: false })
         .limit(60);
 
-    if (!history || history.length < 20) throw new Error("Historique insuffisant");
+    if (!history || history.length < 20) throw new Error("Dataset insuffisant");
 
-    // 2. PRÉ-CALCUL DE LA MATRICE DE SIGNAL (O(N))
-    // On transforme l'histoire en une matrice de probabilités statique
+    // PHASE 1: PRÉ-CALCUL DE LA MATRICE DE SIGNAL (O(H))
     const signalMatrix: Record<number, any> = {};
-    const recent = history.slice(0, 15);
-    const context = history.slice(15, 60);
+    const recent = history.slice(0, 12); // Fenêtre de test
+    const past = history.slice(12, 60);  // Fenêtre d'apprentissage
 
     for (let i = 1; i <= 90; i++) {
-        const freq = context.filter(d => d.gagnants.includes(i)).length;
-        const lastSeen = context.findIndex(d => d.gagnants.includes(i));
-        const gap = lastSeen === -1 ? 50 : lastSeen;
+        const freq = past.filter(d => d.gagnants.includes(i)).length;
+        const lastIdx = past.findIndex(d => d.gagnants.includes(i));
+        const gap = lastIdx === -1 ? 50 : lastIdx;
         
-        // Transitions Markov (simplifiées)
+        // Markov succinct
         let markov = 0;
-        const lastWinners = history[0].gagnants;
-        context.slice(0, 10).forEach((d, idx) => {
-            if (d.gagnants.includes(i) && context[idx+1]?.gagnants.some(n => lastWinners.includes(n))) {
-                markov++;
-            }
+        const anchors = history[12].gagnants;
+        past.slice(0, 10).forEach((d, idx) => {
+            if (d.gagnants.includes(i) && past[idx+1]?.gagnants.some(n => anchors.includes(n))) markov++;
         });
 
         signalMatrix[i] = {
             freq: freq / 45,
-            isGapMatch: gap >= 8 && gap <= 18,
+            isGapMatch: gap >= 8 && gap <= 22,
             markov: markov / 10,
             momentum: history.slice(0, 5).filter(d => d.gagnants.includes(i)).length,
-            wasRecentlyOut: recent.some(d => d.gagnants.includes(i))
+            hitRecently: recent.some(d => d.gagnants.includes(i))
         };
     }
 
-    // 3. ÉVOLUTION GÉNÉTIQUE AVEC TIMER DE SÉCURITÉ
+    // PHASE 2: ÉVOLUTION GÉNÉTIQUE AVEC WATCHDOG (O(G*P))
     const { data: current } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
-    let bestW = current?.weights || { frequency: 0.1, gap: 0.2, spectral: 0.2, markov: 0.1 };
+    let bestW = current?.weights || { frequency: 0.1, gap: 0.2 };
+    let bestScore = evaluateGenome(bestW, signalMatrix);
     
-    let bestScore = evaluateFitness(bestW, signalMatrix);
-    let population = Array(20).fill(null).map((_, i) => i === 0 ? bestW : mutate(bestW, 0.6));
+    let population = Array(20).fill(null).map((_, i) => {
+        if (i === 0) return { ...bestW };
+        const mutant = { ...bestW };
+        WEIGHT_KEYS.forEach(k => mutant[k] = Math.max(0.01, Math.min(1.0, (mutant[k] || 0.1) + (Math.random() - 0.5) * 0.5)));
+        return mutant;
+    });
 
-    for (let g = 0; g < 40; g++) {
-        // TIMER DE SÉCURITÉ : Arrêt à 8 secondes pour éviter le 504
-        if (Date.now() - start > 8000) {
-            console.log("Timeout protection active: Renvoi du meilleur résultat actuel.");
-            break;
-        }
+    for (let g = 0; g < 50; g++) {
+        if (Date.now() - startTime > 8000) break; // Arrêt propre avant timeout 504
 
-        const scored = population.map(w => ({ w, s: evaluateFitness(w, signalMatrix) }))
+        const scored = population.map(w => ({ w, s: evaluateGenome(w, signalMatrix) }))
             .sort((a, b) => b.s - a.s);
         
         if (scored[0].s > bestScore) {
@@ -131,23 +110,23 @@ export default async function handler(req: Request) {
         population = [...elite];
         while(population.length < 20) {
             const p = elite[Math.floor(Math.random() * elite.length)];
-            population.push(mutate(p, 0.3 * (1 - g/40)));
+            const child = { ...p };
+            const k = WEIGHT_KEYS[Math.floor(Math.random() * WEIGHT_KEYS.length)];
+            child[k] = Math.max(0.01, Math.min(1.0, (child[k] || 0.1) + (Math.random() - 0.5) * 0.2));
+            population.push(child);
         }
     }
 
-    // 4. SAUVEGARDE
+    // PHASE 3: PERSISTANCE
     await supabase.from('algo_weights').upsert({ 
         draw_name: drawName, 
         weights: bestW, 
         updated_at: new Date().toISOString() 
     });
 
-    return new Response(JSON.stringify({ 
-        success: true, 
-        improved: true, 
-        weights: bestW,
-        message: "ADN recalibré (Moteur Matrix v15.4)"
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, improved: true, weights: bestW }), { 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
 
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });

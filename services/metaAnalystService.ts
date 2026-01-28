@@ -18,11 +18,10 @@ import {
 } from './mathService';
 
 /**
- * Nexus MetaAnalyst v5.3 - Synchronized Synthesis Kernel
+ * Nexus MetaAnalyst v15.5 - Synchronized Synthesis Kernel
  * Fusionne les signaux algorithmiques pour générer des super-combinaisons à haute diversité.
  */
 
-// Cache avec timestamp étendu à 1 heure pour optimiser les performances HPC
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
 
 export const precomputeBaseScores = async (
@@ -33,13 +32,12 @@ export const precomputeBaseScores = async (
     const now = Date.now();
     const cached = SCORE_CACHE.get(drawName);
     
-    // Cache valide 1 heure (3600000ms) selon spec v5.3
-    if (cached && (now - cached.ts < 3600000)) return cached.data;
+    if (cached && (now - cached.ts < 1800000)) return cached.data;
     
     const weights = await getAlgoWeights(drawName);
-    // Profondeur augmentée à 120+ pour capturer les cycles de rupture
     const deepHistory = history.slice(0, 120);
-    // Fix: remove 5th argument { runBacktest: true } which is not expected by generateMasterPrediction
+    
+    // FIX: Signature alignée avec predictionEngine.ts
     const masterPred = await generateMasterPrediction(drawName, deepHistory, weights, metrics);
     
     const data = masterPred.breakdown || {};
@@ -79,9 +77,6 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     return { stability, chaos, harmony, wavelet, orchestration };
 }
 
-/**
- * GÉNÉRATION PLATINUM FUSION v15.2 (DIVERSIFIED KING EDITION)
- */
 export async function generatePlatinumPrediction(
     drawName: string, 
     history: DrawResult[],
@@ -95,8 +90,6 @@ export async function generatePlatinumPrediction(
     const regularity = calculateRegularity(history);
     const pool = Object.keys(scores).map(Number);
 
-    // --- PHASE 1 : IDENTIFICATION DES KING NUMBERS (DIVERSIFIÉS) ---
-    // Contrainte v15.2 : avgGap > 10 pour éviter la saturation fréquentielle sur les tops fréquences
     const rawKingPool = pool.map(n => {
         const b = scores[n];
         const val = ((b.spectral || 0) * bias.harmony) + 
@@ -109,20 +102,19 @@ export async function generatePlatinumPrediction(
     const kingNumbers = rawKingPool
         .filter(item => {
             const reg = regularity.find(r => r.number === item.num);
-            return (reg?.avgGap || 0) > 10; // Filtrage des numéros trop fréquents
+            return (reg?.avgGap || 0) > 10; 
         })
         .sort((a, b) => b.val - a.val)
         .slice(0, 8)
         .map(k => k.num);
 
-    // --- PHASE 2 : GÉNÉRATION PAR TOURNOI STOCHASTIQUE ---
     const combinations: PlatinumCombo[] = [];
 
     for (let i = 0; i < 5; i++) {
         let bestCombo: number[] = [];
         let maxFitness = -Infinity;
 
-        for (let attempt = 0; attempt < 100; attempt++) {
+        for (let attempt = 0; attempt < 80; attempt++) {
             const candidate: number[] = [];
             const tempPool = [...pool];
             let kingCount = 0;
@@ -131,7 +123,7 @@ export async function generatePlatinumPrediction(
                 let bestInTournament = -1;
                 let topTournamentScore = -Infinity;
 
-                for (let k = 0; k < 8; k++) {
+                for (let k = 0; k < 6; k++) {
                     const idx = Math.floor(Math.random() * tempPool.length);
                     const n = tempPool[idx];
                     const b = scores[n];
@@ -173,7 +165,7 @@ export async function generatePlatinumPrediction(
 
         combinations.push({
             numbers: bestCombo,
-            score: Math.min(99, Math.round(maxFitness / 6)),
+            score: Math.min(99, Math.round(maxFitness / 5.5)),
             tags: i === 0 ? ["Alpha Fusion"] : ["Vecteur Tournoi"],
             breakdown: { 
                 harmony: Math.round(bias.harmony * 100), 
@@ -187,11 +179,9 @@ export async function generatePlatinumPrediction(
     return {
         id: crypto.randomUUID(),
         kingNumbers: kingNumbers.map(n => ({ number: n, count: 1 })), 
-        targetSumRange: { min: 170, max: 245, reason: "Équilibre v15.2 (avg_gap > 10)" },
-        hotZonesSpectro: combinations[0].numbers,
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: Math.round(combinations[0].score * 0.95),
-        analysis: `Synthèse v15.2 active. Biais : Harmonie ${(bias.harmony*100).toFixed(0)}%, Stabilité ${(bias.stability*100).toFixed(0)}%, Chaos ${(bias.chaos*100).toFixed(0)}%. Diversité KingNumbers forcée (avg_gap > 10).`,
+        analysis: `Synthèse v15.5 active. DNA synchronisé. Biais optimisé : Harmonie ${(bias.harmony*100).toFixed(0)}%.`,
         drawName,
         timestamp: Date.now()
     };

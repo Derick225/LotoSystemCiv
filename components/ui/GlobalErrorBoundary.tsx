@@ -1,3 +1,4 @@
+
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
@@ -13,8 +14,8 @@ interface State {
 /**
  * GlobalErrorBoundary v4.5 - Secure Error Interception
  */
-// Fix: Correct inheritance from React.Component to allow property access
-export class GlobalErrorBoundary extends Component<Props, State> {
+// Fix: Use React.Component explicitly to resolve 'Property setState/props does not exist' errors in specific environments
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -32,6 +33,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   // Fix: handleReload now correctly accesses Component context
   private handleReload = () => {
+    // Fix: Access setState from the React.Component base class
     this.setState({ hasError: false, error: null });
     // Hard reload of the infrastructure as a fallback
     window.location.reload(); 
@@ -39,6 +41,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   // Fix: render now correctly accesses Component context
   public render(): ReactNode {
+    // Fix: Access state and props from the React.Component instance
     const { hasError, error } = this.state;
     const { children } = this.props;
 

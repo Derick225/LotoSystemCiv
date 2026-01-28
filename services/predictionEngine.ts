@@ -1,16 +1,26 @@
-
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
 import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v15.4 - SELF-HEALING RECURSIVE KERNEL
+ * NEXUS PREDICTION ENGINE v15.5 - SYNCHRONIZED RECURSIVE KERNEL
  */
 
 export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): AlgoWeights => {
     let normalized = { ...weights };
+    
+    // Auto-ajustement basé sur l'entropie si l'historique est fourni
+    if (history && history.length > 20) {
+        const ent = calculateShannonEntropy(history.slice(0, 100));
+        if (ent.normalized > 0.94) {
+            // En cas de chaos total, on booste l'analyse spectrale et markov
+            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.5;
+            normalized.markov = (Number(normalized.markov) || 0.1) * 1.3;
+        }
+    }
+
     const total = Object.values(normalized).reduce((a, b) => a + (Number(b) || 0), 0);
-    if (total === 0) return getDefaultWeights();
+    if (total <= 0) return getDefaultWeights();
     
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
         normalized[key] = parseFloat(((Number(normalized[key]) || 0) / total).toFixed(4));
@@ -38,12 +48,18 @@ export const generateMasterPrediction = async (
     weightsToUse?: AlgoWeights,
     metrics?: any
 ): Promise<Prediction> => {
+    // Filtrage Temporel de sécurité
     const validHistory = history.filter(d => {
         const year = d.date.includes('/') ? parseInt(d.date.split('/')[2]) : new Date(d.date).getFullYear();
         return year <= new Date().getFullYear();
     });
 
-    let baseWeights = weightsToUse || await getAlgoWeights(drawName);
+    // SYNC LOGIC: Toujours chercher le génome entraîné en priorité
+    let baseWeights = weightsToUse;
+    if (!baseWeights) {
+        baseWeights = await getAlgoWeights(drawName);
+    }
+
     let weights = normalizeWeights(baseWeights, validHistory);
     let rules = getAdaptiveRules(drawName);
 
@@ -91,7 +107,7 @@ export const generateMasterPrediction = async (
         suggestedNumbers: selection,
         candidates: sorted.slice(5, 15).map(s => s.num),
         confidence: Math.min(99, Math.round(sorted[0].score * (acScore / 8.5))),
-        analysis: `Apex v15.4. Précision structurelle : ${acScore}/10.`,
+        analysis: `Apex v15.5 (Genome Sync). Précision structurelle : ${acScore}/10.`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
         timestamp: Date.now()
@@ -113,7 +129,9 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
     const dataToSave = { weights, rules: getAdaptiveRules(drawName), updatedAt: new Date().toISOString() };
     localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(dataToSave));
     if (isSupabaseConfigured()) {
-        await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: weights, updated_at: new Date().toISOString() });
+        try {
+            await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: weights, updated_at: new Date().toISOString() });
+        } catch(e) {}
     }
 };
 
@@ -131,7 +149,7 @@ export const saveAdaptiveRules = async (drawName: string, rules: AdaptiveRules) 
 export const getStrategyName = (weights: AlgoWeights): string => {
     const entries = Object.entries(weights) as [string, any][];
     const dominant = entries.reduce((a, b) => (Number(a[1]) || 0) > (Number(b[1]) || 0) ? a : b);
-    const names: Record<string, string> = { frequency: 'Inertie', gap: 'Écart Récursif', spectral: 'Résonance FFT', markov: 'Lien Séquentiel' };
+    const names: Record<string, string> = { frequency: 'Inertie', gap: 'Écart Récursif', spectral: 'Résonance FFT', markov: 'Lien Séquentiel', orchestration: 'Translocation' };
     return names[dominant[0]] || 'Nexus APEX';
 };
 
@@ -151,5 +169,5 @@ export const calculateCorrectionsFromForensics = (currentWeights: AlgoWeights, _
         const key = top.algo as keyof AlgoWeights;
         if (newWeights[key] !== undefined) newWeights[key] = (Number(newWeights[key]) || 0) + 0.05;
     }
-    return { newWeights: normalizeWeights(newWeights), newRules: _rules, reasoning: ["Optimisation par divergence"] };
+    return { newWeights: normalizeWeights(newWeights), newRules: _rules, reasoning: ["Optimisation par divergence stochastique"] };
 };
