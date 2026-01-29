@@ -1,21 +1,24 @@
-import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult } from '../types';
+
+import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, AdaptiveRules, ForensicReport, TicketAnalysisResult, SymbioticContext } from '../types';
 import { calculateRegularity, calculateACValue, calculateVolatility, calculateDigitalRoot, calculateShannonEntropy } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v15.5 - SYNCHRONIZED RECURSIVE KERNEL
+ * NEXUS PREDICTION ENGINE v17.0 - SYMBIOTIC TENSOR KERNEL
+ * Fusionne les signaux statiques (poids) avec les signaux dynamiques (contexte spatial/orchestral).
  */
 
 export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): AlgoWeights => {
     let normalized = { ...weights };
     
-    // Auto-ajustement basé sur l'entropie si l'historique est fourni
+    // Auto-ajustement basé sur l'entropie
     if (history && history.length > 20) {
         const ent = calculateShannonEntropy(history.slice(0, 100));
+        // Si le chaos est élevé, on réduit l'influence des patterns rigides (markov) au profit de la physique (spectral)
         if (ent.normalized > 0.94) {
-            // En cas de chaos total, on booste l'analyse spectrale et markov
             normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.5;
-            normalized.markov = (Number(normalized.markov) || 0.1) * 1.3;
+            normalized.markov = (Number(normalized.markov) || 0.1) * 0.8; 
+            normalized.gap = (Number(normalized.gap) || 0.25) * 1.2; // Les écarts sont rois dans le chaos
         }
     }
 
@@ -46,7 +49,8 @@ export const generateMasterPrediction = async (
     drawName: string, 
     history: DrawResult[],
     weightsToUse?: AlgoWeights,
-    metrics?: any
+    metrics?: any,
+    symbioticContext?: SymbioticContext
 ): Promise<Prediction> => {
     // Filtrage Temporel de sécurité
     const validHistory = history.filter(d => {
@@ -54,7 +58,6 @@ export const generateMasterPrediction = async (
         return year <= new Date().getFullYear();
     });
 
-    // SYNC LOGIC: Toujours chercher le génome entraîné en priorité
     let baseWeights = weightsToUse;
     if (!baseWeights) {
         baseWeights = await getAlgoWeights(drawName);
@@ -74,6 +77,7 @@ export const generateMasterPrediction = async (
         const spec = metrics?.spectral?.find((s: any) => s.number === num);
         const freq = deepHistory.filter(h => h.gagnants.includes(num)).length;
         
+        // 1. Calculs Base Algorithmique
         let markovScore = 0;
         lastWinners.forEach(lw => {
            const strength = correlationMap[lw]?.affinities?.[num] || 0;
@@ -88,29 +92,77 @@ export const generateMasterPrediction = async (
             momentum: Math.sqrt(deepHistory.slice(0, 12).filter(h => h.gagnants.includes(num)).length) * 45,
             equilibrium: calculateDigitalRoot(num) * 5,
             wavelet: metrics?.wavelet?.find((w: any) => w.number === num)?.energy || 0,
-            orchestration: 50, fractal: 50, spatial: 50, ai_intuition: 50, resistance: 50, transformer: 0, temporal: 0, digital_root: 0, gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0, monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
+            // Les autres seront ajustés par la symbiose
+            orchestration: 0, fractal: 50, spatial: 0, ai_intuition: 50, resistance: 50, transformer: 0, temporal: 0, digital_root: 0, gap_velocity: 0, poisson: 0, leader_succession: 0, anti_consensus: 0, monte_carlo: 0, lstm_pattern: 0, isolation_anomaly: 0, bayes: 0
         };
         
+        // 2. INJECTION SYMBIOTIQUE (Le "Veto" et le "Boost")
+        let symbiosisMultiplier = 1.0;
+
+        if (symbioticContext) {
+            // A. Spatial Veto (Zone Morte)
+            if (symbioticContext.spatialDeadZones.includes(num)) {
+                symbiosisMultiplier *= 0.2; // Pénalité sévère (-80%)
+                nBreakdown.spatial = 0;
+            } else if (symbioticContext.spatialHotZones.includes(num)) {
+                symbiosisMultiplier *= 1.3; // Boost (+30%)
+                nBreakdown.spatial = 100;
+            }
+
+            // B. Orchestration Boost
+            const orchBoost = symbioticContext.orchestrationBoosts[num];
+            if (orchBoost) {
+                symbiosisMultiplier *= orchBoost; // Multiplicateur direct (ex: 1.5 pour un miroir parfait)
+                nBreakdown.orchestration = Math.min(100, orchBoost * 50);
+            }
+
+            // C. Spectral Veto (Énergie nulle)
+            if (symbioticContext.spectralVeto.includes(num)) {
+                symbiosisMultiplier *= 0.5; // Pénalité moyenne
+            }
+
+            // D. Temporel
+            if (symbioticContext.temporalTarget) {
+                const currentGap = reg?.currentGap || 0;
+                if (currentGap >= symbioticContext.temporalTarget.min && currentGap <= symbioticContext.temporalTarget.max) {
+                    symbiosisMultiplier *= 1.2;
+                    nBreakdown.temporal = 100;
+                }
+            }
+        }
+
+        // 3. Calcul Score Final Pondéré
         let finalScore = 0;
         (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(k => {
             finalScore += (nBreakdown[k] || 0) * (Number(weights[k]) || 0);
         });
 
-        return { num, score: finalScore, breakdown: nBreakdown };
+        // Application du facteur symbiotique
+        finalScore *= symbiosisMultiplier;
+
+        return { num, score: finalScore, breakdown: nBreakdown, symbiosisFactor: symbiosisMultiplier };
     });
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
     const selection = sorted.slice(0, 5).map(s => s.num).sort((a,b) => a-b);
     const acScore = calculateACValue(selection);
 
+    // Calcul de la confiance globale basée sur la cohérence des top scores
+    const topAvgScore = sorted.slice(0, 5).reduce((a, b) => a + b.score, 0) / 5;
+    const topSymbiosis = sorted.slice(0, 5).reduce((a, b) => a + (b.symbiosisFactor || 1), 0) / 5;
+    
+    // Confiance boostée si les top numéros sont validés par la symbiose (> 1.0)
+    const confidence = Math.min(99, Math.round(topAvgScore * (acScore / 8.5) * (topSymbiosis > 1.1 ? 1.2 : 1.0)));
+
     return {
         suggestedNumbers: selection,
         candidates: sorted.slice(5, 15).map(s => s.num),
-        confidence: Math.min(99, Math.round(sorted[0].score * (acScore / 8.5))),
-        analysis: `Apex v15.5 (Genome Sync). Précision structurelle : ${acScore}/10.`,
+        confidence,
+        analysis: `Apex v17.0 (Symbiotic Kernel). Cohérence vectorielle : ${(topSymbiosis * 100).toFixed(0)}%. ${topSymbiosis > 1.2 ? "Convergence multiple détectée." : "Signal standard."}`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        symbiosisFactor: parseFloat(topSymbiosis.toFixed(2))
     };
 };
 
@@ -149,16 +201,29 @@ export const saveAdaptiveRules = async (drawName: string, rules: AdaptiveRules) 
 export const getStrategyName = (weights: AlgoWeights): string => {
     const entries = Object.entries(weights) as [string, any][];
     const dominant = entries.reduce((a, b) => (Number(a[1]) || 0) > (Number(b[1]) || 0) ? a : b);
-    const names: Record<string, string> = { frequency: 'Inertie', gap: 'Écart Récursif', spectral: 'Résonance FFT', markov: 'Lien Séquentiel', orchestration: 'Translocation' };
+    const names: Record<string, string> = { frequency: 'Inertie', gap: 'Écart Récursif', spectral: 'Résonance FFT', markov: 'Lien Séquentiel', orchestration: 'Translocation', spatial: 'Géométrie' };
     return names[dominant[0]] || 'Nexus APEX';
 };
 
 export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {
     const ac = calculateACValue(numbers);
+    const sum = numbers.reduce((a,b)=>a+b,0);
+    let score = Math.min(100, Math.round((ac / 10) * 100));
+    const warnings = [];
+    
+    if (ac < 7) {
+        score -= 20;
+        warnings.push("Structure trop prévisible (AC faible)");
+    }
+    if (sum < 100 || sum > 350) {
+        score -= 15;
+        warnings.push("Somme hors normes (Sigma Risk)");
+    }
+
     return {
-        score: Math.min(100, Math.round((ac / 10) * 100)),
-        verdict: ac >= 8 ? "Optimale" : "Équilibrée",
-        warnings: ac < 7 ? ["Structure trop prévisible"] : []
+        score,
+        verdict: score >= 80 ? "Optimale" : score >= 60 ? "Équilibrée" : "Risquée",
+        warnings
     };
 };
 

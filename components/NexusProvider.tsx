@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
-  NexusContextType, RLState
+  NexusContextType, RLState, SymbioticContext
 } from '../types';
 import { lotteryService, getNextScheduledDraw } from '../services/lotteryService';
 import { 
@@ -12,7 +12,9 @@ import {
     calculateSpectralMetricsAsync,
     calculateFractalMetricsAsync, calculateWaveletMetricsAsync
 } from '../services/mathService';
-import { getAlgoWeights, saveAlgoWeights } from '../services/predictionEngine';
+import { calculateSpatialMetrics } from '../services/spatialService';
+import { calculateOrchestrationScores } from '../services/orchestrationService';
+import { getAlgoWeights, saveAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
 
@@ -41,6 +43,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [inspectingNumber, setInspectingNumberState] = useState<number | null>(null);
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
+  const [symbioticContext, setSymbioticContext] = useState<SymbioticContext | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -50,7 +53,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoading(true);
 
     try {
-        // Chargement PRIORITAIRE de l'ADN entraîné
         const weights = await getAlgoWeights(drawName);
         setGlobalWeights(weights);
 
@@ -59,6 +61,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHistory(hist); 
         
         if (hist.length > 0) {
+            // 1. Calculs Statistiques de Base (Instantané)
             const counts: Record<number, number> = {};
             hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             setStats(Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count));
@@ -76,6 +79,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (hist.length >= 10 && drawName !== 'ALL') {
+            // 2. Calculs Mathématiques HPC (Parallèle)
             const [spec, wav, frac, regData, corr, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(hist),
                 calculateWaveletMetricsAsync(hist),
@@ -92,11 +96,41 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegularity(regData);
             setCorrelationMatrix(corr);
 
+            // 3. CONSTRUCTION DU CONTEXTE SYMBIOTIQUE (Nouveau Core v17)
+            const spatial = calculateSpatialMetrics(hist);
+            const orchScores = calculateOrchestrationScores(hist);
+            
+            const symbioticCtx: SymbioticContext = {
+                // Zone Morte : Clusters à très faible densité (< 10%)
+                spatialDeadZones: spatial.gridDensity.map((d, i) => d < (Math.max(...spatial.gridDensity) * 0.1) ? i : -1).filter(n => n !== -1),
+                // Zone Chaude : Clusters à haute densité
+                spatialHotZones: spatial.advancedClusters.filter(c => c.potential > 80).flatMap(c => c.numbers),
+                // Boost Orchestration : Numéros détectés par les patterns (Miroir/Voisin)
+                orchestrationBoosts: {},
+                spectralVeto: spec.filter(s => s.energy < 10).map(s => s.number),
+                temporalTarget: null
+            };
+
+            Object.entries(orchScores).forEach(([n, score]) => {
+                // Conversion du score brut en multiplicateur (ex: 50 -> 1.5x)
+                if (score > 30) symbioticCtx.orchestrationBoosts[parseInt(n)] = 1 + (score / 100);
+            });
+            
+            setSymbioticContext(symbioticCtx);
+
+            // 4. Génération de la Prédiction Maître avec le Contexte
+            // Cela remplace l'ancienne logique isolée
+            const prediction = await generateMasterPrediction(drawName, hist, weights, {
+                spectral: spec, wavelet: wav, correlationMatrix: corr, regularity: regData
+            }, symbioticCtx);
+
+            setLastPrediction(prediction);
+
+            // 5. Insights & Calibration
             const insights = await generateSmartInsights(drawName, hist, spec, regData.map(r => ({ number: r.number, gap: r.currentGap })), regData);
             setSmartInsights(insights);
 
             if (preds.length > 0) {
-                setLastPrediction(preds[0].prediction);
                 const perf = calculateHistoricalPerformance(preds, hist);
                 setCalibration({
                     overallScore: 0.25,
@@ -115,14 +149,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateGlobalWeights = useCallback(async (w: AlgoWeights) => {
       setGlobalWeights(w); 
       await saveAlgoWeights(drawName, w);
-      // Forcer le rechargement immédiat pour appliquer les nouveaux poids aux calculs
       setRefreshTrigger(t => t + 1);
   }, [drawName]);
 
   const contextValue = useMemo(() => ({
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading,
-    correlationMatrix, regularity, calibration, hoveredNumber,
+    correlationMatrix, regularity, calibration, hoveredNumber, symbioticContext,
     setDrawName: setDrawNameState,
     setLastPrediction, setInspectingNumber: setInspectingNumberState,
     updateGlobalWeights, setHoveredNumber: setHoveredNumberState,
@@ -131,7 +164,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }), [
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, 
-    correlationMatrix, regularity, calibration, hoveredNumber, loadData, updateGlobalWeights
+    correlationMatrix, regularity, calibration, hoveredNumber, loadData, updateGlobalWeights, symbioticContext
   ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;

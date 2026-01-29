@@ -8,6 +8,14 @@ export interface DrawResult {
     version: number;
 }
 
+export interface SymbioticContext {
+    spatialHotZones: number[];
+    spatialDeadZones: number[];
+    orchestrationBoosts: Record<number, number>; // Numéro -> Multiplicateur (ex: 1.5)
+    spectralVeto: number[]; // Numéros à exclure car énergie trop basse
+    temporalTarget: { min: number, max: number } | null; // Cible temporelle (Gap)
+}
+
 export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant';
@@ -97,6 +105,7 @@ export interface Prediction {
     breakdown?: Record<number, ScoreBreakdown>;
     usedWeights?: AlgoWeights;
     timestamp?: number;
+    symbiosisFactor?: number; // Indicateur de cohérence inter-services
 }
 
 export interface SmartInsight {
@@ -153,6 +162,7 @@ export interface NexusContextType {
     setHoveredNumber: (n: number | null) => void;
     rlState: RLState | null;
     vocalContext: OracleVocalContext | null;
+    symbioticContext: SymbioticContext | null; // NOUVEAU
 }
 
 export interface ForensicReport {
@@ -469,12 +479,6 @@ export interface PythonAnalysisResult {
     };
     insight: string;
     cells: NotebookCell[];
-}
-
-export interface NotebookCell {
-    id: string;
-    type: 'markdown' | 'code' | 'output';
-    content: string;
 }
 
 export interface NotebookCell {

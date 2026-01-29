@@ -4,7 +4,8 @@ import {
   DrawResult, 
   StrategyBias,
   PlatinumCombo,
-  ScoreBreakdown
+  ScoreBreakdown,
+  SymbioticContext
 } from '../types';
 import { 
   getAlgoWeights, 
@@ -13,14 +14,14 @@ import {
 import { 
     calculateVolatility, 
     calculateShannonEntropy, 
-    detectGameRegime,
     calculateRegularity,
     calculateACValue
 } from './mathService';
 
 /**
- * Nexus MetaAnalyst v16.1 - Organic Adaptive Kernel
+ * Nexus MetaAnalyst v16.2 - Symbiotic Adaptive Kernel
  * Optimisé pour les datasets "Gagnants Uniquement" et la gestion des amplitudes extrêmes.
+ * Intègre maintenant le contexte symbiotique pour le veto/boost.
  */
 
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
@@ -61,7 +62,6 @@ export const precomputeBaseScores = async (
  */
 export function calculateOptimalUserBias(drawName: string, history: DrawResult[]): StrategyBias {
     const vol = calculateVolatility(history);
-    const ent = calculateShannonEntropy(history);
     
     // Valeurs par défaut
     let stability = 0.35;
@@ -71,7 +71,6 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     let orchestration = 0.4;
 
     // 1. Détection de la densité des données Machine
-    let hasMachineData = false;
     const checkDepth = Math.min(history.length, 20);
     let machineDrawsCount = 0;
     
@@ -82,11 +81,7 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
     }
     
     // Si moins de 20% des tirages récents ont une machine, on considère le mode "Organique Pur"
-    if (machineDrawsCount < (checkDepth * 0.2)) {
-        hasMachineData = false;
-    } else {
-        hasMachineData = true;
-    }
+    const hasMachineData = machineDrawsCount >= (checkDepth * 0.2);
 
     // 2. Ajustement des biais selon le mode
     if (!hasMachineData) {
@@ -98,7 +93,6 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
         stability = 0.45; // Légère hausse de stabilité pour les répétitions simples
     } else {
         // Logique Standard avec analyse des fuites
-        // ... (Code existant conservé pour les autres tirages)
         let machineLeakCount = 0;
         let totalMachineChecks = 0;
         for (let i = 0; i < checkDepth - 1; i++) {
@@ -117,9 +111,7 @@ export function calculateOptimalUserBias(drawName: string, history: DrawResult[]
         }
     }
 
-    // 3. Ajustement sur Volatilité Extrême (Analyse Sigma du CSV fourni)
-    // Le CSV montre des sommes variant de 133 à 395. C'est énorme.
-    // On doit forcer l'équilibre (Harmony) si la volatilité est trop haute.
+    // 3. Ajustement sur Volatilité Extrême (Analyse Sigma)
     if (vol.score > 70) {
         harmony = 0.8; // Force le retour à la moyenne harmonique
         chaos = Math.min(0.9, chaos + 0.1); // Le chaos est confirmé
@@ -138,14 +130,22 @@ export async function generatePlatinumPrediction(
     drawName: string, 
     history: DrawResult[],
     precomputedMetrics?: any,
-    userBias?: StrategyBias
+    userBias?: StrategyBias,
+    symbioticContext?: SymbioticContext | null
 ): Promise<PlatinumResult> {
     if (!history || history.length < 15) throw new Error("Historique insuffisant pour la synthèse.");
 
     const bias = userBias || calculateOptimalUserBias(drawName, history);
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
-    const regularity = calculateRegularity(history);
-    const pool = Object.keys(scores).map(Number);
+    
+    // --- FILTRAGE SYMBIOTIQUE (V17 Core) ---
+    // On retire les numéros veto du pool de base AVANT la sélection
+    let pool = Object.keys(scores).map(Number);
+    
+    if (symbioticContext) {
+        // Exclusion stricte des zones mortes spatiales
+        pool = pool.filter(n => !symbioticContext.spatialDeadZones.includes(n));
+    }
 
     // Analyse du dernier tirage pour déterminer la tendance de Somme
     const lastDrawSum = history[0].gagnants.reduce((a,b) => a+b, 0);
@@ -154,20 +154,23 @@ export async function generatePlatinumPrediction(
 
     // --- SÉLECTION DES "KING NUMBERS" ---
     
-    // 1. Hot Kings (Fréquence pure)
+    // 1. Hot Kings (Fréquence pure) + Boost Spatial
     const hotKings = pool
         .map(n => {
             const localFreq = history.slice(0, 12).filter(d => d.gagnants.includes(n)).length;
-            return { num: n, freq: localFreq, val: scores[n] };
+            let val = scores[n].frequency || 0;
+            // Boost symbiotique
+            if (symbioticContext?.spatialHotZones.includes(n)) val *= 1.5;
+            if (symbioticContext?.orchestrationBoosts[n]) val *= symbioticContext.orchestrationBoosts[n];
+            
+            return { num: n, freq: localFreq, score: val };
         })
         .filter(item => item.freq >= 2)
-        .sort((a, b) => (b.val.frequency || 0) - (a.val.frequency || 0))
+        .sort((a, b) => b.score - a.score)
         .slice(0, 4)
         .map(k => k.num);
 
     // 2. Corrective Kings (Basés sur l'équilibre de Somme)
-    // Si on doit baisser la somme, on prend des petits numéros à fort potentiel
-    // Si on doit monter, on prend des grands numéros
     const correctiveKings = pool
         .map(n => ({ num: n, score: scores[n].spectral || 0 }))
         .filter(item => {
@@ -205,7 +208,7 @@ export async function generatePlatinumPrediction(
                     const score = ((b.spectral || 0) * bias.harmony) + 
                                   ((b.momentum || 50) * bias.stability) + 
                                   ((b.gap || 0) * bias.chaos) +
-                                  ((b.orchestration || 0) * bias.orchestration); // Orchestration faible si pas de machine
+                                  ((b.orchestration || 0) * bias.orchestration);
 
                     if (score > topTournamentScore) {
                         topTournamentScore = score;
@@ -271,7 +274,7 @@ export async function generatePlatinumPrediction(
         })), 
         combinations: combinations.sort((a, b) => b.score - a.score),
         confidence: Math.round(combinations[0].score * 0.95),
-        analysis: `Mode Organique (Machine ${machineStatus}). Correction Sigma ${sigmaTrend} activée suite à la volatilité récente.`,
+        analysis: `Mode Symbiotique (Machine ${machineStatus}). Correction Sigma ${sigmaTrend} et filtrage des Zones Mortes activés.`,
         drawName,
         timestamp: Date.now()
     };

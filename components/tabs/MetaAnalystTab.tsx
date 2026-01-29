@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, calculateOptimalUserBias } from '../../services/metaAnalystService';
 import { getFusionConfig, saveFusionConfig } from '../../services/userPreferencesService';
@@ -20,7 +21,7 @@ interface MetaAnalystTabProps {
 
 export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading, spectral, fractal, wavelet, correlationMatrix, regularity } = useNexus();
+    const { history, loading: nexusLoading, spectral, fractal, wavelet, correlationMatrix, regularity, symbioticContext } = useNexus();
     
     const [result, setResult] = useState<PlatinumResult | null>(null);
     const [loading, setLoading] = useState(false);
@@ -58,13 +59,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 drawName, 
                 history, 
                 { spectral, fractal, wavelet, correlationMatrix, regularity },
-                bias
+                bias,
+                symbioticContext // Injection du contexte v17
             );
             
             if (isMounted.current) {
                 setResult(data);
                 savePlatinumHistory(data);
-                showToast("Noyau Platinum v16.1 synchronisé.", "success");
+                showToast("Noyau Platinum v17.0 synchronisé (Symbiose Active).", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
@@ -105,7 +107,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             </div>
 
             <div className="text-center space-y-4 relative z-10">
-                <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs">Platinum Fusion v16.1</p>
+                <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs">Platinum Fusion v17.0</p>
                 <div className="space-y-2">
                     <p className={`text-sm font-bold transition-all duration-500 ${step >= 1 ? 'text-white' : 'text-slate-700'}`}>1. Analyse Structurelle (Machine/Organique)</p>
                     <p className={`text-sm font-bold transition-all duration-500 ${step >= 2 ? 'text-white' : 'text-slate-700'}`}>2. Sélection Duale (Hot/Correction Sigma)</p>
@@ -136,10 +138,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 <div className="relative z-10 grid lg:grid-cols-12 gap-12 items-start">
                     <div className="lg:col-span-7 space-y-10">
                         <div>
-                            <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full w-fit mb-4">KERNEL APEX v16.1</div>
+                            <div className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full w-fit mb-4">KERNEL APEX v17.0</div>
                             <h2 className="text-4xl md:text-6xl font-black tracking-tighter leading-none">Neural <span className="text-indigo-500">Synthesizer</span></h2>
                             <p className="text-slate-400 mt-6 text-sm md:text-base font-medium leading-relaxed">
-                                Le moteur v16.1 détecte automatiquement si le jeu inclut une machine ou non. En mode "Organique", il compense l'absence de données machine par une analyse accrue de la volatilité et des écarts.
+                                Le moteur v17.0 intègre désormais le <strong>Contexte Symbiotique</strong>. Il rejette activement les vecteurs situés dans les zones mortes spatiales et amplifie ceux validés par l'orchestration miroir.
                             </p>
                         </div>
 
@@ -204,7 +206,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
                             <div className="text-center md:text-left">
                                 <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter flex items-center justify-center md:justify-start gap-4">
-                                    <Star fill="currentColor" className="text-amber-400" size={32}/> Vecteurs Maîtres v16
+                                    <Star fill="currentColor" className="text-amber-400" size={32}/> Vecteurs Maîtres v17
                                 </h3>
                                 <p className="text-indigo-100 text-xs font-bold uppercase tracking-[0.2em] mt-2 opacity-80">Noyaux d'ancrage du pool thermique</p>
                             </div>
@@ -277,7 +279,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div className="bg-slate-900 p-10 rounded-[3.5rem] border border-indigo-500/10 relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-6 opacity-5"><FileText size={100} /></div>
                         <h4 className="text-white font-black uppercase text-sm mb-6 flex items-center gap-3">
-                            <Activity size={18} className="text-indigo-500" /> Synthèse de l'Oracle v16.1
+                            <Activity size={18} className="text-indigo-500" /> Synthèse de l'Oracle v17.0
                         </h4>
                         <p className="text-slate-400 text-sm md:text-base leading-relaxed italic font-medium max-w-5xl">
                             "{result.analysis}"

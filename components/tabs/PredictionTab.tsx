@@ -11,7 +11,8 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
-    Save, Wind, AlertTriangle, TrendingUp 
+    Save, Wind, AlertTriangle, TrendingUp,
+    MapPin, GitMerge
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -20,7 +21,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { 
         history, lastPrediction, setLastPrediction, loading: nexusLoading,
         globalWeights, spectral, wavelet, correlationMatrix, regularity, 
-        calibration, volatility, regime 
+        calibration, volatility, regime, symbioticContext
     } = useNexus();
 
     const [isComputing, setIsComputing] = useState(false);
@@ -36,7 +37,8 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             try {
                 const res = await generateMasterPrediction(drawName, history, globalWeights, {
                     spectral, wavelet, correlationMatrix, regularity
-                });
+                }, symbioticContext || undefined);
+                
                 setLastPrediction(res);
                 await savePredictionToHistory(drawName, res);
                 showToast("Convergence vectorielle établie.", "success");
@@ -46,7 +48,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setIsComputing(false);
             }
         }, 800);
-    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, setLastPrediction, showToast]);
+    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, symbioticContext, setLastPrediction, showToast]);
 
     const handleQuickSave = async () => {
         if (!lastPrediction) return;
@@ -75,9 +77,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl border border-slate-800 mb-8 group-hover:scale-110 transition-transform duration-500">
                     <Target size={48} className="text-indigo-500" />
                 </div>
-                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v15.5</h3>
+                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v17.0</h3>
                 <p className="text-slate-400 text-sm font-medium mb-10 max-w-md text-center leading-relaxed">
-                    Moteur d'inférence polyvalent. Fusionne l'analyse fréquentielle, les écarts et la matrice de Markov pour générer le ticket le plus probable.
+                    Moteur Symbiotique. Fusionne l'analyse fréquentielle, la topologie spatiale et la résonance orchestrale pour un ciblage vectoriel ultra-précis.
                 </p>
                 <button 
                     onClick={runInference}
@@ -136,24 +138,26 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="flex justify-between items-start mb-10">
                             <div>
                                 <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none mb-2">
-                                    Vecteur <span className="text-indigo-500">Optimal</span>
+                                    Vecteur <span className="text-indigo-500">Symbiotique</span>
                                 </h2>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">
-                                    Généré via {lastPrediction?.usedWeights?.orchestration ? 'Hybride' : 'Standard'} Kernel
+                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+                                    <GitMerge size={12}/> Fusion tensorielle active {lastPrediction?.symbiosisFactor ? `(Boost x${lastPrediction.symbiosisFactor})` : ''}
                                 </p>
                             </div>
                             <div className="flex flex-col items-end">
                                 <span className="text-[9px] font-black bg-white/10 px-3 py-1 rounded-full text-slate-300 uppercase border border-white/10">
-                                    Build 15.5
+                                    Build 17.0
                                 </span>
                             </div>
                         </div>
 
-                        {/* Les Boules avec ADN */}
+                        {/* Les Boules avec Badge Symbiotique */}
                         <div className="grid grid-cols-5 gap-2 md:gap-4 mb-10">
                             {lastPrediction?.suggestedNumbers.map((n, i) => {
                                 const bd = lastPrediction.breakdown?.[n];
-                                const maxFactor = bd ? Math.max(bd.frequency || 0, bd.gap || 0, bd.spectral || 0) : 100;
+                                // Détection des facteurs symbiotiques
+                                const isSpatialHot = symbioticContext?.spatialHotZones.includes(n);
+                                const isOrchestrated = symbioticContext?.orchestrationBoosts[n] !== undefined;
                                 
                                 return (
                                     <motion.div 
@@ -163,7 +167,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         transition={{ delay: i * 0.1, type: 'spring' }}
                                         className="flex flex-col items-center gap-3"
                                     >
-                                        <NumberBall number={n} size="lg" isAttractor={i < 2} />
+                                        <div className="relative">
+                                            <NumberBall number={n} size="lg" isAttractor={i < 2} />
+                                            {/* Badges Symbiotiques */}
+                                            {isSpatialHot && <div className="absolute -top-1 -right-1 bg-emerald-500 text-white rounded-full p-1 border-2 border-slate-950" title="Zone Chaude Spatiale"><MapPin size={8} fill="currentColor"/></div>}
+                                            {isOrchestrated && <div className="absolute -bottom-1 -left-1 bg-indigo-500 text-white rounded-full p-1 border-2 border-slate-950" title="Boost Orchestration"><Binary size={8}/></div>}
+                                        </div>
                                         
                                         {/* Mini DNA Bar */}
                                         <div className="flex gap-0.5 h-1 w-8 md:w-12 bg-slate-800 rounded-full overflow-hidden">
