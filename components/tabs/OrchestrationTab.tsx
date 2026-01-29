@@ -6,7 +6,10 @@ import type { OrchestrationMetrics, DrawResult, MimicryMetric } from '../../type
 import { NumberBall } from '../NumberBall';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts';
 import { OrchestrationRadar } from '../OrchestrationRadar';
-import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy } from 'lucide-react';
+import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save } from 'lucide-react';
+import { saveTicket } from '../../services/userPreferencesService';
+import { useToast } from '../ui/Toast';
+import { TicketXRay } from '../TicketXRay';
 
 interface OrchestrationTabProps { drawName: string; }
 
@@ -163,11 +166,15 @@ const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
 
 export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) => {
     const { history, loading: nexusLoading } = useNexus();
+    const { showToast } = useToast();
+    
     const [metrics, setMetrics] = useState<OrchestrationMetrics | null>(null);
     const [prevDraw, setPrevDraw] = useState<DrawResult | null>(null);
     const [mimicryData, setMimicryData] = useState<MimicryMetric[]>([]);
     const [loading, setLoading] = useState(true);
-    const [expandedCard, setExpandedCard] = useState<number | null>(null); 
+    const [expandedCard, setExpandedCard] = useState<number | null>(null);
+    const [generatedTicket, setGeneratedTicket] = useState<number[] | null>(null);
+    
     const isMounted = useRef(true);
 
     useEffect(() => {
@@ -197,6 +204,26 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         load();
         return () => { isMounted.current = false; };
     }, [drawName, history]);
+
+    const handleGenerateTicket = () => {
+        if (!metrics || metrics.topCandidates.length < 5) return;
+        const ticket = metrics.topCandidates
+            .slice(0, 5)
+            .map(c => c.number)
+            .sort((a,b) => a-b);
+        setGeneratedTicket(ticket);
+        showToast("Ticket Orchestral généré.", "success");
+    };
+
+    const handleSaveTicket = async () => {
+        if(!generatedTicket) return;
+        await saveTicket({
+            numbers: generatedTicket,
+            drawName,
+            strategy: 'Orchestration Elite'
+        });
+        showToast("Ticket sauvegardé.", "success");
+    };
 
     if (nexusLoading || loading) return <div className="p-24 text-center animate-pulse font-black text-indigo-500 uppercase tracking-[0.4em] text-sm">Orchestration Analysis Hub...</div>;
     if (!metrics) return <div className="p-20 text-center text-slate-400 italic">Historique insuffisant.</div>;
@@ -234,7 +261,6 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                 )}
                 
                 <div className="space-y-8">
-                    {/* Mimicry Card (Nouvel ajout) */}
                     <MimicryCard mimicry={mimicryData} />
 
                     <div className="bg-white dark:bg-slate-800 p-8 rounded-[3.5rem] shadow-sm border border-slate-100 dark:border-slate-700">
@@ -244,6 +270,51 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                         <OrchestrationRadar drawName={drawName} />
                     </div>
                 </div>
+            </div>
+
+            {/* SYNTHESIS & GENERATOR */}
+            <div className="bg-slate-950 p-8 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden">
+                <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
+                    <div>
+                        <h4 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+                            <Wand2 className="text-emerald-500"/> Synthèse Orchestrale
+                        </h4>
+                        <p className="text-slate-400 text-xs font-medium mt-1">Générez un ticket optimisé basé sur les 5 vecteurs les plus influents.</p>
+                    </div>
+                    
+                    <button 
+                        onClick={handleGenerateTicket}
+                        className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg flex items-center gap-3 transition-all active:scale-95"
+                    >
+                        <Wand2 size={16}/> Générer Ticket
+                    </button>
+                </div>
+
+                {generatedTicket && (
+                    <div className="mt-8 animate-slide-up">
+                        <div className="p-6 bg-white/5 rounded-3xl border border-emerald-500/30 flex flex-col items-center gap-6">
+                            <div className="flex gap-4">
+                                {generatedTicket.map((n, i) => (
+                                    <div key={n} className="scale-125">
+                                        <NumberBall number={n} size="md" isAttractor />
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="w-full h-px bg-white/10"></div>
+                            <div className="flex gap-4 w-full justify-center">
+                                <button 
+                                    onClick={handleSaveTicket}
+                                    className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all"
+                                >
+                                    <Save size={14}/> Sauvegarder
+                                </button>
+                            </div>
+                            <div className="w-full">
+                                <TicketXRay numbers={generatedTicket} score={metrics.globalScore} showTitle={false} />
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* CANDIDATES GRID */}

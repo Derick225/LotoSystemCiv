@@ -1,13 +1,15 @@
+
 import { isSupabaseConfigured } from './supabaseClient';
 import { invokeEdgeFunction } from './apiClient';
 import { saveAlgoWeights } from './predictionEngine';
-import { DrawResult, PredictionHistoryItem } from '../types';
+import { DrawResult, PredictionHistoryItem, AlgoWeights } from '../types';
 
 export interface LearningStatus {
     lastRun: string | null;
     improvement: boolean;
     message: string;
     delta?: string;
+    weights?: AlgoWeights; // Ajout du retour des poids pour synchro UI
 }
 
 export const LearningService = {
@@ -25,14 +27,14 @@ export const LearningService = {
             if (error) throw error;
 
             if (data?.success) {
-                if (data.improved && data.weights) {
-                    saveAlgoWeights(drawName, data.weights);
-                }
+                // On ne sauvegarde pas immédiatement ici, on laisse le composant UI 
+                // le faire après normalisation et validation visuelle
                 return {
                     lastRun: new Date().toISOString(),
                     improvement: data.improved,
                     message: data.improved ? `Optimisation ADN : +${data.delta}%` : "L'ADN actuel est optimal.",
-                    delta: data.delta
+                    delta: data.delta,
+                    weights: data.weights
                 };
             }
             throw new Error("Échec du noyau.");

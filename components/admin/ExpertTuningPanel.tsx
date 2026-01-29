@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
-import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules } from '../../services/predictionEngine';
+import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights, saveAlgoWeights } from '../../services/predictionEngine';
 import { LearningService } from '../../services/learningService'; 
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';
 import { useNexus } from '../NexusProvider';
-import { Sliders, Save, Scale, Activity, Gauge, RefreshCw, Wand2, BrainCircuit, CheckCircle2 } from 'lucide-react';
+import { Sliders, Save, Scale, Activity, Gauge, RefreshCw, Wand2, BrainCircuit, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 interface ExpertTuningPanelProps {
     selectedDrawName: string;
@@ -22,6 +22,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     const [isCalibrating, setIsCalibrating] = useState(false);
     const [lastLearnStatus, setLastLearnStatus] = useState<string | null>(null);
     
+    // Synchro bidirectionnelle : Si les poids globaux changent (ex: via TrainingTab), on met à jour les sliders
     useEffect(() => {
         setLocalWeights(globalWeights);
         const loadedRules = getAdaptiveRules(selectedDrawName);
@@ -46,17 +47,10 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
 
     const handleAutoNormalize = () => {
         if (totalWeight === 0) return;
-        const normalized = { ...localWeights };
-        const keys = Object.keys(normalized) as Array<keyof AlgoWeights>;
-        keys.forEach(k => {
-            const currentVal = normalized[k];
-            if (currentVal !== undefined) {
-                normalized[k] = parseFloat(((currentVal as number) / totalWeight).toFixed(4));
-            }
-        });
+        const normalized = normalizeWeights(localWeights);
         setLocalWeights(normalized);
         setIsDirty(true);
-        showToast("Poids normalisés à 1.0", "info");
+        showToast("Tensor Flow équilibré (Σ = 1.0).", "info");
     };
 
     const handleDeepLearning = async () => {
@@ -66,50 +60,56 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         }
 
         setIsCalibrating(true);
-        showToast("🧬 Démarrage du cycle génétique...", "info");
+        showToast("🧬 Initialisation du noyau génétique...", "info");
 
         try {
             const result = await LearningService.triggerAutoLearning(selectedDrawName);
             
-            if (result.improvement) {
+            if (result.improvement && result.weights) {
+                // ÉTAPE CRITIQUE : Normalisation forcée avant application
+                const safeWeights = normalizeWeights(result.weights);
+                
+                // 1. Mise à jour du Context (Global)
+                updateGlobalWeights(safeWeights);
+                
+                // 2. Mise à jour de l'état Local (Sliders)
+                setLocalWeights(safeWeights);
+                
+                // 3. Persistance
+                await saveAlgoWeights(selectedDrawName, safeWeights);
                 await refreshData(selectedDrawName, true);
-                showToast("✅ Mutation réussie ! L'ADN a évolué.", "success");
-                setLastLearnStatus("Adaptation : À l'instant");
+                
+                showToast("✅ Symbiose réussie ! Structure ADN normalisée.", "success");
+                
+                const nowStr = new Date().toLocaleTimeString();
+                setLastLearnStatus(`Adaptation : ${nowStr}`);
+                localStorage.setItem(`nexus_last_learn_${selectedDrawName}`, nowStr);
+                setIsDirty(false);
             } else {
-                showToast(result.message, "info");
+                showToast(result.message || "Aucune amélioration significative.", "info");
             }
         } catch (e) {
-            showToast("Échec du processus d'apprentissage.", "error");
+            showToast("Rupture du lien d'apprentissage.", "error");
         } finally {
             setIsCalibrating(false);
         }
     };
 
     const handleSave = () => {
-        if (Math.abs(totalWeight - 1.0) > 0.05) {
-            if (!window.confirm("La masse totale s'écarte de 1.0. Voulez-vous normaliser avant de sauvegarder ?")) {
-                performSave(localWeights);
-            } else {
-                handleAutoNormalize();
-                const normalized = { ...localWeights };
-                const t = (Object.values(normalized) as number[]).reduce((a, b) => a + (Number(b) || 0), 0);
-                (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(k => {
-                    const val = normalized[k];
-                    normalized[k] = parseFloat(((val || 0) / t).toFixed(4));
-                });
-                performSave(normalized);
-            }
-        } else {
-            performSave(localWeights);
+        // Force la normalisation si l'utilisateur essaie de sauvegarder un état déséquilibré
+        let weightsToSave = { ...localWeights };
+        
+        if (Math.abs(totalWeight - 1.0) > 0.01) {
+            weightsToSave = normalizeWeights(localWeights);
+            showToast("Auto-Correction: Normalisation appliquée.", "info");
+            setLocalWeights(weightsToSave); // Mise à jour visuelle
         }
-    };
 
-    const performSave = (weightsToSave: AlgoWeights) => {
         updateGlobalWeights(weightsToSave);
         saveAdaptiveRules(selectedDrawName, rules);
         refreshData(selectedDrawName, true);
         setIsDirty(false);
-        showToast(`Profil ${selectedDrawName} sauvegardé manuellement.`, "success");
+        showToast(`Configuration ${selectedDrawName} cristallisée.`, "success");
     };
 
     return (
@@ -138,17 +138,19 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                         <div className="space-y-4 relative z-10">
                             <div className="flex justify-between items-end">
                                 <div>
-                                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Masse Totale</span>
-                                    <div className={`text-3xl font-black ${Math.abs(totalWeight - 1.0) < 0.01 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Masse Totale (Target 1.0)</span>
+                                    <div className={`text-3xl font-black ${Math.abs(totalWeight - 1.0) < 0.02 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                         {totalWeight.toFixed(3)}
                                     </div>
                                 </div>
-                                {Math.abs(totalWeight - 1.0) >= 0.01 && (
-                                    <div className="text-[8px] font-black text-orange-500 bg-orange-500/10 px-2 py-1 rounded-lg animate-pulse border border-orange-500/20 uppercase">Déséquilibre Sigma</div>
+                                {Math.abs(totalWeight - 1.0) >= 0.02 && (
+                                    <div className="flex items-center gap-2 text-[8px] font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg animate-pulse border border-rose-500/20 uppercase">
+                                        <AlertTriangle size={10}/> Déséquilibre
+                                    </div>
                                 )}
                             </div>
                             <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner">
-                                <div className={`h-full transition-all duration-700 shadow-[0_0_10px_rgba(255,255,255,0.1)] ${Math.abs(totalWeight - 1.0) < 0.01 ? 'bg-emerald-500' : 'bg-orange-500'}`} style={{ width: `${Math.min(100, totalWeight * 100)}%` }}></div>
+                                <div className={`h-full transition-all duration-700 shadow-[0_0_10px_rgba(255,255,255,0.1)] ${Math.abs(totalWeight - 1.0) < 0.02 ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(100, totalWeight * 100)}%` }}></div>
                             </div>
                         </div>
                     </div>
@@ -168,7 +170,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                             <button onClick={handleAutoNormalize} className="flex-1 py-4 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 font-black rounded-2xl text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition hover:bg-slate-100 dark:hover:bg-slate-950 border border-slate-200 dark:border-slate-700 active:scale-[0.98]">
                                 <Scale size={16}/> Normaliser
                             </button>
-                            <button onClick={handleSave} disabled={!isDirty} className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/30 text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all active:scale-[0.98]">
+                            <button onClick={handleSave} disabled={!isDirty} className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:bg-slate-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/30 text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all active:scale-[0.98]">
                                 <Save size={18}/> Sauvegarder
                             </button>
                         </div>

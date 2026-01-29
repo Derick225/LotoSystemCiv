@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { evolveNeuralDNA } from '../../services/trainingService';
+import { normalizeWeights } from '../../services/predictionEngine';
 import { useNexus } from '../NexusProvider';
 import { AlgoRadar } from '../AlgoRadar';
 import { useToast } from '../ui/Toast';
@@ -50,7 +51,10 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             setProgress(100);
             
             if (result.report) {
-                setCandidateWeights(result.bestWeights);
+                // Normalisation préventive pour l'affichage
+                const normalizedCandidate = normalizeWeights(result.bestWeights);
+                
+                setCandidateWeights(normalizedCandidate);
                 setReport(result.report);
                 setImprovement(result.improvement);
                 setStatus('review');
@@ -70,11 +74,13 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     const handleApply = async () => {
         if (candidateWeights) {
-            await updateGlobalWeights(candidateWeights);
+            // Normalisation stricte finale (double sécurité)
+            const safeWeights = normalizeWeights(candidateWeights);
+            await updateGlobalWeights(safeWeights);
             await refreshData(drawName, true);
             setStatus('idle');
             setCandidateWeights(null);
-            showToast("Nouvel ADN Neuronal injecté dans le noyau.", "success");
+            showToast("Nouvel ADN Neuronal injecté et normalisé.", "success");
             audioEngine.play('boot');
         }
     };
