@@ -5,7 +5,9 @@ import {
   StrategyBias,
   PlatinumCombo,
   ScoreBreakdown,
-  SymbioticContext
+  SymbioticContext,
+  FractalMetric,
+  SpectralMetric
 } from '../types';
 import { 
   getAlgoWeights, 
@@ -14,12 +16,11 @@ import {
 import { 
     calculateVolatility, 
     calculateShannonEntropy, 
-    calculateRegularity,
     calculateACValue
 } from './mathService';
 
 /**
- * Nexus MetaAnalyst v16.2 - Symbiotic Adaptive Kernel
+ * Nexus MetaAnalyst v17.5 - Deep Calibration Kernel
  * Optimisé pour les datasets "Gagnants Uniquement" et la gestion des amplitudes extrêmes.
  * Intègre maintenant le contexte symbiotique pour le veto/boost.
  */
@@ -57,72 +58,107 @@ export const precomputeBaseScores = async (
 };
 
 /**
- * Calcule les biais optimaux en détectant la présence de données machine 
- * et l'amplitude de la volatilité (Sigma).
+ * Calcule les biais optimaux en analysant la profondeur historique, le régime fractal et l'énergie spectrale.
+ * Retourne les biais et un rapport de raisonnement.
  */
-export function calculateOptimalUserBias(drawName: string, history: DrawResult[]): StrategyBias {
-    const vol = calculateVolatility(history);
+export function calculateOptimalUserBias(
+    drawName: string, 
+    history: DrawResult[],
+    metrics?: { 
+        fractal?: FractalMetric[], 
+        spectral?: SpectralMetric[],
+        volatility?: { score: number }
+    }
+): { bias: StrategyBias, reasoning: string } {
     
-    // Valeurs par défaut
-    let stability = 0.35;
-    let chaos = 0.4;
-    let harmony = 0.45;
-    let wavelet = 0.5;
-    let orchestration = 0.4;
+    // Valeurs de base équilibrées
+    let bias: StrategyBias = {
+        stability: 0.35,
+        chaos: 0.40,
+        harmony: 0.45,
+        wavelet: 0.50,
+        orchestration: 0.40
+    };
 
-    // 1. Détection de la densité des données Machine
+    const reasoningParts: string[] = [];
+
+    // 1. Analyse Machine (Fuites de données)
     const checkDepth = Math.min(history.length, 20);
-    let machineDrawsCount = 0;
+    let machineLeakCount = 0;
+    let totalMachineChecks = 0;
     
-    for(let i=0; i<checkDepth; i++) {
-        if(history[i].machine && history[i].machine!.length >= 3) {
-            machineDrawsCount++;
+    for (let i = 0; i < checkDepth - 1; i++) {
+        const currentDraw = history[i];
+        const prevDraw = history[i+1];
+        if (prevDraw.machine && prevDraw.machine.length > 0) {
+            const leaks = currentDraw.gagnants.filter(n => prevDraw.machine?.includes(n)).length;
+            machineLeakCount += leaks;
+            totalMachineChecks += 5;
         }
     }
     
-    // Si moins de 20% des tirages récents ont une machine, on considère le mode "Organique Pur"
-    const hasMachineData = machineDrawsCount >= (checkDepth * 0.2);
-
-    // 2. Ajustement des biais selon le mode
-    if (!hasMachineData) {
-        // Mode Organique : On tue l'orchestration (qui dépend de la machine) 
-        // et on booste le Chaos (pour attraper les écarts) et Wavelet (tendances courtes)
-        orchestration = 0.1; 
-        chaos = 0.65; // Boost Chaos pour compenser la perte d'info machine
-        wavelet = 0.6; // Boost Wavelet pour suivre la "forme" pure des numéros
-        stability = 0.45; // Légère hausse de stabilité pour les répétitions simples
-    } else {
-        // Logique Standard avec analyse des fuites
-        let machineLeakCount = 0;
-        let totalMachineChecks = 0;
-        for (let i = 0; i < checkDepth - 1; i++) {
-            const currentDraw = history[i];
-            const prevDraw = history[i+1];
-            if (prevDraw.machine && prevDraw.machine.length > 0) {
-                const leaks = currentDraw.gagnants.filter(n => prevDraw.machine?.includes(n)).length;
-                machineLeakCount += leaks;
-                totalMachineChecks += 5;
-            }
-        }
-        const leakageRate = totalMachineChecks > 0 ? (machineLeakCount / totalMachineChecks) : 0;
-        if (leakageRate > 0.10) {
-            orchestration = 0.7 + (leakageRate * 2);
-            chaos -= 0.1;
-        }
+    const leakageRate = totalMachineChecks > 0 ? (machineLeakCount / totalMachineChecks) : 0;
+    
+    if (leakageRate > 0.12) {
+        bias.orchestration = 0.8; // Forte corrélation machine
+        reasoningParts.push("Translocation Machine active");
+    } else if (leakageRate < 0.05) {
+        bias.orchestration = 0.2; // Jeu organique
+        bias.chaos += 0.1; // Compensation par le chaos
+        reasoningParts.push("Flux Organique (Sans Machine)");
     }
 
-    // 3. Ajustement sur Volatilité Extrême (Analyse Sigma)
-    if (vol.score > 70) {
-        harmony = 0.8; // Force le retour à la moyenne harmonique
-        chaos = Math.min(0.9, chaos + 0.1); // Le chaos est confirmé
+    // 2. Analyse Fractale (Exposant de Hurst Global)
+    if (metrics?.fractal && metrics.fractal.length > 0) {
+        // Moyenne du Hurst sur les numéros chauds
+        const avgHurst = metrics.fractal.slice(0, 10).reduce((acc, curr) => acc + curr.hurst, 0) / 10;
+        
+        if (avgHurst > 0.60) {
+            // Régime Persistant (Les tendances durent) -> Favoriser Stabilité
+            bias.stability += 0.25;
+            bias.wavelet -= 0.1;
+            reasoningParts.push("Régime Persistant (Hurst > 0.6)");
+        } else if (avgHurst < 0.40) {
+            // Régime Anti-Persistant (Retour à la moyenne rapide) -> Favoriser Wavelet/Harmony
+            bias.wavelet += 0.2;
+            bias.harmony += 0.15;
+            bias.stability -= 0.1;
+            reasoningParts.push("Régime de Rebond (Hurst < 0.4)");
+        }
     }
+
+    // 3. Analyse Spectrale (Résonance)
+    if (metrics?.spectral && metrics.spectral.length > 0) {
+        const maxEnergy = Math.max(...metrics.spectral.map(s => s.energy));
+        if (maxEnergy > 85) {
+            bias.harmony += 0.25; // Forte cyclicité détectée
+            reasoningParts.push("Résonance Harmonique Forte");
+        }
+    }
+
+    // 4. Analyse Volatilité (Entropie)
+    const volScore = metrics?.volatility?.score || calculateVolatility(history).score;
+    
+    if (volScore > 70) {
+        bias.chaos = 0.8; // Haute volatilité -> Mode Chaos
+        bias.stability = 0.2;
+        reasoningParts.push("Haute Volatilité (Mode Chaos)");
+    } else if (volScore < 30) {
+        bias.chaos = 0.2;
+        bias.stability += 0.1;
+        bias.harmony += 0.1;
+        reasoningParts.push("Flux Laminaire (Stable)");
+    }
+
+    // Normalisation finale (Clamping 0.1 - 1.0)
+    Object.keys(bias).forEach(key => {
+        const k = key as keyof StrategyBias;
+        bias[k] = Math.max(0.1, Math.min(1.0, parseFloat(bias[k].toFixed(2))));
+    });
 
     return { 
-        stability: parseFloat(stability.toFixed(2)), 
-        chaos: parseFloat(chaos.toFixed(2)), 
-        harmony: parseFloat(harmony.toFixed(2)), 
-        wavelet: parseFloat(wavelet.toFixed(2)), 
-        orchestration: parseFloat(orchestration.toFixed(2)) 
+        bias, 
+        reasoning: reasoningParts.length > 0 ? reasoningParts.join(" • ") : "Calibration Standard Optimisée" 
     };
 }
 
@@ -135,7 +171,13 @@ export async function generatePlatinumPrediction(
 ): Promise<PlatinumResult> {
     if (!history || history.length < 15) throw new Error("Historique insuffisant pour la synthèse.");
 
-    const bias = userBias || calculateOptimalUserBias(drawName, history);
+    // Si aucun biais utilisateur fourni, on calcule le biais optimal
+    let activeBias = userBias;
+    if (!activeBias) {
+        const calc = calculateOptimalUserBias(drawName, history, precomputedMetrics);
+        activeBias = calc.bias;
+    }
+
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
     
     // --- FILTRAGE SYMBIOTIQUE (V17 Core) ---
@@ -205,10 +247,10 @@ export async function generatePlatinumPrediction(
                     const n = tempPool[idx];
                     const b = scores[n];
                     
-                    const score = ((b.spectral || 0) * bias.harmony) + 
-                                  ((b.momentum || 50) * bias.stability) + 
-                                  ((b.gap || 0) * bias.chaos) +
-                                  ((b.orchestration || 0) * bias.orchestration);
+                    const score = ((b.spectral || 0) * activeBias.harmony) + 
+                                  ((b.momentum || 50) * activeBias.stability) + 
+                                  ((b.gap || 0) * activeBias.chaos) +
+                                  ((b.orchestration || 0) * activeBias.orchestration);
 
                     if (score > topTournamentScore) {
                         topTournamentScore = score;
@@ -255,15 +297,15 @@ export async function generatePlatinumPrediction(
             score: Math.min(99, Math.round(maxFitness / 6)),
             tags: i === 0 ? ["Alpha Fusion"] : i === 1 ? ["Sigma Correctif"] : ["Vecteur Organique"],
             breakdown: { 
-                harmony: Math.round(bias.harmony * 100), 
-                stability: Math.round(bias.stability * 100), 
-                chaos: Math.round(bias.chaos * 100),
+                harmony: Math.round(activeBias.harmony * 100), 
+                stability: Math.round(activeBias.stability * 100), 
+                chaos: Math.round(activeBias.chaos * 100),
                 kings: bestCombo.filter(n => kingNumbers.includes(n)).length
             }
         });
     }
 
-    const machineStatus = bias.orchestration < 0.2 ? "OFF" : "ON";
+    const machineStatus = activeBias.orchestration < 0.2 ? "OFF" : "ON";
     const sigmaTrend = targetLowSum ? "BAISSIERE" : targetHighSum ? "HAUSSIERE" : "NEUTRE";
 
     return {

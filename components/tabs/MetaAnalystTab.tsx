@@ -21,7 +21,7 @@ interface MetaAnalystTabProps {
 
 export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading, spectral, fractal, wavelet, correlationMatrix, regularity, symbioticContext } = useNexus();
+    const { history, loading: nexusLoading, spectral, fractal, wavelet, correlationMatrix, regularity, symbioticContext, volatility } = useNexus();
     
     const [result, setResult] = useState<PlatinumResult | null>(null);
     const [loading, setLoading] = useState(false);
@@ -79,14 +79,22 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     };
 
     const handleAutoTune = () => {
-        const optimal = calculateOptimalUserBias(drawName, history);
-        setBias(optimal);
-        saveFusionConfig(optimal as any);
-        if (optimal.orchestration < 0.2) {
-            showToast("Mode Organique activé (Pas de machine détectée).", "info");
-        } else {
-            showToast("Paramètres ajustés sur l'historique CSV.", "success");
-        }
+        // Calibration Deep Kernel avec métriques
+        const optimization = calculateOptimalUserBias(
+            drawName, 
+            history, 
+            { fractal, spectral, volatility }
+        );
+        
+        setBias(optimization.bias);
+        saveFusionConfig(optimization.bias as any);
+        
+        // Feedback riche à l'utilisateur
+        showToast("Auto-Calibration Terminée", "success");
+        // Délai pour laisser le premier toast respirer
+        setTimeout(() => {
+            showToast(`Ajustement : ${optimization.reasoning}`, "info");
+        }, 1200);
     };
 
     const BIAS_LABELS: Record<string, { label: string, desc: string, icon: any }> = {
@@ -179,8 +187,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                             <p className="text-xs text-slate-500 mb-10">Synthèse par équilibre structurel diversifié.</p>
                             
                             <div className="flex flex-col gap-4">
-                                <button onClick={handleAutoTune} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition-all">
-                                    <Wand2 size={16}/> Calibration Auto (CSV)
+                                <button onClick={handleAutoTune} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-95">
+                                    <Wand2 size={16}/> Calibration Auto (Deep)
                                 </button>
                                 <button onClick={runMetaAnalysis} disabled={loading} className="w-full py-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-2xl shadow-indigo-600/30 font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center gap-4 transition-all active:scale-[0.98] disabled:opacity-50">
                                     {loading ? <RefreshCw className="animate-spin" size={22}/> : <Sparkles size={22}/>} Lancer Fusion
