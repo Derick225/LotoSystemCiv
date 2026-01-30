@@ -1,8 +1,8 @@
+
 import React, { useState, Suspense, lazy, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { SmartInsights } from '../SmartInsights';
 import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box } from 'lucide-react';
-import { DrawResult } from '../../types';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 import { ChaosAttractor } from '../ChaosAttractor';
 
@@ -20,6 +20,20 @@ export const SignalHub: React.FC = () => {
     
     const [activeSubTab, setActiveSubTab] = useState('stats');
 
+    // SYMBIOSE : Écouteur d'événements pour navigation croisée
+    useEffect(() => {
+        const handleNavigation = (e: CustomEvent) => {
+            if (e.detail?.mainTab === 'Signaux' && e.detail?.subTab) {
+                setActiveSubTab(e.detail.subTab);
+                // Scroll doux vers le contenu
+                const contentElement = document.getElementById('signal-content');
+                if (contentElement) contentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+        window.addEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
+        return () => window.removeEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
+    }, []);
+
     const tabs = [
         { id: 'stats', label: 'Stats', icon: BarChart2, color: 'text-indigo-500' },
         { id: 'spectral', label: 'Spectral', icon: Waves, color: 'text-purple-500' },
@@ -36,17 +50,17 @@ export const SignalHub: React.FC = () => {
             <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
                 <div className="lg:col-span-8 space-y-6 min-w-0">
                     {/* Navigation Onglets Mobile Optimized avec Fading Edge */}
-                    <div className="relative">
-                        <div className="overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4 mask-fade-right">
+                    <div className="relative sticky top-[70px] z-20 bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+                        <div className="overflow-x-auto scrollbar-hide pb-2 mask-fade-right">
                             <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-[2.5rem] w-max border border-slate-200 dark:border-slate-700 shadow-inner">
                                 {tabs.map((tab) => (
                                     <button 
                                         key={tab.id}
                                         onClick={() => setActiveSubTab(tab.id)}
                                         className={`
-                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap flex-shrink-0
+                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
                                             ${activeSubTab === tab.id 
-                                                ? 'bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white' 
+                                                ? 'bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10' 
                                                 : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
                                             }
                                         `}
@@ -69,7 +83,7 @@ export const SignalHub: React.FC = () => {
                         `}} />
                     </div>
 
-                    <div className="min-h-[400px] transition-all duration-500">
+                    <div id="signal-content" className="min-h-[400px] transition-all duration-500">
                         <LocalErrorBoundary key={activeSubTab}>
                             <Suspense fallback={
                                 <div className="py-20 flex flex-col items-center justify-center gap-4">

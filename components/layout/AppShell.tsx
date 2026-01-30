@@ -111,29 +111,38 @@ export const AppShell: React.FC<AppShellProps> = ({
         </AnimatePresence>
       </main>
 
-      {/* Mobile Bottom Navigation - PLATINUM BAR */}
-      <div className="fixed bottom-4 left-4 right-4 z-[90] md:hidden">
-        <div className="bg-slate-900/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-2 shadow-2xl flex justify-around items-center">
+      {/* Mobile Bottom Navigation - PLATINUM BAR (Harmonized) */}
+      <div className="fixed bottom-6 left-6 right-6 z-[90] md:hidden">
+        <div className="bg-slate-900/90 backdrop-blur-3xl border border-white/10 rounded-[3rem] p-2 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] flex justify-between items-center relative overflow-hidden">
+            {/* Inner Glow */}
+            <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-transparent to-indigo-500/10 pointer-events-none"></div>
+            
             {navItems.map(item => (
                 <button
                     key={item.id}
                     onClick={() => { setViewMode(item.id as ViewMode); setShowWallet(false); audioEngine.play('click'); }}
-                    className={`flex flex-col items-center gap-1.5 p-3 rounded-[1.8rem] transition-all min-w-[70px]
-                        ${viewMode === item.id && !showWallet ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}
+                    className={`flex flex-col items-center gap-1 p-3 rounded-[2.5rem] transition-all flex-1 relative
+                        ${viewMode === item.id && !showWallet ? 'text-white' : 'text-slate-500 hover:text-slate-300'}
                     `}
                 >
-                    <item.icon size={20} className={viewMode === item.id && !showWallet ? 'scale-110' : ''} />
-                    <span className="text-[8px] font-black uppercase tracking-widest">{item.label}</span>
+                    {viewMode === item.id && !showWallet && (
+                        <motion.div layoutId="nav-pill" className="absolute inset-0 bg-indigo-600 rounded-[2.5rem] shadow-lg shadow-indigo-600/30 -z-10" />
+                    )}
+                    <item.icon size={22} className={viewMode === item.id && !showWallet ? 'scale-110' : ''} />
+                    <span className="text-[9px] font-black uppercase tracking-widest">{item.label}</span>
                 </button>
             ))}
             <button
                 onClick={() => { setShowWallet(!showWallet); audioEngine.play('click'); }}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-[1.8rem] transition-all min-w-[70px]
-                    ${showWallet ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}
+                className={`flex flex-col items-center gap-1 p-3 rounded-[2.5rem] transition-all flex-1 relative
+                    ${showWallet ? 'text-white' : 'text-slate-500 hover:text-slate-300'}
                 `}
             >
-                <Wallet size={20} className={showWallet ? 'scale-110' : ''} />
-                <span className="text-[8px] font-black uppercase tracking-widest">Wallet</span>
+                {showWallet && (
+                    <motion.div layoutId="nav-pill" className="absolute inset-0 bg-emerald-600 rounded-[2.5rem] shadow-lg shadow-emerald-600/30 -z-10" />
+                )}
+                <Wallet size={22} className={showWallet ? 'scale-110' : ''} />
+                <span className="text-[9px] font-black uppercase tracking-widest">Wallet</span>
             </button>
         </div>
       </div>

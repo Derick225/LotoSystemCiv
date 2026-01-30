@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { PredictionTab } from './PredictionTab';
 import { MetaAnalystTab } from './MetaAnalystTab';
@@ -23,6 +24,19 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
         }
     }, [globalWeights]);
 
+    // SYMBIOSE : Écouteur d'événements
+    useEffect(() => {
+        const handleNavigation = (e: CustomEvent) => {
+            if (e.detail?.mainTab === 'Oracle' && e.detail?.subTab) {
+                setSubTab(e.detail.subTab as any);
+                const contentElement = document.getElementById('oracle-content');
+                if (contentElement) contentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+        window.addEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
+        return () => window.removeEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
+    }, []);
+
     const subTabs = [
         { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
         { id: 'chat', label: 'Tactical Chat', icon: <MessageSquareCode size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
@@ -36,23 +50,26 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in relative">
             <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
-                    {subTabs.map((tab) => (
-                        <button 
-                            key={tab.id}
-                            onClick={() => setSubTab(tab.id as any)} 
-                            className={`
-                                px-6 py-3.5 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-3 whitespace-nowrap
-                                ${subTab === tab.id 
-                                    ? 'bg-white dark:bg-slate-700 shadow-xl text-slate-900 dark:text-white scale-105' 
-                                    : `text-slate-400 ${tab.bg} dark:hover:bg-slate-800`
-                                }
-                            `}
-                        >
-                            <span className={subTab === tab.id ? tab.color : ''}>{tab.icon}</span>
-                            {tab.label}
-                        </button>
-                    ))}
+                {/* Navigation Sticky Mobile */}
+                <div className="sticky top-[70px] z-20 w-full md:w-auto bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+                    <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
+                        {subTabs.map((tab) => (
+                            <button 
+                                key={tab.id}
+                                onClick={() => setSubTab(tab.id as any)} 
+                                className={`
+                                    px-6 py-3.5 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-3 whitespace-nowrap
+                                    ${subTab === tab.id 
+                                        ? 'bg-white dark:bg-slate-700 shadow-xl text-slate-900 dark:text-white scale-105' 
+                                        : `text-slate-400 ${tab.bg} dark:hover:bg-slate-800`
+                                    }
+                                `}
+                            >
+                                <span className={subTab === tab.id ? tab.color : ''}>{tab.icon}</span>
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2">
@@ -63,7 +80,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                 </div>
             </div>
 
-            <div className="animate-slide-up transition-all duration-500 min-h-[600px]">
+            <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px]">
                 {subTab === 'oracle' && <PredictionTab drawName={drawName} />}
                 {subTab === 'chat' && <TacticalChatTab drawName={drawName} />}
                 {subTab === 'platinum' && <MetaAnalystTab drawName={drawName} />}
