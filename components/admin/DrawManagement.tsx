@@ -2,10 +2,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
 import { parseResultFromImage } from '../../services/geminiService';
+import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard, Filter } from 'lucide-react';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Clipboard, Filter, FileJson, Archive, DownloadCloud } from 'lucide-react';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
 interface DrawManagementProps {
@@ -25,7 +26,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const { showToast } = useToast();
     const [results, setResults] = useState<DrawResult[]>([]);
     const [loading, setLoading] = useState(true);
-    const [activeSubTab, setActiveSubTab] = useState<'manual' | 'bulk' | 'audit'>('manual');
+    const [activeSubTab, setActiveSubTab] = useState<'manual' | 'bulk' | 'audit' | 'export'>('manual');
     
     // Vision OCR State
     const [isScanning, setIsScanning] = useState(false);
@@ -285,6 +286,19 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         }
     };
 
+    // --- EXPORT LOGIC ---
+    const handleExportJSON = () => {
+        if (results.length === 0) { showToast("Aucune donnée à exporter.", "error"); return; }
+        ExportService.exportToJSON(results, `Backup_${drawName.replace(/\s+/g, '_')}`);
+        showToast("Backup JSON généré.", "success");
+    };
+
+    const handleExportCSV = () => {
+        if (results.length === 0) { showToast("Aucune donnée à exporter.", "error"); return; }
+        ExportService.exportHistoryToCSV(results, `Export_${drawName.replace(/\s+/g, '_')}`);
+        showToast("Export CSV généré.", "success");
+    };
+
     const validCount = useMemo(() => previewData.filter(r => r.isValid).length, [previewData]);
     const errorCount = useMemo(() => previewData.filter(r => !r.isValid).length, [previewData]);
     const filteredPreview = useMemo(() => {
@@ -310,6 +324,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     </button>
                     <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <LayoutGrid size={12}/> Import
+                    </button>
+                    <button onClick={() => setActiveSubTab('export')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'export' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                        <DownloadCloud size={12}/> Export
                     </button>
                     <button onClick={() => setActiveSubTab('audit')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <Stethoscope size={12}/> Audit
@@ -488,6 +505,54 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* TAB CONTENT: EXPORT */}
+            {activeSubTab === 'export' && (
+                <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl animate-scale-in">
+                    <div className="flex items-center gap-4 mb-8">
+                        <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl"><DownloadCloud size={24}/></div>
+                        <div>
+                            <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter text-lg">Centre d'Exportation</h3>
+                            <p className="text-slate-400 text-xs font-medium">Extraire les données de {drawName}</p>
+                        </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <button 
+                            onClick={handleExportCSV}
+                            className="flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-900/50 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 transition-all group"
+                        >
+                            <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-lg mb-4 group-hover:scale-110 transition-transform">
+                                <FileSpreadsheet size={32} className="text-emerald-500"/>
+                            </div>
+                            <h4 className="font-black text-slate-800 dark:text-white uppercase tracking-tight">Format Tableur (CSV)</h4>
+                            <p className="text-[10px] text-slate-400 text-center mt-2 max-w-[200px]">
+                                Compatible Excel, Sheets. Idéal pour l'analyse manuelle et les graphiques externes.
+                            </p>
+                        </button>
+
+                        <button 
+                            onClick={handleExportJSON}
+                            className="flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-900/50 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 transition-all group"
+                        >
+                            <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-lg mb-4 group-hover:scale-110 transition-transform">
+                                <FileJson size={32} className="text-amber-500"/>
+                            </div>
+                            <h4 className="font-black text-slate-800 dark:text-white uppercase tracking-tight">Format Backup (JSON)</h4>
+                            <p className="text-[10px] text-slate-400 text-center mt-2 max-w-[200px]">
+                                Structure complète. Idéal pour la sauvegarde, la réimportation ou l'analyse développeur.
+                            </p>
+                        </button>
+                    </div>
+                    
+                    <div className="mt-8 p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3">
+                        <Archive size={16} className="text-slate-400"/>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">
+                            {results.length} enregistrements disponibles pour l'export.
+                        </span>
+                    </div>
                 </div>
             )}
 

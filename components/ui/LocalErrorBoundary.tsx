@@ -1,4 +1,5 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, WifiOff } from 'lucide-react';
 
 interface Props {
@@ -13,7 +14,7 @@ interface State {
 /**
  * LocalErrorBoundary v4.5 - Module Isolation
  */
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
