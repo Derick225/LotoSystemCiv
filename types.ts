@@ -187,23 +187,29 @@ export interface DetailedNumberMetrics {
     nemesis: number[];
 }
 
-export interface PlatinumCombo {
+// --- NOUVELLES STRUCTURES PLATINUM V18 ---
+
+export interface PlatinumTimeline {
+    type: 'ALPHA' | 'SIGMA' | 'OMEGA';
+    title: string;
     numbers: number[];
     score: number;
-    breakdown: any;
-    tags?: string[];
+    intuitionScore: number;
+    remark: string;
+    keyMetric: string; // ex: "Hurst: 0.82" ou "Ghost Gap: 42"
+    colorTheme: string;
 }
 
 export interface PlatinumResult {
     id: string;
     kingNumbers: { number: number, count: number }[];
-    combinations: PlatinumCombo[];
+    timelines: PlatinumTimeline[]; // Remplace combinations simple
+    combinations?: any[]; // Legacy support
     confidence: number;
     analysis: string;
     drawName: string;
     timestamp: number;
-    targetSumRange?: { min: number, max: number, reason: string };
-    hotZonesSpectro?: number[];
+    ghostMap?: number[]; // Carte des zones vides
 }
 
 export interface GeminiReasoning {
