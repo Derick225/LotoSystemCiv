@@ -1,11 +1,123 @@
 
 /**
- * Nexus Production Math Worker v10.1 (HPC Balance Edition)
+ * Nexus Production Math Worker v12.0 (Deep Science Edition)
+ * Implémentations mathématiques rigoureuses (DFT, Haar, R/S Analysis).
  */
 
 export {};
 
 const ctx = self as unknown as Worker;
+
+// --- UTILS MATHS PURS ---
+
+const mean = (data: number[]) => data.reduce((a, b) => a + b, 0) / (data.length || 1);
+
+const stdDev = (data: number[]) => {
+    const mu = mean(data);
+    const variance = data.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / (data.length || 1);
+    return Math.sqrt(variance);
+};
+
+// Transformée de Fourier Discrète (DFT) Réelle
+// Retourne le spectre de puissance (Magnitude)
+function computeDFT(signal: number[]): { frequency: number, power: number, period: number }[] {
+    const N = signal.length;
+    const spectrum = [];
+    
+    // On ne calcule que la première moitié (Nyquist)
+    for (let k = 1; k < N / 2; k++) {
+        let re = 0;
+        let im = 0;
+        for (let n = 0; n < N; n++) {
+            const angle = (2 * Math.PI * k * n) / N;
+            // Fenêtre de Hanning pour réduire le leakage spectral
+            const window = 0.5 * (1 - Math.cos((2 * Math.PI * n) / (N - 1)));
+            const val = signal[n] * window;
+            
+            re += val * Math.cos(angle);
+            im -= val * Math.sin(angle);
+        }
+        const magnitude = Math.sqrt(re * re + im * im);
+        spectrum.push({
+            frequency: k,
+            power: magnitude,
+            period: N / k
+        });
+    }
+    return spectrum;
+}
+
+// Transformée en Ondelettes de Haar (1 niveau)
+// Décompose le signal en Approximation (A) et Détail (D)
+function computeHaarTransform(signal: number[]): number {
+    const vals = [...signal];
+    if (vals.length % 2 !== 0) vals.pop(); // Pair requis
+    let energy = 0;
+    
+    for (let i = 0; i < vals.length; i += 2) {
+        // Coefficient de détail (Haute fréquence / Changement brusque)
+        const detail = (vals[i] - vals[i+1]) / Math.sqrt(2);
+        energy += Math.pow(detail, 2);
+    }
+    return energy;
+}
+
+// Analyse R/S (Rescaled Range) pour exposant de Hurst robuste
+// Calcule sur plusieurs tailles de fenêtres pour une régression linéaire
+function computeRobustHurst(signal: number[]): number {
+    const N = signal.length;
+    if (N < 20) return 0.5;
+
+    // Tailles de fenêtres (diviseurs)
+    const windowSizes = [Math.floor(N/2), Math.floor(N/4), Math.floor(N/8)].filter(w => w > 4);
+    if (windowSizes.length < 2) return 0.5;
+
+    const logRs: number[] = [];
+    const logSizes: number[] = [];
+
+    for (const wSize of windowSizes) {
+        const chunksCount = Math.floor(N / wSize);
+        let totalRS = 0;
+
+        for (let i = 0; i < chunksCount; i++) {
+            const chunk = signal.slice(i * wSize, (i + 1) * wSize);
+            const m = mean(chunk);
+            const y = chunk.map(v => v - m);
+            
+            // Somme cumulative
+            let sum = 0;
+            const z = y.map(v => { sum += v; return sum; });
+            
+            const R = Math.max(...z) - Math.min(...z);
+            const S = stdDev(chunk);
+            
+            if (S > 0) totalRS += R / S;
+        }
+        
+        const avgRS = totalRS / chunksCount;
+        if (avgRS > 0) {
+            logRs.push(Math.log(avgRS));
+            logSizes.push(Math.log(wSize));
+        }
+    }
+
+    // Régression linéaire simple (Pente = Hurst)
+    if (logRs.length < 2) return 0.5;
+    
+    const meanX = mean(logSizes);
+    const meanY = mean(logRs);
+    let num = 0, den = 0;
+    
+    for(let i=0; i<logRs.length; i++) {
+        num += (logSizes[i] - meanX) * (logRs[i] - meanY);
+        den += Math.pow(logSizes[i] - meanX, 2);
+    }
+    
+    const slope = den !== 0 ? num / den : 0.5;
+    return Math.max(0, Math.min(1, slope));
+}
+
+// --- WORKER HANDLER ---
 
 ctx.onmessage = async (e: MessageEvent) => {
     const { requestId, task, history, payload } = e.data;
@@ -16,14 +128,14 @@ ctx.onmessage = async (e: MessageEvent) => {
         switch (task) {
             case 'full_analysis':
                 result = {
-                    spectral: calculateSpectralFFT(history),
-                    wavelet: calculateWaveletScan(history),
-                    fractal: calculateHurstExponent(history),
+                    spectral: calculateSpectralAnalysis(history),
+                    wavelet: calculateWaveletEnergy(history),
+                    fractal: calculateFractalDimensions(history),
                     centrality: calculatePageRank(history)
                 };
                 break;
             case 'wavelet_analysis':
-                result = calculateWaveletScan(history);
+                result = calculateWaveletEnergy(history);
                 break;
             case 'succession_matrix':
                 result = calculateSuccession(history);
@@ -49,6 +161,90 @@ ctx.onmessage = async (e: MessageEvent) => {
     }
 };
 
+// --- IMPLEMENTATIONS METIER ---
+
+function calculateSpectralAnalysis(history: any[]) {
+    // Analyse des 128 derniers tirages
+    const N = Math.min(history.length, 128);
+    const data = history.slice(0, N);
+    
+    const results = [];
+    let globalMaxPower = 0;
+
+    for (let num = 1; num <= 90; num++) {
+        // Signal binaire : 1 si sorti, -1 si pas sorti (centré sur 0 pour supprimer la composante DC)
+        const signal = data.map(d => (d.gagnants.includes(num) ? 1 : -1));
+        
+        const spectrum = computeDFT(signal);
+        
+        // On cherche la fréquence dominante
+        let maxP = 0;
+        let domPeriod = 0;
+        
+        spectrum.forEach(s => {
+            if (s.power > maxP) {
+                maxP = s.power;
+                domPeriod = s.period;
+            }
+        });
+
+        if (maxP > globalMaxPower) globalMaxPower = maxP;
+        
+        results.push({ 
+            number: num, 
+            rawEnergy: maxP, 
+            dominantPeriod: domPeriod 
+        });
+    }
+
+    // Normalisation
+    return results.map(r => ({
+        number: r.number,
+        energy: Math.round((r.rawEnergy / (globalMaxPower || 1)) * 100),
+        dominantPeriod: parseFloat(r.dominantPeriod.toFixed(1)),
+        resonance: (r.rawEnergy / (globalMaxPower || 1)) > 0.8
+    })).sort((a,b) => b.energy - a.energy);
+}
+
+function calculateWaveletEnergy(history: any[]) {
+    // Ondelettes : Détection de "chocs" récents
+    const N = Math.min(history.length, 64);
+    const data = history.slice(0, N);
+    const results = [];
+
+    for (let num = 1; num <= 90; num++) {
+        const signal = data.map(d => (d.gagnants.includes(num) ? 1 : 0));
+        const energy = computeHaarTransform(signal);
+        // Normalisation empirique
+        const normalized = Math.min(100, (energy / (N/2)) * 100 * 2.5); 
+        results.push({ number: num, energy: normalized });
+    }
+    return results;
+}
+
+function calculateFractalDimensions(history: any[]) {
+    // Hurst : Analyse de la mémoire long terme
+    const N = Math.min(history.length, 250);
+    const data = history.slice(0, N);
+    const results = [];
+
+    for (let num = 1; num <= 90; num++) {
+        const signal = data.map(d => (d.gagnants.includes(num) ? 1 : 0));
+        const h = computeRobustHurst(signal);
+        
+        let regime = 'RANDOM';
+        if (h > 0.6) regime = 'PERSISTANT';
+        else if (h < 0.4) regime = 'ANTI-PERSISTANT';
+
+        results.push({
+            number: num,
+            hurst: parseFloat(h.toFixed(3)),
+            regime
+        });
+    }
+    return results;
+}
+
 function calculateSuccession(history: any[]) {
     const matrix: Record<number, Record<number, number>> = {};
     const totals: Record<number, number> = {};
@@ -73,36 +269,42 @@ function calculatePearsonMatrix(history: any[]) {
     const N = Math.min(200, history.length);
     const data = history.slice(0, N);
 
-    const getSeries = (num: number) => data.map(d => (d.gagnants.includes(num) ? 1 : 0));
-    const means: Record<number, number> = {};
-    const series: Record<number, number[]> = {};
+    // Pré-calcul des séries et moyennes
+    const series: Float32Array[] = [];
+    const means: number[] = [];
+    const stds: number[] = [];
 
     for (let i = 1; i <= 90; i++) {
-        series[i] = getSeries(i);
-        means[i] = series[i].reduce((a, b) => a + b, 0) / N;
+        const s = new Float32Array(N);
+        let sum = 0;
+        for (let k = 0; k < N; k++) {
+            const val = data[k].gagnants.includes(i) ? 1 : 0;
+            s[k] = val;
+            sum += val;
+        }
+        series[i] = s;
+        means[i] = sum / N;
+        
+        let variance = 0;
+        for (let k = 0; k < N; k++) variance += Math.pow(s[k] - means[i], 2);
+        stds[i] = Math.sqrt(variance);
     }
 
     for (let i = 1; i <= 90; i++) {
         const affinities: Record<number, number> = {};
-        const xi = series[i];
-        const mi = means[i];
-
         for (let j = 1; j <= 90; j++) {
             if (i === j) continue;
-            const xj = series[j];
-            const mj = means[j];
-
-            let num = 0, den1 = 0, den2 = 0;
+            
+            // Corrélation de Pearson
+            let covariance = 0;
             for (let k = 0; k < N; k++) {
-                const d1 = xi[k] - mi;
-                const d2 = xj[k] - mj;
-                num += d1 * d2;
-                den1 += d1 * d1;
-                den2 += d2 * d2;
+                covariance += (series[i][k] - means[i]) * (series[j][k] - means[j]);
             }
-            // Corrélation normalisée
-            const r = num / (Math.sqrt(den1 * den2) || 1);
-            if (r > 0.05) affinities[j] = parseFloat(r.toFixed(3));
+            
+            const denom = stds[i] * stds[j];
+            const r = denom !== 0 ? covariance / denom : 0;
+
+            if (Math.abs(r) > 0.05) affinities[j] = parseFloat(r.toFixed(3));
         }
         matrix[i] = { number: i, affinities };
     }
@@ -110,38 +312,55 @@ function calculatePearsonMatrix(history: any[]) {
 }
 
 function calculateKMeans(history: any[]) {
+    // K-Means Algorithm (Lloyd's)
+    // Features : [Retard (Gap), Fréquence Récente (Forme), Écart-Type des Gaps (Stabilité)]
     const points = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         let gap = 0;
         for (let j = 0; j < history.length; j++) {
             if (history[j].gagnants.includes(num)) { gap = j; break; }
         }
-        // Fréquence amortie pour le clustering
-        const freq = Math.sqrt(history.slice(0, 25).filter(d => d.gagnants.includes(num)).length);
-        return { number: num, x: gap, y: freq, cluster: 'Neutre' };
+        const freq = history.slice(0, 20).filter(d => d.gagnants.includes(num)).length;
+        
+        const gaps = [];
+        let lastIdx = -1;
+        for(let j=0; j<Math.min(history.length, 100); j++) {
+            if(history[j].gagnants.includes(num)) {
+                if(lastIdx !== -1) gaps.push(j - lastIdx);
+                lastIdx = j;
+            }
+        }
+        const gapStd = gaps.length > 1 ? stdDev(gaps) : 10;
+
+        return { number: num, x: gap, y: freq, z: gapStd, cluster: 'Neutre' };
     });
 
+    // Centroids initiaux (Heuristiques)
     const centroids = [
-        { x: 2, y: 3, type: 'Sprinter' },
-        { x: 18, y: 1.5, type: 'Marathonien' },
-        { x: 35, y: 0.5, type: 'Dormeur' },
-        { x: 10, y: 1, type: 'Neutre' }
+        { x: 2, y: 3, z: 2, type: 'Sprinter' }, // Gap faible, Freq haute, Stable
+        { x: 15, y: 1, z: 5, type: 'Marathonien' }, // Moyen
+        { x: 35, y: 0, z: 10, type: 'Dormeur' }, // Gap énorme
+        { x: 10, y: 1, z: 8, type: 'Neutre' }
     ];
 
-    for (let iter = 0; iter < 8; iter++) {
+    for (let iter = 0; iter < 10; iter++) {
+        // Assignation
         points.forEach(p => {
             let minDist = Infinity;
             centroids.forEach(c => {
-                const d = Math.pow(p.x - c.x, 2) + Math.pow(p.y - c.y, 2);
+                // Distance Euclidienne pondérée
+                const d = Math.pow(p.x - c.x, 2) + Math.pow((p.y - c.y)*5, 2) + Math.pow((p.z - c.z)/2, 2);
                 if (d < minDist) { minDist = d; p.cluster = c.type; }
             });
         });
 
+        // Update Centroids
         centroids.forEach(c => {
             const clusterPoints = points.filter(p => p.cluster === c.type);
             if (clusterPoints.length > 0) {
-                c.x = clusterPoints.reduce((a, b) => a + b.x, 0) / clusterPoints.length;
-                c.y = clusterPoints.reduce((a, b) => a + b.y, 0) / clusterPoints.length;
+                c.x = mean(clusterPoints.map(p => p.x));
+                c.y = mean(clusterPoints.map(p => p.y));
+                c.z = mean(clusterPoints.map(p => p.z));
             }
         });
     }
@@ -149,101 +368,39 @@ function calculateKMeans(history: any[]) {
 }
 
 function calculatePageRank(history: any[]) {
+    // PageRank sur le graphe de corrélation
     const matrix = calculatePearsonMatrix(history.slice(0, 80));
     const scores: Record<number, number> = {};
+    const d = 0.85; // Damping factor standard
+    
     for(let i=1; i<=90; i++) scores[i] = 1/90;
 
-    for (let iter = 0; iter < 12; iter++) {
+    for (let iter = 0; iter < 20; iter++) {
         const nextScores: Record<number, number> = {};
         for(let i=1; i<=90; i++) {
-            let rank = 0.15 / 90;
-            Object.entries(matrix).forEach(([vStr, data]: [any, any]) => {
-                const v = parseInt(vStr);
-                const affs = data.affinities;
-                const weight = affs[i] || 0;
-                // On réduit le poids sortant des noeuds trop centraux (trop fréquents)
-                const totalOut = Object.values(affs).reduce((a:any,b:any)=>a+b, 0) as number;
-                if (totalOut > 0) rank += 0.85 * (scores[v] * (weight / totalOut));
-            });
-            nextScores[i] = rank;
+            let sumInbound = 0;
+            // On cherche tous les noeuds J qui pointent vers I (Affinité > 0)
+            for(let j=1; j<=90; j++) {
+                if (i === j) continue;
+                const aff = matrix[j].affinities[i];
+                if (aff && aff > 0) {
+                    // Poids sortant total de J (positif seulement)
+                    const totalWeightJ = Object.values(matrix[j].affinities).reduce((a:any, b:any) => a + Math.max(0, b as number), 0) as number;
+                    if (totalWeightJ > 0) {
+                        sumInbound += (scores[j] * aff) / totalWeightJ;
+                    }
+                }
+            }
+            nextScores[i] = (1 - d) / 90 + d * sumInbound;
         }
         Object.assign(scores, nextScores);
     }
+    
     const maxS = Math.max(...Object.values(scores));
     return Object.entries(scores).map(([n, s]) => ({ 
         number: parseInt(n), 
-        normalized: Math.round(Math.sqrt(s/maxS)*100) 
+        normalized: Math.round((s/maxS)*100) 
     }));
-}
-
-function calculateWaveletScan(history: any[]) {
-    const results = [];
-    for (let num = 1; num <= 90; num++) {
-        const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
-        let energy = 0;
-        for (let i = 0; i < Math.min(signal.length - 1, 32); i += 2) {
-            energy += Math.pow(signal[i] - signal[i+1], 2);
-        }
-        results.push({ number: num, energy: Math.min(100, energy * 25) });
-    }
-    return results;
-}
-
-function calculateSpectralFFT(history: any[]) {
-    const N = history.length;
-    let globalMaxPower = 0;
-    const rawPowers = [];
-
-    for (let num = 1; num <= 90; num++) {
-        const signal = history.map(d => (d.gagnants.includes(num) ? 1 : 0));
-        const mean = signal.reduce((a: number, b: number) => a + b, 0) / N;
-        let maxPower = 0;
-        let dominantPeriod = 0;
-        const signalWindowed = signal.map((s, idx) => (s - mean) * (0.54 - 0.46 * Math.cos((2 * Math.PI * idx) / (N - 1))));
-
-        const limit = Math.floor(N / 2);
-        for (let k = 1; k < limit; k++) {
-            let re = 0, im = 0;
-            for (let n = 0; n < N; n++) {
-                const angle = (2 * Math.PI * k * n) / N;
-                re += signalWindowed[n] * Math.cos(angle);
-                im -= signalWindowed[n] * Math.sin(angle);
-            }
-            const power = (re * re + im * im) / N;
-            if (power > maxPower) { maxPower = power; dominantPeriod = N / k; }
-        }
-        if (maxPower > globalMaxPower) globalMaxPower = maxPower;
-        rawPowers.push({ number: num, rawEnergy: maxPower, dominantPeriod });
-    }
-
-    const safeMax = globalMaxPower > 0 ? globalMaxPower : 1;
-    return rawPowers.map(p => ({
-        number: p.number,
-        energy: Math.round((p.rawEnergy / safeMax) * 100),
-        dominantPeriod: parseFloat(p.dominantPeriod.toFixed(1))
-    })).sort((a,b) => b.energy - a.energy);
-}
-
-function calculateHurstExponent(history: any[]) {
-    const results = [];
-    const N = Math.min(history.length, 200);
-    for (let num = 1; num <= 90; num++) {
-        const signal = history.slice(0, N).map(d => (d.gagnants.includes(num) ? 1 : 0));
-        const mean = signal.reduce((a: number, b: number) => a + b, 0) / N;
-        const x = signal.map(v => v - mean);
-        let cumsum = 0;
-        const y = x.map(val => { cumsum += val; return cumsum; });
-        const R = Math.max(...y) - Math.min(...y);
-        const S = Math.sqrt(x.reduce((a, v) => a + v * v, 0) / N) || 1;
-        const h = Math.log(R / S) / Math.log(N);
-        const clampedH = Math.max(0, Math.min(1, h || 0.5));
-        results.push({
-            number: num,
-            hurst: parseFloat(clampedH.toFixed(2)),
-            regime: clampedH > 0.6 ? 'PERSISTANT' : clampedH < 0.4 ? 'ANTI-PERSISTANT' : 'RANDOM'
-        });
-    }
-    return results;
 }
 
 function calculateProjections(history: any[], lastWinners: number[]) {
@@ -262,8 +419,7 @@ function calculateProjections(history: any[], lastWinners: number[]) {
     return Object.entries(probs)
         .map(([n, p]) => ({ 
             number: parseInt(n), 
-            // Probabilité amortie
-            probability: Math.round(Math.sqrt(p / lastWinners.length) * 100) 
+            probability: Math.round(Math.min(100, (p / lastWinners.length) * 100 * 2)) // Boost visuel
         }))
         .sort((a, b) => b.probability - a.probability)
         .slice(0, 10);
