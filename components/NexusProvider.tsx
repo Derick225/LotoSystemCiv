@@ -14,6 +14,7 @@ import {
 } from '../services/mathService';
 import { calculateSpatialMetrics } from '../services/spatialService';
 import { calculateOrchestrationScores } from '../services/orchestrationService';
+import { runDecisionForest } from '../services/decisionTreeService';
 import { getAlgoWeights, saveAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
@@ -61,7 +62,6 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setHistory(hist); 
         
         if (hist.length > 0) {
-            // 1. Calculs Statistiques de Base (Instantané)
             const counts: Record<number, number> = {};
             hist.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             setStats(Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count));
@@ -79,13 +79,14 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (hist.length >= 10 && drawName !== 'ALL') {
-            // 2. Calculs Mathématiques HPC (Parallèle)
-            const [spec, wav, frac, regData, corr, preds] = await Promise.all([
+            // CALCULS HPC PARALLÈLES
+            const [spec, wav, frac, regData, corr, forestRes, preds] = await Promise.all([
                 calculateSpectralMetricsAsync(hist),
                 calculateWaveletMetricsAsync(hist),
                 calculateFractalMetricsAsync(hist),
                 Promise.resolve(calculateRegularity(hist)),
                 calculateCorrelationMatrixAsync(hist),
+                runDecisionForest(hist), // Intégration Decision Forest
                 getPredictionHistoryAsync(drawName)
             ]);
             
@@ -96,37 +97,35 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setRegularity(regData);
             setCorrelationMatrix(corr);
 
-            // 3. CONSTRUCTION DU CONTEXTE SYMBIOTIQUE (Nouveau Core v17)
+            // CONSTRUCTION DU CONTEXTE SYMBIOTIQUE
             const spatial = calculateSpatialMetrics(hist);
             const orchScores = calculateOrchestrationScores(hist);
             
+            const forestVotesMap: Record<number, number> = {};
+            forestRes.votes.forEach(v => forestVotesMap[v.candidate] = v.score);
+
             const symbioticCtx: SymbioticContext = {
-                // Zone Morte : Clusters à très faible densité (< 10%)
                 spatialDeadZones: spatial.gridDensity.map((d, i) => d < (Math.max(...spatial.gridDensity) * 0.1) ? i : -1).filter(n => n !== -1),
-                // Zone Chaude : Clusters à haute densité
                 spatialHotZones: spatial.advancedClusters.filter(c => c.potential > 80).flatMap(c => c.numbers),
-                // Boost Orchestration : Numéros détectés par les patterns (Miroir/Voisin)
                 orchestrationBoosts: {},
                 spectralVeto: spec.filter(s => s.energy < 10).map(s => s.number),
-                temporalTarget: null
+                temporalTarget: null,
+                forestVotes: forestVotesMap
             };
 
             Object.entries(orchScores).forEach(([n, score]) => {
-                // Conversion du score brut en multiplicateur (ex: 50 -> 1.5x)
-                if (score > 30) symbioticCtx.orchestrationBoosts[parseInt(n)] = 1 + (score / 100);
+                if (score > 30) symbioticCtx.orchestrationBoosts[parseInt(n)] = 1 + (score / 120);
             });
             
             setSymbioticContext(symbioticCtx);
 
-            // 4. Génération de la Prédiction Maître avec le Contexte
-            // Cela remplace l'ancienne logique isolée
+            // PRÉDICTION MAÎTRE SYMBIOTIQUE
             const prediction = await generateMasterPrediction(drawName, hist, weights, {
                 spectral: spec, wavelet: wav, correlationMatrix: corr, regularity: regData
             }, symbioticCtx);
 
             setLastPrediction(prediction);
 
-            // 5. Insights & Calibration
             const insights = await generateSmartInsights(drawName, hist, spec, regData.map(r => ({ number: r.number, gap: r.currentGap })), regData);
             setSmartInsights(insights);
 
@@ -134,7 +133,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const perf = calculateHistoricalPerformance(preds, hist);
                 setCalibration({
                     overallScore: 0.25,
-                    reliability: Math.min(100, Math.round(perf.accuracy * 4.5)),
+                    reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
                     bias: 'NEUTRAL',
                     sampleSize: perf.analyzedDrawsCount
                 });

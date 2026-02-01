@@ -14,6 +14,7 @@ export interface SymbioticContext {
     orchestrationBoosts: Record<number, number>; // Numéro -> Multiplicateur (ex: 1.5)
     spectralVeto: number[]; // Numéros à exclure car énergie trop basse
     temporalTarget: { min: number, max: number } | null; // Cible temporelle (Gap)
+    forestVotes: Record<number, number>; // Numéro -> Score Forest (0-100)
 }
 
 export interface ChatMessage {
@@ -51,6 +52,7 @@ export interface AlgoWeights {
     monte_carlo: number; 
     lstm_pattern: number; 
     isolation_anomaly: number; 
+    decision_forest: number; // NOUVEAU
 }
 
 export interface PositionalRegime {
@@ -162,7 +164,7 @@ export interface NexusContextType {
     setHoveredNumber: (n: number | null) => void;
     rlState: RLState | null;
     vocalContext: OracleVocalContext | null;
-    symbioticContext: SymbioticContext | null; // NOUVEAU
+    symbioticContext: SymbioticContext | null;
 }
 
 export interface ForensicReport {
@@ -196,20 +198,20 @@ export interface PlatinumTimeline {
     score: number;
     intuitionScore: number;
     remark: string;
-    keyMetric: string; // ex: "Hurst: 0.82" ou "Ghost Gap: 42"
+    keyMetric: string; 
     colorTheme: string;
 }
 
 export interface PlatinumResult {
     id: string;
     kingNumbers: { number: number, count: number }[];
-    timelines: PlatinumTimeline[]; // Remplace combinations simple
-    combinations?: any[]; // Legacy support
+    timelines: PlatinumTimeline[]; 
+    combinations?: any[]; 
     confidence: number;
     analysis: string;
     drawName: string;
     timestamp: number;
-    ghostMap?: number[]; // Carte des zones vides
+    ghostMap?: number[]; 
 }
 
 export interface GeminiReasoning {

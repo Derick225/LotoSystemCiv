@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { invokeEdgeFunction } from '../../services/apiClient';
 import { ChatMessage } from '../../types';
-import { Send, Terminal, Bot, User, RefreshCw, Brain, Sparkles, Wand2, Activity, Wallet } from 'lucide-react';
+import { Send, Terminal, Bot, User, RefreshCw, Brain, Sparkles, Wand2, Activity, Wallet, Microscope, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SafeMarkdown } from '../ui/SafeMarkdown';
 import { audioEngine } from '../../utils/audioEngine';
@@ -34,6 +34,14 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                 window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Topologie', subTab: 'combinations' } }));
                 result = `Paramétrage de la synthèse effectué : ${fc.args.ticketCount} tickets demandés en mode ${fc.args.riskProfile || 'BALANCED'}.`;
                 break;
+            case "openForensicAudit":
+                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Forensic' } }));
+                result = "Accès au module Forensic pour audit post-tirage accordé.";
+                break;
+            case "showHistory":
+                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Flux' } }));
+                result = "Ouverture du registre historique global.";
+                break;
             default:
                 result = "Erreur : Outil non reconnu.";
         }
@@ -56,7 +64,6 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         setIsLoading(true);
         audioEngine.play('click');
 
-        // Récupération dynamique du bankroll
         const currentBankroll = getBankroll();
 
         try {
@@ -82,7 +89,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                     setMessages(prev => [...prev, {
                         id: crypto.randomUUID(),
                         role: 'assistant',
-                        content: `**[SYSTÈME EXEC]** : ${funcResult}`,
+                        content: `**[SYSTEM_ACTION]** : ${funcResult}`,
                         timestamp: Date.now()
                     }]);
                 }
@@ -102,7 +109,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             setMessages(prev => [...prev, {
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: "Anomalie de liaison Cloud. Le noyau Apex est en mode dégradé.",
+                content: "Rupture de liaison. Le noyau Apex tente une reconnexion...",
                 timestamp: Date.now()
             }]);
             audioEngine.play('error');
@@ -113,16 +120,15 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
 
     return (
         <div className="flex flex-col h-[700px] bg-slate-900/60 rounded-[3.5rem] border border-white/10 overflow-hidden shadow-2xl relative">
-            {/* Header */}
             <div className="p-8 bg-slate-900 border-b border-white/5 flex justify-between items-center z-10">
                 <div className="flex items-center gap-4">
-                    <div className="p-3 bg-indigo-600 rounded-2xl text-white shadow-lg shadow-indigo-600/20">
+                    <div className="p-3 bg-indigo-600 rounded-2xl text-white shadow-lg">
                         <Brain size={22} />
                     </div>
                     <div>
-                        <h3 className="text-white font-black uppercase text-base tracking-widest">Agent Tactique Apex</h3>
+                        <h3 className="text-white font-black uppercase text-base tracking-widest">Tactical Liaison Apex</h3>
                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                             <Activity size={10} className="text-emerald-500"/> Liaison Actionnable Active
+                             <Activity size={10} className="text-emerald-500"/> Cortex Decisionnel Actif
                         </p>
                     </div>
                 </div>
@@ -133,17 +139,15 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                 </div>
             </div>
 
-            {/* Chat Area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar scroll-smooth">
                 {messages.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center text-center space-y-8 opacity-20">
                         <div className="relative">
-                            <Sparkles size={80} className="text-indigo-500 animate-pulse" />
-                            <div className="absolute inset-0 bg-indigo-500 blur-[60px] opacity-20"></div>
+                            <Bot size={80} className="text-indigo-500 animate-pulse" />
                         </div>
                         <div className="space-y-3">
-                            <p className="text-lg font-black uppercase tracking-[0.4em] text-slate-300">Terminal d'Inférence</p>
-                            <p className="text-xs max-w-xs mx-auto font-medium">L'IA Apex analyse vos stratégies et votre budget.</p>
+                            <p className="text-lg font-black uppercase tracking-[0.4em] text-slate-300">Terminal d'Opérations</p>
+                            <p className="text-xs max-w-xs mx-auto font-medium">L'IA Tactique Apex v14 supervise les flux. Ordonnez une analyse ou demandez une synthèse.</p>
                         </div>
                     </div>
                 )}
@@ -164,7 +168,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                             `}>
                                 <div className="flex items-center gap-2 mb-3 opacity-50">
                                     {msg.role === 'assistant' ? <Bot size={14}/> : <User size={14}/>}
-                                    <span className="text-[10px] font-black uppercase tracking-widest">{msg.role === 'user' ? 'Opérateur' : 'Nexus Core'}</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">{msg.role === 'user' ? 'Opérateur' : 'Apex Core'}</span>
                                 </div>
                                 <div className={`text-xs md:text-sm font-medium leading-relaxed ${msg.role === 'assistant' ? 'font-mono' : ''}`}>
                                     {msg.role === 'assistant' ? <SafeMarkdown text={msg.content} /> : msg.content}
@@ -175,17 +179,16 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                 </AnimatePresence>
                 
                 {isLoading && (
-                    <div className="flex justify-start animate-pulse">
+                    <div className="flex justify-start">
                         <div className="bg-slate-800/50 p-6 rounded-[2.5rem] rounded-tl-none border border-white/5 flex gap-2">
-                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                            <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                            <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce"></div>
+                            <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Input Area */}
             <div className="p-6 bg-slate-900 border-t border-white/5">
                 <div className="flex gap-4 items-end bg-black/30 p-2 rounded-[2.5rem] border border-white/10 focus-within:border-indigo-500/50 transition-colors">
                     <div className="pl-4 pb-4 text-indigo-500">
@@ -200,14 +203,14 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                 handleSend();
                             }
                         }}
-                        placeholder="Ordonnez une simulation, demandez un avis tactique..."
-                        className="flex-1 bg-transparent border-none text-slate-200 placeholder-slate-600 focus:ring-0 resize-none py-4 max-h-32 text-sm font-medium custom-scrollbar outline-none"
+                        placeholder="Demandez un audit, une navigation ou un avis..."
+                        className="flex-1 bg-transparent border-none text-slate-200 placeholder-slate-600 focus:ring-0 resize-none py-4 max-h-32 text-sm font-medium outline-none"
                         rows={1}
                     />
                     <button 
                         onClick={handleSend}
                         disabled={!input.trim() || isLoading}
-                        className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                        className="p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all disabled:opacity-50 shadow-lg"
                     >
                         {isLoading ? <RefreshCw className="animate-spin" size={20}/> : <Send size={20}/>}
                     </button>
