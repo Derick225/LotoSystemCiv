@@ -203,19 +203,38 @@ export const saveAdaptiveRules = async (drawName: string, rules: AdaptiveRules) 
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
-    const entries = Object.entries(weights) as [string, any][];
-    const dominant = entries.reduce((a, b) => (Number(a[1]) || 0) > (Number(b[1]) || 0) ? a : b);
+    const entries = Object.entries(weights) as [string, number][];
+    
+    // Tri décroissant par valeur de poids
+    const sorted = entries.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
+    
+    const dominant = sorted[0];
+    const subDominant = sorted[1];
+
     const names: Record<string, string> = { 
         frequency: 'Inertie', 
-        gap: 'Écart Récursif', 
-        spectral: 'Résonance FFT', 
-        markov: 'Lien Séquentiel', 
-        orchestration: 'Translocation', 
-        spatial: 'Géométrie Quantique', 
-        fractal: 'Chaos Mémoire',
-        decision_forest: 'Consensus Forestier'
+        gap: 'Écart', 
+        spectral: 'Spectral', 
+        markov: 'Séquentiel', 
+        orchestration: 'Orchestral', 
+        spatial: 'Spatial', 
+        fractal: 'Fractal',
+        decision_forest: 'Forest',
+        poisson: 'Poisson',
+        momentum: 'Momentum',
+        equilibrium: 'Gauss',
+        wavelet: 'Wavelet'
     };
-    return names[dominant[0]] || 'Nexus Apex';
+
+    const domName = names[dominant[0]] || 'Apex';
+    
+    // Création d'un nom composé "ADN" : ex: "Inertie-Spectral"
+    if (subDominant && subDominant[1] > 0.15) {
+        const subName = names[subDominant[0]] || '';
+        return `${domName}-${subName}`;
+    }
+
+    return `${domName} Pur`;
 };
 
 export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {

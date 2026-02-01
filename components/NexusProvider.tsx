@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   DrawResult, SpectralMetric, FractalMetric, AlgoWeights, 
   Prediction, SmartInsight, NumberRegularity, BrierCalibration,
-  NexusContextType, RLState, SymbioticContext
+  NexusContextType, RLState, SymbioticContext, OracleVocalContext
 } from '../types';
 import { lotteryService, getNextScheduledDraw } from '../services/lotteryService';
 import { 
@@ -45,6 +45,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [hoveredNumber, setHoveredNumberState] = useState<number | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
   const [symbioticContext, setSymbioticContext] = useState<SymbioticContext | null>(null);
+  const [rlState, setRlState] = useState<RLState | null>(null);
+  const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -56,6 +58,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
         const weights = await getAlgoWeights(drawName);
         setGlobalWeights(weights);
+
+        // Load RL State from local storage for UI context
+        try {
+            const rawRL = localStorage.getItem(`rl_state_${drawName}`);
+            if (rawRL) setRlState(JSON.parse(rawRL));
+            else setRlState(null);
+        } catch {}
 
         const hist = await lotteryService.fetchHistory(drawName);
         if (abortControllerRef.current.signal.aborted) return;
@@ -152,18 +161,20 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [drawName]);
 
   const contextValue = useMemo(() => ({
-    drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
+    drawName, currentDrawName: drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading,
     correlationMatrix, regularity, calibration, hoveredNumber, symbioticContext,
+    rlState, vocalContext,
     setDrawName: setDrawNameState,
     setLastPrediction, setInspectingNumber: setInspectingNumberState,
     updateGlobalWeights, setHoveredNumber: setHoveredNumberState,
     refresh: () => loadData(),
-    refreshData: (name: string, force?: boolean) => { if(force) setRefreshTrigger(t => t+1); setDrawNameState(name); }
+    refreshData: async (name: string, force?: boolean) => { if(force) setRefreshTrigger(t => t+1); setDrawNameState(name); }
   }), [
     drawName, history, spectral, wavelet, fractal, stats, gaps, volatility, regime, 
     lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, 
-    correlationMatrix, regularity, calibration, hoveredNumber, loadData, updateGlobalWeights, symbioticContext
+    correlationMatrix, regularity, calibration, hoveredNumber, loadData, updateGlobalWeights, symbioticContext,
+    rlState, vocalContext
   ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;

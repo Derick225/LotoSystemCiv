@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlgoRadar } from '../AlgoRadar';
-import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights, saveAlgoWeights } from '../../services/predictionEngine';
+import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights, saveAlgoWeights, getAlgoWeights, getStrategyName } from '../../services/predictionEngine';
 import { LearningService } from '../../services/learningService'; 
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';
 import { useNexus } from '../NexusProvider';
-import { Sliders, Save, Scale, Activity, Gauge, RefreshCw, Wand2, BrainCircuit, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Sliders, Save, Scale, Activity, Gauge, RefreshCw, Wand2, BrainCircuit, CheckCircle2, AlertTriangle, Fingerprint } from 'lucide-react';
 
 interface ExpertTuningPanelProps {
     selectedDrawName: string;
@@ -14,25 +14,42 @@ interface ExpertTuningPanelProps {
 
 export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDrawName }) => {
     const { showToast } = useToast();
-    const { globalWeights, updateGlobalWeights, refreshData, history } = useNexus();
+    const { updateGlobalWeights, refreshData, history, drawName: activeDrawName } = useNexus();
     
-    const [localWeights, setLocalWeights] = useState<AlgoWeights>(globalWeights);
+    // Initialisation avec des valeurs par défaut pour éviter undefined au premier rendu
+    const [localWeights, setLocalWeights] = useState<AlgoWeights>({} as AlgoWeights);
     const [rules, setRules] = useState<AdaptiveRules>(getDefaultRules());
     const [isDirty, setIsDirty] = useState(false);
     const [isCalibrating, setIsCalibrating] = useState(false);
     const [lastLearnStatus, setLastLearnStatus] = useState<string | null>(null);
+    const [dnaName, setDnaName] = useState<string>("Chargement...");
     
-    // Synchro bidirectionnelle : Si les poids globaux changent (ex: via TrainingTab), on met à jour les sliders
+    // Chargement EXPLICITE des données du tirage SÉLECTIONNÉ (Indépendance ADN)
     useEffect(() => {
-        setLocalWeights(globalWeights);
-        const loadedRules = getAdaptiveRules(selectedDrawName);
-        setRules(loadedRules);
-        setIsDirty(false);
+        let isMounted = true;
+        const loadSpecificDNA = async () => {
+            try {
+                // On va chercher les poids spécifiques stockés pour CE tirage
+                const specificWeights = await getAlgoWeights(selectedDrawName);
+                const specificRules = getAdaptiveRules(selectedDrawName);
+                const lastDate = localStorage.getItem(`nexus_last_learn_${selectedDrawName}`);
+                
+                if (isMounted) {
+                    setLocalWeights(specificWeights);
+                    setRules(specificRules);
+                    setDnaName(getStrategyName(specificWeights));
+                    if(lastDate) setLastLearnStatus(`Dernière adaptation : ${lastDate}`);
+                    else setLastLearnStatus(null);
+                    setIsDirty(false);
+                }
+            } catch (e) {
+                console.error("Erreur chargement ADN", e);
+            }
+        };
         
-        const lastDate = localStorage.getItem(`nexus_last_learn_${selectedDrawName}`);
-        if(lastDate) setLastLearnStatus(`Dernière adaptation : ${lastDate}`);
-
-    }, [selectedDrawName, globalWeights]);
+        loadSpecificDNA();
+        return () => { isMounted = false; };
+    }, [selectedDrawName]);
 
     const totalWeight = useMemo((): number => {
         const vals = Object.values(localWeights) as number[];
@@ -41,7 +58,11 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
 
     const handleWeightChange = (key: keyof AlgoWeights, value: string) => {
         const numValue = parseFloat(value);
-        setLocalWeights(prev => ({ ...prev, [key]: numValue }));
+        setLocalWeights(prev => {
+            const next = { ...prev, [key]: numValue };
+            setDnaName(getStrategyName(next)); // Update live du nom ADN
+            return next;
+        });
         setIsDirty(true);
     };
 
@@ -49,6 +70,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         if (totalWeight === 0) return;
         const normalized = normalizeWeights(localWeights);
         setLocalWeights(normalized);
+        setDnaName(getStrategyName(normalized));
         setIsDirty(true);
         showToast("Tensor Flow équilibré (Σ = 1.0).", "info");
     };
@@ -60,26 +82,28 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         }
 
         setIsCalibrating(true);
-        showToast("🧬 Initialisation du noyau génétique...", "info");
+        showToast(`🧬 Mutation génétique pour ${selectedDrawName}...`, "info");
 
         try {
             const result = await LearningService.triggerAutoLearning(selectedDrawName);
             
             if (result.improvement && result.weights) {
-                // ÉTAPE CRITIQUE : Normalisation forcée avant application
                 const safeWeights = normalizeWeights(result.weights);
                 
-                // 1. Mise à jour du Context (Global)
-                updateGlobalWeights(safeWeights);
-                
-                // 2. Mise à jour de l'état Local (Sliders)
+                // 1. Mise à jour de l'état Local (Sliders)
                 setLocalWeights(safeWeights);
+                setDnaName(getStrategyName(safeWeights));
                 
-                // 3. Persistance
+                // 2. Persistance
                 await saveAlgoWeights(selectedDrawName, safeWeights);
-                await refreshData(selectedDrawName, true);
                 
-                showToast("✅ Symbiose réussie ! Structure ADN normalisée.", "success");
+                // 3. Si le tirage édité est le tirage actif, on met à jour le contexte global
+                if (selectedDrawName === activeDrawName) {
+                    updateGlobalWeights(safeWeights);
+                    await refreshData(selectedDrawName, true);
+                }
+                
+                showToast(`✅ ADN de ${selectedDrawName} optimisé.`, "success");
                 
                 const nowStr = new Date().toLocaleTimeString();
                 setLastLearnStatus(`Adaptation : ${nowStr}`);
@@ -95,7 +119,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         }
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         // Force la normalisation si l'utilisateur essaie de sauvegarder un état déséquilibré
         let weightsToSave = { ...localWeights };
         
@@ -105,11 +129,17 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
             setLocalWeights(weightsToSave); // Mise à jour visuelle
         }
 
-        updateGlobalWeights(weightsToSave);
+        await saveAlgoWeights(selectedDrawName, weightsToSave);
         saveAdaptiveRules(selectedDrawName, rules);
-        refreshData(selectedDrawName, true);
+        
+        // Si on édite le tirage actif, on rafraichit l'app
+        if (selectedDrawName === activeDrawName) {
+            updateGlobalWeights(weightsToSave);
+            await refreshData(selectedDrawName, true);
+        }
+
         setIsDirty(false);
-        showToast(`Configuration ${selectedDrawName} cristallisée.`, "success");
+        showToast(`Configuration ADN "${dnaName}" cristallisée pour ${selectedDrawName}.`, "success");
     };
 
     return (
@@ -119,20 +149,32 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     <div className="bg-slate-900 text-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl relative overflow-hidden border border-slate-800 group">
                         <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-[80px] group-hover:bg-indigo-500/20 transition-all duration-700"></div>
                         
-                        <div className="flex justify-between items-start relative z-10 mb-10">
-                            <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400 flex items-center gap-2">
-                                <Gauge size={14}/> ADN Algorithmique
-                            </h4>
-                            {lastLearnStatus && (
-                                <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-                                    <CheckCircle2 size={10} className="text-emerald-500"/>
-                                    <span className="text-[8px] font-bold text-emerald-400 uppercase">{lastLearnStatus}</span>
+                        <div className="flex flex-col gap-4 relative z-10 mb-8">
+                            <div className="flex justify-between items-start">
+                                <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400 flex items-center gap-2">
+                                    <Gauge size={14}/> ADN Algorithmique
+                                </h4>
+                                {lastLearnStatus && (
+                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                                        <CheckCircle2 size={10} className="text-emerald-500"/>
+                                        <span className="text-[8px] font-bold text-emerald-400 uppercase">{lastLearnStatus}</span>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-white/10 rounded-2xl border border-white/10">
+                                    <Fingerprint size={24} className="text-amber-400"/>
                                 </div>
-                            )}
+                                <div>
+                                    <div className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Identité du Flux</div>
+                                    <div className="text-xl font-black text-white">{dnaName}</div>
+                                </div>
+                            </div>
                         </div>
                         
                         <div className="h-64 md:h-80 mb-10 relative z-10 flex items-center justify-center">
-                            <AlgoRadar weights={localWeights} previousWeights={globalWeights} height={300} />
+                            <AlgoRadar weights={localWeights} height={300} />
                         </div>
                         
                         <div className="space-y-4 relative z-10">
@@ -193,7 +235,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                                     <label className="text-[9px] md:text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest group-hover:text-indigo-500 transition-colors">
                                         {String(key).replace('_', ' ')}
                                     </label>
-                                    <span className={`text-[10px] md:text-xs font-mono font-black px-2.5 py-1 rounded-xl border shadow-sm min-w-[50px] text-center ${localWeights[key] !== globalWeights[key] ? 'bg-amber-100 text-amber-600 border-amber-200' : 'bg-indigo-50 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800/60'}`}>
+                                    <span className="text-[10px] md:text-xs font-mono font-black px-2.5 py-1 rounded-xl border shadow-sm min-w-[50px] text-center bg-indigo-50 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800/60">
                                         {(Number(localWeights[key] ?? 0) * 100).toFixed(1)}%
                                     </span>
                                 </div>
