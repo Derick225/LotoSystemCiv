@@ -138,6 +138,9 @@ ctx.onmessage = async (e: MessageEvent) => {
             case 'wavelet_analysis':
                 result = runWavelet(history);
                 break;
+            case 'hurst_exponent': // AJOUT CRITIQUE ICI
+                result = runFractal(history);
+                break;
             default:
                 result = { status: 'OK' };
         }

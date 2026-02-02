@@ -65,15 +65,21 @@ export const generateMasterPrediction = async (
     const correlationMap = metrics?.correlationMatrix || {};
     const lastWinners = deepHistory[0]?.gagnants || [];
     
-    const specMetrics = metrics?.spectral || [];
+    // SÉCURISATION DES DONNÉES (Fix Crash l?.fractal?.find)
+    const specMetrics = Array.isArray(metrics?.spectral) ? metrics.spectral : [];
+    const fractalMetrics = Array.isArray(metrics?.fractal) ? metrics.fractal : [];
+    const waveletMetrics = Array.isArray(metrics?.wavelet) ? metrics.wavelet : [];
+
     const maxSpecEnergy = specMetrics.length > 0 ? Math.max(...specMetrics.map((s:any) => s.energy)) : 100;
 
     const masterScores = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const reg = regularity.find((r: any) => r.number === num);
+        
+        // Accès sécurisé
         const spec = specMetrics.find((s: any) => s.number === num);
-        const frac = metrics?.fractal?.find((f: any) => f.number === num);
-        const wav = metrics?.wavelet?.find((w: any) => w.number === num);
+        const frac = fractalMetrics.find((f: any) => f.number === num);
+        const wav = waveletMetrics.find((w: any) => w.number === num);
         
         const freq = deepHistory.filter(h => h.gagnants.includes(num)).length;
         
