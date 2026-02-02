@@ -4,7 +4,7 @@ import { calculateACValue, calculateDigitalRoot, calculateShannonEntropy, calcul
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v19.0 - SYMBIOTIC TENSOR KERNEL
+ * NEXUS PREDICTION ENGINE v19.1 - SYMBIOTIC TENSOR KERNEL
  * Fusion complète des signaux physiques, statistiques et décisionnels.
  */
 
@@ -154,7 +154,14 @@ export const generateMasterPrediction = async (
         return { num, score: finalScore, breakdown: nBreakdown, symbiosisFactor: symbiosisMultiplier };
     });
 
-    const sorted = masterScores.sort((a, b) => b.score - a.score);
+    // TRI AVEC ENTROPIE (Fix pour éviter 1,2,3,4,5 si scores égaux)
+    const sorted = masterScores.sort((a, b) => {
+        const diff = b.score - a.score;
+        // Si les scores sont très proches (ou tous à 0), on introduit du hasard pour éviter l'ordre numérique
+        if (Math.abs(diff) < 0.01) return Math.random() - 0.5;
+        return diff;
+    });
+
     const selection = sorted.slice(0, 5).map(s => s.num).sort((a,b) => a-b);
     const acScore = calculateACValue(selection);
 
@@ -168,7 +175,7 @@ export const generateMasterPrediction = async (
         suggestedNumbers: selection,
         candidates: sorted.slice(5, 18).map(s => s.num),
         confidence,
-        analysis: `Moteur Nexus v19.0. Résonance Symbiotique établie à ${(topSymbiosis * 100).toFixed(0)}%. Convergence multivectorielle validée sur le spectre ${selection[0]}-${selection[4]}.`,
+        analysis: `Moteur Nexus v19.1. Résonance Symbiotique établie à ${(topSymbiosis * 100).toFixed(0)}%. Convergence multivectorielle validée sur le spectre ${selection[0]}-${selection[4]}.`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
         timestamp: Date.now(),

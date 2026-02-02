@@ -13,7 +13,7 @@ import {
 } from './predictionEngine';
 
 /**
- * Nexus MetaAnalyst v19.5 - MULTIVERSE TIMELINES
+ * Nexus MetaAnalyst v19.6 - MULTIVERSE TIMELINES (Anti-Linear Patch)
  * Génère 5 réalités statistiques distinctes pour couvrir les angles morts de l'Oracle Base.
  */
 
@@ -36,16 +36,43 @@ export const precomputeBaseScores = async (
     return data;
 };
 
-// Fonction utilitaire pour éviter la redondance avec l'Oracle Base
+// Fonction utilitaire améliorée pour éviter les suites logiques (1, 2, 3...)
 const getDivergentPool = (
-    pool: number[], 
+    sortedPool: number[], 
     basePrediction: number[], 
     count: number = 5
 ): number[] => {
-    // On retire les numéros déjà présents dans la prédiction de l'Oracle Base
-    // pour garantir que Platinum apporte de la valeur ajoutée (complémentarité)
-    const candidates = pool.filter(n => !basePrediction.includes(n));
-    return candidates.slice(0, count).sort((a,b)=>a-b);
+    // 1. On retire les numéros déjà présents dans la prédiction de l'Oracle Base
+    const candidates = sortedPool.filter(n => !basePrediction.includes(n));
+    
+    // 2. SÉLECTION ENTROPIQUE (Correction du bug "1, 2, 3, 4")
+    // Au lieu de prendre les 5 premiers stricts (qui peuvent être voisins si les scores sont proches),
+    // on prend le TOP 15 (la crème de la crème) et on injecte du hasard dedans.
+    const topTier = candidates.slice(0, 15);
+    
+    // Mélange du Top 15 pour casser la linéarité
+    const shuffled = topTier.sort(() => 0.5 - Math.random());
+    
+    // Sélection des N élus
+    let selection = shuffled.slice(0, count).sort((a,b) => a-b);
+
+    // 3. FILET DE SÉCURITÉ : Détection de suites aberrantes (ex: 1,2,3,4)
+    let sequenceCount = 0;
+    let isSuspicious = false;
+    for(let i=0; i < selection.length - 1; i++) {
+        if(selection[i+1] === selection[i] + 1) sequenceCount++;
+        else sequenceCount = 0;
+        
+        // Si on a 3 numéros qui se suivent (ex: 1,2,3), c'est suspect pour une IA
+        if(sequenceCount >= 2) isSuspicious = true; 
+    }
+
+    if (isSuspicious) {
+        // Fallback : on pioche plus large (Top 30) pour garantir la dispersion
+        selection = candidates.slice(0, 30).sort(() => 0.5 - Math.random()).slice(0, count).sort((a,b)=>a-b);
+    }
+
+    return selection;
 };
 
 export async function generatePlatinumPrediction(
@@ -65,56 +92,57 @@ export async function generatePlatinumPrediction(
     const baseNumbers = basePrediction?.suggestedNumbers || [];
     const pool = Array.from({length: 90}, (_, i) => i + 1);
 
+    // Helper pour récupérer une valeur numérique sûre
+    const getVal = (scoreObj: any, key: string) => Number(scoreObj?.[key]) || 0;
+
     // --- TIMELINE 1 : NEON (SPECTRAL ECHO) ---
     // Focus sur la résonance pure et les ondes (Wavelet + Spectral)
-    // Ignore la fréquence et le retard. Cherche la vibration.
     const neonPool = [...pool].sort((a, b) => {
         const sA = scores[a]; const sB = scores[b];
-        const scoreA = (sA.spectral * 2) + (sA.wavelet * 2) + sA.equilibrium;
-        const scoreB = (sB.spectral * 2) + (sB.wavelet * 2) + sB.equilibrium;
-        return scoreB - scoreA;
+        const scoreA = (getVal(sA, 'spectral') * 2) + (getVal(sA, 'wavelet') * 2) + getVal(sA, 'equilibrium');
+        const scoreB = (getVal(sB, 'spectral') * 2) + (getVal(sB, 'wavelet') * 2) + getVal(sB, 'equilibrium');
+        // Tie-breaker aléatoire pour éviter l'ordre naturel 1,2,3... en cas d'égalité
+        return (scoreB - scoreA) || (Math.random() - 0.5);
     });
     const neonNumbers = getDivergentPool(neonPool, baseNumbers);
 
     // --- TIMELINE 2 : TERRA (SPATIAL RIFT) ---
-    // Focus sur la géométrie, la grille, les clusters et l'orchestration
+    // Focus sur la géométrie, la grille, les clusters
     const terraPool = [...pool].sort((a, b) => {
         const sA = scores[a]; const sB = scores[b];
-        const scoreA = (sA.spatial * 3) + (sA.orchestration * 2);
-        const scoreB = (sB.spatial * 3) + (sB.orchestration * 2);
-        return scoreB - scoreA;
+        const scoreA = (getVal(sA, 'spatial') * 3) + (getVal(sA, 'orchestration') * 2);
+        const scoreB = (getVal(sB, 'spatial') * 3) + (getVal(sB, 'orchestration') * 2);
+        return (scoreB - scoreA) || (Math.random() - 0.5);
     });
     const terraNumbers = getDivergentPool(terraPool, baseNumbers);
 
     // --- TIMELINE 3 : CHRONOS (TEMPORAL SHADOW) ---
-    // Focus sur les Gaps, la Vélocité et les cycles de Markov
+    // Focus sur les Gaps et la Vélocité
     const chronosPool = [...pool].sort((a, b) => {
         const sA = scores[a]; const sB = scores[b];
-        const scoreA = (sA.gap * 2) + (sA.gap_velocity * 3) + sA.markov;
-        const scoreB = (sB.gap * 2) + (sB.gap_velocity * 3) + sB.markov;
-        return scoreB - scoreA;
+        const scoreA = (getVal(sA, 'gap') * 2) + (getVal(sA, 'gap_velocity') * 3) + getVal(sA, 'markov');
+        const scoreB = (getVal(sB, 'gap') * 2) + (getVal(sB, 'gap_velocity') * 3) + getVal(sB, 'markov');
+        return (scoreB - scoreA) || (Math.random() - 0.5);
     });
     const chronosNumbers = getDivergentPool(chronosPool, baseNumbers);
 
     // --- TIMELINE 4 : AETHER (CHAOS THEORY) ---
-    // Focus sur l'anti-consensus, les anomalies d'isolation et la résistance
-    // Ce sont les "outsiders" mathématiques
+    // Focus sur l'anti-consensus
     const aetherPool = [...pool].sort((a, b) => {
         const sA = scores[a]; const sB = scores[b];
-        const scoreA = (sA.anti_consensus * 3) + (sA.isolation_anomaly * 2) + sA.resistance;
-        const scoreB = (sB.anti_consensus * 3) + (sB.isolation_anomaly * 2) + sB.resistance;
-        return scoreB - scoreA;
+        const scoreA = (getVal(sA, 'anti_consensus') * 3) + (getVal(sA, 'isolation_anomaly') * 2) + getVal(sA, 'resistance');
+        const scoreB = (getVal(sB, 'anti_consensus') * 3) + (getVal(sB, 'isolation_anomaly') * 2) + getVal(sB, 'resistance');
+        return (scoreB - scoreA) || (Math.random() - 0.5);
     });
     const aetherNumbers = getDivergentPool(aetherPool, baseNumbers);
 
     // --- TIMELINE 5 : NOVA (NEURAL DREAM) ---
-    // Focus sur l'IA pure (Decision Forest + AI Intuition + Poisson)
-    // Ce que la "machine" pense, indépendamment des stats classiques
+    // Focus sur l'IA pure
     const novaPool = [...pool].sort((a, b) => {
         const sA = scores[a]; const sB = scores[b];
-        const scoreA = (sA.decision_forest * 3) + (sA.ai_intuition * 2) + sA.poisson;
-        const scoreB = (sB.decision_forest * 3) + (sB.ai_intuition * 2) + sB.poisson;
-        return scoreB - scoreA;
+        const scoreA = (getVal(sA, 'decision_forest') * 3) + (getVal(sA, 'ai_intuition') * 2) + getVal(sA, 'poisson');
+        const scoreB = (getVal(sB, 'decision_forest') * 3) + (getVal(sB, 'ai_intuition') * 2) + getVal(sB, 'poisson');
+        return (scoreB - scoreA) || (Math.random() - 0.5);
     });
     const novaNumbers = getDivergentPool(novaPool, baseNumbers);
 
