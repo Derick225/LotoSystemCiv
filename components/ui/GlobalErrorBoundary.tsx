@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -15,8 +15,7 @@ interface State {
  * GlobalErrorBoundary v1.1
  * Captures critical failures and provides a recovery path.
  */
-// Fix: Use Component directly from import to ensure base class properties like state, props, and setState are recognized
-export class GlobalErrorBoundary extends Component<Props, State> {
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   // Initialize state as a class property
   state: State = {
     hasError: false,
@@ -34,7 +33,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   // Handle system reload to recover from error state
   private handleReload = () => {
-    // Fix: setState is now correctly recognized from Component base class
     this.setState({ hasError: false, error: null });
     window.location.reload(); 
   };
@@ -61,7 +59,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fix: props is now correctly recognized from Component base class
     return this.props.children;
   }
 }

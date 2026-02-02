@@ -1,5 +1,5 @@
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -15,8 +15,7 @@ interface State {
  * LocalErrorBoundary v1.1
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-// Fix: Use Component directly from import to ensure base class properties like state, props, and setState are recognized
-export class LocalErrorBoundary extends Component<Props, State> {
+export class LocalErrorBoundary extends React.Component<Props, State> {
   // Initialize state as a class property
   state: State = {
     hasError: false,
@@ -34,7 +33,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
 
   // Restore the module by resetting error state
   private handleReload = () => {
-    // Fix: setState is now correctly recognized from Component base class
     this.setState({ hasError: false, error: null });
   };
 
@@ -59,7 +57,6 @@ export class LocalErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // Fix: props is now correctly recognized from Component base class
     return this.props.children;
   }
 }

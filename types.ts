@@ -52,7 +52,7 @@ export interface AlgoWeights {
     monte_carlo: number; 
     lstm_pattern: number; 
     isolation_anomaly: number; 
-    decision_forest: number; // NOUVEAU
+    decision_forest: number; 
 }
 
 export interface PositionalRegime {
@@ -189,10 +189,10 @@ export interface DetailedNumberMetrics {
     nemesis: number[];
 }
 
-// --- NOUVELLES STRUCTURES PLATINUM V18 ---
+// --- NOUVELLES STRUCTURES PLATINUM V19 ---
 
 export interface PlatinumTimeline {
-    type: 'ALPHA' | 'SIGMA' | 'OMEGA';
+    type: 'NEON' | 'TERRA' | 'CHRONOS' | 'AETHER' | 'NOVA'; // 5 Nouveaux Types
     title: string;
     numbers: number[];
     score: number;
