@@ -1,6 +1,5 @@
 
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
-import ForestWorker from './workers/forest.worker.ts?worker';
 
 export const FEATURES_LABELS = [
     'Critical Gap', 'Frequency', 'Shadow', 
@@ -88,7 +87,7 @@ export const runDecisionForest = async (
     }));
 
     return new Promise((resolve, reject) => {
-        const worker = new ForestWorker();
+        const worker = new Worker(new URL('./workers/forest.worker.ts', import.meta.url), { type: 'module' });
         worker.onmessage = (e) => {
             const { votes } = e.data;
             worker.terminate();

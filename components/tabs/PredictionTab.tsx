@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { generateMasterPrediction } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -27,7 +27,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [isComputing, setIsComputing] = useState(false);
 
     const runInference = useCallback(async () => {
-        if (history.length < 15) {
+        if (history.length < 5) {
             showToast("Historique insuffisant pour l'Oracle Base.", "error");
             return;
         }
@@ -60,6 +60,16 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         showToast("Ticket sécurisé dans le Portefeuille.", "success");
     };
 
+    // Calcul approximatif du score global pour affichage visuel
+    const getAlgoScore = (breakdown: any, weights: any) => {
+        if (!breakdown || !weights) return 0;
+        let score = 0;
+        Object.keys(weights).forEach(k => {
+            score += (breakdown[k] || 0) * (weights[k] || 0);
+        });
+        return Math.round(score);
+    };
+
     if (nexusLoading) return (
         <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 animate-pulse">
             <Cpu className="text-indigo-500 animate-spin" size={48} />
@@ -77,9 +87,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl border border-slate-800 mb-8 group-hover:scale-110 transition-transform duration-500">
                     <Target size={48} className="text-indigo-500" />
                 </div>
-                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v17.0</h3>
+                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v19.4</h3>
                 <p className="text-slate-400 text-sm font-medium mb-10 max-w-md text-center leading-relaxed">
-                    Moteur Symbiotique. Fusionne l'analyse fréquentielle, la topologie spatiale et la résonance orchestrale pour un ciblage vectoriel ultra-précis.
+                    Moteur Symbiotique Déterministe. Fusionne l'analyse fréquentielle, la topologie spatiale et la résonance orchestrale pour un ciblage vectoriel strict.
                 </p>
                 <button 
                     onClick={runInference}
@@ -146,7 +156,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                             <div className="flex flex-col items-end">
                                 <span className="text-[9px] font-black bg-white/10 px-3 py-1 rounded-full text-slate-300 uppercase border border-white/10">
-                                    Build 17.0
+                                    Mode Strict
                                 </span>
                             </div>
                         </div>
@@ -158,6 +168,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 // Détection des facteurs symbiotiques
                                 const isSpatialHot = symbioticContext?.spatialHotZones.includes(n);
                                 const isOrchestrated = symbioticContext?.orchestrationBoosts[n] !== undefined;
+                                const algoScore = getAlgoScore(bd, globalWeights);
                                 
                                 return (
                                     <motion.div 
@@ -170,19 +181,19 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         <div className="relative">
                                             <NumberBall number={n} size="lg" isAttractor={i < 2} />
                                             {/* Badges Symbiotiques */}
-                                            {isSpatialHot && <div className="absolute -top-1 -right-1 bg-emerald-500 text-white rounded-full p-1 border-2 border-slate-950" title="Zone Chaude Spatiale"><MapPin size={8} fill="currentColor"/></div>}
-                                            {isOrchestrated && <div className="absolute -bottom-1 -left-1 bg-indigo-500 text-white rounded-full p-1 border-2 border-slate-950" title="Boost Orchestration"><Binary size={8}/></div>}
+                                            {isSpatialHot && <div className="absolute -top-1 -right-1 bg-emerald-500 text-white rounded-full p-1 border-2 border-slate-950 shadow-md" title="Zone Chaude Spatiale"><MapPin size={8} fill="currentColor"/></div>}
+                                            {isOrchestrated && <div className="absolute -bottom-1 -left-1 bg-indigo-500 text-white rounded-full p-1 border-2 border-slate-950 shadow-md" title="Boost Orchestration"><Binary size={8}/></div>}
                                         </div>
                                         
-                                        {/* Mini DNA Bar */}
-                                        <div className="flex gap-0.5 h-1 w-8 md:w-12 bg-slate-800 rounded-full overflow-hidden">
-                                            <div className="h-full bg-emerald-500" style={{ width: `${(bd?.frequency || 0)}%` }} title="Fréquence"></div>
-                                            <div className="h-full bg-amber-500" style={{ width: `${(bd?.gap || 0)}%` }} title="Écart"></div>
-                                            <div className="h-full bg-indigo-500" style={{ width: `${(bd?.spectral || 0)}%` }} title="Spectral"></div>
+                                        {/* Score Visuel - Preuve du Calcul */}
+                                        <div className="flex flex-col items-center">
+                                            <div className="flex gap-0.5 h-1 w-8 md:w-12 bg-slate-800 rounded-full overflow-hidden mb-1">
+                                                <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, algoScore * 1.5)}%` }} title={`Score Algo: ${algoScore}`}></div>
+                                            </div>
+                                            <span className="text-[7px] font-mono font-bold text-indigo-400 uppercase tracking-tight">
+                                                SCR: {algoScore}
+                                            </span>
                                         </div>
-                                        <span className="text-[8px] font-black text-slate-500 uppercase">
-                                            {(bd?.frequency || 0) > (bd?.gap || 0) ? 'FREQ' : 'GAP'}
-                                        </span>
                                     </motion.div>
                                 );
                             })}

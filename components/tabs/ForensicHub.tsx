@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
@@ -89,7 +90,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         return reports.map(r => ({
             date: r.date.slice(0, 5),
             hits: r.matches.filter(m => m.errorType === 'Hit').length,
-            proximity: r.matches.filter(m => ['Voisin', 'Miroir'].includes(m.errorType)).length
+            proximity: r.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length
         })).reverse();
     }, [reports]);
 
@@ -109,14 +110,16 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="relative z-10 grid lg:grid-cols-2 gap-12 items-center">
                     <div>
                         <div className="flex items-center gap-3 mb-4">
-                            <Microscope className="text-rose-500" size={24} />
+                            <div className="p-2 bg-rose-500/20 rounded-xl border border-rose-500/30">
+                                <Microscope className="text-rose-500" size={24} />
+                            </div>
                             <h3 className="text-sm font-black uppercase tracking-[0.4em] text-rose-500">Forensic Analytics Unit</h3>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none mb-6">
                             Autopsie <span className="text-rose-500">Synchronisée</span>
                         </h2>
                         <p className="text-slate-400 text-sm font-medium leading-relaxed border-l-2 border-rose-500/30 pl-6 italic">
-                            Analyse de précision par rapprochement strict. Le système ne compare que les prédictions et les résultats du **même jour calendaire**.
+                            Analyse de précision par rapprochement strict. Le système détecte les hits, voisins, miroirs et shadows (inversions) pour calculer la dérive précise de l'IA.
                         </p>
                     </div>
 
@@ -161,7 +164,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="space-y-4">
                             {reports.map((rep, idx) => {
                                 const hits = rep.matches.filter(m => m.errorType === 'Hit').length;
-                                const proximity = rep.matches.filter(m => ['Voisin', 'Miroir'].includes(m.errorType)).length;
+                                const proximity = rep.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length;
                                 
                                 return (
                                     <div 
@@ -182,7 +185,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                                         </span>
                                                         {proximity > 0 && (
                                                             <span className="text-[8px] font-black uppercase bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">
-                                                                {proximity} Frôlement{proximity > 1 ? 's' : ''}
+                                                                {proximity} Signaux Proches
                                                             </span>
                                                         )}
                                                     </div>
@@ -227,7 +230,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         <XAxis dataKey="date" hide />
                                         <YAxis hide domain={[0, 5]} />
                                         <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
-                                        <Area type="monotone" dataKey="proximity" stackId="1" stroke="#6366f1" fill="url(#colorProxForensic)" strokeWidth={2} name="Voisins" />
+                                        <Area type="monotone" dataKey="proximity" stackId="1" stroke="#6366f1" fill="url(#colorProxForensic)" strokeWidth={2} name="Zones Proches" />
                                         <Area type="monotone" dataKey="hits" stackId="2" stroke="#10b981" fill="url(#colorHitsForensic)" strokeWidth={2} name="Hits" />
                                     </AreaChart>
                                 </ResponsiveContainer>
@@ -246,7 +249,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="relative z-10">
                             <h5 className="text-[10px] font-black uppercase text-rose-500 tracking-[0.2em] mb-3">Diagnostic de Rapprochement</h5>
                             <p className="text-xs text-slate-400 leading-relaxed font-medium italic">
-                                "Le système a filtré toutes les archives pour ne conserver que les prédictions générées le même jour que le tirage réel. C'est l'étalon-or pour valider l'intuition de l'IA."
+                                "Le système détecte désormais les inversions (ex: 12 vs 21) et les ombres mathématiques pour affiner le calcul de la dérive."
                             </p>
                         </div>
                     </div>

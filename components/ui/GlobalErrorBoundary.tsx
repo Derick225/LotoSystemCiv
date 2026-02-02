@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
@@ -23,7 +22,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   };
 
   // Standard static method for updating state after an error
-  static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
@@ -32,7 +31,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   }
 
   // Handle system reload to recover from error state
-  private handleReload = () => {
+  public handleReload = () => {
     this.setState({ hasError: false, error: null });
     window.location.reload(); 
   };

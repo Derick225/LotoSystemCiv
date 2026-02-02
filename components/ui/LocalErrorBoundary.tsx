@@ -1,4 +1,3 @@
-
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -23,7 +22,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
   };
 
   // Standard static method for error boundaries
-  static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
@@ -32,7 +31,7 @@ export class LocalErrorBoundary extends Component<Props, State> {
   }
 
   // Restore the module by resetting error state
-  private handleReload = () => {
+  public handleReload = () => {
     this.setState({ hasError: false, error: null });
   };
 
