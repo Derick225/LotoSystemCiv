@@ -1,59 +1,57 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getFullOrchestrationAnalysis, analyzeShortTermMimicry } from '../../services/orchestrationService';
+import { getFullOrchestrationAnalysis, analyzeShortTermMimicry, ScoreComposition } from '../../services/orchestrationService';
 import { useNexus } from '../NexusProvider';
 import type { OrchestrationMetrics, DrawResult, MimicryMetric } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { OrchestrationRadar } from '../OrchestrationRadar';
-import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save, ArrowRight, Share2 } from 'lucide-react';
+import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save, ArrowRight, Share2, Workflow } from 'lucide-react';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 
 interface OrchestrationTabProps { drawName: string; }
 
-// --- COMPOSANT VECTOR FLOW CHART (ANIMÉ & INTERACTIF) ---
+// --- COMPOSANT VECTOR FLOW CHART (Amélioré) ---
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [hoveredNode, setHoveredNode] = useState<{ id: number, type: 'src' | 'tgt' } | null>(null);
-
     const topCands = candidates.slice(0, 5);
 
-    // Pré-calcul des liens pour performance
     const links = useMemo(() => {
-        const l: {src: number, tgt: number, type: string, color: string}[] = [];
+        const l: {src: number, tgt: number, type: string, color: string, strength: number}[] = [];
         prevDraw.forEach(src => {
             topCands.forEach(tgt => {
                 let type = '';
                 let color = '';
+                let strength = 1;
                 
-                if (src === tgt) { type = 'Répétition'; color = '#10b981'; } // Vert
-                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; } // Bleu
-                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; } // Rose
-                else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; } // Orange (Nouveau)
+                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } 
+                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; }
+                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } 
+                else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; strength = 1; }
                 
-                if (type) l.push({ src, tgt, type, color });
+                if (type) l.push({ src, tgt, type, color, strength });
             });
         });
         return l;
     }, [prevDraw, topCands]);
 
     const isLinkActive = (src: number, tgt: number) => {
-        if (!hoveredNode) return true; // Tout montrer par défaut
+        if (!hoveredNode) return true;
         if (hoveredNode.type === 'src' && hoveredNode.id === src) return true;
         if (hoveredNode.type === 'tgt' && hoveredNode.id === tgt) return true;
         return false;
     };
 
     return (
-        <div className="bg-slate-950 text-white p-6 md:p-8 rounded-[3rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[450px] flex flex-col justify-between group select-none">
-            {/* Background Grid animée */}
+        <div className="bg-slate-950 text-white p-6 md:p-8 rounded-[3rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[400px] flex flex-col justify-between group select-none">
             <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,#4f46e5_0%,transparent_70%)] animate-pulse-slow"></div>
-            <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
             
-            <div className="flex justify-between items-stretch relative z-10 h-full">
+            <div className="flex justify-between items-stretch relative z-10 h-full gap-8">
                 {/* SOURCE COLUMN (T-1) */}
-                <div className="flex flex-col justify-around items-center w-24 py-4">
-                    <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-700 mb-2">Source (T-1)</div>
+                <div className="flex flex-col justify-around items-center w-24 py-4 relative">
+                    <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-slate-700 to-transparent"></div>
+                    <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-700 mb-2">T-1 (Source)</div>
                     {prevDraw.map(n => {
                         const isActive = hoveredNode ? (hoveredNode.type === 'src' && hoveredNode.id === n) || links.some(l => l.src === n && l.tgt === (hoveredNode.type === 'tgt' ? hoveredNode.id : -1)) : true;
                         return (
@@ -73,11 +71,13 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 <div className="flex-1 relative">
                     <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
                         <defs>
-                            <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stopColor="currentColor" stopOpacity="0.1" />
-                                <stop offset="50%" stopColor="currentColor" stopOpacity="1" />
-                                <stop offset="100%" stopColor="currentColor" stopOpacity="0.1" />
-                            </linearGradient>
+                            <filter id="glow">
+                                <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+                                <feMerge>
+                                    <feMergeNode in="coloredBlur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
                         </defs>
                         {links.map((link, i) => {
                             const sIdx = prevDraw.indexOf(link.src);
@@ -85,10 +85,8 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                             if (sIdx === -1 || tIdx === -1) return null;
                             
                             const isActive = isLinkActive(link.src, link.tgt);
-                            if (!isActive && hoveredNode) return null; // Hide non-active links when hovering
+                            if (!isActive && hoveredNode) return null; 
 
-                            // Calcul dynamique des positions Y (basé sur flex-around)
-                            // Approx: (index + 0.5) / count * 100%
                             const sY = `${((sIdx + 0.5) / prevDraw.length) * 100}%`;
                             const tY = `${((tIdx + 0.5) / topCands.length) * 100}%`;
                             
@@ -98,18 +96,14 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                                         d={`M 0 ${sY} C 50% ${sY}, 50% ${tY}, 100% ${tY}`} 
                                         fill="none" 
                                         stroke={link.color} 
-                                        strokeWidth={isActive ? 3 : 1} 
-                                        strokeOpacity={isActive ? 0.8 : 0.2}
-                                        strokeDasharray={isActive ? "none" : "4 4"}
+                                        strokeWidth={isActive ? link.strength * 2 : link.strength} 
+                                        strokeOpacity={isActive ? 0.9 : 0.15}
+                                        strokeLinecap="round"
+                                        filter={isActive ? "url(#glow)" : ""}
                                         className="transition-all duration-500"
-                                    >
-                                        {isActive && (
-                                            <animate attributeName="stroke-dashoffset" from="100" to="0" dur="1.5s" repeatCount="indefinite" />
-                                        )}
-                                    </path>
-                                    {/* Label au milieu de la courbe si actif */}
+                                    />
                                     {isActive && hoveredNode && (
-                                        <text x="50%" y={`${((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100 + 20}%`} fill={link.color} fontSize="10" fontWeight="bold" textAnchor="middle" dy="-5">
+                                        <text x="50%" y="50%" fill={link.color} fontSize="9" fontWeight="900" textAnchor="middle" dy="-5" className="uppercase tracking-widest bg-slate-900">
                                             {link.type}
                                         </text>
                                     )}
@@ -120,14 +114,15 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 </div>
 
                 {/* TARGET COLUMN (Predictions) */}
-                <div className="flex flex-col justify-around items-center w-24 py-4">
-                    <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-700 mb-2">Cibles (IA)</div>
+                <div className="flex flex-col justify-around items-center w-24 py-4 relative">
+                    <div className="absolute right-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-indigo-500 to-transparent"></div>
+                    <div className="text-[9px] uppercase font-black text-indigo-400 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-indigo-900/50 mb-2">IA (Cibles)</div>
                     {topCands.map(n => {
                         const isActive = hoveredNode ? (hoveredNode.type === 'tgt' && hoveredNode.id === n) || links.some(l => l.tgt === n && l.src === (hoveredNode.type === 'src' ? hoveredNode.id : -1)) : true;
                         return (
                             <div 
                                 key={`tgt-${n}`} 
-                                className={`cursor-pointer transition-all duration-300 transform ${isActive ? 'scale-125 opacity-100 z-10' : 'scale-90 opacity-20 blur-[1px]'}`} 
+                                className={`cursor-pointer transition-all duration-300 transform ${isActive ? 'scale-125 opacity-100 z-10 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 'scale-90 opacity-20 blur-[1px]'}`} 
                                 onMouseEnter={() => setHoveredNode({ id: n, type: 'tgt' })} 
                                 onMouseLeave={() => setHoveredNode(null)}
                             >
@@ -136,21 +131,6 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                         );
                     })}
                 </div>
-            </div>
-
-            {/* LEGEND */}
-            <div className="mt-4 flex flex-wrap gap-3 justify-center items-center">
-                {[
-                    { label: 'Répétition', color: '#10b981' },
-                    { label: 'Voisin', color: '#3b82f6' },
-                    { label: 'Miroir', color: '#ec4899' },
-                    { label: 'Dizaine', color: '#f59e0b' }
-                ].map((l, i) => (
-                    <div key={i} className="flex items-center gap-1.5 px-2 py-1 bg-slate-900 rounded-md border border-slate-800">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: l.color }}></div>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">{l.label}</span>
-                    </div>
-                ))}
             </div>
         </div>
     );
@@ -197,11 +177,11 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     const { history, loading: nexusLoading } = useNexus();
     const { showToast } = useToast();
     
-    const [metrics, setMetrics] = useState<OrchestrationMetrics | null>(null);
+    // Type étendu avec details
+    const [metrics, setMetrics] = useState<(OrchestrationMetrics & { candidatesDetails?: Record<number, ScoreComposition> }) | null>(null);
     const [prevDraw, setPrevDraw] = useState<DrawResult | null>(null);
     const [mimicryData, setMimicryData] = useState<MimicryMetric[]>([]);
     const [loading, setLoading] = useState(true);
-    const [expandedCard, setExpandedCard] = useState<number | null>(null);
     const [generatedTicket, setGeneratedTicket] = useState<number[] | null>(null);
     
     const isMounted = useRef(true);
@@ -212,7 +192,6 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             setLoading(true);
             try {
                 if (history.length > 2 && isMounted.current) {
-                    // Calcul parallèle
                     const [res, mim] = await Promise.all([
                         getFullOrchestrationAnalysis(drawName, history),
                         Promise.resolve(analyzeShortTermMimicry(history))
@@ -224,11 +203,8 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                         setPrevDraw(history[0]); 
                     }
                 }
-            } catch (e) { 
-                console.error(e);
-            } finally { 
-                if (isMounted.current) setLoading(false); 
-            }
+            } catch (e) { console.error(e); } 
+            finally { if (isMounted.current) setLoading(false); }
         };
         load();
         return () => { isMounted.current = false; };
@@ -236,14 +212,10 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
 
     const handleGenerateTicket = () => {
         if (!metrics || metrics.topCandidates.length < 5) return;
-        // Sélection intelligente : Top 3 + 2 Complémentaires pour l'harmonie
         const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
         const fillers = metrics.topCandidates.slice(3, 8).map(c => c.number);
-        
-        // Shuffle fillers
         const shuffledFillers = fillers.sort(() => 0.5 - Math.random()).slice(0, 2);
         const ticket = [...core, ...shuffledFillers].sort((a,b) => a-b);
-        
         setGeneratedTicket(ticket);
         showToast("Ticket Orchestral généré avec optimisation harmonique.", "success");
     };
@@ -279,7 +251,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Interconnexion Temporelle</span>
                         </div>
                         <h3 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none">
-                            Orchestration <span className="text-indigo-500">Scoped</span>
+                            Orchestration <span className="text-indigo-500">Flux</span>
                         </h3>
                         <p className="text-slate-400 text-sm mt-4 max-w-xl font-medium leading-relaxed border-l-2 border-indigo-500/30 pl-4">
                             {metrics.narrativeLesson}
@@ -319,6 +291,64 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                             <OrchestrationRadar drawName={drawName} />
                         </div>
                     </div>
+                </div>
+            </div>
+
+            {/* CANDIDATES GRID WITH DNA BREAKDOWN */}
+            <div className="bg-white dark:bg-slate-800 p-8 md:p-12 rounded-[4rem] shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+                <div className="flex items-center gap-4 mb-10 border-b border-slate-100 dark:border-slate-700 pb-6">
+                    <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl">
+                        <Target size={24} />
+                    </div>
+                    <div>
+                        <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Vecteurs de Convergence</h4>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Décomposition ADN du Signal</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
+                    {metrics.topCandidates.slice(0, 10).map((cand, idx) => {
+                        const details = metrics.candidatesDetails?.[cand.number] || { markov: 0, structural: 0, machine: 0, trend: 0 };
+                        const total = cand.score; // Approx total score for scaling bars relative to each other (or use local sum)
+                        const localTotal = details.markov + details.structural + details.machine + details.trend || 1;
+                        
+                        // Normalisation locale pour la barre
+                        const pMarkov = (details.markov / localTotal) * 100;
+                        const pStruct = (details.structural / localTotal) * 100;
+                        const pMachine = (details.machine / localTotal) * 100;
+                        const pTrend = (details.trend / localTotal) * 100;
+
+                        return (
+                            <div 
+                                key={cand.number} 
+                                className="bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 p-5 rounded-[2.5rem] hover:border-indigo-400 transition-all group relative overflow-hidden"
+                            >
+                                <div className="absolute top-4 right-4 text-[8px] font-black text-slate-300">#{idx+1}</div>
+                                <div className="flex justify-center mb-4">
+                                    <NumberBall number={cand.number} size="md" isAttractor={idx < 3} />
+                                </div>
+                                
+                                <div className="space-y-1.5 mb-3">
+                                    <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                                        <div style={{ width: `${pMarkov}%` }} className="bg-indigo-500" title="Markov"></div>
+                                        <div style={{ width: `${pStruct}%` }} className="bg-emerald-500" title="Structure"></div>
+                                        <div style={{ width: `${pMachine}%` }} className="bg-amber-500" title="Machine"></div>
+                                        <div style={{ width: `${pTrend}%` }} className="bg-rose-500" title="Tendance"></div>
+                                    </div>
+                                    <div className="flex justify-between text-[8px] font-bold uppercase text-slate-400">
+                                        <span>ADN</span>
+                                        <span>{cand.score}pts</span>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    {pMarkov > 30 && <div className="text-[8px] font-bold text-indigo-500 flex items-center gap-1"><Workflow size={8}/> Markovien</div>}
+                                    {pStruct > 30 && <div className="text-[8px] font-bold text-emerald-500 flex items-center gap-1"><Layers size={8}/> Symétrie</div>}
+                                    {pMachine > 20 && <div className="text-[8px] font-bold text-amber-500 flex items-center gap-1"><Binary size={8}/> Machine</div>}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -366,57 +396,6 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                         </div>
                     </div>
                 )}
-            </div>
-
-            {/* CANDIDATES GRID */}
-            <div className="bg-white dark:bg-slate-800 p-8 md:p-12 rounded-[4rem] shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
-                <div className="flex items-center gap-4 mb-10 border-b border-slate-100 dark:border-slate-700 pb-6">
-                    <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl">
-                        <Target size={24} />
-                    </div>
-                    <div>
-                        <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Vecteurs de Convergence</h4>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Top 10 Signaux Isolés</p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-6">
-                    {metrics.topCandidates.slice(0, 10).map((cand, idx) => (
-                        <div 
-                            key={cand.number} 
-                            onClick={() => setExpandedCard(expandedCard === cand.number ? null : cand.number)}
-                            className={`
-                                flex flex-col items-center p-6 rounded-[2.5rem] border transition-all group relative overflow-hidden cursor-pointer
-                                ${expandedCard === cand.number 
-                                    ? 'bg-white dark:bg-slate-700 shadow-2xl ring-2 ring-indigo-500 border-transparent z-10 scale-105' 
-                                    : 'bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 hover:border-indigo-400'
-                                }
-                            `}
-                        >
-                            <div className="absolute top-3 right-3 opacity-10 font-black text-4xl text-slate-300 pointer-events-none">#{idx+1}</div>
-                            
-                            <NumberBall number={cand.number} size="lg" selected={expandedCard === cand.number} />
-                            
-                            <div className="mt-4 text-center w-full">
-                                <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{cand.score}</div>
-                                <div className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-2">Impact Score</div>
-                                
-                                {expandedCard === cand.number ? (
-                                    <div className="animate-slide-up w-full text-left bg-slate-50 dark:bg-slate-800 p-3 rounded-xl shadow-inner mt-2 border border-slate-100 dark:border-slate-600">
-                                        {cand.reasons.map((r, i) => (
-                                            <div key={i} className="flex items-start gap-2 text-[9px] font-bold text-slate-600 dark:text-slate-300 mb-1 last:mb-0">
-                                                <CheckCircle2 size={10} className="text-emerald-500 mt-0.5 shrink-0" /> 
-                                                <span className="leading-tight">{r}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <ChevronDown size={14} className="text-slate-300 mx-auto mt-2 group-hover:text-indigo-400 transition-colors" />
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
             </div>
         </div>
     );

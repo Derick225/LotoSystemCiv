@@ -4,43 +4,65 @@ import { calculateACValue, calculateDigitalRoot, calculateShannonEntropy, calcul
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
- * NEXUS PREDICTION ENGINE v19.4 - PURE DETERMINISTIC KERNEL
- * Fusion complète des signaux physiques, statistiques et décisionnels.
- * GARANTIE : 0% Random, 100% Algorithmique.
+ * NEXUS PREDICTION ENGINE v19.6 - DATA SCIENCE CORE
+ * Configuration axée sur les modèles stochastiques avancés avec préservation des poids manuels.
  */
 
 export const normalizeWeights = (weights: AlgoWeights, history?: DrawResult[]): AlgoWeights => {
     let normalized = { ...weights };
     
-    // Auto-ajustement basé sur l'entropie de Shannon
+    // Auto-ajustement dynamique UNIQUEMENT si l'historique suggère une anomalie forte
+    // Sinon, on respecte les poids définis par l'utilisateur/génétique
     if (history && history.length > 20) {
-        const ent = calculateShannonEntropy(history.slice(0, 100));
-        if (ent.normalized > 0.94) {
-            // En régime chaotique, on favorise la structure forestière et le spectral
-            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.3;
-            normalized.decision_forest = (Number(normalized.decision_forest) || 0.1) * 1.5;
-            normalized.markov = (Number(normalized.markov) || 0.1) * 0.6; 
-            normalized.gap = (Number(normalized.gap) || 0.25) * 1.2;
+        const ent = calculateShannonEntropy(history.slice(0, 50)); // Optimisation: slice 50
+        
+        // Si le chaos est extrême, on force une adaptation, sinon on touche peu
+        if (ent.normalized > 0.96) {
+            normalized.spectral = (Number(normalized.spectral) || 0.1) * 1.2;
+            normalized.decision_forest = (Number(normalized.decision_forest) || 0.1) * 1.3;
+            // On réduit Markov en cas de chaos pur car les suites logiques brisent
+            normalized.markov = (Number(normalized.markov) || 0.1) * 0.8; 
         }
     }
 
     const total = Object.values(normalized).reduce((a, b) => a + (Number(b) || 0), 0);
-    if (total <= 0) return getDefaultWeights();
     
+    // Si les poids sont vides ou nuls, on charge les défauts
+    if (total <= 0.01) return getDefaultWeights();
+    
+    // Normalisation pour que la somme fasse 1.0
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
         normalized[key] = parseFloat(((Number(normalized[key]) || 0) / total).toFixed(4));
     });
     return normalized;
 };
 
+// Poids par défaut orientés "Data Science"
 export const getDefaultWeights = (): AlgoWeights => ({
-    frequency: 0.10, gap: 0.12, spectral: 0.12, fractal: 0.08, 
-    markov: 0.12, wavelet: 0.05, orchestration: 0.10, momentum: 0.05, 
-    equilibrium: 0.05, ai_intuition: 0.05, digital_root: 0.01, gap_velocity: 0.01, 
-    isolation_anomaly: 0.01, resistance: 0.0, spatial: 0.05, bayes: 0.0,
-    transformer: 0.0, temporal: 0.0, poisson: 0.05, leader_succession: 0.05,
-    anti_consensus: 0.0, monte_carlo: 0.0, lstm_pattern: 0.0,
-    decision_forest: 0.10
+    frequency: 0.08, 
+    gap: 0.10, 
+    spectral: 0.10, 
+    fractal: 0.05, 
+    markov: 0.18,        // Forte emphase sur les chaînes de Markov
+    wavelet: 0.05, 
+    orchestration: 0.05, 
+    momentum: 0.05, 
+    equilibrium: 0.05, 
+    ai_intuition: 0.05, 
+    digital_root: 0.01, 
+    gap_velocity: 0.02, 
+    isolation_anomaly: 0.01, 
+    resistance: 0.0, 
+    spatial: 0.05, 
+    bayes: 0.0,
+    transformer: 0.0, 
+    temporal: 0.0, 
+    poisson: 0.15,       // Forte emphase sur Poisson
+    leader_succession: 0.0,
+    anti_consensus: 0.0, 
+    monte_carlo: 0.0, 
+    lstm_pattern: 0.0, 
+    decision_forest: 0.0 
 } as any);
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -57,6 +79,7 @@ export const generateMasterPrediction = async (
 ): Promise<Prediction> => {
     if (history.length < 5) throw new Error("Dataset insuffisant pour l'inférence v19.");
 
+    // 1. Gestion des poids : Priorité aux poids passés en argument (Custom/Genetic), sinon DB, sinon Default
     let baseWeights = weightsToUse || await getAlgoWeights(drawName);
     let weights = normalizeWeights(baseWeights, history);
     let rules = getAdaptiveRules(drawName);
@@ -95,14 +118,22 @@ export const generateMasterPrediction = async (
         const hVal = frac?.hurst || 0.5;
         const fractalScore = Math.abs(hVal - 0.5) * 200;
 
-        // 3. POISSON ESTIMÉ
-        const lambda = (freq / Math.max(1, deepHistory.length)) * (90/5);
-        const gap = reg?.currentGap || 18;
-        const poissonP = (Math.exp(-lambda) * Math.pow(lambda, gap)); 
+        // 3. POISSON ESTIMÉ (Data Science Logic Améliorée)
+        // Lambda local calculé sur une fenêtre glissante pertinente (30 derniers tirages)
+        const localFreq = history.slice(0, 30).filter(h => h.gagnants.includes(num)).length;
+        const lambda = (localFreq / 30) * (90/5); // Taux d'arrivée moyen normalisé
+        
+        // Probabilité Poisson : P(k=0) = e^-lambda. Si P(k=0) est faible, P(k>=1) est fort.
+        // On module avec l'écart actuel. Si l'écart est grand et lambda aussi (ce qui est paradoxal), la tension est max.
+        const probNext = 1 - Math.exp(-lambda);
+        
+        // Boost de "Tension" : Si un numéro fréquent (lambda haut) a un grand écart (gap), il est "sous pression".
+        const gap = reg?.currentGap || 0;
+        const tension = probNext * (1 + (gap * 0.05)); // +5% de score par tour d'écart
 
         const nBreakdown: ScoreBreakdown = {
             frequency: (Math.sqrt(freq) / Math.sqrt(Math.max(1, deepHistory.length))) * 100,
-            gap: (reg?.currentGap || 50) >= rules.criticalZoneMin && (reg?.currentGap || 50) <= rules.criticalZoneMax ? 95 : 25,
+            gap: (gap >= rules.criticalZoneMin && gap <= rules.criticalZoneMax) ? 95 : 25,
             spectral: spec ? (spec.energy / Math.max(1, maxSpecEnergy)) * 100 : 0,
             fractal: Math.min(100, fractalScore),
             markov: Math.min(100, markovScore * 2.5),
@@ -117,7 +148,7 @@ export const generateMasterPrediction = async (
             temporal: 0, 
             digital_root: calculateDigitalRoot(num) * 10, 
             gap_velocity: Math.abs((reg?.avgGap || 18) - (reg?.currentGap || 0)) * 6, 
-            poisson: Math.min(100, poissonP * 250), 
+            poisson: Math.min(100, tension * 200), // Scale to 0-100 approx
             leader_succession: lastWinners.includes(num) ? 30 : 0, 
             anti_consensus: 0, 
             monte_carlo: 0, 
@@ -165,19 +196,15 @@ export const generateMasterPrediction = async (
 
         // TIE-BREAKERS (Départage en cas d'égalité parfaite)
         
-        // 2. Momentum (Force cinétique récente)
-        const momDiff = (b.breakdown.momentum || 0) - (a.breakdown.momentum || 0);
-        if (Math.abs(momDiff) > 0.001) return momDiff;
+        // 2. Poisson (Critère Mathématique fort)
+        const poisDiff = (b.breakdown.poisson || 0) - (a.breakdown.poisson || 0);
+        if (Math.abs(poisDiff) > 0.001) return poisDiff;
 
-        // 3. Fréquence (Poids historique)
-        const freqDiff = (b.breakdown.frequency || 0) - (a.breakdown.frequency || 0);
-        if (Math.abs(freqDiff) > 0.001) return freqDiff;
+        // 3. Markov (Probabilité de transition)
+        const markDiff = (b.breakdown.markov || 0) - (a.breakdown.markov || 0);
+        if (Math.abs(markDiff) > 0.001) return markDiff;
 
-        // 4. Écart (Pression de sortie)
-        const gapDiff = (b.breakdown.gap || 0) - (a.breakdown.gap || 0);
-        if (Math.abs(gapDiff) > 0.001) return gapDiff;
-
-        // 5. Numéro (Ordre décroissant pour stabilité finale absolue)
+        // 4. Numéro (Ordre décroissant pour stabilité finale absolue)
         return b.num - a.num;
     });
 
@@ -194,7 +221,7 @@ export const generateMasterPrediction = async (
         suggestedNumbers: selection,
         candidates: sorted.slice(5, 18).map(s => s.num),
         confidence,
-        analysis: `Oracle v19.4 (Strict Mode). Calcul vectoriel pur sur ${selection[0]}-${selection[4]}. Facteur de certitude algorithmique : ${(topAvgScore).toFixed(1)}/100.`,
+        analysis: `Oracle v19.6 (Data Science Core). Vecteurs calculés sur ${selection[0]}-${selection[4]}. Facteur de certitude algorithmique : ${(topAvgScore).toFixed(1)}/100.`,
         breakdown: masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {}),
         usedWeights: weights,
         timestamp: Date.now(),
@@ -241,7 +268,7 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     const subDominant = sorted[1];
 
     const names: Record<string, string> = { 
-        frequency: 'Inertie', gap: 'Écart', spectral: 'Spectral', markov: 'Séquentiel', 
+        frequency: 'Inertie', gap: 'Écart', spectral: 'Spectral', markov: 'Markov', 
         orchestration: 'Orchestral', spatial: 'Spatial', fractal: 'Fractal', decision_forest: 'Forest',
         poisson: 'Poisson', momentum: 'Momentum', equilibrium: 'Gauss', wavelet: 'Wavelet'
     };
@@ -264,25 +291,17 @@ export const analyzeTicketStrength = async (numbers: number[], _drawName: string
     return { score, verdict: score >= 80 ? "Optimale" : score >= 60 ? "Équilibrée" : "Risquée", warnings };
 };
 
-/**
- * LOGIQUE D'AUTO-CORRECTION AVANCÉE (Gradient Descent)
- * Ajuste les poids en fonction de la divergence entre prédiction et réalité.
- */
 export const calculateCorrectionsFromForensics = (currentWeights: AlgoWeights, _rules: AdaptiveRules, report: ForensicReport) => {
     const newWeights = { ...currentWeights };
     const reasoning: string[] = [];
-    const LEARNING_RATE = 0.08; // Taux d'apprentissage modéré
+    const LEARNING_RATE = 0.08; 
 
-    // 1. Analyse de la Divergence Positive (Quels algos avaient raison sur les gagnants ?)
-    // scoreDivergence contient { algo: string, impact: number } pour les algos qui ont bien scoré sur les vrais numéros gagnants.
+    // 1. Analyse de la Divergence Positive 
     if (report.scoreDivergence.length > 0) {
         report.scoreDivergence.forEach(div => {
             const key = div.algo as keyof AlgoWeights;
             const currentVal = Number(newWeights[key]) || 0;
-            
-            // Calcul du boost proportionnel à l'impact manqué
             const boost = (div.impact / 100) * LEARNING_RATE;
-            
             if (newWeights[key] !== undefined) {
                 newWeights[key] = currentVal + boost;
                 reasoning.push(`Boost ${div.algo.toUpperCase()} (+${(boost*100).toFixed(1)}%) : A détecté ${div.impact}% du signal réel.`);
@@ -290,18 +309,14 @@ export const calculateCorrectionsFromForensics = (currentWeights: AlgoWeights, _
         });
     }
 
-    // 2. Analyse des Occasions Manquées (Spécifique aux numéros totalement ignorés)
+    // 2. Analyse des Occasions Manquées 
     if (report.missedOpportunities.length > 0) {
-        // On augmente légèrement l'exploration (anti-consensus) si on rate trop de numéros
         newWeights.anti_consensus = (Number(newWeights.anti_consensus) || 0) + (LEARNING_RATE * 0.5);
-        newWeights.decision_forest = (Number(newWeights.decision_forest) || 0) + (LEARNING_RATE * 0.5);
-        reasoning.push(`Boost EXPLORATION (+${(LEARNING_RATE*0.5*100).toFixed(1)}%) : ${report.missedOpportunities.length} numéros hors radar.`);
+        newWeights.markov = (Number(newWeights.markov) || 0) + (LEARNING_RATE * 0.5); // On booste Markov en cas d'échec
+        reasoning.push(`Boost MARKOV/CHAOS (+${(LEARNING_RATE*0.5*100).toFixed(1)}%) : ${report.missedOpportunities.length} numéros hors radar.`);
     }
 
-    // 3. Normalisation et Nettoyage
     const normalized = normalizeWeights(newWeights);
-    
-    // Comparaison finale pour le log
     const changes = Object.keys(normalized).filter(k => Math.abs((normalized[k as keyof AlgoWeights] || 0) - (currentWeights[k as keyof AlgoWeights] || 0)) > 0.01);
     if (changes.length === 0 && reasoning.length === 0) {
         reasoning.push("Aucune correction significative nécessaire. L'ADN est stable.");

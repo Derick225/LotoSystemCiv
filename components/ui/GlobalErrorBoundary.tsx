@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,8 +14,7 @@ interface State {
  * GlobalErrorBoundary v1.1
  * Captures critical failures and provides a recovery path.
  */
-export class GlobalErrorBoundary extends Component<Props, State> {
-  // Initialize state as a class property
+export class GlobalErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
