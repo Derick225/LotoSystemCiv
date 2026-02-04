@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { getWatchlist, removeFromWatchlist } from '../services/userPreferencesService';
 import { useDailySummary } from '../hooks/useLottery';

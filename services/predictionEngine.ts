@@ -1,5 +1,6 @@
+
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport } from '../types';
-import { calculateACValue, calculateDigitalRoot, calculateShannonEntropy, calculateRegularity } from './mathService';
+import { calculateACValue, calculateRegularity } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 /**
@@ -32,12 +33,12 @@ export const getDefaultWeights = (): AlgoWeights => ({
     bayes: 0.0,
     temporal: 0.0,
     transformer: 0.0
-} as any);
+});
 
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
-    const total = Object.values(weights).reduce((a, b) => a + (Number(b) || 0), 0);
+    const total = Object.values(weights).reduce((a, b) => (a || 0) + (Number(b) || 0), 0);
     if (total <= 0) return getDefaultWeights();
-    const normalized = { ...weights };
+    const normalized: AlgoWeights = { ...weights };
     (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(key => {
         normalized[key] = parseFloat(((Number(normalized[key]) || 0) / total).toFixed(4));
     });
@@ -84,7 +85,7 @@ export const generateMasterPrediction = async (
 
         // 2. MARKOV TRANSITION
         let markovScore = 0;
-        lastWinners.forEach(lw => {
+        lastWinners.forEach((lw: number) => {
             const strength = correlationMap[lw]?.affinities?.[num] || 0;
             markovScore += (strength * 100);
         });
@@ -100,11 +101,13 @@ export const generateMasterPrediction = async (
             equilibrium: 50,
             ai_intuition: 50,
             fractal: 50
-        } as any;
+        };
 
         let finalScore = 0;
         (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(k => {
-            finalScore += (nBreakdown[k] || 0) * (Number(weights[k]) || 0);
+            const weightVal = Number(weights[k]) || 0;
+            const scoreVal = Number(nBreakdown[k]) || 0;
+            finalScore += scoreVal * weightVal;
         });
 
         return { num, score: finalScore, breakdown: nBreakdown };
@@ -152,8 +155,8 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
 };
 
 export const getStrategyName = (weights: AlgoWeights): string => {
-    const dominant = Object.entries(weights).sort((a,b) => (b[1] as number) - (a[1] as number))[0];
-    return `Mode ${dominant[0].toUpperCase()}`;
+    const dominant = Object.entries(weights).sort((a,b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))[0];
+    return `Mode ${dominant?.[0]?.toUpperCase() || 'Standard'}`;
 };
 
 export const analyzeTicketStrength = async (numbers: number[], _drawName: string): Promise<TicketAnalysisResult> => {

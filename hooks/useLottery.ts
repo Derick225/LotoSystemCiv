@@ -1,4 +1,3 @@
-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult, SpectralMetric, FractalMetric, NumberRegularity } from '../types';
@@ -94,7 +93,7 @@ export const useDrawHistory = (drawName: string) => {
         () => {
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
-          queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); // Invalide tout pour rafraîchir le dashboard
+          queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); 
         }
       )
       .subscribe();
@@ -106,7 +105,7 @@ export const useDrawHistory = (drawName: string) => {
     queryKey: lotteryKeys.draw(drawName),
     queryFn: () => fetchHistory(drawName),
     enabled: !!drawName,
-    staleTime: 1000 * 60 * 5, // 5 minutes fresh
+    staleTime: 1000 * 60 * 5, 
   });
 };
 
@@ -122,8 +121,8 @@ export const useDailySummary = (day: string) => {
     return useQuery({
         queryKey: lotteryKeys.dailySummary(day),
         queryFn: () => getDailySummary(day),
-        staleTime: 1000 * 60 * 2, // 2 minutes
-        refetchInterval: 1000 * 60 * 5, // Rafraîchir toutes les 5 min automatiquement
+        staleTime: 1000 * 60 * 2, 
+        refetchInterval: 1000 * 60 * 5, 
     });
 };
 
@@ -131,7 +130,7 @@ export const useGlobalStats = () => {
     return useQuery({
         queryKey: lotteryKeys.globalStats(),
         queryFn: fetchGlobalStats,
-        staleTime: 1000 * 60 * 30, // 30 minutes (statistiques lourdes)
+        staleTime: 1000 * 60 * 30, 
     });
 };
 

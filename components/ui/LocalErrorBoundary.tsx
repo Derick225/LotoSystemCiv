@@ -3,10 +3,10 @@ import { RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface Props {
   children?: ReactNode;
-  key?: React.Key; // Explicitly allowed to fix TS errors in consumers
+  key?: React.Key;
 }
 
-interface State {
+interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
@@ -15,14 +15,17 @@ interface State {
  * LocalErrorBoundary v1.1
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-export class LocalErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+export class LocalErrorBoundary extends Component<Props, ErrorBoundaryState> {
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
   // Standard static method for error boundaries
-  public static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 

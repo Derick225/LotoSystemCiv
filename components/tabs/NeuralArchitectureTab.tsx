@@ -1,291 +1,534 @@
 
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useNexus } from '../NexusProvider';
-import { Network, Search, X, Activity, Info, TrendingUp, Cpu, Target } from 'lucide-react';
+import { Network, Search, X, Activity, Share2, Layers, Cpu, Zap, MousePointer2, Move, Sliders } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
+import { saveTicket } from '../../services/userPreferencesService';
+import { useToast } from '../ui/Toast';
 
-interface Node { id: number; x: number; y: number; vx: number; vy: number; radius: number; color: string; mass: number; }
-interface Link { source: number; target: number; strength: number; }
+interface Node { 
+    id: number; 
+    x: number; 
+    y: number; 
+    vx: number; 
+    vy: number; 
+    radius: number; 
+    color: string; 
+    mass: number;
+    centrality: number;
+    community: number;
+    fixed: boolean;
+}
+
+interface Link { 
+    source: number; 
+    target: number; 
+    strength: number; 
+}
+
+const COMMUNITY_COLORS = [
+    '#6366f1', // Indigo
+    '#10b981', // Emerald
+    '#f43f5e', // Rose
+    '#f59e0b', // Amber
+    '#8b5cf6', // Violet
+    '#06b6d4', // Cyan
+];
 
 export const NeuralArchitectureTab: React.FC = () => {
-    const { history, correlationMatrix, loading } = useNexus();
+    const { history, correlationMatrix, drawName } = useNexus();
+    const { showToast } = useToast();
+    
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    
+    // State
     const [hoveredNode, setHoveredNode] = useState<number | null>(null);
     const [selectedNode, setSelectedNode] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [minStrength, setMinStrength] = useState(25); // Seuil de filtre (0-100)
+    const [generatedPath, setGeneratedPath] = useState<number[]>([]);
+    
+    // Physics Refs (Mutable for performance)
+    const nodesRef = useRef<Node[]>([]);
+    const linksRef = useRef<Link[]>([]);
+    const draggingRef = useRef<number | null>(null);
+    const animationRef = useRef<number>();
 
-    // Initialisation des nœuds (1-90)
-    const nodes = useMemo(() => {
-        return Array.from({ length: 90 }, (_, i) => ({
-            id: i + 1,
-            x: Math.random() * 800,
-            y: Math.random() * 600,
-            vx: 0, vy: 0,
-            radius: 6,
-            color: '#4f46e5',
-            mass: 1
-        }));
-    }, []);
-
-    // Extraction des liens de synergie significatifs (> 0.20)
-    const links = useMemo(() => {
-        const l: Link[] = [];
+    // --- INITIALISATION DES DONNÉES ---
+    useEffect(() => {
+        // 1. Calcul des Liens
+        const rawLinks: Link[] = [];
+        const nodeDegrees: Record<number, number> = {};
+        
         Object.entries(correlationMatrix).forEach(([srcStr, data]: [string, any]) => {
             const src = parseInt(srcStr);
             Object.entries(data.affinities).forEach(([tgtStr, strength]: [string, any]) => {
                 const tgt = parseInt(tgtStr);
-                if (strength > 0.20 && src < tgt) {
-                    l.push({ source: src, target: tgt, strength: Number(strength) });
+                const sVal = Number(strength);
+                if (src < tgt && sVal > 0.10) { // Pré-filtre léger
+                    rawLinks.push({ source: src, target: tgt, strength: sVal });
+                    nodeDegrees[src] = (nodeDegrees[src] || 0) + sVal;
+                    nodeDegrees[tgt] = (nodeDegrees[tgt] || 0) + sVal;
                 }
             });
         });
-        return l.sort((a, b) => b.strength - a.strength);
+
+        // 2. Initialisation des Noeuds
+        const newNodes: Node[] = Array.from({ length: 90 }, (_, i) => {
+            const id = i + 1;
+            const degree = nodeDegrees[id] || 0;
+            // Communauté simple (modulo pour l'instant, pourrait être Louvain)
+            const community = id % 6; 
+            
+            return {
+                id,
+                x: Math.random() * 800,
+                y: Math.random() * 600,
+                vx: 0, vy: 0,
+                radius: 4 + (degree * 1.5), // Taille selon importance
+                color: COMMUNITY_COLORS[community],
+                mass: 1 + degree,
+                centrality: degree,
+                community,
+                fixed: false
+            };
+        });
+
+        // Positionnement initial circulaire pour éviter le chaos
+        const centerX = 400;
+        const centerY = 300;
+        newNodes.forEach((n, i) => {
+            const angle = (i / 90) * Math.PI * 2;
+            const r = 250;
+            n.x = centerX + Math.cos(angle) * r;
+            n.y = centerY + Math.sin(angle) * r;
+        });
+
+        nodesRef.current = newNodes;
+        linksRef.current = rawLinks;
+
     }, [correlationMatrix]);
 
-    const topBinomials = useMemo(() => links.slice(0, 6), [links]);
+    // --- MOTEUR PHYSIQUE ---
+    const updatePhysics = useCallback(() => {
+        const nodes = nodesRef.current;
+        const links = linksRef.current;
+        const width = canvasRef.current?.width || 800;
+        const height = canvasRef.current?.height || 600;
+        const threshold = minStrength / 100;
 
-    const handleSearch = (val: string) => {
-        setSearchQuery(val);
-        const num = parseInt(val);
-        if (!isNaN(num) && num >= 1 && num <= 90) {
-            setSelectedNode(num);
-        } else if (val === '') {
-            setSelectedNode(null);
+        // Filtrer les liens actifs
+        const activeLinks = links.filter(l => l.strength >= threshold);
+
+        // 1. Forces de Répulsion (Coulomb)
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const a = nodes[i];
+                const b = nodes[j];
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const distSq = dx*dx + dy*dy || 1;
+                
+                if (distSq < 25000) { // Rayon d'interaction
+                    const force = (100 * a.mass * b.mass) / distSq;
+                    const fx = (dx * force) / Math.sqrt(distSq);
+                    const fy = (dy * force) / Math.sqrt(distSq);
+                    
+                    if (!a.fixed) { a.vx += fx; a.vy += fy; }
+                    if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
+                }
+            }
         }
-    };
 
-    useEffect(() => {
+        // 2. Forces d'Attraction (Ressort)
+        activeLinks.forEach(l => {
+            const s = nodes[l.source - 1];
+            const t = nodes[l.target - 1];
+            const dx = t.x - s.x;
+            const dy = t.y - s.y;
+            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+            
+            const targetDist = 100 - (l.strength * 50); // Plus fort = plus proche
+            const force = (dist - targetDist) * 0.05 * l.strength;
+            
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+
+            if (!s.fixed) { s.vx += fx; s.vy += fy; }
+            if (!t.fixed) { t.vx -= fx; t.vy -= fy; }
+        });
+
+        // 3. Gravité Centrale & Friction
+        nodes.forEach(n => {
+            if (n.fixed) return;
+            // Gravité vers le centre
+            n.vx += (width/2 - n.x) * 0.005;
+            n.vy += (height/2 - n.y) * 0.005;
+            
+            // Friction
+            n.vx *= 0.85;
+            n.vy *= 0.85;
+            
+            // Update Position
+            n.x += n.vx;
+            n.y += n.vy;
+
+            // Bounding Box
+            const margin = 20;
+            if (n.x < margin) n.x = margin;
+            if (n.x > width - margin) n.x = width - margin;
+            if (n.y < margin) n.y = margin;
+            if (n.y > height - margin) n.y = height - margin;
+        });
+    }, [minStrength]);
+
+    // --- RENDU CANVAS ---
+    const draw = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        let frame: number;
-        const width = canvas.width;
-        const height = canvas.height;
+        updatePhysics();
 
-        const run = () => {
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, width, height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Fond grille subtile
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        for(let i=0; i<canvas.width; i+=50) { ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); }
+        for(let i=0; i<canvas.height; i+=50) { ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); }
+        ctx.stroke();
 
-            // Grille technique de fond
-            ctx.strokeStyle = '#f8fafc';
-            ctx.lineWidth = 1;
-            for(let i=0; i<width; i+=40) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+        const threshold = minStrength / 100;
+        const nodes = nodesRef.current;
+        
+        // Dessin des Liens
+        linksRef.current.forEach(l => {
+            if (l.strength < threshold) return;
+            
+            const s = nodes[l.source - 1];
+            const t = nodes[l.target - 1];
+
+            // Opacité dynamique : focus sur la sélection
+            let alpha = (l.strength - threshold) / (1 - threshold); // Normaliser 0-1
+            alpha = Math.max(0.05, Math.min(0.8, alpha));
+
+            if (selectedNode || hoveredNode) {
+                const target = selectedNode || hoveredNode;
+                const isConnected = l.source === target || l.target === target;
+                if (isConnected) {
+                    alpha = 1;
+                    ctx.strokeStyle = '#a5b4fc'; // Highlight color
+                    ctx.lineWidth = l.strength * 4;
+                } else {
+                    alpha *= 0.1; // Dim others
+                    ctx.strokeStyle = s.color;
+                    ctx.lineWidth = l.strength;
+                }
+            } else {
+                ctx.strokeStyle = s.color; // Couleur source
+                ctx.lineWidth = l.strength * 2;
             }
-            for(let i=0; i<height; i+=40) {
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
-            }
 
-            // Physique de force-direction simplifiée
-            nodes.forEach(n => {
-                n.vx += (width / 2 - n.x) * 0.002;
-                n.vy += (height / 2 - n.y) * 0.002;
-                
-                nodes.forEach(n2 => {
-                    if (n === n2) return;
-                    const dx = n.x - n2.x;
-                    const dy = n.y - n2.y;
-                    const distSq = dx*dx + dy*dy || 1;
-                    if (distSq < 3000) {
-                        const force = 0.6;
-                        n.vx += (dx / Math.sqrt(distSq)) * force;
-                        n.vy += (dy / Math.sqrt(distSq)) * force;
-                    }
-                });
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y);
+            ctx.lineTo(t.x, t.y);
+            ctx.stroke();
+        });
 
-                n.vx *= 0.85; n.vy *= 0.85;
-                n.x += n.vx; n.y += n.vy;
-            });
+        // Dessin des Noeuds
+        nodes.forEach(n => {
+            let alpha = 1;
+            let scale = 1;
 
-            // Dessin des Liens (Synergies)
-            links.forEach(l => {
-                const s = nodes[l.source - 1];
-                const t = nodes[l.target - 1];
-                
-                const isRelatedToSelection = selectedNode === null || l.source === selectedNode || l.target === selectedNode;
-                const isHov = hoveredNode === l.source || hoveredNode === l.target;
+            if (selectedNode || hoveredNode) {
+                const target = selectedNode || hoveredNode;
+                // Est-ce le noeud cible ou un voisin direct ?
+                const isTarget = n.id === target;
+                const isNeighbor = linksRef.current.some(l => 
+                    l.strength >= threshold && 
+                    ((l.source === target && l.target === n.id) || (l.target === target && l.source === n.id))
+                );
 
-                if (!isRelatedToSelection && !isHov) return;
-
-                ctx.beginPath();
-                ctx.moveTo(s.x, s.y);
-                ctx.lineTo(t.x, t.y);
-                ctx.lineWidth = l.strength * (isHov || (selectedNode && isRelatedToSelection) ? 6 : 2);
-                ctx.strokeStyle = isHov ? '#10b981' : (selectedNode ? 'rgba(99, 102, 241, 0.8)' : 'rgba(99, 102, 241, 0.1)');
-                ctx.stroke();
-            });
-
-            // Dessin des Nœuds
-            nodes.forEach(n => {
-                const isSelected = selectedNode === n.id;
-                const isHovered = hoveredNode === n.id;
-                const hasLinksToSelected = selectedNode ? links.some(l => (l.source === selectedNode && l.target === n.id) || (l.target === selectedNode && l.source === n.id)) : true;
-
-                let alpha = 1;
-                if (selectedNode && !isSelected && !hasLinksToSelected) alpha = 0.1;
-
-                ctx.globalAlpha = alpha;
-                ctx.beginPath();
-                const radius = isSelected ? 14 : isHovered ? 10 : 5;
-                ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
-                ctx.fillStyle = isSelected ? '#4f46e5' : isHovered ? '#10b981' : '#cbd5e1';
-                
-                if (isSelected) {
+                if (isTarget) {
+                    scale = 1.5;
                     ctx.shadowBlur = 20;
-                    ctx.shadowColor = 'rgba(79, 70, 229, 0.5)';
+                    ctx.shadowColor = n.color;
+                } else if (isNeighbor) {
+                    scale = 1.1;
+                } else {
+                    alpha = 0.1;
                 }
-                
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                
-                if (isSelected || isHovered || (selectedNode && hasLinksToSelected)) {
-                    ctx.font = `bold ${isSelected ? '12px' : '9px'} Inter`;
-                    ctx.fillStyle = isSelected ? '#1e293b' : '#64748b';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(n.id.toString(), n.x, n.y - (radius + 5));
-                }
-                ctx.globalAlpha = 1;
-            });
+            }
 
-            frame = requestAnimationFrame(run);
-        };
+            ctx.globalAlpha = alpha;
+            
+            // Corps du noeud
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, n.radius * scale, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = n.color;
+            ctx.stroke();
 
-        run();
-        return () => cancelAnimationFrame(frame);
-    }, [nodes, links, hoveredNode, selectedNode]);
+            // Texte
+            if (alpha > 0.2 && (n.centrality > 1.5 || scale > 1)) {
+                ctx.fillStyle = '#fff';
+                ctx.font = `bold ${10 * scale}px Inter`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(n.id.toString(), n.x, n.y);
+            }
+
+            ctx.shadowBlur = 0;
+        });
+        
+        ctx.globalAlpha = 1;
+        animationRef.current = requestAnimationFrame(draw);
+    }, [minStrength, selectedNode, hoveredNode]);
+
+    useEffect(() => {
+        animationRef.current = requestAnimationFrame(draw);
+        return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
+    }, [draw]);
+
+    // --- EVENTS HANDLERS ---
+    
+    const handleMouseDown = (e: React.MouseEvent) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Find hit
+        const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
+        
+        if (hit) {
+            draggingRef.current = hit.id;
+            hit.fixed = true;
+            setSelectedNode(prev => prev === hit.id ? null : hit.id);
+            setGeneratedPath([]); // Reset path on new selection
+        } else {
+            setSelectedNode(null);
+            setGeneratedPath([]);
+        }
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (draggingRef.current) {
+            const node = nodesRef.current.find(n => n.id === draggingRef.current);
+            if (node) {
+                node.x = x;
+                node.y = y;
+            }
+        } else {
+            const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
+            setHoveredNode(hit ? hit.id : null);
+        }
+    };
+
+    const handleMouseUp = () => {
+        if (draggingRef.current) {
+            const node = nodesRef.current.find(n => n.id === draggingRef.current);
+            if (node) node.fixed = false;
+            draggingRef.current = null;
+        }
+    };
+
+    // --- PATH FINDER LOGIC ---
+    const generateNeuralPath = () => {
+        if (!selectedNode) return;
+        
+        // Algorithme glouton : part du noeud sélectionné et suit les liens les plus forts
+        const path = new Set<number>();
+        path.add(selectedNode);
+        
+        let currentId = selectedNode;
+        const threshold = minStrength / 100;
+
+        // On cherche 4 voisins successifs
+        for (let i = 0; i < 4; i++) {
+            const links = linksRef.current
+                .filter(l => l.strength >= threshold && (l.source === currentId || l.target === currentId))
+                .map(l => ({ 
+                    id: l.source === currentId ? l.target : l.source,
+                    str: l.strength
+                }))
+                .filter(n => !path.has(n.id))
+                .sort((a,b) => b.str - a.str);
+            
+            if (links.length > 0) {
+                // Facteur aléatoire léger pour ne pas toujours prendre le même chemin
+                const pick = links[Math.floor(Math.random() * Math.min(3, links.length))];
+                path.add(pick.id);
+                currentId = pick.id;
+            } else {
+                break; // Cul de sac
+            }
+        }
+
+        // Si pas assez, on complète avec les voisins directs les plus forts du noeud de départ
+        if (path.size < 5) {
+            const neighbors = linksRef.current
+                .filter(l => l.strength >= threshold && (l.source === selectedNode || l.target === selectedNode))
+                .map(l => ({ 
+                    id: l.source === selectedNode ? l.target : l.source,
+                    str: l.strength
+                }))
+                .filter(n => !path.has(n.id))
+                .sort((a,b) => b.str - a.str);
+            
+            neighbors.slice(0, 5 - path.size).forEach(n => path.add(n.id));
+        }
+
+        const finalPath = Array.from(path).sort((a,b) => a-b);
+        setGeneratedPath(finalPath);
+        showToast("Chemin Neuronal tracé.", "success");
+    };
+
+    const savePath = async () => {
+        if (generatedPath.length < 5) return;
+        await saveTicket({
+            numbers: generatedPath,
+            drawName,
+            strategy: `Neural Path (Origin #${selectedNode})`
+        });
+        showToast("Chemin sauvegardé dans le Wallet.", "success");
+    };
 
     return (
         <div className="space-y-8 animate-fade-in pb-20">
-            {/* Header avec Barre de Recherche */}
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-8 opacity-5"><Network size={120}/></div>
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
-                    <div className="text-center md:text-left">
-                        <h3 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Cartographie des Liaisons</h3>
-                        <p className="text-slate-400 text-xs font-medium max-w-xl leading-relaxed">
-                            Visualisez les "familles de numéros". Identifiez les vecteurs qui sortent historiquement ensemble.
-                        </p>
-                    </div>
-                    
-                    {/* Barre de Recherche Industrielle */}
-                    <div className="relative w-full md:w-64 group">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                            <Search className="h-4 w-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+            {/* Header / Controls */}
+            <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
+                <div>
+                    <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
+                        <Network size={24} className="text-indigo-500" /> Architecture Neurale
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                        Cartographie gravitationnelle des vecteurs.
+                    </p>
+                </div>
+
+                <div className="flex items-center gap-4 bg-black/30 p-3 rounded-2xl border border-white/5 w-full md:w-auto">
+                    <Sliders size={16} className="text-slate-400" />
+                    <div className="flex-1">
+                        <div className="flex justify-between text-[9px] font-black uppercase text-slate-500 mb-1">
+                            <span>Bruit</span>
+                            <span>Signal Pur</span>
                         </div>
-                        <input
-                            type="number"
-                            min="1" max="90"
-                            placeholder="Isoler un numéro (1-90)..."
-                            value={searchQuery}
-                            onChange={(e) => handleSearch(e.target.value)}
-                            className="block w-full pl-11 pr-10 py-4 bg-black/40 border border-slate-700 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all appearance-none"
+                        <input 
+                            type="range" min="0" max="60" step="1" 
+                            value={minStrength} 
+                            onChange={(e) => setMinStrength(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-500"
                         />
-                        {searchQuery && (
-                            <button 
-                                onClick={() => { setSearchQuery(''); setSelectedNode(null); }}
-                                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-white transition-colors"
-                            >
-                                <X size={16} />
-                            </button>
-                        )}
                     </div>
+                    <span className="text-xs font-bold text-white w-8 text-right">{minStrength}%</span>
                 </div>
             </div>
 
             <div className="grid lg:grid-cols-12 gap-8">
-                {/* Canevas Principal */}
-                <div className="lg:col-span-8 bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden relative group h-[600px]">
-                    <div className="absolute top-6 left-6 z-10 flex flex-col gap-3">
-                        <div className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase border border-indigo-100 flex items-center gap-2 shadow-sm">
-                            <Activity size={10} className="animate-pulse" /> Scanner de Synergie Actif
+                {/* CANVAS */}
+                <div className="lg:col-span-8 h-[600px] bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden group cursor-crosshair">
+                    <canvas 
+                        ref={canvasRef}
+                        width={800} height={600}
+                        className="w-full h-full touch-none"
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onMouseLeave={handleMouseUp}
+                    />
+                    
+                    {/* Overlay Info Canvas */}
+                    <div className="absolute bottom-6 left-6 pointer-events-none">
+                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
+                            <MousePointer2 size={12}/> {selectedNode ? `Nœud ${selectedNode} verrouillé` : 'Survoler / Cliquer'}
                         </div>
-                        {selectedNode && (
-                            <div className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-[9px] font-black uppercase border border-rose-100 flex items-center gap-2 shadow-sm animate-slide-up">
-                                <Target size={10} /> Focus : Vecteur {selectedNode}
+                    </div>
+                    <div className="absolute bottom-6 right-6 pointer-events-none">
+                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
+                            <Move size={12}/> Moteur Physique Actif
+                        </div>
+                    </div>
+                </div>
+
+                {/* SIDEBAR ANALYSE */}
+                <div className="lg:col-span-4 flex flex-col gap-6">
+                    {/* Node Details */}
+                    <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-lg flex-1 flex flex-col">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                            <Activity size={16} className="text-emerald-500"/> Inspecteur
+                        </h4>
+
+                        {selectedNode ? (
+                            <div className="space-y-6 animate-slide-up">
+                                <div className="text-center">
+                                    <div className="inline-block p-4 bg-slate-100 dark:bg-slate-900 rounded-full mb-2">
+                                        <NumberBall number={selectedNode} size="lg" selected />
+                                    </div>
+                                    <div className="text-2xl font-black text-slate-800 dark:text-white">Vecteur {selectedNode}</div>
+                                    <div className="text-[10px] font-bold text-indigo-500 uppercase">Nœud Sélectionné</div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                                        <div className="text-[9px] text-slate-400 font-black uppercase">Connexions</div>
+                                        <div className="text-xl font-black text-slate-700 dark:text-slate-200">
+                                            {linksRef.current.filter(l => l.strength >= minStrength/100 && (l.source === selectedNode || l.target === selectedNode)).length}
+                                        </div>
+                                    </div>
+                                    <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                                        <div className="text-[9px] text-slate-400 font-black uppercase">Centralité</div>
+                                        <div className="text-xl font-black text-slate-700 dark:text-slate-200">
+                                            {Math.round((nodesRef.current.find(n => n.id === selectedNode)?.mass || 1) * 10)}%
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    onClick={generateNeuralPath}
+                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+                                >
+                                    <Zap size={16} fill="currentColor"/> Tracer Chemin Neuronal
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center opacity-40">
+                                <Share2 size={48} className="text-slate-400 mb-4"/>
+                                <p className="text-xs font-bold text-slate-500">Sélectionnez un nœud sur le graphe pour l'analyser.</p>
                             </div>
                         )}
                     </div>
 
-                    <canvas 
-                        ref={canvasRef} 
-                        width={800} height={600} 
-                        className="w-full h-full cursor-crosshair touch-none"
-                        onMouseMove={(e) => {
-                            const rect = canvasRef.current?.getBoundingClientRect();
-                            if (!rect) return;
-                            const x = (e.clientX - rect.left) * (800 / rect.width);
-                            const y = (e.clientY - rect.top) * (600 / rect.height);
-                            const hit = nodes.find(n => Math.sqrt((n.x-x)**2 + (n.y-y)**2) < 20);
-                            setHoveredNode(hit ? hit.id : null);
-                        }}
-                        onClick={() => {
-                            if (hoveredNode) {
-                                setSelectedNode(hoveredNode);
-                                setSearchQuery(hoveredNode.toString());
-                            } else {
-                                setSelectedNode(null);
-                                setSearchQuery('');
-                            }
-                        }}
-                    />
-                    
-                    {/* Watermark */}
-                    <div className="absolute bottom-6 right-8 opacity-20 pointer-events-none flex items-center gap-2">
-                        <Cpu size={14}/> <span className="text-[9px] font-black uppercase tracking-widest">Nexus Core Graphics</span>
-                    </div>
-                </div>
-
-                {/* Sidebar d'Interprétation */}
-                <div className="lg:col-span-4 space-y-6">
-                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-lg">
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <Info size={14} className="text-indigo-500"/> Guide de lecture
-                        </h4>
-                        <div className="space-y-4">
-                            <div className="flex items-start gap-4">
-                                <div className="w-4 h-4 rounded-full bg-indigo-600 mt-1 shadow-lg shadow-indigo-500/30"></div>
-                                <div className="text-[11px] text-slate-600 font-medium leading-relaxed"><strong>Liens Épais</strong> : Représentent des numéros "binômes" qui ont une probabilité de sortie conjointe élevée.</div>
+                    {/* Generated Path */}
+                    {generatedPath.length > 0 && (
+                        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-indigo-500/30 shadow-2xl relative overflow-hidden animate-slide-up">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><Cpu size={64}/></div>
+                            <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4">Séquence Dérivée</h4>
+                            
+                            <div className="flex justify-center gap-2 mb-6">
+                                {generatedPath.map(n => <NumberBall key={n} number={n} size="sm" />)}
                             </div>
-                            <div className="flex items-start gap-4">
-                                <div className="w-4 h-4 rounded-full bg-slate-200 mt-1"></div>
-                                <div className="text-[11px] text-slate-600 font-medium leading-relaxed"><strong>Nœuds Isolés</strong> : Indiquent des numéros dont les sorties ne dépendent d'aucun pattern de co-occurrence identifié.</div>
-                            </div>
-                        </div>
-                    </div>
 
-                    <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1">
-                        <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <TrendingUp size={14}/> Binômes Dominants
-                        </h4>
-                        <div className="space-y-3">
-                            {topBinomials.map((link, i) => (
-                                <div 
-                                    key={i} 
-                                    onClick={() => { setSelectedNode(link.source); setSearchQuery(link.source.toString()); }}
-                                    className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 group hover:border-emerald-500/50 transition-all cursor-pointer"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex -space-x-2">
-                                            <NumberBall number={link.source} size="sm" />
-                                            <NumberBall number={link.target} size="sm" />
-                                        </div>
-                                        <span className="text-[10px] font-bold text-slate-300">Paire Alpha {i+1}</span>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-black text-emerald-400">{Math.round(link.strength * 100)}%</div>
-                                        <div className="text-[8px] font-bold text-slate-500 uppercase">Affinité</div>
-                                    </div>
-                                </div>
-                            ))}
+                            <button 
+                                onClick={savePath}
+                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                            >
+                                <Layers size={14}/> Sauvegarder
+                            </button>
                         </div>
-                        <div className="mt-6 p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
-                            <p className="text-[9px] text-indigo-300 font-medium italic leading-relaxed">
-                                "Conseil Elite : Une synergie &gt; 40% indique une dépendance structurelle forte. Jouer ces numéros séparément réduit vos chances mathématiques."
-                            </p>
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>

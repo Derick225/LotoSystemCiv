@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';

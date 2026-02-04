@@ -5,7 +5,7 @@ interface Props {
   children?: ReactNode;
 }
 
-interface State {
+interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
@@ -14,13 +14,16 @@ interface State {
  * GlobalErrorBoundary v1.1
  * Captures critical failures and provides a recovery path.
  */
-export class GlobalErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+export class GlobalErrorBoundary extends Component<Props, ErrorBoundaryState> {
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
-  public static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 

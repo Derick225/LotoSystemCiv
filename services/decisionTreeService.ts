@@ -42,9 +42,8 @@ const extractNumericFeatures = (num: number, results: DrawResult[], globalConsen
 
 export const runDecisionForest = async (
     history: DrawResult[], 
-    shadowMode: boolean = false, 
-    activeFeatures: string[] = FEATURES_LABELS,
-    minScore: number = 50
+    mode: 'consensus' | 'average' | 'shadow' = 'consensus', 
+    activeFeatures: string[] = FEATURES_LABELS
 ): Promise<{ votes: ForestVote[], dataset: any[] }> => {
     if (!history || history.length < 40) return { votes: [], dataset: [] };
 
@@ -91,16 +90,30 @@ export const runDecisionForest = async (
         worker.onmessage = (e) => {
             const { votes } = e.data;
             worker.terminate();
+            
             const finalVotes: ForestVote[] = votes.map((v: any) => ({
                 candidate: v.number,
                 score: Math.round(v.score),
                 votes: { temporal: 0, spatial: 0, structural: 0 },
                 decisionPath: { id: 'root', type: 'condition', label: 'Forest Consensus', children: [] } as DecisionNode,
-                features: { isConsensusTrap: v.score > 85 && shadowMode }
+                features: { isConsensusTrap: v.score > 85 }
             }));
-            const filtered = shadowMode 
-                ? finalVotes.filter(v => v.score > 35 && v.score < 75)
-                : finalVotes.filter(v => v.score >= minScore);
+
+            let filtered: ForestVote[] = [];
+
+            if (mode === 'consensus') {
+                // Les numéros très probables (> 60%)
+                filtered = finalVotes.filter(v => v.score >= 60);
+            } else if (mode === 'average') {
+                // Zone Moyenne / Équilibre (40% - 60%)
+                // Ce sont les numéros "tièdes" souvent négligés mais statistiquement stables
+                filtered = finalVotes.filter(v => v.score >= 40 && v.score < 60);
+            } else {
+                // Shadow / Dissidents (< 40% mais > 15%)
+                // Les outsiders potentiels
+                filtered = finalVotes.filter(v => v.score > 15 && v.score < 40);
+            }
+            
             resolve({ votes: filtered.sort((a, b) => b.score - a.score).slice(0, 20), dataset });
         };
         worker.onerror = (err) => { worker.terminate(); reject(err); };
