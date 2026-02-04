@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
@@ -63,7 +62,7 @@ export const UserWallet: React.FC = () => {
     });
 
     // 2. Fetch Saved Tickets (Local Source of Truth)
-    const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
+    const { data: tickets = [], isLoading: ticketsLoading } = useQuery<SavedTicket[]>({
         queryKey: ['tickets'],
         queryFn: () => getSavedTickets().filter(t => t.status !== 'archived'),
         staleTime: 0 // Always fetch fresh from local storage on mount/focus
@@ -77,7 +76,7 @@ export const UserWallet: React.FC = () => {
     });
 
     // 4. Fetch Results for Tickets (Only for draws present in tickets)
-    const ticketDrawNames = Array.from(new Set(tickets.map(t => t.drawName)));
+    const ticketDrawNames: string[] = Array.from(new Set(tickets.map(t => t.drawName)));
     const { data: resultsMap = {} } = useQuery<Record<string, DrawResult[]>>({
         queryKey: ['ticketResults', ticketDrawNames],
         queryFn: async () => {
