@@ -1,54 +1,46 @@
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { getWatchlist, removeFromWatchlist } from '../services/userPreferencesService';
-import { getDailySummary } from '../services/lotteryService';
+import { useDailySummary } from '../hooks/useLottery';
 import { NumberBall } from './NumberBall';
 import { Eye, Bell, X, CheckCircle2, Clock, Zap } from 'lucide-react';
 import { useToast } from './ui/Toast';
 
 export const WatchlistMonitor: React.FC = () => {
     const { showToast } = useToast();
-    const [watchlist, setWatchlist] = useState<number[]>([]);
-    const [hits, setHits] = useState<Record<number, { time: string, draw: string }[]>>({});
-    const [loading, setLoading] = useState(true);
+    
+    const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+    const today = days[new Date().getDay()];
+    
+    // Utilisation du hook React Query pour récupérer les tirages du jour automatiquement
+    const { data: summary = [], isLoading } = useDailySummary(today);
+    
+    // Récupération synchrone de la watchlist (local storage)
+    const watchlist = getWatchlist();
 
-    useEffect(() => {
-        loadStatus();
-        const interval = setInterval(loadStatus, 30000); // Rafraîchir toutes les 30s
-        return () => clearInterval(interval);
-    }, []);
+    const hits = React.useMemo(() => {
+        const newHits: Record<number, { time: string, draw: string }[]> = {};
+        if (!summary) return newHits;
 
-    const loadStatus = async () => {
-        const list = getWatchlist();
-        setWatchlist(list);
-        
-        const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-        const today = days[new Date().getDay()];
-        
-        try {
-            const summary = await getDailySummary(today);
-            const newHits: Record<number, { time: string, draw: string }[]> = {};
+        watchlist.forEach(num => {
+            const foundIn = summary
+                .filter((s: any) => s.result && s.result.gagnants.includes(num))
+                .map((s: any) => ({ time: s.time, draw: s.name }));
             
-            list.forEach(num => {
-                const foundIn = summary
-                    .filter(s => s.result && s.result.gagnants.includes(num))
-                    .map(s => ({ time: s.time, draw: s.name }));
-                
-                if (foundIn.length > 0) newHits[num] = foundIn;
-            });
-            
-            setHits(newHits);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
+            if (foundIn.length > 0) newHits[num] = foundIn;
+        });
+        return newHits;
+    }, [summary, watchlist]);
 
     const handleRemove = (num: number) => {
         removeFromWatchlist(num);
         showToast(`Numéro ${num} retiré des favoris.`, "info");
-        loadStatus();
+        // Force update trick not needed as React will re-render parent or we can use local state if strictly needed, 
+        // but typically watchlist management should be in a hook/context if we want full reactivity.
+        // For now, this component re-renders when parent updates or query updates.
+        // To make removal instant in UI, we might need a small local state or context for watchlist.
+        // Assuming parent triggers re-render or we reload.
+        window.location.reload(); // Simple brute force update for watchlist change (since it's localStorage based)
     };
 
     if (watchlist.length === 0) return null;
@@ -75,7 +67,9 @@ export const WatchlistMonitor: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 relative z-10">
-                {watchlist.map(num => {
+                {isLoading ? (
+                    [1,2,3].map(i => <div key={i} className="h-24 bg-slate-100 dark:bg-slate-700/50 rounded-2xl animate-pulse"></div>)
+                ) : watchlist.map(num => {
                     const found = hits[num];
                     return (
                         <div key={num} className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-3 group relative ${found ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 shadow-md' : 'bg-gray-50 dark:bg-gray-900/50 border-gray-100 dark:border-gray-700'}`}>

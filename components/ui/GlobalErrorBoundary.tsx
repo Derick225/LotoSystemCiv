@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -20,7 +21,6 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
     error: null,
   };
 
-  // Standard static method for updating state after an error
   public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
@@ -36,7 +36,6 @@ export class GlobalErrorBoundary extends React.Component<Props, State> {
   };
 
   public render(): ReactNode {
-    // Access state via this.state
     if (this.state.hasError) {
       const msg = getUserFriendlyError(this.state.error);
       return (

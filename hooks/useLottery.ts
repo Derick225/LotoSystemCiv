@@ -1,15 +1,30 @@
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
-import type { DrawResult } from '../types';
-import { normalizeDate, fetchResults } from '../services/lotteryService';
+import type { DrawResult, SpectralMetric, FractalMetric, NumberRegularity } from '../types';
+import { normalizeDate, fetchResults, getDailySummary, fetchGlobalStats } from '../services/lotteryService';
+import { 
+    calculateSpectralMetricsAsync, 
+    calculateWaveletMetricsAsync, 
+    calculateFractalMetricsAsync, 
+    calculateRegularity, 
+    calculateCorrelationMatrixAsync, 
+    calculateVolatility,
+    detectGameRegime
+} from '../services/mathService';
+import { calculateSpatialMetrics } from '../services/spatialService';
+import { calculateOrchestrationScores } from '../services/orchestrationService';
+import { runDecisionForest } from '../services/decisionTreeService';
 import { useEffect } from 'react';
 
 export const lotteryKeys = {
   all: ['lottery'] as const,
   draw: (name: string) => [...lotteryKeys.all, 'draw', name] as const,
   stats: (name: string) => [...lotteryKeys.all, 'stats', name] as const,
-  analytics: (name: string) => [...lotteryKeys.all, 'analytics', name] as const,
+  analytics: (name: string, historyHash: string) => [...lotteryKeys.all, 'analytics', name, historyHash] as const,
   globalMarket: () => [...lotteryKeys.all, 'global-market'] as const,
+  dailySummary: (day: string) => [...lotteryKeys.all, 'daily-summary', day] as const,
+  globalStats: () => [...lotteryKeys.all, 'global-stats-hot'] as const,
 };
 
 const getDrawTimestamp = (dateStr: string): number => {
@@ -70,10 +85,8 @@ export const useDrawHistory = (drawName: string) => {
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     
-    // Si 'ALL', on écoute tous les inserts (filtre undefined), sinon on filtre par draw_name
     const filter = drawName === 'ALL' ? undefined : `draw_name=eq.${drawName}`;
 
-    // Écoute Realtime des nouveaux résultats
     const channel = supabase
       .channel('draw-sync')
       .on('postgres_changes', 
@@ -81,6 +94,7 @@ export const useDrawHistory = (drawName: string) => {
         () => {
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
+          queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); // Invalide tout pour rafraîchir le dashboard
         }
       )
       .subscribe();
@@ -92,7 +106,7 @@ export const useDrawHistory = (drawName: string) => {
     queryKey: lotteryKeys.draw(drawName),
     queryFn: () => fetchHistory(drawName),
     enabled: !!drawName,
-    staleTime: 1000 * 60,
+    staleTime: 1000 * 60 * 5, // 5 minutes fresh
   });
 };
 
@@ -101,6 +115,23 @@ export const useGlobalMarketHistory = () => {
         queryKey: lotteryKeys.globalMarket(),
         queryFn: fetchGlobalMarketHistory,
         staleTime: 1000 * 60 * 5,
+    });
+};
+
+export const useDailySummary = (day: string) => {
+    return useQuery({
+        queryKey: lotteryKeys.dailySummary(day),
+        queryFn: () => getDailySummary(day),
+        staleTime: 1000 * 60 * 2, // 2 minutes
+        refetchInterval: 1000 * 60 * 5, // Rafraîchir toutes les 5 min automatiquement
+    });
+};
+
+export const useGlobalStats = () => {
+    return useQuery({
+        queryKey: lotteryKeys.globalStats(),
+        queryFn: fetchGlobalStats,
+        staleTime: 1000 * 60 * 30, // 30 minutes (statistiques lourdes)
     });
 };
 
@@ -129,6 +160,7 @@ export const useDrawMutation = (drawName: string) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
       queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
     },
   });
 };
@@ -144,6 +176,68 @@ export const useDeleteDrawMutation = (drawName: string) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
       queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
     }
   });
+};
+
+// --- NOUVEAU : HOOK ANALYTIQUE HPC ---
+// Encapsule tous les calculs lourds dans un Worker Query
+export const useNexusAnalytics = (drawName: string, history: DrawResult[] | undefined) => {
+    const historyHash = history && history.length > 0 ? history[0].id : 'empty';
+
+    return useQuery({
+        queryKey: lotteryKeys.analytics(drawName, historyHash),
+        queryFn: async () => {
+            if (!history || history.length < 10) return null;
+
+            // Calculs Mathématiques via Workers
+            const [spec, wav, frac, regData, corr, forestRes] = await Promise.all([
+                calculateSpectralMetricsAsync(history),
+                calculateWaveletMetricsAsync(history),
+                calculateFractalMetricsAsync(history),
+                Promise.resolve(calculateRegularity(history)), // Synchrone mais rapide
+                calculateCorrelationMatrixAsync(history),
+                runDecisionForest(history)
+            ]);
+
+            // Calculs Contextuels
+            const spatial = calculateSpatialMetrics(history);
+            const orchScores = calculateOrchestrationScores(history);
+            const vol = calculateVolatility(history);
+            const reg = detectGameRegime(history);
+
+            // Construction Symbiotique
+            const forestVotesMap: Record<number, number> = {};
+            forestRes.votes.forEach(v => forestVotesMap[v.candidate] = v.score);
+
+            const symbioticContext = {
+                spatialDeadZones: spatial.gridDensity.map((d, i) => d < (Math.max(...spatial.gridDensity) * 0.1) ? i : -1).filter(n => n !== -1),
+                spatialHotZones: spatial.advancedClusters.filter(c => c.potential > 80).flatMap(c => c.numbers),
+                orchestrationBoosts: {} as Record<number, number>,
+                spectralVeto: spec.filter(s => s.energy < 10).map(s => s.number),
+                temporalTarget: null,
+                forestVotes: forestVotesMap
+            };
+
+            Object.entries(orchScores).forEach(([n, score]) => {
+                if (score > 30) symbioticContext.orchestrationBoosts[parseInt(n)] = 1 + (score / 120);
+            });
+
+            return {
+                spectral: spec,
+                wavelet: wav,
+                fractal: frac,
+                regularity: regData,
+                correlationMatrix: corr,
+                symbioticContext,
+                volatility: vol,
+                regime: reg ? { hurst: reg.hurst, regime: reg.regime } : null,
+                forestRes // Access to raw forest data if needed
+            };
+        },
+        enabled: !!history && history.length >= 10,
+        staleTime: 1000 * 60 * 30, // Ces calculs sont lourds et changent peu, on cache 30min
+        gcTime: 1000 * 60 * 60, // Garder en mémoire 1h
+    });
 };

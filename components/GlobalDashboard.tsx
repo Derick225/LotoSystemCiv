@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { getDailySummary, getNextScheduledDraw, fetchGlobalStats, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
+
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
 import { useNexus } from './NexusProvider';
-import { useGlobalMarketHistory } from '../hooks/useLottery';
+import { useGlobalMarketHistory, useDailySummary, useGlobalStats, lotteryKeys } from '../hooks/useLottery';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Draw, DrawResult } from '../types';
 import { NumberBall } from './NumberBall';
 import { InfoTooltip } from './ui/InfoTooltip';
@@ -14,7 +16,6 @@ import {
     Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
-import { useIsFetching } from '@tanstack/react-query';
 import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../utils/audioEngine';
@@ -143,48 +144,28 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
 
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const { regime, volatility, refreshData, history, rlState } = useNexus(); 
+    const { regime, volatility, refreshData, history } = useNexus(); 
+    const queryClient = useQueryClient();
+    
+    // Hooks React Query
     const { data: recentGlobalResults, refetch: refetchGlobal } = useGlobalMarketHistory();
-    const isFetchingGlobal = useIsFetching();
-    
-    const latestResult = recentGlobalResults && recentGlobalResults.length > 0 ? recentGlobalResults[0] : null;
-    
-    const [summary, setSummary] = useState<SummaryItem[]>([]);
-    const [loadingSummary, setLoadingSummary] = useState(true);
-    const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean, time: string, day: string} | null>(null);
-    const [globalHot, setGlobalHot] = useState<{number: number, count: number}[]>([]);
-    const [fullSyncing, setFullSyncing] = useState(false);
     
     const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const [selectedDay, setSelectedDay] = useState<string>(daysOrder[new Date().getDay()]);
-
-    const isMounted = useRef(true);
-
-    const loadDailySummary = useCallback(async () => {
-        if (!isMounted.current) return;
-        setLoadingSummary(true);
-        
-        try {
-            const summaryData = await getDailySummary(selectedDay);
-            if (isMounted.current) setSummary(summaryData);
-        } catch (e) { 
-            console.error(e); 
-        } finally { 
-            if (isMounted.current) setLoadingSummary(false); 
-        }
-    }, [selectedDay]);
-
-    const loadHotStats = useCallback(async () => {
-        try {
-            const data = await fetchGlobalStats();
-            if (isMounted.current) setGlobalHot(data.slice(0, 6));
-        } catch (e) { console.error(e); }
-    }, []);
+    
+    const { data: summary = [], isLoading: loadingSummary } = useDailySummary(selectedDay);
+    const { data: globalHotData = [] } = useGlobalStats();
+    
+    const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean, time: string, day: string} | null>(null);
+    const [fullSyncing, setFullSyncing] = useState(false);
+    
+    const latestResult = recentGlobalResults && recentGlobalResults.length > 0 ? recentGlobalResults[0] : null;
+    const globalHot = globalHotData.slice(0, 6);
 
     useEffect(() => {
         const timer = setInterval(() => {
             const next = getNextScheduledDraw();
-            if (next && isMounted.current) {
+            if (next) {
                 const now = new Date();
                 const [h, m] = next.time.split(':').map(Number);
                 const targetDate = new Date();
@@ -210,21 +191,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         return () => clearInterval(timer);
     }, []);
 
-    useEffect(() => {
-        isMounted.current = true;
-        loadDailySummary();
-        loadHotStats();
-        const syncTimer = setInterval(() => checkAndSyncRecentResults().then(loadDailySummary), 300000);
-        return () => { isMounted.current = false; clearInterval(syncTimer); };
-    }, [loadDailySummary, loadHotStats]);
-
     const handleManualSync = async () => {
         audioEngine.play('scan');
         setFullSyncing(true);
         try {
             const count = await checkAndSyncRecentResults();
-            await loadDailySummary();
-            await refetchGlobal();
+            // Invalidation globale pour tout rafraîchir
+            await queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
             showToast(count > 0 ? `${count} signaux synchronisés.` : "Noyau à jour.", "success");
             if (count > 0) audioEngine.play('success');
         } catch (e) {
@@ -239,11 +212,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         setFullSyncing(true);
         try {
             await injectDemoData();
-            await loadDailySummary();
-            await refetchGlobal();
+            await queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
             await refreshData('Reveil', true);
             showToast("Données de démo injectées.", "success");
-            window.location.reload();
         } catch(e) {
             showToast("Erreur injection démo.", "error");
         } finally {
@@ -252,7 +223,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     };
 
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-    const isEmptyState = !latestResult && !loadingSummary && summary.every(s => s.result === null);
+    const isEmptyState = !latestResult && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
 
     return (
         <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
@@ -365,7 +336,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                 {globalHot.length === 0 ? (
                                     [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
                                 ) : 
-                                globalHot.slice(0, 5).map((stat, i) => (
+                                globalHot.map((stat, i) => (
                                     <motion.div 
                                       key={stat.number} 
                                       initial={{ opacity: 0, x: 20 }}
@@ -430,7 +401,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             {loadingSummary ? (
                                 [1,2,3,4].map(i => <div key={i} className="h-64 bg-white/5 rounded-[2.5rem] md:rounded-[3rem] animate-pulse border border-white/5 mx-auto w-full"></div>)
                             ) :
-                            summary.map((item, idx) => {
+                            (summary as SummaryItem[]).map((item, idx) => {
                                 const isCompleted = item.result !== null;
                                 const isNext = nextDraw?.name === item.name;
                                 const config = SLOT_CONFIG[item.time] || { color: 'text-slate-400', icon: '⏱️', label: '' };

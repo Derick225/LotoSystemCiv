@@ -1,12 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
 import { checkAndSyncRecentResults, fetchResults } from '../services/lotteryService';
 import { checkSubscriptionStatus } from '../services/subscriptionService';
 import { authService } from '../services/authService';
 import type { SavedTicket, DrawResult, SubscriptionState } from '../types';
 import { NumberBall } from './NumberBall';
-import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, Download, Briefcase, Calculator, Crown, ShieldCheck, Sparkles, CloudDownload, Activity } from 'lucide-react';
+import { Wallet, Trash2, Trophy, Clock, Search, AlertCircle, Coins, ChevronDown, RefreshCw, CloudDownload, Briefcase, Calculator, Crown, ShieldCheck, Sparkles, Activity } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, Tooltip } from 'recharts';
 import { TicketXRay } from './TicketXRay';
 import { LOTO_PAYOUTS } from '../constants';
@@ -14,132 +15,123 @@ import { useToast } from './ui/Toast';
 import { KellyCalculator } from './KellyCalculator';
 import { useNexus } from './NexusProvider';
 
+const calculateWinAmount = (hits: number) => {
+    const payouts = LOTO_PAYOUTS.STANDARD.SIMPLE;
+    if (hits === 1) return payouts['1N'].gain;
+    if (hits === 2) return payouts['2N'].gain;
+    if (hits === 3) return payouts['3N'].gain;
+    if (hits === 4) return payouts['4N'].gain;
+    if (hits === 5) return payouts['5N'].gain;
+    return 0;
+};
+
+const parseDateSafe = (dateStr: string): Date => {
+    if (!dateStr) return new Date();
+    if (dateStr.includes('/')) {
+        const [d, m, y] = dateStr.split('/').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    if (dateStr.includes('-')) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    return new Date(dateStr);
+};
+
 export const UserWallet: React.FC = () => {
     const { showToast } = useToast();
-    const { spectral } = useNexus(); // Pour l'audit de pertinence en temps réel
+    const { spectral } = useNexus(); 
+    const queryClient = useQueryClient();
     
-    const [tickets, setTickets] = useState<SavedTicket[]>([]);
-    const [resultsMap, setResultsMap] = useState<Record<string, DrawResult[]>>({});
-    const [loading, setLoading] = useState(true);
-    const [scanning, setScanning] = useState(false);
-    const [syncingWallet, setSyncingWallet] = useState(false);
     const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
-    const [bankroll, setBankroll] = useState(getBankroll());
     const [showKelly, setShowKelly] = useState(false);
-    const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
     
-    const [totalWinnings, setTotalWinnings] = useState(0);
-    const [totalSpent, setTotalSpent] = useState(0);
-    const [financialHistory, setFinancialHistory] = useState<any[]>([]);
+    // --- REACT QUERY HOOKS ---
 
-    useEffect(() => { loadWallet(); }, []);
-
-    const loadWallet = async () => {
-        setLoading(true);
-        const saved = getSavedTickets().filter(t => t.status !== 'archived');
-        setTickets(saved);
-        setBankroll(getBankroll());
-
-        const session = await authService.getSession();
-        if (session?.user) {
-            const sub = await checkSubscriptionStatus(session.user.id);
-            setSubscription(sub);
-        }
-
-        const drawNames = [...new Set(saved.map(t => t.drawName))];
-        const newResultsMap: Record<string, DrawResult[]> = {};
-        
-        await Promise.all(drawNames.map(async (name) => {
-            if (name !== 'Unknown') {
-                try {
-                    const { data } = await fetchResults(name); 
-                    newResultsMap[name] = data;
-                } catch (e) { console.warn(`Failed load: ${name}`); }
+    // 1. Fetch User Session & Subscription
+    const { data: sessionData } = useQuery({
+        queryKey: ['session'],
+        queryFn: async () => {
+            const sess = await authService.getSession();
+            let sub: SubscriptionState | null = null;
+            if (sess?.user) {
+                sub = await checkSubscriptionStatus(sess.user.id);
             }
-        }));
-        
-        setResultsMap(newResultsMap);
-        calculateFinancials(saved, newResultsMap);
-        setLoading(false);
-    };
+            return { session: sess, subscription: sub };
+        },
+        staleTime: 1000 * 60 * 10
+    });
 
-    const handleSyncWallet = async () => {
-        setSyncingWallet(true);
-        try {
-            const session = await authService.getSession();
-            if (session?.user) {
-                await hydrateUserData(session.user.id);
-                await loadWallet();
-                showToast("Sync Cloud OK.", "success");
-            }
-        } catch (e) {
-            showToast("Erreur Sync.", "error");
-        } finally {
-            setSyncingWallet(false);
-        }
-    };
+    // 2. Fetch Saved Tickets (Local Source of Truth)
+    const { data: tickets = [], isLoading: ticketsLoading } = useQuery({
+        queryKey: ['tickets'],
+        queryFn: () => getSavedTickets().filter(t => t.status !== 'archived'),
+        staleTime: 0 // Always fetch fresh from local storage on mount/focus
+    });
 
-    const handleScanLive = async () => {
-        setScanning(true);
-        try {
-            const count = await checkAndSyncRecentResults();
-            await loadWallet();
-            showToast(count > 0 ? `${count} nouveaux tirages.` : "À jour.", "success");
-        } catch(e) {
-            showToast("Erreur scan.", "error");
-        } finally {
-            setScanning(false);
-        }
-    };
+    // 3. Fetch Bankroll
+    const { data: bankroll = 50000 } = useQuery({
+        queryKey: ['bankroll'],
+        queryFn: getBankroll,
+        staleTime: 0
+    });
 
-    const handleClaim = async (ticket: SavedTicket, winAmount: number) => {
-        if (confirm(`Encaisser ${winAmount.toLocaleString()} F ?`)) {
-            updateBankroll(winAmount);
-            await archiveTicket(ticket.id);
-            showToast("Gain ajouté !", "success");
-            loadWallet();
-        }
-    };
+    // 4. Fetch Results for Tickets (Only for draws present in tickets)
+    const ticketDrawNames = Array.from(new Set(tickets.map(t => t.drawName)));
+    const { data: resultsMap = {} } = useQuery<Record<string, DrawResult[]>>({
+        queryKey: ['ticketResults', ticketDrawNames],
+        queryFn: async () => {
+            const map: Record<string, DrawResult[]> = {};
+            await Promise.all(ticketDrawNames.map(async (name) => {
+                if (name !== 'Unknown') {
+                    try {
+                        const { data } = await fetchResults(name);
+                        map[name] = data;
+                    } catch { /* ignore */ }
+                }
+            }));
+            return map;
+        },
+        enabled: tickets.length > 0,
+        staleTime: 1000 * 60 * 5
+    });
 
-    const calculateWinAmount = (hits: number) => {
-        const payouts = LOTO_PAYOUTS.STANDARD.SIMPLE;
-        if (hits === 1) return payouts['1N'].gain;
-        if (hits === 2) return payouts['2N'].gain;
-        if (hits === 3) return payouts['3N'].gain;
-        if (hits === 4) return payouts['4N'].gain;
-        if (hits === 5) return payouts['5N'].gain;
-        return 0;
-    };
+    // Mutations
+    const deleteMutation = useMutation({
+        mutationFn: deleteTicket,
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tickets'] })
+    });
 
-    const parseDateSafe = (dateStr: string): Date => {
-        if (!dateStr) return new Date();
-        if (dateStr.includes('/')) {
-            const [d, m, y] = dateStr.split('/').map(Number);
-            return new Date(y, m - 1, d);
-        }
-        if (dateStr.includes('-')) {
-            const [y, m, d] = dateStr.split('-').map(Number);
-            return new Date(y, m - 1, d);
-        }
-        return new Date(dateStr);
-    };
+    const archiveMutation = useMutation({
+        mutationFn: archiveTicket,
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tickets'] })
+    });
 
-    const calculateFinancials = (tickets: SavedTicket[], results: Record<string, DrawResult[]>) => {
+    const bankrollMutation = useMutation({
+        mutationFn: async (amount: number) => updateBankroll(amount),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bankroll'] })
+    });
+
+    // --- DERIVED STATE ---
+    
+    // Financial Calculation
+    const { totalWinnings, totalSpent, financialHistory } = React.useMemo(() => {
         let winnings = 0;
         let spent = 0;
-        let runningBalance = 50000;
+        let runningBalance = 50000; // Base fictive pour le graphique
         const history: any[] = [];
         const sortedTickets = [...tickets].sort((a, b) => a.createdAt - b.createdAt);
 
         sortedTickets.forEach(ticket => {
             spent += 100;
             runningBalance -= 100;
-            const drawHistory = results[ticket.drawName] || [];
+            const drawHistory = resultsMap[ticket.drawName] || [];
             const creationDate = new Date(ticket.createdAt);
             
             const matchDraw = drawHistory.find(d => {
                  const dDate = parseDateSafe(d.date);
                  const diff = dDate.getTime() - creationDate.getTime();
+                 // Match si le tirage a lieu entre -24h et +48h de la création du ticket
                  return diff > -86400000 && diff < 172800000; 
             });
 
@@ -152,16 +144,37 @@ export const UserWallet: React.FC = () => {
             history.push({ date: creationDate.toLocaleDateString('fr-FR').slice(0, 5), balance: runningBalance });
         });
 
-        setTotalWinnings(winnings);
-        setTotalSpent(spent);
-        setFinancialHistory(history);
+        return { totalWinnings: winnings, totalSpent: spent, financialHistory: history };
+    }, [tickets, resultsMap]);
+
+    // --- ACTIONS ---
+
+    const handleSyncWallet = async () => {
+        const sess = sessionData?.session;
+        if (sess?.user) {
+            await hydrateUserData(sess.user.id);
+            queryClient.invalidateQueries({ queryKey: ['tickets'] });
+            showToast("Sync Cloud OK.", "success");
+        } else {
+            showToast("Connexion requise.", "error");
+        }
     };
 
-    const handleDelete = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        if(confirm('Supprimer ?')) {
-            await deleteTicket(id);
-            loadWallet();
+    const handleScanLive = async () => {
+        const count = await checkAndSyncRecentResults();
+        if (count > 0) {
+            queryClient.invalidateQueries({ queryKey: ['ticketResults'] });
+            showToast(`${count} nouveaux tirages.`, "success");
+        } else {
+            showToast("À jour.", "success");
+        }
+    };
+
+    const handleClaim = (ticket: SavedTicket, winAmount: number) => {
+        if (confirm(`Encaisser ${winAmount.toLocaleString()} F ?`)) {
+            bankrollMutation.mutate(winAmount);
+            archiveMutation.mutate(ticket.id);
+            showToast("Gain ajouté !", "success");
         }
     };
 
@@ -184,7 +197,6 @@ export const UserWallet: React.FC = () => {
         return { status: 'checked', hits, win, drawDate: match.date };
     };
 
-    // Calcul de la pertinence actuelle (Score Spectral Moyen)
     const getRelevance = (numbers: number[]) => {
         if (spectral.length === 0) return null;
         const totalEnergy = numbers.reduce((acc, n) => {
@@ -193,6 +205,8 @@ export const UserWallet: React.FC = () => {
         }, 0);
         return Math.round(totalEnergy / numbers.length);
     };
+
+    const subscription = sessionData?.subscription;
 
     return (
         <div className="animate-fade-in space-y-6 md:space-y-8 pb-20 px-1 md:px-0">
@@ -275,7 +289,7 @@ export const UserWallet: React.FC = () => {
                 </div>
             </div>
 
-            {/* Smart Tools Bar - Scrollable horizontal sur mobile */}
+            {/* Smart Tools Bar */}
             <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
                 <button 
                     onClick={() => setShowKelly(!showKelly)}
@@ -286,18 +300,16 @@ export const UserWallet: React.FC = () => {
                 </button>
                 <button 
                     onClick={handleScanLive}
-                    disabled={scanning}
                     className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl md:rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
                 >
-                    <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
-                    {scanning ? '...' : 'Scan Live'}
+                    <RefreshCw size={16} />
+                    Scan Live
                 </button>
                 <button 
                     onClick={handleSyncWallet}
-                    disabled={syncingWallet}
                     className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl md:rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest shadow-lg active:scale-95 transition-all whitespace-nowrap"
                 >
-                    <CloudDownload size={16} className={syncingWallet ? 'animate-bounce' : ''} />
+                    <CloudDownload size={16} />
                     Sync
                 </button>
             </div>
@@ -312,8 +324,8 @@ export const UserWallet: React.FC = () => {
                     </h3>
                 </div>
 
-                {loading ? (
-                    <div className="p-12 text-center animate-pulse text-slate-400 font-black uppercase text-[9px]">Calcul...</div>
+                {ticketsLoading ? (
+                    <div className="p-12 text-center animate-pulse text-slate-400 font-black uppercase text-[9px]">Chargement...</div>
                 ) : tickets.length === 0 ? (
                     <div className="p-10 md:p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-[2rem] md:rounded-[3rem] bg-white/5">
                         <Search className="mx-auto text-slate-300 mb-4 opacity-50" size={32} />
@@ -322,7 +334,7 @@ export const UserWallet: React.FC = () => {
                 ) : (
                     <div className="grid gap-3">
                     {tickets.map(ticket => {
-                        const { status, hits, win, drawDate } = getTicketStatus(ticket);
+                        const { status, win, drawDate } = getTicketStatus(ticket);
                         const isExpanded = expandedTicketId === ticket.id;
                         const relevance = getRelevance(ticket.numbers);
                         
@@ -341,13 +353,12 @@ export const UserWallet: React.FC = () => {
                                                 <span className="text-[8px] md:text-[10px] font-black uppercase text-white bg-slate-900 px-2.5 py-1 rounded-lg">{ticket.drawName}</span>
                                                 <span className="text-[8px] md:text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
                                             </div>
-                                            <button onClick={(e) => handleDelete(e, ticket.id)} className="text-slate-300 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={14}/></button>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(ticket.id); }} className="text-slate-300 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={14}/></button>
                                         </div>
                                         <div className="flex gap-1.5 md:gap-2 justify-center md:justify-start flex-wrap">
                                             {ticket.numbers.map(n => <NumberBall key={n} number={n} size="sm" />)}
                                         </div>
                                         
-                                        {/* PERTINENCE ACTUELLE (NEW) */}
                                         {relevance !== null && status === 'pending' && (
                                             <div className={`mt-2 flex items-center gap-1 text-[9px] font-black uppercase ${relevance > 70 ? 'text-emerald-500' : relevance > 40 ? 'text-indigo-400' : 'text-slate-500'}`}>
                                                 <Activity size={10} /> Pertinence Actuelle : {relevance}%
