@@ -46,20 +46,43 @@ export const getSupabaseConfigDiagnostics = () => {
   };
 };
 
-// Utilisation d'une URL factice valide syntaxiquement pour éviter le crash immédiat de createClient si non configuré
-// L'application doit vérifier isSupabaseConfigured() avant d'appeler les méthodes.
-const SAFE_URL = isSupabaseConfigured() ? SUPABASE_URL : 'https://setup-required.local';
-const SAFE_KEY = isSupabaseConfigured() ? SUPABASE_ANON_KEY : 'placeholder-key-must-be-long-enough-to-pass-validation';
+// Initialisation sécurisée : Ne crée le client que si la config est valide, sinon retourne un objet factice qui ne crash pas
+const createSafeClient = (): SupabaseClient => {
+    if (isSupabaseConfigured()) {
+        return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: { 
+                persistSession: true, 
+                autoRefreshToken: true, 
+                detectSessionInUrl: true, 
+                storage: typeof window !== 'undefined' ? window.localStorage : undefined 
+            },
+            global: { 
+                headers: { 'x-nexus-client': 'platinum-v12-prod' },
+                fetch: (url, options) => {
+                    return fetch(url, { ...options, signal: AbortSignal.timeout(20000) }); // Global Timeout 20s
+                }
+            },
+        });
+    } else {
+        // Mock client pour éviter le crash au chargement, les appels échoueront gracieusement via isSupabaseConfigured() check
+        console.warn("Supabase non configuré correctement. Mode hors-ligne strict activé.");
+        return {
+            from: () => ({ select: () => ({ data: null, error: { message: "Supabase not configured" } }) }),
+            auth: {
+                getSession: async () => ({ data: { session: null }, error: null }),
+                onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+                getUser: async () => ({ data: { user: null }, error: null }),
+                signInWithPassword: async () => ({ data: null, error: { message: "No config" } }),
+                signOut: async () => ({ error: null }),
+            },
+            channel: () => ({ on: () => ({ subscribe: () => {} }), unsubscribe: () => {} }),
+            removeChannel: () => {},
+            functions: { invoke: async () => ({ data: null, error: { message: "No config" } }) }
+        } as unknown as SupabaseClient;
+    }
+};
 
-export const supabase: SupabaseClient = createClient(SAFE_URL, SAFE_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: typeof window !== 'undefined' ? window.localStorage : undefined },
-    global: { 
-        headers: { 'x-nexus-client': 'platinum-v12-prod' },
-        fetch: (url, options) => {
-            return fetch(url, { ...options, signal: AbortSignal.timeout(20000) }); // Global Timeout 20s
-        }
-    },
-});
+export const supabase = createSafeClient();
 
 export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) return { success: false, error: "Configuration manquante (.env)" };

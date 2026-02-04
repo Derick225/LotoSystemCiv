@@ -8,7 +8,7 @@ import {
     Zap, Activity, TrendingUp, 
     RefreshCw, Layers, Microscope, 
     ShieldCheck, Binary, Waves, 
-    ArrowDownRight, Cpu, Globe, ArrowRight
+    ArrowDownRight, Cpu, Globe, ArrowRight, Share2, AlertOctagon
 } from 'lucide-react';
 import { 
     Radar, RadarChart, PolarGrid, 
@@ -249,10 +249,14 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                 ].map(item => (
                     <div key={item.label} className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between group hover:border-indigo-500 transition-all">
                         <div className="flex items-center gap-4">
-                            <div className={`p-2.5 rounded-xl ${item.bg} ${item.color}`}>{item.icon}</div>
-                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight">{item.label}</span>
+                            <div className={`p-2.5 rounded-xl ${item.bg} ${item.color}`}>
+                                {item.icon}
+                            </div>
+                            <div>
+                                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{item.label}</div>
+                                <div className="text-xl font-black text-slate-800 dark:text-white mt-0.5">{item.val}%</div>
+                            </div>
                         </div>
-                        <span className="text-xl font-black text-slate-800 dark:text-white">{item.val}%</span>
                     </div>
                 ))}
             </div>

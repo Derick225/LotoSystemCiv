@@ -49,7 +49,7 @@ const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
       
       <button 
         onClick={onBack}
-        className="w-full py-4 bg-white text-slate-900 hover:bg-indigo-50 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg"
+        className="w-full py-4 bg-white text-slate-900 hover:bg-indigo-50 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg hover:animate-pulse"
       >
         <ArrowLeft size={16} /> Retour Station
       </button>

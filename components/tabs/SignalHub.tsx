@@ -2,9 +2,12 @@
 import React, { useState, Suspense, lazy, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { SmartInsights } from '../SmartInsights';
-import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box } from 'lucide-react';
+import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box, TrendingUp } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 import { ChaosAttractor } from '../ChaosAttractor';
+import { calculateGapEfficiency } from '../../services/mathService';
+import { GapEfficiencyMeter } from '../GapEfficiencyMeter';
+import type { GapEfficiency } from '../../types';
 
 const StatsTab = lazy(() => import('./StatsTab').then(m => ({ default: m.StatsTab })));
 const SpectralTab = lazy(() => import('./SpectralTab').then(m => ({ default: m.SpectralTab })));
@@ -19,13 +22,19 @@ export const SignalHub: React.FC = () => {
     const activeDraw = drawName || currentDrawName;
     
     const [activeSubTab, setActiveSubTab] = useState('stats');
+    const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
+
+    useEffect(() => {
+        if (history.length > 20) {
+            calculateGapEfficiency(history).then(setGeiData);
+        }
+    }, [history]);
 
     // SYMBIOSE : Écouteur d'événements pour navigation croisée
     useEffect(() => {
         const handleNavigation = (e: CustomEvent) => {
             if (e.detail?.mainTab === 'Signaux' && e.detail?.subTab) {
                 setActiveSubTab(e.detail.subTab);
-                // Scroll doux vers le contenu
                 const contentElement = document.getElementById('signal-content');
                 if (contentElement) contentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
@@ -71,7 +80,6 @@ export const SignalHub: React.FC = () => {
                                 ))}
                             </div>
                         </div>
-                        {/* CSS Mask Inline Style pour compatibilité immédiate */}
                         <style dangerouslySetInnerHTML={{ __html: `
                             .mask-fade-right {
                                 -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
@@ -103,15 +111,17 @@ export const SignalHub: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Sidebar Widget : Attracteur */}
+                {/* Sidebar Widget : Attracteur & GEI */}
                 <div className="lg:col-span-4 space-y-6">
                     <ChaosAttractor history={history} />
+                    <GapEfficiencyMeter data={geiData} />
+                    
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl">
                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                             <Box size={12} className="text-indigo-500"/> Analyse Contextuelle
                         </h4>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                            Les graphiques ci-contre isolent les singularités mathématiques. Une forte "énergie" spectral suggère une sortie imminente par résonance cyclique.
+                            Les graphiques isolent les singularités mathématiques. Une forte "Maturité" (GEI) couplée à une résonance spectrale indique une sortie imminente.
                         </p>
                     </div>
                 </div>

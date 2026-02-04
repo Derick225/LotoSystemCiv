@@ -75,12 +75,11 @@ const toolsDef: { functionDeclarations: FunctionDeclaration[] }[] = [{
 
 export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { lastPrediction, regime, volatility, setInspectingNumber, setDrawName, refreshData } = useNexus();
+    const { lastPrediction, regime, setInspectingNumber, setDrawName, refreshData } = useNexus();
     
     const [isActive, setIsActive] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
-    const [hasApiKey, setHasApiKey] = useState(true);
     
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const sessionRef = useRef<LiveSession | null>(null);
@@ -92,152 +91,143 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     const nextStartTime = useRef<number>(0);
     const analyzerNode = useRef<AnalyserNode | null>(null);
 
+    // Utilisation de process.env car défini dans vite.config.ts define
+    const apiKey = process.env.API_KEY;
+
+    // Cleanup complet au démontage
     useEffect(() => {
         return () => {
             stopAssistant();
         };
     }, []);
 
-    useEffect(() => {
-        if (!process.env.API_KEY) {
-            setHasApiKey(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        const resizeCanvas = () => {
-            const canvas = canvasRef.current;
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                canvas.width = rect.width * window.devicePixelRatio;
-                canvas.height = rect.height * window.devicePixelRatio;
-            }
-        };
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-        return () => window.removeEventListener('resize', resizeCanvas);
-    }, []);
-
-    const closeAudioContext = async (ctx: AudioContext | null) => {
-        if (ctx && ctx.state !== 'closed') {
-            try { await ctx.close(); } catch (e) {}
-        }
-    };
-
     const initAudioContexts = async () => {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        
         if (!outputAudioContext.current || outputAudioContext.current.state === 'closed') {
-            outputAudioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+            outputAudioContext.current = new AudioContextClass({ sampleRate: 24000 });
         }
         if (!inputAudioContext.current || inputAudioContext.current.state === 'closed') {
-            inputAudioContext.current = new AudioContext({ sampleRate: 16000 });
+            inputAudioContext.current = new AudioContextClass({ sampleRate: 16000 });
         }
+        
+        // Resume necessities for stricter browser policies
         if (outputAudioContext.current.state === 'suspended') await outputAudioContext.current.resume();
         if (inputAudioContext.current.state === 'suspended') await inputAudioContext.current.resume();
     };
 
     const stopAssistant = useCallback(async () => {
+        // 1. Close Session
         if (sessionRef.current) {
             try { sessionRef.current.close(); } catch (e) {}
             sessionRef.current = null;
         }
+        
+        // 2. Stop Media Tracks (Microphone)
         if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach(track => track.stop());
             mediaStreamRef.current = null;
         }
+        
+        // 3. Close Audio Contexts to release hardware
+        const closeCtx = async (ctx: AudioContext | null) => {
+            if (ctx && ctx.state !== 'closed') {
+                try { await ctx.close(); } catch (e) { console.warn("Context close error", e); }
+            }
+        };
+        
         await Promise.all([
-            closeAudioContext(inputAudioContext.current),
-            closeAudioContext(outputAudioContext.current)
+            closeCtx(inputAudioContext.current),
+            closeCtx(outputAudioContext.current)
         ]);
+        
         inputAudioContext.current = null;
         outputAudioContext.current = null;
+        analyzerNode.current = null;
+
+        // 4. Stop Visualizer
         if (animationRef.current) {
             cancelAnimationFrame(animationRef.current);
             animationRef.current = null;
         }
+
+        // 5. Reset State
         setIsActive(false);
         setIsConnecting(false);
         setIsSpeaking(false);
         nextStartTime.current = 0;
-        analyzerNode.current = null;
     }, []);
 
     const playAudioChunk = async (base64Data: string) => {
+        if (!outputAudioContext.current) return;
         const ctx = outputAudioContext.current;
-        if (!ctx) return;
+        
         try {
             const rawBytes = decodeBase64Audio(base64Data);
+            // Convert Int16 PCM to Float32
             const int16 = new Int16Array(rawBytes.buffer);
             const buffer = ctx.createBuffer(1, int16.length, 24000);
             const channelData = buffer.getChannelData(0);
             for (let i = 0; i < int16.length; i++) { channelData[i] = int16[i] / 32768.0; }
+            
             const source = ctx.createBufferSource();
             source.buffer = buffer;
             source.connect(ctx.destination);
+            
             const now = ctx.currentTime;
-            if (nextStartTime.current < now) nextStartTime.current = now;
-            source.start(nextStartTime.current);
-            nextStartTime.current += buffer.duration;
+            // Scheduling pour éviter les gaps
+            const startTime = Math.max(now, nextStartTime.current);
+            source.start(startTime);
+            nextStartTime.current = startTime + buffer.duration;
+            
             setIsSpeaking(true);
             source.onended = () => {
-                requestAnimationFrame(() => {
-                    if (!outputAudioContext.current || outputAudioContext.current.state === 'closed') return;
-                    if (outputAudioContext.current.currentTime >= nextStartTime.current - 0.1) setIsSpeaking(false);
-                });
+                // Petite latence pour éviter le clignotement
+                setTimeout(() => {
+                    if (outputAudioContext.current && outputAudioContext.current.currentTime >= nextStartTime.current - 0.1) {
+                        setIsSpeaking(false);
+                    }
+                }, 100);
             };
-        } catch (e) {}
+        } catch (e) {
+            console.error("Playback error", e);
+        }
     };
 
     const setupAudioProcessing = async (stream: MediaStream) => {
         if (!inputAudioContext.current) return;
         const inputCtx = inputAudioContext.current;
+        
         const source = inputCtx.createMediaStreamSource(stream);
+        
+        // Analyzer pour la visualisation
         analyzerNode.current = inputCtx.createAnalyser();
         analyzerNode.current.fftSize = 64;
         source.connect(analyzerNode.current);
+        
+        // Processor pour l'envoi à l'API
         const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
         scriptProcessor.onaudioprocess = (e) => {
-            if (!isActive) return;
-            processAudioChunk(e.inputBuffer.getChannelData(0));
-        };
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(inputCtx.destination);
-    };
-
-    const processAudioChunk = (inputData: Float32Array) => {
-        if (!sessionRef.current || !isActive) return;
-        const pcm16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) { pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF; }
-        try {
-            sessionRef.current.sendRealtimeInput({
-                media: { data: encodeAudioToBase64(new Uint8Array(pcm16.buffer)), mimeType: 'audio/pcm;rate=16000' }
-            });
-        } catch (e) {}
-    };
-
-    const startVisualizer = () => {
-        if (!canvasRef.current || !analyzerNode.current) return;
-        const ctx = canvasRef.current.getContext('2d');
-        if (!ctx) return;
-        const bufferLength = analyzerNode.current.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        const draw = () => {
-            if (!canvasRef.current || !analyzerNode.current) return;
-            animationRef.current = requestAnimationFrame(draw);
-            analyzerNode.current!.getByteFrequencyData(dataArray);
-            const canvas = canvasRef.current;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const barWidth = (canvas.width / bufferLength) * 2.5;
-            let x = 0;
-            for (let i = 0; i < bufferLength; i++) {
-                const h = (dataArray[i] / 255) * canvas.height * 0.8;
-                ctx.fillStyle = isSpeaking ? '#10b981' : '#6366f1';
-                ctx.beginPath();
-                ctx.roundRect(x, canvas.height - h, barWidth, h, [4, 4, 0, 0]);
-                ctx.fill();
-                x += barWidth + 2;
+            if (!isActive || !sessionRef.current) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            
+            // Downsampling simple et conversion PCM16
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) { 
+                pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF; 
+            }
+            
+            try {
+                sessionRef.current.sendRealtimeInput({
+                    media: { data: encodeAudioToBase64(new Uint8Array(pcm16.buffer)), mimeType: 'audio/pcm;rate=16000' }
+                });
+            } catch (err) {
+                // Ignore send errors if session closed abruptly
             }
         };
-        draw();
+        
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(inputCtx.destination); // Nécessaire pour que onaudioprocess tire
     };
 
     const handleToolCall = async (toolCall: any) => {
@@ -272,21 +262,23 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     };
 
     const startAssistant = async () => {
-        if (!hasApiKey || isConnecting || isActive) return;
+        if (!apiKey) {
+            showToast("Clé API manquante.", "error");
+            return;
+        }
+        if (isConnecting || isActive) return;
+        
         setIsConnecting(true);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
             });
             mediaStreamRef.current = stream;
+            
             await initAudioContexts();
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-            const contextPrompt = `Tu es l'Oracle de LotoPro.
-                Tirage actif : ${drawName}.
-                Régime : ${regime?.regime || 'Inconnu'}.
-                Prédiction IA : ${lastPrediction?.suggestedNumbers?.join(', ') || 'Inconnue'}.
-                Tu peux naviguer dans l'app, changer de tirage ou inspecter des numéros.
-                Réponds brièvement et avec autorité scientifique.`;
+            
+            const ai = new GoogleGenAI({ apiKey });
+            const contextPrompt = `Tu es l'Oracle de LotoPro. Tirage: ${drawName}. Régime: ${regime?.regime || 'Inconnu'}. Prédiction: ${lastPrediction?.suggestedNumbers?.join(', ') || 'Aucune'}. Sois bref et concis.`;
 
             const session = await ai.live.connect({
                 model: 'gemini-2.5-flash-native-audio-preview-12-2025', 
@@ -297,7 +289,35 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                     systemInstruction: contextPrompt,
                 },
                 callbacks: {
-                    onopen: () => { setIsActive(true); setIsConnecting(false); setupAudioProcessing(stream); startVisualizer(); },
+                    onopen: () => { 
+                        setIsActive(true); 
+                        setIsConnecting(false); 
+                        setupAudioProcessing(stream); 
+                        // Start visualizer loop
+                        const draw = () => {
+                            if (!canvasRef.current || !analyzerNode.current) return;
+                            animationRef.current = requestAnimationFrame(draw);
+                            const bufferLength = analyzerNode.current.frequencyBinCount;
+                            const dataArray = new Uint8Array(bufferLength);
+                            analyzerNode.current.getByteFrequencyData(dataArray);
+                            
+                            const ctx = canvasRef.current.getContext('2d');
+                            if(!ctx) return;
+                            
+                            ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                            const barWidth = (canvasRef.current.width / bufferLength) * 2.5;
+                            let x = 0;
+                            for (let i = 0; i < bufferLength; i++) {
+                                const h = (dataArray[i] / 255) * canvasRef.current.height * 0.8;
+                                ctx.fillStyle = isSpeaking ? '#10b981' : '#6366f1';
+                                ctx.beginPath();
+                                ctx.roundRect(x, canvasRef.current.height - h, barWidth, h, [4, 4, 0, 0]);
+                                ctx.fill();
+                                x += barWidth + 2;
+                            }
+                        };
+                        draw();
+                    },
                     onmessage: (msg: LiveServerMessage) => {
                         if (msg.toolCall) handleToolCall(msg.toolCall);
                         const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -308,7 +328,12 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                 }
             });
             sessionRef.current = session;
-        } catch (e) { showToast("Audio/API Error.", "error"); setIsConnecting(false); stopAssistant(); }
+        } catch (e) {
+            console.error(e);
+            showToast("Erreur connexion Oracle.", "error");
+            setIsConnecting(false);
+            stopAssistant();
+        }
     };
 
     return (
@@ -336,10 +361,10 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             )}
             <button
                 onClick={isActive ? stopAssistant : startAssistant}
-                disabled={isConnecting || !hasApiKey}
-                className={`pointer-events-auto w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all border-4 border-slate-950 z-50 ${!hasApiKey ? 'bg-slate-800 border-rose-500/30' : isConnecting ? 'bg-slate-700 animate-pulse' : isActive ? 'bg-rose-600 shadow-rose-900/50 animate-pulse-slow' : 'bg-indigo-600 hover:scale-105'}`}
+                disabled={isConnecting || !apiKey}
+                className={`pointer-events-auto w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all border-4 border-slate-950 z-50 ${!apiKey ? 'bg-slate-800 border-rose-500/30' : isConnecting ? 'bg-slate-700 animate-pulse' : isActive ? 'bg-rose-600 shadow-rose-900/50 animate-pulse-slow' : 'bg-indigo-600 hover:scale-105'}`}
             >
-                {!hasApiKey ? <AlertTriangle className="text-rose-500" size={20} /> : isConnecting ? <RefreshCw className="animate-spin text-white" size={20} /> : isActive ? <MicOff className="text-white" size={20} /> : <Mic className="text-white" size={20} />}
+                {!apiKey ? <AlertTriangle className="text-rose-500" size={20} /> : isConnecting ? <RefreshCw className="animate-spin text-white" size={20} /> : isActive ? <MicOff className="text-white" size={20} /> : <Mic className="text-white" size={20} />}
             </button>
         </div>
     );

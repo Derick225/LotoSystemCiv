@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSavedTickets, deleteTicket, archiveTicket, getBankroll, updateBankroll, hydrateUserData } from '../services/userPreferencesService';
@@ -26,15 +27,20 @@ const calculateWinAmount = (hits: number) => {
 
 const parseDateSafe = (dateStr: string): Date => {
     if (!dateStr) return new Date();
-    if (dateStr.includes('/')) {
-        const [d, m, y] = dateStr.split('/').map(Number);
-        return new Date(y, m - 1, d);
+    try {
+        if (dateStr.includes('/')) {
+            const [d, m, y] = dateStr.split('/').map(Number);
+            return new Date(y, m - 1, d);
+        }
+        if (dateStr.includes('-')) {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+        const d = new Date(dateStr);
+        return isNaN(d.getTime()) ? new Date() : d;
+    } catch {
+        return new Date();
     }
-    if (dateStr.includes('-')) {
-        const [y, m, d] = dateStr.split('-').map(Number);
-        return new Date(y, m - 1, d);
-    }
-    return new Date(dateStr);
 };
 
 export const UserWallet: React.FC = () => {
@@ -65,7 +71,7 @@ export const UserWallet: React.FC = () => {
     const { data: tickets = [], isLoading: ticketsLoading } = useQuery<SavedTicket[]>({
         queryKey: ['tickets'],
         queryFn: () => getSavedTickets().filter(t => t.status !== 'archived'),
-        staleTime: 0 // Always fetch fresh from local storage on mount/focus
+        staleTime: 0
     });
 
     // 3. Fetch Bankroll
@@ -75,7 +81,7 @@ export const UserWallet: React.FC = () => {
         staleTime: 0
     });
 
-    // 4. Fetch Results for Tickets (Only for draws present in tickets)
+    // 4. Fetch Results for Tickets
     const ticketDrawNames: string[] = Array.from(new Set(tickets.map(t => t.drawName)));
     const { data: resultsMap = {} } = useQuery<Record<string, DrawResult[]>>({
         queryKey: ['ticketResults', ticketDrawNames],
@@ -95,7 +101,6 @@ export const UserWallet: React.FC = () => {
         staleTime: 1000 * 60 * 5
     });
 
-    // Mutations
     const deleteMutation = useMutation({
         mutationFn: deleteTicket,
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tickets'] })
@@ -113,11 +118,10 @@ export const UserWallet: React.FC = () => {
 
     // --- DERIVED STATE ---
     
-    // Financial Calculation
     const { totalWinnings, totalSpent, financialHistory } = React.useMemo(() => {
         let winnings = 0;
         let spent = 0;
-        let runningBalance = 50000; // Base fictive pour le graphique
+        let runningBalance = 50000;
         const history: any[] = [];
         const sortedTickets = [...tickets].sort((a, b) => a.createdAt - b.createdAt);
 
@@ -227,22 +231,10 @@ export const UserWallet: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                        
-                        <div className="flex gap-2 w-full md:w-auto overflow-x-auto scrollbar-hide">
-                            <div className="px-3 py-1.5 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2 whitespace-nowrap flex-1 md:flex-none justify-center">
-                                <ShieldCheck size={14} className="text-emerald-400" />
-                                <span className="text-[8px] font-bold text-slate-300 uppercase">IA Active</span>
-                            </div>
-                            <div className="px-3 py-1.5 bg-white/5 rounded-lg border border-white/10 flex items-center gap-2 whitespace-nowrap flex-1 md:flex-none justify-center">
-                                <Sparkles size={14} className="text-amber-400" />
-                                <span className="text-[8px] font-bold text-slate-300 uppercase">Full Access</span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}
 
-            {/* Financial Dashboard */}
             <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
                 <div className="relative z-10 flex flex-col lg:grid lg:grid-cols-2 gap-6 md:gap-8">
                     <div>
@@ -288,7 +280,6 @@ export const UserWallet: React.FC = () => {
                 </div>
             </div>
 
-            {/* Smart Tools Bar */}
             <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
                 <button 
                     onClick={() => setShowKelly(!showKelly)}
@@ -315,7 +306,6 @@ export const UserWallet: React.FC = () => {
 
             {showKelly && <KellyCalculator confidence={75} />}
 
-            {/* Active Tickets List */}
             <div className="space-y-4">
                 <div className="flex justify-between items-center px-2">
                     <h3 className="text-[11px] md:text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
@@ -357,12 +347,6 @@ export const UserWallet: React.FC = () => {
                                         <div className="flex gap-1.5 md:gap-2 justify-center md:justify-start flex-wrap">
                                             {ticket.numbers.map(n => <NumberBall key={n} number={n} size="sm" />)}
                                         </div>
-                                        
-                                        {relevance !== null && status === 'pending' && (
-                                            <div className={`mt-2 flex items-center gap-1 text-[9px] font-black uppercase ${relevance > 70 ? 'text-emerald-500' : relevance > 40 ? 'text-indigo-400' : 'text-slate-500'}`}>
-                                                <Activity size={10} /> Pertinence Actuelle : {relevance}%
-                                            </div>
-                                        )}
                                     </div>
 
                                     <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-50 dark:border-slate-700">

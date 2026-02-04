@@ -1,14 +1,11 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, Terminal, LogOut, Mic, MicOff, Share2, RefreshCw, LayoutGrid } from 'lucide-react';
-import { useIsFetching } from '@tanstack/react-query';
+import { Home, Settings, FlaskConical, Wallet, Activity, LogOut, Mic, MicOff } from 'lucide-react';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
-import { SonarPing } from '../ui/SonarPing';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
-import { useNexus } from '../NexusProvider';
 import { QuantumInspector } from '../QuantumInspector';
 
 export type ViewMode = 'home' | 'admin' | 'lab';
@@ -31,8 +28,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   children, 
   viewMode, 
   setViewMode, 
-  theme, 
-  setTheme, 
   onReset,
   showWallet,
   setShowWallet,
@@ -40,11 +35,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   isAdmin,
   onLogout
 }) => {
-  const isFetching = useIsFetching();
   const [showPalette, setShowPalette] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   
-  const { isListening, transcript, toggleListening } = useVoiceControl(setViewMode, setShowWallet);
+  const { isListening, toggleListening } = useVoiceControl(setViewMode, setShowWallet);
   
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -102,8 +96,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="container mx-auto px-2 md:px-4 pt-28 md:pt-44 pb-40 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden">
+      {/* Main Content Area - Padding bottom augmented to clear mobile nav */}
+      <main className="container mx-auto px-2 md:px-4 pt-28 md:pt-44 pb-32 md:pb-40 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden">
         <AnimatePresence mode="wait">
             <motion.div key={viewMode + isDrawSelected + showWallet} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }}>
                 {children}

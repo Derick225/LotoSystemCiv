@@ -35,6 +35,8 @@ const COMMUNITY_COLORS = [
     '#06b6d4', // Cyan
 ];
 
+const MAX_VELOCITY = 4; // Limite de vitesse physique pour éviter les explosions
+
 export const NeuralArchitectureTab: React.FC = () => {
     const { history, correlationMatrix, drawName } = useNexus();
     const { showToast } = useToast();
@@ -46,10 +48,9 @@ export const NeuralArchitectureTab: React.FC = () => {
     const [hoveredNode, setHoveredNode] = useState<number | null>(null);
     const [selectedNode, setSelectedNode] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [minStrength, setMinStrength] = useState(25); // Seuil de filtre (0-100)
+    const [minStrength, setMinStrength] = useState(25); 
     const [generatedPath, setGeneratedPath] = useState<number[]>([]);
     
-    // Physics Refs (Mutable for performance)
     const nodesRef = useRef<Node[]>([]);
     const linksRef = useRef<Link[]>([]);
     const draggingRef = useRef<number | null>(null);
@@ -57,7 +58,6 @@ export const NeuralArchitectureTab: React.FC = () => {
 
     // --- INITIALISATION DES DONNÉES ---
     useEffect(() => {
-        // 1. Calcul des Liens
         const rawLinks: Link[] = [];
         const nodeDegrees: Record<number, number> = {};
         
@@ -66,7 +66,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             Object.entries(data.affinities).forEach(([tgtStr, strength]: [string, any]) => {
                 const tgt = parseInt(tgtStr);
                 const sVal = Number(strength);
-                if (src < tgt && sVal > 0.10) { // Pré-filtre léger
+                if (src < tgt && sVal > 0.10) { 
                     rawLinks.push({ source: src, target: tgt, strength: sVal });
                     nodeDegrees[src] = (nodeDegrees[src] || 0) + sVal;
                     nodeDegrees[tgt] = (nodeDegrees[tgt] || 0) + sVal;
@@ -74,11 +74,9 @@ export const NeuralArchitectureTab: React.FC = () => {
             });
         });
 
-        // 2. Initialisation des Noeuds
         const newNodes: Node[] = Array.from({ length: 90 }, (_, i) => {
             const id = i + 1;
             const degree = nodeDegrees[id] || 0;
-            // Communauté simple (modulo pour l'instant, pourrait être Louvain)
             const community = id % 6; 
             
             return {
@@ -86,7 +84,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                 x: Math.random() * 800,
                 y: Math.random() * 600,
                 vx: 0, vy: 0,
-                radius: 4 + (degree * 1.5), // Taille selon importance
+                radius: 4 + (degree * 1.5), 
                 color: COMMUNITY_COLORS[community],
                 mass: 1 + degree,
                 centrality: degree,
@@ -95,7 +93,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             };
         });
 
-        // Positionnement initial circulaire pour éviter le chaos
+        // Positionnement initial circulaire
         const centerX = 400;
         const centerY = 300;
         newNodes.forEach((n, i) => {
@@ -110,7 +108,7 @@ export const NeuralArchitectureTab: React.FC = () => {
 
     }, [correlationMatrix]);
 
-    // --- MOTEUR PHYSIQUE ---
+    // --- MOTEUR PHYSIQUE OPTIMISÉ ---
     const updatePhysics = useCallback(() => {
         const nodes = nodesRef.current;
         const links = linksRef.current;
@@ -118,10 +116,9 @@ export const NeuralArchitectureTab: React.FC = () => {
         const height = canvasRef.current?.height || 600;
         const threshold = minStrength / 100;
 
-        // Filtrer les liens actifs
         const activeLinks = links.filter(l => l.strength >= threshold);
 
-        // 1. Forces de Répulsion (Coulomb)
+        // 1. Forces de Répulsion (Coulomb) - O(N^2) mais acceptable pour N=90
         for (let i = 0; i < nodes.length; i++) {
             for (let j = i + 1; j < nodes.length; j++) {
                 const a = nodes[i];
@@ -130,7 +127,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                 const dy = a.y - b.y;
                 const distSq = dx*dx + dy*dy || 1;
                 
-                if (distSq < 25000) { // Rayon d'interaction
+                if (distSq < 25000) { 
                     const force = (100 * a.mass * b.mass) / distSq;
                     const fx = (dx * force) / Math.sqrt(distSq);
                     const fy = (dy * force) / Math.sqrt(distSq);
@@ -149,7 +146,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             const dy = t.y - s.y;
             const dist = Math.sqrt(dx*dx + dy*dy) || 1;
             
-            const targetDist = 100 - (l.strength * 50); // Plus fort = plus proche
+            const targetDist = 100 - (l.strength * 50); 
             const force = (dist - targetDist) * 0.05 * l.strength;
             
             const fx = (dx / dist) * force;
@@ -159,18 +156,22 @@ export const NeuralArchitectureTab: React.FC = () => {
             if (!t.fixed) { t.vx -= fx; t.vy -= fy; }
         });
 
-        // 3. Gravité Centrale & Friction
+        // 3. Intégration & Contraintes
         nodes.forEach(n => {
             if (n.fixed) return;
-            // Gravité vers le centre
-            n.vx += (width/2 - n.x) * 0.005;
+            n.vx += (width/2 - n.x) * 0.005; // Gravité
             n.vy += (height/2 - n.y) * 0.005;
             
-            // Friction
-            n.vx *= 0.85;
+            // Terminal Velocity Cap (Anti-Explosion)
+            const speed = Math.sqrt(n.vx*n.vx + n.vy*n.vy);
+            if(speed > MAX_VELOCITY) {
+                n.vx = (n.vx / speed) * MAX_VELOCITY;
+                n.vy = (n.vy / speed) * MAX_VELOCITY;
+            }
+
+            n.vx *= 0.85; // Friction
             n.vy *= 0.85;
             
-            // Update Position
             n.x += n.vx;
             n.y += n.vy;
 
@@ -194,7 +195,6 @@ export const NeuralArchitectureTab: React.FC = () => {
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Fond grille subtile
         ctx.strokeStyle = '#1e293b';
         ctx.lineWidth = 0.5;
         ctx.beginPath();
@@ -205,15 +205,13 @@ export const NeuralArchitectureTab: React.FC = () => {
         const threshold = minStrength / 100;
         const nodes = nodesRef.current;
         
-        // Dessin des Liens
+        // Liens
         linksRef.current.forEach(l => {
             if (l.strength < threshold) return;
-            
             const s = nodes[l.source - 1];
             const t = nodes[l.target - 1];
 
-            // Opacité dynamique : focus sur la sélection
-            let alpha = (l.strength - threshold) / (1 - threshold); // Normaliser 0-1
+            let alpha = (l.strength - threshold) / (1 - threshold);
             alpha = Math.max(0.05, Math.min(0.8, alpha));
 
             if (selectedNode || hoveredNode) {
@@ -221,15 +219,15 @@ export const NeuralArchitectureTab: React.FC = () => {
                 const isConnected = l.source === target || l.target === target;
                 if (isConnected) {
                     alpha = 1;
-                    ctx.strokeStyle = '#a5b4fc'; // Highlight color
+                    ctx.strokeStyle = '#a5b4fc'; 
                     ctx.lineWidth = l.strength * 4;
                 } else {
-                    alpha *= 0.1; // Dim others
+                    alpha *= 0.1;
                     ctx.strokeStyle = s.color;
                     ctx.lineWidth = l.strength;
                 }
             } else {
-                ctx.strokeStyle = s.color; // Couleur source
+                ctx.strokeStyle = s.color; 
                 ctx.lineWidth = l.strength * 2;
             }
 
@@ -240,14 +238,13 @@ export const NeuralArchitectureTab: React.FC = () => {
             ctx.stroke();
         });
 
-        // Dessin des Noeuds
+        // Noeuds
         nodes.forEach(n => {
             let alpha = 1;
             let scale = 1;
 
             if (selectedNode || hoveredNode) {
                 const target = selectedNode || hoveredNode;
-                // Est-ce le noeud cible ou un voisin direct ?
                 const isTarget = n.id === target;
                 const isNeighbor = linksRef.current.some(l => 
                     l.strength >= threshold && 
@@ -267,7 +264,6 @@ export const NeuralArchitectureTab: React.FC = () => {
 
             ctx.globalAlpha = alpha;
             
-            // Corps du noeud
             ctx.beginPath();
             ctx.arc(n.x, n.y, n.radius * scale, 0, Math.PI * 2);
             ctx.fillStyle = '#0f172a';
@@ -276,7 +272,6 @@ export const NeuralArchitectureTab: React.FC = () => {
             ctx.strokeStyle = n.color;
             ctx.stroke();
 
-            // Texte
             if (alpha > 0.2 && (n.centrality > 1.5 || scale > 1)) {
                 ctx.fillStyle = '#fff';
                 ctx.font = `bold ${10 * scale}px Inter`;
@@ -284,7 +279,6 @@ export const NeuralArchitectureTab: React.FC = () => {
                 ctx.textBaseline = 'middle';
                 ctx.fillText(n.id.toString(), n.x, n.y);
             }
-
             ctx.shadowBlur = 0;
         });
         
@@ -297,22 +291,19 @@ export const NeuralArchitectureTab: React.FC = () => {
         return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
     }, [draw]);
 
-    // --- EVENTS HANDLERS ---
-    
     const handleMouseDown = (e: React.MouseEvent) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         
-        // Find hit
         const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
         
         if (hit) {
             draggingRef.current = hit.id;
             hit.fixed = true;
             setSelectedNode(prev => prev === hit.id ? null : hit.id);
-            setGeneratedPath([]); // Reset path on new selection
+            setGeneratedPath([]);
         } else {
             setSelectedNode(null);
             setGeneratedPath([]);
@@ -327,10 +318,7 @@ export const NeuralArchitectureTab: React.FC = () => {
 
         if (draggingRef.current) {
             const node = nodesRef.current.find(n => n.id === draggingRef.current);
-            if (node) {
-                node.x = x;
-                node.y = y;
-            }
+            if (node) { node.x = x; node.y = y; }
         } else {
             const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
             setHoveredNode(hit ? hit.id : null);
@@ -345,54 +333,41 @@ export const NeuralArchitectureTab: React.FC = () => {
         }
     };
 
-    // --- PATH FINDER LOGIC ---
     const generateNeuralPath = () => {
         if (!selectedNode) return;
-        
-        // Algorithme glouton : part du noeud sélectionné et suit les liens les plus forts
         const path = new Set<number>();
         path.add(selectedNode);
-        
         let currentId = selectedNode;
         const threshold = minStrength / 100;
 
-        // On cherche 4 voisins successifs
         for (let i = 0; i < 4; i++) {
             const links = linksRef.current
                 .filter(l => l.strength >= threshold && (l.source === currentId || l.target === currentId))
-                .map(l => ({ 
-                    id: l.source === currentId ? l.target : l.source,
-                    str: l.strength
-                }))
+                .map(l => ({ id: l.source === currentId ? l.target : l.source, str: l.strength }))
                 .filter(n => !path.has(n.id))
                 .sort((a,b) => b.str - a.str);
             
             if (links.length > 0) {
-                // Facteur aléatoire léger pour ne pas toujours prendre le même chemin
+                // Stochastic Path: Pick top 1-3 weighted
                 const pick = links[Math.floor(Math.random() * Math.min(3, links.length))];
                 path.add(pick.id);
                 currentId = pick.id;
             } else {
-                break; // Cul de sac
+                break;
             }
         }
 
-        // Si pas assez, on complète avec les voisins directs les plus forts du noeud de départ
         if (path.size < 5) {
             const neighbors = linksRef.current
                 .filter(l => l.strength >= threshold && (l.source === selectedNode || l.target === selectedNode))
-                .map(l => ({ 
-                    id: l.source === selectedNode ? l.target : l.source,
-                    str: l.strength
-                }))
+                .map(l => ({ id: l.source === selectedNode ? l.target : l.source, str: l.strength }))
                 .filter(n => !path.has(n.id))
                 .sort((a,b) => b.str - a.str);
             
             neighbors.slice(0, 5 - path.size).forEach(n => path.add(n.id));
         }
 
-        const finalPath = Array.from(path).sort((a,b) => a-b);
-        setGeneratedPath(finalPath);
+        setGeneratedPath(Array.from(path).sort((a,b) => a-b));
         showToast("Chemin Neuronal tracé.", "success");
     };
 
@@ -408,69 +383,40 @@ export const NeuralArchitectureTab: React.FC = () => {
 
     return (
         <div className="space-y-8 animate-fade-in pb-20">
-            {/* Header / Controls */}
             <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
                         <Network size={24} className="text-indigo-500" /> Architecture Neurale
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                        Cartographie gravitationnelle des vecteurs.
-                    </p>
+                    <p className="text-xs text-slate-400 mt-1">Cartographie gravitationnelle des vecteurs.</p>
                 </div>
-
                 <div className="flex items-center gap-4 bg-black/30 p-3 rounded-2xl border border-white/5 w-full md:w-auto">
                     <Sliders size={16} className="text-slate-400" />
                     <div className="flex-1">
                         <div className="flex justify-between text-[9px] font-black uppercase text-slate-500 mb-1">
-                            <span>Bruit</span>
-                            <span>Signal Pur</span>
+                            <span>Bruit</span><span>Signal Pur</span>
                         </div>
-                        <input 
-                            type="range" min="0" max="60" step="1" 
-                            value={minStrength} 
-                            onChange={(e) => setMinStrength(Number(e.target.value))}
-                            className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-500"
-                        />
+                        <input type="range" min="0" max="60" step="1" value={minStrength} onChange={(e) => setMinStrength(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-500"/>
                     </div>
                     <span className="text-xs font-bold text-white w-8 text-right">{minStrength}%</span>
                 </div>
             </div>
 
             <div className="grid lg:grid-cols-12 gap-8">
-                {/* CANVAS */}
                 <div className="lg:col-span-8 h-[600px] bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden group cursor-crosshair">
-                    <canvas 
-                        ref={canvasRef}
-                        width={800} height={600}
-                        className="w-full h-full touch-none"
-                        onMouseDown={handleMouseDown}
-                        onMouseMove={handleMouseMove}
-                        onMouseUp={handleMouseUp}
-                        onMouseLeave={handleMouseUp}
-                    />
-                    
-                    {/* Overlay Info Canvas */}
+                    <canvas ref={canvasRef} width={800} height={600} className="w-full h-full touch-none" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}/>
                     <div className="absolute bottom-6 left-6 pointer-events-none">
                         <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
                             <MousePointer2 size={12}/> {selectedNode ? `Nœud ${selectedNode} verrouillé` : 'Survoler / Cliquer'}
                         </div>
                     </div>
-                    <div className="absolute bottom-6 right-6 pointer-events-none">
-                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
-                            <Move size={12}/> Moteur Physique Actif
-                        </div>
-                    </div>
                 </div>
 
-                {/* SIDEBAR ANALYSE */}
                 <div className="lg:col-span-4 flex flex-col gap-6">
-                    {/* Node Details */}
                     <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-lg flex-1 flex flex-col">
                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
                             <Activity size={16} className="text-emerald-500"/> Inspecteur
                         </h4>
-
                         {selectedNode ? (
                             <div className="space-y-6 animate-slide-up">
                                 <div className="text-center">
@@ -480,26 +426,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                                     <div className="text-2xl font-black text-slate-800 dark:text-white">Vecteur {selectedNode}</div>
                                     <div className="text-[10px] font-bold text-indigo-500 uppercase">Nœud Sélectionné</div>
                                 </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                        <div className="text-[9px] text-slate-400 font-black uppercase">Connexions</div>
-                                        <div className="text-xl font-black text-slate-700 dark:text-slate-200">
-                                            {linksRef.current.filter(l => l.strength >= minStrength/100 && (l.source === selectedNode || l.target === selectedNode)).length}
-                                        </div>
-                                    </div>
-                                    <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
-                                        <div className="text-[9px] text-slate-400 font-black uppercase">Centralité</div>
-                                        <div className="text-xl font-black text-slate-700 dark:text-slate-200">
-                                            {Math.round((nodesRef.current.find(n => n.id === selectedNode)?.mass || 1) * 10)}%
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button 
-                                    onClick={generateNeuralPath}
-                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
-                                >
+                                <button onClick={generateNeuralPath} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all">
                                     <Zap size={16} fill="currentColor"/> Tracer Chemin Neuronal
                                 </button>
                             </div>
@@ -511,20 +438,14 @@ export const NeuralArchitectureTab: React.FC = () => {
                         )}
                     </div>
 
-                    {/* Generated Path */}
                     {generatedPath.length > 0 && (
                         <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-indigo-500/30 shadow-2xl relative overflow-hidden animate-slide-up">
                             <div className="absolute top-0 right-0 p-4 opacity-10"><Cpu size={64}/></div>
                             <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4">Séquence Dérivée</h4>
-                            
                             <div className="flex justify-center gap-2 mb-6">
                                 {generatedPath.map(n => <NumberBall key={n} number={n} size="sm" />)}
                             </div>
-
-                            <button 
-                                onClick={savePath}
-                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                            >
+                            <button onClick={savePath} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
                                 <Layers size={14}/> Sauvegarder
                             </button>
                         </div>

@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { generateMasterPrediction } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -8,13 +8,14 @@ import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { ReliabilityMeter } from '../ReliabilityMeter';
+import { RiskProfile } from '../../types';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
     Save, Wind, AlertTriangle, TrendingUp,
-    MapPin, GitMerge
+    MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
@@ -25,6 +26,8 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     } = useNexus();
 
     const [isComputing, setIsComputing] = useState(false);
+    const [computingStep, setComputingStep] = useState<string>("");
+    const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
 
     const runInference = useCallback(async () => {
         if (history.length < 5) {
@@ -32,12 +35,30 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             return;
         }
         setIsComputing(true);
-        // Simulation d'un temps de calcul pour l'effet "Deep Thought"
+        setComputingStep("Initialisation du Noyau...");
+
+        const steps = [
+            { msg: `Activation Stratégie : ${riskProfile}`, delay: 400 },
+            { msg: "Calibration Réalité T-1...", delay: 1000 },
+            { msg: `Analyse du Régime : ${regime?.regime || 'Calcul...'}`, delay: 1600 },
+            { msg: "Adaptation Dynamique des Poids...", delay: 2200 },
+            { msg: "Convergence Vectorielle...", delay: 2800 }
+        ];
+
+        let stepIndex = 0;
+        const interval = setInterval(() => {
+            if (stepIndex < steps.length) {
+                setComputingStep(steps[stepIndex].msg);
+                stepIndex++;
+            }
+        }, 600);
+
         setTimeout(async () => {
+            clearInterval(interval);
             try {
                 const res = await generateMasterPrediction(drawName, history, globalWeights, {
-                    spectral, wavelet, correlationMatrix, regularity
-                }, symbioticContext || undefined);
+                    spectral, wavelet, correlationMatrix, regularity, volatility
+                }, symbioticContext || undefined, riskProfile);
                 
                 setLastPrediction(res);
                 await savePredictionToHistory(drawName, res);
@@ -46,21 +67,21 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 showToast("Erreur lors de l'inférence.", "error");
             } finally {
                 setIsComputing(false);
+                setComputingStep("");
             }
-        }, 800);
-    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, symbioticContext, setLastPrediction, showToast]);
+        }, 3500);
+    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile]);
 
     const handleQuickSave = async () => {
         if (!lastPrediction) return;
         await saveTicket({
             numbers: lastPrediction.suggestedNumbers,
             drawName,
-            strategy: `Oracle Base (${lastPrediction.confidence}%)`
+            strategy: `Oracle ${riskProfile} (${lastPrediction.confidence}%)`
         });
         showToast("Ticket sécurisé dans le Portefeuille.", "success");
     };
 
-    // Calcul approximatif du score global pour affichage visuel
     const getAlgoScore = (breakdown: any, weights: any) => {
         if (!breakdown || !weights) return 0;
         let score = 0;
@@ -77,23 +98,43 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
     );
 
-    // Écran d'accueil si pas de prédiction
+    const profiles: { id: RiskProfile, label: string, icon: any, color: string }[] = [
+        { id: 'PRUDENT', label: 'Prudent', icon: <ShieldCheck size={14} />, color: 'bg-emerald-600' },
+        { id: 'BALANCED', label: 'Équilibré', icon: <Scale size={14} />, color: 'bg-indigo-600' },
+        { id: 'AUDACIOUS', label: 'Audacieux', icon: <Target size={14} />, color: 'bg-amber-600' },
+        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={14} />, color: 'bg-rose-600' }
+    ];
+
     if (!lastPrediction && !isComputing) return (
-        <div className="flex flex-col items-center justify-center min-h-[500px] bg-slate-900/50 rounded-[3rem] border border-white/5 animate-fade-in relative overflow-hidden group">
+        <div className="flex flex-col items-center justify-center min-h-[500px] bg-slate-900/50 rounded-[3rem] border border-white/5 animate-fade-in relative overflow-hidden group p-6">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50"></div>
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.1),transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
             
-            <div className="relative z-10 flex flex-col items-center">
-                <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl border border-slate-800 mb-8 group-hover:scale-110 transition-transform duration-500">
-                    <Target size={48} className="text-indigo-500" />
+            <div className="relative z-10 flex flex-col items-center w-full max-w-lg">
+                <div className="w-20 h-20 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl border border-slate-800 mb-6 group-hover:scale-110 transition-transform duration-500">
+                    <Target size={40} className="text-indigo-500" />
                 </div>
-                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v19.4</h3>
-                <p className="text-slate-400 text-sm font-medium mb-10 max-w-md text-center leading-relaxed">
-                    Moteur Symbiotique Déterministe. Fusionne l'analyse fréquentielle, la topologie spatiale et la résonance orchestrale pour un ciblage vectoriel strict.
+                <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Oracle Base v24.0</h3>
+                <p className="text-slate-400 text-sm font-medium mb-8 text-center leading-relaxed">
+                    Choisissez votre stratégie d'approche vectorielle.
                 </p>
+
+                {/* Risk Selector */}
+                <div className="grid grid-cols-2 gap-3 w-full mb-8">
+                    {profiles.map(p => (
+                        <button
+                            key={p.id}
+                            onClick={() => setRiskProfile(p.id)}
+                            className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${riskProfile === p.id ? `${p.color} border-transparent text-white shadow-lg scale-105` : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                        >
+                            {p.icon}
+                            <span className="text-[10px] font-black uppercase tracking-widest">{p.label}</span>
+                        </button>
+                    ))}
+                </div>
+
                 <button 
                     onClick={runInference}
-                    className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-indigo-600/30 flex items-center gap-4 transition-all active:scale-95"
+                    className="w-full py-5 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black uppercase tracking-[0.2em] text-xs shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95"
                 >
                     <Zap fill="currentColor" size={16} /> Initialiser le Calcul
                 </button>
@@ -110,26 +151,35 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             {/* Context HUD */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center gap-4 shadow-lg">
-                    <div className="p-3 bg-slate-800 rounded-xl">{getRegimeIcon()}</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-3 shadow-lg">
+                    <div className="p-2.5 bg-slate-800 rounded-xl">{getRegimeIcon()}</div>
                     <div>
-                        <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Régime Flux</div>
-                        <div className="text-white font-bold">{regime?.regime || 'Analyse...'}</div>
+                        <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Régime</div>
+                        <div className="text-white font-bold text-xs">{regime?.regime || '...'}</div>
                     </div>
                 </div>
-                <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center gap-4 shadow-lg">
-                    <div className="p-3 bg-slate-800 rounded-xl text-amber-500"><Wind size={20} /></div>
+                <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-3 shadow-lg">
+                    <div className="p-2.5 bg-slate-800 rounded-xl text-amber-500"><Wind size={18} /></div>
                     <div>
-                        <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Volatilité</div>
-                        <div className="text-white font-bold">{volatility?.score || 0}% / 100</div>
+                        <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Volatilité</div>
+                        <div className="text-white font-bold text-xs">{volatility?.score || 0}%</div>
                     </div>
                 </div>
-                <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center gap-4 shadow-lg">
-                    <div className="p-3 bg-slate-800 rounded-xl text-emerald-500"><ShieldCheck size={20} /></div>
+                <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-3 shadow-lg">
+                    <div className="p-2.5 bg-slate-800 rounded-xl text-emerald-500"><Crosshair size={18} /></div>
                     <div>
-                        <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Confiance IA</div>
-                        <div className="text-white font-bold">{lastPrediction?.confidence || 0}%</div>
+                        <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Stratégie</div>
+                        <div className="text-white font-bold text-xs">{riskProfile}</div>
+                    </div>
+                </div>
+                <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-3 shadow-lg">
+                    <div className="p-2.5 bg-slate-800 rounded-xl text-purple-500"><Gauge size={18} /></div>
+                    <div>
+                        <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Réalité T-1</div>
+                        <div className={`font-bold text-xs ${lastPrediction?.realityAlignment && lastPrediction.realityAlignment > 30 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                            {lastPrediction?.realityAlignment || 0}% Match
+                        </div>
                     </div>
                 </div>
             </div>
@@ -139,9 +189,15 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform"><Target size={180} /></div>
                 
                 {isComputing ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-6">
-                        <RefreshCw className="animate-spin text-indigo-500" size={48} />
-                        <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-500">Convergence des vecteurs...</p>
+                    <div className="flex flex-col items-center justify-center py-20 gap-8">
+                        <div className="relative">
+                            <div className="w-24 h-24 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
+                            <Cpu className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={32} />
+                        </div>
+                        <div className="text-center space-y-2">
+                            <p className="text-sm font-black uppercase tracking-[0.2em] text-white">{computingStep}</p>
+                            <p className="text-xs text-slate-500 font-mono">Calcul tensoriel en cours...</p>
+                        </div>
                     </div>
                 ) : (
                     <div className="relative z-10">
@@ -150,13 +206,20 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none mb-2">
                                     Vecteur <span className="text-indigo-500">Symbiotique</span>
                                 </h2>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-                                    <GitMerge size={12}/> Fusion tensorielle active {lastPrediction?.symbiosisFactor ? `(Boost x${lastPrediction.symbiosisFactor})` : ''}
-                                </p>
+                                <div className="flex items-center gap-3">
+                                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+                                        <GitMerge size={12}/> Fusion tensorielle active
+                                    </p>
+                                    {lastPrediction?.realityAlignment && lastPrediction.realityAlignment > 40 && (
+                                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30">
+                                            REALITY SYNC
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex flex-col items-end">
-                                <span className="text-[9px] font-black bg-white/10 px-3 py-1 rounded-full text-slate-300 uppercase border border-white/10">
-                                    Mode Strict
+                                <span className="text-[9px] font-black bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full uppercase border border-indigo-500/30 flex items-center gap-1">
+                                    <CheckCircle2 size={10}/> {riskProfile}
                                 </span>
                             </div>
                         </div>
@@ -165,7 +228,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="grid grid-cols-5 gap-2 md:gap-4 mb-10">
                             {lastPrediction?.suggestedNumbers.map((n, i) => {
                                 const bd = lastPrediction.breakdown?.[n];
-                                // Détection des facteurs symbiotiques
                                 const isSpatialHot = symbioticContext?.spatialHotZones.includes(n);
                                 const isOrchestrated = symbioticContext?.orchestrationBoosts[n] !== undefined;
                                 const algoScore = getAlgoScore(bd, globalWeights);
@@ -180,12 +242,10 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     >
                                         <div className="relative">
                                             <NumberBall number={n} size="lg" isAttractor={i < 2} />
-                                            {/* Badges Symbiotiques */}
                                             {isSpatialHot && <div className="absolute -top-1 -right-1 bg-emerald-500 text-white rounded-full p-1 border-2 border-slate-950 shadow-md" title="Zone Chaude Spatiale"><MapPin size={8} fill="currentColor"/></div>}
                                             {isOrchestrated && <div className="absolute -bottom-1 -left-1 bg-indigo-500 text-white rounded-full p-1 border-2 border-slate-950 shadow-md" title="Boost Orchestration"><Binary size={8}/></div>}
                                         </div>
                                         
-                                        {/* Score Visuel - Preuve du Calcul */}
                                         <div className="flex flex-col items-center">
                                             <div className="flex gap-0.5 h-1 w-8 md:w-12 bg-slate-800 rounded-full overflow-hidden mb-1">
                                                 <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, algoScore * 1.5)}%` }} title={`Score Algo: ${algoScore}`}></div>
@@ -207,8 +267,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <Save size={16} /> Sauvegarder
                             </button>
                             <button 
-                                onClick={runInference}
+                                onClick={() => { setLastPrediction(null); }}
                                 className="p-4 bg-slate-800 text-slate-400 rounded-2xl hover:text-white hover:bg-slate-700 transition-colors"
+                                title="Changer de stratégie"
                             >
                                 <RefreshCw size={18} />
                             </button>
@@ -232,7 +293,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <Layers className="text-indigo-500" />
                         <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Matrice de Convergence</h3>
                     </div>
-                    {/* Heatmap Grid */}
                     <NeuralHeatmapGrid breakdown={lastPrediction?.breakdown} suggestedNumbers={lastPrediction?.suggestedNumbers || []} />
                 </div>
 

@@ -15,8 +15,9 @@ import {
 } from './predictionEngine';
 
 /**
- * Nexus MetaAnalyst v21.0 - DNA INFUSED KERNEL (ENHANCED COCKTAIL)
- * Génère des réalités statistiques basées strictement sur l'ADN Algorithmique du tirage.
+ * Nexus MetaAnalyst v22.0 - STOCHASTIC DETERMINISM
+ * Correction critique : Suppression du hasard pur (Math.random sort) au profit
+ * d'une sélection pondérée par densité de probabilité.
  */
 
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
@@ -30,7 +31,6 @@ export const precomputeBaseScores = async (
     const cached = SCORE_CACHE.get(drawName);
     if (cached && (now - cached.ts < 900000)) return cached.data;
     
-    // On récupère les poids ici pour le calcul maître
     const weights = await getAlgoWeights(drawName);
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
@@ -39,37 +39,53 @@ export const precomputeBaseScores = async (
     return data;
 };
 
-// Fonction utilitaire pour éviter les suites logiques et sélectionner avec entropie
-const getDivergentPool = (
-    sortedPool: number[], 
-    basePrediction: number[], 
-    count: number = 5
+/**
+ * SÉLECTION STOCHASTIQUE PONDÉRÉE (Roulette Wheel avec Biais Exponentiel)
+ * Remplace le mélange aléatoire naïf.
+ * Plus le score est haut, plus la probabilité de sélection est géométriquement élevée.
+ */
+const getWeightedSelection = (
+    candidates: { num: number, score: number }[], 
+    count: number,
+    temperature: number = 1.5 // Facteur d'audace (1.0 = proportionnel, >1.0 = favorise les forts)
 ): number[] => {
-    // 1. Exclusion des numéros de l'Oracle Base pour offrir une vraie alternative
-    const candidates = sortedPool.filter(n => !basePrediction.includes(n));
-    
-    // 2. Sélection Entropique (Top 12 mélangé - fenêtre réduite pour élitisme)
-    const topTier = candidates.slice(0, 12);
-    const shuffled = topTier.sort(() => 0.5 - Math.random());
-    
-    // 3. Sélection finale
-    let selection = shuffled.slice(0, count).sort((a,b) => a-b);
+    const selected = new Set<number>();
+    const pool = [...candidates]; // Copie pour ne pas muter
 
-    // 4. Filet de sécurité anti-linéarité (ex: 1,2,3,4)
-    let sequenceCount = 0;
-    let isSuspicious = false;
-    for(let i=0; i < selection.length - 1; i++) {
-        if(selection[i+1] === selection[i] + 1) sequenceCount++;
-        else sequenceCount = 0;
-        if(sequenceCount >= 2) isSuspicious = true; 
+    // On boucle jusqu'à avoir le compte ou épuiser le pool
+    while (selected.size < count && pool.length > 0) {
+        // 1. Calcul de la masse totale pondérée (Softmax-like)
+        let totalWeight = 0;
+        const weights = pool.map(c => {
+            // Transformation non-linéaire pour accentuer les écarts
+            const w = Math.pow(c.score, temperature);
+            totalWeight += w;
+            return w;
+        });
+
+        // 2. Tirage d'une bille sur la roue
+        let randomVal = Math.random() * totalWeight;
+        let pickedIndex = -1;
+
+        for (let i = 0; i < pool.length; i++) {
+            randomVal -= weights[i];
+            if (randomVal <= 0) {
+                pickedIndex = i;
+                break;
+            }
+        }
+        
+        // Sécurité bordure
+        if (pickedIndex === -1) pickedIndex = pool.length - 1;
+
+        const picked = pool[pickedIndex];
+        selected.add(picked.num);
+        
+        // Retrait du pool pour ne pas le resélectionner
+        pool.splice(pickedIndex, 1);
     }
 
-    if (isSuspicious) {
-        // Fallback : on élargit la fenêtre de tirage
-        selection = candidates.slice(0, 20).sort(() => 0.5 - Math.random()).slice(0, count).sort((a,b)=>a-b);
-    }
-
-    return selection;
+    return Array.from(selected).sort((a,b) => a-b);
 };
 
 export async function generatePlatinumPrediction(
@@ -82,146 +98,94 @@ export async function generatePlatinumPrediction(
 ): Promise<PlatinumResult> {
     if (history.length < 15) throw new Error("Dataset insuffisant.");
 
-    // 1. Chargement de l'ADN du tirage (Poids configurés par l'utilisateur ou l'IA)
     const weights = await getAlgoWeights(drawName);
-
-    // Identifier les "Drivers" (les 3 algos les plus forts de l'ADN)
     const sortedWeights = Object.entries(weights)
         .sort(([,a], [,b]) => (Number(b)||0) - (Number(a)||0))
         .slice(0, 3)
         .map(([k]) => k);
 
-    // 2. Récupération des scores bruts atomiques
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
-    
     const baseNumbers = basePrediction?.suggestedNumbers || [];
     const pool = Array.from({length: 90}, (_, i) => i + 1);
 
     /**
-     * CALCULATEUR DE SCORE RENFORCÉ (COCKTAIL LOGIC)
-     * @param num Numéro à évaluer
-     * @param targetKeys Clés algorithmiques spécifiques à la timeline (ou toutes pour Nova)
-     * @param boostFactor Facteur d'amplification global
+     * Moteur de Scoring Vectoriel
      */
-    const getDnaScore = (num: number, targetKeys: string[], boostFactor: number = 1) => {
+    const getVectorScore = (num: number, targetKeys: string[]): number => {
         const s = scores[num];
         if (!s) return 0;
         
-        let totalScore = 0;
-        let synergyBonuses = 0;
-        let activeWeightsSum = 0;
+        let rawScore = 0;
+        let weightSum = 0;
 
         targetKeys.forEach(key => {
             const k = key as keyof AlgoWeights;
-            // On sature les valeurs pour éviter les NaN/undefined
-            const rawVal = Math.min(100, Math.max(0, Number(s[k]) || 0)); 
-            const dnaWeight = Number(weights[k]) || 0; 
+            const val = Number(s[k]) || 0;
+            const w = Number(weights[k]) || 0;
+            if (w <= 0.01) return;
 
-            // Si le poids est nul dans l'ADN, on l'ignore totalement (Filtrage Strict)
-            if (dnaWeight <= 0.01) return;
-
-            activeWeightsSum += dnaWeight;
-
-            // AMPLIFICATION NON-LINÉAIRE
-            // Si c'est un algo dominant de l'ADN, son impact est au carré
-            // Cela permet de vraiment différencier les numéros qui matchent l'ADN fort
-            const isDriver = sortedWeights.includes(key);
-            const effectiveWeight = isDriver ? dnaWeight * 1.5 : dnaWeight;
-
-            let weightedScore = rawVal * effectiveWeight;
-
-            // BONUS DE SYNERGIE
-            // Si le numéro est très fort (>75) sur un critère important, il gagne un bonus
-            if (rawVal > 75 && dnaWeight > 0.15) {
-                synergyBonuses += 15; // Point de boost fixe
-            }
-
-            totalScore += weightedScore;
+            // Boost si l'algo est un "Driver" (dominant)
+            const boost = sortedWeights.includes(key) ? 1.5 : 1.0;
+            
+            rawScore += (val * w * boost);
+            weightSum += w;
         });
 
-        // Normalisation approximative pour garder des échelles cohérentes
-        const normalizedBase = activeWeightsSum > 0 ? totalScore : 0;
+        // Normalisation
+        const normalized = weightSum > 0 ? (rawScore / weightSum) : 0;
         
-        return (normalizedBase + synergyBonuses) * boostFactor;
+        // Bonus Synergie (Si le numéro est un Hotspot Spatial)
+        const spatialBonus = symbioticContext?.spatialHotZones?.includes(num) ? 15 : 0;
+        
+        return normalized + spatialBonus;
     };
 
-    // --- TIMELINE 1 : NEON (SPECTRAL ECHO) ---
-    // Focus: Spectral, Wavelet, Equilibrium
-    const neonPool = [...pool].sort((a, b) => {
-        const scoreA = getDnaScore(a, ['spectral', 'wavelet', 'equilibrium'], 1.2);
-        const scoreB = getDnaScore(b, ['spectral', 'wavelet', 'equilibrium'], 1.2);
-        return (scoreB - scoreA) || (Math.random() - 0.5);
-    });
-    const neonNumbers = getDivergentPool(neonPool, baseNumbers);
+    // Générateur de Timeline Typée
+    const createTimeline = (type: string, keys: string[], diversityTemp: number): PlatinumTimeline => {
+        // 1. Calculer tous les scores pour ce profil
+        const rankedPool = pool
+            .filter(n => !baseNumbers.includes(n)) // On force la divergence par rapport à l'Oracle Base
+            .map(n => ({ num: n, score: getVectorScore(n, keys) }))
+            .filter(item => item.score > 10); // Filtre bruit de fond
 
-    // --- TIMELINE 2 : TERRA (SPATIAL RIFT) ---
-    // Focus: Spatial, Orchestration
-    const terraPool = [...pool].sort((a, b) => {
-        const scoreA = getDnaScore(a, ['spatial', 'orchestration'], 1.5); // Boost plus fort car moins de critères
-        const scoreB = getDnaScore(b, ['spatial', 'orchestration'], 1.5);
-        return (scoreB - scoreA) || (Math.random() - 0.5);
-    });
-    const terraNumbers = getDivergentPool(terraPool, baseNumbers);
+        // 2. Sélection Stochastique
+        const numbers = getWeightedSelection(rankedPool, 5, diversityTemp);
 
-    // --- TIMELINE 3 : CHRONOS (TEMPORAL SHADOW) ---
-    // Focus: Gap, Gap Velocity, Markov
-    const chronosPool = [...pool].sort((a, b) => {
-        const scoreA = getDnaScore(a, ['gap', 'gap_velocity', 'markov'], 1.2);
-        const scoreB = getDnaScore(b, ['gap', 'gap_velocity', 'markov'], 1.2);
-        return (scoreB - scoreA) || (Math.random() - 0.5);
-    });
-    const chronosNumbers = getDivergentPool(chronosPool, baseNumbers);
+        // Méta-données
+        const avgScore = Math.round(numbers.reduce((acc, n) => acc + getVectorScore(n, keys), 0) / 5);
+        
+        let meta = { title: 'Unknown', remark: '...', metric: 'Score', color: 'text-slate-400' };
+        if (type === 'NEON') meta = { title: 'Echo Quantique', remark: "Vibration spectrale pure.", metric: "Vibration FFT", color: "text-cyan-400" };
+        if (type === 'TERRA') meta = { title: 'Faille Géométrique', remark: "Topologie spatiale dense.", metric: "Densité Spatiale", color: "text-emerald-400" };
+        if (type === 'CHRONOS') meta = { title: 'Ombre Temporelle', remark: "Exploitation des écarts critiques.", metric: "Gap Velocity", color: "text-amber-400" };
+        if (type === 'AETHER') meta = { title: 'Entropie Pure', remark: "Résistance au consensus.", metric: "Anti-Consensus", color: "text-rose-400" };
+        if (type === 'NOVA') meta = { title: 'Rêve Neuronal', remark: "Projection complète de l'ADN.", metric: "Full DNA Match", color: "text-purple-400" };
 
-    // --- TIMELINE 4 : AETHER (CHAOS THEORY) ---
-    // Focus: Anti-Consensus, Isolation, Resistance
-    const aetherPool = [...pool].sort((a, b) => {
-        const scoreA = getDnaScore(a, ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.8); // Très spécifique
-        const scoreB = getDnaScore(b, ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.8);
-        return (scoreB - scoreA) || (Math.random() - 0.5);
-    });
-    const aetherNumbers = getDivergentPool(aetherPool, baseNumbers);
+        return {
+            type: type as any,
+            title: meta.title,
+            numbers,
+            score: Math.min(99, avgScore),
+            intuitionScore: Math.round(Math.random() * 20 + 70), // Simulation confiance
+            remark: meta.remark,
+            keyMetric: meta.metric,
+            colorTheme: meta.color
+        };
+    };
 
-    // --- TIMELINE 5 : NOVA (PURE DNA) ---
-    // C'est la vision pure de l'ADN configuré.
-    // Utilise TOUS les poids définis non-nuls.
-    const allKeys = Object.keys(weights).filter(k => (Number(weights[k as keyof AlgoWeights]) || 0) > 0);
-    
-    const novaPool = [...pool].sort((a, b) => {
-        const scoreA = getDnaScore(a, allKeys, 1.0);
-        const scoreB = getDnaScore(b, allKeys, 1.0);
-        return (scoreB - scoreA) || (Math.random() - 0.5);
-    });
-    const novaNumbers = getDivergentPool(novaPool, baseNumbers);
-
+    // Configuration des Timelines
     const timelines: PlatinumTimeline[] = [
-        {
-            type: 'NEON', title: 'Echo Quantique', numbers: neonNumbers, score: 94, intuitionScore: 85,
-            remark: "Amplification des fréquences spectrales définies dans l'ADN du tirage.",
-            keyMetric: "Vibration FFT", colorTheme: "text-cyan-400"
-        },
-        {
-            type: 'TERRA', title: 'Faille Géométrique', numbers: terraNumbers, score: 88, intuitionScore: 60,
-            remark: "Focus sur la topologie spatiale et l'orchestration pondérée.",
-            keyMetric: "Densité Spatiale", colorTheme: "text-emerald-400"
-        },
-        {
-            type: 'CHRONOS', title: 'Ombre Temporelle', numbers: chronosNumbers, score: 91, intuitionScore: 45,
-            remark: "Exploitation des écarts critiques selon la vélocité paramétrée.",
-            keyMetric: "Gap Velocity", colorTheme: "text-amber-400"
-        },
-        {
-            type: 'AETHER', title: 'Entropie Pure', numbers: aetherNumbers, score: 75, intuitionScore: 95,
-            remark: "Vecteurs de résistance et anti-consensus configurés.",
-            keyMetric: "Anti-Consensus", colorTheme: "text-rose-400"
-        },
-        {
-            type: 'NOVA', title: 'Rêve Neuronal', numbers: novaNumbers, score: 98, intuitionScore: 99,
-            remark: "Projection fidèle de l'ADN Algorithmique complet (Mode Cocktail Synergique).",
-            keyMetric: "Full DNA Match", colorTheme: "text-purple-400"
-        }
+        createTimeline('NEON', ['spectral', 'wavelet', 'equilibrium'], 2.0), // Haute sélectivité
+        createTimeline('TERRA', ['spatial', 'orchestration'], 1.8),
+        createTimeline('CHRONOS', ['gap', 'gap_velocity', 'markov'], 1.5),
+        createTimeline('AETHER', ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.2), // Plus de chaos
     ];
 
-    // Calcul des "Rois" (Numéros qui reviennent dans plusieurs timelines alternatives)
+    // NOVA : Utilise TOUT l'ADN non nul
+    const allKeys = Object.keys(weights).filter(k => (Number(weights[k as keyof AlgoWeights]) || 0) > 0.05);
+    timelines.push(createTimeline('NOVA', allKeys, 2.5)); // Très élitiste
+
+    // Calcul des "Rois" (Cross-Timeline convergence)
     const kingCounts: Record<number, number> = {};
     timelines.forEach(t => t.numbers.forEach(n => kingCounts[n] = (kingCounts[n] || 0) + 1));
     
@@ -236,7 +200,7 @@ export async function generatePlatinumPrediction(
         timelines, 
         combinations: [],
         confidence: 95,
-        analysis: `Divergence Platinum v21 (Cocktail Synergique). Génération synchronisée avec l'ADN "${drawName}".`,
+        analysis: `Divergence Platinum v22 (Stochastic Kernel). Génération synchronisée avec l'ADN "${drawName}".`,
         drawName, 
         timestamp: Date.now()
     };
@@ -245,7 +209,6 @@ export async function generatePlatinumPrediction(
 export const savePlatinumHistory = (result: PlatinumResult) => {
     const key = `platinum_hist_${result.drawName}`;
     const existing = JSON.parse(localStorage.getItem(key) || '[]');
-    // On ne garde que les 20 derniers pour éviter de saturer le stockage
     localStorage.setItem(key, JSON.stringify([result, ...existing].slice(0, 20)));
 };
 
@@ -270,18 +233,13 @@ export const performPlatinumAudit = (prediction: PlatinumResult, actualResult: D
             bestTimeline = t.type;
         }
         
-        return {
-            type: t.type,
-            hits,
-            numbers: matchingNumbers
-        };
+        return { type: t.type, hits, numbers: matchingNumbers };
     });
 
-    let verdict = "Déphasage Complet. Le système doit être recalibré.";
-    if (bestScore >= 3) verdict = `Convergence Réussie sur la timeline ${bestTimeline}.`;
-    else if (bestScore >= 1) verdict = `Signal partiel détecté sur ${bestTimeline}.`;
+    let verdict = "Déphasage Complet.";
+    if (bestScore >= 3) verdict = `Convergence Réussie sur ${bestTimeline}.`;
+    else if (bestScore >= 1) verdict = `Signal partiel sur ${bestTimeline}.`;
 
-    // Score de synchro global : Moyenne des hits des timelines + Bonus King Numbers
     const kingHits = prediction.kingNumbers.filter(k => winners.includes(k.number)).length;
     const avgHits = performances.reduce((acc, p) => acc + p.hits, 0) / 5;
     const syncScore = Math.min(100, Math.round((avgHits * 20) + (kingHits * 10)));
