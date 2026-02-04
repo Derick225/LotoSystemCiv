@@ -48,8 +48,7 @@ const getDivergentPool = (
     // 1. Exclusion des numéros de l'Oracle Base pour offrir une vraie alternative
     const candidates = sortedPool.filter(n => !basePrediction.includes(n));
     
-    // 2. Sélection Entropique (Top 15 mélangé)
-    // On réduit la fenêtre à 12 pour être plus élitiste suite au renforcement du scoring
+    // 2. Sélection Entropique (Top 12 mélangé - fenêtre réduite pour élitisme)
     const topTier = candidates.slice(0, 12);
     const shuffled = topTier.sort(() => 0.5 - Math.random());
     

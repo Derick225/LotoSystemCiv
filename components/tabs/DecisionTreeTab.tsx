@@ -218,7 +218,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                             <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
                                 Imaginez 80 experts qui regardent le passé du loto. Chacun a sa spécialité (les écarts, les suites, les fréquences...). Ils votent tous.
                                 <br/><br/>
-                                <strong>Top :</strong> Majorité absolue (>60%).<br/>
+                                <strong>Top :</strong> Majorité absolue (&gt;60%).<br/>
                                 <strong>Moyen :</strong> Avis partagé mais positif (40-60%). Souvent plus fiable sur le long terme.<br/>
                                 <strong>Ombre :</strong> Avis minoritaire mais pertinent (Outsiders).
                             </p>
