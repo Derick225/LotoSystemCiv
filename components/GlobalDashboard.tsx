@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
@@ -12,7 +13,7 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, 
-    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap, Gauge
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { WatchlistMonitor } from './WatchlistMonitor';
@@ -224,31 +225,39 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     const isEmptyState = !latestResult && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
 
+    // Couleur de l'indicateur de pouls global
+    const pulseColor = volatility?.score && volatility.score > 60 ? 'text-rose-500' : 'text-emerald-500';
+
     return (
         <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
             
             {/* Core Status Monitoring Bar */}
-            <div className="bg-slate-900/50 backdrop-blur-xl p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 md:gap-10 mx-auto w-full">
-                <div className="flex items-center gap-4 md:gap-6">
+            <div className="bg-slate-900/50 backdrop-blur-xl p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 md:gap-10 mx-auto w-full relative overflow-hidden">
+                {/* Background pulse effect */}
+                <div className="absolute left-0 bottom-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-600/20 to-transparent"></div>
+
+                <div className="flex items-center gap-4 md:gap-6 relative z-10">
                     <div className="p-4 md:p-5 bg-indigo-600 rounded-2xl md:rounded-[2rem] shadow-2xl shadow-indigo-600/30 text-white group hover:rotate-6 transition-all">
                         <Monitor size={24} className="md:w-8 md:h-8" />
                     </div>
                     <div>
                         <h2 className="text-xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">Console Maître</h2>
                         <div className="flex flex-wrap items-center gap-3 md:gap-6 mt-2 md:mt-3">
-                            <div className="flex items-center gap-2">
-                                <HeartPulse size={14} className="text-rose-500 animate-pulse" />
-                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Calculateur IA : <span className="text-white">{regime?.regime || 'IDLE'}</span></span>
+                            <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+                                <HeartPulse size={14} className={`${pulseColor} animate-pulse`} />
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    Nexus Pulse : <span className="text-white">{volatility?.score || 0}%</span>
+                                </span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Activity size={14} className="text-indigo-400" />
-                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Entropie (Σ) : <span className="text-white">{volatility?.score || 0}%</span></span>
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Régime : <span className="text-white">{regime?.regime || 'IDLE'}</span></span>
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <div className="flex gap-4 w-full md:w-auto">
+                <div className="flex gap-4 w-full md:w-auto relative z-10">
                     <button 
                         onClick={handleManualSync}
                         disabled={fullSyncing}
