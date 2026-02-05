@@ -9,10 +9,10 @@ import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, ShieldCheck, Zap,
     Binary, Sparkles, Activity,
-    Ghost, Layers, Hexagon, Component, Clock, Workflow, Archive, FileSearch, ArrowRight, BarChart2, CheckCircle2
+    Ghost, Layers, Hexagon, Component, Clock, Workflow, Archive, FileSearch, ArrowRight, BarChart2, CheckCircle2, Radar as RadarIcon, Crown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
 interface MetaAnalystTabProps {
     drawName: string;
@@ -39,7 +39,7 @@ const TimelineCard: React.FC<{
             whileHover={{ scale: 1.02 }}
             onClick={onClick}
             className={`
-                relative p-5 rounded-[2rem] border cursor-pointer transition-all duration-300 overflow-hidden flex flex-col justify-between h-full min-h-[160px]
+                relative p-5 rounded-[2rem] border cursor-pointer transition-all duration-300 overflow-hidden flex flex-col justify-between h-full min-h-[160px] group
                 ${isSelected ? `${theme.border} ${theme.bg} shadow-xl ${theme.glow}` : 'border-slate-800 bg-slate-900/40 hover:bg-slate-800'}
             `}
         >
@@ -50,11 +50,15 @@ const TimelineCard: React.FC<{
                     </div>
                     <h4 className={`text-xs font-black uppercase tracking-widest ${theme.text}`}>{timeline.type}</h4>
                 </div>
-                <div className="text-[9px] font-bold text-slate-500 uppercase bg-black/20 px-2 py-0.5 rounded">{timeline.score}%</div>
+                {timeline.divergence !== undefined && (
+                    <div className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border border-white/10 ${timeline.divergence > 60 ? 'text-rose-400 bg-rose-900/20' : 'text-slate-400 bg-black/20'}`}>
+                        Div: {Math.round(timeline.divergence)}%
+                    </div>
+                )}
             </div>
 
             <div className="relative z-10">
-                <h3 className="text-sm text-white font-bold mb-3">{timeline.title}</h3>
+                <h3 className="text-sm text-white font-bold mb-3 truncate">{timeline.title}</h3>
                 <div className="flex justify-between gap-1">
                     {timeline.numbers.map(n => (
                         <div key={n} className="scale-90 transform -ml-1 first:ml-0">
@@ -65,63 +69,56 @@ const TimelineCard: React.FC<{
             </div>
             
             {/* Background Glint */}
-            {isSelected && <div className={`absolute -bottom-10 -right-10 w-24 h-24 blur-[40px] opacity-40 ${theme.bg.replace('/10', '')}`}></div>}
+            {isSelected && <div className={`absolute -bottom-10 -right-10 w-32 h-32 blur-[50px] opacity-30 ${theme.bg.replace('/10', '')}`}></div>}
         </motion.div>
     );
 };
 
-// Composant Audit
-const PlatinumPostMortem: React.FC<{ audit: PlatinumAudit }> = ({ audit }) => {
-    const chartData = audit.timelinePerformance.map(t => ({
-        name: t.type,
-        hits: t.hits,
-        color: t.type === 'NEON' ? '#22d3ee' : t.type === 'TERRA' ? '#34d399' : t.type === 'CHRONOS' ? '#fbbf24' : t.type === 'AETHER' ? '#fb7185' : '#c084fc'
-    }));
+// Composant Radar de Divergence
+const DivergenceRadar: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
+    if (!timeline.radarStats) return null;
 
     return (
-        <div className="space-y-6 animate-scale-in">
-            <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl">
-                <div className="flex justify-between items-center mb-6">
-                    <div>
-                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Résultat Réel</div>
-                        <div className="text-xl font-black text-white">{audit.date}</div>
-                    </div>
-                    <div className="flex gap-1.5">
-                        {audit.actualDraw.map(n => <NumberBall key={n} number={n} size="sm" />)}
-                    </div>
-                </div>
+        <div className="h-64 w-full relative">
+            <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={timeline.radarStats}>
+                    <PolarGrid stroke="#334155" />
+                    <PolarAngleAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                    <Radar name={timeline.type} dataKey="value" stroke="#818cf8" strokeWidth={3} fill="#818cf8" fillOpacity={0.4} />
+                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
+                </RadarChart>
+            </ResponsiveContainer>
+            <div className="absolute top-0 right-0 p-2 bg-slate-900/80 rounded-lg border border-slate-700 text-[9px] text-slate-400 font-mono">
+                Divergence Scan
+            </div>
+        </div>
+    );
+};
 
-                <div className="grid md:grid-cols-2 gap-6">
-                    <div className="h-40 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData}>
-                                <XAxis dataKey="name" tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} tickLine={false} />
-                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
-                                <Bar dataKey="hits" radius={[4, 4, 0, 0]}>
-                                    {chartData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                    <div className="flex flex-col justify-center gap-4">
-                        <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-[10px] font-black text-slate-400 uppercase">Synchronisation</span>
-                                <span className={`text-xl font-black ${audit.syncScore > 60 ? 'text-emerald-400' : 'text-indigo-400'}`}>{audit.syncScore}%</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                                <div className={`h-full ${audit.syncScore > 60 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${audit.syncScore}%` }}></div>
+// Composant Fusion Matrix (King Numbers)
+const FusionMatrix: React.FC<{ kings: { number: number, count: number }[] }> = ({ kings }) => {
+    return (
+        <div className="bg-slate-950 p-6 rounded-[2.5rem] border border-indigo-500/20 shadow-inner">
+            <div className="flex items-center gap-3 mb-6">
+                <Crown size={20} className="text-amber-400" />
+                <h4 className="text-white font-black text-sm uppercase tracking-widest">Matrice de Fusion (Rois)</h4>
+            </div>
+            <div className="flex flex-wrap gap-4 justify-center">
+                {kings.slice(0, 6).map((k, i) => (
+                    <div key={k.number} className="flex flex-col items-center gap-2 group">
+                        <div className="relative">
+                            <NumberBall number={k.number} size="md" isAttractor={i < 3} />
+                            <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-950 shadow-lg">
+                                {k.count}
                             </div>
                         </div>
-                        <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
-                            <div className="text-[10px] font-black text-indigo-300 uppercase mb-1 flex items-center gap-2"><CheckCircle2 size={12}/> Timeline Dominante</div>
-                            <div className="text-lg font-black text-white">{audit.bestTimeline}</div>
-                            <p className="text-[9px] text-slate-400 mt-1">{audit.verdict}</p>
+                        <div className="h-1 w-8 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-400" style={{ width: `${(k.count / 5) * 100}%` }}></div>
                         </div>
                     </div>
-                </div>
+                ))}
+                {kings.length === 0 && <span className="text-slate-500 text-xs italic">Aucune convergence détectée.</span>}
             </div>
         </div>
     );
@@ -175,24 +172,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         }
     };
 
-    const handleInspectArchive = (arch: PlatinumResult) => {
-        const predDate = new Date(arch.timestamp).toLocaleDateString('fr-FR');
-        // Recherche stricte par date ou la plus récente précédente si c'est aujourd'hui
-        const actual = history.find(h => h.date === predDate);
-        
-        if (actual) {
-            const audit = performPlatinumAudit(arch, actual);
-            setSelectedAudit(audit);
-        } else {
-            // Pas encore de résultat (Tirage futur)
-            setSelectedAudit(null);
-            showToast("En attente des résultats officiels...", "info");
-        }
-        // Pour l'instant on réutilise l'objet result pour l'affichage visuel des timelines
-        setResult(arch);
-        setViewMode('generator');
-    };
-
     if (nexusLoading || (loading && !result)) return (
         <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 bg-slate-950 rounded-[4rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden">
             <div className="absolute inset-0 flex items-center justify-center">
@@ -202,8 +181,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             <div className="relative z-10 flex flex-col items-center gap-4">
                 <Workflow className="text-indigo-400 w-16 h-16 animate-pulse" />
                 <div className="text-center">
-                    <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs mb-2">Platinum Fusion v19.5</p>
-                    <p className="text-slate-500 text-xs font-mono">Calcul des 5 Réalités Alternatives...</p>
+                    <p className="text-indigo-400 font-black uppercase tracking-[0.5em] text-xs mb-2">Platinum Fusion v23.0</p>
+                    <p className="text-slate-500 text-xs font-mono">Génération des 5 Réalités Stochastiques...</p>
                 </div>
             </div>
         </div>
@@ -254,7 +233,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="col-span-full py-20 text-center text-slate-500 font-medium italic">Aucune archive Platinum disponible.</div>
                     ) : (
                         archives.map((arch) => (
-                            <div key={arch.id} onClick={() => handleInspectArchive(arch)} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 hover:border-indigo-500 transition-all cursor-pointer group shadow-sm">
+                            <div key={arch.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 hover:border-indigo-500 transition-all group shadow-sm">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className="p-2.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-indigo-500"><FileSearch size={18}/></div>
@@ -263,7 +242,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                             <div className="text-[9px] font-bold text-slate-400 uppercase">{new Date(arch.timestamp).toLocaleTimeString()}</div>
                                         </div>
                                     </div>
-                                    <ArrowRight size={16} className="text-slate-300 group-hover:text-indigo-500 transition-colors"/>
                                 </div>
                                 <div className="space-y-2">
                                     {arch.timelines.slice(0, 3).map(t => (
@@ -295,8 +273,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         </div>
                     )}
 
-                    {selectedAudit && <PlatinumPostMortem audit={selectedAudit} />}
-
                     {result && (
                         <>
                             {/* Grid des 5 Timelines */}
@@ -322,37 +298,57 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 >
                                     <div className="absolute top-0 right-0 p-6 opacity-5"><Component size={120}/></div>
                                     
-                                    <div className="relative z-10">
-                                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                                            <div>
-                                                <div className="flex items-center gap-3 mb-2">
-                                                    <div className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-widest">
-                                                        Timeline Active : {selectedTimeline}
+                                    <div className="relative z-10 grid lg:grid-cols-12 gap-8">
+                                        <div className="lg:col-span-8">
+                                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                                                <div>
+                                                    <div className="flex items-center gap-3 mb-2">
+                                                        <div className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-widest">
+                                                            Timeline Active : {selectedTimeline}
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-400 font-bold uppercase">{result.timelines.find(t => t.type === selectedTimeline)?.keyMetric}</div>
                                                     </div>
-                                                    <div className="text-[10px] text-slate-400 font-bold uppercase">{result.timelines.find(t => t.type === selectedTimeline)?.keyMetric}</div>
+                                                    <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">
+                                                        {result.timelines.find(t => t.type === selectedTimeline)?.title}
+                                                    </h3>
                                                 </div>
-                                                <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">
-                                                    {result.timelines.find(t => t.type === selectedTimeline)?.title}
-                                                </h3>
-                                            </div>
-                                            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-700 max-w-md">
-                                                <div className="flex gap-2">
-                                                    <ShieldCheck size={16} className="text-emerald-500 shrink-0 mt-0.5" />
-                                                    <p className="text-xs text-slate-600 dark:text-slate-300 font-medium italic leading-relaxed">
-                                                        "{result.timelines.find(t => t.type === selectedTimeline)?.remark}"
-                                                    </p>
+                                                <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-700 max-w-md">
+                                                    <div className="flex gap-2">
+                                                        <ShieldCheck size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                                                        <p className="text-xs text-slate-600 dark:text-slate-300 font-medium italic leading-relaxed">
+                                                            "{result.timelines.find(t => t.type === selectedTimeline)?.remark}"
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             </div>
+
+                                            <TicketXRay 
+                                                numbers={result.timelines.find(t => t.type === selectedTimeline)?.numbers || []} 
+                                                score={result.timelines.find(t => t.type === selectedTimeline)?.score}
+                                                showTitle={false}
+                                            />
                                         </div>
 
-                                        <TicketXRay 
-                                            numbers={result.timelines.find(t => t.type === selectedTimeline)?.numbers || []} 
-                                            score={result.timelines.find(t => t.type === selectedTimeline)?.score}
-                                            showTitle={false}
-                                        />
+                                        <div className="lg:col-span-4 flex flex-col gap-6">
+                                            <div className="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl h-full">
+                                                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                    <RadarIcon size={14} /> Profil de Divergence
+                                                </h4>
+                                                {result.timelines.find(t => t.type === selectedTimeline) && 
+                                                    <DivergenceRadar timeline={result.timelines.find(t => t.type === selectedTimeline)!} />
+                                                }
+                                            </div>
+                                        </div>
                                     </div>
                                 </motion.div>
                             </AnimatePresence>
+
+                            {/* Fusion Matrix Footer */}
+                            <div className="grid lg:grid-cols-12 gap-8">
+                                <div className="lg:col-span-12">
+                                    <FusionMatrix kings={result.kingNumbers} />
+                                </div>
+                            </div>
 
                             {/* Footer Info */}
                             <div className="text-center pb-8">

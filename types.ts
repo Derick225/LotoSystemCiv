@@ -340,6 +340,8 @@ export interface PlatinumTimeline {
     remark: string;
     keyMetric: string;
     colorTheme: string;
+    divergence?: number; // Distance par rapport au consensus
+    radarStats?: { label: string, value: number }[]; // Pour le graphique
 }
 
 export interface PlatinumAudit {
