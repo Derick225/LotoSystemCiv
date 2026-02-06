@@ -22,7 +22,7 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({ data }) 
         <div className="p-10 text-center text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800 border-dashed backdrop-blur-sm">
             <ScanLine size={48} className="mx-auto mb-4 opacity-30 text-indigo-400 animate-pulse-slow"/>
             <p className="text-xs font-black uppercase tracking-widest">Pression Atmosphérique Normale</p>
-            <p className="text-[10px] mt-2 opacity-60">Aucune anomalie d'écart détectée (> 0.5 σ)</p>
+            <p className="text-[10px] mt-2 opacity-60">Aucune anomalie d'écart détectée (&gt; 0.5 σ)</p>
         </div>
     );
 
