@@ -7,6 +7,10 @@ export interface GapEfficiency {
     probabilityAtCurrentGap: number;
     maturityScore: number;
     zone: 'COLD' | 'WARMING' | 'HOT' | 'CRITICAL';
+    // New Stochastic Metrics
+    zScore: number;       // Écart type par rapport à la moyenne
+    fatigueIndex: number; // Résistance du numéro à sortir
+    breakoutProb: number; // Probabilité gaussienne de rupture
 }
 
 export interface DigitalRootMetric {

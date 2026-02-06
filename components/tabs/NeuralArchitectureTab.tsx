@@ -1,374 +1,120 @@
 
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
-import { Network, Search, X, Activity, Share2, Layers, Cpu, Zap, MousePointer2, Move, Sliders } from 'lucide-react';
+import { Network, Activity, Cpu, Zap, Layers, BarChart3, Share2, Grid } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
+import { motion, AnimatePresence } from 'framer-motion';
 
-interface Node { 
+interface NodeData { 
     id: number; 
-    x: number; 
-    y: number; 
-    vx: number; 
-    vy: number; 
-    radius: number; 
-    color: string; 
-    mass: number;
-    centrality: number;
-    community: number;
-    fixed: boolean;
-}
-
-interface Link { 
-    source: number; 
-    target: number; 
-    strength: number; 
+    centrality: number; // Importance globale (degré pondéré)
+    community: number;  // Groupe d'appartenance
+    links: { target: number; strength: number }[]; // Connexions triées
 }
 
 const COMMUNITY_COLORS = [
-    '#6366f1', // Indigo
-    '#10b981', // Emerald
-    '#f43f5e', // Rose
-    '#f59e0b', // Amber
-    '#8b5cf6', // Violet
-    '#06b6d4', // Cyan
+    'border-indigo-500 text-indigo-500', 
+    'border-emerald-500 text-emerald-500', 
+    'border-rose-500 text-rose-500', 
+    'border-amber-500 text-amber-500', 
+    'border-violet-500 text-violet-500', 
+    'border-cyan-500 text-cyan-500',
 ];
 
-const MAX_VELOCITY = 4; // Limite de vitesse physique pour éviter les explosions
+const COMMUNITY_BG = [
+    'bg-indigo-500', 
+    'bg-emerald-500', 
+    'bg-rose-500', 
+    'bg-amber-500', 
+    'bg-violet-500', 
+    'bg-cyan-500',
+];
 
 export const NeuralArchitectureTab: React.FC = () => {
-    const { history, correlationMatrix, drawName } = useNexus();
+    const { correlationMatrix, drawName } = useNexus();
     const { showToast } = useToast();
     
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    
     // State
-    const [hoveredNode, setHoveredNode] = useState<number | null>(null);
-    const [selectedNode, setSelectedNode] = useState<number | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [minStrength, setMinStrength] = useState(25); 
+    const [nodes, setNodes] = useState<NodeData[]>([]);
+    const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
     const [generatedPath, setGeneratedPath] = useState<number[]>([]);
-    
-    const nodesRef = useRef<Node[]>([]);
-    const linksRef = useRef<Link[]>([]);
-    const draggingRef = useRef<number | null>(null);
-    const animationRef = useRef<number>();
+    const [minStrength, setMinStrength] = useState(15); 
 
-    // --- INITIALISATION DES DONNÉES ---
+    // --- ANALYSE DES DONNÉES (Statique) ---
     useEffect(() => {
-        const rawLinks: Link[] = [];
-        const nodeDegrees: Record<number, number> = {};
-        
-        Object.entries(correlationMatrix).forEach(([srcStr, data]: [string, any]) => {
-            const src = parseInt(srcStr);
-            Object.entries(data.affinities).forEach(([tgtStr, strength]: [string, any]) => {
-                const tgt = parseInt(tgtStr);
-                const sVal = Number(strength);
-                if (src < tgt && sVal > 0.10) { 
-                    rawLinks.push({ source: src, target: tgt, strength: sVal });
-                    nodeDegrees[src] = (nodeDegrees[src] || 0) + sVal;
-                    nodeDegrees[tgt] = (nodeDegrees[tgt] || 0) + sVal;
+        const calculatedNodes: NodeData[] = [];
+        const maxDegree = 1; // Pour normalisation
+
+        for (let i = 1; i <= 90; i++) {
+            const affinities = correlationMatrix[i]?.affinities || {};
+            const links: { target: number; strength: number }[] = [];
+            let degree = 0;
+
+            Object.entries(affinities).forEach(([targetStr, strength]) => {
+                const s = Number(strength);
+                if (s > 0.05) {
+                    links.push({ target: parseInt(targetStr), strength: s });
+                    degree += s;
                 }
             });
-        });
 
-        const newNodes: Node[] = Array.from({ length: 90 }, (_, i) => {
-            const id = i + 1;
-            const degree = nodeDegrees[id] || 0;
-            const community = id % 6; 
-            
-            return {
-                id,
-                x: Math.random() * 800,
-                y: Math.random() * 600,
-                vx: 0, vy: 0,
-                radius: 4 + (degree * 1.5), 
-                color: COMMUNITY_COLORS[community],
-                mass: 1 + degree,
+            // Tri des liens par force décroissante
+            links.sort((a, b) => b.strength - a.strength);
+
+            // Assignation simple de communauté basée sur le lien le plus fort
+            // Si pas de lien, communauté par défaut basée sur modulo
+            const primaryLink = links[0]?.target || i;
+            const community = primaryLink % 6;
+
+            calculatedNodes.push({
+                id: i,
                 centrality: degree,
                 community,
-                fixed: false
-            };
-        });
+                links
+            });
+        }
 
-        // Positionnement initial circulaire
-        const centerX = 400;
-        const centerY = 300;
-        newNodes.forEach((n, i) => {
-            const angle = (i / 90) * Math.PI * 2;
-            const r = 250;
-            n.x = centerX + Math.cos(angle) * r;
-            n.y = centerY + Math.sin(angle) * r;
-        });
-
-        nodesRef.current = newNodes;
-        linksRef.current = rawLinks;
-
+        setNodes(calculatedNodes);
     }, [correlationMatrix]);
 
-    // --- MOTEUR PHYSIQUE OPTIMISÉ ---
-    const updatePhysics = useCallback(() => {
-        const nodes = nodesRef.current;
-        const links = linksRef.current;
-        const width = canvasRef.current?.width || 800;
-        const height = canvasRef.current?.height || 600;
-        const threshold = minStrength / 100;
+    const selectedNodeData = useMemo(() => 
+        nodes.find(n => n.id === selectedNodeId) || null, 
+    [nodes, selectedNodeId]);
 
-        const activeLinks = links.filter(l => l.strength >= threshold);
-
-        // 1. Forces de Répulsion (Coulomb) - O(N^2) mais acceptable pour N=90
-        for (let i = 0; i < nodes.length; i++) {
-            for (let j = i + 1; j < nodes.length; j++) {
-                const a = nodes[i];
-                const b = nodes[j];
-                const dx = a.x - b.x;
-                const dy = a.y - b.y;
-                const distSq = dx*dx + dy*dy || 1;
-                
-                if (distSq < 25000) { 
-                    const force = (100 * a.mass * b.mass) / distSq;
-                    const fx = (dx * force) / Math.sqrt(distSq);
-                    const fy = (dy * force) / Math.sqrt(distSq);
-                    
-                    if (!a.fixed) { a.vx += fx; a.vy += fy; }
-                    if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
-                }
-            }
-        }
-
-        // 2. Forces d'Attraction (Ressort)
-        activeLinks.forEach(l => {
-            const s = nodes[l.source - 1];
-            const t = nodes[l.target - 1];
-            const dx = t.x - s.x;
-            const dy = t.y - s.y;
-            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-            
-            const targetDist = 100 - (l.strength * 50); 
-            const force = (dist - targetDist) * 0.05 * l.strength;
-            
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-
-            if (!s.fixed) { s.vx += fx; s.vy += fy; }
-            if (!t.fixed) { t.vx -= fx; t.vy -= fy; }
-        });
-
-        // 3. Intégration & Contraintes
-        nodes.forEach(n => {
-            if (n.fixed) return;
-            n.vx += (width/2 - n.x) * 0.005; // Gravité
-            n.vy += (height/2 - n.y) * 0.005;
-            
-            // Terminal Velocity Cap (Anti-Explosion)
-            const speed = Math.sqrt(n.vx*n.vx + n.vy*n.vy);
-            if(speed > MAX_VELOCITY) {
-                n.vx = (n.vx / speed) * MAX_VELOCITY;
-                n.vy = (n.vy / speed) * MAX_VELOCITY;
-            }
-
-            n.vx *= 0.85; // Friction
-            n.vy *= 0.85;
-            
-            n.x += n.vx;
-            n.y += n.vy;
-
-            // Bounding Box
-            const margin = 20;
-            if (n.x < margin) n.x = margin;
-            if (n.x > width - margin) n.x = width - margin;
-            if (n.y < margin) n.y = margin;
-            if (n.y > height - margin) n.y = height - margin;
-        });
-    }, [minStrength]);
-
-    // --- RENDU CANVAS ---
-    const draw = useCallback(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        updatePhysics();
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.strokeStyle = '#1e293b';
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        for(let i=0; i<canvas.width; i+=50) { ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); }
-        for(let i=0; i<canvas.height; i+=50) { ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); }
-        ctx.stroke();
-
-        const threshold = minStrength / 100;
-        const nodes = nodesRef.current;
-        
-        // Liens
-        linksRef.current.forEach(l => {
-            if (l.strength < threshold) return;
-            const s = nodes[l.source - 1];
-            const t = nodes[l.target - 1];
-
-            let alpha = (l.strength - threshold) / (1 - threshold);
-            alpha = Math.max(0.05, Math.min(0.8, alpha));
-
-            if (selectedNode || hoveredNode) {
-                const target = selectedNode || hoveredNode;
-                const isConnected = l.source === target || l.target === target;
-                if (isConnected) {
-                    alpha = 1;
-                    ctx.strokeStyle = '#a5b4fc'; 
-                    ctx.lineWidth = l.strength * 4;
-                } else {
-                    alpha *= 0.1;
-                    ctx.strokeStyle = s.color;
-                    ctx.lineWidth = l.strength;
-                }
-            } else {
-                ctx.strokeStyle = s.color; 
-                ctx.lineWidth = l.strength * 2;
-            }
-
-            ctx.globalAlpha = alpha;
-            ctx.beginPath();
-            ctx.moveTo(s.x, s.y);
-            ctx.lineTo(t.x, t.y);
-            ctx.stroke();
-        });
-
-        // Noeuds
-        nodes.forEach(n => {
-            let alpha = 1;
-            let scale = 1;
-
-            if (selectedNode || hoveredNode) {
-                const target = selectedNode || hoveredNode;
-                const isTarget = n.id === target;
-                const isNeighbor = linksRef.current.some(l => 
-                    l.strength >= threshold && 
-                    ((l.source === target && l.target === n.id) || (l.target === target && l.source === n.id))
-                );
-
-                if (isTarget) {
-                    scale = 1.5;
-                    ctx.shadowBlur = 20;
-                    ctx.shadowColor = n.color;
-                } else if (isNeighbor) {
-                    scale = 1.1;
-                } else {
-                    alpha = 0.1;
-                }
-            }
-
-            ctx.globalAlpha = alpha;
-            
-            ctx.beginPath();
-            ctx.arc(n.x, n.y, n.radius * scale, 0, Math.PI * 2);
-            ctx.fillStyle = '#0f172a';
-            ctx.fill();
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = n.color;
-            ctx.stroke();
-
-            if (alpha > 0.2 && (n.centrality > 1.5 || scale > 1)) {
-                ctx.fillStyle = '#fff';
-                ctx.font = `bold ${10 * scale}px Inter`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(n.id.toString(), n.x, n.y);
-            }
-            ctx.shadowBlur = 0;
-        });
-        
-        ctx.globalAlpha = 1;
-        animationRef.current = requestAnimationFrame(draw);
-    }, [minStrength, selectedNode, hoveredNode]);
-
-    useEffect(() => {
-        animationRef.current = requestAnimationFrame(draw);
-        return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-    }, [draw]);
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        
-        const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
-        
-        if (hit) {
-            draggingRef.current = hit.id;
-            hit.fixed = true;
-            setSelectedNode(prev => prev === hit.id ? null : hit.id);
-            setGeneratedPath([]);
-        } else {
-            setSelectedNode(null);
-            setGeneratedPath([]);
-        }
-    };
-
-    const handleMouseMove = (e: React.MouseEvent) => {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        if (draggingRef.current) {
-            const node = nodesRef.current.find(n => n.id === draggingRef.current);
-            if (node) { node.x = x; node.y = y; }
-        } else {
-            const hit = nodesRef.current.find(n => Math.pow(n.x - x, 2) + Math.pow(n.y - y, 2) < Math.pow(n.radius + 10, 2));
-            setHoveredNode(hit ? hit.id : null);
-        }
-    };
-
-    const handleMouseUp = () => {
-        if (draggingRef.current) {
-            const node = nodesRef.current.find(n => n.id === draggingRef.current);
-            if (node) node.fixed = false;
-            draggingRef.current = null;
-        }
-    };
+    // --- ACTIONS ---
 
     const generateNeuralPath = () => {
-        if (!selectedNode) return;
+        if (!selectedNodeData) return;
+        
+        // Algorithme Greedy : On suit les liens les plus forts
         const path = new Set<number>();
-        path.add(selectedNode);
-        let currentId = selectedNode;
-        const threshold = minStrength / 100;
-
-        for (let i = 0; i < 4; i++) {
-            const links = linksRef.current
-                .filter(l => l.strength >= threshold && (l.source === currentId || l.target === currentId))
-                .map(l => ({ id: l.source === currentId ? l.target : l.source, str: l.strength }))
-                .filter(n => !path.has(n.id))
-                .sort((a,b) => b.str - a.str);
+        path.add(selectedNodeData.id);
+        
+        let current = selectedNodeData;
+        
+        // On cherche 4 autres numéros
+        for(let i=0; i<4; i++) {
+            // Filtre les liens déjà dans le path
+            const candidates = current.links.filter(l => !path.has(l.target));
             
-            if (links.length > 0) {
-                // Stochastic Path: Pick top 1-3 weighted
-                const pick = links[Math.floor(Math.random() * Math.min(3, links.length))];
-                path.add(pick.id);
-                currentId = pick.id;
+            if (candidates.length > 0) {
+                // On prend le meilleur candidat
+                const nextId = candidates[0].target;
+                path.add(nextId);
+                // On saute au prochain nœud
+                const nextNode = nodes.find(n => n.id === nextId);
+                if (nextNode) current = nextNode;
             } else {
-                break;
+                // Si cul-de-sac, on complète avec les meilleurs liens du nœud d'origine
+                const fallback = selectedNodeData.links.filter(l => !path.has(l.target));
+                if (fallback[0]) path.add(fallback[0].target);
             }
         }
 
-        if (path.size < 5) {
-            const neighbors = linksRef.current
-                .filter(l => l.strength >= threshold && (l.source === selectedNode || l.target === selectedNode))
-                .map(l => ({ id: l.source === selectedNode ? l.target : l.source, str: l.strength }))
-                .filter(n => !path.has(n.id))
-                .sort((a,b) => b.str - a.str);
-            
-            neighbors.slice(0, 5 - path.size).forEach(n => path.add(n.id));
-        }
-
-        setGeneratedPath(Array.from(path).sort((a,b) => a-b));
-        showToast("Chemin Neuronal tracé.", "success");
+        setGeneratedPath(Array.from(path).sort((a, b) => a - b));
+        showToast("Séquence dérivée calculée.", "success");
     };
 
     const savePath = async () => {
@@ -376,76 +122,185 @@ export const NeuralArchitectureTab: React.FC = () => {
         await saveTicket({
             numbers: generatedPath,
             drawName,
-            strategy: `Neural Path (Origin #${selectedNode})`
+            strategy: `Architecture (Source #${selectedNodeId})`
         });
         showToast("Chemin sauvegardé dans le Wallet.", "success");
     };
 
+    // Normalisation pour l'affichage visuel (Opacité/Taille)
+    const maxCentrality = Math.max(...nodes.map(n => n.centrality), 1);
+
     return (
         <div className="space-y-8 animate-fade-in pb-20">
+            {/* Header */}
             <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
-                        <Network size={24} className="text-indigo-500" /> Architecture Neurale
+                        <Network size={24} className="text-indigo-500" /> Matrice Structurelle
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">Cartographie gravitationnelle des vecteurs.</p>
+                    <p className="text-xs text-slate-400 mt-1">Cartographie numérique des poids synaptiques.</p>
                 </div>
-                <div className="flex items-center gap-4 bg-black/30 p-3 rounded-2xl border border-white/5 w-full md:w-auto">
-                    <Sliders size={16} className="text-slate-400" />
-                    <div className="flex-1">
-                        <div className="flex justify-between text-[9px] font-black uppercase text-slate-500 mb-1">
-                            <span>Bruit</span><span>Signal Pur</span>
-                        </div>
-                        <input type="range" min="0" max="60" step="1" value={minStrength} onChange={(e) => setMinStrength(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-indigo-500"/>
+                
+                {/* Stats Globales */}
+                <div className="flex gap-4">
+                    <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 text-center">
+                        <div className="text-[9px] font-black text-slate-500 uppercase">Nœuds Actifs</div>
+                        <div className="text-lg font-black text-white">{nodes.filter(n => n.centrality > 1).length}</div>
                     </div>
-                    <span className="text-xs font-bold text-white w-8 text-right">{minStrength}%</span>
+                    <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 text-center">
+                        <div className="text-[9px] font-black text-slate-500 uppercase">Densité</div>
+                        <div className="text-lg font-black text-emerald-400">{(maxCentrality / 5).toFixed(1)}</div>
+                    </div>
                 </div>
             </div>
 
             <div className="grid lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8 h-[600px] bg-slate-950 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden group cursor-crosshair">
-                    <canvas ref={canvasRef} width={800} height={600} className="w-full h-full touch-none" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}/>
-                    <div className="absolute bottom-6 left-6 pointer-events-none">
-                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
-                            <MousePointer2 size={12}/> {selectedNode ? `Nœud ${selectedNode} verrouillé` : 'Survoler / Cliquer'}
+                
+                {/* GRILLE (Main Visualization) */}
+                <div className="lg:col-span-8 bg-white dark:bg-slate-800 p-6 rounded-[3rem] shadow-2xl border border-slate-200 dark:border-slate-700 relative overflow-hidden">
+                    <div className="flex justify-between items-center mb-6 px-2">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            <Grid size={14} className="text-indigo-500"/> Carte des Poids
+                        </h4>
+                        <div className="flex gap-2 text-[9px] font-bold text-slate-400 uppercase">
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-200"></span> Faible</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> Fort</span>
                         </div>
+                    </div>
+
+                    <div className="grid grid-cols-10 gap-2 sm:gap-3">
+                        {nodes.map((node) => {
+                            const intensity = node.centrality / maxCentrality; // 0 à 1
+                            const isSelected = selectedNodeId === node.id;
+                            const isLinked = selectedNodeData?.links.some(l => l.target === node.id && l.strength > (minStrength/100));
+                            
+                            let bgClass = "bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-700 text-slate-300";
+                            let scaleClass = "scale-100";
+
+                            if (isSelected) {
+                                bgClass = "bg-indigo-600 border-indigo-500 text-white shadow-xl z-20";
+                                scaleClass = "scale-110";
+                            } else if (isLinked) {
+                                bgClass = "bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-300";
+                            } else if (intensity > 0.1) {
+                                // Opacité basée sur la centralité
+                                const opacity = Math.max(0.4, intensity);
+                                bgClass = `border-2 ${COMMUNITY_COLORS[node.community]} bg-opacity-10`;
+                            }
+
+                            return (
+                                <button
+                                    key={node.id}
+                                    onClick={() => { setSelectedNodeId(node.id === selectedNodeId ? null : node.id); setGeneratedPath([]); }}
+                                    className={`
+                                        aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-xs font-black transition-all duration-300 relative border
+                                        ${bgClass} ${scaleClass}
+                                    `}
+                                    style={(!isSelected && !isLinked && intensity > 0.1) ? { opacity: 0.7 + intensity * 0.3 } : {}}
+                                >
+                                    {node.id}
+                                    {intensity > 0.6 && !isSelected && <div className={`absolute bottom-1 w-1 h-1 rounded-full ${COMMUNITY_BG[node.community]}`}></div>}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
+                {/* INSPECTOR (Sidebar) */}
                 <div className="lg:col-span-4 flex flex-col gap-6">
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-lg flex-1 flex flex-col">
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <Activity size={16} className="text-emerald-500"/> Inspecteur
+                    <div className="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1 flex flex-col h-full min-h-[500px]">
+                        <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                            <Activity size={16}/> Inspecteur Neuronal
                         </h4>
-                        {selectedNode ? (
-                            <div className="space-y-6 animate-slide-up">
-                                <div className="text-center">
-                                    <div className="inline-block p-4 bg-slate-100 dark:bg-slate-900 rounded-full mb-2">
-                                        <NumberBall number={selectedNode} size="lg" selected />
+
+                        <AnimatePresence mode="wait">
+                            {selectedNodeData ? (
+                                <motion.div 
+                                    key="details"
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -20 }}
+                                    className="flex-1 flex flex-col"
+                                >
+                                    {/* En-tête Nœud */}
+                                    <div className="text-center mb-8 relative">
+                                        <div className={`absolute inset-0 bg-gradient-to-b ${COMMUNITY_COLORS[selectedNodeData.community].split(' ')[1].replace('text-', 'from-')}/20 to-transparent blur-3xl opacity-30`}></div>
+                                        <div className="relative z-10">
+                                            <NumberBall number={selectedNodeData.id} size="xl" isAttractor />
+                                            <div className="mt-4 flex justify-center gap-4">
+                                                <div className="text-center">
+                                                    <div className="text-[9px] font-black text-slate-500 uppercase">Masse</div>
+                                                    <div className="text-xl font-black text-white">{selectedNodeData.centrality.toFixed(1)}</div>
+                                                </div>
+                                                <div className="text-center">
+                                                    <div className="text-[9px] font-black text-slate-500 uppercase">Tribu</div>
+                                                    <div className={`text-xl font-black ${COMMUNITY_COLORS[selectedNodeData.community].split(' ')[1]}`}>#{selectedNodeData.community + 1}</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="text-2xl font-black text-slate-800 dark:text-white">Vecteur {selectedNode}</div>
-                                    <div className="text-[10px] font-bold text-indigo-500 uppercase">Nœud Sélectionné</div>
-                                </div>
-                                <button onClick={generateNeuralPath} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all">
-                                    <Zap size={16} fill="currentColor"/> Tracer Chemin Neuronal
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-center opacity-40">
-                                <Share2 size={48} className="text-slate-400 mb-4"/>
-                                <p className="text-xs font-bold text-slate-500">Sélectionnez un nœud sur le graphe pour l'analyser.</p>
-                            </div>
-                        )}
+
+                                    {/* Liste Connexions */}
+                                    <div className="flex-1 space-y-3 mb-6 overflow-y-auto custom-scrollbar pr-1 max-h-[250px]">
+                                        <div className="text-[9px] font-black text-slate-500 uppercase mb-2 flex justify-between">
+                                            <span>Liaisons Fortes</span>
+                                            <span>Intensité</span>
+                                        </div>
+                                        {selectedNodeData.links.slice(0, 6).map((link, idx) => (
+                                            <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-[9px] font-bold text-slate-500">#{idx+1}</span>
+                                                    <NumberBall number={link.target} size="sm" />
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-12 h-1 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, link.strength * 100)}%` }}></div>
+                                                    </div>
+                                                    <span className="text-[10px] font-mono text-indigo-300">{Math.round(link.strength * 100)}%</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {selectedNodeData.links.length === 0 && (
+                                            <div className="text-center text-xs text-slate-500 italic py-4">Nœud isolé (Orphelin)</div>
+                                        )}
+                                    </div>
+
+                                    <button 
+                                        onClick={generateNeuralPath}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 group"
+                                    >
+                                        <Zap size={16} className="group-hover:text-yellow-300 transition-colors"/> Tracer Séquence
+                                    </button>
+                                </motion.div>
+                            ) : (
+                                <motion.div 
+                                    key="empty"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="flex-1 flex flex-col items-center justify-center text-center opacity-40 p-6"
+                                >
+                                    <Share2 size={64} className="text-slate-600 mb-6 animate-pulse-slow" />
+                                    <p className="text-sm font-bold text-slate-400">Sélectionnez un vecteur dans la matrice pour décoder son architecture.</p>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
 
+                    {/* Zone de génération */}
                     {generatedPath.length > 0 && (
-                        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-indigo-500/30 shadow-2xl relative overflow-hidden animate-slide-up">
-                            <div className="absolute top-0 right-0 p-4 opacity-10"><Cpu size={64}/></div>
-                            <h4 className="text-xs font-black text-white uppercase tracking-widest mb-4">Séquence Dérivée</h4>
+                        <div className="bg-emerald-900/20 p-6 rounded-[2.5rem] border border-emerald-500/30 animate-slide-up">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                                    <Cpu size={14}/> Séquence Dérivée
+                                </h4>
+                            </div>
                             <div className="flex justify-center gap-2 mb-6">
                                 {generatedPath.map(n => <NumberBall key={n} number={n} size="sm" />)}
                             </div>
-                            <button onClick={savePath} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+                            <button 
+                                onClick={savePath}
+                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                            >
                                 <Layers size={14}/> Sauvegarder
                             </button>
                         </div>

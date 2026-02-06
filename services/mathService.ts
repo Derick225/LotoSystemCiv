@@ -2,7 +2,7 @@
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
 /**
- * Calcule l'efficacité conditionnelle des écarts (GEI).
+ * Calcule l'efficacité conditionnelle des écarts (GEI) avec métriques stochastiques avancées.
  */
 export const calculateGapEfficiency = async (history: DrawResult[]): Promise<GapEfficiency[]> => {
     const efficiencies: GapEfficiency[] = [];
@@ -30,39 +30,62 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         }
         if (isFirst) currentGap = currentCounter;
 
+        // Calculs statistiques standards
         const maxGap = gaps.length > 0 ? Math.max(...gaps) : currentGap;
         const avgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : 0;
 
-        const instancesAtReach = gaps.filter(g => g >= currentGap).length;
-        const instancesSuccess = gaps.filter(g => g >= currentGap && g <= currentGap + 2).length;
+        // Calcul de la Variance et Écart-Type (Sigma)
+        const variance = gaps.length > 0 
+            ? gaps.reduce((acc, val) => acc + Math.pow(val - avgGap, 2), 0) / gaps.length
+            : 0;
+        const sigma = Math.sqrt(variance) || 1; // Évite division par zéro
 
-        let prob = 0;
-        if (instancesAtReach > 0) {
-            prob = (instancesSuccess / instancesAtReach) * 100;
-        }
+        // --- MOTEUR STOCHASTIQUE V2 ---
+        
+        // 1. Z-Score (Tension Normalisée)
+        // Mesure combien d'écarts-types séparent l'écart actuel de la moyenne.
+        // Z > 2.0 = Anomalie statistique (Zone Critique)
+        const zScore = (currentGap - avgGap) / sigma;
 
-        let maturity = 0;
-        if (maxGap > 0) {
-            maturity = Math.min(100, (currentGap / (maxGap * 0.85)) * 100);
-        }
+        // 2. Probabilité de Rupture Gaussienne (Breakout Probability)
+        // Approximation de l'intégrale de la loi normale (CDF)
+        // Plus on s'éloigne de la moyenne vers le haut, plus la probabilité de retour à l'équilibre augmente.
+        // On utilise une fonction sigmoïde adaptée pour mapper le Z-Score en probabilité [0, 1]
+        const breakoutProb = (1 / (1 + Math.exp(-(zScore - 0.5) * 1.5))) * 100;
 
+        // 3. Indice de Fatigue (Fatigue Index)
+        // Si maxGap est très élevé par rapport à la moyenne, le numéro est "paresseux".
+        const fatigueIndex = maxGap > 0 ? (maxGap / avgGap) : 1;
+
+        // 4. Score de Maturité Révisé
+        // Combine la position relative (Gap/Max) et la pression statistique (Z-Score)
+        const positionScore = maxGap > 0 ? (currentGap / maxGap) * 100 : 0;
+        const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33)); // Z=-1->0%, Z=2->100%
+        
+        const maturityScore = Math.round((positionScore * 0.4) + (pressureScore * 0.6));
+
+        // Détermination des Zones
         let zone: GapEfficiency['zone'] = 'COLD';
-        if (maturity > 90) zone = 'CRITICAL';
-        else if (maturity > 70) zone = 'HOT';
-        else if (maturity > 40) zone = 'WARMING';
+        if (zScore > 2.5 || maturityScore > 90) zone = 'CRITICAL';
+        else if (zScore > 1.0 || maturityScore > 70) zone = 'HOT';
+        else if (zScore > 0 || maturityScore > 40) zone = 'WARMING';
 
         efficiencies.push({
             number: num,
             currentGap,
             maxGap,
             avgGap,
-            probabilityAtCurrentGap: prob,
-            maturityScore: Math.round(maturity),
-            zone
+            probabilityAtCurrentGap: Math.round(breakoutProb),
+            maturityScore,
+            zone,
+            zScore,
+            fatigueIndex,
+            breakoutProb
         });
     }
 
-    return efficiencies.sort((a, b) => b.maturityScore - a.maturityScore);
+    // Tri par Z-Score décroissant (Les plus sous pression en premier)
+    return efficiencies.sort((a, b) => b.zScore - a.zScore);
 };
 
 export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]): Promise<ProjectionItem[]> => {

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -20,8 +21,8 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
 
     return (
         <div style={{ ...style, paddingBottom: '12px' }} className="px-1">
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-[2rem] border border-slate-100 dark:border-slate-700 shadow-sm hover:border-indigo-400 transition-all group relative overflow-hidden h-full">
-                <div className="flex flex-col md:flex-row justify-between items-center gap-4 h-full">
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-[2rem] border border-slate-100 dark:border-slate-700 shadow-sm hover:border-indigo-400 transition-all group relative overflow-hidden h-full flex flex-col justify-center">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 w-full">
                     <div className="flex flex-row md:flex-col items-center md:items-start justify-between md:justify-center w-full md:w-auto md:min-w-[140px] text-left">
                         <div>
                             <div className="flex items-center gap-2 mb-1">
@@ -41,18 +42,18 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
                         </div>
                     </div>
                     
-                    <div className="flex flex-col items-center gap-2 w-full md:w-auto">
+                    <div className="flex flex-col items-center gap-3 w-full md:w-auto">
                         <div className="flex gap-1 md:gap-1.5 flex-wrap justify-center">
                             {draw.gagnants.map(n => <NumberBall key={n} number={n} size="sm" />)}
                         </div>
                         {draw.machine && draw.machine.length > 0 && (
-                            <div className="flex items-center gap-2 opacity-60">
-                                <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter flex items-center gap-1">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 w-full md:w-auto justify-center">
+                                <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter flex items-center gap-1 shrink-0">
                                     <Binary size={8}/> MAC
                                 </span>
                                 <div className="flex gap-1 flex-wrap justify-center">
                                     {draw.machine.map(n => (
-                                        <div key={n} className="w-5 h-5 rounded-md bg-slate-100 dark:bg-slate-900 flex items-center justify-center text-[7px] md:text-[8px] font-black text-slate-500 border border-slate-200 dark:border-slate-800">
+                                        <div key={n} className="w-5 h-5 rounded-md bg-white dark:bg-slate-800 flex items-center justify-center text-[8px] font-black text-slate-500 border border-slate-200 dark:border-slate-700 shadow-sm">
                                             {n}
                                         </div>
                                     ))}
@@ -174,7 +175,8 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
                         <List
                             height={height}
                             itemCount={filteredHistory.length}
-                            itemSize={140} // Approximate height of each card + margin
+                            // Hauteur conditionnelle : 190px sur mobile pour accommoder machine + gagnants en colonne
+                            itemSize={width < 768 ? 190 : 140}
                             width={width}
                             itemData={{ 
                                 items: filteredHistory, 
