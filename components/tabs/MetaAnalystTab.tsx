@@ -1,15 +1,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
+import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
 import { useNexus } from '../NexusProvider';
-import type { PlatinumResult, PlatinumTimeline, PlatinumAudit } from '../../types';
+import type { PlatinumResult, PlatinumTimeline } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { 
-    Brain, ShieldCheck, Zap,
-    Binary, Sparkles, Activity,
-    Ghost, Layers, Hexagon, Component, Clock, Workflow, Archive, FileSearch, ArrowRight, BarChart2, Crown, Radar as RadarIcon, Atom
+    Brain, Sparkles, Activity,
+    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, ResponsiveContainer } from 'recharts';
@@ -104,7 +103,7 @@ const TimelineCard: React.FC<{
                 </div>
 
                 <div className="flex justify-between gap-1 mt-auto">
-                    {timeline.numbers.map((n, i) => (
+                    {timeline.numbers.map((n) => (
                         <div key={n} className="scale-90 transform -ml-1.5 first:ml-0">
                             <NumberBall number={n} size="sm" />
                         </div>
@@ -116,8 +115,6 @@ const TimelineCard: React.FC<{
 };
 
 const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
-    const theme = TIMELINE_THEMES['NOVA'];
-    
     return (
         <div className="relative group">
             <div className="absolute inset-0 bg-purple-600/20 rounded-[3rem] blur-2xl group-hover:blur-3xl transition-all duration-1000 animate-pulse-slow"></div>
@@ -272,7 +269,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         setResult(null); // Reset pour l'anim
         
         try {
-            // Simulation de temps de calcul pour l'UX (la vraie fonction est rapide, mais on veut montrer la complexité)
+            // Simulation de temps de calcul pour l'UX
             await new Promise(r => setTimeout(r, 2500)); 
 
             const data = await generatePlatinumPrediction(
