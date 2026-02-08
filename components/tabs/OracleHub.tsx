@@ -5,9 +5,10 @@ import { MetaAnalystTab } from './MetaAnalystTab';
 import { IntelligenceTab } from './IntelligenceTab';
 import { OrchestrationTab } from './OrchestrationTab';
 import { TacticalChatTab } from './TacticalChatTab';
+import { ConvergenceTab } from './ConvergenceTab';
 import { useNexus } from '../NexusProvider';
 import { getStrategyName } from '../../services/predictionEngine';
-import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, MessageSquareCode } from 'lucide-react';
+import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, MessageSquareCode, Hexagon } from 'lucide-react';
 import { OracleLiveAssistant } from '../OracleLiveAssistant';
 
 interface OracleHubProps { drawName: string; }
@@ -15,7 +16,7 @@ interface OracleHubProps { drawName: string; }
 export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const { regime: globalRegime, loading: nexusLoading, globalWeights } = useNexus();
     
-    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat'>('oracle');
+    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat' | 'convergence'>('convergence');
     const [activeStrategy, setActiveStrategy] = useState("Standard");
     
     useEffect(() => {
@@ -38,11 +39,12 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     }, []);
 
     const subTabs = [
-        { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
-        { id: 'chat', label: 'Tactical Chat', icon: <MessageSquareCode size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
-        { id: 'platinum', label: 'Platinum Fusion', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
-        { id: 'intel', label: 'IA Narrative', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
-        { id: 'orch', label: 'Orchestration', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' }
+        { id: 'convergence', label: 'Synthèse', icon: <Hexagon size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
+        { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-violet-500', bg: 'hover:bg-violet-50' },
+        { id: 'platinum', label: 'Platinum', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
+        { id: 'intel', label: 'Narratif', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
+        { id: 'orch', label: 'Orchestra', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' },
+        { id: 'chat', label: 'Chat', icon: <MessageSquareCode size={16}/>, color: 'text-blue-500', bg: 'hover:bg-blue-50' }
     ];
 
     if (nexusLoading) return <div className="p-20 text-center animate-pulse text-indigo-500">Connexion Oracle...</div>;
@@ -50,7 +52,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in relative">
             <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                {/* Navigation Sticky Mobile */}
                 <div className="sticky top-[70px] z-20 w-full md:w-auto bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
                     <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
                         {subTabs.map((tab) => (
@@ -58,7 +59,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                                 key={tab.id}
                                 onClick={() => setSubTab(tab.id as any)} 
                                 className={`
-                                    px-6 py-3.5 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-3 whitespace-nowrap
+                                    px-5 py-3 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap
                                     ${subTab === tab.id 
                                         ? 'bg-white dark:bg-slate-700 shadow-xl text-slate-900 dark:text-white scale-105' 
                                         : `text-slate-400 ${tab.bg} dark:hover:bg-slate-800`
@@ -81,6 +82,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
             </div>
 
             <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px]">
+                {subTab === 'convergence' && <ConvergenceTab drawName={drawName} />}
                 {subTab === 'oracle' && <PredictionTab drawName={drawName} />}
                 {subTab === 'chat' && <TacticalChatTab drawName={drawName} />}
                 {subTab === 'platinum' && <MetaAnalystTab drawName={drawName} />}

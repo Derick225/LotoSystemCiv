@@ -486,6 +486,18 @@ export interface RLState {
     totalCorrection: number;
 }
 
+export interface FusionResult {
+    sources: {
+        python: number[];
+        quantum: number[];
+        oracle: number[];
+    };
+    convergedNumbers: { number: number; score: number; sources: string[] }[];
+    finalTicket: number[];
+    confidence: number;
+    entropy: number;
+}
+
 export interface NexusContextType {
     drawName: string;
     currentDrawName: string;

@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { getUserFriendlyError } from '../../utils/errorHandler';
 
 interface Props {
@@ -14,7 +15,7 @@ interface ErrorBoundaryState {
  * GlobalErrorBoundary v1.1
  * Captures critical failures and provides a recovery path.
  */
-export class GlobalErrorBoundary extends React.Component<Props, ErrorBoundaryState> {
+export class GlobalErrorBoundary extends Component<Props, ErrorBoundaryState> {
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -23,21 +24,21 @@ export class GlobalErrorBoundary extends React.Component<Props, ErrorBoundarySta
     };
   }
 
-  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('NEXUS_INFRA_CRASH:', error, errorInfo);
   }
 
   // Handle system reload to recover from error state
-  public handleReload = () => {
+  handleReload = () => {
     this.setState({ hasError: false, error: null });
     window.location.reload(); 
   };
 
-  public render(): ReactNode {
+  render(): ReactNode {
     if (this.state.hasError) {
       const msg = getUserFriendlyError(this.state.error);
       return (

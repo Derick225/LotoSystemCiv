@@ -1,4 +1,5 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -14,7 +15,7 @@ interface ErrorBoundaryState {
  * LocalErrorBoundary v1.1
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-export class LocalErrorBoundary extends React.Component<Props, ErrorBoundaryState> {
+export class LocalErrorBoundary extends Component<Props, ErrorBoundaryState> {
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -24,20 +25,20 @@ export class LocalErrorBoundary extends React.Component<Props, ErrorBoundaryStat
   }
 
   // Standard static method for error boundaries
-  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn("MODULE_ISOLATED_FAILURE:", error, errorInfo);
   }
 
   // Restore the module by resetting error state
-  public handleReload = () => {
+  handleReload = () => {
     this.setState({ hasError: false, error: null });
   };
 
-  public render(): ReactNode {
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
         <div className="p-6 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 rounded-[2rem] border-2 border-dashed border-slate-200 dark:border-slate-800 text-center animate-fade-in flex flex-col items-center justify-center gap-4 min-h-[200px]">
