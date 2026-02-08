@@ -14,7 +14,7 @@ const corsHeaders = {
 const toolDeclarations: FunctionDeclaration[] = [
     {
         name: "analyzeDrawDynamics",
-        description: "Analyse en profondeur les dynamiques d'un tirage spécifique (volatilité, cycles, régime).",
+        description: "Analyse en profondeur les dynamiques d'un tirage spécifique (volatilité, cycles, régime). Ouvre le module Signaux.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -26,7 +26,7 @@ const toolDeclarations: FunctionDeclaration[] = [
     },
     {
         name: "requestTicketSynthesis",
-        description: "Génère des combinaisons optimisées (tickets) basées sur des critères spécifiques.",
+        description: "Génère des combinaisons optimisées (tickets) basées sur des critères spécifiques. Ouvre le module Architecte.",
         parameters: {
             type: Type.OBJECT,
             properties: {
@@ -35,6 +35,22 @@ const toolDeclarations: FunctionDeclaration[] = [
                 riskProfile: { type: Type.STRING, enum: ["PRUDENT", "BALANCED", "CHAOS"], description: "Profil de risque" }
             },
             required: ["drawName", "ticketCount"]
+        }
+    },
+    {
+        name: "openForensicAudit",
+        description: "Ouvre le module Forensic pour une analyse balistique et stochastique post-tirage.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {},
+        }
+    },
+    {
+        name: "showHistory",
+        description: "Affiche le registre historique global (Flux) des tirages.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {},
         }
     }
 ];
@@ -89,7 +105,8 @@ export default async function handler(req: Request) {
         - Prédiction IA : ${JSON.stringify(currentContext?.lastPrediction)}
         - Capital utilisateur (Bankroll) : ${currentContext?.bankroll ? currentContext.bankroll + ' FCFA' : 'Non spécifié'}
         
-        Tu as accès à des outils pour analyser l'historique ou générer des tickets. Utilise-les si l'utilisateur demande une action concrète.
+        Tu as accès à des outils pour piloter l'interface (Forensic, Architecte, Historique, Signaux).
+        Si l'utilisateur demande une analyse, une génération de ticket ou un audit, UTILISE LES OUTILS fournis (Function Calling).
         Si le capital est bas (< 5000 FCFA), conseille impérativement la prudence et des mises réduites.
         Ton ton est industriel, précis et ultra-professionnel. Pas de blabla inutile.`;
 
