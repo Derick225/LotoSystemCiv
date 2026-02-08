@@ -9,11 +9,13 @@ import { useToast } from '../ui/Toast';
 import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { ReliabilityMeter } from '../ReliabilityMeter';
 import { RiskProfile } from '../../types';
+import { QuantumTensionField } from '../QuantumTensionField';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
     Save, Wind, AlertTriangle, TrendingUp,
-    MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna
+    MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
+    Atom
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -22,12 +24,13 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { 
         history, lastPrediction, setLastPrediction, loading: nexusLoading,
         globalWeights, spectral, wavelet, correlationMatrix, regularity, 
-        calibration, volatility, regime, symbioticContext
+        calibration, volatility, regime, symbioticContext, fractal
     } = useNexus();
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
     const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
+    const [showField, setShowField] = useState(false);
 
     const runInference = useCallback(async () => {
         if (history.length < 5) {
@@ -57,7 +60,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             clearInterval(interval);
             try {
                 const res = await generateMasterPrediction(drawName, history, globalWeights, {
-                    spectral, wavelet, correlationMatrix, regularity, volatility
+                    spectral, wavelet, correlationMatrix, regularity, volatility, fractal
                 }, symbioticContext || undefined, riskProfile);
                 
                 setLastPrediction(res);
@@ -65,12 +68,13 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 showToast("Convergence vectorielle établie.", "success");
             } catch (e) {
                 showToast("Erreur lors de l'inférence.", "error");
+                console.error(e);
             } finally {
                 setIsComputing(false);
                 setComputingStep("");
             }
         }, 3500);
-    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile]);
+    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal]);
 
     const handleQuickSave = async () => {
         if (!lastPrediction) return;
@@ -255,6 +259,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             >
                                 <RefreshCw size={16} /> Nouvelle Stratégie
                             </button>
+                            <button 
+                                onClick={() => setShowField(!showField)}
+                                className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${showField ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
+                            >
+                                <Atom size={16} /> Champ Quantum
+                            </button>
                         </div>
 
                         <div className="mt-10 bg-black/40 p-8 rounded-[2.5rem] border border-white/5 backdrop-blur-md">
@@ -274,33 +284,39 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 )}
             </div>
 
-            <div className="grid lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8 space-y-6">
-                    <div className="flex items-center gap-3 px-4">
-                        <Layers className="text-indigo-500" />
-                        <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Matrice de Convergence</h3>
-                    </div>
-                    <NeuralHeatmapGrid breakdown={lastPrediction?.breakdown} suggestedNumbers={lastPrediction?.suggestedNumbers || []} />
-                </div>
-
-                <div className="lg:col-span-4 space-y-6">
-                    {calibration && <ReliabilityMeter calibration={calibration} />}
-                    
-                    <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <Binary size={14} /> Alternatives (Outsiders)
-                        </h4>
-                        <div className="flex flex-wrap gap-3 justify-center">
-                            {lastPrediction?.candidates.slice(0, 8).map(n => (
-                                <NumberBall key={n} number={n} size="sm" />
-                            ))}
+            {lastPrediction && (
+                <div className="grid lg:grid-cols-12 gap-8">
+                    <div className="lg:col-span-8 space-y-6">
+                        <div className="flex items-center gap-3 px-4">
+                            <Layers className="text-indigo-500" />
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Matrice de Convergence</h3>
                         </div>
-                        <p className="text-center text-[9px] text-slate-400 mt-6 font-bold uppercase tracking-widest">
-                            Vecteurs secondaires à surveiller
-                        </p>
+                        {showField ? (
+                            <QuantumTensionField breakdown={lastPrediction.breakdown || {}} suggestedNumbers={lastPrediction.suggestedNumbers} />
+                        ) : (
+                            <NeuralHeatmapGrid breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />
+                        )}
+                    </div>
+
+                    <div className="lg:col-span-4 space-y-6">
+                        {calibration && <ReliabilityMeter calibration={calibration} />}
+                        
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                <Binary size={14} /> Alternatives (Outsiders)
+                            </h4>
+                            <div className="flex flex-wrap gap-3 justify-center">
+                                {lastPrediction?.candidates.slice(0, 8).map(n => (
+                                    <NumberBall key={n} number={n} size="sm" />
+                                ))}
+                            </div>
+                            <p className="text-center text-[9px] text-slate-400 mt-6 font-bold uppercase tracking-widest">
+                                Vecteurs secondaires à surveiller
+                            </p>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 };

@@ -39,13 +39,13 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = ({ breakdown,
     }, [breakdown]);
 
     return (
-        <div className="bg-white p-8 md:p-12 rounded-[3.5rem] border border-slate-200 shadow-2xl relative overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-[3.5rem] border border-slate-200 dark:border-slate-800 shadow-2xl relative overflow-hidden">
             {/* Effet Scanline spécifique à la grille */}
             <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-20" style={{ backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))', backgroundSize: '100% 2px, 3px 100%' }}></div>
             
             <div className="flex justify-between items-end mb-8 relative z-10 px-2">
                 <div>
-                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-[0.2em] flex items-center gap-3">
+                    <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-[0.2em] flex items-center gap-3">
                         <Activity className="text-indigo-600" size={18} /> Matrice Tensorielle 1-90
                     </h4>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Séquençage des points chauds par fusion d'algorithmes</p>
@@ -63,8 +63,8 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = ({ breakdown,
                             className={`
                                 aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-xs font-black transition-all duration-500 relative group border
                                 ${isSuggested 
-                                    ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-700 scale-110 z-10 shadow-xl ring-2 ring-indigo-50' 
-                                    : 'text-slate-500 bg-slate-50 border-slate-100 hover:border-indigo-400 hover:shadow-md hover:z-10'
+                                    ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white border-indigo-700 scale-110 z-10 shadow-xl ring-2 ring-indigo-50 dark:ring-indigo-900/50' 
+                                    : 'text-slate-500 bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-800 hover:border-indigo-400 hover:shadow-md hover:z-10'
                                 }
                             `}
                             style={{ 
@@ -105,23 +105,23 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = ({ breakdown,
             </div>
             
             {/* Légende Interactive */}
-            <div className="mt-12 flex flex-wrap justify-center gap-8 border-t border-slate-100 pt-10 relative z-10">
+            <div className="mt-12 flex flex-wrap justify-center gap-8 border-t border-slate-100 dark:border-slate-800 pt-10 relative z-10">
                 <div className="flex items-center gap-3">
                     <div className="w-4 h-4 rounded-md bg-indigo-600 shadow-md shadow-indigo-600/20 ring-1 ring-white/20"></div>
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Top Inférence</span>
+                        <span className="text-[10px] font-black text-slate-800 dark:text-white uppercase tracking-widest leading-none">Top Inférence</span>
                         <span className="text-[8px] text-slate-400 font-bold mt-1">Cible IA Prioritaire</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-md bg-indigo-100 ring-1 ring-indigo-200"></div>
+                    <div className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/30 ring-1 ring-indigo-200 dark:ring-indigo-700"></div>
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Activité Haute</span>
+                        <span className="text-[10px] font-black text-slate-800 dark:text-white uppercase tracking-widest leading-none">Activité Haute</span>
                         <span className="text-[8px] text-slate-400 font-bold mt-1">Pression Stochastique</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-md bg-slate-50 border border-slate-200"></div>
+                    <div className="w-4 h-4 rounded-md bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"></div>
                     <div className="flex flex-col">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Stable / Froid</span>
                         <span className="text-[8px] text-slate-400 font-bold mt-1">Bruit de fond</span>
@@ -130,7 +130,7 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = ({ breakdown,
             </div>
 
             {/* Décoration d'angle technologique */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-[100px] opacity-40 -mr-24 -mt-24 pointer-events-none"></div>
+            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 dark:bg-indigo-900/10 rounded-full blur-[100px] opacity-40 -mr-24 -mt-24 pointer-events-none"></div>
         </div>
     );
 };

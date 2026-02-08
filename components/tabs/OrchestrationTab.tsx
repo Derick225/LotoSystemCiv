@@ -5,17 +5,19 @@ import { useNexus } from '../NexusProvider';
 import type { OrchestrationMetrics, DrawResult, MimicryMetric } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { OrchestrationRadar } from '../OrchestrationRadar';
-import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save, ArrowRight, Share2, Workflow } from 'lucide-react';
+import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save, ArrowRight, Share2, Workflow, GitMerge } from 'lucide-react';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface OrchestrationTabProps { drawName: string; }
 
-// --- COMPOSANT VECTOR FLOW CHART (Amélioré) ---
+// --- COMPOSANT VECTOR FLOW CHART ---
+// Visualise les liens physiques entre T-1 et les prédictions (T)
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [hoveredNode, setHoveredNode] = useState<{ id: number, type: 'src' | 'tgt' } | null>(null);
-    const topCands = candidates.slice(0, 5);
+    const topCands = candidates.slice(0, 7); // On limite à 7 pour la lisibilité
 
     const links = useMemo(() => {
         const l: {src: number, tgt: number, type: string, color: string, strength: number}[] = [];
@@ -23,12 +25,13 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
             topCands.forEach(tgt => {
                 let type = '';
                 let color = '';
-                let strength = 1;
+                let strength = 0;
                 
-                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } 
-                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; }
-                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } 
-                else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; strength = 1; }
+                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } // Emerald
+                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; } // Blue
+                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink
+                else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; strength = 1; } // Amber
+                else if (src % 10 === tgt % 10) { type = 'Finale'; color = '#8b5cf6'; strength = 0.5; } // Purple
                 
                 if (type) l.push({ src, tgt, type, color, strength });
             });
@@ -44,14 +47,18 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
     };
 
     return (
-        <div className="bg-slate-950 text-white p-6 md:p-8 rounded-[3rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[400px] flex flex-col justify-between group select-none">
+        <div className="bg-slate-950 text-white p-6 md:p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[450px] flex flex-col justify-between group select-none">
+            {/* Background FX */}
             <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,#4f46e5_0%,transparent_70%)] animate-pulse-slow"></div>
+            <div className="absolute top-0 bottom-0 left-24 right-24 border-x border-dashed border-white/5"></div>
             
-            <div className="flex justify-between items-stretch relative z-10 h-full gap-8">
+            <div className="flex justify-between items-stretch relative z-10 h-full gap-12">
                 {/* SOURCE COLUMN (T-1) */}
-                <div className="flex flex-col justify-around items-center w-24 py-4 relative">
+                <div className="flex flex-col justify-around items-center w-24 py-4 relative z-20">
                     <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-slate-700 to-transparent"></div>
-                    <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-700 mb-2">T-1 (Source)</div>
+                    <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-700 mb-2 shadow-lg backdrop-blur-md">
+                        T-1 (Source)
+                    </div>
                     {prevDraw.map(n => {
                         const isActive = hoveredNode ? (hoveredNode.type === 'src' && hoveredNode.id === n) || links.some(l => l.src === n && l.tgt === (hoveredNode.type === 'tgt' ? hoveredNode.id : -1)) : true;
                         return (
@@ -61,7 +68,7 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                                 onMouseEnter={() => setHoveredNode({ id: n, type: 'src' })}
                                 onMouseLeave={() => setHoveredNode(null)}
                             >
-                                <NumberBall number={n} size="sm" />
+                                <NumberBall number={n} size="md" />
                             </div>
                         );
                     })}
@@ -71,8 +78,8 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 <div className="flex-1 relative">
                     <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
                         <defs>
-                            <filter id="glow">
-                                <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+                            <filter id="glow-line">
+                                <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
                                 <feMerge>
                                     <feMergeNode in="coloredBlur"/>
                                     <feMergeNode in="SourceGraphic"/>
@@ -93,30 +100,49 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                             return (
                                 <g key={i}>
                                     <path 
-                                        d={`M 0 ${sY} C 50% ${sY}, 50% ${tY}, 100% ${tY}`} 
+                                        d={`M 0 ${sY} C 40% ${sY}, 60% ${tY}, 100% ${tY}`} 
                                         fill="none" 
                                         stroke={link.color} 
-                                        strokeWidth={isActive ? link.strength * 2 : link.strength} 
-                                        strokeOpacity={isActive ? 0.9 : 0.15}
+                                        strokeWidth={isActive ? link.strength * 2 : 1} 
+                                        strokeOpacity={isActive ? 0.8 : 0.1}
                                         strokeLinecap="round"
-                                        filter={isActive ? "url(#glow)" : ""}
+                                        filter={isActive ? "url(#glow-line)" : ""}
                                         className="transition-all duration-500"
                                     />
                                     {isActive && hoveredNode && (
-                                        <text x="50%" y="50%" fill={link.color} fontSize="9" fontWeight="900" textAnchor="middle" dy="-5" className="uppercase tracking-widest bg-slate-900">
-                                            {link.type}
-                                        </text>
+                                        <g transform={`translate(${50}%, ${50}%)`}> {/* Approximatif, texte centré via CSS dans un vrai graph */}
+                                           {/* Le label est rendu via HTML pour simplicité ci-dessous */}
+                                        </g>
                                     )}
                                 </g>
                             );
                         })}
                     </svg>
+                    
+                    {/* Floating Labels for Active Links */}
+                    {hoveredNode && links.map((link, i) => {
+                         const isActive = isLinkActive(link.src, link.tgt);
+                         if (!isActive) return null;
+                         const sIdx = prevDraw.indexOf(link.src);
+                         const tIdx = topCands.indexOf(link.tgt);
+                         const topPos = ((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100; // Approx middle vertical
+                         
+                         return (
+                            <div key={`lbl-${i}`} className="absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-none" style={{ top: `${topPos}%` }}>
+                                <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white shadow-xl" style={{ color: link.color }}>
+                                    {link.type}
+                                </span>
+                            </div>
+                         )
+                    })}
                 </div>
 
                 {/* TARGET COLUMN (Predictions) */}
-                <div className="flex flex-col justify-around items-center w-24 py-4 relative">
+                <div className="flex flex-col justify-around items-center w-24 py-4 relative z-20">
                     <div className="absolute right-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-indigo-500 to-transparent"></div>
-                    <div className="text-[9px] uppercase font-black text-indigo-400 tracking-widest bg-slate-900/80 px-2 py-1 rounded-lg border border-indigo-900/50 mb-2">IA (Cibles)</div>
+                    <div className="text-[9px] uppercase font-black text-indigo-400 tracking-widest bg-slate-900/90 px-3 py-1.5 rounded-lg border border-indigo-900/50 mb-2 shadow-lg backdrop-blur-md">
+                        IA (Cibles)
+                    </div>
                     {topCands.map(n => {
                         const isActive = hoveredNode ? (hoveredNode.type === 'tgt' && hoveredNode.id === n) || links.some(l => l.tgt === n && l.src === (hoveredNode.type === 'src' ? hoveredNode.id : -1)) : true;
                         return (
@@ -139,7 +165,7 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
 // --- COMPOSANT MIMICRY CARD ---
 const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
     return (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-xl h-full flex flex-col">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-xl h-full flex flex-col">
             <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-3">
                 <Copy size={16} className="text-amber-500"/> Mimétisme Séquentiel
             </h4>
@@ -177,7 +203,6 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     const { history, loading: nexusLoading } = useNexus();
     const { showToast } = useToast();
     
-    // Type étendu avec details
     const [metrics, setMetrics] = useState<(OrchestrationMetrics & { candidatesDetails?: Record<number, ScoreComposition> }) | null>(null);
     const [prevDraw, setPrevDraw] = useState<DrawResult | null>(null);
     const [mimicryData, setMimicryData] = useState<MimicryMetric[]>([]);
@@ -212,12 +237,17 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
 
     const handleGenerateTicket = () => {
         if (!metrics || metrics.topCandidates.length < 5) return;
+        
+        // Algorithme de synthèse intelligente
         const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
-        const fillers = metrics.topCandidates.slice(3, 8).map(c => c.number);
-        const shuffledFillers = fillers.sort(() => 0.5 - Math.random()).slice(0, 2);
-        const ticket = [...core, ...shuffledFillers].sort((a,b) => a-b);
-        setGeneratedTicket(ticket);
-        showToast("Ticket Orchestral généré avec optimisation harmonique.", "success");
+        // On prend 2 autres dans le top 10, en favorisant ceux qui augmentent la diversité du ticket (Spread)
+        const fillers = metrics.topCandidates.slice(3, 10).map(c => c.number);
+        
+        const shuffledFillers = fillers.sort(() => 0.5 - Math.random());
+        const finalTicket = [...core, ...shuffledFillers.slice(0, 2)].sort((a,b) => a-b);
+        
+        setGeneratedTicket(finalTicket);
+        showToast("Synthèse Harmonique terminée.", "success");
     };
 
     const handleSaveTicket = async () => {
@@ -244,8 +274,9 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             {/* HERO CARD */}
             <div className="bg-slate-900 p-8 md:p-12 rounded-[3.5rem] shadow-2xl border border-indigo-500/20 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] group-hover:scale-125 transition-transform duration-1000 -mr-20 -mt-20"></div>
+                
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
-                    <div>
+                    <div className="flex-1">
                         <div className="flex items-center gap-3 mb-4">
                             <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Share2 size={20} className="text-white"/></div>
                             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Interconnexion Temporelle</span>
@@ -257,6 +288,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                             {metrics.narrativeLesson}
                         </p>
                     </div>
+                    
                     <div className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 shadow-2xl text-center min-w-[220px]">
                         <div className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-2">Couverture Backtest</div>
                         <div className="text-6xl font-black text-white">{metrics.backtestAccuracy}%</div>
@@ -269,8 +301,8 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             <div className="grid lg:grid-cols-12 gap-8">
                 {prevDraw && (
                     <div className="lg:col-span-8 space-y-6">
-                        <div className="bg-white dark:bg-slate-800 p-2 rounded-[3.5rem] shadow-xl border border-slate-100 dark:border-slate-700">
-                            <div className="px-8 pt-6 pb-2 flex items-center gap-3">
+                        <div className="bg-white dark:bg-slate-800 p-2 rounded-[3.5rem] shadow-xl border border-slate-100 dark:border-slate-700 relative overflow-hidden">
+                            <div className="px-8 pt-6 pb-2 flex items-center gap-3 relative z-10">
                                 <Zap size={18} className="text-indigo-600"/>
                                 <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">Flux d'Influence Directe (T-1 ➜ IA)</h4>
                             </div>

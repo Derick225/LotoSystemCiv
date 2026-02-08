@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useMemo } from 'react';
 import type { ScoreBreakdown } from '../types';
 import { Activity, Radio, Magnet, Scan, Maximize2 } from 'lucide-react';
