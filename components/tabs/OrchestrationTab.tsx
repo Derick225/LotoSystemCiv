@@ -14,11 +14,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface OrchestrationTabProps { drawName: string; }
 
 // --- COMPOSANT VECTOR FLOW CHART ---
-// Visualise les liens physiques entre T-1 et les prédictions (T)
+// Visualise les liens physiques entre T-1 et les prédictions (T) via SVG
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [hoveredNode, setHoveredNode] = useState<{ id: number, type: 'src' | 'tgt' } | null>(null);
-    const topCands = candidates.slice(0, 7); // On limite à 7 pour la lisibilité
+    // On limite à 7 candidats pour la lisibilité du graphe, mais le calcul se fait sur tout
+    const topCands = candidates.slice(0, 7); 
 
+    // Calcul des liens vectoriels (Memoized pour la perf)
     const links = useMemo(() => {
         const l: {src: number, tgt: number, type: string, color: string, strength: number}[] = [];
         prevDraw.forEach(src => {
@@ -27,9 +29,10 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 let color = '';
                 let strength = 0;
                 
-                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } // Emerald
+                // Logique de détection de relations
+                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } // Emerald (Inertie)
                 else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; } // Blue
-                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink
+                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink (Miroir Loto)
                 else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; strength = 1; } // Amber
                 else if (src % 10 === tgt % 10) { type = 'Finale'; color = '#8b5cf6'; strength = 0.5; } // Purple
                 
@@ -40,7 +43,7 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
     }, [prevDraw, topCands]);
 
     const isLinkActive = (src: number, tgt: number) => {
-        if (!hoveredNode) return true;
+        if (!hoveredNode) return true; // Tout montrer par défaut (avec opacité réduite via CSS)
         if (hoveredNode.type === 'src' && hoveredNode.id === src) return true;
         if (hoveredNode.type === 'tgt' && hoveredNode.id === tgt) return true;
         return false;
@@ -92,8 +95,9 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                             if (sIdx === -1 || tIdx === -1) return null;
                             
                             const isActive = isLinkActive(link.src, link.tgt);
-                            if (!isActive && hoveredNode) return null; 
+                            if (!isActive && hoveredNode) return null; // Masquer les non-pertinents lors du survol
 
+                            // Calcul des positions Y relatives (en %)
                             const sY = `${((sIdx + 0.5) / prevDraw.length) * 100}%`;
                             const tY = `${((tIdx + 0.5) / topCands.length) * 100}%`;
                             
@@ -109,26 +113,21 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                                         filter={isActive ? "url(#glow-line)" : ""}
                                         className="transition-all duration-500"
                                     />
-                                    {isActive && hoveredNode && (
-                                        <g transform={`translate(${50}%, ${50}%)`}> {/* Approximatif, texte centré via CSS dans un vrai graph */}
-                                           {/* Le label est rendu via HTML pour simplicité ci-dessous */}
-                                        </g>
-                                    )}
                                 </g>
                             );
                         })}
                     </svg>
                     
-                    {/* Floating Labels for Active Links */}
+                    {/* Labels Flottants pour les liens actifs */}
                     {hoveredNode && links.map((link, i) => {
                          const isActive = isLinkActive(link.src, link.tgt);
                          if (!isActive) return null;
                          const sIdx = prevDraw.indexOf(link.src);
                          const tIdx = topCands.indexOf(link.tgt);
-                         const topPos = ((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100; // Approx middle vertical
+                         const topPos = ((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100; // Position moyenne approx.
                          
                          return (
-                            <div key={`lbl-${i}`} className="absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-none" style={{ top: `${topPos}%` }}>
+                            <div key={`lbl-${i}`} className="absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-none z-30" style={{ top: `${topPos}%` }}>
                                 <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white shadow-xl" style={{ color: link.color }}>
                                     {link.type}
                                 </span>
@@ -238,9 +237,10 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     const handleGenerateTicket = () => {
         if (!metrics || metrics.topCandidates.length < 5) return;
         
-        // Algorithme de synthèse intelligente
+        // Algorithme de synthèse intelligente : Coeur solide + Dispersion
+        // 1. Cœur : Les 3 meilleurs vecteurs
         const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
-        // On prend 2 autres dans le top 10, en favorisant ceux qui augmentent la diversité du ticket (Spread)
+        // 2. Dispersion : 2 numéros piochés dans le top 10 (hors top 3) pour la variance
         const fillers = metrics.topCandidates.slice(3, 10).map(c => c.number);
         
         const shuffledFillers = fillers.sort(() => 0.5 - Math.random());
@@ -267,7 +267,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         </div>
     );
     
-    if (!metrics) return <div className="p-20 text-center text-slate-400 italic">Historique insuffisant.</div>;
+    if (!metrics) return <div className="p-20 text-center text-slate-400 italic">Historique insuffisant pour l'orchestration.</div>;
 
     return (
         <div className="space-y-10 animate-fade-in pb-20 w-full overflow-hidden">
@@ -341,10 +341,10 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
                     {metrics.topCandidates.slice(0, 10).map((cand, idx) => {
                         const details = metrics.candidatesDetails?.[cand.number] || { markov: 0, structural: 0, machine: 0, trend: 0 };
-                        const total = cand.score; // Approx total score for scaling bars relative to each other (or use local sum)
-                        const localTotal = details.markov + details.structural + details.machine + details.trend || 1;
+                        // Calcul d'un total local pour les pourcentages relatifs
+                        const localTotal = (details.markov + details.structural + details.machine + details.trend) || 1;
                         
-                        // Normalisation locale pour la barre
+                        // Normalisation pour la barre visuelle
                         const pMarkov = (details.markov / localTotal) * 100;
                         const pStruct = (details.structural / localTotal) * 100;
                         const pMachine = (details.machine / localTotal) * 100;

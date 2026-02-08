@@ -15,10 +15,13 @@ interface ErrorBoundaryState {
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
 export class LocalErrorBoundary extends React.Component<Props, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: null,
-  };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
   // Standard static method for error boundaries
   public static getDerivedStateFromError(error: Error): ErrorBoundaryState {

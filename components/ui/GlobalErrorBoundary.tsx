@@ -15,10 +15,13 @@ interface ErrorBoundaryState {
  * Captures critical failures and provides a recovery path.
  */
 export class GlobalErrorBoundary extends React.Component<Props, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: null,
-  };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null,
+    };
+  }
 
   public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
