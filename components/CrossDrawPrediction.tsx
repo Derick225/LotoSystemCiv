@@ -2,18 +2,19 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNexus } from './NexusProvider';
 import type { DrawResult } from '../types';
-import { analyzeMigrationFlux, type InterGameHeat } from '../services/interGameService';
+import { analyzeMigrationFlux, analyzeIntraDayResonance, type InterGameHeat, type DayFlowMetrics } from '../services/interGameService';
 import { NumberBall } from './NumberBall';
 import { 
     Zap, Activity, TrendingUp, 
     RefreshCw, Layers, Microscope, 
     ShieldCheck, Binary, Waves, 
-    ArrowDownRight, Cpu, Globe, ArrowRight, Share2, AlertOctagon
+    ArrowDownRight, Cpu, Globe, ArrowRight, Share2, AlertOctagon, Sun, Moon
 } from 'lucide-react';
 import { 
     Radar, RadarChart, PolarGrid, 
     PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip
 } from 'recharts';
+import { DRAW_SCHEDULE } from '../constants';
 
 interface CrossDrawPredictionProps {
     currentDrawName: string;
@@ -21,11 +22,11 @@ interface CrossDrawPredictionProps {
 
 interface SelfCorrelationMetrics {
     drawName: string;
-    machineLeakage: number; // T-1 Machine -> T Winner
-    repetitionRate: number; // T-1 Winner -> T Winner
-    neighborForce: number;  // T-1 -> T Neighbor
-    mirrorForce: number;    // T-1 -> T Mirror
-    jumpRate: number;      // T-2 -> T Winner
+    machineLeakage: number;
+    repetitionRate: number;
+    neighborForce: number;
+    mirrorForce: number;
+    jumpRate: number;
     attractors: number[];
     stability: number;
 }
@@ -34,17 +35,32 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
     const { history, loading: nexusLoading } = useNexus();
     const [metrics, setMetrics] = useState<SelfCorrelationMetrics | null>(null);
     const [migration, setMigration] = useState<InterGameHeat | null>(null);
+    const [dayFlow, setDayFlow] = useState<DayFlowMetrics | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // Déterminer le jour du tirage pour l'analyse intra-day
+    const getDayName = (draw: string) => {
+        for (const [day, schedule] of Object.entries(DRAW_SCHEDULE)) {
+            if (Object.values(schedule).includes(draw)) return day;
+        }
+        return 'Lundi'; // Default
+    };
 
     useEffect(() => {
         const load = async () => {
             if (history.length >= 15) {
-                // Parallélisation des analyses interne et externe
                 setLoading(true);
                 try {
                     await analyzeSelfCorrelation();
-                    const migrationData = await analyzeMigrationFlux(currentDrawName);
-                    setMigration(migrationData);
+                    
+                    const dayName = getDayName(currentDrawName);
+                    const [mig, flow] = await Promise.all([
+                        analyzeMigrationFlux(currentDrawName),
+                        analyzeIntraDayResonance(currentDrawName, dayName)
+                    ]);
+                    
+                    setMigration(mig);
+                    setDayFlow(flow);
                 } catch (e) {
                     console.error("CrossDraw Analysis Error", e);
                 } finally {
@@ -58,7 +74,6 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
     }, [currentDrawName, history, nexusLoading]);
 
     const analyzeSelfCorrelation = async () => {
-        // 1. Analyse des vecteurs internes (Auto-corrélation)
         let machineToWinner = 0;
         let winnersToWinners = 0;
         let neighbors = 0;
@@ -169,6 +184,37 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                     </div>
                 </div>
 
+                {/* Day Flow Section (New) */}
+                {dayFlow && dayFlow.dayMomentum > 0 && (
+                    <div className="mt-8 p-6 bg-gradient-to-r from-amber-900/20 to-slate-900 rounded-[2.5rem] border border-amber-500/20 relative overflow-hidden">
+                         <div className="flex items-center gap-4 mb-4 relative z-10">
+                            <div className="p-2 bg-amber-500/20 rounded-xl text-amber-400"><Sun size={20}/></div>
+                            <div>
+                                <h4 className="text-sm font-black text-white uppercase tracking-widest">Résonance Journalière</h4>
+                                <p className="text-[10px] text-slate-400 font-bold">Influence des tirages précédents d'aujourd'hui</p>
+                            </div>
+                         </div>
+                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
+                             <div className="bg-slate-950/50 p-4 rounded-2xl border border-white/5">
+                                 <div className="text-[9px] text-slate-500 uppercase font-black mb-1">Momentum Jour</div>
+                                 <div className="text-2xl font-black text-amber-500">{dayFlow.dayMomentum}%</div>
+                             </div>
+                             <div className="bg-slate-950/50 p-4 rounded-2xl border border-white/5 col-span-2">
+                                 <div className="text-[9px] text-slate-500 uppercase font-black mb-2">Échos (Répétitions)</div>
+                                 <div className="flex gap-2">
+                                     {dayFlow.echoNumbers.length > 0 ? dayFlow.echoNumbers.map(n => (
+                                         <NumberBall key={n} number={n} size="sm" />
+                                     )) : <span className="text-xs text-slate-500 italic">Aucun écho détecté</span>}
+                                 </div>
+                             </div>
+                             <div className="bg-slate-950/50 p-4 rounded-2xl border border-white/5">
+                                 <div className="text-[9px] text-slate-500 uppercase font-black mb-1">Dizaine Chaude</div>
+                                 <div className="text-xl font-black text-white">{dayFlow.hotDecades[0] ? `${dayFlow.hotDecades[0]}0s` : '--'}</div>
+                             </div>
+                         </div>
+                    </div>
+                )}
+
                 <div className="grid lg:grid-cols-12 gap-8 mt-12">
                     {/* Radar d'Influence (Left) */}
                     <div className="lg:col-span-5 bg-black/40 rounded-[2.5rem] p-6 border border-white/5 flex flex-col items-center">
@@ -197,7 +243,7 @@ export const CrossDrawPrediction: React.FC<CrossDrawPredictionProps> = ({ curren
                                 <div className="p-3 bg-emerald-500/20 rounded-2xl text-emerald-400"><Globe size={24}/></div>
                                 <div className="flex-1 relative z-10">
                                     <div className="flex justify-between items-center mb-1">
-                                        <h4 className="text-xs font-black text-white uppercase tracking-widest">Influence Externe Détectée</h4>
+                                        <h4 className="text-xs font-black text-white uppercase tracking-widest">Influence Externe (J-1)</h4>
                                         <span className="text-[9px] font-black bg-emerald-500 text-slate-900 px-2 py-0.5 rounded">
                                             {migration.correlationFactor}% CORR
                                         </span>

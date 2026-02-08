@@ -4,16 +4,17 @@ import { calculateACValue, calculateRegularity } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 export const getDefaultWeights = (): AlgoWeights => ({
-    frequency: 0.15, // Augmenté pour la stabilité
-    gap: 0.20,       // Crucial pour les jeux de tirage
-    spectral: 0.10,
-    fractal: 0.05,
-    markov: 0.15,
-    poisson: 0.15,
-    momentum: 0.05,
-    equilibrium: 0.05,
+    // Configuration optimisée pour 5/90 Loto Bonheur/Ghana
+    frequency: 0.25,  // Augmenté : La récurrence est forte dans ce type de loterie
+    markov: 0.20,     // Augmenté : Les suites logiques sont fréquentes
+    gap: 0.15,        // Modéré : Les écarts sont importants mais moins que la fréquence brute
+    spectral: 0.10,   // Analyse cyclique de fond
+    poisson: 0.10,    // Probabilité d'arrivée standard
+    momentum: 0.05,   // Tendance court terme
+    equilibrium: 0.05,// Retour à la moyenne
     ai_intuition: 0.05,
     decision_forest: 0.05,
+    fractal: 0.0,
     wavelet: 0.0,
     resistance: 0.0,
     spatial: 0.0,
@@ -50,18 +51,18 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeights => {
     const modified = { ...weights };
     
-    // Stratégies Professionnelles
+    // Stratégies Professionnelles 5/90
     if (profile === 'PRUDENT') {
-        // Focus sur la récurrence et la loi des grands nombres
-        modified.frequency = (modified.frequency || 0.1) * 3.0;
+        // Focus sur la récurrence et la loi des grands nombres (Sécurité)
+        modified.frequency = (modified.frequency || 0.25) * 2.0;
         modified.equilibrium = (modified.equilibrium || 0.05) * 2.0;
-        modified.gap = 0; // On évite les écarts risqués
-        modified.markov = 0.1;
+        modified.gap = 0.05; // On évite les écarts risqués
+        modified.markov = 0.15;
     } else if (profile === 'AUDACIOUS') {
         // Chasse aux écarts et ruptures de tendance
-        modified.gap = (modified.gap || 0.15) * 3.0;
-        modified.poisson = (modified.poisson || 0.2) * 1.5;
-        modified.frequency = 0.05;
+        modified.gap = (modified.gap || 0.15) * 2.5;
+        modified.poisson = (modified.poisson || 0.1) * 1.5;
+        modified.frequency = 0.1;
     } else if (profile === 'CHAOS') {
         // Recherche d'anomalies statistiques (Black Swans)
         modified.anti_consensus = 0.4;
@@ -74,8 +75,8 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
 };
 
 export const getDefaultRules = (): AdaptiveRules => ({
-    criticalZoneMin: 8,
-    criticalZoneMax: 22
+    criticalZoneMin: 12, // Ajusté pour 5/90
+    criticalZoneMax: 28
 });
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
@@ -93,22 +94,22 @@ const adaptWeightsToRegime = (baseWeights: AlgoWeights, volatilityScore: number,
     const adjusted = { ...baseWeights };
     
     // Logique de Régime Adaptatif Avancée
-    if (hurstIndex > 0.65) {
+    if (hurstIndex > 0.60) {
         // Régime Persistant (Tendance forte) -> On suit la fréquence et Markov
-        adjusted.frequency = (adjusted.frequency || 0.1) * 1.5;
-        adjusted.markov = (adjusted.markov || 0.15) * 1.5;
-        adjusted.gap = (adjusted.gap || 0.2) * 0.5;
-    } else if (hurstIndex < 0.35) {
+        adjusted.frequency = (adjusted.frequency || 0.25) * 1.3;
+        adjusted.markov = (adjusted.markov || 0.20) * 1.3;
+        adjusted.gap = (adjusted.gap || 0.15) * 0.6;
+    } else if (hurstIndex < 0.40) {
         // Régime Anti-Persistant (Retour à la moyenne) -> On joue les écarts et l'équilibre
-        adjusted.gap = (adjusted.gap || 0.2) * 1.5;
+        adjusted.gap = (adjusted.gap || 0.15) * 1.4;
         adjusted.equilibrium = (adjusted.equilibrium || 0.05) * 1.5;
-        adjusted.frequency = (adjusted.frequency || 0.1) * 0.5;
+        adjusted.frequency = (adjusted.frequency || 0.25) * 0.7;
     }
 
-    if (volatilityScore > 70) {
+    if (volatilityScore > 65) {
         // Haute Volatilité -> Augmenter la sensibilité aux signaux courts (Momentum, Spectral)
-        adjusted.momentum = (adjusted.momentum || 0.05) * 2.0;
-        adjusted.spectral = (adjusted.spectral || 0.1) * 1.5;
+        adjusted.momentum = (adjusted.momentum || 0.05) * 1.8;
+        adjusted.spectral = (adjusted.spectral || 0.1) * 1.4;
     }
 
     return normalizeWeights(adjusted);
