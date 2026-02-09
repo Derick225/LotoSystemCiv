@@ -1,3 +1,4 @@
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult, SpectralMetric, FractalMetric, NumberRegularity } from '../types';
@@ -14,6 +15,8 @@ import {
 import { calculateSpatialMetrics } from '../services/spatialService';
 import { calculateOrchestrationScores } from '../services/orchestrationService';
 import { runDecisionForest } from '../services/decisionTreeService';
+import { analyzeIntraDayResonance } from '../services/interGameService';
+import { DRAW_SCHEDULE } from '../constants';
 import { useEffect } from 'react';
 
 export const lotteryKeys = {
@@ -180,6 +183,14 @@ export const useDeleteDrawMutation = (drawName: string) => {
   });
 };
 
+// Helper pour trouver le jour
+const getDayName = (draw: string): string => {
+    for (const [day, schedule] of Object.entries(DRAW_SCHEDULE)) {
+        if (Object.values(schedule).includes(draw)) return day;
+    }
+    return 'Lundi'; // Default
+};
+
 // --- NOUVEAU : HOOK ANALYTIQUE HPC ---
 // Encapsule tous les calculs lourds dans un Worker Query
 export const useNexusAnalytics = (drawName: string, history: DrawResult[] | undefined) => {
@@ -206,6 +217,11 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
             const vol = calculateVolatility(history);
             const reg = detectGameRegime(history);
 
+            // Calcul Résonance Journalière (Intra-Day)
+            // Détecte les échos du matin pour les tirages du soir
+            const dayName = getDayName(drawName);
+            const dayMetrics = await analyzeIntraDayResonance(drawName, dayName);
+
             // Construction Symbiotique
             const forestVotesMap: Record<number, number> = {};
             forestRes.votes.forEach(v => forestVotesMap[v.candidate] = v.score);
@@ -216,7 +232,8 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
                 orchestrationBoosts: {} as Record<number, number>,
                 spectralVeto: spec.filter(s => s.energy < 10).map(s => s.number),
                 temporalTarget: null,
-                forestVotes: forestVotesMap
+                forestVotes: forestVotesMap,
+                dayMetrics // Injection ici
             };
 
             Object.entries(orchScores).forEach(([n, score]) => {

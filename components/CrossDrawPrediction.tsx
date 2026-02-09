@@ -1,8 +1,8 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNexus } from './NexusProvider';
-import type { DrawResult } from '../types';
-import { analyzeMigrationFlux, analyzeIntraDayResonance, type InterGameHeat, type DayFlowMetrics } from '../services/interGameService';
+import type { DrawResult, InterGameHeat, DayFlowMetrics } from '../types';
+import { analyzeMigrationFlux, analyzeIntraDayResonance } from '../services/interGameService';
 import { NumberBall } from './NumberBall';
 import { 
     Zap, Activity, TrendingUp, 

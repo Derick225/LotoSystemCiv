@@ -1,22 +1,8 @@
 
 import { fetchResults } from './lotteryService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import type { DrawResult } from '../types';
+import type { DrawResult, InterGameHeat, DayFlowMetrics } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
-
-export interface InterGameHeat {
-    sourceGame: string;
-    targetGame: string;
-    correlationFactor: number; 
-    migratingNumbers: number[];
-}
-
-export interface DayFlowMetrics {
-    dayMomentum: number; // Force de la tendance journalière (0-100)
-    echoNumbers: number[]; // Numéros qui se répètent aujourd'hui
-    hotDecades: number[]; // Dizaines chaudes aujourd'hui
-    morningToEveningBias: number; // % de transfert Matin -> Soir
-}
 
 /**
  * Analyse si les résultats d'un jeu influencent mathématiquement le suivant (Translocation).
@@ -128,6 +114,8 @@ export const analyzeIntraDayResonance = async (targetDrawName: string, dayName: 
     if (dateRef.includes('/')) {
         const [d, m, y] = dateRef.split('/');
         dbDateRef = `${y}-${m}-${d}`;
+    } else if (dateRef.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        dbDateRef = dateRef;
     }
 
     const { data: dayResults } = await supabase

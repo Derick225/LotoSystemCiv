@@ -155,9 +155,15 @@ export const generateMasterPrediction = async (
             markovScore += (strength * 100);
         });
 
-        // 3. Orchestration & Spatial (Symbiose)
+        // 3. Orchestration, Spatial & Intra-Day (Symbiose)
         let orchestrationBonus = symbioticContext?.orchestrationBoosts?.[num] ? symbioticContext.orchestrationBoosts[num] * 15 : 0;
         let spatialBonus = symbioticContext?.spatialHotZones?.includes(num) ? 20 : 0;
+        
+        // Bonus pour "Echo Journalier" (Intra-Day)
+        let dayEchoBonus = 0;
+        if (symbioticContext?.dayMetrics?.echoNumbers?.includes(num)) {
+            dayEchoBonus = 25; // Bonus fort pour un numéro qui répète dans la journée
+        }
         
         // 4. Momentum (Vélocité récente)
         const recentFreq = history.slice(0, 10).filter(h => h.gagnants.includes(num)).length;
@@ -178,7 +184,8 @@ export const generateMasterPrediction = async (
             ai_intuition: 50, // Réservé pour injection externe
             fractal: (metrics?.fractal?.find((f:any) => f.number === num)?.hurst || 0.5) * 100,
             orchestration: orchestrationBonus, 
-            spatial: spatialBonus
+            spatial: spatialBonus,
+            day_echo: dayEchoBonus
         };
 
         // Agrégation Pondérée
@@ -191,7 +198,8 @@ export const generateMasterPrediction = async (
             weightedSum += activatedScore * weightVal;
         });
 
-        const finalScore = weightedSum + orchestrationBonus + spatialBonus;
+        // Somme finale avec les bonus contextuels
+        const finalScore = weightedSum + orchestrationBonus + spatialBonus + dayEchoBonus;
         
         return { num, score: finalScore, breakdown: nBreakdown };
     });
@@ -214,6 +222,7 @@ export const generateMasterPrediction = async (
 
     let analysisText = `Nexus Kernel v12. `;
     if (volScore > 65) analysisText += `Régime Turbulent détecté (${volScore}%). `;
+    if (symbioticContext?.dayMetrics?.dayMomentum && symbioticContext.dayMetrics.dayMomentum > 40) analysisText += `Résonance journalière active. `;
     if (riskProfile === 'PRUDENT') analysisText += "Filtrage conservateur activé. ";
     if (riskProfile === 'AUDACIOUS') analysisText += "Amplification des écarts critiques. ";
     analysisText += `Cohérence vectorielle : ${Math.round(sorted[0].score)}/100.`;
