@@ -137,9 +137,9 @@ export const analyzeIntraDayResonance = async (targetDrawName: string, dayName: 
         decades[dec] = (decades[dec] || 0) + 1;
     });
 
-    // Numéros sortis plus d'une fois aujourd'hui
+    // Numéros sortis au moins une fois aujourd'hui (résonance potentielle)
     const echoNumbers = Object.entries(counts)
-        .filter(([_, c]) => c >= 2)
+        .filter(([_, c]) => c >= 1)
         .map(([n]) => parseInt(n));
 
     // Dizaines chaudes
@@ -149,13 +149,14 @@ export const analyzeIntraDayResonance = async (targetDrawName: string, dayName: 
         .map(([d]) => parseInt(d));
 
     // Calcul du Momentum (Force de répétition)
-    const repetitionRate = echoNumbers.length / (dayResults.length * 5); // Ratio
-    const dayMomentum = Math.min(100, Math.round(repetitionRate * 500)); // Scale 0-100
+    // Plus il y a de numéros qui se répètent, plus le momentum est fort
+    const multipleOccurrences = Object.values(counts).filter(c => c >= 2).length;
+    const dayMomentum = Math.min(100, Math.round(multipleOccurrences * 20 + echoNumbers.length * 5)); 
 
     return {
         dayMomentum,
         echoNumbers,
         hotDecades,
-        morningToEveningBias: dayMomentum // Simplifié pour l'instant
+        morningToEveningBias: dayMomentum 
     };
 };

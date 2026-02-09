@@ -245,6 +245,13 @@ export interface DayFlowMetrics {
     morningToEveningBias: number;
 }
 
+export interface InterGameHeat {
+    sourceGame: string;
+    targetGame: string;
+    correlationFactor: number;
+    migratingNumbers: number[];
+}
+
 export interface SymbioticContext {
     spatialHotZones: number[];
     orchestrationBoosts: Record<number, number>;
@@ -546,11 +553,4 @@ export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     timestamp: number;
-}
-
-export interface InterGameHeat {
-    sourceGame: string;
-    targetGame: string;
-    correlationFactor: number;
-    migratingNumbers: number[];
 }
