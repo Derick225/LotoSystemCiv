@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration, GenerateContentResponse } from "@google/genai";
 
 export const config = {
   runtime: 'edge',
@@ -60,27 +59,38 @@ function cleanJson(text: string) {
     return text.replace(/```json\n?|\n?```/g, '').trim();
 }
 
-async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any) {
+async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any): Promise<GenerateContentResponse> {
     const fallbackModel = "gemini-3-flash-preview";
     const config: any = { ...params.config };
     
+    // Activation du mode Thinking pour les modèles Pro (Raisonnement profond)
     if (primaryModel.includes('pro')) {
-        config.thinkingConfig = { thinkingBudget: 4000 }; 
+        config.thinkingConfig = { thinkingBudget: 4096 }; 
     }
 
     try {
+        console.log(`[Oracle] Execution sur ${primaryModel}...`);
         return await genAI.models.generateContent({ 
             ...params, 
             model: primaryModel,
             config 
         });
     } catch (e: any) {
+        console.warn(`[Oracle] Echec sur ${primaryModel}:`, e.message);
         const isQuotaError = e.status === 429 || 
-                             (e.message && (e.message.includes('429') || e.message.includes('quota')));
+                             (e.message && (e.message.includes('429') || e.message.includes('quota') || e.message.includes('resource_exhausted')));
         
         if (isQuotaError && primaryModel !== fallbackModel) {
-            console.warn(`Quota exceeded for ${primaryModel}. Switching to fallback.`);
-            return await genAI.models.generateContent({ ...params, model: fallbackModel });
+            console.warn(`[Oracle] Fallback vers ${fallbackModel}.`);
+            // On retire thinkingConfig pour le modèle Flash s'il ne le supporte pas ou pour économiser
+            const fallbackConfig = { ...config };
+            delete fallbackConfig.thinkingConfig;
+            
+            return await genAI.models.generateContent({ 
+                ...params, 
+                model: fallbackModel,
+                config: fallbackConfig
+            });
         }
         throw e;
     }
@@ -91,24 +101,29 @@ export default async function handler(req: Request) {
 
   try {
     const { task, drawName, history, metrics, dataset, modelType, userInput, currentContext } = await req.json();
-    const apiKey = process.env.API_KEY;
     
-    if (!apiKey) throw new Error("API_KEY manquante.");
+    // Sécurité: Utilisation exclusive de process.env.API_KEY
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) throw new Error("API_KEY manquante. Vérifiez la configuration serveur.");
 
     const genAI = new GoogleGenAI({ apiKey });
 
+    // --- TÂCHE 1 : CHAT TACTIQUE ---
     if (task === "chat") {
-        const systemPrompt = `Tu es l'Agent Tactique Nexus Apex v13.0, l'intelligence suprême de LotoPro Platinum.
-        Ton rôle est d'assister les utilisateurs dans leur prise de décision décisionnelle.
-        Contexte actuel pour ${drawName} :
-        - Régime détecté : ${currentContext?.regime || 'Inconnu'}
-        - Prédiction IA : ${JSON.stringify(currentContext?.lastPrediction)}
-        - Capital utilisateur (Bankroll) : ${currentContext?.bankroll ? currentContext.bankroll + ' FCFA' : 'Non spécifié'}
+        const systemPrompt = `Tu es l'Agent Tactique Nexus Apex v14.0, une IA financière experte en loterie stochastique.
         
-        Tu as accès à des outils pour piloter l'interface (Forensic, Architecte, Historique, Signaux).
-        Si l'utilisateur demande une analyse, une génération de ticket ou un audit, UTILISE LES OUTILS fournis (Function Calling).
-        Si le capital est bas (< 5000 FCFA), conseille impérativement la prudence et des mises réduites.
-        Ton ton est industriel, précis et ultra-professionnel. Pas de blabla inutile.`;
+        CONTEXTE ACTUEL :
+        - Tirage Cible : ${drawName}
+        - Régime de Jeu : ${currentContext?.regime || 'Inconnu'} (Hurst Index)
+        - Dernière Prédiction : ${JSON.stringify(currentContext?.lastPrediction || [])}
+        - Capital (Bankroll) : ${currentContext?.bankroll ? currentContext.bankroll + ' FCFA' : 'Non défini'}
+
+        DIRECTIVES :
+        1. Analyse la demande de l'opérateur avec froideur et précision mathématique.
+        2. Si le capital est faible (< 5000 FCFA), impose une stratégie défensive (Kelly Fractionnel).
+        3. UTILISE LES OUTILS (Function Calling) pour piloter l'interface si l'utilisateur demande une action (analyse, audit, ticket).
+        4. Ne donne jamais de certitudes ("Garantie 100%"), parle en probabilités et vecteurs de risque.
+        5. Sois concis. Tu es un outil professionnel.`;
 
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: userInput,
@@ -126,8 +141,27 @@ export default async function handler(req: Request) {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
 
+    // --- TÂCHE 2 : ANALYSE PROFONDE (INTELLIGENCE TAB) ---
     } else if (task === "analyze") {
-      const prompt = `Rôle: Oracle Nexus Platinum. Analyse du tirage "${drawName}". Historique: ${JSON.stringify(history.slice(0, 15))}. Effectue une analyse stochastique profonde incluant l'entropie spectrale.`;
+      const prompt = `Rôle: Oracle Nexus Platinum. Analyse Stochastique pour "${drawName}".
+      
+      DONNÉES D'ENTRÉE :
+      - Historique Récent : ${JSON.stringify(history.slice(0, 10))}
+      - Métriques HPC : ${JSON.stringify(metrics)} (Entropie, Hurst, Chi2)
+      
+      MISSION :
+      Génère un rapport d'intelligence stratégique structuré. Détecte les anomalies de symétrie et les ruptures de séquence.
+      
+      FORMAT DE SORTIE (JSON STRICT) :
+      {
+        "logicalAnalysis": "Analyse textuelle détaillée (Markdown autorisé)",
+        "patternType": "Nom du pattern (ex: 'Rupture de Tendance', 'Cycle Harmonique')",
+        "nextSequence": "Description courte de la projection",
+        "anomalies": ["Liste", "des", "anomalies"],
+        "strategicAdvice": "Conseil de mise concret",
+        "suggestedFocus": [12, 45, ...], // 5 vecteurs prioritaires
+        "intuitionScore": 85 // Confiance 0-100
+      }`;
       
       const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
         contents: prompt,
@@ -148,12 +182,24 @@ export default async function handler(req: Request) {
             }
         }
       });
-      return new Response(JSON.stringify(JSON.parse(cleanJson(response.text) || '{}')), {
+      return new Response(JSON.stringify(JSON.parse(cleanJson(response.text || '{}'))), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
 
+    // --- TÂCHE 3 : KERNEL PYTHON (SIMULATION DATA SCIENCE) ---
     } else if (task === "python_kernel") {
-        const prompt = `Simule un script Python scientifique (${modelType}) sur : ${JSON.stringify(dataset.slice(0, 40))}.`;
+        const prompt = `Agis comme un environnement Jupyter Notebook Senior Data Science.
+        Tâche : Générer une analyse prédictive avancée en Python pour une série temporelle de loto.
+        Modèle : ${modelType} (ex: XGBoost, LSTM, Poisson).
+        Données : ${JSON.stringify(dataset.slice(0, 20))}.
+        
+        Génère :
+        1. Le code Python (utilisant pandas, numpy, scipy, sklearn) qui aurait produit l'analyse.
+        2. La sortie standard simulée (stdout) de ce script.
+        3. Les résultats structurés (vecteurs trouvés).
+        
+        Format JSON strict.`;
+
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: prompt,
             config: { 
@@ -177,16 +223,42 @@ export default async function handler(req: Request) {
                 }
             }
         });
-        return new Response(JSON.stringify(JSON.parse(cleanJson(response.text) || '{}')), {
+        return new Response(JSON.stringify(JSON.parse(cleanJson(response.text || '{}'))), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+    }
+
+    // --- TÂCHE 4 : GÉNÉRATION NARRATIVE ---
+    else if (task === "narrative") {
+        const prompt = `Rédige un "Bulletin Météo Stochastique" pour le tirage "${drawName}".
+        Métriques : ${JSON.stringify(metrics)}.
+        Ton : Expert, concis, style "Finance de marché".`;
+        
+        const response = await generateWithFallback(genAI, "gemini-3-flash-preview", {
+             contents: prompt,
+             config: {
+                 responseMimeType: "application/json",
+                 responseSchema: {
+                     type: Type.OBJECT,
+                     properties: {
+                         summary: { type: Type.STRING },
+                         technicalVerdict: { type: Type.STRING },
+                         riskAssessment: { type: Type.STRING }
+                     }
+                 }
+             }
+        });
+        return new Response(JSON.stringify(JSON.parse(cleanJson(response.text || '{}'))), {
+             headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
     }
 
     return new Response(JSON.stringify({ error: "Task not found" }), { status: 404, headers: corsHeaders });
 
   } catch (error: any) {
+    console.error("[Oracle API Error]", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message || "Internal Server Error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

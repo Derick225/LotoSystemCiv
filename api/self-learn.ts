@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
@@ -9,31 +10,47 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const WEIGHT_KEYS = [
+// Poids optimisables par l'algorithme
+const GENOME_KEYS = [
     'frequency', 'gap', 'spectral', 'markov', 'wavelet', 
     'momentum', 'equilibrium', 'orchestration', 'anti_consensus'
 ];
 
 /**
- * FITNESS EVALUATOR v15.5 (ULTRA-FAST)
- * Calcule l'efficacité des poids contre la matrice de signal pré-calculée.
+ * FITNESS FUNCTION v16.0
+ * Évalue la performance d'un jeu de poids sur l'historique récent.
+ * Récompense: Précision (Hits).
+ * Pénalité: Bruit (Faux positifs).
  */
-const evaluateGenome = (weights: any, signalMatrix: Record<number, any>) => {
-    let fitness = 0;
+const evaluateGenome = (weights: any, signalMatrix: Record<number, any>, targets: number[]) => {
+    let score = 0;
+    let candidates = [];
+    
+    // Simulation de prédiction pour ce génome
     for (let i = 1; i <= 90; i++) {
         const sig = signalMatrix[i];
         if (!sig) continue;
 
-        const score = 
+        const val = 
             (sig.freq * (weights.frequency || 0.1)) +
-            (sig.isGapMatch ? (weights.gap || 0.2) * 40 : 0) +
-            (sig.markov * (weights.markov || 0.1) * 15) +
-            (sig.momentum * (weights.momentum || 0.05) * 8);
-        
-        if (sig.hitRecently) fitness += score;
-        else fitness -= score * 0.12; // Pénalité de faux positif
+            (sig.isGapMatch ? (weights.gap || 0.2) * 50 : 0) +
+            (sig.markov * (weights.markov || 0.1) * 20) +
+            (sig.momentum * (weights.momentum || 0.05) * 10);
+            
+        candidates.push({ n: i, v: val });
     }
-    return fitness;
+    
+    // On prend le Top 10
+    candidates.sort((a,b) => b.v - a.v);
+    const top10 = candidates.slice(0, 10).map(c => c.n);
+    
+    // Calcul des hits
+    const hits = top10.filter(n => targets.includes(n)).length;
+    
+    // Score non-linéaire (récompense exponentiellement les hits)
+    score += Math.pow(hits, 2) * 100;
+    
+    return score;
 };
 
 export default async function handler(req: Request) {
@@ -43,88 +60,116 @@ export default async function handler(req: Request) {
     const startTime = Date.now();
     const { drawName } = await req.json();
     
-    const supabase = createClient(
-        process.env.VITE_SUPABASE_URL || '',
-        process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-    );
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if(!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante");
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { data: history } = await supabase
+    // Récupération Historique
+    const { data: rawHistory } = await supabase
         .from('draw_results')
         .select('gagnants')
         .eq('draw_name', drawName)
         .order('date', { ascending: false })
         .limit(60);
 
-    if (!history || history.length < 20) throw new Error("Dataset insuffisant");
+    const history = rawHistory as { gagnants: number[] }[] | null;
 
-    // PHASE 1: PRÉ-CALCUL DE LA MATRICE DE SIGNAL (O(H))
+    if (!history || history.length < 30) throw new Error("Historique insuffisant pour l'apprentissage.");
+
+    // --- PHASE 1: PRÉPARATION DES DONNÉES (TRAINING SET) ---
+    // On utilise les tirages 10 à 60 pour prédire les tirages 0 à 10 (Validation Croisée)
+    const validationSet = history.slice(0, 10);
+    const trainingContext = history.slice(10, 60);
+
     const signalMatrix: Record<number, any> = {};
-    const recent = history.slice(0, 12); // Fenêtre de test
-    const past = history.slice(12, 60);  // Fenêtre d'apprentissage
-
+    
+    // Calcul des signaux bruts sur le contexte d'entrainement
     for (let i = 1; i <= 90; i++) {
-        const freq = past.filter(d => d.gagnants.includes(i)).length;
-        const lastIdx = past.findIndex(d => d.gagnants.includes(i));
+        const freq = trainingContext.filter(d => d.gagnants.includes(i)).length;
+        const lastIdx = trainingContext.findIndex(d => d.gagnants.includes(i));
         const gap = lastIdx === -1 ? 50 : lastIdx;
         
-        // Markov succinct
-        let markov = 0;
-        const anchors = history[12].gagnants;
-        past.slice(0, 10).forEach((d, idx) => {
-            if (d.gagnants.includes(i) && past[idx+1]?.gagnants.some(n => anchors.includes(n))) markov++;
-        });
+        // Momentum court terme
+        const momentum = trainingContext.slice(0, 5).filter(d => d.gagnants.includes(i)).length;
 
         signalMatrix[i] = {
-            freq: freq / 45,
+            freq: freq / 50, // Normalisé
             isGapMatch: gap >= 8 && gap <= 22,
-            markov: markov / 10,
-            momentum: history.slice(0, 5).filter(d => d.gagnants.includes(i)).length,
-            hitRecently: recent.some(d => d.gagnants.includes(i))
+            markov: 0.1, // Simplifié pour perf Edge
+            momentum: momentum
         };
     }
-
-    // PHASE 2: ÉVOLUTION GÉNÉTIQUE AVEC WATCHDOG (O(G*P))
-    const { data: current } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
-    let bestW = current?.weights || { frequency: 0.1, gap: 0.2 };
-    let bestScore = evaluateGenome(bestW, signalMatrix);
     
-    let population = Array(20).fill(null).map((_, i) => {
-        if (i === 0) return { ...bestW };
+    // Cibles réelles (pool des numéros sortis récemment)
+    const targets = [...new Set(validationSet.flatMap(d => d.gagnants))];
+
+    // --- PHASE 2: ÉVOLUTION (GENETIC ALGO) ---
+    const { data: current } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
+    let bestW = current?.weights || { frequency: 0.2, gap: 0.2, markov: 0.2, momentum: 0.1 };
+    let bestScore = evaluateGenome(bestW, signalMatrix, targets);
+    let improved = false;
+    
+    // Population initiale : clones mutés du meilleur actuel
+    let population = Array(25).fill(null).map((_, i) => {
+        if (i === 0) return { ...bestW }; // Elitisme
         const mutant = { ...bestW };
-        WEIGHT_KEYS.forEach(k => mutant[k] = Math.max(0.01, Math.min(1.0, (mutant[k] || 0.1) + (Math.random() - 0.5) * 0.5)));
+        // Mutation aléatoire
+        const gene = GENOME_KEYS[Math.floor(Math.random() * GENOME_KEYS.length)];
+        mutant[gene] = Math.max(0.01, Math.min(1.0, (mutant[gene] || 0.1) + (Math.random() - 0.5) * 0.3));
         return mutant;
     });
 
-    for (let g = 0; g < 50; g++) {
-        if (Date.now() - startTime > 8000) break; // Arrêt propre avant timeout 504
+    const MAX_TIME_MS = 8000; // Watchdog Edge Function
 
-        const scored = population.map(w => ({ w, s: evaluateGenome(w, signalMatrix) }))
-            .sort((a, b) => b.s - a.s);
+    for (let g = 0; g < 40; g++) {
+        if (Date.now() - startTime > MAX_TIME_MS) break;
+
+        // Évaluation
+        const scored = population.map(w => ({ w, s: evaluateGenome(w, signalMatrix, targets) }));
+        scored.sort((a, b) => b.s - a.s);
         
         if (scored[0].s > bestScore) {
             bestScore = scored[0].s;
             bestW = scored[0].w;
+            improved = true;
         }
 
-        const elite = scored.slice(0, 4).map(x => x.w);
-        population = [...elite];
-        while(population.length < 20) {
-            const p = elite[Math.floor(Math.random() * elite.length)];
-            const child = { ...p };
-            const k = WEIGHT_KEYS[Math.floor(Math.random() * WEIGHT_KEYS.length)];
-            child[k] = Math.max(0.01, Math.min(1.0, (child[k] || 0.1) + (Math.random() - 0.5) * 0.2));
+        // Sélection & Reproduction
+        const survivors = scored.slice(0, 5).map(x => x.w);
+        population = [...survivors]; // Garde les meilleurs
+
+        while(population.length < 25) {
+            const parent = survivors[Math.floor(Math.random() * survivors.length)];
+            const child = { ...parent };
+            
+            // Mutation adaptative
+            const mutationRate = 0.2 * (1 - (g/40)); // Diminue avec le temps
+            if (Math.random() < 0.7) {
+                const gene = GENOME_KEYS[Math.floor(Math.random() * GENOME_KEYS.length)];
+                child[gene] = Math.max(0.01, Math.min(1.0, (child[gene] || 0.1) + (Math.random() - 0.5) * mutationRate));
+            }
             population.push(child);
         }
     }
 
-    // PHASE 3: PERSISTANCE
-    await supabase.from('algo_weights').upsert({ 
-        draw_name: drawName, 
-        weights: bestW, 
-        updated_at: new Date().toISOString() 
-    });
+    // --- PHASE 3: PERSISTANCE ---
+    if (improved) {
+        await supabase.from('algo_weights').upsert({ 
+            draw_name: drawName, 
+            weights: bestW, 
+            updated_at: new Date().toISOString() 
+        });
+    }
 
-    return new Response(JSON.stringify({ success: true, improved: true, weights: bestW }), { 
+    return new Response(JSON.stringify({ 
+        success: true, 
+        improved, 
+        weights: bestW,
+        delta: improved ? ((evaluateGenome(bestW, signalMatrix, targets) - evaluateGenome(current?.weights || {}, signalMatrix, targets)) / 10).toFixed(1) : "0"
+    }), { 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
 
