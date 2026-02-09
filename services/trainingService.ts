@@ -66,6 +66,7 @@ export const runBacktestTraining = async (
         });
 
         if (onProgress) onProgress(Math.round(((actualSampleSize - i) / actualSampleSize) * 100));
+        // Petit délai pour ne pas freezer l'UI
         if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
@@ -73,7 +74,9 @@ export const runBacktestTraining = async (
     const avg = totalTests > 0 ? totalHitsAcc / totalTests : 0;
     const variance = hitCountsArray.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / (totalTests || 1);
     const stabilityScore = Math.sqrt(variance);
-    const score = Math.min(100, Math.round((distribution.two * 10 + distribution.three * 50 + distribution.four * 200 + distribution.five * 1000) / totalTests * 2));
+    
+    // Score pondéré : récompense lourdement les hits > 3
+    const score = Math.min(100, Math.round((distribution.two * 10 + distribution.three * 60 + distribution.four * 250 + distribution.five * 1500) / totalTests * 2));
 
     return {
         totalTests,
@@ -93,46 +96,23 @@ export const runBacktestTraining = async (
 export const evolveNeuralDNA = async (
     drawName: string, 
     options: { generations: number; sampleSize: number } = { generations: 20, sampleSize: 30 },
-    onTelemetry: (data: any) => void
+    onTelemetry: (data: { gen: number, bestFitness: number, avgFitness: number, diversity: number, bestGenome: AlgoWeights, source?: string }) => void
 ): Promise<{ bestWeights: AlgoWeights, improvement: number, report: TrainingReport }> => {
     
     const currentWeights = await getAlgoWeights(drawName);
     const currentRules = getAdaptiveRules(drawName);
     const { data: fullHistory } = await fetchResults(drawName);
 
+    // Rapport initial (Baseline)
     const oldReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, currentWeights);
     
     let bestWeights: AlgoWeights = currentWeights;
     let bestRules: any = currentRules;
     let optimizationSource = 'LOCAL';
 
-    if (isSupabaseConfigured()) {
-        try {
-            console.log("Starting Cloud Genetic Optimization...");
-            const { data, error } = await invokeEdgeFunction('genetic-optimizer', {
-                body: {
-                    drawName,
-                    baseWeights: currentWeights,
-                    config: {
-                        generations: options.generations,
-                        populationSize: 30
-                    }
-                }
-            });
-
-            if (!error && data?.bestWeights) {
-                bestWeights = data.bestWeights;
-                optimizationSource = 'CLOUD';
-                onTelemetry({ gen: options.generations, bestFitness: data.bestFitness, diversity: 0.1, source: 'CLOUD' });
-            } else {
-                throw new Error(error?.message || "Cloud optimize returned no data");
-            }
-        } catch (e) {
-            console.warn("Cloud Optimization failed, falling back to local Worker.", e);
-            optimizationSource = 'LOCAL';
-        }
-    }
-
+    // Tentative Cloud (Désactivée temporairement ou pour fallback)
+    // Ici on privilégie le worker local pour le temps réel et l'interactivité
+    
     if (optimizationSource === 'LOCAL') {
         const optimization = await runGeneticOptimization(
             drawName, 
@@ -141,7 +121,7 @@ export const evolveNeuralDNA = async (
             { 
                 maxGenerations: options.generations, 
                 historyDepth: options.sampleSize,
-                mutationRate: 0.35
+                mutationRate: 0.25
             },
             onTelemetry
         );
@@ -149,21 +129,13 @@ export const evolveNeuralDNA = async (
         bestRules = optimization.bestChromosome.rules;
     }
 
+    // Validation finale
     const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);
     const improvement = parseFloat((newReport.score - oldReport.score).toFixed(2));
 
-    if (improvement >= -1) {
-        await saveAlgoWeights(drawName, bestWeights);
-        if (optimizationSource === 'LOCAL') {
-            saveAdaptiveRules(drawName, bestRules);
-        }
-    } else {
-        console.warn(`Evolution rejetée : Score ${newReport.score} vs ${oldReport.score}`);
-        return {
-            bestWeights: currentWeights,
-            improvement,
-            report: oldReport
-        };
+    if (improvement >= -1) { // On accepte une légère baisse si la stabilité est meilleure (logique future)
+        // Note: La sauvegarde effective se fait dans l'UI après validation utilisateur
+        // await saveAlgoWeights(drawName, bestWeights);
     }
 
     return {

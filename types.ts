@@ -80,6 +80,24 @@ export interface PredictionFeedback {
     userComment: string;
 }
 
+// --- NOUVEAUX TYPES FORENSIC ---
+
+export interface CounterfactualResult {
+    algo: string;
+    originalWeight: number;
+    optimalWeight: number;
+    potentialHits: number;
+    potentialNumbers: number[];
+    improvement: number; // % d'amélioration
+}
+
+export interface SpectralDeviation {
+    number: number;
+    predictedEnergy: number;
+    actualEnergy: number; // 100 si sorti, 0 sinon (ou une valeur dérivée des stats)
+    delta: number;
+}
+
 export interface ForensicReport {
     drawName: string;
     date: string;
@@ -93,6 +111,10 @@ export interface ForensicReport {
     entropyCollapse?: boolean;
     benfordCompliance?: number;
     evidenceLogs?: string[];
+    // New Data
+    counterfactuals?: CounterfactualResult[];
+    spectralDeviations?: SpectralDeviation[];
+    rmse?: number; // Root Mean Square Error du modèle
 }
 
 export interface ForensicEvidence {

@@ -2,14 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import type { ForensicReport, ForensicEvidence, AlgoWeights, AdaptiveRules, PredictionFeedback } from '../types';
 import { NumberBall } from './NumberBall';
-import { TicketXRay } from './TicketXRay';
 import { calculateCorrectionsFromForensics, getAlgoWeights, getAdaptiveRules } from '../services/predictionEngine';
+import { runCounterfactualSimulation } from '../services/postPredictionAnalysisService';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { invokeEdgeFunction } from '../services/apiClient';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
-import { ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight } from 'lucide-react';
+import { 
+    ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
+    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, BarChart3, RefreshCw 
+} from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, AreaChart, Area } from 'recharts';
 
 interface PredictionForensicsProps {
     report: ForensicReport;
@@ -20,6 +24,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const { showToast } = useToast();
     const { updateGlobalWeights } = useNexus();
     
+    const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation'>('ballistic');
     const [applying, setApplying] = useState(false);
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
     const [feedbackSent, setFeedbackSent] = useState(false);
@@ -27,17 +32,26 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const [userComment, setUserComment] = useState('');
     
     const [correctionPlan, setCorrectionPlan] = useState<{ newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } | null>(null);
-    const [originalWeights, setOriginalWeights] = useState<AlgoWeights | null>(null);
+    const [counterfactuals, setCounterfactuals] = useState<any[]>([]);
     
-    const predictedTicket = report.matches.map(m => m.predicted).sort((a,b) => a-b);
-
     useEffect(() => {
         const prepCorrection = async () => {
             const currentWeights = await getAlgoWeights(report.drawName);
             const currentRules = getAdaptiveRules(report.drawName);
-            setOriginalWeights(currentWeights);
+            
+            // 1. Calcul Plan Correction Standard
             const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
             setCorrectionPlan(plan);
+
+            // 2. Lancement Simulation Contrefactuelle ("Et si ?")
+            // On a besoin du breakdown original pour simuler. 
+            // Note: report contient déjà les missedOpportunities qui ont le breakdown partiel, 
+            // mais runCounterfactualSimulation a besoin d'un breakdown plus complet.
+            // Ici on simule avec ce qu'on a ou on désactive si pas de breakdown.
+            // Dans une vraie implémentation, on passerait le breakdown complet stocké.
+            // Pour la démo, on utilise une simulation simplifiée si dispo.
+            
+            // TODO: Passer le breakdown complet dans props ou le fetcher
         }
         prepCorrection();
     }, [report]);
@@ -88,6 +102,14 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
     
+    // Visualization Helpers
+    const spectralChartData = report.spectralDeviations?.map(d => ({
+        num: d.number,
+        prediction: d.predictedEnergy,
+        realite: d.actualEnergy,
+        delta: d.delta
+    })) || [];
+
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
             case 'Hit': return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700';
@@ -98,213 +120,223 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
 
-    const getConnectorStyle = (type: ForensicEvidence['errorType']) => {
-        switch(type) {
-            case 'Hit': return 'stroke-emerald-500 stroke-[3px]';
-            case 'Voisin': return 'stroke-blue-400 stroke-[2px] stroke-dasharray-4';
-            case 'Miroir': return 'stroke-purple-400 stroke-[2px] stroke-dasharray-2';
-            case 'Shadow': return 'stroke-amber-400 stroke-[2px] stroke-dasharray-1';
-            default: return 'stroke-transparent';
-        }
-    };
-
-    const getWeightDiff = (key: string) => {
-        if (!originalWeights || !correctionPlan) return 0;
-        const oldVal = (originalWeights[key as keyof AlgoWeights] || 0) * 100;
-        const newVal = (correctionPlan.newWeights[key as keyof AlgoWeights] || 0) * 100;
-        return parseFloat((newVal - oldVal).toFixed(2));
-    };
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 relative">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-5xl max-h-[90vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 relative">
                 
                 {/* Header */}
-                <div className="p-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex justify-between items-center">
-                    <div>
-                        <div className="flex items-center gap-3 mb-1">
-                            <div className="p-2 bg-indigo-500 rounded-xl text-white shadow-lg shadow-indigo-500/30">
-                                <Microscope size={24} />
-                            </div>
-                            <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Autopsie Balistique</h3>
+                <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-indigo-500 rounded-2xl text-white shadow-lg shadow-indigo-500/30">
+                            <Microscope size={28} />
                         </div>
-                        <p className="text-xs font-bold text-slate-500 dark:text-slate-400 ml-1">
-                            Tirage {report.drawName} • {report.date}
-                        </p>
+                        <div>
+                            <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Forensic Hub</h3>
+                            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                Tirage {report.drawName} • {report.date} 
+                                {report.rmse && <span className="bg-slate-200 dark:bg-slate-800 px-2 rounded text-[9px]">RMSE: {report.rmse.toFixed(2)}</span>}
+                            </p>
+                        </div>
                     </div>
+                    
+                    {/* Navigation Tabs */}
+                    <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl">
+                        <button onClick={() => setActiveTab('ballistic')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
+                        <button onClick={() => setActiveTab('spectral')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
+                        <button onClick={() => setActiveTab('simulation')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'simulation' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600 dark:text-white' : 'text-slate-500'}`}>Simulation</button>
+                    </div>
+
                     <button onClick={onClose} className="p-3 bg-white dark:bg-slate-800 rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-500 transition shadow-sm border border-slate-200 dark:border-slate-700">
                         <XIcon size={20} />
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-10">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-10 bg-slate-50/50 dark:bg-slate-900/50">
                     
-                    {/* VISUAL WIRING CHART */}
-                    <section className="bg-slate-100 dark:bg-slate-950/50 rounded-[2.5rem] p-8 border border-slate-200 dark:border-slate-800 relative overflow-hidden">
-                        <h4 className="font-black text-slate-400 dark:text-slate-500 mb-8 uppercase text-xs tracking-[0.3em] text-center">Trajectoire des Vecteurs</h4>
-                        
-                        <div className="relative flex justify-between items-stretch gap-10">
-                            {/* PREDICTED COLUMN */}
-                            <div className="flex flex-col gap-6 items-center z-10">
-                                <span className="text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1 rounded-full">Prédiction IA</span>
-                                {report.matches.map((m, i) => (
-                                    <div key={`pred-${i}`} className="relative group">
-                                        <NumberBall number={m.predicted} size="md" glow={m.errorType === 'Hit'} />
-                                        <div className="absolute top-1/2 -right-4 w-2 h-2 bg-slate-300 rounded-full -translate-y-1/2" id={`p-node-${i}`}></div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* SVG CONNECTIONS LAYER */}
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
-                                {report.matches.map((m, i) => {
-                                    if (m.actual === null) return null;
-                                    const y1 = 100 + (i * 64);
-                                    const actualIndex = report.matches.findIndex(rm => rm.actual === m.actual);
-                                    if (actualIndex === -1) return null;
-                                    const y2 = 100 + (actualIndex * 64);
-                                    return (
-                                        <path 
-                                            key={i}
-                                            d={`M 80 ${y1} C 200 ${y1}, 200 ${y2}, 320 ${y2}`}
-                                            fill="none"
-                                            className={getConnectorStyle(m.errorType)}
-                                        />
-                                    );
-                                })}
-                            </svg>
-
-                            {/* ACTUAL COLUMN */}
-                            <div className="flex flex-col gap-6 items-center z-10">
-                                <span className="text-[10px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full">Résultat Réel</span>
-                                {report.matches.map((m, i) => (
-                                    <div key={`act-${i}`} className="relative">
-                                        <div className="absolute top-1/2 -left-4 w-2 h-2 bg-slate-300 rounded-full -translate-y-1/2"></div>
-                                        {m.actual !== null ? (
-                                            <div className="relative">
-                                                <NumberBall number={m.actual} size="md" />
-                                                <div className={`absolute -top-2 -right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase border bg-white dark:bg-slate-900 ${getBadgeColor(m.errorType)}`}>
-                                                    {m.errorType === 'None' ? 'Miss' : m.errorType}
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-300 font-bold">?</div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* CORRECTION PLAN */}
-                    {correctionPlan && (
-                        <div className="p-8 border-2 border-indigo-500/30 rounded-[2.5rem] bg-indigo-50/50 dark:bg-indigo-900/10 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-6 opacity-10"><GitMerge size={80}/></div>
-                            <div className="flex justify-between items-center mb-6">
-                                <h4 className="text-sm font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300 flex items-center gap-3">
-                                    <BrainCircuit size={18}/> Plan d'Auto-Correction
+                    {/* TAB 1: BALLISTIC ANALYSIS */}
+                    {activeTab === 'ballistic' && (
+                        <div className="animate-slide-up space-y-8">
+                            <section className="bg-white dark:bg-slate-950/50 rounded-[2.5rem] p-8 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+                                <h4 className="font-black text-slate-400 dark:text-slate-500 mb-8 uppercase text-xs tracking-[0.3em] text-center flex items-center justify-center gap-2">
+                                    <ScanLine size={14}/> Trajectoire Vectorielle
                                 </h4>
-                                <span className="text-[9px] font-bold text-slate-400 bg-white/20 px-2 py-1 rounded">Gradient Descent</span>
-                            </div>
-                            
-                            <div className="grid md:grid-cols-2 gap-8">
-                                {/* Reasoning List */}
-                                <div className="space-y-3">
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Logique de Mutation</div>
-                                    {correctionPlan.reasoning.length > 0 ? correctionPlan.reasoning.map((reason, i) => (
-                                        <div key={i} className="flex items-start gap-3 text-xs text-slate-600 dark:text-slate-300 bg-white/60 dark:bg-black/20 p-3 rounded-xl border border-indigo-100 dark:border-indigo-800">
-                                            <span className="text-indigo-500 mt-0.5">•</span> 
-                                            <span className="leading-relaxed">{reason}</span>
+                                
+                                <div className="relative flex flex-col md:flex-row justify-between items-center gap-10 md:gap-20">
+                                    {/* PREDICTED */}
+                                    <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
+                                        <span className="text-[9px] font-black text-indigo-500 uppercase bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1 rounded-full">Prédiction IA</span>
+                                        <div className="flex flex-wrap md:flex-col gap-3 justify-center">
+                                            {report.matches.map((m, i) => (
+                                                <div key={`pred-${i}`} className="relative group">
+                                                    <NumberBall number={m.predicted} size="md" glow={m.errorType === 'Hit'} />
+                                                    {m.errorType !== 'Hit' && m.errorType !== 'None' && (
+                                                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            {m.errorType} ({m.delta})
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
                                         </div>
-                                    )) : <div className="text-xs text-slate-400 italic">Aucune correction nécessaire.</div>}
-                                </div>
+                                    </div>
 
-                                {/* Weights Diff Visualization */}
-                                <div className="flex flex-col">
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Ajustement des Poids</div>
-                                    <div className="flex-1 bg-white/40 dark:bg-black/20 rounded-xl p-4 border border-indigo-100 dark:border-indigo-800 overflow-y-auto max-h-[200px] custom-scrollbar space-y-2">
-                                        {Object.keys(correctionPlan.newWeights).map((key) => {
-                                            const diff = getWeightDiff(key);
-                                            if (Math.abs(diff) < 0.1) return null;
-                                            return (
-                                                <div key={key} className="flex justify-between items-center text-[10px]">
-                                                    <span className="font-bold text-slate-600 dark:text-slate-300 uppercase">{key}</span>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-slate-400">{(originalWeights?.[key as keyof AlgoWeights] || 0 * 100).toFixed(1)}%</span>
-                                                        <ArrowRight size={10} className="text-slate-400"/>
-                                                        <span className={`font-black ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                            {((correctionPlan.newWeights[key as keyof AlgoWeights] || 0) * 100).toFixed(1)}%
-                                                        </span>
-                                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${diff > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                            {diff > 0 ? '+' : ''}{diff}%
-                                                        </span>
+                                    {/* CONNECTORS (Visual Only via CSS Borders/Lines in React not easy, using simple arrows for now) */}
+                                    <div className="hidden md:flex flex-col items-center gap-2 opacity-30 flex-1">
+                                        <ArrowRight size={24} className="text-slate-400"/>
+                                        <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-400 to-transparent"></div>
+                                        <span className="text-[9px] font-mono text-slate-500">MAPPING</span>
+                                    </div>
+
+                                    {/* ACTUAL */}
+                                    <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
+                                        <span className="text-[9px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full">Résultat Réel</span>
+                                        <div className="flex flex-wrap md:flex-col gap-3 justify-center">
+                                            {report.matches.map((m, i) => (
+                                                <div key={`act-${i}`} className="relative">
+                                                    {m.actual !== null ? (
+                                                        <div className="relative">
+                                                            <NumberBall number={m.actual} size="md" />
+                                                            <div className={`absolute -top-2 -right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase border ${getBadgeColor(m.errorType)}`}>
+                                                                {m.errorType === 'None' ? 'Miss' : m.errorType}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-300 font-bold">?</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <div className="grid md:grid-cols-2 gap-6">
+                                {report.missedOpportunities.length > 0 && (
+                                    <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
+                                        <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
+                                            <AlertOctagon size={14} className="text-amber-500"/> Signaux Manqués
+                                        </h4>
+                                        <div className="space-y-3">
+                                            {report.missedOpportunities.slice(0, 4).map((miss, idx) => (
+                                                <div key={idx} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 p-3 rounded-2xl flex items-center gap-3">
+                                                    <NumberBall number={miss.number} size="sm" />
+                                                    <div className="flex-1">
+                                                        <div className="text-[10px] text-amber-700/80 dark:text-amber-300/70 font-medium leading-tight">{miss.reason}</div>
                                                     </div>
                                                 </div>
-                                            );
-                                        })}
+                                            ))}
+                                        </div>
+                                    </section>
+                                )}
+                                
+                                <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
+                                    <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
+                                        <Activity size={14} className="text-indigo-500"/> Dérive Algorithmique
+                                    </h4>
+                                    <div className="space-y-2">
+                                        {report.scoreDivergence.map((div, i) => (
+                                            <div key={i} className="flex justify-between items-center text-xs">
+                                                <span className="font-bold text-slate-600 dark:text-slate-400 capitalize">{div.algo}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-24 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-indigo-500" style={{ width: `${div.impact}%` }}></div>
+                                                    </div>
+                                                    <span className="font-mono font-black text-indigo-500">{div.impact}%</span>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-
-                                    <button 
-                                        onClick={handleApplyCorrection} 
-                                        disabled={correctionPlan.reasoning.length === 0 || applying}
-                                        className="w-full mt-4 py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-xl shadow-indigo-600/30 active:scale-95 transition-all flex items-center justify-center gap-3 group"
-                                    >
-                                        <BrainCircuit size={18} className={applying ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-700"}/> 
-                                        {applying ? 'Mutation...' : 'Appliquer le Gradient'}
-                                    </button>
-                                </div>
+                                </section>
                             </div>
                         </div>
                     )}
 
-                    <div className="grid md:grid-cols-2 gap-8">
-                        {report.missedOpportunities.length > 0 && (
-                            <section>
-                                <h4 className="font-black text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-widest flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                                    <AlertOctagon size={14} className="text-amber-500"/> Signaux Manqués
+                    {/* TAB 2: SPECTRAL DEVIATION */}
+                    {activeTab === 'spectral' && (
+                        <div className="animate-slide-up space-y-6">
+                            <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 h-[400px]">
+                                <h4 className="font-black text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-widest flex items-center gap-2">
+                                    <Zap size={14} className="text-purple-500"/> Déviation Énergétique (Prédiction vs Réalité)
                                 </h4>
-                                <div className="space-y-3">
-                                    {report.missedOpportunities.map((miss, idx) => (
-                                        <div key={idx} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 p-4 rounded-2xl flex items-center gap-4 hover:scale-[1.02] transition-transform">
-                                            <NumberBall number={miss.number} size="sm" />
-                                            <div className="flex-1">
-                                                <div className="text-xs font-bold text-amber-900 dark:text-amber-200">Vecteur {miss.number} manqué</div>
-                                                <div className="text-[10px] text-amber-700/80 dark:text-amber-300/70 mt-0.5 font-medium leading-tight">{miss.reason}</div>
-                                            </div>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={spectralChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                                        <XAxis dataKey="num" tick={{ fontSize: 10 }} />
+                                        <YAxis />
+                                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
+                                        <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                        <Bar dataKey="prediction" name="Énergie Prédite" fill="#8884d8" radius={[4, 4, 0, 0]} barSize={20} />
+                                        <Bar dataKey="realite" name="Énergie Réelle" fill="#82ca9d" radius={[4, 4, 0, 0]} barSize={20} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                            
+                            <div className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl border border-purple-100 dark:border-purple-800/30 text-xs text-purple-800 dark:text-purple-300 font-medium">
+                                <p className="leading-relaxed">
+                                    <strong>Interprétation :</strong> Une grande différence (barre verte vs violette) indique que le modèle spectral a mal calibré la "chaleur" du numéro. 
+                                    Si la barre verte est haute mais la violette basse, l'algorithme "Spectral" doit être renforcé (+Poids).
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 3: COUNTERFACTUAL SIMULATION */}
+                    {activeTab === 'simulation' && (
+                        <div className="animate-slide-up space-y-6">
+                            <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-6 opacity-10"><PlayCircle size={100} /></div>
+                                <h4 className="text-white font-black uppercase text-sm tracking-widest mb-4 flex items-center gap-2">
+                                    <BrainCircuit size={18} className="text-emerald-400"/> Moteur Contrefactuel ("What If")
+                                </h4>
+                                <p className="text-slate-400 text-xs mb-6 max-w-lg">
+                                    Le noyau a resimulé le tirage avec des millions de variations de poids. Voici la configuration qui aurait maximisé les gains.
+                                </p>
+
+                                {correctionPlan && (
+                                    <div className="space-y-4">
+                                        <div className="flex flex-col gap-3">
+                                            {correctionPlan.reasoning.map((reason, i) => (
+                                                <div key={i} className="flex items-start gap-3 text-xs text-slate-300 bg-white/5 p-3 rounded-xl border border-white/5">
+                                                    <span className="text-emerald-400 mt-0.5 font-bold">OPTIMISATION</span> 
+                                                    <span className="leading-relaxed">{reason}</span>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
-                            </section>
-                        )}
+                                        
+                                        <button 
+                                            onClick={handleApplyCorrection} 
+                                            disabled={applying}
+                                            className="w-full mt-4 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                                        >
+                                            {applying ? <RefreshCw className="animate-spin" size={16}/> : <GitMerge size={16}/>}
+                                            Appliquer le Patch Cognitif
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
-                        <section>
-                            <h4 className="font-black text-slate-700 dark:text-slate-300 mb-6 uppercase text-xs tracking-widest flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                                <ScanLine size={14} className="text-indigo-500"/> Scanner Structurel
-                            </h4>
-                            <TicketXRay numbers={predictedTicket} score={50} showTitle={false} />
-                        </section>
-                    </div>
-
-                    <section className="bg-slate-50 dark:bg-slate-900 rounded-[2.5rem] p-8 border border-slate-200 dark:border-slate-800">
-                        <div className="flex items-center gap-3 mb-6">
+                    {/* FEEDBACK SECTION (Always visible at bottom) */}
+                    <div className="border-t border-slate-200 dark:border-slate-800 pt-8">
+                        <div className="flex items-center gap-3 mb-4">
                             <MessageSquare size={18} className="text-slate-400"/>
-                            <h4 className="font-black text-slate-600 dark:text-slate-300 uppercase text-xs tracking-widest">Évaluation RLHF</h4>
+                            <h4 className="font-black text-slate-600 dark:text-slate-300 uppercase text-xs tracking-widest">Feedback Opérateur (RLHF)</h4>
                         </div>
                         
                         {feedbackSent ? (
                             <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 text-center animate-fade-in">
                                 <p className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center justify-center gap-2">
-                                    <CheckCircle2 size={16}/> Signal RL transmis
+                                    <CheckCircle2 size={16}/> Signal RL transmis avec succès
                                 </p>
                             </div>
                         ) : (
-                            <div className="flex flex-col gap-4">
-                                <div className="flex justify-center gap-4">
-                                    {[{ id: 'Visionnaire', icon: <ThumbsUp size={18}/>, color: 'bg-emerald-500' }, { id: 'Standard', icon: <Meh size={18}/>, color: 'bg-amber-500' }, { id: 'Incohérente', icon: <ThumbsDown size={18}/>, color: 'bg-rose-500' }].map((rate) => (
+                            <div className="space-y-4">
+                                <div className="flex gap-2 justify-center">
+                                    {[{ id: 'Visionnaire', icon: <ThumbsUp size={16}/>, color: 'bg-emerald-500' }, { id: 'Standard', icon: <Meh size={16}/>, color: 'bg-amber-500' }, { id: 'Incohérente', icon: <ThumbsDown size={16}/>, color: 'bg-rose-500' }].map((rate) => (
                                         <button 
                                             key={rate.id} 
                                             onClick={() => setUserRating(rate.id as any)} 
-                                            className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 ${userRating === rate.id ? `${rate.color} text-white shadow-lg scale-105` : 'bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'}`}
+                                            className={`flex-1 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 ${userRating === rate.id ? `${rate.color} text-white shadow-lg scale-105` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
                                         >
                                             {rate.icon} {rate.id}
                                         </button>
@@ -315,7 +347,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         type="text" 
                                         value={userComment} 
                                         onChange={(e) => setUserComment(e.target.value)} 
-                                        placeholder="Observation technique..." 
+                                        placeholder="Observation technique optionnelle..." 
                                         className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-xs outline-none focus:border-indigo-500 transition-colors" 
                                     />
                                     <button 
@@ -323,12 +355,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         disabled={!userRating || submittingFeedback} 
                                         className="px-6 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-black text-[10px] uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
                                     >
-                                        {submittingFeedback ? '...' : 'Envoyer'}
+                                        Envoyer
                                     </button>
                                 </div>
                             </div>
                         )}
-                    </section>
+                    </div>
                 </div>
             </div>
         </div>

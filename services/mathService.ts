@@ -1,6 +1,58 @@
 
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
+// --- UTILS STATISTIQUES ---
+
+const factorial = (n: number): number => {
+    if (n === 0 || n === 1) return 1;
+    let result = 1;
+    for (let i = 2; i <= n; i++) result *= i;
+    return result;
+};
+
+/**
+ * Calcule la probabilité de Poisson P(k; lambda)
+ * @param k Nombre d'occurrences attendues (généralement >= 1 pour "au moins une sortie")
+ * @param lambda Taux moyen d'arrivée sur la période
+ */
+export const calculatePoissonProbability = (k: number, lambda: number): number => {
+    return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+};
+
+/**
+ * Inférence Bayésienne : Met à jour la probabilité d'un numéro
+ * @param prior Probabilité a priori (basée sur l'historique long)
+ * @param likelihood Vraisemblance (basée sur l'activité récente/résonance)
+ */
+export const calculateBayesianScore = (prior: number, likelihood: number): number => {
+    // Formule simplifiée pour le ranking : P(A|B) propto P(B|A) * P(A)
+    const evidence = (prior * likelihood) + ((1 - prior) * (1 - likelihood)); // Normalisation
+    return (likelihood * prior) / evidence;
+};
+
+/**
+ * Simulation Monte Carlo rapide
+ */
+export const runMonteCarloSimulation = (weights: Record<number, number>, iterations: number = 5000): Record<number, number> => {
+    const results: Record<number, number> = {};
+    const pool = Object.entries(weights).map(([n, w]) => ({ n: Number(n), w }));
+    const totalWeight = pool.reduce((a, b) => a + b.w, 0);
+
+    for (let i = 0; i < iterations; i++) {
+        let r = Math.random() * totalWeight;
+        for (const item of pool) {
+            r -= item.w;
+            if (r <= 0) {
+                results[item.n] = (results[item.n] || 0) + 1;
+                break;
+            }
+        }
+    }
+    return results;
+};
+
+// ... (Garder le reste des fonctions existantes inchangées ci-dessous) ...
+
 /**
  * Calcule l'efficacité conditionnelle des écarts (GEI) avec métriques stochastiques avancées.
  */
@@ -43,24 +95,17 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         // --- MOTEUR STOCHASTIQUE V2 ---
         
         // 1. Z-Score (Tension Normalisée)
-        // Mesure combien d'écarts-types séparent l'écart actuel de la moyenne.
-        // Z > 2.0 = Anomalie statistique (Zone Critique)
         const zScore = (currentGap - avgGap) / sigma;
 
         // 2. Probabilité de Rupture Gaussienne (Breakout Probability)
-        // Approximation de l'intégrale de la loi normale (CDF)
-        // Plus on s'éloigne de la moyenne vers le haut, plus la probabilité de retour à l'équilibre augmente.
-        // On utilise une fonction sigmoïde adaptée pour mapper le Z-Score en probabilité [0, 1]
         const breakoutProb = (1 / (1 + Math.exp(-(zScore - 0.5) * 1.5))) * 100;
 
         // 3. Indice de Fatigue (Fatigue Index)
-        // Si maxGap est très élevé par rapport à la moyenne, le numéro est "paresseux".
         const fatigueIndex = maxGap > 0 ? (maxGap / avgGap) : 1;
 
         // 4. Score de Maturité Révisé
-        // Combine la position relative (Gap/Max) et la pression statistique (Z-Score)
         const positionScore = maxGap > 0 ? (currentGap / maxGap) * 100 : 0;
-        const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33)); // Z=-1->0%, Z=2->100%
+        const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33));
         
         const maturityScore = Math.round((positionScore * 0.4) + (pressureScore * 0.6));
 
@@ -84,7 +129,6 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         });
     }
 
-    // Tri par Z-Score décroissant (Les plus sous pression en premier)
     return efficiencies.sort((a, b) => b.zScore - a.zScore);
 };
 
@@ -132,7 +176,6 @@ export const getVelocityScores = async (history: DrawResult[]): Promise<Record<n
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
-    const signal = history.map(d => d.gagnants.includes(num) ? 1 : 0);
     return { hurst: 0.5 + (Math.random() * 0.2 - 0.1) };
 };
 
