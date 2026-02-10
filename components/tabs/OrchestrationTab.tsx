@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getFullOrchestrationAnalysis, analyzeShortTermMimicry, ScoreComposition } from '../../services/orchestrationService';
+import { getFullOrchestrationAnalysis, analyzeShortTermMimicry } from '../../services/orchestrationService';
 import { useNexus } from '../NexusProvider';
-import type { OrchestrationMetrics, DrawResult, MimicryMetric } from '../../types';
+import type { OrchestrationMetrics, DrawResult, MimicryMetric, ScoreComposition } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { OrchestrationRadar } from '../OrchestrationRadar';
-import { Activity, Layers, Zap, Target, Binary, ChevronDown, CheckCircle2, Copy, Wand2, Save, ArrowRight, Share2, Workflow, GitMerge } from 'lucide-react';
+import { Activity, Layers, Zap, Target, Binary, Copy, Wand2, Save, ArrowRight, Share2, Workflow, GitMerge, GitBranch } from 'lucide-react';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
@@ -17,10 +17,9 @@ interface OrchestrationTabProps { drawName: string; }
 // Visualise les liens physiques entre T-1 et les prédictions (T) via SVG
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [hoveredNode, setHoveredNode] = useState<{ id: number, type: 'src' | 'tgt' } | null>(null);
-    // On limite à 7 candidats pour la lisibilité du graphe, mais le calcul se fait sur tout
-    const topCands = candidates.slice(0, 7); 
+    const topCands = candidates.slice(0, 8); // On montre 8 candidats
 
-    // Calcul des liens vectoriels (Memoized pour la perf)
+    // Calcul des liens vectoriels RÉELS entre le tirage précédent et les candidats proposés
     const links = useMemo(() => {
         const l: {src: number, tgt: number, type: string, color: string, strength: number}[] = [];
         prevDraw.forEach(src => {
@@ -29,12 +28,14 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 let color = '';
                 let strength = 0;
                 
-                // Logique de détection de relations
-                if (src === tgt) { type = 'Répétition'; color = '#10b981'; strength = 3; } // Emerald (Inertie)
+                // Répétition
+                if (src === tgt) { type = 'Inertie'; color = '#10b981'; strength = 3; } // Emerald
+                // Voisinage
                 else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; } // Blue
-                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink (Miroir Loto)
-                else if (Math.abs(src - tgt) === 10) { type = 'Dizaine'; color = '#f59e0b'; strength = 1; } // Amber
-                else if (src % 10 === tgt % 10) { type = 'Finale'; color = '#8b5cf6'; strength = 0.5; } // Purple
+                // Miroir Loto (1 <-> 90)
+                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink
+                // Inversion Chiffres (12 <-> 21)
+                else if (src.toString().split('').reverse().join('') === tgt.toString() && src > 10) { type = 'Shadow'; color = '#f59e0b'; strength = 2; } // Amber
                 
                 if (type) l.push({ src, tgt, type, color, strength });
             });
@@ -43,7 +44,7 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
     }, [prevDraw, topCands]);
 
     const isLinkActive = (src: number, tgt: number) => {
-        if (!hoveredNode) return true; // Tout montrer par défaut (avec opacité réduite via CSS)
+        if (!hoveredNode) return true;
         if (hoveredNode.type === 'src' && hoveredNode.id === src) return true;
         if (hoveredNode.type === 'tgt' && hoveredNode.id === tgt) return true;
         return false;
@@ -51,7 +52,6 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
 
     return (
         <div className="bg-slate-950 text-white p-6 md:p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 overflow-hidden relative min-h-[450px] flex flex-col justify-between group select-none">
-            {/* Background FX */}
             <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,#4f46e5_0%,transparent_70%)] animate-pulse-slow"></div>
             <div className="absolute top-0 bottom-0 left-24 right-24 border-x border-dashed border-white/5"></div>
             
@@ -95,9 +95,8 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                             if (sIdx === -1 || tIdx === -1) return null;
                             
                             const isActive = isLinkActive(link.src, link.tgt);
-                            if (!isActive && hoveredNode) return null; // Masquer les non-pertinents lors du survol
+                            if (!isActive && hoveredNode) return null;
 
-                            // Calcul des positions Y relatives (en %)
                             const sY = `${((sIdx + 0.5) / prevDraw.length) * 100}%`;
                             const tY = `${((tIdx + 0.5) / topCands.length) * 100}%`;
                             
@@ -118,13 +117,12 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                         })}
                     </svg>
                     
-                    {/* Labels Flottants pour les liens actifs */}
                     {hoveredNode && links.map((link, i) => {
                          const isActive = isLinkActive(link.src, link.tgt);
                          if (!isActive) return null;
                          const sIdx = prevDraw.indexOf(link.src);
                          const tIdx = topCands.indexOf(link.tgt);
-                         const topPos = ((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100; // Position moyenne approx.
+                         const topPos = ((sIdx + tIdx + 1) / (prevDraw.length + topCands.length)) * 100;
                          
                          return (
                             <div key={`lbl-${i}`} className="absolute left-1/2 -translate-x-1/2 transition-all duration-300 pointer-events-none z-30" style={{ top: `${topPos}%` }}>
@@ -161,7 +159,6 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
     );
 };
 
-// --- COMPOSANT MIMICRY CARD ---
 const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
     return (
         <div className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 shadow-xl h-full flex flex-col">

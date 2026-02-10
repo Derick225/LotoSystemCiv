@@ -258,6 +258,14 @@ export interface ScoreBreakdown {
     bayes?: number;
     gap_velocity?: number;
     day_echo?: number; // Nouveau score d'écho journalier
+    anti_consensus?: number;
+}
+
+export interface ScoreComposition {
+    structural: number;
+    markov: number;
+    machine: number;
+    trend: number;
 }
 
 export interface DayFlowMetrics {

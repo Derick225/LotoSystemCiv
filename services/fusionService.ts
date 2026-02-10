@@ -8,53 +8,60 @@ import { FusionResult, SpectralMetric, Prediction, DrawResult } from '../types';
  */
 const calculatePythonVector = (history: DrawResult[]): { number: number, score: number }[] => {
     const scores: Record<number, number> = {};
-    const DECAY = 0.96; // Facteur d'oubli (plus il est bas, plus on privilégie le très récent)
+    const ALPHA = 0.15; // Facteur de lissage exponentiel (0 < alpha < 1)
+    // alpha élevé = donne plus de poids aux données récentes (réactif)
+    // alpha faible = lisse davantage (tendance longue)
     
-    // Analyse sur une fenêtre glissante de 60 tirages
-    const recent = history.slice(0, 60).reverse(); 
-    
-    // 1. Calcul EMA Fréquence
-    recent.forEach((draw, idx) => {
-        // Le poids augmente exponentiellement vers les tirages récents
-        const weight = Math.pow(DECAY, recent.length - 1 - idx);
-        draw.gagnants.forEach(n => {
-            scores[n] = (scores[n] || 0) + (10 * weight);
-        });
-    });
+    // Initialisation avec des scores nuls
+    for(let i=1; i<=90; i++) scores[i] = 0;
 
-    // 2. Calcul des Écarts (Gaps) pour bonus de maturité
-    const gaps: Record<number, number> = {};
-    const lastAppearanceIndex: Record<number, number> = {};
-    
-    // Init
-    for(let i=1; i<=90; i++) {
-        gaps[i] = 0;
-        lastAppearanceIndex[i] = -1;
+    // Calcul EMA (Exponential Moving Average) inversé (du plus ancien au plus récent)
+    // On veut le score "actuel", donc on itère chronologiquement
+    const chronoHistory = [...history].reverse(); 
+    const limit = Math.min(chronoHistory.length, 100);
+    const startIdx = chronoHistory.length - limit;
+
+    for (let i = startIdx; i < chronoHistory.length; i++) {
+        const draw = chronoHistory[i];
+        
+        for (let num = 1; num <= 90; num++) {
+            const isPresent = draw.gagnants.includes(num) ? 1 : 0;
+            // Formule EMA: S(t) = alpha * Y(t) + (1 - alpha) * S(t-1)
+            // Ici Y(t) est binaire (1 si sorti, 0 sinon)
+            // On amplifie par 100 pour avoir une échelle lisible
+            scores[num] = (ALPHA * (isPresent * 100)) + ((1 - ALPHA) * scores[num]);
+        }
     }
 
-    // Scan historique pour trouver le dernier écart
-    for(let i=0; i<Math.min(history.length, 100); i++) {
-        const draw = history[i];
-        draw.gagnants.forEach(n => {
-            if (lastAppearanceIndex[n] === -1) {
-                lastAppearanceIndex[n] = i;
-                gaps[n] = i;
-            }
-        });
+    // Calcul des Écarts actuels
+    const currentGaps: Record<number, number> = {};
+    for (let num = 1; num <= 90; num++) {
+        let gap = 0;
+        for (const draw of history) {
+            if (draw.gagnants.includes(num)) break;
+            gap++;
+        }
+        currentGaps[num] = gap;
     }
 
     return Object.entries(scores).map(([n, s]) => {
         const num = parseInt(n);
-        const gap = gaps[num] || 50; // Si jamais sorti, gros écart
+        const gap = currentGaps[num];
         
-        // Bonus "Zone de Retour" : Statistiquement, beaucoup de numéros sortent entre 6 et 18 tours d'écart
-        let gapBonus = 0;
-        if (gap >= 6 && gap <= 20) gapBonus = 25;
-        if (gap > 40) gapBonus = 10; // Loi des grands nombres (pression)
+        // Ajustement hybride : Score EMA + Bonus Gap Maturité
+        // Si EMA est élevée (tendance chaude), on booste.
+        // Si Gap est dans la zone critique (ex: > 20), on ajoute un "rebound potential".
+        
+        let finalScore = s; // Base EMA (0-100 théorique, souvent 0-20 en pratique pour alpha 0.15)
+        
+        // Normalisation EMA pour l'amener vers 0-100
+        finalScore = Math.min(100, finalScore * 4); 
 
-        // Normalisation approximative vers 0-100
-        const finalScore = Math.min(100, (s * 5) + gapBonus);
-        return { number: num, score: finalScore };
+        // Bonus Maturité (Loi du retour)
+        if (gap >= 10 && gap <= 30) finalScore += 15; // Zone de retour probable
+        if (gap > 40) finalScore += 25; // Pression statistique forte
+
+        return { number: num, score: Math.min(100, Math.round(finalScore)) };
     });
 };
 
@@ -149,7 +156,7 @@ export const calculateFusion = (
     const scoreMap: Record<number, { score: number, sources: string[], details: any }> = {};
     
     // Poids des vecteurs dans la décision finale (Ajustables)
-    const W_PYTHON = 1.0;  // Logique pure
+    const W_PYTHON = 1.0;  // Logique pure (EMA)
     const W_QUANTUM = 1.3; // Physique (Souvent très précis sur les cycles)
     const W_ORACLE = 1.6;  // IA/Association (La plus forte valeur prédictive)
 

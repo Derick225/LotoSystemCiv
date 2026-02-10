@@ -6,7 +6,7 @@ import { LearningService } from '../../services/learningService';
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';
 import { useNexus } from '../NexusProvider';
-import { Sliders, Save, Scale, Activity, Gauge, RefreshCw, Wand2, BrainCircuit, CheckCircle2, AlertTriangle, Fingerprint, Dna, ArrowRight } from 'lucide-react';
+import { Sliders, Save, Scale, Gauge, RefreshCw, BrainCircuit, CheckCircle2, AlertTriangle, Dna } from 'lucide-react';
 
 interface ExpertTuningPanelProps {
     selectedDrawName: string;
@@ -88,11 +88,12 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                 const safeWeights = normalizeWeights(result.weights);
                 setLocalWeights(safeWeights);
                 setDnaName(getStrategyName(safeWeights));
-                await saveAlgoWeights(selectedDrawName, safeWeights);
                 
+                // Sauvegarde immédiate
+                await saveAlgoWeights(selectedDrawName, safeWeights);
                 if (selectedDrawName === activeDrawName) {
-                    updateGlobalWeights(safeWeights);
-                    await refreshData(selectedDrawName, true);
+                    await updateGlobalWeights(safeWeights);
+                    await refreshData(selectedDrawName, true); // Force le recalcul
                 }
                 
                 showToast(`✅ ADN optimisé avec succès.`, "success");
@@ -112,22 +113,24 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
 
     const handleSave = async () => {
         let weightsToSave = { ...localWeights };
+        // Normalisation automatique à la sauvegarde si déséquilibré
         if (Math.abs(totalWeight - 1.0) > 0.01) {
             weightsToSave = normalizeWeights(localWeights);
-            showToast("Auto-Correction: Normalisation appliquée.", "info");
             setLocalWeights(weightsToSave);
+            showToast("Auto-Correction: Normalisation appliquée.", "info");
         }
 
         await saveAlgoWeights(selectedDrawName, weightsToSave);
         saveAdaptiveRules(selectedDrawName, rules);
         
+        // Application immédiate si c'est le tirage en cours
         if (selectedDrawName === activeDrawName) {
-            updateGlobalWeights(weightsToSave);
-            await refreshData(selectedDrawName, true);
+            await updateGlobalWeights(weightsToSave);
+            await refreshData(selectedDrawName, true); // CRITIQUE : Force le recalcul des prédictions
         }
 
         setIsDirty(false);
-        showToast(`Configuration ADN cristallisée.`, "success");
+        showToast(`Configuration ADN cristallisée pour ${selectedDrawName}.`, "success");
     };
 
     const isBalanced = Math.abs(totalWeight - 1.0) < 0.02;
@@ -136,10 +139,8 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         <div className="animate-fade-in w-full">
             {/* CONSOLE DE MIXAGE UNIFIÉE */}
             <div className="bg-slate-950 border border-slate-800 rounded-[3rem] shadow-2xl overflow-hidden relative group">
-                {/* Background FX */}
                 <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/5 rounded-full blur-[120px] pointer-events-none group-hover:bg-indigo-600/10 transition-colors duration-1000"></div>
                 
-                {/* Header Global */}
                 <div className="bg-slate-900/80 backdrop-blur-md p-6 md:p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-6">
                     <div className="flex items-center gap-6 w-full md:w-auto">
                         <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 shrink-0">
@@ -171,10 +172,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     </div>
                 </div>
 
-                {/* Corps de la Console : Split View Symbiotique */}
                 <div className="flex flex-col xl:flex-row min-h-[600px]">
-                    
-                    {/* GAUCHE : Visualisation & Feedback */}
                     <div className="xl:w-1/3 bg-slate-900/30 p-8 flex flex-col justify-between border-b xl:border-b-0 xl:border-r border-white/5 relative">
                         <div className="space-y-6">
                             <div className="flex justify-between items-center">
@@ -193,7 +191,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                             </div>
                         </div>
 
-                        {/* Jauge de Masse Totale */}
                         <div className="mt-8 bg-black/40 p-6 rounded-3xl border border-white/5 relative overflow-hidden">
                             <div className="flex justify-between items-end mb-2 relative z-10">
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Masse Tensorielle</span>
@@ -211,7 +208,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                         </div>
                     </div>
 
-                    {/* DROITE : Égaliseur (Sliders) */}
                     <div className="xl:w-2/3 bg-white dark:bg-slate-900 p-8 flex flex-col">
                         <div className="flex justify-between items-center mb-8">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2">
@@ -245,24 +241,21 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                                             </span>
                                         </div>
                                         <div className="relative h-10 flex items-center">
-                                            {/* Track */}
                                             <div className="absolute w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                                 <div 
                                                     className={`h-full transition-all duration-100 ${isActive ? 'bg-gradient-to-r from-indigo-500 to-purple-500' : 'bg-slate-300 dark:bg-slate-700'}`}
                                                     style={{ width: `${Math.min(100, val * 100)}%` }}
                                                 ></div>
                                             </div>
-                                            {/* Input invisible pour l'interaction */}
                                             <input 
                                                 type="range" min="0" max="0.5" step="0.005" 
                                                 value={val}
                                                 onChange={(e) => handleWeightChange(key, e.target.value)}
                                                 className="absolute w-full h-full opacity-0 cursor-pointer z-10"
                                             />
-                                            {/* Thumb visuel (facultatif si la barre suffit, mais ajoute du style) */}
                                             <div 
                                                 className={`absolute h-4 w-4 rounded-full border-2 border-white shadow-md transition-all duration-100 pointer-events-none ${isActive ? 'bg-indigo-600 scale-110' : 'bg-slate-400'}`}
-                                                style={{ left: `calc(${Math.min(100, val * 200)}% - 8px)` }} // *200 car max 0.5
+                                                style={{ left: `calc(${Math.min(100, val * 200)}% - 8px)` }} 
                                             ></div>
                                         </div>
                                     </div>
@@ -270,7 +263,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                             })}
                         </div>
 
-                        {/* Footer Actions */}
                         <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                             <button 
                                 onClick={handleSave}
