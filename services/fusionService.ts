@@ -1,5 +1,5 @@
 
-import { FusionResult, SpectralMetric, Prediction, DrawResult } from '../types';
+import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } from '../types';
 
 /**
  * VECTEUR PYTHON (Logique & Statistique)
@@ -8,32 +8,25 @@ import { FusionResult, SpectralMetric, Prediction, DrawResult } from '../types';
  */
 const calculatePythonVector = (history: DrawResult[]): { number: number, score: number }[] => {
     const scores: Record<number, number> = {};
-    const ALPHA = 0.15; // Facteur de lissage exponentiel (0 < alpha < 1)
-    // alpha élevé = donne plus de poids aux données récentes (réactif)
-    // alpha faible = lisse davantage (tendance longue)
+    const ALPHA = 0.15; // Facteur de lissage exponentiel
     
-    // Initialisation avec des scores nuls
+    // Initialisation
     for(let i=1; i<=90; i++) scores[i] = 0;
 
-    // Calcul EMA (Exponential Moving Average) inversé (du plus ancien au plus récent)
-    // On veut le score "actuel", donc on itère chronologiquement
+    // Calcul EMA
     const chronoHistory = [...history].reverse(); 
     const limit = Math.min(chronoHistory.length, 100);
     const startIdx = chronoHistory.length - limit;
 
     for (let i = startIdx; i < chronoHistory.length; i++) {
         const draw = chronoHistory[i];
-        
         for (let num = 1; num <= 90; num++) {
             const isPresent = draw.gagnants.includes(num) ? 1 : 0;
-            // Formule EMA: S(t) = alpha * Y(t) + (1 - alpha) * S(t-1)
-            // Ici Y(t) est binaire (1 si sorti, 0 sinon)
-            // On amplifie par 100 pour avoir une échelle lisible
             scores[num] = (ALPHA * (isPresent * 100)) + ((1 - ALPHA) * scores[num]);
         }
     }
 
-    // Calcul des Écarts actuels
+    // Calcul des Écarts
     const currentGaps: Record<number, number> = {};
     for (let num = 1; num <= 90; num++) {
         let gap = 0;
@@ -48,18 +41,12 @@ const calculatePythonVector = (history: DrawResult[]): { number: number, score: 
         const num = parseInt(n);
         const gap = currentGaps[num];
         
-        // Ajustement hybride : Score EMA + Bonus Gap Maturité
-        // Si EMA est élevée (tendance chaude), on booste.
-        // Si Gap est dans la zone critique (ex: > 20), on ajoute un "rebound potential".
-        
-        let finalScore = s; // Base EMA (0-100 théorique, souvent 0-20 en pratique pour alpha 0.15)
-        
-        // Normalisation EMA pour l'amener vers 0-100
+        let finalScore = s;
         finalScore = Math.min(100, finalScore * 4); 
 
         // Bonus Maturité (Loi du retour)
-        if (gap >= 10 && gap <= 30) finalScore += 15; // Zone de retour probable
-        if (gap > 40) finalScore += 25; // Pression statistique forte
+        if (gap >= 10 && gap <= 30) finalScore += 15;
+        if (gap > 40) finalScore += 25;
 
         return { number: num, score: Math.min(100, Math.round(finalScore)) };
     });
@@ -67,38 +54,30 @@ const calculatePythonVector = (history: DrawResult[]): { number: number, score: 
 
 /**
  * VECTEUR QUANTUM (Physique & Énergie)
- * Se base sur l'analyse spectrale (FFT) pré-calculée par le moteur HPC.
- * Sélectionne les numéros en "Résonance" (Haut niveau d'énergie cyclique).
+ * Se base sur l'analyse spectrale (FFT).
  */
 const calculateQuantumVector = (spectral: SpectralMetric[]): { number: number, score: number }[] => {
     return spectral.map(s => ({
         number: s.number,
-        // L'énergie spectrale (0-100) est utilisée directement comme score de probabilité physique
-        // On amplifie les signaux très forts (>70)
         score: s.energy > 70 ? Math.min(100, s.energy * 1.2) : s.energy * 0.8
     }));
 };
 
 /**
  * VECTEUR ORACLE (Intuition & Association)
- * Si une prédiction IA existe, elle est prioritaire.
- * Sinon, utilise un algorithme de "Mémoire Associative" (Loi des séries conditionnelles).
  */
 const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction | null): { number: number, score: number }[] => {
-    // Mode IA Active (Prioritaire)
     if (lastPrediction && lastPrediction.suggestedNumbers.length > 0) {
         const preds = new Set(lastPrediction.suggestedNumbers);
         const candidates = new Set(lastPrediction.candidates);
         
         return Array.from({length: 90}, (_, i) => i + 1).map(n => {
-            if (preds.has(n)) return { number: n, score: 98 }; // Top Pick IA
-            if (candidates.has(n)) return { number: n, score: 65 }; // Outsider IA
-            return { number: n, score: 10 }; // Bruit de fond
+            if (preds.has(n)) return { number: n, score: 98 };
+            if (candidates.has(n)) return { number: n, score: 65 };
+            return { number: n, score: 10 };
         });
     }
 
-    // Mode Fallback : Mémoire Associative (Pattern Matching T-1)
-    // "Quels numéros ont tendance à sortir après les numéros du dernier tirage ?"
     if (history.length < 2) return [];
     
     const lastDrawNumbers = history[0].gagnants;
@@ -107,14 +86,10 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
     
     for (let i = 1; i < depth; i++) {
         const prevDraw = history[i];
-        // On compte combien de numéros du "Passé T" correspondent au "Dernier Tirage Réel"
         const commonCount = prevDraw.gagnants.filter(n => lastDrawNumbers.includes(n)).length;
         
-        // Si le tirage passé ressemble au dernier tirage (au moins 1 numéro en commun)
         if (commonCount >= 1) { 
-            const nextDraw = history[i-1]; // Le tirage qui a SUIVI ce tirage passé
-            
-            // Plus le tirage passé est récent et similaire, plus son successeur a de poids
+            const nextDraw = history[i-1];
             const weight = commonCount * (1 - (i/depth) * 0.5); 
             
             nextDraw.gagnants.forEach(n => {
@@ -123,7 +98,6 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
         }
     }
     
-    // Normalisation
     const maxScore = Math.max(...Object.values(associationScores), 1);
     return Object.entries(associationScores).map(([n, s]) => ({
         number: parseInt(n),
@@ -132,14 +106,15 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
 };
 
 /**
- * MOTEUR DE FUSION HYPER-CONVERGENCE
- * Agrège les 3 vecteurs avec pondération dynamique.
+ * MOTEUR DE FUSION HYPER-CONVERGENCE (DNA-AWARE)
+ * Agrège les 3 vecteurs en respectant scrupuleusement les poids de l'ADN Algorithmique.
  */
 export const calculateFusion = (
     history: DrawResult[],
-    _stats: { number: number; count: number }[], // Stats brutes (moins précises que le vecteur Python)
+    _stats: { number: number; count: number }[],
     spectral: SpectralMetric[],
-    lastPrediction: Prediction | null
+    lastPrediction: Prediction | null,
+    weights: AlgoWeights // INJECTION ADN
 ): FusionResult => {
     
     // 1. Calcul des Vecteurs (HPC)
@@ -147,29 +122,33 @@ export const calculateFusion = (
     const vQuantum = calculateQuantumVector(spectral);
     const vOracle = calculateOracleVector(history, lastPrediction);
 
-    // Maps pour accès rapide O(1)
     const mPython = new Map(vPython.map(v => [v.number, v.score]));
     const mQuantum = new Map(vQuantum.map(v => [v.number, v.score]));
     const mOracle = new Map(vOracle.map(v => [v.number, v.score]));
 
-    // 2. Matrice de Fusion
+    // 2. Détermination des coefficients de mélange via l'ADN
+    // On regroupe les paramètres ADN par famille de vecteur
+    const dnaLogic = (weights.frequency || 0) + (weights.gap || 0) + (weights.momentum || 0) + (weights.equilibrium || 0);
+    const dnaPhysics = (weights.spectral || 0) + (weights.fractal || 0) + (weights.spatial || 0) + (weights.wavelet || 0);
+    const dnaIntuition = (weights.markov || 0) + (weights.ai_intuition || 0) + (weights.anti_consensus || 0) + (weights.orchestration || 0);
+
+    // Facteur de base (1.0) + Bonus ADN
+    // Si l'utilisateur met "Frequency" à fond, dnaLogic augmente, donc W_PYTHON augmente.
+    const W_PYTHON = 1.0 + (dnaLogic * 2); 
+    const W_QUANTUM = 1.0 + (dnaPhysics * 2);
+    const W_ORACLE = 1.0 + (dnaIntuition * 2);
+
     const scoreMap: Record<number, { score: number, sources: string[], details: any }> = {};
-    
-    // Poids des vecteurs dans la décision finale (Ajustables)
-    const W_PYTHON = 1.0;  // Logique pure (EMA)
-    const W_QUANTUM = 1.3; // Physique (Souvent très précis sur les cycles)
-    const W_ORACLE = 1.6;  // IA/Association (La plus forte valeur prédictive)
 
     for (let i = 1; i <= 90; i++) {
         const sP = mPython.get(i) || 0;
         const sQ = mQuantum.get(i) || 0;
         const sO = mOracle.get(i) || 0;
 
-        // Seuil de bruit : on ignore les signaux très faibles pour nettoyer la sortie
+        // Seuil de bruit
         if (sP < 15 && sQ < 15 && sO < 15) continue;
 
         const weightedScore = (sP * W_PYTHON) + (sQ * W_QUANTUM) + (sO * W_ORACLE);
-        // Normalisation approximative
         const finalScore = Math.min(100, Math.round(weightedScore / (W_PYTHON + W_QUANTUM + W_ORACLE)));
 
         const sources = [];
@@ -192,32 +171,26 @@ export const calculateFusion = (
             sources: data.sources,
             details: data.details
         }))
-        .filter(c => c.score > 35) // Filtre de pertinence globale
+        .filter(c => c.score > 35)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 12); // On garde les 12 meilleurs candidats
+        .slice(0, 12);
 
-    // 4. Sélection du Ticket Ultime (Top 5 Intelligent)
+    // 4. Sélection du Ticket Ultime
     const finalTicket: number[] = [];
     const candidates = [...convergedNumbers];
     
-    // On prend les 2 meilleurs scores absolus (Piliers)
+    // Stratégie Pilier + Diversité
     for(let i=0; i<2; i++) {
         if(candidates.length > 0) finalTicket.push(candidates.shift()!.number);
     }
-
-    // On complète avec des numéros qui apportent de la diversité (pas trop proches des piliers)
     while (finalTicket.length < 5 && candidates.length > 0) {
         const cand = candidates.shift()!;
-        // Simple règle d'espacement : on évite les suites de 3 numéros (ex: 41,42,43)
-        // Ici on simplifie : on accepte tout pour l'instant car l'algo de fusion est déjà sélectif
         finalTicket.push(cand.number);
     }
     
-    // Tri final pour affichage
     finalTicket.sort((a, b) => a - b);
 
-    // 5. Calcul de Confiance Système
-    // Basé sur la "densité" de convergence (Combien de sources sont d'accord ?)
+    // 5. Confiance Système (Ajustée par la cohérence avec l'ADN)
     const strongAgreements = convergedNumbers.filter(c => c.sources.length >= 2).length;
     const confidence = Math.min(99, 60 + (strongAgreements * 8));
 
@@ -228,7 +201,7 @@ export const calculateFusion = (
             oracle: vOracle.sort((a,b) => b.score - a.score).slice(0, 5).map(v => v.number)
         },
         convergedNumbers,
-        finalTicket: finalTicket.slice(0, 5), // Sécurité taille
+        finalTicket: finalTicket.slice(0, 5),
         confidence,
         entropy: 0.1
     };

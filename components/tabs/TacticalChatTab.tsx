@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { invokeEdgeFunction } from '../../services/apiClient';
@@ -8,9 +7,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SafeMarkdown } from '../ui/SafeMarkdown';
 import { audioEngine } from '../../utils/audioEngine';
 import { getBankroll } from '../../services/userPreferencesService';
+import { getStrategyName } from '../../services/predictionEngine';
 
 export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, lastPrediction, refreshData } = useNexus();
+    const { history, lastPrediction, refreshData, globalWeights } = useNexus();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -66,6 +66,8 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         audioEngine.play('click');
 
         const currentBankroll = getBankroll();
+        // Récupération de l'ADN actif
+        const dnaContext = globalWeights ? `ADN Actif : ${getStrategyName(globalWeights)}. Poids dominants: ${Object.entries(globalWeights).sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0)).slice(0, 3).map(e => e[0]).join(', ')}.` : "ADN Standard";
 
         try {
             const { data, error } = await invokeEdgeFunction('ask-oracle', {
@@ -77,7 +79,8 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                     currentContext: {
                         regime: history.length > 20 ? "Stabilisé" : "Calibration",
                         lastPrediction: lastPrediction?.suggestedNumbers,
-                        bankroll: currentBankroll
+                        bankroll: currentBankroll,
+                        dnaInfo: dnaContext // Injection ici
                     }
                 }
             });
@@ -163,7 +166,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                         </div>
                         <div className="space-y-2">
                             <p className="text-xl font-black uppercase tracking-[0.4em] text-slate-300">Terminal Prêt</p>
-                            <p className="text-xs max-w-xs mx-auto font-medium text-slate-500">L'IA Tactique Apex v14 supervise les flux. Lancez une commande.</p>
+                            <p className="text-xs max-w-xs mx-auto font-medium text-slate-500">L'IA Tactique Apex v14 supervise les flux en mode <span className="text-indigo-400 font-bold">{globalWeights ? getStrategyName(globalWeights) : 'Standard'}</span>.</p>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             {['Analyser le risque', 'Ouvrir le Wallet', 'Audit Forensic', 'Synthèse Ticket'].map(cmd => (

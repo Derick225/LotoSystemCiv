@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
-import { generateMasterPrediction, getStrategyName } from '../../services/predictionEngine';
+import { generateMasterPrediction, getStrategyName, getAlgoWeights } from '../../services/predictionEngine';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { saveTicket } from '../../services/userPreferencesService';
 import { NumberBall } from '../NumberBall';
@@ -31,6 +31,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [computingStep, setComputingStep] = useState<string>("");
     const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
     const [showField, setShowField] = useState(false);
+    const [activeDNA, setActiveDNA] = useState<string>("Standard");
+
+    // Mise à jour du nom de l'ADN affiché
+    useEffect(() => {
+        if(globalWeights) setActiveDNA(getStrategyName(globalWeights));
+    }, [globalWeights]);
 
     const runInference = useCallback(async () => {
         if (history.length < 5) {
@@ -40,11 +46,15 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         setIsComputing(true);
         setComputingStep("Initialisation du Noyau...");
 
+        // FETCH CRITIQUE : On recharge les poids spécifiques pour être sûr à 100% que c'est la config du tirage
+        const specificWeights = await getAlgoWeights(drawName);
+        setActiveDNA(getStrategyName(specificWeights));
+
         const steps = [
-            { msg: `Activation Stratégie : ${riskProfile}`, delay: 400 },
-            { msg: "Calibration Réalité T-1...", delay: 1000 },
-            { msg: `Analyse du Régime : ${regime?.regime || 'Calcul...'}`, delay: 1600 },
-            { msg: "Adaptation Dynamique des Poids...", delay: 2200 },
+            { msg: `Chargement ADN : ${getStrategyName(specificWeights)}`, delay: 400 },
+            { msg: `Stratégie : ${riskProfile}`, delay: 1000 },
+            { msg: "Injection Métriques Stochastiques...", delay: 1600 },
+            { msg: "Calcul de la Résultante...", delay: 2200 },
             { msg: "Convergence Vectorielle...", delay: 2800 }
         ];
 
@@ -59,13 +69,14 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         setTimeout(async () => {
             clearInterval(interval);
             try {
-                const res = await generateMasterPrediction(drawName, history, globalWeights, {
+                // On passe specificWeights explicitement
+                const res = await generateMasterPrediction(drawName, history, specificWeights, {
                     spectral, wavelet, correlationMatrix, regularity, volatility, fractal
                 }, symbioticContext || undefined, riskProfile);
                 
                 setLastPrediction(res);
                 await savePredictionToHistory(drawName, res);
-                showToast("Convergence vectorielle établie.", "success");
+                showToast("Prédiction générée via l'ADN actif.", "success");
             } catch (e) {
                 showToast("Erreur lors de l'inférence.", "error");
                 console.error(e);
@@ -74,7 +85,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setComputingStep("");
             }
         }, 3500);
-    }, [drawName, history, globalWeights, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal]);
+    }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal]);
 
     const handleQuickSave = async () => {
         if (!lastPrediction) return;
@@ -103,10 +114,10 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     );
 
     const profiles: { id: RiskProfile, label: string, icon: any, color: string, desc: string }[] = [
-        { id: 'PRUDENT', label: 'Prudent', icon: <ShieldCheck size={18} />, color: 'bg-emerald-600', desc: 'Minimise le risque. Cherche la récurrence.' },
-        { id: 'BALANCED', label: 'Équilibré', icon: <Scale size={18} />, color: 'bg-indigo-600', desc: 'Compromis optimal entre fréquence et retard.' },
-        { id: 'AUDACIOUS', label: 'Audacieux', icon: <Target size={18} />, color: 'bg-amber-600', desc: 'Chasse les écarts mûrs et ruptures.' },
-        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Mise sur les anomalies statistiques rares.' }
+        { id: 'PRUDENT', label: 'Prudent', icon: <ShieldCheck size={18} />, color: 'bg-emerald-600', desc: 'Favorise la stabilité de l\'ADN.' },
+        { id: 'BALANCED', label: 'Équilibré', icon: <Scale size={18} />, color: 'bg-indigo-600', desc: 'Mix optimal Favoris/Outsiders.' },
+        { id: 'AUDACIOUS', label: 'Audacieux', icon: <Target size={18} />, color: 'bg-amber-600', desc: 'Amplifie les poids "Gap" et "Momentum".' },
+        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Inverse la logique (Anti-Consensus).' }
     ];
 
     if (!lastPrediction && !isComputing) return (
@@ -118,8 +129,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     <Target size={48} className="text-indigo-500" />
                 </div>
                 <h3 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-4">Oracle Base v24.0</h3>
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/20 mb-8">
+                    <Dna size={14} className="text-indigo-400"/>
+                    <span className="text-xs font-bold text-indigo-200 uppercase tracking-widest">ADN Actif : {activeDNA}</span>
+                </div>
                 <p className="text-slate-400 text-sm md:text-base font-medium mb-12 leading-relaxed max-w-lg mx-auto">
-                    Configurez le profil de risque pour orienter l'algorithme génétique vers votre stratégie préférentielle.
+                    Configurez le profil de risque pour moduler l'influence de l'ADN algorithmique sur la sélection.
                 </p>
 
                 {/* Risk Selector */}
@@ -143,7 +158,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     onClick={runInference}
                     className="w-full md:w-auto px-16 py-6 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 hover:shadow-indigo-500/20"
                 >
-                    <Zap fill="currentColor" size={20} /> Initialiser le Calcul
+                    <Zap fill="currentColor" size={20} /> Exécuter l'ADN
                 </button>
             </div>
         </div>
@@ -154,7 +169,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Context HUD */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                    { label: 'Régime', val: regime?.regime || 'Inconnu', icon: <Activity className="text-indigo-500"/> },
+                    { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/> },
                     { label: 'Volatilité', val: `${volatility?.score || 0}%`, icon: <Wind className="text-amber-500"/> },
                     { label: 'Stratégie', val: riskProfile, icon: <Crosshair className="text-emerald-500"/> },
                     { label: 'Réalité T-1', val: `${lastPrediction?.realityAlignment || 0}%`, icon: <Gauge className="text-purple-500"/> }
@@ -163,7 +178,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="p-3 bg-slate-800 rounded-2xl">{item.icon}</div>
                         <div>
                             <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{item.label}</div>
-                            <div className="text-white font-bold text-xs">{item.val}</div>
+                            <div className="text-white font-bold text-xs truncate max-w-[100px]">{item.val}</div>
                         </div>
                     </div>
                 ))}
@@ -193,13 +208,8 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 </h2>
                                 <div className="flex items-center gap-4">
                                     <span className="text-xs font-bold text-indigo-300 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 flex items-center gap-2">
-                                        <Dna size={12}/> ADN: {getStrategyName(globalWeights)}
+                                        <Dna size={12}/> {activeDNA}
                                     </span>
-                                    {lastPrediction?.realityAlignment && lastPrediction.realityAlignment > 40 && (
-                                        <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/30">
-                                            REALITY SYNC
-                                        </span>
-                                    )}
                                 </div>
                             </div>
                             <div className="flex flex-col items-end">

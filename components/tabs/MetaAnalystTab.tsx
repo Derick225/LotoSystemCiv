@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
+import { saveTicket } from '../../services/userPreferencesService';
 import { useNexus } from '../NexusProvider';
 import type { PlatinumResult, PlatinumTimeline } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -8,7 +9,7 @@ import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, Sparkles, Activity,
-    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary, ShieldCheck
+    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary, Wallet, Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, ResponsiveContainer } from 'recharts';
@@ -91,7 +92,7 @@ const TimelineCard: React.FC<{
                     </div>
                     <div className="flex flex-col items-end">
                         <span className={`text-[10px] font-black uppercase tracking-widest ${theme.color}`}>{timeline.type}</span>
-                        <span className="text-[9px] font-bold text-slate-500">Stratégie Alt.</span>
+                        <span className="text-[9px] font-bold text-slate-500">Stratégie ADN</span>
                     </div>
                 </div>
 
@@ -112,7 +113,7 @@ const TimelineCard: React.FC<{
     );
 };
 
-const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
+const NovaCore: React.FC<{ timeline: PlatinumTimeline; onSave: (nums: number[]) => void }> = ({ timeline, onSave }) => {
     return (
         <div className="relative group">
             <div className="absolute inset-0 bg-purple-600/20 rounded-[3rem] blur-2xl group-hover:blur-3xl transition-all duration-1000 animate-pulse-slow"></div>
@@ -125,14 +126,21 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
                     <div className="text-center md:text-left">
                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full mb-4">
                             <Crown size={14} className="text-purple-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Top 5 Réserve</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Top 5 ADN</span>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-2">
                             NOVA <span className="text-purple-500">PRIME</span>
                         </h2>
                         <p className="text-slate-400 text-sm max-w-md">
-                            Sélection Elite issue du <strong>Top 50</strong> restant après exclusion des favoris Oracle. La meilleure alternative mathématique.
+                            La quintessence de votre configuration ADN. Les 5 vecteurs les plus puissants générés par vos poids algorithmiques.
                         </p>
+                        
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onSave(timeline.numbers); }}
+                            className="mt-6 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95"
+                        >
+                            <Save size={14}/> Sauvegarder Nova
+                        </button>
                     </div>
 
                     <div className="flex gap-3 md:gap-4">
@@ -156,10 +164,10 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
 const LoadingSequence: React.FC = () => {
     const [step, setStep] = useState(0);
     const steps = [
-        "Initialisation du Tamis Algorithmique...",
-        "Exclusion des Vecteurs Oracle Base...",
-        "Isolation de la Réserve Platinum (Top 50)...",
-        "Génération des Réalités Alternatives..."
+        "Chargement de l'ADN Algorithmique...",
+        "Calcul des scores vectoriels (1-90)...",
+        "Isolation des 5 flux de probabilité...",
+        "Génération des réalités alternatives..."
     ];
 
     useEffect(() => {
@@ -186,7 +194,7 @@ const LoadingSequence: React.FC = () => {
                 
                 <div className="text-center space-y-2">
                     <p className="text-indigo-400 font-black uppercase tracking-[0.3em] text-xs animate-pulse">
-                        Platinum Fusion v3.0
+                        Platinum Fusion v4.0
                     </p>
                     <div className="h-6 overflow-hidden">
                         <motion.p 
@@ -251,13 +259,22 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 setResult(data);
                 setSelectedTimelineId(null); 
                 savePlatinumHistory(data);
-                showToast("Réalités Alternatives générées.", "success");
+                showToast("Réalités Alternatives générées selon l'ADN.", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
         } finally {
             if (isMounted.current) setLoading(false);
         }
+    };
+
+    const handleSaveTimeline = async (timelineType: string, numbers: number[]) => {
+        await saveTicket({
+            numbers,
+            drawName,
+            strategy: `Platinum ${timelineType} (${new Date().toLocaleTimeString()})`
+        });
+        showToast(`Timeline ${timelineType} cristallisée dans le wallet.`, "success");
     };
 
     const selectedTimeline = result?.timelines.find(t => t.type === selectedTimelineId);
@@ -282,11 +299,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         </h2>
                         <div className="mt-2 flex flex-col gap-1">
                             <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg">
-                                Génération de <strong>5 Réalités Alternatives</strong> basées sur la "Réserve Platinum".
-                            </p>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
-                                <ShieldCheck size={10} className="text-emerald-500"/>
-                                Exclut les vecteurs Oracle Base (Diversification Maximale)
+                                Génération de <strong>5 Réalités Alternatives</strong> basées strictement sur votre ADN Algorithmique actif.
                             </p>
                         </div>
                     </div>
@@ -316,13 +329,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] border border-slate-800 border-dashed">
                             <Binary size={48} className="text-slate-600 mb-6" />
                             <p className="text-slate-400 text-sm font-medium mb-8 max-w-md text-center">
-                                Le noyau va isoler les <strong>50 meilleurs numéros</strong> non utilisés par l'Oracle Base et générer 5 tickets stratégiques divergents.
+                                Le noyau va appliquer vos poids ADN pour calculer 5 stratégies distinctes (Elite, Probabiliste, Structurelle, Cyclique, Chaos).
                             </p>
                             <button 
                                 onClick={runMetaAnalysis} 
                                 className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 flex items-center gap-3 transition-all active:scale-95 group"
                             >
-                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Lancer Fusion (Réserve)
+                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Lancer Fusion (ADN)
                             </button>
                         </div>
                     )}
@@ -330,7 +343,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     {result && (
                         <>
                             {/* NOVA CORE - The Main Result */}
-                            <NovaCore timeline={result.timelines.find(t => t.type === 'NOVA')!} />
+                            <NovaCore 
+                                timeline={result.timelines.find(t => t.type === 'NOVA')!} 
+                                onSave={(nums) => handleSaveTimeline('NOVA', nums)}
+                            />
 
                             {/* TIMELINES GRID */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -371,6 +387,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                                     score={selectedTimeline.score}
                                                     showTitle={false}
                                                 />
+                                                
+                                                <button 
+                                                    onClick={() => handleSaveTimeline(selectedTimeline.type, selectedTimeline.numbers)}
+                                                    className={`w-full py-4 rounded-xl text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 bg-gradient-to-r ${TIMELINE_THEMES[selectedTimeline.type].gradient}`}
+                                                >
+                                                    <Wallet size={16}/> Sauvegarder cette Timeline
+                                                </button>
                                             </div>
 
                                             <div className="bg-black/30 rounded-[2rem] p-6 border border-white/5">

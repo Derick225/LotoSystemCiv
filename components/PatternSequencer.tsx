@@ -7,7 +7,6 @@ import { saveTicket } from '../services/userPreferencesService';
 import { useToast } from './ui/Toast';
 import type { TicketAnalysisResult } from '../types';
 import { Activity, Save, RefreshCw, Layers, Wand2, ThermometerSun } from 'lucide-react';
-import { TicketXRay } from './TicketXRay';
 
 export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
@@ -15,16 +14,19 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
     
     const [selection, setSelection] = useState<number[]>([]);
     const [metrics, setMetrics] = useState<TicketAnalysisResult | null>(null);
-    const [spectralScore, setSpectralScore] = useState(0);
 
-    // Calcul des affinités prédictives (Heatmap temps réel)
+    // --- MOTEUR DE HEATMAP PRÉDICTIVE ---
+    // Calcule en temps réel les numéros qui ont la plus forte affinité avec ceux déjà sélectionnés
     const heatMap = useMemo(() => {
         const map: Record<number, number> = {};
         if (selection.length === 0) return map;
 
+        // On initialise à 0
+        for (let i = 1; i <= 90; i++) map[i] = 0;
+
         for (let target = 1; target <= 90; target++) {
             if (selection.includes(target)) {
-                map[target] = 100;
+                map[target] = 100; // Déjà sélectionné
                 continue;
             }
 
@@ -32,6 +34,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
             let count = 0;
 
             selection.forEach(source => {
+                // On récupère le score de corrélation pré-calculé par le worker Math
                 const affinity = Number(correlationMatrix[source]?.affinities?.[target] || 0);
                 if (affinity > 0) {
                     affinitySum += affinity;
@@ -39,24 +42,21 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                 }
             });
 
-            map[target] = count > 0 ? (affinitySum / selection.length) * 200 : 0;
+            // Normalisation arbitraire pour l'affichage visuel
+            // Si tous les numéros sélectionnés "aiment" le target, le score explose
+            map[target] = count > 0 ? (affinitySum / selection.length) * 300 : 0;
         }
         return map;
     }, [selection, correlationMatrix]);
 
+    // Analyse de structure en direct
     useEffect(() => {
         if (selection.length > 0) {
             analyzeTicketStrength(selection, drawName).then(setMetrics);
-            const score = selection.reduce((acc, n) => {
-                const s = spectral.find(x => x.number === n);
-                return acc + (s?.energy || 0);
-            }, 0);
-            setSpectralScore(selection.length > 0 ? Math.round(score / selection.length) : 0);
         } else {
             setMetrics(null);
-            setSpectralScore(0);
         }
-    }, [selection, drawName, spectral]);
+    }, [selection, drawName]);
 
     const toggleNumber = (n: number) => {
         if (selection.includes(n)) {
@@ -70,31 +70,42 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
         }
     };
 
+    // --- ALGORITHME DE COMPLÉTION INTELLIGENTE ---
     const handleMagicFill = () => {
         if (selection.length >= 5) return;
+
+        // 1. Chercher d'abord dans les corrélations fortes (Heatmap)
         const candidates = Object.entries(heatMap)
             .map(([n, score]) => ({ n: parseInt(n), score: Number(score) }))
             .filter(item => !selection.includes(item.n))
             .sort((a, b) => b.score - a.score);
 
         const needed = 5 - selection.length;
-        const toAdd = candidates.slice(0, needed).map(c => c.n);
         
-        if (toAdd.length > 0) {
+        // Si on a des candidats forts via corrélation
+        if (candidates.length > 0 && candidates[0].score > 10) {
+            const toAdd = candidates.slice(0, needed).map(c => c.n);
             setSelection(prev => [...prev, ...toAdd].sort((a, b) => a - b));
             showToast(`${toAdd.length} vecteurs convergents ajoutés.`, "success");
         } else {
+            // 2. Sinon, Fallback sur l'énergie spectrale (les numéros "chauds" du moment)
             const remaining = 5 - selection.length;
             const smartRandom: number[] = [];
-            while(smartRandom.length < remaining) {
-                const candidate = spectral.length > 0 
-                    ? spectral[Math.floor(Math.random() * Math.min(20, spectral.length))].number
-                    : Math.floor(Math.random() * 90) + 1;
+            
+            // On prend dans le top 20 spectral
+            const topSpectral = [...spectral].sort((a,b) => b.energy - a.energy).slice(0, 20);
+
+            while(smartRandom.length < remaining && topSpectral.length > 0) {
+                const idx = Math.floor(Math.random() * topSpectral.length);
+                const candidate = topSpectral[idx].number;
                 
                 if (!selection.includes(candidate) && !smartRandom.includes(candidate)) {
                     smartRandom.push(candidate);
                 }
+                // Retirer pour éviter doublon dans la boucle
+                topSpectral.splice(idx, 1);
             }
+            
             setSelection(prev => [...prev, ...smartRandom].sort((a, b) => a - b));
             showToast("Complétion spectrale activée.", "info");
         }
@@ -114,17 +125,19 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
     };
 
     const getCellColor = (n: number) => {
+        // Numéro sélectionné
         if (selection.includes(n)) return 'bg-indigo-600 text-white ring-4 ring-indigo-100 scale-110 z-10 shadow-xl font-black border-indigo-700';
         
-        const affinity = heatMap[n] || 0;
-        
+        // Mode Heatmap (quand au moins 1 numéro sélectionné)
         if (selection.length > 0) {
+            const affinity = heatMap[n] || 0;
             if (affinity > 60) return 'bg-emerald-500 text-white shadow-lg scale-105 font-bold border-emerald-600';
             if (affinity > 30) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
             if (affinity > 10) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
             return 'bg-slate-50 text-slate-300 border-slate-100 opacity-40';
         }
 
+        // Mode Calibration (Vue Spectrale par défaut)
         const spec = spectral.find(s => s.number === n);
         const energy = spec?.energy || 0;
         if (energy > 80) return 'bg-rose-100 text-rose-800 border-rose-200';
@@ -216,12 +229,6 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                             <Save size={16}/> Enregistrer Séquence
                         </button>
                     </div>
-
-                    {selection.length > 0 && (
-                        <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-xl">
-                            <TicketXRay numbers={selection} score={metrics?.score || 0} showTitle={false} />
-                        </div>
-                    )}
                 </div>
             </div>
         </div>

@@ -1,5 +1,5 @@
 
-import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition } from '../types';
+import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition, AlgoWeights } from '../types';
 import { calculateSuccessionMatrixAsync, calculateACValue } from './mathService';
 
 export interface OrchestrationConfig {
@@ -28,21 +28,11 @@ export interface ImmediateLesson {
     impactScore: number;
 }
 
-/**
- * Analyse le mimétisme séquentiel sur les 3 derniers tirages (T vs T-1, T vs T-2).
- * Détecte les répétitions exactes et les effets de voisinage immédiat.
- */
 export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] => {
     if (history.length < 3) return [];
     
-    const t0 = history[0]; // Dernier tirage connu (pour analyse backtest) ou base de projection
-    // Pour projection future, T est inconnu. Cette fonction compare T(dernier) avec T-1 et T-2.
-    // Elle sert à dire "Voici ce qui s'est passé récemment".
-    
-    // Si on veut prédire pour T+1, on regarde les comportements récents.
-    
     const metrics: MimicryMetric[] = [];
-    const recentWinners = [...new Set([...history[0].gagnants, ...history[1].gagnants])]; // Pool d'analyse
+    const recentWinners = [...new Set([...history[0].gagnants, ...history[1].gagnants])]; 
 
     recentWinners.forEach(n => {
         let score = 0;
@@ -55,7 +45,7 @@ export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] 
             if(!pastDraw) continue;
 
             if (pastDraw.gagnants.includes(n)) { 
-                score += (60 / i); // Décroissance rapide
+                score += (60 / i); 
                 type = i === 1 ? 'Répétition' : 'Lag'; 
                 sourceSet.add(`T-${i}`); 
             } 
@@ -100,21 +90,21 @@ export const calculateOrchestrationScores = (history: DrawResult[], config: Orch
         const winners = draw.gagnants;
         const machine = draw.machine || [];
 
-        // 1. Machine Leakage : Les numéros machine tendent à devenir gagnants
+        // 1. Machine Leakage
         machine.forEach(m => scores[m] = (scores[m] || 0) + (config.machineBoost * w)); 
         
         winners.forEach(winner => {
-            // 2. Miroirs (Symétrie 91)
+            // 2. Miroirs
             const mirror = getMirror(winner);
             if (mirror) scores[mirror] = (scores[mirror] || 0) + (config.mirrorBoost * w);
             
-            // 3. Voisins (+/- 1)
+            // 3. Voisins
             const nLeft = winner > 1 ? winner - 1 : 90;
             const nRight = winner < 90 ? winner + 1 : 1;
             scores[nLeft] = (scores[nLeft] || 0) + (15 * w);
             scores[nRight] = (scores[nRight] || 0) + (15 * w);
 
-            // 4. Répétition (Inertie) - Faible poids car la répétition immédiate est rare
+            // 4. Répétition
             scores[winner] = (scores[winner] || 0) + (10 * w);
         });
     }
@@ -148,9 +138,9 @@ export const analyzeImmediateTrend = (history: DrawResult[]): { lessons: Immedia
         });
     }
     
-    const transferRate = machineTransferCount / (depth * 5); // % des gagnants venant de la machine précédente
+    const transferRate = machineTransferCount / (depth * 5); 
     
-    if (transferRate > 0.08) { // 8% est significatif (statistiquement ~1%)
+    if (transferRate > 0.08) { 
         lessons.push({ 
             pattern: 'Transfert Machine', 
             description: `Canal Machine Ouvert : ${(transferRate*100).toFixed(0)}% des gagnants proviennent de la Machine T-1.`, 
@@ -194,35 +184,44 @@ const calculateCoherence = (numbers: number[]): number => {
     return Math.round((acScore * 0.6) + (spreadScore * 0.4));
 };
 
-export const getFullOrchestrationAnalysis = async (drawName: string, history: DrawResult[]): Promise<OrchestrationMetrics & { candidatesDetails: Record<number, ScoreComposition> }> => {
+export const getFullOrchestrationAnalysis = async (
+    drawName: string, 
+    history: DrawResult[], 
+    weights?: AlgoWeights // Injection ADN
+): Promise<OrchestrationMetrics & { candidatesDetails: Record<number, ScoreComposition> }> => {
     
+    // Coefficients ADN (si fournis, sinon défaut)
+    const coeffMachine = weights ? 1 + (weights.decision_forest || 0) : 1; 
+    const coeffMarkov = weights ? 1 + (weights.markov || 0) * 2 : 1;
+    const coeffStruct = weights ? 1 + (weights.orchestration || 0) * 2 : 1;
+    const coeffTrend = weights ? 1 + (weights.frequency || 0) * 1.5 : 1;
+
     // 1. Calcul des Scores Vectoriels (Physique)
-    // On réutilise la logique de calculateOrchestrationScores mais en isolant les composantes
     const structuralScores: Record<number, number> = {};
     const machineScores: Record<number, number> = {};
     const trendScores: Record<number, number> = {};
     
-    const weights = [1.0, 0.6, 0.3]; // T-1, T-2, T-3
+    const timeWeights = [1.0, 0.6, 0.3];
 
     for(let i=0; i<3 && i < history.length; i++) {
         const draw = history[i];
-        const w = weights[i];
+        const w = timeWeights[i];
         
-        // Machine
-        (draw.machine || []).forEach(m => machineScores[m] = (machineScores[m] || 0) + (30 * w));
+        // Machine (boosté par coeffMachine)
+        (draw.machine || []).forEach(m => machineScores[m] = (machineScores[m] || 0) + (30 * w * coeffMachine));
         
         draw.gagnants.forEach(winner => {
             // Trend (Répétition)
-            trendScores[winner] = (trendScores[winner] || 0) + (10 * w);
+            trendScores[winner] = (trendScores[winner] || 0) + (10 * w * coeffTrend);
             
             // Structure (Miroir/Voisin)
             const mirror = getMirror(winner);
-            if (mirror) structuralScores[mirror] = (structuralScores[mirror] || 0) + (20 * w);
+            if (mirror) structuralScores[mirror] = (structuralScores[mirror] || 0) + (20 * w * coeffStruct);
             
             const nLeft = winner > 1 ? winner - 1 : 90;
             const nRight = winner < 90 ? winner + 1 : 1;
-            structuralScores[nLeft] = (structuralScores[nLeft] || 0) + (15 * w);
-            structuralScores[nRight] = (structuralScores[nRight] || 0) + (15 * w);
+            structuralScores[nLeft] = (structuralScores[nLeft] || 0) + (15 * w * coeffStruct);
+            structuralScores[nRight] = (structuralScores[nRight] || 0) + (15 * w * coeffStruct);
         });
     }
 
@@ -237,9 +236,9 @@ export const getFullOrchestrationAnalysis = async (drawName: string, history: Dr
         Object.entries(followersMap).forEach(([fStr, count]) => {
             const follower = parseInt(fStr);
             const prob = (count as number) / total;
-            // On ne garde que les probabilités significatives pour réduire le bruit
             if (prob > 0.08) { 
-                markovScores[follower] = (markovScores[follower] || 0) + (prob * 200);
+                // Boosté par coeffMarkov
+                markovScores[follower] = (markovScores[follower] || 0) + (prob * 200 * coeffMarkov);
             }
         });
     });
@@ -255,7 +254,7 @@ export const getFullOrchestrationAnalysis = async (drawName: string, history: Dr
         const t = (trendScores[i] || 0);
         
         const total = s + m + mac + t;
-        if (total > 15) { // Filtre bruit
+        if (total > 15) { 
             finalScores[i] = total;
             candidatesDetails[i] = {
                 structural: Math.round(s),
@@ -291,14 +290,15 @@ export const getFullOrchestrationAnalysis = async (drawName: string, history: Dr
             return { number: num, score: Math.round(score), reasons };
         });
 
-    // Backtest Rapide (Validation de la stratégie sur les 10 derniers tirages)
+    // Backtest Rapide
     let hits = 0;
     let totalChecks = 0;
     const testSample = history.slice(1, 11); 
     
     testSample.forEach((targetDraw, idx) => {
-        const subHistory = history.slice(idx + 2); // Contexte au moment du tirage passé
+        const subHistory = history.slice(idx + 2); 
         if (subHistory.length > 5) {
+            // On appelle la version simple pour le backtest (sans poids ADN pour simplifier ou avec défauts)
             const subScores = calculateOrchestrationScores(subHistory);
             const candidates = Object.entries(subScores).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => Number(e[0]));
             hits += targetDraw.gagnants.filter(n => candidates.includes(n)).length;
@@ -306,7 +306,7 @@ export const getFullOrchestrationAnalysis = async (drawName: string, history: Dr
         }
     });
     
-    const accuracyScore = Math.min(100, Math.round((totalChecks > 0 ? hits / totalChecks : 0) * 400)); // Facteur 4 pour normaliser ~25% hit rate à 100% score
+    const accuracyScore = Math.min(100, Math.round((totalChecks > 0 ? hits / totalChecks : 0) * 400));
     const top5 = topCandidates.slice(0, 5).map(c => c.number);
     const coherence = calculateCoherence(top5);
     

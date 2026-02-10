@@ -3,14 +3,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
 import { performForensicAnalysis } from '../../services/postPredictionAnalysisService';
+import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
-import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX } from 'lucide-react';
-import { ForensicReport } from '../../types';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX, Crown } from 'lucide-react';
+import { ForensicReport, PlatinumAudit } from '../../types';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 
 export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { history } = useNexus();
     const [reports, setReports] = useState<ForensicReport[]>([]);
+    const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
 
@@ -22,28 +24,20 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             }
             setLoading(true);
             try {
+                // 1. Audit Standard (Oracle)
                 const preds = await getPredictionHistoryAsync(drawName);
                 const computedReports: ForensicReport[] = [];
 
-                // Analyse des prédictions récentes
-                // On s'assure d'une correspondance stricte Prediction(Date) == Result(Date)
                 for (const pred of preds.slice(0, 30)) {
                     let actual = null;
-
-                    // 1. Tentative de lien par ID (Lien explicite déjà établi)
                     if (pred.drawResultId) {
                         actual = history.find(h => h.id === pred.drawResultId);
                     }
-
-                    // 2. Correspondance stricte par Date Locale (Format DD/MM/YYYY)
                     if (!actual) {
-                        // On utilise la date locale de la machine au moment de la prédiction
                         const predDateLocale = new Date(pred.timestamp).toLocaleDateString('fr-FR');
-                        // history contient des dates formatées en "DD/MM/YYYY" par le lotteryService
                         actual = history.find(h => h.date === predDateLocale);
                     }
 
-                    // Seule la prédiction du jour correspondant au tirage du même jour est traitée
                     if (actual) {
                         const rep = await performForensicAnalysis(
                             drawName, 
@@ -57,6 +51,23 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     }
                 }
                 setReports(computedReports);
+
+                // 2. Audit Platinum (Timelines)
+                const platHist = getPlatinumHistory(drawName);
+                const computedAudits: PlatinumAudit[] = [];
+                
+                for (const plat of platHist.slice(0, 20)) {
+                    // Recherche stricte par date
+                    const platDateLocale = new Date(plat.timestamp).toLocaleDateString('fr-FR');
+                    const actual = history.find(h => h.date === platDateLocale);
+                    
+                    if (actual) {
+                        const audit = performPlatinumAudit(plat, actual);
+                        computedAudits.push(audit);
+                    }
+                }
+                setPlatinumAudits(computedAudits);
+
             } catch (err) {
                 console.error("Forensic Hub Sync Error:", err);
             } finally {
@@ -85,6 +96,24 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             fullMark: 100
         })).sort((a, b) => b.precision - a.precision).slice(0, 6);
     }, [reports]);
+
+    // Calcul de la performance des Timelines Platinum
+    const platinumStats = useMemo(() => {
+        if (platinumAudits.length === 0) return [];
+        const stats: Record<string, number> = { 'NOVA': 0, 'NEON': 0, 'TERRA': 0, 'CHRONOS': 0, 'AETHER': 0 };
+        
+        platinumAudits.forEach(audit => {
+            audit.timelinePerformance.forEach(tp => {
+                stats[tp.type] += tp.hits;
+            });
+        });
+        
+        return Object.entries(stats).map(([type, hits]) => ({
+            name: type,
+            hits: hits,
+            color: type === 'NOVA' ? '#a855f7' : type === 'NEON' ? '#06b6d4' : type === 'TERRA' ? '#10b981' : type === 'CHRONOS' ? '#f59e0b' : '#f43f5e'
+        })).sort((a, b) => b.hits - a.hits);
+    }, [platinumAudits]);
 
     const trendData = useMemo(() => {
         return reports.map(r => ({
@@ -145,6 +174,40 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Platinum Performance Monitor */}
+            {platinumAudits.length > 0 && (
+                <div className="bg-white dark:bg-slate-950 p-6 rounded-[3rem] border border-indigo-100 dark:border-indigo-900/30 shadow-xl overflow-hidden relative">
+                    <div className="absolute top-0 right-0 p-6 opacity-5"><Crown size={120} /></div>
+                    
+                    <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8 relative z-10">
+                        <div>
+                            <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
+                                <Crown size={14}/> Platinum Performance (20 derniers)
+                            </h4>
+                            <p className="text-[10px] text-slate-400 font-bold mt-1">Quelle Timeline domine le flux ?</p>
+                        </div>
+                        <div className="text-[9px] font-black bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-full border border-indigo-500/20">
+                            LEADER: {platinumStats[0]?.name}
+                        </div>
+                    </div>
+
+                    <div className="h-48 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={platinumStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                                <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
+                                <Bar dataKey="hits" radius={[6, 6, 0, 0]} barSize={40}>
+                                    {platinumStats.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            )}
 
             <div className="grid lg:grid-cols-12 gap-8">
                 {/* Reports List */}

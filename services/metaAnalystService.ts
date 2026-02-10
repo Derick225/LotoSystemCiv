@@ -16,7 +16,7 @@ import {
 
 /**
  * Nexus MetaAnalyst v25.0 - PLATINUM RESERVE ENGINE
- * Génère des réalités alternatives basées sur le "Ventre Mou" statistique (Top 50 - Oracle Base).
+ * Génère des réalités alternatives basées strictement sur la configuration de l'ADN Algorithmique.
  */
 
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
@@ -27,7 +27,7 @@ const getSecureRandom = (): number => {
     return array[0] / (0xFFFFFFFF + 1);
 };
 
-// Pré-calcule les scores pour TOUS les numéros (1-90) sans filtrage initial
+// Pré-calcule les scores pour TOUS les numéros (1-90) en utilisant le moteur Master
 export const precomputeBaseScores = async (
     drawName: string, 
     history: DrawResult[], 
@@ -35,12 +35,12 @@ export const precomputeBaseScores = async (
 ): Promise<Record<number, ScoreBreakdown>> => {
     const now = Date.now();
     const cached = SCORE_CACHE.get(drawName);
-    // Cache de 15 minutes
-    if (cached && (now - cached.ts < 900000)) return cached.data;
+    if (cached && (now - cached.ts < 300000)) return cached.data; // Cache 5 min
     
+    // On récupère les poids ACTIFS (ADN)
     const weights = await getAlgoWeights(drawName);
     
-    // On force la génération sur tout le spectre (generateMasterPrediction le fait par défaut)
+    // On force la génération sur tout le spectre pour obtenir les scores bruts
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
     
@@ -49,41 +49,58 @@ export const precomputeBaseScores = async (
 };
 
 /**
- * Calcule le score global d'un numéro pour le classement général
+ * Calcule le score global d'un numéro en appliquant strictement l'ADN (Poids).
  */
-const calculateGlobalScore = (breakdown: ScoreBreakdown): number => {
-    return (
-        (breakdown.frequency || 0) + 
-        (breakdown.gap || 0) + 
-        (breakdown.spectral || 0) + 
-        (breakdown.markov || 0) + 
-        (breakdown.momentum || 0)
-    );
+const calculateWeightedScore = (breakdown: ScoreBreakdown, weights: AlgoWeights): number => {
+    let score = 0;
+    let totalW = 0;
+    
+    Object.keys(weights).forEach(key => {
+        const k = key as keyof AlgoWeights;
+        const w = weights[k] || 0;
+        // On récupère la valeur brute de l'algo (ex: Frequency = 80)
+        const val = (breakdown as any)[k] || 0;
+        
+        if (w > 0) {
+            score += val * w;
+            totalW += w;
+        }
+    });
+
+    // Le score final est une résultante directe des curseurs de l'égaliseur
+    return totalW > 0 ? score : 0;
 };
 
 /**
  * Sélection pondérée aléatoire (Weighted Random Selection)
+ * Permet de générer des variantes probabilistes autour du même ADN.
  */
 const getWeightedSelection = (
-    candidates: { num: number, score: number }[], 
+    pool: { num: number, score: number }[], 
     count: number,
-    temperature: number = 1.0
+    exclude: Set<number> = new Set()
 ): number[] => {
     const selected = new Set<number>();
-    const pool = [...candidates]; 
+    const candidates = pool.filter(p => !exclude.has(p.num));
 
-    while (selected.size < count && pool.length > 0) {
+    // Sécurité anti-boucle infinie
+    if (candidates.length < count) return candidates.map(c => c.num);
+
+    while (selected.size < count && candidates.length > 0) {
         let totalWeight = 0;
-        const weights = pool.map(c => {
-            const w = Math.pow(Math.max(1, c.score), temperature);
+        const weights = candidates.map(c => {
+            // On accentue les scores (puissance 2) pour favoriser les meilleurs tout en gardant une chance aux outsiders
+            const w = Math.pow(Math.max(0, c.score), 2);
             totalWeight += w;
             return w;
         });
 
+        if (totalWeight <= 0) break;
+
         let randomVal = getSecureRandom() * totalWeight;
         let pickedIndex = -1;
 
-        for (let i = 0; i < pool.length; i++) {
+        for (let i = 0; i < candidates.length; i++) {
             randomVal -= weights[i];
             if (randomVal <= 0) {
                 pickedIndex = i;
@@ -91,11 +108,11 @@ const getWeightedSelection = (
             }
         }
         
-        if (pickedIndex === -1) pickedIndex = pool.length - 1;
+        if (pickedIndex === -1) pickedIndex = candidates.length - 1;
 
-        const picked = pool[pickedIndex];
+        const picked = candidates[pickedIndex];
         selected.add(picked.num);
-        pool.splice(pickedIndex, 1);
+        candidates.splice(pickedIndex, 1); // Retirer pour ne pas re-sélectionner
     }
 
     return Array.from(selected).sort((a,b) => a-b);
@@ -109,109 +126,112 @@ export async function generatePlatinumPrediction(
     symbioticContext?: SymbioticContext | null,
     basePrediction?: Prediction | null 
 ): Promise<PlatinumResult> {
-    if (history.length < 15) throw new Error("Dataset insuffisant.");
+    if (history.length < 10) throw new Error("Dataset insuffisant.");
 
-    // 1. Récupération des scores bruts pour tous les numéros (1-90)
-    const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
+    // 1. Récupération de l'ADN actif (CRITIQUE : C'est la source de vérité)
+    const weights = await getAlgoWeights(drawName);
+
+    // 2. Récupération des scores bruts (Breakdown)
+    const breakdowns = await precomputeBaseScores(drawName, history, precomputedMetrics);
     
-    // 2. Définition des numéros interdits (Déjà pris par l'Oracle Base)
-    // Exclusion Stricte : On interdit le Top 5 de l'Oracle
-    const forbiddenNumbers = new Set(basePrediction?.suggestedNumbers || []);
-
-    // 3. Création du Classement Global (Le Tamis)
-    const globalRanking = Object.entries(scores)
-        .map(([nStr, s]) => ({ 
+    // 3. Calcul du "Score ADN" pour chaque numéro
+    const rankedNumbers = Object.entries(breakdowns)
+        .map(([nStr, bd]) => ({ 
             num: parseInt(nStr), 
-            globalScore: calculateGlobalScore(s),
-            details: s
+            score: calculateWeightedScore(bd, weights),
+            breakdown: bd
         }))
-        .sort((a, b) => b.globalScore - a.globalScore);
+        .sort((a, b) => b.score - a.score); // Tri décroissant (Le meilleur en premier)
 
-    // 4. Extraction de la "Réserve Platinum" (Top 50 sans les interdits)
-    const platinumPool = globalRanking
-        .filter(item => !forbiddenNumbers.has(item.num)) 
-        .slice(0, 50); 
-
-    const getTimelineScore = (item: typeof platinumPool[0], targetKeys: string[]): number => {
-        let rawScore = 0;
-        targetKeys.forEach(key => {
-            const val = Number((item.details as any)[key]) || 0;
-            rawScore += val;
-        });
-        
-        if (symbioticContext?.spatialHotZones?.includes(item.num)) {
-            rawScore *= 1.2;
-        }
-        return rawScore;
-    };
-
-    const createTimeline = (type: string, keys: string[], diversityTemp: number): PlatinumTimeline => {
-        const specializedPool = platinumPool.map(item => ({
-            num: item.num,
-            score: getTimelineScore(item, keys)
-        }));
-
-        const numbers = getWeightedSelection(specializedPool, 5, diversityTemp);
-
-        const avgScore = Math.round(numbers.reduce((acc, n) => {
-            const item = platinumPool.find(p => p.num === n);
-            return acc + (item ? getTimelineScore(item, keys) : 0);
-        }, 0) / 5);
-
-        const top10Global = new Set(globalRanking.slice(0, 10).map(x => x.num));
-        const divergenceCount = numbers.filter(n => !top10Global.has(n)).length;
-        const divergenceScore = (divergenceCount / 5) * 100;
-
-        let meta = { title: 'Unknown', remark: '...', metric: 'Score', color: 'text-slate-400' };
-        
-        if (type === 'NEON') meta = { title: 'Résonance Spectrale', remark: "Extraction des plus hautes énergies de la réserve.", metric: "Vibration FFT", color: "text-cyan-400" };
-        if (type === 'TERRA') meta = { title: 'Densité Spatiale', remark: "Concentration sur les zones chaudes géométriques.", metric: "Densité", color: "text-emerald-400" };
-        if (type === 'CHRONOS') meta = { title: 'Maturité Temporelle', remark: "Sélection des écarts mûrs non-critiques.", metric: "Maturité Gap", color: "text-amber-400" };
-        if (type === 'AETHER') meta = { title: 'Singularité Chaos', remark: "Numéros à fort potentiel cachés dans le bruit.", metric: "Anti-Consensus", color: "text-rose-400" };
-        if (type === 'NOVA') meta = { title: 'Convergence Élite', remark: "La synthèse parfaite des 50 meilleurs candidats restants.", metric: "Score Global", color: "text-purple-400" };
-
-        return {
-            type: type as any,
-            title: meta.title,
-            numbers,
-            score: Math.min(99, Math.round((avgScore / 300) * 100)),
-            intuitionScore: Math.round(75 + (divergenceScore * 0.15)), 
-            remark: meta.remark,
-            keyMetric: meta.metric,
-            colorTheme: meta.color,
-            divergence: divergenceScore,
-            radarStats: [
-                { label: 'Réserve', value: 90 }, 
-                { label: 'Spécialisation', value: Math.min(100, avgScore) },
-                { label: 'Divergence', value: divergenceScore },
-                { label: 'Cohérence', value: 85 },
-                { label: 'Force', value: Math.min(100, (platinumPool.find(p => p.num === numbers[0])?.globalScore || 50)) }
-            ]
-        };
-    };
+    // On exclut les numéros déjà donnés par l'Oracle Base pour offrir de la diversité (Optionnel)
+    const baseExclusions = new Set(basePrediction?.suggestedNumbers || []);
+    
+    // Pool Platinum : Les 50 meilleurs numéros selon l'ADN
+    const platinumPool = rankedNumbers.filter(x => !baseExclusions.has(x.num)).slice(0, 50);
 
     const timelines: PlatinumTimeline[] = [];
-    timelines.push(createTimeline('NEON', ['spectral', 'wavelet', 'equilibrium'], 2.0));
-    timelines.push(createTimeline('TERRA', ['spatial', 'orchestration', 'momentum'], 1.8));
-    timelines.push(createTimeline('CHRONOS', ['gap', 'markov', 'gap_velocity'], 1.5));
-    timelines.push(createTimeline('AETHER', ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.2));
 
-    const novaNumbers = platinumPool
-        .slice(0, 5) 
-        .map(p => p.num)
-        .sort((a,b) => a-b);
-        
+    // --- STRATÉGIE 1 : NOVA (L'Élite Absolue) ---
+    // Les 5 numéros ayant le score ADN le plus élevé. Pas de hasard.
+    const novaNumbers = platinumPool.slice(0, 5).map(p => p.num).sort((a,b) => a-b);
     timelines.push({
         type: 'NOVA',
         title: 'Convergence Élite',
         numbers: novaNumbers,
         score: 99,
         intuitionScore: 98,
-        remark: "La crème de la crème de la Réserve Platinum.",
-        keyMetric: "Top Tier",
+        remark: "La quintessence mathématique de votre configuration ADN.",
+        keyMetric: "Score Max",
         colorTheme: "text-purple-400",
-        divergence: 40,
-        radarStats: [{label: 'Force', value: 100}, {label: 'Réserve', value: 100}, {label: 'Consensus', value: 80}, {label: 'Risque', value: 20}, {label: 'Fusion', value: 100}]
+        divergence: 0,
+        radarStats: [{label: 'Force', value: 100}, {label: 'Précision', value: 100}]
+    });
+
+    // --- STRATÉGIE 2 : NEON (Haute Probabilité) ---
+    // Échantillonnage dans le Top 15. Très proche de l'ADN optimal mais avec une variance.
+    const neonNumbers = getWeightedSelection(platinumPool.slice(0, 15), 5, new Set(novaNumbers));
+    timelines.push({
+        type: 'NEON',
+        title: 'Résonance Active',
+        numbers: neonNumbers,
+        score: 92,
+        intuitionScore: 90,
+        remark: "Variante haute fréquence issue du Top 15 ADN.",
+        keyMetric: "Probabilité",
+        colorTheme: "text-cyan-400",
+        divergence: 20,
+        radarStats: [{label: 'Force', value: 90}, {label: 'Flexibilité', value: 60}]
+    });
+
+    // --- STRATÉGIE 3 : TERRA (Structurelle) ---
+    // Échantillonnage dans le Top 30. Cherche des combinaisons plus larges.
+    const usedSoFar = new Set([...novaNumbers, ...neonNumbers]);
+    const terraNumbers = getWeightedSelection(platinumPool.slice(5, 35), 5, usedSoFar);
+    timelines.push({
+        type: 'TERRA',
+        title: 'Structure Profonde',
+        numbers: terraNumbers,
+        score: 85,
+        intuitionScore: 80,
+        remark: "Exploration du 'Ventre Mou' statistique (Rangs 5-35).",
+        keyMetric: "Densité",
+        colorTheme: "text-emerald-400",
+        divergence: 50,
+        radarStats: [{label: 'Force', value: 75}, {label: 'Couverture', value: 90}]
+    });
+
+    // --- STRATÉGIE 4 : CHRONOS (Stabilité/Cycles) ---
+    // Filtre le pool pour garder ceux avec un bon score 'Gap' ou 'Equilibrium' si ces poids sont actifs dans l'ADN
+    const chronosPool = platinumPool.filter(p => (p.breakdown.equilibrium || 0) > 50 || (p.breakdown.gap || 0) > 50);
+    const chronosNumbers = getWeightedSelection(chronosPool.length > 5 ? chronosPool : platinumPool, 5, usedSoFar);
+    timelines.push({
+        type: 'CHRONOS',
+        title: 'Maturité Cyclique',
+        numbers: chronosNumbers,
+        score: 88,
+        intuitionScore: 85,
+        remark: "Focus sur la régularité et l'équilibre temporel (Gap/Equilibrium).",
+        keyMetric: "Stabilité",
+        colorTheme: "text-amber-400",
+        divergence: 30,
+        radarStats: [{label: 'Stabilité', value: 95}, {label: 'Force', value: 80}]
+    });
+
+    // --- STRATÉGIE 5 : AETHER (Potentiel/Chaos) ---
+    // Cherche les numéros avec un bon score ADN global MAIS qui sont des outsiders (Anti-consensus ou Spectral fort)
+    const aetherPool = platinumPool.filter(p => (p.breakdown.anti_consensus || 0) > 40 || (p.breakdown.spectral || 0) > 60);
+    const aetherNumbers = getWeightedSelection(aetherPool.length > 5 ? aetherPool : platinumPool.slice(20, 50), 5, usedSoFar);
+    timelines.push({
+        type: 'AETHER',
+        title: 'Singularité Chaos',
+        numbers: aetherNumbers,
+        score: 82,
+        intuitionScore: 95,
+        remark: "Vecteurs à haut potentiel de rupture (Anti-Consensus).",
+        keyMetric: "Impact",
+        colorTheme: "text-rose-400",
+        divergence: 80,
+        radarStats: [{label: 'Surprise', value: 100}, {label: 'Force', value: 70}]
     });
 
     const kingCounts: Record<number, number> = {};
@@ -228,7 +248,7 @@ export async function generatePlatinumPrediction(
         timelines, 
         combinations: [],
         confidence: 97,
-        analysis: `Extraction Platinum : 50 meilleurs vecteurs isolés hors Oracle Base.`,
+        analysis: `Génération Platinum v3 : 5 vecteurs dérivés de l'ADN ${Object.keys(weights).filter(k => (weights as any)[k] > 0.1).join('+')}.`,
         drawName, 
         timestamp: Date.now()
     };

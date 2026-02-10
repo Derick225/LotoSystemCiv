@@ -211,7 +211,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     <div className="xl:w-2/3 bg-white dark:bg-slate-900 p-8 flex flex-col">
                         <div className="flex justify-between items-center mb-8">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2">
-                                <Sliders size={14}/> Égaliseur Paramétrique
+                                <Sliders size={14}/> ADN Algorithmique
                             </h4>
                             <div className="flex gap-2">
                                 <button 

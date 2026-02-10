@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { generateAbbreviatedWheel, generateFullWheel } from '../../services/combinatoricsService';
-import { calculateCorrelationMatrixAsync, calculateHurstForNumber, calculateACValue } from '../../services/mathService';
+import { calculateACValue } from '../../services/mathService';
 import { runAntColonyOptimization } from '../../services/acoService';
 import { getUniqueSortedNumbers } from '../../utils/arrayUtils';
 import { saveTicket } from '../../services/userPreferencesService';
@@ -32,16 +32,14 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
 
     // Auto Inputs & Config
     const [inputs, setInputs] = useState<string[]>(Array(12).fill('')); 
-    const [bankers, setBankers] = useState<number[]>([]);
+    const [bankers, setBankers] = useState<number[]>([]); // Bankers non implémentés graphiquement pour l'instant, mais la logique est prête
     const [systemType, setSystemType] = useState<'full' | 'reduced'>('reduced');
     const [guarantee, setGuarantee] = useState<3 | 4 | 5>(3);
     
     // Filters
-    const [useHarmonicFilter, setUseHarmonicFilter] = useState(true);
-    const [useCorrelationFilter, setUseCorrelationFilter] = useState(false);
-    const [useHurstFilter, setUseHurstFilter] = useState(true);
     const [minSum, setMinSum] = useState(100);
     const [maxSum, setMaxSum] = useState(250);
+    const [useHarmonicFilter, setUseHarmonicFilter] = useState(true);
     
     // State
     const [generatedTickets, setGeneratedTickets] = useState<GeneratedTicket[]>([]);
@@ -51,6 +49,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
     const [logs, setLogs] = useState<string[]>([]);
     const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
 
+    // Chargement ACO
     useEffect(() => { 
         if(history.length > 20) loadAco(); 
     }, [drawName, history, vocalContext]);
@@ -64,6 +63,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
 
     const addLog = (msg: string) => setLogs(prev => [`> ${msg}`, ...prev].slice(0, 6));
 
+    // --- MOTEUR DE GÉNÉRATION PRINCIPAL ---
     const handleGenerate = async () => {
         const pool = getUniqueSortedNumbers(inputs);
         if (pool.length < 5) { showToast("Min 5 numéros requis dans le pool.", "error"); return; }
@@ -75,8 +75,14 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
         setGeneratedTickets([]);
         
         try {
+            // 1. Génération Brute (Worker-friendly en chunking)
             let baseTickets: number[][] = [];
             if (systemType === 'full') {
+                if (pool.length > 14) {
+                    showToast("Max 14 numéros pour Système Intégral (Protection Mémoire)", "error");
+                    setIsGenerating(false);
+                    return;
+                }
                 baseTickets = generateFullWheel(pool, 5);
             } else {
                 baseTickets = generateAbbreviatedWheel(pool, bankers, 5, guarantee);
@@ -84,36 +90,40 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
 
             addLog(`${baseTickets.length} structures brutes générées.`);
             
-            const matrix = useCorrelationFilter ? await calculateCorrelationMatrixAsync(history) : null;
+            // 2. Préparation du scoring basé sur l'ADN (GlobalWeights)
             const spectralCache: Record<number, number> = {};
-            
             pool.forEach(n => {
                 spectralCache[n] = spectral.find(s => s.number === n)?.energy || 0;
             });
 
+            // Poids d'influence pour le scoring
             const wSpectral = (globalWeights.spectral || 0.15) * 4; 
             const wChaos = (globalWeights.ai_intuition || 0.1) * 3; 
 
             let output: GeneratedTicket[] = [];
-            const CHUNK_SIZE = 400;
+            const CHUNK_SIZE = 500; // Traitement par lots pour ne pas figer l'UI
 
             for (let i = 0; i < baseTickets.length; i += CHUNK_SIZE) {
                 const chunk = baseTickets.slice(i, i + CHUNK_SIZE);
                 
                 const processedChunk = chunk.map(t => {
+                    // A. Filtre Somme (Hard Filter)
                     const sum = t.reduce((a,b) => a+b, 0);
                     if (sum < minSum || sum > maxSum) return null;
 
-                    if (useHarmonicFilter) {
-                        const avgEnergy = t.reduce((acc, n) => acc + (spectralCache[n] || 0), 0) / 5;
-                        if (avgEnergy < 35) return null;
-                    }
+                    // B. Filtre Harmonique (Moyenne spectrale)
+                    const avgEnergy = t.reduce((acc, n) => acc + (spectralCache[n] || 0), 0) / 5;
+                    if (useHarmonicFilter && avgEnergy < 30) return null; // Rejeter les combinaisons "froides"
 
+                    // C. Calcul des Métriques
                     const ac = calculateACValue(t);
-                    const specScore = t.reduce((acc, n) => acc + (spectralCache[n] || 0), 0) / 5;
                     const odds = t.filter(n => n % 2 !== 0).length;
                     
-                    let nexusScore = (specScore * wSpectral) + (ac * 10 * wChaos) + (odds === 2 || odds === 3 ? 20 : 0);
+                    // D. Scoring Nexus (0-100)
+                    // Combine Énergie Spectrale + Complexité AC + Équilibre Parité
+                    let nexusScore = (avgEnergy * wSpectral) + (ac * 10 * wChaos);
+                    if (odds === 2 || odds === 3) nexusScore += 20; // Bonus parité équilibrée
+                    
                     nexusScore = Math.min(100, Math.round(nexusScore / (wSpectral + wChaos + 0.5)));
 
                     return {
@@ -128,17 +138,21 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
 
                 output = [...output, ...processedChunk];
                 setGenProgress(Math.round(((i + CHUNK_SIZE) / baseTickets.length) * 100));
+                
+                // Pause pour laisser respirer l'event loop
                 await new Promise(resolve => requestAnimationFrame(resolve));
             }
 
+            // 3. Tri final par score Nexus
             output.sort((a, b) => b.nexusScore - a.nexusScore);
             setGeneratedTickets(output);
+            
             addLog(`Génération terminée : ${output.length} tickets optimisés.`);
-            showToast(`${output.length} tickets générés.`, "success");
+            showToast(`${output.length} tickets générés et classés par pertinence ADN.`, "success");
 
         } catch (e: any) { 
             console.error(e);
-            showToast("Erreur critique.", "error"); 
+            showToast("Erreur critique : " + e.message, "error"); 
         } finally { 
             setIsGenerating(false); 
             setGenProgress(100);
@@ -240,7 +254,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
                     <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
                         <div className="grid md:grid-cols-2 gap-8">
                             <div className="space-y-4">
-                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Pool de Numéros (Min 5)</h4>
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Pool de Numéros (Min 5, Max 14 pour Intégral)</h4>
                                 <div className="grid grid-cols-6 gap-2">
                                     {inputs.map((val, idx) => (
                                         <input 

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNexus } from '../NexusProvider';
 import { calculateFusion } from '../../services/fusionService';
 import { FusionResult } from '../../types';
@@ -8,15 +8,15 @@ import { TicketXRay } from '../TicketXRay';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cpu, Zap, Brain, Hexagon, ArrowDown, Save, RefreshCw, Layers, Check } from 'lucide-react';
+import { Cpu, Zap, Brain, Hexagon, ArrowDown, Save, RefreshCw, Layers } from 'lucide-react';
 
 export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, stats, spectral, lastPrediction } = useNexus();
+    const { history, stats, spectral, lastPrediction, globalWeights } = useNexus();
     const { showToast } = useToast();
     
     const [fusionResult, setFusionResult] = useState<FusionResult | null>(null);
     const [isFusing, setIsFusing] = useState(false);
-    const [step, setStep] = useState(0); // Pour l'animation séquentielle
+    const [step, setStep] = useState(0); 
 
     const handleFusion = () => {
         if (history.length < 5) {
@@ -24,15 +24,14 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
             return;
         }
         setIsFusing(true);
-        setStep(1); // Start logic calculation
+        setStep(1); 
         
-        // Simulation des étapes de calcul pour l'UX
-        setTimeout(() => setStep(2), 600);  // Start quantum
-        setTimeout(() => setStep(3), 1200); // Start oracle
+        setTimeout(() => setStep(2), 600);  
+        setTimeout(() => setStep(3), 1200); 
         
         setTimeout(() => {
-            // Appel réel avec l'historique complet
-            const result = calculateFusion(history, stats, spectral, lastPrediction);
+            // Injection des poids ADN (globalWeights)
+            const result = calculateFusion(history, stats, spectral, lastPrediction, globalWeights);
             setFusionResult(result);
             setIsFusing(false);
             setStep(0);
@@ -54,7 +53,6 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
             {/* Header / Control */}
             <div className="bg-slate-900 border border-indigo-500/20 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden text-center group">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent animate-pulse-slow"></div>
-                {/* Background effect */}
                 <div className="absolute inset-0 bg-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
                 
                 <div className="relative z-10">
@@ -62,7 +60,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
                         Hyper <span className="text-indigo-500">Convergence</span>
                     </h2>
                     <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg mx-auto mb-8">
-                        Fusionnez les vecteurs logiques (Python), physiques (Quantum) et intuitifs (Oracle) pour générer le ticket ultime.
+                        Fusionnez les vecteurs logiques (Python), physiques (Quantum) et intuitifs (Oracle) pour générer le ticket ultime, calibré par votre ADN Algorithmique.
                     </p>
                     
                     <button 
@@ -71,7 +69,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
                         className="px-10 py-5 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 mx-auto transition-all active:scale-95 disabled:opacity-50 min-w-[200px]"
                     >
                         {isFusing ? <RefreshCw className="animate-spin" size={18}/> : <Hexagon size={18}/>}
-                        {isFusing ? 'Fusion des Noyaux...' : 'Initialiser la Fusion'}
+                        {isFusing ? 'Application de l\'ADN...' : 'Initialiser la Fusion'}
                     </button>
                 </div>
             </div>
@@ -82,7 +80,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
                 <div className={`p-4 rounded-[2rem] border transition-all duration-500 relative overflow-hidden text-center ${step >= 1 || fusionResult ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-500/30' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 opacity-60'}`}>
                     {step === 1 && <div className="absolute inset-0 bg-emerald-500/10 animate-pulse"></div>}
                     <Cpu className={`mx-auto mb-2 ${step >= 1 || fusionResult ? 'text-emerald-500' : 'text-slate-400'}`} size={24} />
-                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 1 || fusionResult ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>Python Kernel</h3>
+                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 1 || fusionResult ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>Logique</h3>
                     <div className="flex flex-col items-center gap-1.5 min-h-[100px] justify-center">
                         {fusionResult ? fusionResult.sources.python.map(n => <span key={n} className="font-mono font-bold text-xs text-emerald-700 dark:text-emerald-300">{n}</span>) : <span className="text-[10px] text-slate-400 italic">En attente...</span>}
                     </div>
@@ -92,7 +90,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
                 <div className={`p-4 rounded-[2rem] border transition-all duration-500 relative overflow-hidden text-center ${step >= 2 || fusionResult ? 'bg-purple-50 dark:bg-purple-900/10 border-purple-500/30' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 opacity-60'}`}>
                     {step === 2 && <div className="absolute inset-0 bg-purple-500/10 animate-pulse"></div>}
                     <Zap className={`mx-auto mb-2 ${step >= 2 || fusionResult ? 'text-purple-500' : 'text-slate-400'}`} size={24} />
-                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 2 || fusionResult ? 'text-purple-600 dark:text-purple-400' : 'text-slate-500'}`}>Quantum Field</h3>
+                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 2 || fusionResult ? 'text-purple-600 dark:text-purple-400' : 'text-slate-500'}`}>Physique</h3>
                     <div className="flex flex-col items-center gap-1.5 min-h-[100px] justify-center">
                         {fusionResult ? fusionResult.sources.quantum.map(n => <span key={n} className="font-mono font-bold text-xs text-purple-700 dark:text-purple-300">{n}</span>) : <span className="text-[10px] text-slate-400 italic">En attente...</span>}
                     </div>
@@ -102,7 +100,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
                 <div className={`p-4 rounded-[2rem] border transition-all duration-500 relative overflow-hidden text-center ${step >= 3 || fusionResult ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-500/30' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 opacity-60'}`}>
                     {step === 3 && <div className="absolute inset-0 bg-amber-500/10 animate-pulse"></div>}
                     <Brain className={`mx-auto mb-2 ${step >= 3 || fusionResult ? 'text-amber-500' : 'text-slate-400'}`} size={24} />
-                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 3 || fusionResult ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`}>Oracle Node</h3>
+                    <h3 className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-4 ${step >= 3 || fusionResult ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`}>Intuition</h3>
                     <div className="flex flex-col items-center gap-1.5 min-h-[100px] justify-center">
                         {fusionResult ? fusionResult.sources.oracle.map(n => <span key={n} className="font-mono font-bold text-xs text-amber-700 dark:text-amber-300">{n}</span>) : <span className="text-[10px] text-slate-400 italic">En attente...</span>}
                     </div>

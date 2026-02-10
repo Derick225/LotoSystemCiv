@@ -1,7 +1,6 @@
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
-import { Network, Activity, Cpu, Zap, Layers, BarChart3, Share2, Grid } from 'lucide-react';
+import { Network, Activity, Cpu, Zap, Layers, Grid, Share2, RefreshCw } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
@@ -33,7 +32,7 @@ const COMMUNITY_BG = [
 ];
 
 export const NeuralArchitectureTab: React.FC = () => {
-    const { correlationMatrix, drawName } = useNexus();
+    const { correlationMatrix, drawName, spectral } = useNexus();
     const { showToast } = useToast();
     
     // State
@@ -41,11 +40,11 @@ export const NeuralArchitectureTab: React.FC = () => {
     const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
     const [generatedPath, setGeneratedPath] = useState<number[]>([]);
     const [minStrength, setMinStrength] = useState(15); 
+    const [isWalking, setIsWalking] = useState(false);
 
-    // --- ANALYSE DES DONNÉES (Statique) ---
+    // --- ANALYSE DES DONNÉES (Construction du Graphe) ---
     useEffect(() => {
         const calculatedNodes: NodeData[] = [];
-        const maxDegree = 1; // Pour normalisation
 
         for (let i = 1; i <= 90; i++) {
             const affinities = correlationMatrix[i]?.affinities || {};
@@ -63,8 +62,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             // Tri des liens par force décroissante
             links.sort((a, b) => b.strength - a.strength);
 
-            // Assignation simple de communauté basée sur le lien le plus fort
-            // Si pas de lien, communauté par défaut basée sur modulo
+            // Assignation de communauté basée sur le lien le plus fort
             const primaryLink = links[0]?.target || i;
             const community = primaryLink % 6;
 
@@ -83,44 +81,78 @@ export const NeuralArchitectureTab: React.FC = () => {
         nodes.find(n => n.id === selectedNodeId) || null, 
     [nodes, selectedNodeId]);
 
-    // --- ACTIONS ---
-
-    const generateNeuralPath = () => {
+    // --- ALGORITHME DE MARCHE ALÉATOIRE PONDÉRÉE ---
+    const generateNeuralPath = async () => {
         if (!selectedNodeData) return;
-        
-        // Algorithme Greedy : On suit les liens les plus forts
+        setIsWalking(true);
+        setGeneratedPath([]);
+
+        // Simulation visuelle du parcours
+        const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+        // 1. Point de départ
         const path = new Set<number>();
         path.add(selectedNodeData.id);
         
-        let current = selectedNodeData;
-        
-        // On cherche 4 autres numéros
-        for(let i=0; i<4; i++) {
-            // Filtre les liens déjà dans le path
-            const candidates = current.links.filter(l => !path.has(l.target));
+        let currentNode = selectedNodeData;
+        let steps = 0;
+        const MAX_STEPS = 4; // On veut 5 numéros au total (1 + 4)
+
+        while (path.size < 5 && steps < 20) { // Safety break
+            await delay(300); // Délai pour l'effet visuel
             
-            if (candidates.length > 0) {
-                // On prend le meilleur candidat
-                const nextId = candidates[0].target;
-                path.add(nextId);
-                // On saute au prochain nœud
-                const nextNode = nodes.find(n => n.id === nextId);
-                if (nextNode) current = nextNode;
+            // 2. Identifier les voisins valides (pas encore dans le path)
+            const neighbors = currentNode.links
+                .filter(l => !path.has(l.target))
+                .map(l => ({ ...l, weight: l.strength * l.strength })); // On accentue les poids (carré)
+
+            let nextId: number;
+
+            if (neighbors.length > 0) {
+                // 3. Sélection Roulette Wheel (Probabiliste)
+                const totalWeight = neighbors.reduce((sum, n) => sum + n.weight, 0);
+                let random = Math.random() * totalWeight;
+                
+                const selectedNeighbor = neighbors.find(n => {
+                    random -= n.weight;
+                    return random <= 0;
+                }) || neighbors[0]; // Fallback au meilleur
+
+                nextId = selectedNeighbor.target;
             } else {
-                // Si cul-de-sac, on complète avec les meilleurs liens du nœud d'origine
-                const fallback = selectedNodeData.links.filter(l => !path.has(l.target));
-                if (fallback[0]) path.add(fallback[0].target);
+                // 4. Cul-de-sac : Saut Quantique vers un nœud spectral fort non utilisé
+                const availableHighEnergy = spectral
+                    .filter(s => !path.has(s.number))
+                    .sort((a, b) => b.energy - a.energy)
+                    .slice(0, 5);
+                
+                if (availableHighEnergy.length > 0) {
+                    nextId = availableHighEnergy[Math.floor(Math.random() * availableHighEnergy.length)].number;
+                } else {
+                    // Fallback ultime : aléatoire
+                    do {
+                        nextId = Math.floor(Math.random() * 90) + 1;
+                    } while (path.has(nextId));
+                }
             }
+
+            path.add(nextId);
+            setGeneratedPath(Array.from(path)); // Mise à jour progressive
+            
+            const nextNodeObj = nodes.find(n => n.id === nextId);
+            if (nextNodeObj) currentNode = nextNodeObj;
+            steps++;
         }
 
-        setGeneratedPath(Array.from(path).sort((a, b) => a - b));
-        showToast("Séquence dérivée calculée.", "success");
+        setIsWalking(false);
+        showToast("Chemin neuronal tracé.", "success");
     };
 
     const savePath = async () => {
         if (generatedPath.length < 5) return;
+        const sortedPath = [...generatedPath].sort((a, b) => a - b);
         await saveTicket({
-            numbers: generatedPath,
+            numbers: sortedPath,
             drawName,
             strategy: `Architecture (Source #${selectedNodeId})`
         });
@@ -138,7 +170,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                     <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">
                         <Network size={24} className="text-indigo-500" /> Matrice Structurelle
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">Cartographie numérique des poids synaptiques.</p>
+                    <p className="text-xs text-slate-400 mt-1">Cartographie des poids synaptiques & propagation.</p>
                 </div>
                 
                 {/* Stats Globales */}
@@ -172,6 +204,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                         {nodes.map((node) => {
                             const intensity = node.centrality / maxCentrality; // 0 à 1
                             const isSelected = selectedNodeId === node.id;
+                            const isInPath = generatedPath.includes(node.id);
                             const isLinked = selectedNodeData?.links.some(l => l.target === node.id && l.strength > (minStrength/100));
                             
                             let bgClass = "bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-700 text-slate-300";
@@ -180,11 +213,12 @@ export const NeuralArchitectureTab: React.FC = () => {
                             if (isSelected) {
                                 bgClass = "bg-indigo-600 border-indigo-500 text-white shadow-xl z-20";
                                 scaleClass = "scale-110";
+                            } else if (isInPath) {
+                                bgClass = "bg-emerald-500 border-emerald-400 text-white shadow-lg z-20 animate-pulse";
+                                scaleClass = "scale-105";
                             } else if (isLinked) {
                                 bgClass = "bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-300";
                             } else if (intensity > 0.1) {
-                                // Opacité basée sur la centralité
-                                const opacity = Math.max(0.4, intensity);
                                 bgClass = `border-2 ${COMMUNITY_COLORS[node.community]} bg-opacity-10`;
                             }
 
@@ -196,10 +230,10 @@ export const NeuralArchitectureTab: React.FC = () => {
                                         aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-xs font-black transition-all duration-300 relative border
                                         ${bgClass} ${scaleClass}
                                     `}
-                                    style={(!isSelected && !isLinked && intensity > 0.1) ? { opacity: 0.7 + intensity * 0.3 } : {}}
+                                    style={(!isSelected && !isLinked && !isInPath && intensity > 0.1) ? { opacity: 0.7 + intensity * 0.3 } : {}}
                                 >
                                     {node.id}
-                                    {intensity > 0.6 && !isSelected && <div className={`absolute bottom-1 w-1 h-1 rounded-full ${COMMUNITY_BG[node.community]}`}></div>}
+                                    {intensity > 0.6 && !isSelected && !isInPath && <div className={`absolute bottom-1 w-1 h-1 rounded-full ${COMMUNITY_BG[node.community]}`}></div>}
                                 </button>
                             );
                         })}
@@ -267,9 +301,11 @@ export const NeuralArchitectureTab: React.FC = () => {
 
                                     <button 
                                         onClick={generateNeuralPath}
-                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 group"
+                                        disabled={isWalking}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 group disabled:opacity-50"
                                     >
-                                        <Zap size={16} className="group-hover:text-yellow-300 transition-colors"/> Tracer Séquence
+                                        {isWalking ? <RefreshCw className="animate-spin" size={16}/> : <Zap size={16} className="group-hover:text-yellow-300 transition-colors"/>}
+                                        {isWalking ? "Propagation..." : "Générer Séquence"}
                                     </button>
                                 </motion.div>
                             ) : (
@@ -280,7 +316,7 @@ export const NeuralArchitectureTab: React.FC = () => {
                                     className="flex-1 flex flex-col items-center justify-center text-center opacity-40 p-6"
                                 >
                                     <Share2 size={64} className="text-slate-600 mb-6 animate-pulse-slow" />
-                                    <p className="text-sm font-bold text-slate-400">Sélectionnez un vecteur dans la matrice pour décoder son architecture.</p>
+                                    <p className="text-sm font-bold text-slate-400">Sélectionnez un vecteur dans la matrice pour démarrer la propagation.</p>
                                 </motion.div>
                             )}
                         </AnimatePresence>

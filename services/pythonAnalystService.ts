@@ -1,7 +1,7 @@
 
 import { isSupabaseConfigured } from './supabaseClient';
 import { invokeEdgeFunction } from './apiClient';
-import { DrawResult, PythonAnalysisResult, NotebookCell } from "../types";
+import { DrawResult, PythonAnalysisResult, NotebookCell, AlgoWeights } from "../types";
 import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimulation } from './mathService';
 
 // Service Hybride : Calcul Local (Client) + Interprétation (Cloud)
@@ -10,6 +10,7 @@ export const runDeepPythonAnalysis = async (
     drawName: string, 
     history: DrawResult[], 
     modelType: 'XGBoost' | 'ARIMA' | 'MCMC' = 'XGBoost',
+    weights?: AlgoWeights,
     onProgress?: (data: any) => void,
     onLog?: (msg: string) => void
 ): Promise<PythonAnalysisResult> => {
@@ -18,6 +19,7 @@ export const runDeepPythonAnalysis = async (
         onLog(`[SYSTEM] Initiating Neural Python Kernel v12.1...`);
         onLog(`[CONFIG] Strategy: ${modelType} (Stochastic Modeling)`);
         onLog(`[DATA] Loading ${history.length} frames from registry...`);
+        if (weights) onLog(`[DNA] Injecting AlgoWeights: Poisson=${weights.poisson?.toFixed(2) || 'N/A'}, Bayes=${weights.bayes?.toFixed(2) || 'N/A'}`);
     }
 
     // 1. CALCULS MATHÉMATIQUES LOCAUX (Vrais calculs)
@@ -31,6 +33,11 @@ export const runDeepPythonAnalysis = async (
 
     const metricsVector = [];
     const weightsForMC: Record<number, number> = {};
+
+    // Poids par défaut si non fournis
+    const wPoisson = weights?.poisson ?? 0.4;
+    const wBayes = weights?.bayes ?? 0.6;
+    const totalW = wPoisson + wBayes || 1;
 
     for (let i = 1; i <= 90; i++) {
         // Paramètres
@@ -47,7 +54,8 @@ export const runDeepPythonAnalysis = async (
         const likelihood = recentFreq / 20; 
         const bayesScore = calculateBayesianScore(prior, Math.max(0.01, likelihood));
 
-        const combinedScore = (poissonP * 0.4) + (bayesScore * 0.6);
+        // Score combiné pondéré par l'ADN
+        const combinedScore = (poissonP * (wPoisson / totalW)) + (bayesScore * (wBayes / totalW));
         
         metricsVector.push({ 
             number: i, 

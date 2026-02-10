@@ -90,6 +90,26 @@ export const generateMasterPrediction = async (
     let weights = normalizeWeights(weightsToUse || await getAlgoWeights(drawName));
     weights = applyRiskProfile(weights, riskProfile);
 
+    // DÉTERMINATION DE LA STRUCTURE DU TICKET BASÉE SUR L'ADN
+    // L'ADN (les poids) dicte non seulement le score, mais aussi la stratégie de composition
+    const stabilityWeight = (weights.frequency || 0) + (weights.markov || 0) + (weights.equilibrium || 0);
+    const chaosWeight = (weights.anti_consensus || 0) + (weights.gap || 0) + (weights.spectral || 0);
+    
+    // Si l'ADN est configuré pour le Chaos, on force plus d'outsiders dans la sélection finale
+    let topPickCount = 3;
+    let outsiderCount = 2;
+    
+    if (chaosWeight > stabilityWeight * 1.5) {
+        topPickCount = 1; // Stratégie Hyper-Chaos : 1 Top + 4 Outsiders
+        outsiderCount = 4;
+    } else if (chaosWeight > stabilityWeight) {
+        topPickCount = 2; // Stratégie Audacieuse : 2 Top + 3 Outsiders
+        outsiderCount = 3;
+    } else if (stabilityWeight > chaosWeight * 2) {
+        topPickCount = 5; // Stratégie Béton : 5 Top (Tout sur la logique)
+        outsiderCount = 0;
+    }
+
     const N = 90; // Total numbers
     const sampleSize = Math.min(history.length, 100);
     const recentHistory = history.slice(0, sampleSize);
@@ -217,15 +237,31 @@ export const generateMasterPrediction = async (
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
     
-    // Sélection intelligente : Top 3 + 2 Outsiders du Top 10-20 (pour éviter le sur-ajustement)
-    const top3 = sorted.slice(0, 3).map(s => s.num);
-    const outsiders = sorted.slice(3, 12).sort(() => 0.5 - Math.random()).slice(0, 2).map(s => s.num);
-    const selection = [...top3, ...outsiders].sort((a,b) => a-b);
+    // SÉLECTION INFLUENCÉE PAR L'ADN
+    const topPicks = sorted.slice(0, topPickCount).map(s => s.num);
+    
+    // Les outsiders sont pris plus loin dans la liste (zone "tiède" ou "froide" selon chaos)
+    const outsiderPoolStart = topPickCount + 2;
+    const outsiderPoolEnd = outsiderCount > 0 ? outsiderPoolStart + 20 : outsiderPoolStart;
+    
+    const outsiders = sorted
+        .slice(outsiderPoolStart, outsiderPoolEnd)
+        .sort(() => 0.5 - Math.random()) // Shuffle pour variété dans la zone sélectionnée
+        .slice(0, outsiderCount)
+        .map(s => s.num);
+        
+    const selection = [...topPicks, ...outsiders].sort((a,b) => a-b);
 
-    let analysisText = `Moteur Nexus v12 opérationnel. `;
-    analysisText += `Profil : ${riskProfile}. `;
-    analysisText += `Dominante : ${Object.entries(weights).sort((a,b) => b[1]-a[1])[0][0].toUpperCase()}. `;
-    analysisText += `Confiance calculée : ${Math.round(sorted[0].score)}/100.`;
+    // Construction du narratif d'ADN
+    const dnaDominant = Object.entries(weights).sort((a,b) => b[1]-a[1])[0];
+    let dnaType = "Équilibré";
+    if (dnaDominant[1] > 0.3) dnaType = `${dnaDominant[0].toUpperCase()} Dominant`;
+    
+    const structureType = outsiderCount === 0 ? "Logique Pure" : outsiderCount > 2 ? "Chaos Structuré" : "Mixte";
+
+    let analysisText = `ADN Actif : ${dnaType} (${getStrategyName(weights)}). `;
+    analysisText += `Structure générée : ${structureType} (${topPickCount} Top / ${outsiderCount} Outsiders). `;
+    analysisText += `La combinaison est une résultante directe de la pondération active (Pression: ${dnaDominant[1].toFixed(2)} sur ${dnaDominant[0]}).`;
     
     return {
         suggestedNumbers: selection,
@@ -236,7 +272,7 @@ export const generateMasterPrediction = async (
         timestamp: Date.now(),
         symbiosisFactor: symbioticContext ? 1.5 : 1.0,
         riskProfile,
-        realityAlignment: 0 // Sera calculé par le composant UI si T-1 disponible
+        realityAlignment: 0
     };
 };
 

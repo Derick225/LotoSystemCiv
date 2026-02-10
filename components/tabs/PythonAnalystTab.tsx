@@ -50,7 +50,7 @@ const OutputCell: React.FC<{ content: string }> = ({ content }) => (
 );
 
 export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history } = useNexus();
+    const { history, globalWeights } = useNexus();
     const { showToast } = useToast();
     
     const [status, setStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -76,7 +76,8 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
         ]);
 
         try {
-            const data = await runDeepPythonAnalysis(drawName, history, 'XGBoost', undefined, (msg) => {
+            // Injection des poids globaux pour que l'analyse Python respecte l'ADN
+            const data = await runDeepPythonAnalysis(drawName, history, 'XGBoost', globalWeights, (msg) => {
                 setLogs(prev => [...prev, msg]);
             });
             setResult(data);

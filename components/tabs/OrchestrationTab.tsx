@@ -17,7 +17,7 @@ interface OrchestrationTabProps { drawName: string; }
 // Visualise les liens physiques entre T-1 et les prédictions (T) via SVG
 const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = ({ prevDraw, candidates }) => {
     const [hoveredNode, setHoveredNode] = useState<{ id: number, type: 'src' | 'tgt' } | null>(null);
-    const topCands = candidates.slice(0, 8); // On montre 8 candidats
+    const topCands = candidates.slice(0, 8); 
 
     // Calcul des liens vectoriels RÉELS entre le tirage précédent et les candidats proposés
     const links = useMemo(() => {
@@ -29,13 +29,13 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                 let strength = 0;
                 
                 // Répétition
-                if (src === tgt) { type = 'Inertie'; color = '#10b981'; strength = 3; } // Emerald
+                if (src === tgt) { type = 'Inertie'; color = '#10b981'; strength = 3; } 
                 // Voisinage
-                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; } // Blue
+                else if (Math.abs(src - tgt) === 1) { type = 'Voisin'; color = '#3b82f6'; strength = 1.5; }
                 // Miroir Loto (1 <-> 90)
-                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; } // Pink
+                else if (src === 91 - tgt) { type = 'Miroir'; color = '#ec4899'; strength = 2; }
                 // Inversion Chiffres (12 <-> 21)
-                else if (src.toString().split('').reverse().join('') === tgt.toString() && src > 10) { type = 'Shadow'; color = '#f59e0b'; strength = 2; } // Amber
+                else if (src.toString().split('').reverse().join('') === tgt.toString() && src > 10) { type = 'Shadow'; color = '#f59e0b'; strength = 2; }
                 
                 if (type) l.push({ src, tgt, type, color, strength });
             });
@@ -196,7 +196,7 @@ const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
 };
 
 export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) => {
-    const { history, loading: nexusLoading } = useNexus();
+    const { history, loading: nexusLoading, globalWeights } = useNexus(); // Ajout globalWeights
     const { showToast } = useToast();
     
     const [metrics, setMetrics] = useState<(OrchestrationMetrics & { candidatesDetails?: Record<number, ScoreComposition> }) | null>(null);
@@ -214,7 +214,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             try {
                 if (history.length > 2 && isMounted.current) {
                     const [res, mim] = await Promise.all([
-                        getFullOrchestrationAnalysis(drawName, history),
+                        getFullOrchestrationAnalysis(drawName, history, globalWeights), // Passage des poids ADN
                         Promise.resolve(analyzeShortTermMimicry(history))
                     ]);
                     
@@ -229,7 +229,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         };
         load();
         return () => { isMounted.current = false; };
-    }, [drawName, history]);
+    }, [drawName, history, globalWeights]); // Recalcul si les poids changent
 
     const handleGenerateTicket = () => {
         if (!metrics || metrics.topCandidates.length < 5) return;
@@ -260,7 +260,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     if (nexusLoading || loading) return (
         <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse">
             <Layers className="text-indigo-500 animate-bounce" size={48} />
-            <p className="font-black text-indigo-500 uppercase tracking-[0.4em] text-xs">Triangulation Vectorielle...</p>
+            <p className="font-black text-indigo-500 uppercase tracking-[0.4em] text-xs">Triangulation Vectorielle (ADN Actif)...</p>
         </div>
     );
     
