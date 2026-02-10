@@ -1,9 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { ForensicReport, ForensicEvidence, AlgoWeights, AdaptiveRules, PredictionFeedback } from '../types';
 import { NumberBall } from './NumberBall';
-import { calculateCorrectionsFromForensics, getAlgoWeights, getAdaptiveRules } from '../services/predictionEngine';
-import { runCounterfactualSimulation } from '../services/postPredictionAnalysisService';
+import { calculateCorrectionsFromForensics, getAlgoWeights, getAdaptiveRules, saveAlgoWeights, normalizeWeights } from '../services/predictionEngine';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { invokeEdgeFunction } from '../services/apiClient';
@@ -13,7 +12,7 @@ import {
     ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
     AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, BarChart3, RefreshCw 
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, Cell } from 'recharts';
 
 interface PredictionForensicsProps {
     report: ForensicReport;
@@ -22,7 +21,7 @@ interface PredictionForensicsProps {
 
 export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report, onClose }) => {
     const { showToast } = useToast();
-    const { updateGlobalWeights } = useNexus();
+    const { updateGlobalWeights, refreshData } = useNexus();
     
     const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation'>('ballistic');
     const [applying, setApplying] = useState(false);
@@ -31,37 +30,38 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const [userRating, setUserRating] = useState<PredictionFeedback['userRating'] | null>(null);
     const [userComment, setUserComment] = useState('');
     
-    const [correctionPlan, setCorrectionPlan] = useState<{ newWeights: AlgoWeights, newRules: AdaptiveRules, reasoning: string[] } | null>(null);
-    const [counterfactuals, setCounterfactuals] = useState<any[]>([]);
-    
-    useEffect(() => {
-        const prepCorrection = async () => {
-            const currentWeights = await getAlgoWeights(report.drawName);
-            const currentRules = getAdaptiveRules(report.drawName);
-            
-            // 1. Calcul Plan Correction Standard
-            const plan = calculateCorrectionsFromForensics(currentWeights, currentRules, report);
-            setCorrectionPlan(plan);
+    const [bestScenario, setBestScenario] = useState<any | null>(null);
 
-            // 2. Lancement Simulation Contrefactuelle ("Et si ?")
-            // On a besoin du breakdown original pour simuler. 
-            // Note: report contient déjà les missedOpportunities qui ont le breakdown partiel, 
-            // mais runCounterfactualSimulation a besoin d'un breakdown plus complet.
-            // Ici on simule avec ce qu'on a ou on désactive si pas de breakdown.
-            // Dans une vraie implémentation, on passerait le breakdown complet stocké.
-            // Pour la démo, on utilise une simulation simplifiée si dispo.
-            
-            // TODO: Passer le breakdown complet dans props ou le fetcher
+    // Détermination du meilleur scénario contrefactuel au chargement
+    useEffect(() => {
+        if (report.counterfactuals && report.counterfactuals.length > 0) {
+            setBestScenario(report.counterfactuals[0]);
         }
-        prepCorrection();
     }, [report]);
 
     const handleApplyCorrection = async () => {
-        if (!correctionPlan) return;
+        if (!bestScenario) return;
         setApplying(true);
         try {
-            updateGlobalWeights(correctionPlan.newWeights);
-            showToast("🧬 ADN Muté & Sauvegardé : Le système a appris.", "success");
+            // 1. Charger les poids actuels
+            const currentWeights = await getAlgoWeights(report.drawName);
+            
+            // 2. Appliquer le boost suggéré par le scénario contrefactuel
+            const key = bestScenario.algo as keyof AlgoWeights;
+            // Boost significatif (+15% relatif)
+            const boost = 0.15; 
+            
+            const newWeights = { ...currentWeights };
+            newWeights[key] = (newWeights[key] || 0) + boost;
+            
+            const normalized = normalizeWeights(newWeights);
+
+            // 3. Sauvegarde et Mise à jour
+            await saveAlgoWeights(report.drawName, normalized);
+            await updateGlobalWeights(normalized);
+            await refreshData(report.drawName, true); // Recalculer pour voir l'effet
+
+            showToast(`🧬 Mutation ADN : ${bestScenario.algo} renforcé.`, "success");
             setTimeout(onClose, 1500);
         } catch(e) {
             showToast("Erreur d'assimilation.", "error");
@@ -102,13 +102,26 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
     
-    // Visualization Helpers
-    const spectralChartData = report.spectralDeviations?.map(d => ({
-        num: d.number,
-        prediction: d.predictedEnergy,
-        realite: d.actualEnergy,
-        delta: d.delta
-    })) || [];
+    // Visualization Data
+    const spectralChartData = useMemo(() => {
+        return report.spectralDeviations?.map(d => ({
+            num: d.number,
+            prediction: d.predictedEnergy,
+            realite: d.actualEnergy,
+            delta: d.delta,
+            // Couleur dynamique pour la barre Delta
+            fill: d.delta > 50 ? '#f43f5e' : '#fbbf24'
+        })) || [];
+    }, [report]);
+
+    const simChartData = useMemo(() => {
+        // On compare le nombre de hits potentiels par algo
+        return report.counterfactuals?.slice(0, 6).map(c => ({
+            algo: c.algo.charAt(0).toUpperCase() + c.algo.slice(1),
+            hits: c.potentialHits,
+            color: c.potentialHits >= 3 ? '#10b981' : '#6366f1'
+        })) || [];
+    }, [report]);
 
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
@@ -179,7 +192,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         </div>
                                     </div>
 
-                                    {/* CONNECTORS (Visual Only via CSS Borders/Lines in React not easy, using simple arrows for now) */}
+                                    {/* CONNECTORS */}
                                     <div className="hidden md:flex flex-col items-center gap-2 opacity-30 flex-1">
                                         <ArrowRight size={24} className="text-slate-400"/>
                                         <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-400 to-transparent"></div>
@@ -233,7 +246,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         <Activity size={14} className="text-indigo-500"/> Dérive Algorithmique
                                     </h4>
                                     <div className="space-y-2">
-                                        {report.scoreDivergence.map((div, i) => (
+                                        {report.scoreDivergence.length > 0 ? report.scoreDivergence.map((div, i) => (
                                             <div key={i} className="flex justify-between items-center text-xs">
                                                 <span className="font-bold text-slate-600 dark:text-slate-400 capitalize">{div.algo}</span>
                                                 <div className="flex items-center gap-2">
@@ -243,7 +256,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                     <span className="font-mono font-black text-indigo-500">{div.impact}%</span>
                                                 </div>
                                             </div>
-                                        ))}
+                                        )) : <p className="text-xs text-slate-400 italic">Aucune divergence majeure.</p>}
                                     </div>
                                 </section>
                             </div>
@@ -288,28 +301,50 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     <BrainCircuit size={18} className="text-emerald-400"/> Moteur Contrefactuel ("What If")
                                 </h4>
                                 <p className="text-slate-400 text-xs mb-6 max-w-lg">
-                                    Le noyau a resimulé le tirage avec des millions de variations de poids. Voici la configuration qui aurait maximisé les gains.
+                                    Simulation temps réel : Performances des algorithmes isolés sur ce tirage. 
                                 </p>
 
-                                {correctionPlan && (
-                                    <div className="space-y-4">
-                                        <div className="flex flex-col gap-3">
-                                            {correctionPlan.reasoning.map((reason, i) => (
-                                                <div key={i} className="flex items-start gap-3 text-xs text-slate-300 bg-white/5 p-3 rounded-xl border border-white/5">
-                                                    <span className="text-emerald-400 mt-0.5 font-bold">OPTIMISATION</span> 
-                                                    <span className="leading-relaxed">{reason}</span>
-                                                </div>
-                                            ))}
+                                {bestScenario ? (
+                                    <div className="space-y-6">
+                                        {/* Chart Comparatif */}
+                                        <div className="h-48 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={simChartData} layout="vertical">
+                                                    <XAxis type="number" hide />
+                                                    <YAxis dataKey="algo" type="category" width={80} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 'bold'}} />
+                                                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
+                                                    <Bar dataKey="hits" radius={[0, 4, 4, 0]} barSize={16}>
+                                                        {simChartData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+
+                                        <div className="flex items-start gap-3 text-xs text-slate-300 bg-white/5 p-4 rounded-xl border border-white/5">
+                                            <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
+                                                <Zap size={16}/>
+                                            </div>
+                                            <div>
+                                                <span className="text-emerald-400 font-bold block mb-1">DÉCOUVERTE MAJEURE</span>
+                                                L'algorithme <strong className="text-white">{bestScenario.algo}</strong> a isolé {bestScenario.potentialHits} gagnants ({bestScenario.potentialNumbers.join(', ')}). 
+                                                Le renforcer aurait amélioré la précision.
+                                            </div>
                                         </div>
                                         
                                         <button 
                                             onClick={handleApplyCorrection} 
                                             disabled={applying}
-                                            className="w-full mt-4 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
                                         >
                                             {applying ? <RefreshCw className="animate-spin" size={16}/> : <GitMerge size={16}/>}
                                             Appliquer le Patch Cognitif
                                         </button>
+                                    </div>
+                                ) : (
+                                    <div className="text-center text-slate-500 text-xs italic py-10">
+                                        Aucun scénario contrefactuel significatif trouvé (Performance standard).
                                     </div>
                                 )}
                             </div>

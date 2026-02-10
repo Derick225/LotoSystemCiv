@@ -53,7 +53,7 @@ export const performForensicAnalysis = async (
                 const reverse = getReverse(pred);
                 if (reverse && actualSet.has(reverse)) {
                     matches.push({ predicted: pred, actual: reverse, errorType: 'Shadow', delta: 'Flip' });
-                    found = true;
+                    found = true; 
                 }
             }
             
@@ -63,35 +63,41 @@ export const performForensicAnalysis = async (
 
     // 2. Identification des occasions manquées (Signaux forts non retenus)
     const missed: { number: number; reason: string }[] = [];
+    
+    // Pour calculer la divergence, on a besoin des scores bruts
+    // On regarde quels algos avaient raison pour les numéros sortis
     actualWinningNumbers.forEach(win => {
         const isCovered = matches.some(m => m.actual === win);
         
-        if (!isCovered) {
-            const scores = predictionBreakdown?.[win];
-            if (scores) {
-                const sortedAlgos = Object.entries(scores)
-                    .filter(([_, v]) => typeof v === 'number')
-                    .sort((a: any, b: any) => b[1] - a[1]);
-                
-                const bestAlgo = sortedAlgos[0];
-                
+        if (predictionBreakdown && predictionBreakdown[win]) {
+            const scores = predictionBreakdown[win];
+            // On cherche l'algo qui avait le score le plus haut pour ce numéro gagnant
+            const sortedAlgos = Object.entries(scores)
+                .filter(([_, v]) => typeof v === 'number')
+                .sort((a: any, b: any) => b[1] - a[1]);
+            
+            const bestAlgo = sortedAlgos[0];
+            
+            if (bestAlgo && (bestAlgo[1] as number) > 50) {
+                // On accumule l'impact : Si Frequency avait 90% sur ce gagnant, Frequency gagne 90 pts d'impact
+                algoImpacts[bestAlgo[0]] = (algoImpacts[bestAlgo[0]] || 0) + (bestAlgo[1] as number);
+            }
+
+            if (!isCovered) {
                 if (bestAlgo && (bestAlgo[1] as number) > 65) {
                     missed.push({ 
                         number: win, 
                         reason: `Signal fort sur ${bestAlgo[0]} (${Math.round(bestAlgo[1] as number)}%), mais filtré par le consensus.` 
                     });
-                    
-                    algoImpacts[bestAlgo[0]] = (algoImpacts[bestAlgo[0]] || 0) + (bestAlgo[1] as number);
-                }
-                else {
+                } else {
                      missed.push({ 
                         number: win, 
                         reason: "Signal faible global (Zone Morte)." 
                     });
                 }
-            } else {
-                missed.push({ number: win, reason: "Aucune donnée spectrale." });
             }
+        } else if (!isCovered) {
+            missed.push({ number: win, reason: "Aucune donnée spectrale." });
         }
     });
 
@@ -99,35 +105,54 @@ export const performForensicAnalysis = async (
     const scoreDivergence: { algo: string; impact: number }[] = [];
     const maxImpact = Math.max(...Object.values(algoImpacts), 1);
     Object.entries(algoImpacts).forEach(([algo, val]) => {
-        if (val > 50) {
+        if (val > 0) {
             scoreDivergence.push({ algo, impact: Math.round((val / maxImpact) * 100) });
         }
     });
 
-    // 4. Calcul de la déviation spectrale (Nouvelle métrique)
+    // 4. Calcul de la déviation spectrale (RMSE)
     const spectralDeviations: SpectralDeviation[] = [];
     let squaredErrorSum = 0;
+    let validPoints = 0;
 
-    for(let i=1; i<=90; i++) {
-        const predictedScore = predictionBreakdown?.[i] ? 
-            Object.values(predictionBreakdown[i]).reduce((a,b) => (a as number)+(b as number), 0) / 5 : 0; // Moyenne approx
-        
-        const isActual = actualSet.has(i) ? 100 : 0;
-        const delta = Math.abs(predictedScore - isActual);
-        
-        squaredErrorSum += Math.pow(delta, 2);
+    if (predictionBreakdown) {
+        for(let i=1; i<=90; i++) {
+            const scores = predictionBreakdown[i];
+            if (!scores) continue;
 
-        if (actualSet.has(i) || predictedNumbers.includes(i)) {
-            spectralDeviations.push({
-                number: i,
-                predictedEnergy: predictedScore,
-                actualEnergy: isActual,
-                delta
-            });
+            const values = Object.values(scores).filter(v => typeof v === 'number') as number[];
+            const predictedScore = values.length > 0 ? values.reduce((a,b) => a+b, 0) / values.length : 0;
+            
+            const isActual = actualSet.has(i) ? 100 : 0;
+            const delta = predictedScore - isActual; // Négatif si sous-estimé (0 - 80 = -80), Positif si surestimé (80 - 0 = 80)
+            
+            squaredErrorSum += Math.pow(delta, 2);
+            validPoints++;
+
+            // On ne garde que les déviations significatives pour le rapport
+            if (actualSet.has(i) || (predictedNumbers.includes(i) && Math.abs(delta) > 50)) {
+                spectralDeviations.push({
+                    number: i,
+                    predictedEnergy: Math.round(predictedScore),
+                    actualEnergy: isActual,
+                    delta: Math.round(delta)
+                });
+            }
         }
     }
     
-    const rmse = Math.sqrt(squaredErrorSum / 90);
+    const rmse = validPoints > 0 ? Math.sqrt(squaredErrorSum / validPoints) : 0;
+
+    // 5. Simulation Contrefactuelle
+    // On simule ce qui se serait passé si on avait écouté uniquement un algo spécifique
+    // ou si on avait boosté cet algo.
+    let counterfactuals: CounterfactualResult[] = [];
+    if (predictionBreakdown) {
+        // On utilise des poids fictifs de base pour la comparaison
+        // Dans une app réelle, on passerait les poids utilisés lors de la prédiction
+        const baseWeights: AlgoWeights = { frequency: 0.1, gap: 0.1, spectral: 0.1, markov: 0.1, momentum: 0.1, equilibrium: 0.1 }; 
+        counterfactuals = runCounterfactualSimulation(baseWeights, predictionBreakdown, actualWinningNumbers);
+    }
 
     return { 
         drawName, 
@@ -136,14 +161,15 @@ export const performForensicAnalysis = async (
         matches, 
         missedOpportunities: missed, 
         scoreDivergence: scoreDivergence.sort((a,b) => b.impact - a.impact).slice(0, 5),
-        spectralDeviations: spectralDeviations.sort((a,b) => b.delta - a.delta).slice(0, 10),
-        rmse
+        spectralDeviations: spectralDeviations.sort((a,b) => a.delta - b.delta), // Tri par sous-estimation (négatif) vers surestimation
+        rmse,
+        counterfactuals
     };
 };
 
 /**
  * Moteur Contrefactuel : "Et si ?"
- * Simule quel aurait été le résultat si on avait modifié les poids
+ * Simule quel aurait été le résultat si on avait modifié les poids pour isoler chaque algo.
  */
 export const runCounterfactualSimulation = (
     currentWeights: AlgoWeights,
@@ -151,43 +177,49 @@ export const runCounterfactualSimulation = (
     actualWinners: number[]
 ): CounterfactualResult[] => {
     const results: CounterfactualResult[] = [];
-    const algos = ['frequency', 'gap', 'markov', 'spectral', 'momentum', 'equilibrium'] as const;
+    
+    // Liste des algos disponibles dans le breakdown
+    const sampleBreakdown = Object.values(breakdown)[0];
+    if (!sampleBreakdown) return [];
+    
+    const algos = Object.keys(sampleBreakdown).filter(k => typeof (sampleBreakdown as any)[k] === 'number');
 
-    // Pour chaque algo clé, on teste un boost de 20%
     algos.forEach(algo => {
-        const modifiedWeights = { ...currentWeights };
-        modifiedWeights[algo] = (modifiedWeights[algo] || 0) + 0.2; // Boost significatif
-        const normalized = normalizeWeights(modifiedWeights);
-
-        // Re-calcul du score global pour chaque numéro avec les nouveaux poids
-        const newScores: { n: number, s: number }[] = [];
+        // Scénario : Isolation Pure (Poids = 1.0 pour cet algo, 0 pour les autres)
+        // Cela permet de voir si l'algo "savait" la réponse.
         
-        Object.entries(breakdown).forEach(([nStr, scores]) => {
-            const num = parseInt(nStr);
-            let weightedSum = 0;
-            
-            (Object.keys(normalized) as Array<keyof AlgoWeights>).forEach(k => {
-                const w = normalized[k] || 0;
-                const s = (scores as any)[k] || 0;
-                weightedSum += s * w;
-            });
-            newScores.push({ n: num, s: weightedSum });
-        });
-
-        // Top 5 simulé
-        const top5 = newScores.sort((a,b) => b.s - a.s).slice(0, 5).map(x => x.n);
+        const scores: { n: number, s: number }[] = [];
+        
+        for(let i=1; i<=90; i++) {
+            const bd = breakdown[i];
+            if(bd) {
+                const val = (bd as any)[algo] || 0;
+                scores.push({ n: i, s: val });
+            }
+        }
+        
+        // On trie par score décroissant
+        scores.sort((a,b) => b.s - a.s);
+        
+        // On regarde le Top 5 de cet algo pur
+        const top5 = scores.slice(0, 5).map(x => x.n);
         const hits = top5.filter(n => actualWinners.includes(n)).length;
-
-        // Si on a au moins 1 hit de plus ou >= 3 hits total
-        if (hits >= 3) {
-            results.push({
-                algo,
-                originalWeight: currentWeights[algo] || 0,
-                optimalWeight: normalized[algo] || 0,
-                potentialHits: hits,
-                potentialNumbers: top5.filter(n => actualWinners.includes(n)),
-                improvement: 20 // Arbitraire pour simulation
-            });
+        
+        // On calcule l'amélioration théorique
+        // Si cet algo donne 3 hits, c'est une piste majeure
+        if (hits >= 2) {
+             // On construit le poids "Optimal" suggéré : Boost de cet algo
+             const optimalWeights = { ...currentWeights };
+             optimalWeights[algo as keyof AlgoWeights] = (optimalWeights[algo as keyof AlgoWeights] || 0) + 0.3;
+             
+             results.push({
+                 algo,
+                 originalWeight: currentWeights[algo as keyof AlgoWeights] || 0,
+                 optimalWeight: normalizeWeights(optimalWeights)[algo as keyof AlgoWeights] || 0,
+                 potentialHits: hits,
+                 potentialNumbers: top5.filter(n => actualWinners.includes(n)),
+                 improvement: hits * 20 // Score arbitraire d'amélioration
+             });
         }
     });
 
