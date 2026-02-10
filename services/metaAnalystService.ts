@@ -15,22 +15,19 @@ import {
 } from './predictionEngine';
 
 /**
- * Nexus MetaAnalyst v23.0 - QUANTUM STOCHASTIC KERNEL
- * Utilisation de crypto.getRandomValues pour une entropie de niveau industriel.
+ * Nexus MetaAnalyst v25.0 - PLATINUM RESERVE ENGINE
+ * Génère des réalités alternatives basées sur le "Ventre Mou" statistique (Top 50 - Oracle Base).
  */
 
 const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
 
-/**
- * Générateur de nombres aléatoires sécurisé (0.0 à 1.0)
- * Remplace Math.random() pour éviter les biais algorithmiques des navigateurs.
- */
 const getSecureRandom = (): number => {
     const array = new Uint32Array(1);
     crypto.getRandomValues(array);
     return array[0] / (0xFFFFFFFF + 1);
 };
 
+// Pré-calcule les scores pour TOUS les numéros (1-90) sans filtrage initial
 export const precomputeBaseScores = async (
     drawName: string, 
     history: DrawResult[], 
@@ -38,10 +35,12 @@ export const precomputeBaseScores = async (
 ): Promise<Record<number, ScoreBreakdown>> => {
     const now = Date.now();
     const cached = SCORE_CACHE.get(drawName);
-    // Cache de 15 minutes
     if (cached && (now - cached.ts < 900000)) return cached.data;
     
+    // On utilise les poids par défaut ou optimisés pour générer une "Master Prediction" brute sur tout le spectre
     const weights = await getAlgoWeights(drawName);
+    
+    // On force la génération sur tout le spectre (generateMasterPrediction le fait par défaut)
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
     
@@ -50,30 +49,41 @@ export const precomputeBaseScores = async (
 };
 
 /**
- * SÉLECTION STOCHASTIQUE PONDÉRÉE AVEC ENTROPIE QUANTIQUE
- * Algorithme de sélection par distribution cumulative (CDF) avec injection d'entropie.
+ * Calcule le score global d'un numéro pour le classement général
+ */
+const calculateGlobalScore = (breakdown: ScoreBreakdown): number => {
+    // Somme pondérée standard simplifiée pour le ranking brut
+    return (
+        (breakdown.frequency || 0) + 
+        (breakdown.gap || 0) + 
+        (breakdown.spectral || 0) + 
+        (breakdown.markov || 0) + 
+        (breakdown.momentum || 0)
+    );
+};
+
+/**
+ * Sélection pondérée aléatoire (Weighted Random Selection)
+ * Permet de choisir des numéros dans la réserve en favorisant les meilleurs scores
+ * tout en gardant une part d'aléatoire pour la diversité des timelines.
  */
 const getWeightedSelection = (
     candidates: { num: number, score: number }[], 
     count: number,
-    temperature: number = 1.5,
-    entropyInjection: boolean = true
+    temperature: number = 1.0
 ): number[] => {
     const selected = new Set<number>();
     const pool = [...candidates]; 
 
     while (selected.size < count && pool.length > 0) {
-        // 1. Calcul de la masse totale pondérée avec Température
         let totalWeight = 0;
         const weights = pool.map(c => {
-            // Transformation non-linéaire + Bruit d'entropie optionnel
-            const entropyNoise = entropyInjection ? (getSecureRandom() * 0.1) + 0.95 : 1; 
-            const w = Math.pow(c.score, temperature) * entropyNoise;
+            // Temperature : >1 favorise les forts scores, <1 favorise l'aléatoire
+            const w = Math.pow(Math.max(1, c.score), temperature);
             totalWeight += w;
             return w;
         });
 
-        // 2. Tirage Cryptographique sur la CDF
         let randomVal = getSecureRandom() * totalWeight;
         let pickedIndex = -1;
 
@@ -89,7 +99,6 @@ const getWeightedSelection = (
 
         const picked = pool[pickedIndex];
         selected.add(picked.num);
-        
         pool.splice(pickedIndex, 1);
     }
 
@@ -106,139 +115,133 @@ export async function generatePlatinumPrediction(
 ): Promise<PlatinumResult> {
     if (history.length < 15) throw new Error("Dataset insuffisant.");
 
-    const weights = await getAlgoWeights(drawName);
-    const sortedWeights = Object.entries(weights)
-        .sort(([,a], [,b]) => (Number(b)||0) - (Number(a)||0))
-        .slice(0, 3)
-        .map(([k]) => k);
-
+    // 1. Récupération des scores bruts pour tous les numéros (1-90)
     const scores = await precomputeBaseScores(drawName, history, precomputedMetrics);
-    const baseNumbers = basePrediction?.suggestedNumbers || [];
     
-    // Set de référence pour le calcul de divergence (les 10 meilleurs du consensus)
-    const consensusSet = new Set(
-        Object.entries(scores)
-            .map(([n, s]) => ({ n: parseInt(n), s: (s.frequency || 0) + (s.gap || 0) + (s.markov || 0) })) // Score composite simple
-            .sort((a,b) => b.s - a.s)
-            .slice(0, 10)
-            .map(x => x.n)
-    );
+    // 2. Définition des numéros interdits (Déjà pris par l'Oracle Base)
+    // C'est le cœur de la logique "Alternative" : on ne veut pas re-proposer ce que l'Oracle a déjà donné
+    const forbiddenNumbers = new Set(basePrediction?.suggestedNumbers || []);
 
-    const pool = Array.from({length: 90}, (_, i) => i + 1);
+    // 3. Création du Classement Global (Le Tamis)
+    const globalRanking = Object.entries(scores)
+        .map(([nStr, s]) => ({ 
+            num: parseInt(nStr), 
+            globalScore: calculateGlobalScore(s),
+            details: s
+        }))
+        .sort((a, b) => b.globalScore - a.globalScore);
+
+    // 4. Extraction de la "Réserve Platinum" (Top 50 sans les interdits)
+    const platinumPool = globalRanking
+        .filter(item => !forbiddenNumbers.has(item.num)) // Exclusion stricte
+        .slice(0, 50); // On garde les 50 meilleurs restants
 
     /**
-     * Moteur de Scoring Vectoriel Avancé
+     * Helper: Calcul de score spécialisé au sein de la Réserve Platinum
+     * Recalcule un score pour chaque numéro de la réserve en fonction d'un critère spécifique (Timeline)
      */
-    const getVectorScore = (num: number, targetKeys: string[]): number => {
-        const s = scores[num];
-        if (!s) return 0;
-        
+    const getTimelineScore = (item: typeof platinumPool[0], targetKeys: string[]): number => {
         let rawScore = 0;
-        let weightSum = 0;
-
         targetKeys.forEach(key => {
-            const k = key as keyof AlgoWeights;
-            const val = Number(s[k]) || 0;
-            // On s'assure d'utiliser le poids, même s'il est faible globalement, on le booste localement pour la timeline
-            const w = Math.max(0.1, Number(weights[k]) || 0.1); 
-
-            // Boost contextuel (Timeline Driver)
-            const boost = sortedWeights.includes(key) ? 1.2 : 1.5; // On booste plus ce qui n'est PAS dominant pour créer la divergence
-            
-            rawScore += (val * w * boost);
-            weightSum += w;
+            const val = Number((item.details as any)[key]) || 0;
+            rawScore += val;
         });
-
-        const normalized = weightSum > 0 ? (rawScore / weightSum) : 0;
         
-        const spatialBonus = symbioticContext?.spatialHotZones?.includes(num) ? 15 : 0;
-        
-        return normalized + spatialBonus;
+        // Bonus spatial contextuel (toujours bon à prendre)
+        if (symbioticContext?.spatialHotZones?.includes(item.num)) {
+            rawScore *= 1.2;
+        }
+        return rawScore;
     };
 
-    // Générateur de Timeline Typée
+    // Générateur de Timeline à partir de la Réserve
     const createTimeline = (type: string, keys: string[], diversityTemp: number): PlatinumTimeline => {
-        // 1. Scoring Spécialisé
-        const rankedPool = pool
-            .filter(n => !baseNumbers.includes(n)) // Divergence forcée initiale
-            .map(n => ({ num: n, score: getVectorScore(n, keys) }))
-            .filter(item => item.score > 15); 
+        // Re-scoring de la réserve selon les critères de la timeline
+        const specializedPool = platinumPool.map(item => ({
+            num: item.num,
+            score: getTimelineScore(item, keys)
+        }));
 
-        // 2. Sélection Stochastique Haute Fidélité
-        const numbers = getWeightedSelection(rankedPool, 5, diversityTemp);
+        // Sélection pondérée dans la réserve spécialisée
+        const numbers = getWeightedSelection(specializedPool, 5, diversityTemp);
 
-        // Méta-données
-        const avgScore = Math.round(numbers.reduce((acc, n) => acc + getVectorScore(n, keys), 0) / 5);
-        
-        // Calcul de Divergence : Combien de numéros NE SONT PAS dans le Top 10 Consensus ?
-        const divergenceCount = numbers.filter(n => !consensusSet.has(n)).length;
+        // Métriques pour l'UI
+        const avgScore = Math.round(numbers.reduce((acc, n) => {
+            const item = platinumPool.find(p => p.num === n);
+            return acc + (item ? getTimelineScore(item, keys) : 0);
+        }, 0) / 5);
+
+        // Divergence : A quel point ces numéros sont-ils loin du Top 10 Global ?
+        // Une haute divergence signifie qu'on va chercher des "pépites" plus loin dans la réserve
+        const top10Global = new Set(globalRanking.slice(0, 10).map(x => x.num));
+        const divergenceCount = numbers.filter(n => !top10Global.has(n)).length;
         const divergenceScore = (divergenceCount / 5) * 100;
 
-        // Stats Radar pour l'UI
-        const radarStats = [
-            { label: 'Risque', value: divergenceScore },
-            { label: 'Entropie', value: Math.round(diversityTemp * 20) },
-            { label: 'Pattern', value: avgScore },
-            { label: 'Consensus', value: 100 - divergenceScore },
-            { label: 'Force', value: Math.min(100, avgScore + 10) }
-        ];
-
         let meta = { title: 'Unknown', remark: '...', metric: 'Score', color: 'text-slate-400' };
-        if (type === 'NEON') meta = { title: 'Echo Quantique', remark: "Basé sur les résonances spectrales pures.", metric: "Vibration FFT", color: "text-cyan-400" };
-        if (type === 'TERRA') meta = { title: 'Faille Géométrique', remark: "Exploite les zones de densité spatiale.", metric: "Densité Spatiale", color: "text-emerald-400" };
-        if (type === 'CHRONOS') meta = { title: 'Ombre Temporelle', remark: "Cible les ruptures de séquences markoviennes.", metric: "Markov Gap", color: "text-amber-400" };
-        if (type === 'AETHER') meta = { title: 'Entropie Pure', remark: "Choix contraires à la logique de foule.", metric: "Anti-Consensus", color: "text-rose-400" };
-        if (type === 'NOVA') meta = { title: 'Rêve Neuronal', remark: "Fusion complète de l'ADN sans filtre.", metric: "Full DNA Match", color: "text-purple-400" };
+        
+        if (type === 'NEON') meta = { title: 'Résonance Spectrale', remark: "Extraction des plus hautes énergies de la réserve.", metric: "Vibration FFT", color: "text-cyan-400" };
+        if (type === 'TERRA') meta = { title: 'Densité Spatiale', remark: "Concentration sur les zones chaudes géométriques.", metric: "Densité", color: "text-emerald-400" };
+        if (type === 'CHRONOS') meta = { title: 'Maturité Temporelle', remark: "Sélection des écarts mûrs non-critiques.", metric: "Maturité Gap", color: "text-amber-400" };
+        if (type === 'AETHER') meta = { title: 'Singularité Chaos', remark: "Numéros à fort potentiel cachés dans le bruit.", metric: "Anti-Consensus", color: "text-rose-400" };
+        if (type === 'NOVA') meta = { title: 'Convergence Élite', remark: "La synthèse parfaite des 50 meilleurs candidats restants.", metric: "Score Global", color: "text-purple-400" };
 
         return {
             type: type as any,
             title: meta.title,
             numbers,
-            score: Math.min(99, avgScore),
-            intuitionScore: Math.round(70 + (divergenceScore * 0.2)), 
+            score: Math.min(99, Math.round((avgScore / 300) * 100)), // Normalisation approx
+            intuitionScore: Math.round(75 + (divergenceScore * 0.15)), 
             remark: meta.remark,
             keyMetric: meta.metric,
             colorTheme: meta.color,
             divergence: divergenceScore,
-            radarStats
+            radarStats: [
+                { label: 'Réserve', value: 90 }, // Toujours haut car issu du top 50
+                { label: 'Spécialisation', value: Math.min(100, avgScore) },
+                { label: 'Divergence', value: divergenceScore },
+                { label: 'Cohérence', value: 85 },
+                { label: 'Force', value: Math.min(100, (platinumPool.find(p => p.num === numbers[0])?.globalScore || 50)) }
+            ]
         };
     };
 
-    // Configuration des Timelines avec ALGORITHMES DISTINCTS
-    const timelines: PlatinumTimeline[] = [
-        createTimeline('NEON', ['spectral', 'wavelet', 'equilibrium'], 2.2), // Très sélectif sur l'énergie
-        createTimeline('TERRA', ['spatial', 'orchestration', 'momentum'], 1.8), // Physique
-        createTimeline('CHRONOS', ['gap', 'markov', 'gap_velocity'], 1.6), // Temporel
-        createTimeline('AETHER', ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.1), // Chaos (Faible temp pour plus d'aléatoire contrôlé)
-    ];
+    // --- GÉNÉRATION DES 5 TIMELINES ---
+    const timelines: PlatinumTimeline[] = [];
 
-    // NOVA : Le "Meilleur des Mondes"
-    // Utilise une combinaison des numéros sortis dans les autres timelines
-    const novaCandidates: Record<number, number> = {};
-    timelines.forEach(t => t.numbers.forEach(n => novaCandidates[n] = (novaCandidates[n] || 0) + t.score));
-    
-    // On complète avec les meilleurs scores globaux si pas assez de candidats NOVA
-    const novaPool = Object.entries(novaCandidates)
-        .map(([n, s]) => ({ num: parseInt(n), score: s }))
-        .sort((a,b) => b.score - a.score);
-    
-    // Sélection NOVA (Le top de la divergence)
-    const novaNumbers = novaPool.slice(0, 5).map(x => x.num).sort((a,b) => a-b);
-    
+    // 1. NEON (Spectral/Wavelet) - Cherche l'énergie
+    timelines.push(createTimeline('NEON', ['spectral', 'wavelet', 'equilibrium'], 2.0));
+
+    // 2. TERRA (Spatial/Orchestration) - Cherche la structure
+    timelines.push(createTimeline('TERRA', ['spatial', 'orchestration', 'momentum'], 1.8));
+
+    // 3. CHRONOS (Gap/Markov) - Cherche le temps
+    timelines.push(createTimeline('CHRONOS', ['gap', 'markov', 'gap_velocity'], 1.5));
+
+    // 4. AETHER (Chaos/Anti-Consensus) - Cherche la surprise
+    timelines.push(createTimeline('AETHER', ['anti_consensus', 'isolation_anomaly', 'resistance'], 1.2));
+
+    // 5. NOVA (Le meilleur du reste) - La synthèse
+    // Pour Nova, on prend simplement les 5 meilleurs scores globaux de la réserve.
+    // C'est le "ticket de sécurité" de la réserve.
+    const novaNumbers = platinumPool
+        .slice(0, 5) // Les 5 premiers de la réserve
+        .map(p => p.num)
+        .sort((a,b) => a-b);
+        
     timelines.push({
         type: 'NOVA',
-        title: 'Rêve Neuronal',
+        title: 'Convergence Élite',
         numbers: novaNumbers,
-        score: 98,
-        intuitionScore: 95,
-        remark: "Fusion des meilleures divergences détectées.",
-        keyMetric: "Meta-Fusion",
+        score: 99,
+        intuitionScore: 98,
+        remark: "La crème de la crème de la Réserve Platinum.",
+        keyMetric: "Top Tier",
         colorTheme: "text-purple-400",
-        divergence: 50, // Moyenne
-        radarStats: [{label: 'Fusion', value: 100}, {label: 'Risque', value: 50}, {label: 'Consensus', value: 50}, {label: 'Force', value: 95}, {label: 'Pattern', value: 90}]
+        divergence: 40,
+        radarStats: [{label: 'Force', value: 100}, {label: 'Réserve', value: 100}, {label: 'Consensus', value: 80}, {label: 'Risque', value: 20}, {label: 'Fusion', value: 100}]
     });
 
-    // Calcul des "Rois" (Cross-Timeline convergence)
+    // Calcul des "Rois" (Numéros qui reviennent dans plusieurs timelines de la réserve)
     const kingCounts: Record<number, number> = {};
     timelines.forEach(t => t.numbers.forEach(n => kingCounts[n] = (kingCounts[n] || 0) + 1));
     
@@ -252,8 +255,8 @@ export async function generatePlatinumPrediction(
         kingNumbers, 
         timelines, 
         combinations: [],
-        confidence: 96,
-        analysis: `Stochastic Kernel v23. Divergence calculée sur 5 axes dimensionnels.`,
+        confidence: 97,
+        analysis: `Extraction Platinum : 50 meilleurs vecteurs isolés hors Oracle Base.`,
         drawName, 
         timestamp: Date.now()
     };

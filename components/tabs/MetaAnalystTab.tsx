@@ -8,7 +8,7 @@ import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { 
     Brain, Sparkles, Activity,
-    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary
+    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, ResponsiveContainer } from 'recharts';
@@ -91,9 +91,7 @@ const TimelineCard: React.FC<{
                     </div>
                     <div className="flex flex-col items-end">
                         <span className={`text-[10px] font-black uppercase tracking-widest ${theme.color}`}>{timeline.type}</span>
-                        {timeline.divergence !== undefined && (
-                            <span className="text-[9px] font-bold text-slate-500">Div. {Math.round(timeline.divergence)}%</span>
-                        )}
+                        <span className="text-[9px] font-bold text-slate-500">Stratégie Alt.</span>
                     </div>
                 </div>
 
@@ -126,14 +124,14 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div className="text-center md:text-left">
                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full mb-4">
-                            <Sparkles size={14} className="text-purple-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Convergence Optimale</span>
+                            <Crown size={14} className="text-purple-400" />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Top 5 Réserve</span>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-2">
                             NOVA <span className="text-purple-500">PRIME</span>
                         </h2>
                         <p className="text-slate-400 text-sm max-w-md">
-                            Synthèse neuronale des meilleures divergences. Ce vecteur représente l'équilibre parfait entre risque et consensus.
+                            Sélection Elite issue du <strong>Top 50</strong> restant après exclusion des favoris Oracle. La meilleure alternative mathématique.
                         </p>
                     </div>
 
@@ -155,44 +153,13 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline }> = ({ timeline }) => {
     );
 };
 
-const FusionMatrix: React.FC<{ kings: { number: number, count: number }[] }> = ({ kings }) => {
-    return (
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-[2.5rem] shadow-xl">
-            <div className="flex items-center gap-3 mb-6 px-2">
-                <Crown size={20} className="text-amber-400" />
-                <div>
-                    <h4 className="text-white font-black text-sm uppercase tracking-widest">Rois de la Fusion</h4>
-                    <p className="text-[10px] text-slate-500 font-bold">Vecteurs récurrents à travers les réalités</p>
-                </div>
-            </div>
-            
-            <div className="flex flex-wrap gap-4 justify-center p-4 bg-black/20 rounded-[2rem] border border-white/5">
-                {kings.slice(0, 8).map((k, i) => (
-                    <div key={k.number} className="flex flex-col items-center gap-2 group cursor-help" title={`Vu dans ${k.count} timelines`}>
-                        <div className="relative">
-                            <NumberBall number={k.number} size="md" isAttractor={i < 3} />
-                            <div className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-900 shadow-lg scale-90 group-hover:scale-110 transition-transform">
-                                {k.count}
-                            </div>
-                        </div>
-                        <div className="h-1 w-8 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-amber-400 to-orange-500" style={{ width: `${(k.count / 5) * 100}%` }}></div>
-                        </div>
-                    </div>
-                ))}
-                {kings.length === 0 && <span className="text-slate-500 text-xs italic">Aucune convergence significative.</span>}
-            </div>
-        </div>
-    );
-};
-
 const LoadingSequence: React.FC = () => {
     const [step, setStep] = useState(0);
     const steps = [
-        "Initialisation du Noyau Stochastique...",
-        "Bifurcation des Réalités Temporelles...",
-        "Calcul des Divergences Spectrales...",
-        "Fusion Nova en cours..."
+        "Initialisation du Tamis Algorithmique...",
+        "Exclusion des Vecteurs Oracle Base...",
+        "Isolation de la Réserve Platinum (Top 50)...",
+        "Génération des Réalités Alternatives..."
     ];
 
     useEffect(() => {
@@ -219,7 +186,7 @@ const LoadingSequence: React.FC = () => {
                 
                 <div className="text-center space-y-2">
                     <p className="text-indigo-400 font-black uppercase tracking-[0.3em] text-xs animate-pulse">
-                        Platinum Fusion v2.0
+                        Platinum Fusion v3.0
                     </p>
                     <div className="h-6 overflow-hidden">
                         <motion.p 
@@ -266,10 +233,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
              return;
         }
         setLoading(true);
-        setResult(null); // Reset pour l'anim
+        setResult(null); 
         
         try {
-            // Simulation de temps de calcul pour l'UX
             await new Promise(r => setTimeout(r, 2500)); 
 
             const data = await generatePlatinumPrediction(
@@ -283,9 +249,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             
             if (isMounted.current) {
                 setResult(data);
-                setSelectedTimelineId(null); // Pas de sélection par défaut, on montre NOVA
+                setSelectedTimelineId(null); 
                 savePlatinumHistory(data);
-                showToast("Multivers Platinum généré.", "success");
+                showToast("Réalités Alternatives générées.", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
@@ -314,9 +280,15 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">
                             Platinum <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Fusion</span>
                         </h2>
-                        <p className="text-slate-400 text-xs md:text-sm mt-2 max-w-lg font-medium">
-                            Exploration de 5 réalités stochastiques parallèles pour isoler la convergence optimale.
-                        </p>
+                        <div className="mt-2 flex flex-col gap-1">
+                            <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg">
+                                Génération de <strong>5 Réalités Alternatives</strong> basées sur la "Réserve Platinum".
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <ShieldCheck size={10} className="text-emerald-500"/>
+                                Exclut les vecteurs Oracle Base (Diversification Maximale)
+                            </p>
+                        </div>
                     </div>
 
                     <div className="flex bg-black/40 p-1.5 rounded-2xl border border-white/5">
@@ -343,12 +315,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     {!result && (
                         <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] border border-slate-800 border-dashed">
                             <Binary size={48} className="text-slate-600 mb-6" />
-                            <p className="text-slate-400 text-sm font-medium mb-8">Le noyau est prêt pour l'injection stochastique.</p>
+                            <p className="text-slate-400 text-sm font-medium mb-8 max-w-md text-center">
+                                Le noyau va isoler les <strong>50 meilleurs numéros</strong> non utilisés par l'Oracle Base et générer 5 tickets stratégiques divergents.
+                            </p>
                             <button 
                                 onClick={runMetaAnalysis} 
                                 className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 flex items-center gap-3 transition-all active:scale-95 group"
                             >
-                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Initialiser Fusion
+                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Lancer Fusion (Réserve)
                             </button>
                         </div>
                     )}
@@ -385,7 +359,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                             <div className="space-y-6">
                                                 <div>
                                                     <h3 className={`text-2xl font-black uppercase tracking-tighter mb-2 ${TIMELINE_THEMES[selectedTimeline.type].color}`}>
-                                                        Analyse {selectedTimeline.type}
+                                                        Réalité {selectedTimeline.type}
                                                     </h3>
                                                     <p className="text-slate-400 text-xs font-medium italic border-l-2 border-slate-700 pl-4">
                                                         "{selectedTimeline.remark}"
@@ -402,7 +376,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                             <div className="bg-black/30 rounded-[2rem] p-6 border border-white/5">
                                                 <div className="flex items-center gap-2 mb-4">
                                                     <RadarIcon size={16} className="text-indigo-400" />
-                                                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Radar de Divergence</span>
+                                                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Radar de Potentiel</span>
                                                 </div>
                                                 <div className="h-64 w-full">
                                                     <ResponsiveContainer width="100%" height="100%">
@@ -420,9 +394,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                     </motion.div>
                                 )}
                             </AnimatePresence>
-
-                            {/* FUSION MATRIX */}
-                            <FusionMatrix kings={result.kingNumbers} />
                         </>
                     )}
                 </div>
@@ -448,7 +419,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                 </div>
                                 
                                 <div className="space-y-4 flex-1">
-                                    {/* Show only NOVA & Top Divergent */}
                                     {arch.timelines.filter(t => t.type === 'NOVA' || t.score > 90).slice(0, 2).map(t => (
                                         <div key={t.type} className="bg-slate-50 dark:bg-black/20 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
                                             <div className="flex justify-between text-[10px] items-center mb-2">
