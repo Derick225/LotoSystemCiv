@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, FunctionDeclaration, GenerateContentResponse } from "@google/genai";
 
 export const config = {
@@ -8,6 +9,9 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Clé de secours OpenRouter fournie
+const OPENROUTER_KEY = "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";
 
 // Définition des outils pour l'Agent de Décision Actionnable
 const toolDeclarations: FunctionDeclaration[] = [
@@ -59,11 +63,108 @@ function cleanJson(text: string) {
     return text.replace(/```json\n?|\n?```/g, '').trim();
 }
 
-async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any): Promise<GenerateContentResponse> {
+/**
+ * Fallback vers OpenRouter (Llama 3.3) si Gemini est KO
+ */
+async function generateWithOpenRouter(params: any) {
+    console.log("[Oracle] Bascule sur OpenRouter (Llama 3.3)...");
+    
+    const messages = [];
+    
+    // 1. Gestion System Prompt
+    if (params.config?.systemInstruction) {
+        messages.push({ role: 'system', content: params.config.systemInstruction });
+    } else {
+        messages.push({ role: 'system', content: "Tu es un expert en analyse de données et statistiques. Tu dois répondre au format JSON strict quand cela est demandé." });
+    }
+
+    // 2. Gestion User Content
+    let userContent = "";
+    if (typeof params.contents === 'string') {
+        userContent = params.contents;
+    } else if (Array.isArray(params.contents)) {
+        userContent = params.contents.map((p: any) => typeof p === 'string' ? p : JSON.stringify(p)).join('\n');
+    } else if (params.contents?.parts) {
+        userContent = params.contents.parts.map((p: any) => p.text).join('\n');
+    } else {
+        userContent = JSON.stringify(params.contents);
+    }
+
+    if (params.config?.responseMimeType === "application/json") {
+        userContent += "\n\nIMPORTANT : Réponds UNIQUEMENT avec un objet JSON valide. Pas de texte avant ou après.";
+    }
+
+    messages.push({ role: 'user', content: userContent });
+
+    // 3. Mapping Tools (Function Calling)
+    let tools = undefined;
+    // Vérification de la structure tools (Gemini utilise un tableau d'objets avec functionDeclarations)
+    if (params.config?.tools?.[0]?.functionDeclarations) {
+        tools = params.config.tools[0].functionDeclarations.map((fn: any) => ({
+            type: "function",
+            function: {
+                name: fn.name,
+                description: fn.description,
+                parameters: fn.parameters
+            }
+        }));
+    }
+
+    const body: any = {
+        model: "meta-llama/llama-3.3-70b-instruct", 
+        messages: messages,
+        temperature: params.config?.temperature || 0.7,
+        top_p: 0.9
+    };
+
+    if (tools) body.tools = tools;
+    if (params.config?.responseMimeType === "application/json") {
+        body.response_format = { type: "json_object" };
+    }
+
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${OPENROUTER_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`OpenRouter Error: ${response.status} - ${err}`);
+        }
+
+        const json = await response.json();
+        const choice = json.choices[0];
+        
+        // Reconstruction d'un objet compatible Gemini Response
+        const result: any = {
+            text: choice.message.content
+        };
+
+        if (choice.message.tool_calls) {
+            result.functionCalls = choice.message.tool_calls.map((tc: any) => ({
+                name: tc.function.name,
+                args: JSON.parse(tc.function.arguments)
+            }));
+        }
+
+        return result;
+
+    } catch (e: any) {
+        console.error("OpenRouter Failed:", e.message);
+        throw e;
+    }
+}
+
+async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, params: any): Promise<any> {
     const fallbackModel = "gemini-3-flash-preview";
     const config: any = { ...params.config };
     
-    // Activation du mode Thinking pour les modèles Pro (Raisonnement profond)
+    // Activation du mode Thinking pour les modèles Pro
     if (primaryModel.includes('pro')) {
         config.thinkingConfig = { thinkingBudget: 4096 }; 
     }
@@ -77,22 +178,28 @@ async function generateWithFallback(genAI: GoogleGenAI, primaryModel: string, pa
         });
     } catch (e: any) {
         console.warn(`[Oracle] Echec sur ${primaryModel}:`, e.message);
-        const isQuotaError = e.status === 429 || 
-                             (e.message && (e.message.includes('429') || e.message.includes('quota') || e.message.includes('resource_exhausted')));
         
-        if (isQuotaError && primaryModel !== fallbackModel) {
+        // Premier Fallback : Gemini Flash
+        if (primaryModel !== fallbackModel) {
             console.warn(`[Oracle] Fallback vers ${fallbackModel}.`);
-            // On retire thinkingConfig pour le modèle Flash s'il ne le supporte pas ou pour économiser
             const fallbackConfig = { ...config };
             delete fallbackConfig.thinkingConfig;
             
-            return await genAI.models.generateContent({ 
-                ...params, 
-                model: fallbackModel,
-                config: fallbackConfig
-            });
+            try {
+                return await genAI.models.generateContent({ 
+                    ...params, 
+                    model: fallbackModel,
+                    config: fallbackConfig
+                });
+            } catch (e2: any) {
+                console.warn(`[Oracle] Echec Flash:`, e2.message);
+                // Deuxième Fallback : OpenRouter
+                return await generateWithOpenRouter(params);
+            }
+        } else {
+            // Si on était déjà sur Flash
+            return await generateWithOpenRouter(params);
         }
-        throw e;
     }
 }
 
@@ -102,7 +209,6 @@ export default async function handler(req: Request) {
   try {
     const { task, drawName, history, metrics, dataset, modelType, userInput, currentContext } = await req.json();
     
-    // Sécurité: Utilisation exclusive de process.env.API_KEY
     const apiKey = process.env.API_KEY;
     if (!apiKey) throw new Error("API_KEY manquante. Vérifiez la configuration serveur.");
 
@@ -133,7 +239,7 @@ export default async function handler(req: Request) {
             }
         });
 
-        // Gemini peut retourner du texte OU des appels de fonctions
+        // Gemini retourne .text et .functionCalls
         return new Response(JSON.stringify({ 
             response: response.text,
             functionCalls: response.functionCalls

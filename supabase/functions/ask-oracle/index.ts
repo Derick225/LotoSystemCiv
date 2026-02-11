@@ -9,9 +9,82 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Clé de secours OpenRouter fournie
+const OPENROUTER_KEY = "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";
+
 function cleanJson(text: string) {
     if (!text) return '{}';
     return text.replace(/```json\n?|\n?```/g, '').trim();
+}
+
+/**
+ * Fallback vers OpenRouter (Llama 3.3) si Gemini est KO
+ */
+async function generateWithOpenRouter(params: any) {
+    console.log("[Oracle] Bascule sur OpenRouter (Llama 3.3)...");
+    
+    const messages = [];
+    
+    // 1. Gestion System Prompt
+    if (params.config?.systemInstruction) {
+        messages.push({ role: 'system', content: params.config.systemInstruction });
+    } else {
+        // Prompt par défaut pour assurer la cohérence
+        messages.push({ role: 'system', content: "Tu es un expert en analyse de données et statistiques. Tu dois répondre au format JSON strict quand cela est demandé." });
+    }
+
+    // 2. Gestion User Content (String ou Parts)
+    let userContent = "";
+    if (typeof params.contents === 'string') {
+        userContent = params.contents;
+    } else if (Array.isArray(params.contents)) {
+        // Cas chat history simple
+        // Note: L'historique chat est géré différemment dans 'chat', ici on simplifie pour le prompt principal
+        userContent = params.contents.map((p: any) => typeof p === 'string' ? p : JSON.stringify(p)).join('\n');
+    } else if (params.contents?.parts) {
+        userContent = params.contents.parts.map((p: any) => p.text).join('\n');
+    } else {
+        userContent = JSON.stringify(params.contents);
+    }
+
+    // Force JSON instruction si nécessaire (car Llama n'a pas de mode JSON strict natif comme Gemini)
+    if (params.config?.responseMimeType === "application/json") {
+        userContent += "\n\nIMPORTANT : Réponds UNIQUEMENT avec un objet JSON valide. Pas de texte avant ou après, pas de markdown.";
+    }
+
+    messages.push({ role: 'user', content: userContent });
+
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${OPENROUTER_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                // Modèle puissant et rapide, bon en JSON
+                model: "meta-llama/llama-3.3-70b-instruct", 
+                messages: messages,
+                temperature: params.config?.temperature || 0.7,
+                top_p: 0.9,
+                // On simule un output JSON pour le parser
+                response_format: params.config?.responseMimeType === "application/json" ? { type: "json_object" } : undefined
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`OpenRouter Error: ${response.status} - ${err}`);
+        }
+
+        const json = await response.json();
+        // On retourne un objet qui imite la structure de réponse Gemini pour la compatibilité
+        return { text: json.choices[0].message.content };
+
+    } catch (e: any) {
+        console.error("OpenRouter Failed:", e.message);
+        throw e;
+    }
 }
 
 async function generateWithFallback(genAI: any, primaryModel: string, params: any) {
@@ -28,11 +101,24 @@ async function generateWithFallback(genAI: any, primaryModel: string, params: an
         return await genAI.models.generateContent({ ...params, model: primaryModel, config });
     } catch (e: any) {
         console.error(`Error with ${primaryModel}:`, e.message);
+        
+        // Premier Fallback : Gemini Flash
         if (primaryModel !== fallbackModel) {
             console.warn(`Falling back to ${fallbackModel}...`);
-            return await genAI.models.generateContent({ ...params, model: fallbackModel });
+            try {
+                // On retire thinkingConfig pour Flash s'il est présent (par sécurité)
+                const flashConfig = { ...config };
+                delete flashConfig.thinkingConfig;
+                return await genAI.models.generateContent({ ...params, model: fallbackModel, config: flashConfig });
+            } catch (e2: any) {
+                console.error(`Error with ${fallbackModel}:`, e2.message);
+                // Deuxième Fallback : OpenRouter (Llama)
+                return await generateWithOpenRouter(params);
+            }
+        } else {
+            // Si on était déjà sur Flash et que ça a planté -> OpenRouter
+            return await generateWithOpenRouter(params);
         }
-        throw e;
     }
 }
 
@@ -111,6 +197,26 @@ serve(async (req: Request) => {
                     }
                 }
             }
+        });
+        resultData = JSON.parse(cleanJson(response.text) || '{}');
+    } else if (task === "narrative") {
+        const prompt = `Rédige un "Bulletin Météo Stochastique" pour le tirage "${drawName}".
+        Métriques : ${JSON.stringify(metrics)}.
+        Ton : Expert, concis, style "Finance de marché".`;
+        
+        const response = await generateWithFallback(genAI, "gemini-3-flash-preview", {
+             contents: prompt,
+             config: {
+                 responseMimeType: "application/json",
+                 responseSchema: {
+                     type: Type.OBJECT,
+                     properties: {
+                         summary: { type: Type.STRING },
+                         technicalVerdict: { type: Type.STRING },
+                         riskAssessment: { type: Type.STRING }
+                     }
+                 }
+             }
         });
         resultData = JSON.parse(cleanJson(response.text) || '{}');
     }
