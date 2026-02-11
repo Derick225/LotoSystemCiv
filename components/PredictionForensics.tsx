@@ -43,28 +43,44 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         if (!bestScenario) return;
         setApplying(true);
         try {
-            // 1. Charger les poids actuels
+            // 1. Charger les poids actuels (Configuration ADN active)
             const currentWeights = await getAlgoWeights(report.drawName);
             
-            // 2. Appliquer le boost suggéré par le scénario contrefactuel
-            const key = bestScenario.algo as keyof AlgoWeights;
-            // Boost significatif (+15% relatif)
+            // 2. Identifier l'algo à booster (celui qui a le mieux performé dans la simulation "What If")
+            const algoKey = bestScenario.algo as keyof AlgoWeights;
+            const oldVal = currentWeights[algoKey] || 0;
+            
+            // 3. Appliquer un boost significatif mais contrôlé (+15% ou +0.15)
+            // Cela signale au système que cet algorithme est actuellement le plus pertinent pour ce tirage
             const boost = 0.15; 
+            const newVal = oldVal + boost;
             
             const newWeights = { ...currentWeights };
-            newWeights[key] = (newWeights[key] || 0) + boost;
+            newWeights[algoKey] = newVal;
             
+            // 4. Normalisation CRITIQUE : Si on augmente un poids, les autres doivent baisser proportionnellement
+            // pour garder une somme de 1.0 (100% d'énergie décisionnelle)
             const normalized = normalizeWeights(newWeights);
+            const finalVal = normalized[algoKey] || 0;
 
-            // 3. Sauvegarde et Mise à jour
+            // 5. Sauvegarde Persistante (Affecte les futurs calculs "Oracle" et "Platinum")
             await saveAlgoWeights(report.drawName, normalized);
+            
+            // 6. Mise à jour du contexte live de l'application
             await updateGlobalWeights(normalized);
-            await refreshData(report.drawName, true); // Recalculer pour voir l'effet
+            
+            // 7. Forcer un rafraîchissement des données pour que l'interface reflète le nouvel ADN
+            // (Note: Cela ne changera pas l'historique passé, mais préparera la prochaine prédiction)
+            await refreshData(report.drawName, true); 
 
-            showToast(`🧬 Mutation ADN : ${bestScenario.algo} renforcé.`, "success");
-            setTimeout(onClose, 1500);
+            // Feedback visuel précis
+            const percentChange = Math.round((finalVal - (currentWeights[algoKey] || 0)) * 100);
+            showToast(`🧬 Mutation ADN : ${algoKey.toUpperCase()} renforcé (+${percentChange}%). Configuration sauvegardée.`, "success");
+            
+            setTimeout(onClose, 2000);
         } catch(e) {
-            showToast("Erreur d'assimilation.", "error");
+            console.error(e);
+            showToast("Erreur lors de la mutation de l'ADN.", "error");
             setApplying(false);
         }
     };
@@ -292,7 +308,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     )}
 
-                    {/* TAB 3: COUNTERFACTUAL SIMULATION */}
+                    {/* TAB 3: COUNTERFACTUAL SIMULATION & DNA PATCH */}
                     {activeTab === 'simulation' && (
                         <div className="animate-slide-up space-y-6">
                             <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl relative overflow-hidden">
@@ -301,7 +317,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     <BrainCircuit size={18} className="text-emerald-400"/> Moteur Contrefactuel ("What If")
                                 </h4>
                                 <p className="text-slate-400 text-xs mb-6 max-w-lg">
-                                    Simulation temps réel : Performances des algorithmes isolés sur ce tirage. 
+                                    Simulation : Si nous avions privilégié un autre algorithme, aurions-nous gagné ? Le système identifie l'ADN optimal pour ce tirage passé.
                                 </p>
 
                                 {bestScenario ? (
@@ -328,30 +344,31 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                             </div>
                                             <div>
                                                 <span className="text-emerald-400 font-bold block mb-1">DÉCOUVERTE MAJEURE</span>
-                                                L'algorithme <strong className="text-white">{bestScenario.algo}</strong> a isolé {bestScenario.potentialHits} gagnants ({bestScenario.potentialNumbers.join(', ')}). 
-                                                Le renforcer aurait amélioré la précision.
+                                                L'algorithme <strong className="text-white">{bestScenario.algo.toUpperCase()}</strong> a isolé {bestScenario.potentialHits} gagnants ({bestScenario.potentialNumbers.join(', ')}). 
+                                                <br/>
+                                                <span className="text-slate-400 text-[10px]">Appliquer le patch renforcera ce facteur dans l'ADN du jeu pour les futurs tirages.</span>
                                             </div>
                                         </div>
                                         
                                         <button 
                                             onClick={handleApplyCorrection} 
                                             disabled={applying}
-                                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
                                         >
                                             {applying ? <RefreshCw className="animate-spin" size={16}/> : <GitMerge size={16}/>}
-                                            Appliquer le Patch Cognitif
+                                            {applying ? 'Mutation de l\'ADN...' : 'Appliquer le Patch Cognitif'}
                                         </button>
                                     </div>
                                 ) : (
                                     <div className="text-center text-slate-500 text-xs italic py-10">
-                                        Aucun scénario contrefactuel significatif trouvé (Performance standard).
+                                        Aucun scénario contrefactuel significatif trouvé (La configuration actuelle était optimale ou le tirage était un pur hasard).
                                     </div>
                                 )}
                             </div>
                         </div>
                     )}
 
-                    {/* FEEDBACK SECTION (Always visible at bottom) */}
+                    {/* FEEDBACK SECTION */}
                     <div className="border-t border-slate-200 dark:border-slate-800 pt-8">
                         <div className="flex items-center gap-3 mb-4">
                             <MessageSquare size={18} className="text-slate-400"/>
