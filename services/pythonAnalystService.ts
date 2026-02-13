@@ -263,7 +263,8 @@ confidence = ${confidence / 100}
                 p_value: pValue 
             },
             insight: insightContent,
-            cells
+            cells,
+            distribution: mcResults // Injection des résultats réels pour le graphe
         };
 
     } catch (e: any) {

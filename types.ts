@@ -518,6 +518,7 @@ export interface PythonAnalysisResult {
     };
     insight: string;
     cells: NotebookCell[];
+    distribution?: Record<number, number>;
 }
 
 export interface NotebookCell {

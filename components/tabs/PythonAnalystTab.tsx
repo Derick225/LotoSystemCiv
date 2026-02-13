@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runDeepPythonAnalysis } from '../../services/pythonAnalystService';
@@ -54,6 +53,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
     const { showToast } = useToast();
     
     const [status, setStatus] = useState<'idle' | 'running' | 'completed'>('idle');
+    const [progress, setProgress] = useState(0);
     const [result, setResult] = useState<PythonAnalysisResult | null>(null);
     const [logs, setLogs] = useState<string[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -66,20 +66,25 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
     const runAnalysis = async () => {
         setStatus('running');
         setResult(null);
+        setProgress(0);
         setLogs([
             "> [INIT] Spawning Isolated Python Environment (Pyodide v0.24)...",
             `> [DATA] Loading DataFrame: ${drawName}_history.csv (${history.length} rows)`,
             "> [PKG] Importing: pandas, scipy.stats, numpy, sklearn.ensemble",
-            "> [EXEC] Calculating Poisson Distribution Matrix...",
-            "> [EXEC] Running Bayesian Inference on recent decay...",
-            "> [SIM] Launching Monte Carlo (n=10000)..."
         ]);
 
         try {
             // Injection des poids globaux pour que l'analyse Python respecte l'ADN
-            const data = await runDeepPythonAnalysis(drawName, history, 'XGBoost', globalWeights, (msg) => {
-                setLogs(prev => [...prev, msg]);
-            });
+            // On passe explicitement le callback de progression ET le callback de log
+            const data = await runDeepPythonAnalysis(
+                drawName, 
+                history, 
+                'XGBoost', 
+                globalWeights, 
+                (p: any) => setProgress(Number(p)),  // Callback progression
+                (msg) => setLogs(prev => [...prev, msg]) // Callback logs
+            );
+            
             setResult(data);
             setStatus('completed');
             showToast("Notebook exécuté avec succès.", "success");
@@ -92,14 +97,33 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
     // Préparation des données pour le graphique de distribution
     const chartData = useMemo(() => {
         if (!result) return [];
-        // On simule une distribution normale autour des résultats trouvés pour le visuel
+        
+        // Utilisation de la distribution réelle si disponible
+        if (result.distribution) {
+             const maxVal = Math.max(...Object.values(result.distribution), 1);
+             return Array.from({length: 90}, (_, i) => {
+                const num = i + 1;
+                const val = result.distribution![num] || 0;
+                // Normalisation 0-100% relative au max
+                const normalizedProb = (val / maxVal) * 100;
+                
+                return {
+                    num,
+                    prob: normalizedProb,
+                    // Seuil visuel pour mettre en évidence les vecteurs forts
+                    threshold: 50 
+                };
+            });
+        }
+
+        // Fallback (simulation visuelle si pas de données brutes)
         const vectors = result.findings.result_vector.slice(0, 5);
         return Array.from({length: 90}, (_, i) => {
             const num = i + 1;
             const isTarget = vectors.includes(num);
             return {
                 num,
-                prob: isTarget ? Math.random() * 40 + 50 : Math.random() * 10 + 5, // Simulé pour l'affichage si pas de données brutes
+                prob: isTarget ? Math.random() * 40 + 50 : Math.random() * 10 + 5,
                 threshold: 40
             };
         });
@@ -133,16 +157,18 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                 
                 {/* NOTEBOOK AREA (Main) */}
                 <div className="lg:col-span-8 bg-[#0d1117] rounded-[2.5rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col relative">
-                    {/* Status Bar */}
+                    {/* Status Bar / Progress */}
                     <div className="h-1 bg-slate-800 w-full flex">
-                        {status === 'running' && <motion.div layoutId="loader" className="h-full bg-emerald-500 w-1/3" animate={{ x: ['-100%', '300%'] }} transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }} />}
+                        {status === 'running' && (
+                            <div className="h-full bg-emerald-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }}></div>
+                        )}
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" ref={scrollRef}>
                         {/* Initial Logs */}
                         <div className="font-mono text-xs text-slate-500 mb-6 space-y-1">
                             {logs.map((log, i) => (
-                                <div key={i} className={log.includes('CRITICAL') ? 'text-rose-500' : log.includes('DATA') ? 'text-blue-400' : ''}>{log}</div>
+                                <div key={i} className={log.includes('CRITICAL') || log.includes('FATAL') ? 'text-rose-500' : log.includes('DATA') ? 'text-blue-400' : 'text-slate-500'}>{log}</div>
                             ))}
                         </div>
 
@@ -163,7 +189,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                             </div>
                         ))}
                         
-                        {status === 'idle' && logs.length < 2 && (
+                        {status === 'idle' && logs.length < 5 && (
                             <div className="flex flex-col items-center justify-center h-40 opacity-30">
                                 <Code size={48} className="text-slate-500 mb-4"/>
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Prêt à exécuter</p>
@@ -177,7 +203,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                     {/* Graphique de Densité */}
                     <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1 flex flex-col min-h-[300px]">
                         <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <BarChart2 size={14} className="text-indigo-500"/> Distribution Probabiliste
+                            <BarChart2 size={14} className="text-indigo-500"/> Distribution Monte Carlo
                         </h4>
                         
                         {result ? (
@@ -193,9 +219,13 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                                         <XAxis hide />
                                         <YAxis hide />
-                                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
-                                        <Area type="monotone" dataKey="prob" stroke="#10b981" fill="url(#colorProb)" strokeWidth={2} />
-                                        <ReferenceLine y={40} stroke="red" strokeDasharray="3 3" />
+                                        <Tooltip 
+                                            contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }}
+                                            formatter={(val: number) => [`${Math.round(val)}%`, 'Probabilité']}
+                                            labelFormatter={(idx) => `Vecteur ${Number(idx)+1}`}
+                                        />
+                                        <Area type="monotone" dataKey="prob" stroke="#10b981" fill="url(#colorProb)" strokeWidth={2} animationDuration={1000} />
+                                        <ReferenceLine y={50} stroke="red" strokeDasharray="3 3" opacity={0.3} />
                                     </AreaChart>
                                 </ResponsiveContainer>
                             </div>
@@ -218,7 +248,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                                 ))}
                             </div>
                             <div className="mt-4 pt-4 border-t border-emerald-500/10 flex justify-between items-center">
-                                <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300">P-Value: {result.findings.p_value}</span>
+                                <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300">P-Value: {result.findings.p_value.toFixed(4)}</span>
                                 <span className="text-lg font-black text-emerald-500">{result.findings.confidence_score}%</span>
                             </div>
                         </div>
