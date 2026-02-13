@@ -1,70 +1,114 @@
 
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
-// --- UTILS STATISTIQUES ---
+// --- UTILS STATISTIQUES VECTORISÉS ---
 
-const factorial = (n: number): number => {
-    if (n === 0 || n === 1) return 1;
-    let result = 1;
-    for (let i = 2; i <= n; i++) result *= i;
-    return result;
-};
+/**
+ * Calcule la factorielle d'un nombre (Mémoïsation basique).
+ */
+const factorial = (() => {
+    const cache = new Map<number, number>();
+    return (n: number): number => {
+        if (n === 0 || n === 1) return 1;
+        if (cache.has(n)) return cache.get(n)!;
+        let result = 1;
+        for (let i = 2; i <= n; i++) result *= i;
+        cache.set(n, result);
+        return result;
+    };
+})();
 
-const getMean = (data: number[]) => {
-    if (data.length === 0) return 0;
-    return data.reduce((a, b) => a + b, 0) / data.length;
-};
-
-const getStdDev = (data: number[]) => {
-    if (data.length === 0) return 0;
-    const mu = getMean(data);
-    const variance = data.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / data.length;
-    return Math.sqrt(variance);
+/**
+ * Calcule la moyenne arithmétique d'un tableau.
+ * Sécurisé contre la division par zéro.
+ */
+const getMean = (data: number[]): number => {
+    if (!data || data.length === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    return sum / data.length;
 };
 
 /**
- * Calcule la probabilité de Poisson P(k; lambda)
+ * Calcule l'écart-type (Standard Deviation) d'un tableau.
+ */
+const getStdDev = (data: number[]): number => {
+    if (!data || data.length < 2) return 0;
+    const mu = getMean(data);
+    let sumSq = 0;
+    for (let i = 0; i < data.length; i++) {
+        sumSq += (data[i] - mu) ** 2;
+    }
+    return Math.sqrt(sumSq / data.length);
+};
+
+/**
+ * Calcule la probabilité de Poisson P(k; lambda).
+ * @param k Nombre d'occurrences attendues (souvent 0 ou >=1).
+ * @param lambda Taux moyen d'occurrence sur la période.
  */
 export const calculatePoissonProbability = (k: number, lambda: number): number => {
+    if (lambda < 0) return 0;
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 };
 
 /**
- * Inférence Bayésienne
+ * Calcule un score Bayésien combinant une probabilité a priori et une vraisemblance.
+ * @param prior Probabilité globale (historique long).
+ * @param likelihood Probabilité locale (historique court).
  */
 export const calculateBayesianScore = (prior: number, likelihood: number): number => {
     const evidence = (prior * likelihood) + ((1 - prior) * (1 - likelihood));
-    return evidence === 0 ? 0 : (likelihood * prior) / evidence;
+    return evidence <= 0.0001 ? 0 : (likelihood * prior) / evidence;
 };
 
 /**
- * Simulation Monte Carlo
+ * Exécute une simulation de Monte Carlo pour estimer la distribution probable.
+ * @param weights Poids de probabilité pour chaque numéro (1-90).
+ * @param iterations Nombre d'itérations (défaut 5000).
  */
 export const runMonteCarloSimulation = (weights: Record<number, number>, iterations: number = 5000): Record<number, number> => {
     const results: Record<number, number> = {};
-    const pool = Object.entries(weights).map(([n, w]) => ({ n: Number(n), w }));
-    const totalWeight = pool.reduce((a, b) => a + b.w, 0);
+    const items = Object.entries(weights).map(([n, w]) => ({ n: Number(n), w: Math.max(0, w) }));
+    
+    // Calcul de la somme cumulative pour sélection rapide (Roulette Wheel)
+    let totalWeight = 0;
+    const cumulativeWeights = new Float64Array(items.length);
+    for (let i = 0; i < items.length; i++) {
+        totalWeight += items[i].w;
+        cumulativeWeights[i] = totalWeight;
+    }
+
+    if (totalWeight === 0) return {};
 
     for (let i = 0; i < iterations; i++) {
-        let r = Math.random() * totalWeight;
-        for (const item of pool) {
-            r -= item.w;
-            if (r <= 0) {
-                results[item.n] = (results[item.n] || 0) + 1;
-                break;
-            }
+        const r = Math.random() * totalWeight;
+        // Recherche dichotomique pour performance O(log N)
+        let lo = 0, hi = items.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (cumulativeWeights[mid] < r) lo = mid + 1;
+            else hi = mid;
         }
+        const selected = items[lo].n;
+        results[selected] = (results[selected] || 0) + 1;
     }
     return results;
 };
 
 /**
- * Calcule l'efficacité conditionnelle des écarts (GEI)
+ * Calcule l'indice d'efficacité des écarts (GEI - Gap Efficiency Index).
+ * Détecte les numéros en situation de "rupture d'écart" probable.
  */
 export const calculateGapEfficiency = async (history: DrawResult[]): Promise<GapEfficiency[]> => {
+    if (!history || history.length === 0) return [];
+    
     const efficiencies: GapEfficiency[] = [];
     const depth = Math.min(history.length, 300);
     const subHistory = history.slice(0, depth);
+
+    // Pré-calculer les gagnants pour éviter les accès objets répétés
+    const draws = subHistory.map(h => new Set(h.gagnants));
 
     for (let num = 1; num <= 90; num++) {
         const gaps: number[] = [];
@@ -72,8 +116,8 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         let isFirst = true;
         let currentGap = 0;
 
-        for (const draw of subHistory) {
-            if (draw.gagnants.includes(num)) {
+        for (const drawSet of draws) {
+            if (drawSet.has(num)) {
                 if (isFirst) {
                     currentGap = currentCounter;
                     isFirst = false;
@@ -87,14 +131,25 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         }
         if (isFirst) currentGap = currentCounter;
 
-        const maxGap = gaps.length > 0 ? Math.max(...gaps) : currentGap;
-        const avgGap = gaps.length > 0 ? gaps.reduce((a,b)=>a+b,0)/gaps.length : 0;
-        const variance = gaps.length > 0 ? gaps.reduce((acc, val) => acc + Math.pow(val - avgGap, 2), 0) / gaps.length : 0;
-        const sigma = Math.sqrt(variance) || 1;
+        // Stats des gaps
+        let maxGap = currentGap;
+        let avgGap = 0;
+        let sigma = 1;
+
+        if (gaps.length > 0) {
+            maxGap = Math.max(Math.max(...gaps), currentGap);
+            let sum = 0;
+            for(let g of gaps) sum += g;
+            avgGap = sum / gaps.length;
+            
+            let sumSq = 0;
+            for(let g of gaps) sumSq += (g - avgGap) ** 2;
+            sigma = Math.sqrt(sumSq / gaps.length) || 1;
+        }
 
         const zScore = (currentGap - avgGap) / sigma;
         const breakoutProb = (1 / (1 + Math.exp(-(zScore - 0.5) * 1.5))) * 100;
-        const fatigueIndex = maxGap > 0 ? (maxGap / avgGap) : 1;
+        const fatigueIndex = avgGap > 0 ? (maxGap / avgGap) : 1;
 
         const positionScore = maxGap > 0 ? (currentGap / maxGap) * 100 : 0;
         const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33));
@@ -122,35 +177,56 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
     return efficiencies.sort((a, b) => b.zScore - a.zScore);
 };
 
-export const getProjectionsAsync = async (history: DrawResult[], lastNumbers: number[]): Promise<ProjectionItem[]> => {
-    const freq: Record<number, number> = {};
-    history.forEach(d => d.gagnants.forEach(n => freq[n] = (freq[n] || 0) + 1));
-    return Object.entries(freq)
-        .sort((a,b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([n, c]) => ({ number: Number(n), probability: Math.round((c / history.length) * 100) }));
+export const getProjectionsAsync = async (history: DrawResult[], _lastNumbers: number[]): Promise<ProjectionItem[]> => {
+    if (history.length === 0) return [];
+    const freq = new Uint32Array(91);
+    
+    for (const d of history) {
+        for (const n of d.gagnants) {
+            if (n >= 1 && n <= 90) freq[n]++;
+        }
+    }
+    
+    const result: ProjectionItem[] = [];
+    const total = history.length;
+    for (let i = 1; i <= 90; i++) {
+        result.push({ number: i, probability: Math.round((freq[i] / total) * 100) });
+    }
+    
+    return result.sort((a, b) => b.probability - a.probability).slice(0, 5);
 };
 
 export const getFollowersAnalysisAsync = async (history: DrawResult[]): Promise<TopFollowerAnalysis[]> => {
     if (history.length < 2) return [];
-    const lastDraw = history[0].gagnants;
-    const followers: Record<number, number> = {};
-    for(let i=1; i<history.length-1; i++) {
-        const prev = history[i+1].gagnants;
-        const curr = history[i].gagnants;
-        if (prev.some(n => lastDraw.includes(n))) {
-            curr.forEach(n => followers[n] = (followers[n] || 0) + 1);
+    
+    const lastDrawSet = new Set(history[0].gagnants);
+    const followers = new Uint32Array(91);
+
+    for (let i = 1; i < history.length - 1; i++) {
+        const prevGagnants = history[i + 1].gagnants;
+        // Si le tirage précédent contient au moins un numéro du tirage "Target" (ici lastDraw)
+        // Note: La logique standard est "quels numéros suivent ceux sortis".
+        // Ici on regarde l'histoire : Si T-1 contenait un numéro de LastDraw, alors T est un follower.
+        if (prevGagnants.some(n => lastDrawSet.has(n))) {
+            const currentGagnants = history[i].gagnants;
+            for (const n of currentGagnants) {
+                 if (n >= 1 && n <= 90) followers[n]++;
+            }
         }
     }
-    return Object.entries(followers)
-        .map(([n, c]) => ({ number: Number(n), count: c }))
-        .sort((a,b) => b.count - a.count)
-        .slice(0, 10);
+
+    const result: TopFollowerAnalysis[] = [];
+    for (let i = 1; i <= 90; i++) {
+        if (followers[i] > 0) result.push({ number: i, count: followers[i] });
+    }
+    
+    return result.sort((a, b) => b.count - a.count).slice(0, 10);
 };
 
 export const getMomentumScores = async (history: DrawResult[]): Promise<Record<number, number>> => {
     const scores: Record<number, number> = {};
     const recent = history.slice(0, 10);
+    // Poids décroissant : le plus récent (idx 0) a poids 10, le plus vieux (idx 9) a poids 1
     recent.forEach((d, idx) => {
         const weight = 10 - idx;
         d.gagnants.forEach(n => scores[n] = (scores[n] || 0) + weight);
@@ -161,115 +237,149 @@ export const getMomentumScores = async (history: DrawResult[]): Promise<Record<n
 export const getVelocityScores = async (history: DrawResult[]): Promise<Record<number, number>> => {
     const scores: Record<number, number> = {};
     const recent = history.slice(0, 5);
+    // Vélocité pure : présence dans les 5 derniers tirages = boost constant
     recent.forEach(d => d.gagnants.forEach(n => scores[n] = (scores[n] || 0) + 20));
     return scores;
 };
 
-// --- ALGORITHMES AVANCÉS (REAL IMPLEMENTATION) ---
+// --- ALGORITHMES AVANCÉS OPTIMISÉS ---
 
 /**
- * Calcul réel de l'exposant de Hurst via R/S Analysis
- * Mesure la persistance d'une série temporelle.
+ * Calcul rapide de l'exposant de Hurst (R/S Analysis Simplifiée).
+ * Optimisé pour les performances mobiles (moins de fenêtres).
  */
-const performRSAnalysis = (series: number[]): number => {
-    const N = series.length;
-    if (N < 10) return 0.5;
+const calculateFastHurst = (signal: number[]): number => {
+    const N = signal.length;
+    if (N < 20) return 0.5;
 
-    const mean = getMean(series);
-    const y = series.map(x => x - mean); // Série centrée
+    const meanVal = getMean(signal);
+    // Centrage
+    const y = new Float32Array(N);
+    for(let i=0; i<N; i++) y[i] = signal[i] - meanVal;
+
+    // Somme cumulative
+    let currentSum = 0;
+    let maxCum = -Infinity;
+    let minCum = Infinity;
     
-    let cumsum = 0;
-    const z = y.map(val => {
-        cumsum += val;
-        return cumsum;
-    });
-
-    const R = Math.max(...z) - Math.min(...z); // Range
-    const S = getStdDev(series); // Standard Deviation
-
+    // Single pass for Range
+    for(let i=0; i<N; i++) {
+        currentSum += y[i];
+        if (currentSum > maxCum) maxCum = currentSum;
+        if (currentSum < minCum) minCum = currentSum;
+    }
+    
+    const R = maxCum - minCum;
+    const S = getStdDev(signal);
+    
     if (R === 0 || S === 0) return 0.5;
 
-    // Log-Log Relation: log(R/S) = H * log(N) + c
-    // H = log(R/S) / log(N) (Approximation simplifiée)
-    const hurst = Math.log(R / S) / Math.log(N / 2); // N/2 pour échelle empirique Loto
+    // Approximation Anis-Lloyd : log(R/S) / log(N/2)
+    // N/2 est une constante empirique pour les petites séries temporelles de loto
+    const hurst = Math.log(R / S) / Math.log(N / 2);
     
     return Math.max(0.01, Math.min(0.99, hurst));
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
-    // Convertir l'historique en signal binaire (0 ou 1) pour le numéro
-    const signal = history.slice(0, 100).map(d => d.gagnants.includes(num) ? 1 : 0);
-    const h = performRSAnalysis(signal);
-    return { hurst: h };
+    // Conversion en signal binaire (0/1) sur 100 tirages
+    const limit = Math.min(history.length, 100);
+    const signal = new Array(limit);
+    for(let i=0; i<limit; i++) {
+        signal[i] = history[i].gagnants.includes(num) ? 1 : 0;
+    }
+    return { hurst: calculateFastHurst(signal) };
 };
 
 export const calculateFractalIndex = (history: DrawResult[]): number => {
-    // Calcul Hurst global sur la somme des numéros (proxy de l'activité globale)
-    const sums = history.slice(0, 100).map(d => d.gagnants.reduce((a,b)=>a+b,0));
-    return performRSAnalysis(sums);
+    // Hurst global sur la somme des numéros
+    const limit = Math.min(history.length, 100);
+    const sums = new Array(limit);
+    for(let i=0; i<limit; i++) {
+        let s = 0;
+        const w = history[i].gagnants;
+        for(let j=0; j<w.length; j++) s += w[j];
+        sums[i] = s;
+    }
+    return calculateFastHurst(sums);
 };
 
 export const calculateShadowNumbers = (draw: DrawResult): ShadowNumbers => {
-    const sum = draw.gagnants.reduce((a, b) => a + b, 0);
+    let sum = 0;
+    for (const n of draw.gagnants) sum += n;
+    
     return {
         sumModulo: sum % 90 || 90,
         goldenNumber: Math.round(sum * 0.618) % 90 || 1,
-        firstCompliment: 90 - draw.gagnants[0],
-        gapLink: Math.abs(draw.gagnants[0] - draw.gagnants[4])
+        firstCompliment: 90 - (draw.gagnants[0] || 0),
+        gapLink: Math.abs((draw.gagnants[0] || 0) - (draw.gagnants[4] || 0))
     };
 };
 
 /**
- * Test de Wald-Wolfowitz (Runs Test)
- * Vérifie l'hypothèse d'aléatoire d'une séquence binaire.
+ * Test de Wald-Wolfowitz (Runs Test) optimisé.
  */
 export const calculateRunsTest = (numbers: number[]): { zScore: number; isRandom: boolean } => {
-    if (numbers.length === 0) return { zScore: 0, isRandom: true };
-
-    const median = getMean(numbers);
-    const binarySeq = numbers.map(n => n > median ? 1 : 0);
-    
-    let n1 = 0; // count of 0s
-    let n2 = 0; // count of 1s
-    let runs = 1; // number of runs
-
-    binarySeq.forEach(v => v === 0 ? n1++ : n2++);
-
-    for (let i = 1; i < binarySeq.length; i++) {
-        if (binarySeq[i] !== binarySeq[i-1]) runs++;
-    }
-
-    const N = n1 + n2;
+    const N = numbers.length;
     if (N < 2) return { zScore: 0, isRandom: true };
 
+    const median = getMean(numbers);
+    
+    let n1 = 0, n2 = 0, runs = 1;
+    let prevBit = numbers[0] > median ? 1 : 0;
+    if (prevBit === 0) n1++; else n2++;
+
+    for (let i = 1; i < N; i++) {
+        const bit = numbers[i] > median ? 1 : 0;
+        if (bit === 0) n1++; else n2++;
+        if (bit !== prevBit) {
+            runs++;
+            prevBit = bit;
+        }
+    }
+
+    if (n1 === 0 || n2 === 0) return { zScore: 0, isRandom: false };
+
     const expectedRuns = ((2 * n1 * n2) / N) + 1;
-    const variance = (2 * n1 * n2 * (2 * n1 * n2 - N)) / (Math.pow(N, 2) * (N - 1));
+    const variance = (2 * n1 * n2 * (2 * n1 * n2 - N)) / (N * N * (N - 1));
+    const zScore = (runs - expectedRuns) / Math.sqrt(variance || 1);
     
-    // Z = (Runs - Expected) / StdDev
-    const zScore = variance > 0 ? (runs - expectedRuns) / Math.sqrt(variance) : 0;
-    
-    // Si |Z| < 1.96, c'est aléatoire à 95% de confiance
     return { zScore, isRandom: Math.abs(zScore) < 1.96 };
 };
 
 export const calculateTrendOscillator = (history: DrawResult[], period: number): TrendOscillatorPoint[] => {
-    return history.slice(0, period).map(d => ({
-        momentum: d.gagnants.reduce((a,b)=>a+b, 0) / 5 - 45
-    })).reverse();
+    const limit = Math.min(history.length, period);
+    const result = new Array(limit);
+    
+    for(let i=0; i<limit; i++) {
+        let s = 0;
+        const w = history[i].gagnants;
+        for(let k=0; k<w.length; k++) s += w[k];
+        // Centrage autour de 0 (Moyenne théorique 5*45.5 = 227.5)
+        // On divise par 5 pour ramener à l'échelle d'un numéro moyen (45.5)
+        result[i] = { momentum: (s / 5) - 45.5 };
+    }
+    return result.reverse();
 };
 
-export const calculateCUSUM = (history: DrawResult[]): any => {
+export const calculateCUSUM = (history: DrawResult[]): number[] => {
     const sums = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
-    const mean = getMean(sums);
+    const mu = getMean(sums);
     let cusum = 0;
     return sums.map(s => {
-        cusum += (s - mean);
+        cusum += (s - mu);
         return cusum;
     });
 };
 
+/**
+ * Calcul de la Complexité Arithmétique (AC Value).
+ * AC = D - (r - 1) où D est le nombre de différences uniques entre les numéros.
+ */
 export const calculateACValue = (numbers: number[]): number => {
-    const diffs = new Set();
+    if (numbers.length < 2) return 0;
+    const diffs = new Set<number>();
+    
     for(let i=0; i<numbers.length; i++) {
         for(let j=i+1; j<numbers.length; j++) {
             diffs.add(Math.abs(numbers[i] - numbers[j]));
@@ -280,19 +390,33 @@ export const calculateACValue = (numbers: number[]): number => {
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const res: NumberRegularity[] = [];
+    const limit = Math.min(history.length, 200); // Limit analysis depth
+    const subset = history.slice(0, limit);
+
     for(let i=1; i<=90; i++) {
-        const gaps = [];
-        let gap = 0;
-        for(const d of history) {
-            if(d.gagnants.includes(i)) { gaps.push(gap); gap = 0; } else gap++;
+        const gaps: number[] = [];
+        let currentGap = 0;
+        let isFirst = true;
+
+        for (const d of subset) {
+            if (d.gagnants.includes(i)) {
+                if (!isFirst) gaps.push(currentGap);
+                currentGap = 0;
+                isFirst = false;
+            } else {
+                currentGap++;
+            }
         }
-        const avg = gaps.length ? gaps.reduce((a,b)=>a+b,0)/gaps.length : 0;
-        const variance = gaps.length ? gaps.reduce((a,b)=>a+Math.pow(b-avg,2),0)/gaps.length : 0;
+        // Le gap actuel (depuis la dernière sortie) n'est pas "fermé", on le stocke à part
+        
+        const avg = getMean(gaps);
+        const std = getStdDev(gaps);
+        
         res.push({
             number: i,
-            currentGap: gap,
+            currentGap: currentGap,
             avgGap: avg,
-            stdDev: Math.sqrt(variance),
+            stdDev: std,
             lastGaps: gaps.slice(0, 5)
         });
     }
@@ -302,9 +426,9 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
 export const detectGameRegime = (history: DrawResult[]): { regime: string; hurst: number } => {
     const h = calculateFractalIndex(history);
     let regime = 'NORMAL';
-    if (h > 0.6) regime = 'PERSISTANT'; // Tendance
-    else if (h < 0.4) regime = 'ANTI-PERSISTANT'; // Retour moyenne
-    else regime = 'RANDOM'; // Hasard pur
+    if (h > 0.6) regime = 'PERSISTANT'; 
+    else if (h < 0.4) regime = 'ANTI-PERSISTANT'; 
+    else regime = 'RANDOM'; 
     return { regime, hurst: h };
 };
 
@@ -312,35 +436,45 @@ export const predictBarycenterShift = (trajectory: BarycenterPoint[]): { x: numb
     if(trajectory.length < 2) return null;
     const last = trajectory[trajectory.length-1];
     const prev = trajectory[trajectory.length-2];
-    // Projection linéaire simple
     return { x: last.x + (last.x - prev.x), y: last.y + (last.y - prev.y) };
 };
 
 export const calculateNetworkCentralityAsync = async (history: DrawResult[]): Promise<{ number: number; normalized: number }[]> => {
-    const counts: Record<number, number> = {};
-    history.slice(0,50).forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n]||0)+1));
-    const max = Math.max(...Object.values(counts));
-    return Object.entries(counts).map(([n,c]) => ({ number: Number(n), normalized: (c/max)*100 }));
+    const counts = new Uint16Array(91);
+    const limit = Math.min(history.length, 50);
+    
+    for(let i=0; i<limit; i++) {
+        const w = history[i].gagnants;
+        for(let j=0; j<w.length; j++) counts[w[j]]++;
+    }
+    
+    let max = 0;
+    for(let i=1; i<=90; i++) if(counts[i] > max) max = counts[i];
+    
+    const result = [];
+    for(let i=1; i<=90; i++) {
+        result.push({ number: i, normalized: max > 0 ? (counts[i]/max)*100 : 0 });
+    }
+    return result;
 };
 
 export const detectCommunities = (nodes: number[], matrix: any): Record<number, number> => {
-    // Implémentation Louvain simplifiée (Attribution basée sur l'affinité max)
     const comms: Record<number, number> = {};
     nodes.forEach(n => {
         let bestAffinity = 0;
         let bestTarget = n;
         
         const affinities = matrix[n]?.affinities || {};
-        Object.entries(affinities).forEach(([target, score]) => {
-            if ((score as number) > bestAffinity) {
-                bestAffinity = score as number;
+        for (const target in affinities) {
+            const score = affinities[target] as number;
+            if (score > bestAffinity) {
+                bestAffinity = score;
                 bestTarget = parseInt(target);
             }
-        });
+        }
         
-        // Si affinité forte, on rejoint la communauté de la cible, sinon on reste seul ou modulo
         if (bestAffinity > 0.2) {
-             comms[n] = bestTarget % 8; // 8 communautés max
+             comms[n] = bestTarget % 8; 
         } else {
              comms[n] = n % 8;
         }
@@ -355,85 +489,111 @@ export const calculateSuccessionMatrixAsync = async (history: DrawResult[]): Pro
     for(let i=0; i<history.length-1; i++) {
         const curr = history[i].gagnants;
         const prev = history[i+1].gagnants;
-        prev.forEach(p => {
+        
+        for (const p of prev) {
             totals[p] = (totals[p]||0)+1;
             if(!matrix[p]) matrix[p] = {};
-            curr.forEach(c => matrix[p][c] = (matrix[p][c]||0)+1);
-        });
+            for (const c of curr) {
+                matrix[p][c] = (matrix[p][c]||0)+1;
+            }
+        }
     }
     return { matrix, totals };
 };
 
 export const calculateVolatility = (history: DrawResult[]): { score: number; status: string } => {
     const sums = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
-    const stdDev = getStdDev(sums);
-    // On s'attend à un écart-type autour de 40 pour une somme de 5 numéros sur 90
-    // Normalisation approximative
-    const score = Math.min(100, Math.round((stdDev / 45) * 100));
+    const std = getStdDev(sums);
+    // Ecart-type attendu pour somme de 5 numéros uniformes [1,90] ~ 45
+    const score = Math.min(100, Math.round((std / 45) * 100));
     return { score, status: score > 60 ? 'Chaos' : score > 30 ? 'Volatile' : 'Stable' };
 };
 
 export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number } => {
-    const freq: Record<number, number> = {};
+    if (history.length === 0) return { normalized: 0 };
+    
+    const freq = new Uint32Array(91);
     let total = 0;
-    history.forEach(d => d.gagnants.forEach(n => { freq[n] = (freq[n]||0)+1; total++; }));
+    
+    for(const d of history) {
+        for(const n of d.gagnants) {
+            freq[n]++;
+            total++;
+        }
+    }
     
     let entropy = 0;
-    Object.values(freq).forEach(count => {
-        const p = count / total;
-        if (p > 0) entropy -= p * Math.log2(p);
-    });
+    for(let i=1; i<=90; i++) {
+        if(freq[i] > 0) {
+            const p = freq[i] / total;
+            entropy -= p * Math.log2(p);
+        }
+    }
     
-    const maxEntropy = Math.log2(90); // ~6.49 bits
+    const maxEntropy = Math.log2(90); 
     return { normalized: entropy / maxEntropy };
 };
 
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
-    const expected = totalObservations / 90; // Distribution uniforme théorique
+    const expected = totalObservations / 90; 
     let chiSq = 0;
     
     for(let i=1; i<=90; i++) {
         const obs = observed[i] || 0;
-        chiSq += Math.pow(obs - expected, 2) / expected;
+        chiSq += ((obs - expected) ** 2) / expected;
     }
     return { score: chiSq };
 };
 
 export const calculateBenfordCompliance = (numbers: number[]): { score: number } => {
-    const counts = Array(10).fill(0);
-    numbers.forEach(n => {
-        const leadingDigit = parseInt(n.toString()[0]);
-        if(leadingDigit >= 1 && leadingDigit <= 9) counts[leadingDigit]++;
-    });
+    if (numbers.length === 0) return { score: 0 };
+    const counts = new Uint32Array(10);
+    
+    for(const n of numbers) {
+        const leading = parseInt(n.toString()[0]);
+        if(leading >= 1 && leading <= 9) counts[leading]++;
+    }
     
     const total = numbers.length;
     let deviation = 0;
     
     for(let d=1; d<=9; d++) {
         const observed = counts[d] / total;
-        const expected = Math.log10(1 + 1/d); // Loi de Benford
+        const expected = Math.log10(1 + 1/d); 
         deviation += Math.abs(observed - expected);
     }
     
-    // Score inversé : 0 deviation = 100% compliance
-    const score = Math.max(0, 100 - (deviation * 100 * 2));
+    const score = Math.max(0, 100 - (deviation * 200)); 
     return { score };
 };
 
 export const findHistoricalMatches = (current: DrawResult, history: DrawResult[], limit: number = 5): any[] => {
-    const matches = history.map(h => {
-        if (h.id === current.id) return null;
-        // Jaccard Index
-        const intersection = current.gagnants.filter(n => h.gagnants.includes(n)).length;
-        const union = new Set([...current.gagnants, ...h.gagnants]).size;
-        return {
-            match: h,
-            nextDraw: history[history.findIndex(x => x.id === h.id) - 1] || null, // Le tirage qui a SUIVI historiquement
-            similarity: (intersection / union) * 100
-        };
-    }).filter(x => x !== null && x.similarity > 0);
+    if (!current || !history) return [];
     
-    return matches.sort((a,b) => b!.similarity - a!.similarity).slice(0, limit);
+    const currentSet = new Set(current.gagnants);
+    
+    const matches = history
+        .filter(h => h.id !== current.id)
+        .map((h, idx) => {
+            let intersection = 0;
+            for(const n of h.gagnants) {
+                if (currentSet.has(n)) intersection++;
+            }
+            // Jaccard Index simplifié : Intersection / Union
+            // Union size = 5 + 5 - intersection
+            const union = 10 - intersection;
+            
+            return {
+                match: h,
+                nextDraw: history[idx - 1] || null, // Le tirage qui a SUIVI ce match historique
+                similarity: (intersection / union) * 100
+            };
+        })
+        .filter(x => x.similarity > 0)
+        .sort((a,b) => b.similarity - a.similarity)
+        .slice(0, limit);
+    
+    return matches;
 };
 
 export const getNumberDetailedMetrics = async (num: number, history: DrawResult[], spectral: SpectralMetric[], fractal: FractalMetric[]): Promise<DetailedNumberMetrics> => {
@@ -451,50 +611,66 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
         temperature: temp,
         hurst,
         lastGap,
-        nextProb: Math.round((1 - Math.exp(-(freq20/20))) * 100), // Poisson approx
+        nextProb: Math.round((1 - Math.exp(-(freq20/20))) * 100),
         historyGraph: history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse(),
-        affinity: [], // Rempli par le composant appelant via correlationMatrix
+        affinity: [],
         nemesis: []
     };
 };
 
 /**
- * Transformée de Fourier Discrète (DFT) - JavaScript Fallback
+ * Transformée de Fourier Discrète (DFT) optimisée avec fenêtre de Hamming.
  */
 const computeDFT = (signal: number[]): number => {
     const N = signal.length;
     if (N < 4) return 0;
     
     let maxPower = 0;
-    // On scanne les harmoniques basses
+    // Pré-calcul de la fenêtre de Hamming
+    const window = new Float32Array(N);
+    const PI2_N = (2 * Math.PI) / (N - 1);
+    for(let i=0; i<N; i++) window[i] = 0.54 - 0.46 * Math.cos(PI2_N * i);
+
+    // Analyse des 10 premières harmoniques (les plus pertinentes pour la périodicité loto)
     for (let k = 1; k < 10; k++) {
         let re = 0, im = 0;
+        const angleStep = (2 * Math.PI * k) / N;
+        
         for (let t = 0; t < N; t++) {
-            const angle = (2 * Math.PI * k * t) / N;
-            re += signal[t] * Math.cos(angle);
-            im -= signal[t] * Math.sin(angle);
+            const val = signal[t] * window[t];
+            if (val === 0) continue; // Skip zero
+            
+            const angle = angleStep * t;
+            re += val * Math.cos(angle);
+            im -= val * Math.sin(angle);
         }
         const power = (re * re + im * im);
         if (power > maxPower) maxPower = power;
     }
+    // Normalisation heuristique
     return Math.min(100, Math.round(Math.sqrt(maxPower) * 20));
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     const metrics: SpectralMetric[] = [];
     const limit = Math.min(history.length, 64);
+    const signalBuffer = new Int8Array(limit);
     
     for (let i = 1; i <= 90; i++) {
-        const signal = history.slice(0, limit).map(d => d.gagnants.includes(i) ? 1 : 0);
-        const energy = computeDFT(signal);
+        // Remplissage buffer
+        for(let j=0; j<limit; j++) {
+            signalBuffer[j] = history[j].gagnants.includes(i) ? 1 : 0;
+        }
+        // Conversion array pour computeDFT (qui attend number[])
+        const energy = computeDFT(Array.from(signalBuffer));
         metrics.push({ number: i, energy, resonance: energy > 70 });
     }
     return metrics;
 };
 
-// Placeholder pour ondelettes (complexe en pur JS, souvent via Worker ou API)
+// Fallbacks simplifiés pour les métriques complexes (Wavelet)
 export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
-    return calculateSpectralMetricsAsync(history); // Fallback DFT
+    return calculateSpectralMetricsAsync(history); 
 };
 
 export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promise<FractalMetric[]> => {
@@ -511,16 +687,22 @@ export const calculateCorrelationMatrixAsync = async (history: DrawResult[]): Pr
     for(let i=1; i<=90; i++) matrix[i] = { affinities: {} };
     
     const depth = Math.min(history.length, 100);
+    const increment = 1 / depth;
     
-    history.slice(0, depth).forEach(d => {
-        d.gagnants.forEach(n1 => {
-            d.gagnants.forEach(n2 => {
-                if(n1 !== n2) {
-                    matrix[n1].affinities[n2] = (matrix[n1].affinities[n2] || 0) + (1/depth);
+    // Boucle optimisée
+    for (let k = 0; k < depth; k++) {
+        const winners = history[k].gagnants;
+        const len = winners.length;
+        for (let i = 0; i < len; i++) {
+            const n1 = winners[i];
+            for (let j = 0; j < len; j++) {
+                if (i !== j) {
+                    const n2 = winners[j];
+                    matrix[n1].affinities[n2] = (matrix[n1].affinities[n2] || 0) + increment;
                 }
-            });
-        });
-    });
+            }
+        }
+    }
     return matrix;
 };
 
@@ -530,7 +712,6 @@ export const calculateDigitalRoot = (n: number): number => {
 
 export const performKMeansClusteringAsync = async (history: DrawResult[]): Promise<ClusterPoint[]> => {
     const regularity = calculateRegularity(history);
-    // Clustering simple basé sur les seuils
     return regularity.map(r => {
         let cluster = 'Neutre';
         if (r.currentGap > 20) cluster = 'Dormeur';
@@ -540,7 +721,7 @@ export const performKMeansClusteringAsync = async (history: DrawResult[]): Promi
         return {
             number: r.number,
             x: r.currentGap,
-            y: 100 / (r.avgGap || 1), // Pseudo fréquence
+            y: 100 / (r.avgGap || 1), 
             cluster
         };
     });

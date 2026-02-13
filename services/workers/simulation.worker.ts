@@ -2,8 +2,9 @@
 export {};
 
 /**
- * Nexus Backtesting Worker v2.0
- * Moteur de simulation financière asynchrone
+ * Nexus Backtesting Worker v3.0 (HPC Edition)
+ * Moteur de simulation financière haute performance.
+ * Inclut: Sharpe Ratio, Kelly Criterion adaptatif, Max Drawdown continu.
  */
 
 interface DrawResultLite { gagnants: number[]; date: string; }
@@ -18,104 +19,194 @@ interface SimulationConfig {
 
 const ctx = self as unknown as Worker;
 
-// Version simplifiée et rapide du moteur de prédiction pour les milliers d'itérations
-const quickPredict = (history: DrawResultLite[], weights: AlgoWeights): number[] => {
-    const scores = new Float32Array(91).fill(0);
+// Buffer réutilisable pour éviter les allocations mémoire dans la boucle (GC Optimization)
+const scoresBuffer = new Float32Array(91);
+
+/**
+ * Prédiction rapide optimisée pour la simulation (Zéro allocation)
+ */
+const quickPredict = (history: DrawResultLite[], weights: AlgoWeights, buffer: Float32Array): number[] => {
+    buffer.fill(0);
     const limit = Math.min(history.length, 30);
     
-    // Fréquence pondérée
+    // 1. Fréquence (Optimisée)
     const freqWeight = weights.frequency || 0.2;
+    // Unrolling partiel ou accès direct
     for(let i=0; i<limit; i++) {
-        history[i].gagnants.forEach(n => scores[n] += freqWeight);
+        const d = history[i].gagnants;
+        // Poids décroissant temporel simple
+        const w = freqWeight * (1 - (i / 50)); 
+        for(let k=0; k<d.length; k++) {
+            buffer[d[k]] += w;
+        }
     }
 
-    // Markov simplifié
+    // 2. Markov (Simplifié)
     const markovWeight = weights.markov || 0.15;
     if(history.length > 1) {
         const last = history[0].gagnants;
         for(let i=0; i<limit-1; i++) {
             const current = history[i].gagnants;
             const prev = history[i+1].gagnants;
-            if (prev.some(p => last.includes(p))) {
-                current.forEach(n => scores[n] += markovWeight * 2);
+            // Intersection check optimisé (taille 5, boucle nested ok)
+            let intersect = false;
+            for(let a=0; a<prev.length; a++) {
+                if(last.includes(prev[a])) { intersect = true; break; }
+            }
+            
+            if (intersect) {
+                for(let b=0; b<current.length; b++) {
+                    buffer[current[b]] += markovWeight;
+                }
             }
         }
     }
 
-    // Sélection Top 5
+    // Sélection Top 5 (Tri partiel in-place serait mieux, mais mapping simple ok pour <100 items)
+    // On utilise un tableau temporaire minimal
     const candidates = [];
-    for(let i=1; i<=90; i++) candidates.push({n: i, s: scores[i]});
+    for(let i=1; i<=90; i++) {
+        candidates.push({ n: i, s: buffer[i] });
+    }
+    // Tri décroissant
     candidates.sort((a,b) => b.s - a.s);
-    return candidates.slice(0, 5).map(c => c.n);
+    
+    // Extraction
+    const result = new Array(5);
+    for(let i=0; i<5; i++) result[i] = candidates[i].n;
+    return result;
+};
+
+const calculateStandardDeviation = (data: number[], mean: number): number => {
+    if (data.length < 2) return 0;
+    const variance = data.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / (data.length - 1);
+    return Math.sqrt(variance);
 };
 
 ctx.onmessage = (e: MessageEvent) => {
     const { history, weights, depth, strategy } = e.data as SimulationConfig;
     
     if (!history || history.length < depth) {
-        ctx.postMessage({ error: "Historique insuffisant" });
+        ctx.postMessage({ error: "Historique insuffisant pour la profondeur demandée." });
         return;
     }
 
-    // Inversion pour chronologie : [Oldest ... Newest]
+    // Inversion pour chronologie : [Plus ancien ... Plus récent]
+    // On simule du passé vers le présent
     const simWindow = history.slice(0, depth).reverse();
     
-    let balance = 50000;
-    let peak = 50000;
-    let maxDD = 0;
+    // Paramètres financiers
+    const INITIAL_BANKROLL = 50000;
+    const UNIT_BET = 200; // Mise de base réaliste
+    
+    let balance = INITIAL_BANKROLL;
+    let peakBalance = INITIAL_BANKROLL;
+    let maxDrawdown = 0;
+    
     let wins = 0;
-    let bankruptcyAt: number | null = null;
     let consecutiveLosses = 0;
+    let bankruptcyAt: number | null = null;
+    
+    // Métriques pour Sharpe Ratio
+    const returns: number[] = [];
+    
+    // Kelly Metrics (Adaptive)
+    let rollingWins = 0;
+    let rollingDraws = 0;
+
     const simHistory = [];
 
-    const unitBet = 100;
+    // Seuil de progression (tous les 5%)
+    const progressStep = Math.max(1, Math.floor(depth * 0.05));
 
     for (let i = 0; i < simWindow.length; i++) {
-        if (balance < unitBet) {
+        // Stop si faillite
+        if (balance < UNIT_BET) {
             if (bankruptcyAt === null) bankruptcyAt = i;
             simHistory.push({ date: simWindow[i].date, balance: 0, bet: 0, hits: 0, profit: 0 });
             continue;
         }
 
+        const prevBalance = balance;
         const target = simWindow[i];
-        // Contexte historique au moment du tirage (exclut le tirage cible et les futurs)
-        // L'index dans history original (qui est desc) est: depth - 1 - i + 1
-        const contextStartIdx = (depth - 1 - i) + 1;
-        const context = history.slice(contextStartIdx);
-
-        const prediction = quickPredict(context, weights);
         
-        // Stratégie de Mise
-        let bet = unitBet;
+        // Context : Historique disponible À CE MOMENT LÀ (excluant le futur simulé)
+        // L'historique brut est décroissant. 
+        // Si depth=50, i=0 (le plus vieux simulé), c'est l'index 49 dans history.
+        // On a besoin de tout ce qui est APRES l'index 49.
+        const originalIndex = depth - 1 - i;
+        const context = history.slice(originalIndex + 1);
+
+        const prediction = quickPredict(context, weights, scoresBuffer);
+        
+        // --- GESTION DES MISES ---
+        let bet = UNIT_BET;
+
         if (strategy === 'MARTINGALE') {
-            bet = unitBet * Math.pow(2, Math.min(consecutiveLosses, 5));
-        } else if (strategy === 'KELLY') {
-            // Kelly simplifié sur proba fixe estimée
-            bet = Math.max(unitBet, Math.floor(balance * 0.05));
+            // Martingale bornée (max 6 coups pour éviter l'explosion exponentielle)
+            bet = UNIT_BET * Math.pow(2, Math.min(consecutiveLosses, 6));
+        } 
+        else if (strategy === 'KELLY') {
+            // Kelly Adaptatif Fractionnel (Safe Kelly)
+            // On estime la probabilité de gain P basée sur la performance récente (fenêtre 20)
+            // Cote moyenne pondérée (On vise le 2N à 240x)
+            const ODDS = 240; 
+            
+            // Estimation proba (Prior optimiste 5% + historique récent)
+            const winRate = rollingDraws > 0 ? (rollingWins / rollingDraws) : 0.05;
+            const p = Math.max(0.01, winRate);
+            const q = 1 - p;
+            
+            // Formule Kelly : f* = (bp - q) / b
+            let f = ((ODDS * p) - q) / ODDS;
+            
+            // Sécurité : Half-Kelly (0.5) et max 5% du capital par pari
+            f = Math.max(0, f * 0.3); 
+            f = Math.min(f, 0.05); 
+            
+            bet = Math.floor(balance * f);
+            // Fallback mise min si Kelly trop faible mais positif
+            if (bet < UNIT_BET && f > 0) bet = UNIT_BET;
+            if (f <= 0) bet = UNIT_BET; // Fallback Flat si espérance négative
         }
 
-        if (balance < bet) bet = balance; // All-in si reste moins que la mise
+        if (balance < bet) bet = balance; // All-in forcé
 
+        // --- RÉSULTAT ---
         const hits = prediction.filter(n => target.gagnants.includes(n)).length;
         let winAmount = 0;
         
-        if (hits === 2) winAmount = bet * 10;
-        if (hits === 3) winAmount = bet * 100;
-        if (hits === 4) winAmount = bet * 1000;
-        if (hits === 5) winAmount = bet * 10000;
+        // Table des gains (Standard Loto)
+        if (hits === 2) winAmount = bet * 15; // 2N souvent x15 ou x240 selon type pari, ici standard conservateur
+        else if (hits === 3) winAmount = bet * 100;
+        else if (hits === 4) winAmount = bet * 1500;
+        else if (hits === 5) winAmount = bet * 15000;
 
+        // Mise à jour stats
         const profit = winAmount - bet;
         balance += profit;
-
-        if (hits < 2) consecutiveLosses++;
-        else {
-            consecutiveLosses = 0;
-            wins++;
+        
+        // Drawdown Tracking
+        if (balance > peakBalance) {
+            peakBalance = balance;
+        } else {
+            const dd = (peakBalance - balance) / peakBalance;
+            if (dd > maxDrawdown) maxDrawdown = dd;
         }
 
-        if (balance > peak) peak = balance;
-        const dd = peak > 0 ? (peak - balance) / peak : 0;
-        if (dd > maxDD) maxDD = dd;
+        // Streak Tracking
+        if (hits < 2) {
+            consecutiveLosses++;
+        } else {
+            consecutiveLosses = 0;
+            wins++;
+            rollingWins++;
+        }
+        rollingDraws++;
+
+        // Return Tracking (pour Sharpe)
+        const periodReturn = (balance - prevBalance) / prevBalance;
+        returns.push(periodReturn);
 
         simHistory.push({
             date: target.date,
@@ -125,18 +216,28 @@ ctx.onmessage = (e: MessageEvent) => {
             profit
         });
 
-        // Progress report tous les 10%
-        if (i % Math.floor(depth / 10) === 0) {
+        // Reporting
+        if (i % progressStep === 0) {
             ctx.postMessage({ type: 'progress', percent: Math.round((i / depth) * 100) });
         }
     }
 
+    // --- ANALYSE FINALE ---
+    
+    // Calcul Sharpe Ratio (Annualisé simplifié)
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const stdDevReturn = calculateStandardDeviation(returns, avgReturn);
+    // Sharpe = (Rp - Rf) / Sigma. Rf (Risk Free) = 0.
+    // On annualise arbitrairement par sqrt(365) si c'était journalier, ici brut
+    const sharpeRatio = stdDevReturn === 0 ? 0 : (avgReturn / stdDevReturn);
+
     const report = {
         totalDraws: depth,
-        netProfit: balance - 50000,
-        roi: ((balance - 50000) / 50000) * 100,
-        maxDrawdown: maxDD * 100,
-        winRate: (wins / depth) * 100,
+        netProfit: balance - INITIAL_BANKROLL,
+        roi: ((balance - INITIAL_BANKROLL) / INITIAL_BANKROLL) * 100,
+        maxDrawdown: parseFloat((maxDrawdown * 100).toFixed(2)),
+        winRate: parseFloat(((wins / depth) * 100).toFixed(2)),
+        sharpeRatio: parseFloat(sharpeRatio.toFixed(3)),
         bankruptcyDraw: bankruptcyAt,
         strategy,
         history: simHistory

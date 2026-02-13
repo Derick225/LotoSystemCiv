@@ -2,15 +2,18 @@
 export {};
 
 /**
- * Nexus Genetic Engine v5.1 (Production Sync)
- * Synchronisé avec services/predictionEngine.ts pour une optimisation réelle.
+ * Nexus Genetic Engine v6.0 (Adaptive & Robust)
+ * Optimisation génétique avec gestion de la diversité, mutation adaptative et early stopping.
  */
 
 interface DrawResultLite { gagnants: number[]; machine?: number[]; }
 interface AlgoWeights { [key: string]: number | undefined; }
 interface AdaptiveRules { criticalZoneMin: number; criticalZoneMax: number; }
+interface Individual { weights: AlgoWeights; fitness: number; }
 
 const ctx = self as unknown as Worker;
+
+// --- UTILS ---
 
 const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
     const keys = Object.keys(w);
@@ -26,44 +29,101 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
     return normalized;
 };
 
-// Fitness function qui imite generateMasterPrediction (version allégée pour perf)
+// Box-Muller transform for Gaussian distribution
+const randomGaussian = (mean: number = 0, stdev: number = 1): number => {
+    const u = 1 - Math.random(); // Converting [0,1) to (0,1]
+    const v = Math.random();
+    const z = Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
+    return z * stdev + mean;
+};
+
+const euclideanDistance = (w1: AlgoWeights, w2: AlgoWeights): number => {
+    const keys = Array.from(new Set([...Object.keys(w1), ...Object.keys(w2)]));
+    let sumSq = 0;
+    keys.forEach(k => {
+        const v1 = w1[k] || 0;
+        const v2 = w2[k] || 0;
+        sumSq += Math.pow(v1 - v2, 2);
+    });
+    return Math.sqrt(sumSq);
+};
+
+const calculateDiversity = (population: Individual[]): number => {
+    if (population.length < 2) return 0;
+    // Distance moyenne par rapport au meilleur individu (centroïde approximatif)
+    const best = population[0].weights;
+    let totalDist = 0;
+    for (let i = 1; i < population.length; i++) {
+        totalDist += euclideanDistance(best, population[i].weights);
+    }
+    return totalDist / (population.length - 1);
+};
+
+// --- GENETIC OPERATORS ---
+
+// Crossover Uniforme : Chaque gène a 50% de chance de venir de P1 ou P2
+const uniformCrossover = (p1: AlgoWeights, p2: AlgoWeights): AlgoWeights => {
+    const child: AlgoWeights = {};
+    const keys = Array.from(new Set([...Object.keys(p1), ...Object.keys(p2)]));
+    
+    keys.forEach(k => {
+        child[k] = Math.random() > 0.5 ? (p1[k] || 0) : (p2[k] || 0);
+    });
+    return normalizeWeights(child);
+};
+
+// Mutation Gaussienne Adaptative
+const mutateGaussian = (w: AlgoWeights, sigma: number, rate: number): AlgoWeights => {
+    const mutant = { ...w };
+    const keys = Object.keys(mutant);
+    
+    keys.forEach(k => {
+        if (Math.random() < rate) {
+            // Mutation : valeur actuelle + bruit gaussien centré sur 0
+            const noise = randomGaussian(0, sigma);
+            const currentVal = mutant[k] || 0;
+            // On clamp entre 0.001 et 1.0 pour éviter les poids nuls ou négatifs
+            mutant[k] = Math.max(0.001, Math.min(1.0, currentVal + noise));
+        }
+    });
+    return normalizeWeights(mutant);
+};
+
+// --- FITNESS FUNCTION ---
+
 const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], depth: number): number => {
     const limit = Math.min(history.length - 1, depth);
     let totalScore = 0;
     
-    // Optimisation : Pré-calcul des fréquences globales une fois pour la fenêtre
-    // Mais pour être précis, il faut recalculer pour chaque point de test (History sliding window)
-    // Pour perf, on fait une approximation glissante simple.
+    // Pré-calcul pour optimisation
+    const freqWeight = w.frequency || 0;
+    const markovWeight = w.markov || 0;
+    const gapWeight = w.gap || 0;
+    const momWeight = w.momentum || 0;
 
     for (let i = 0; i < limit; i++) {
         const target = history[i].gagnants;
-        const past = history.slice(i + 1); // Contexte connu à ce moment
+        const past = history.slice(i + 1); 
         if (past.length < 20) break;
 
-        const contextSize = Math.min(past.length, 50);
+        const contextSize = Math.min(past.length, 40);
         const subPast = past.slice(0, contextSize);
         const candidates = new Map<number, number>();
 
         // 1. Fréquence
-        const freqWeight = w.frequency || 0;
-        const freqMap = new Map<number, number>();
-        subPast.forEach(d => d.gagnants.forEach(n => freqMap.set(n, (freqMap.get(n) || 0) + 1)));
-
-        if (freqWeight > 0) {
+        if (freqWeight > 0.01) {
+            const freqMap = new Map<number, number>();
+            subPast.forEach(d => d.gagnants.forEach(n => freqMap.set(n, (freqMap.get(n) || 0) + 1)));
             const maxFreq = Math.max(...freqMap.values()) || 1;
-            for(let n=1; n<=90; n++) {
-                const score = ((freqMap.get(n)||0) / maxFreq) * 100;
-                candidates.set(n, (candidates.get(n)||0) + (score * freqWeight));
-            }
+            freqMap.forEach((count, n) => {
+                 candidates.set(n, (candidates.get(n)||0) + ((count / maxFreq) * 100 * freqWeight));
+            });
         }
 
         // 2. Markov (T-1)
-        const markovWeight = w.markov || 0;
-        if (markovWeight > 0) {
+        if (markovWeight > 0.01) {
             const lastDraw = past[0].gagnants;
             const markovMap = new Map<number, number>();
-            
-            // Calcul transition simple
             for (let k = 0; k < contextSize - 1; k++) {
                 const curr = past[k].gagnants;
                 const prev = past[k+1].gagnants;
@@ -72,42 +132,42 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
                 }
             }
             const maxMark = Math.max(...markovMap.values()) || 1;
-            markovMap.forEach((val, key) => {
-                candidates.set(key, (candidates.get(key)||0) + ((val/maxMark)*100 * markovWeight));
-            });
+            if (maxMark > 0) {
+                markovMap.forEach((val, key) => {
+                    candidates.set(key, (candidates.get(key)||0) + ((val/maxMark)*100 * markovWeight));
+                });
+            }
         }
 
         // 3. Gap
-        const gapWeight = w.gap || 0;
-        if (gapWeight > 0) {
+        if (gapWeight > 0.01) {
             for(let n=1; n<=90; n++) {
                 let gap = 0;
                 for(let k=0; k<subPast.length; k++) {
                     if(subPast[k].gagnants.includes(n)) break;
                     gap++;
                 }
-                // Logique simplifiée de predictionEngine (Theoretical ~ 17)
                 let score = 0;
-                if(gap < 17) score = (gap/17)*50;
-                else if(gap < 51) score = 50 + ((gap-17)/34)*50;
-                else score = 90;
+                // Logique "Ecart Critique"
+                if(gap < 10) score = (gap/10)*20;
+                else if(gap >= 10 && gap <= 25) score = 50 + ((gap-10)/15)*50; // Zone chaude
+                else score = 100; // Zone critique
                 
                 candidates.set(n, (candidates.get(n)||0) + (score * gapWeight));
             }
         }
 
-        // 4. Momentum (10 derniers)
-        const momWeight = w.momentum || 0;
-        if (momWeight > 0) {
-            const momPast = past.slice(0, 10);
+        // 4. Momentum
+        if (momWeight > 0.01) {
+            const momPast = past.slice(0, 8);
             const momMap = new Map<number, number>();
             momPast.forEach(d => d.gagnants.forEach(n => momMap.set(n, (momMap.get(n)||0)+1)));
             momMap.forEach((val, key) => {
-                candidates.set(key, (candidates.get(key)||0) + (Math.min(100, val*25) * momWeight));
+                candidates.set(key, (candidates.get(key)||0) + (Math.min(100, val*30) * momWeight));
             });
         }
 
-        // Extraction Top 5
+        // Top 5 Prediction
         const top5 = Array.from(candidates.entries())
             .sort((a,b) => b[1] - a[1])
             .slice(0, 5)
@@ -115,95 +175,126 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
         
         const hits = top5.filter(n => target.includes(n)).length;
         
-        // Système de récompense : on veut des hits > 0 réguliers, et > 2 occasionnellement
-        if (hits === 1) totalScore += 1;
-        if (hits === 2) totalScore += 5;
-        if (hits === 3) totalScore += 20;
-        if (hits === 4) totalScore += 100;
-        if (hits === 5) totalScore += 1000;
+        // Fitness exponentielle pour favoriser les "gros coups"
+        if (hits === 1) totalScore += 10;
+        if (hits === 2) totalScore += 50;
+        if (hits === 3) totalScore += 250;
+        if (hits === 4) totalScore += 1000;
+        if (hits === 5) totalScore += 5000;
     }
 
     return totalScore;
 };
 
-const mutateGaussian = (w: AlgoWeights, rate: number, intensity: number = 0.2): AlgoWeights => {
-    const mutated = { ...w };
-    Object.keys(mutated).forEach(k => {
-        if (Math.random() < rate) {
-            const noise = (Math.random() - 0.5) * intensity;
-            const currentVal = mutated[k] || 0;
-            mutated[k] = Math.max(0.001, currentVal + noise);
-        }
-    });
-    return normalizeWeights(mutated);
-};
-
-const crossover = (p1: AlgoWeights, p2: AlgoWeights): AlgoWeights => {
-    const child: AlgoWeights = {};
-    Object.keys(p1).forEach(k => {
-        child[k] = Math.random() > 0.5 ? p1[k] : p2[k];
-    });
-    return normalizeWeights(child);
-};
-
-// Distance pour diversité
-const geneticDistance = (w1: AlgoWeights, w2: AlgoWeights): number => {
-    let sumSq = 0;
-    const keys = Object.keys(w1);
-    keys.forEach(k => {
-        sumSq += Math.pow((w1[k] || 0) - (w2[k] || 0), 2);
-    });
-    return Math.sqrt(sumSq);
-};
+// --- WORKER HANDLER ---
 
 ctx.onmessage = (e) => {
     if (e.data.type === 'start') {
         const { baseWeights, baseRules, config, history } = e.data.payload;
         
         const POPSIZE = config.populationSize || 40;
-        const GENERATIONS = config.maxGenerations || 30;
-        const MUTATION_RATE = config.mutationRate || 0.2;
+        const MAX_GENERATIONS = config.maxGenerations || 40;
+        const INITIAL_MUTATION_RATE = config.mutationRate || 0.2;
+        const ELITISM_COUNT = Math.max(2, Math.floor(POPSIZE * 0.1));
+        const EARLY_STOP_PATIENCE = 6;
+        const DIVERSITY_THRESHOLD = 0.05;
 
-        let population = Array.from({ length: POPSIZE }, (_, i) => ({
-            weights: i === 0 ? baseWeights : mutateGaussian(baseWeights, 1.0, 0.5), 
-            rules: baseRules,
+        let population: Individual[] = Array.from({ length: POPSIZE }, (_, i) => ({
+            weights: i === 0 ? baseWeights : mutateGaussian(baseWeights, 0.5, 0.5), // Diversité initiale
             fitness: 0
         }));
 
-        for (let gen = 0; gen < GENERATIONS; gen++) {
+        let bestFitnessEver = -Infinity;
+        let stagnationCount = 0;
+        let lastBestFitness = -Infinity;
+
+        for (let gen = 0; gen < MAX_GENERATIONS; gen++) {
+            // 1. Evaluation
             population.forEach(ind => {
-                ind.fitness = evaluate(ind.weights, ind.rules, history, config.historyDepth);
+                // Optimization: Ne pas recalculer si fitness déjà connue (sauf si l'algo était stochastique, ce qui n'est pas le cas ici pour une historique fixe)
+                if (ind.fitness === 0) { 
+                    ind.fitness = evaluate(ind.weights, baseRules, history, config.historyDepth);
+                }
             });
 
+            // 2. Sort & Stats
             population.sort((a, b) => b.fitness - a.fitness);
             
-            const bestFitness = population[0].fitness;
-            const avgFitness = population.reduce((a,b) => a + b.fitness, 0) / POPSIZE;
-            
-            let totalDist = 0;
-            for(let i=1; i<POPSIZE; i++) totalDist += geneticDistance(population[0].weights, population[i].weights);
-            const diversity = totalDist / (POPSIZE - 1);
+            const currentBest = population[0];
+            const currentAvg = population.reduce((a,b) => a + b.fitness, 0) / POPSIZE;
+            const diversity = calculateDiversity(population);
 
+            // 3. Stagnation Check (Early Stopping)
+            if (currentBest.fitness > lastBestFitness) {
+                lastBestFitness = currentBest.fitness;
+                stagnationCount = 0;
+            } else {
+                stagnationCount++;
+            }
+
+            // 4. Reporting
             ctx.postMessage({ 
                 type: 'progress', 
-                data: { gen: gen + 1, bestFitness, avgFitness, diversity, bestGenome: population[0].weights } 
+                data: { 
+                    gen: gen + 1, 
+                    bestFitness: currentBest.fitness, 
+                    avgFitness: currentAvg, 
+                    diversity, 
+                    stagnation: stagnationCount,
+                    bestGenome: currentBest.weights 
+                } 
             });
 
-            const nextGen = [];
-            const eliteCount = Math.max(2, Math.floor(POPSIZE * 0.1));
-            for(let i=0; i<eliteCount; i++) nextGen.push(population[i]);
+            if (stagnationCount >= EARLY_STOP_PATIENCE) {
+                // Early stopping triggered
+                break;
+            }
 
+            if (currentBest.fitness > bestFitnessEver) {
+                bestFitnessEver = currentBest.fitness;
+            }
+
+            // 5. Adaptive Parameters
+            // Si la diversité est faible, on augmente massivement le taux de mutation (Cataclysm)
+            // Sinon on réduit sigma progressivement pour converger
+            let currentSigma = 0.3 * (1 - (gen / MAX_GENERATIONS)); 
+            let currentMutationRate = INITIAL_MUTATION_RATE;
+
+            if (diversity < DIVERSITY_THRESHOLD) {
+                currentSigma = 0.6; // Boost
+                currentMutationRate = 0.6; // High mutation
+            }
+
+            // 6. Reproduction
+            const nextGen: Individual[] = [];
+            
+            // Elitisme
+            for(let i=0; i<ELITISM_COUNT; i++) {
+                nextGen.push({ ...population[i] }); // Clone
+            }
+
+            // Breeding
             while (nextGen.length < POPSIZE) {
-                const p1 = population[Math.floor(Math.random() * (POPSIZE / 2))]; 
-                const p2 = population[Math.floor(Math.random() * POPSIZE)]; 
+                // Tournoi Selection
+                const tournamentSize = 3;
+                const selectParent = () => {
+                    let best = population[Math.floor(Math.random() * POPSIZE)];
+                    for(let k=1; k<tournamentSize; k++) {
+                        const contender = population[Math.floor(Math.random() * POPSIZE)];
+                        if (contender.fitness > best.fitness) best = contender;
+                    }
+                    return best;
+                };
+
+                const p1 = selectParent();
+                const p2 = selectParent();
                 
-                let childWeights = crossover(p1.weights, p2.weights);
-                const dynRate = diversity < 0.1 ? MUTATION_RATE * 2 : MUTATION_RATE;
-                const dynInt = diversity < 0.1 ? 0.3 : 0.1;
+                let childWeights = uniformCrossover(p1.weights, p2.weights);
                 
-                if (Math.random() < 0.7) childWeights = mutateGaussian(childWeights, dynRate, dynInt);
+                // Mutation
+                childWeights = mutateGaussian(childWeights, currentSigma, currentMutationRate);
                 
-                nextGen.push({ weights: childWeights, rules: baseRules, fitness: 0 });
+                nextGen.push({ weights: childWeights, fitness: 0 });
             }
             population = nextGen;
         }
