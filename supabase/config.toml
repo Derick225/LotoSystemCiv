@@ -1,0 +1,22 @@
+project_id = "nexus-platinum"
+
+[functions.ask-oracle]
+verify_jwt = false
+
+[functions.compute-nexus-analytics]
+verify_jwt = false
+
+[functions.cron-sync]
+verify_jwt = false
+
+[functions.init-payment]
+verify_jwt = false
+
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.proxy-results]
+verify_jwt = false
+
+[functions.self-learn]
+verify_jwt = false

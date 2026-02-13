@@ -15,10 +15,9 @@ interface LocalErrorBoundaryState {
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
 export class LocalErrorBoundary extends Component<LocalErrorBoundaryProps, LocalErrorBoundaryState> {
-  public state: LocalErrorBoundaryState = { hasError: false, error: null };
-
   constructor(props: LocalErrorBoundaryProps) {
     super(props);
+    this.state = { hasError: false, error: null };
   }
 
   // Standard static method for error boundaries
