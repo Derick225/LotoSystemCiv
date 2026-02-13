@@ -1,12 +1,11 @@
-
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
-interface Props {
+interface LocalErrorBoundaryProps {
   children?: ReactNode;
 }
 
-interface ErrorBoundaryState {
+interface LocalErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
@@ -15,14 +14,14 @@ interface ErrorBoundaryState {
  * LocalErrorBoundary v1.1
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-export class LocalErrorBoundary extends Component<Props, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
+export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps, LocalErrorBoundaryState> {
+  public state: LocalErrorBoundaryState = {
     hasError: false,
     error: null,
   };
 
   // Standard static method for error boundaries
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): LocalErrorBoundaryState {
     return { hasError: true, error };
   }
 

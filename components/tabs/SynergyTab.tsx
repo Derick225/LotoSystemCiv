@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { calculateSuccessionMatrixAsync } from '../../services/mathService';
 import { NumberBall } from '../NumberBall';
-import { Users, ArrowRight, Activity, Zap, ShieldCheck, Heart, UserMinus, Search, Target, Network, Info } from 'lucide-react';
+import { Users, ArrowRight, Activity, Zap, ShieldCheck, Heart, UserMinus, Search, Target, Network, Info, Link } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface SynergyTabProps { drawName: string; }
@@ -14,6 +14,40 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
     const [successors, setSuccessors] = useState<{ number: number; prob: number }[]>([]);
     const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
+    // --- ANALYSE AUTOMATIQUE DU DERNIER TIRAGE ---
+    const lastDrawSynergies = useMemo(() => {
+        if (history.length === 0 || !correlationMatrix[1]) return [];
+        const lastDraw = history[0].gagnants;
+        const scores: { number: number; score: number; sources: number[] }[] = [];
+
+        // On scanne tous les numéros (1-90) pour voir lesquels réagissent le plus au tirage précédent
+        for (let candidate = 1; candidate <= 90; candidate++) {
+            if (lastDraw.includes(candidate)) continue; // On exclut les répétitions directes ici (gérées ailleurs)
+
+            let totalAffinity = 0;
+            let sources: number[] = [];
+
+            lastDraw.forEach(source => {
+                // Score de corrélation brut (0 à 1)
+                const affinity = Number(correlationMatrix[source]?.affinities?.[candidate] || 0);
+                if (affinity > 0.08) { // Seuil de bruit
+                    totalAffinity += affinity;
+                    sources.push(source);
+                }
+            });
+
+            if (totalAffinity > 0.2) {
+                scores.push({ 
+                    number: candidate, 
+                    score: Math.min(100, Math.round(totalAffinity * 25)), // Normalisation pour affichage
+                    sources 
+                });
+            }
+        }
+        return scores.sort((a, b) => b.score - a.score).slice(0, 8);
+    }, [history, correlationMatrix]);
+
+    // --- ANALYSE MANUELLE ---
     useEffect(() => {
         if (selectedNum && history.length > 10) {
             setLoadingAnalysis(true);
@@ -48,11 +82,6 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
             .slice(0, 3);
     }, [selectedNum, correlationMatrix]);
 
-    const socialPressure = useMemo(() => {
-        if (affinities.length === 0) return 0;
-        return Math.round(affinities.reduce((acc, a) => acc + a.score, 0) / affinities.length);
-    }, [affinities]);
-
     if (nexusLoading) return <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse"><Users className="text-indigo-500 animate-spin" size={48} /><p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Extraction des liens synaptiques...</p></div>;
 
     return (
@@ -70,6 +99,46 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                 </div>
             </div>
 
+            {/* SECTION: RÉSONANCE DU DERNIER TIRAGE (AUTO) */}
+            {history.length > 0 && (
+                <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 md:p-8 rounded-[2.5rem] shadow-xl border border-indigo-500/30 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50"></div>
+                    
+                    <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
+                        {/* Dernier Tirage */}
+                        <div className="bg-black/30 p-5 rounded-3xl border border-white/10 shrink-0">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                <Activity size={12}/> Source (Dernier Tirage)
+                            </h4>
+                            <div className="flex gap-2">
+                                {history[0].gagnants.map(n => <NumberBall key={n} number={n} size="sm" />)}
+                            </div>
+                        </div>
+
+                        {/* Connexions Fortes */}
+                        <div className="flex-1 w-full">
+                            <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                <Link size={12}/> Résonance Globale Détectée
+                            </h4>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {lastDrawSynergies.map((item, i) => (
+                                    <div key={item.number} className="bg-white/5 hover:bg-white/10 p-3 rounded-2xl border border-white/5 transition-all group cursor-pointer flex flex-col items-center">
+                                        <div className="flex justify-between w-full mb-2">
+                                            <span className="text-[9px] font-bold text-slate-500">#{i+1}</span>
+                                            <span className="text-[9px] font-black text-emerald-400">{item.score}%</span>
+                                        </div>
+                                        <NumberBall number={item.number} size="md" glow={item.score > 80} />
+                                        <div className="mt-2 text-[8px] text-slate-400">
+                                            Lié à {item.sources.length} sources
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="grid lg:grid-cols-12 gap-8">
                 {/* Matrix Selector - FOND BLANC HAUT CONTRASTE */}
                 <div className="lg:col-span-5 bg-white p-8 rounded-[3rem] shadow-xl border border-slate-200 relative overflow-hidden">
@@ -77,7 +146,7 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                     
                     <div className="flex justify-between items-center mb-8 px-2 relative z-10">
                         <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                            <Search size={14} className="text-indigo-600"/> Sélecteur de Vecteur
+                            <Search size={14} className="text-indigo-600"/> Inspecteur Manuel
                         </h4>
                         {selectedNum && (
                             <button onClick={() => setSelectedNum(null)} className="text-[9px] font-black text-rose-600 uppercase bg-rose-50 px-3 py-1 rounded-full border border-rose-100 transition-all active:scale-95 shadow-sm">Reset</button>

@@ -1,11 +1,13 @@
+
 import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runSurvivalSimulation, BettingStrategy, BacktestReport } from '../../services/backtestingEngine';
 import { Play, RefreshCw, Trophy, PiggyBank, ThumbsUp, ThumbsDown, Layers, ChevronRight } from 'lucide-react';
 import { ParallelSimulationTab } from './ParallelSimulationTab';
+import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
 
 export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, globalWeights, loading: nexusLoading } = useNexus();
+    const { history, globalWeights, loading: nexusLoading, rlState } = useNexus();
     const [mode, setMode] = useState<'single' | 'comparative'>('single');
     const [simulating, setSimulating] = useState(false);
     const [report, setReport] = useState<BacktestReport | null>(null);
@@ -31,6 +33,8 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     return (
         <div className="space-y-8 animate-fade-in pb-16">
+            <NeuralEvolutionDashboard rlState={rlState} drawName={drawName} />
+
             <div className="flex bg-slate-100 dark:bg-slate-800/50 p-1 rounded-2xl w-fit border border-slate-200 dark:border-slate-700 mx-auto mb-4">
                 <button onClick={() => setMode('single')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${mode === 'single' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-400'}`}>Backtest Simple</button>
                 <button onClick={() => setMode('comparative')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${mode === 'comparative' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-400'}`}>Comparatif Futur</button>

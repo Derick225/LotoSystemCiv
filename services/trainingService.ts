@@ -4,8 +4,18 @@ import { generateMasterPrediction, saveAlgoWeights, getAlgoWeights, getAdaptiveR
 import { runGeneticOptimization } from './geneticOptimizer';
 import { detectGameRegime } from './mathService';
 import { isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
 import type { AlgoWeights, TrainingReport, TrainingResult, DrawResult } from '../types';
+
+// Calcul des métriques de classification (Precision, Recall, F1)
+const calculateClassMetrics = (hits: number[], totalPredictions: number) => {
+    const tp = hits.filter(h => h > 0).length;
+    const fp = totalPredictions - tp;
+    // Estimation simplifiée pour le contexte loto (où les TN sont massifs)
+    const precision = tp / (tp + fp || 1);
+    const recall = tp / 5; // Rappel par rapport au tirage idéal (5 numéros)
+    const f1 = 2 * (precision * recall) / (precision + recall || 1);
+    return { precision, recall, f1 };
+};
 
 export const runBacktestTraining = async (
     drawName: string, 
@@ -33,50 +43,78 @@ export const runBacktestTraining = async (
     
     const weightsToUse = customWeights || await getAlgoWeights(drawName);
     
-    for (let i = actualSampleSize - 1; i >= 0; i--) {
-        const targetDraw = allResults[i];
-        const historyAtThatTime = allResults.slice(i + 1); 
-        const prediction = await generateMasterPrediction(drawName, historyAtThatTime, weightsToUse);
-        const predicted = prediction.suggestedNumbers;
-        const actual = targetDraw.gagnants;
-        const hits = predicted.filter(n => actual.includes(n));
-        const hitCount = hits.length;
-        
-        hitCountsArray.push(hitCount);
-        totalHitsAcc += hitCount;
-        if (hitCount > 0) atLeastOneHitCount++;
-        
-        if (hitCount === 0) distribution.zero++;
-        else if (hitCount === 1) distribution.one++;
-        else if (hitCount === 2) distribution.two++;
-        else if (hitCount === 3) distribution.three++;
-        else if (hitCount === 4) distribution.four++;
-        else if (hitCount >= 5) distribution.five++;
+    // Cross-Validation (K-Fold simplifié : Sliding Window)
+    // On divise l'échantillon en 3 plis pour valider la robustesse
+    const kFolds = 3;
+    const foldSize = Math.floor(actualSampleSize / kFolds);
+    let foldScores: number[] = [];
 
-        trainingResults.unshift({
-            date: targetDraw.date,
-            drawName,
-            predictedNumbers: predicted,
-            actualWinningNumbers: actual,
-            hits,
-            hitCount,
-            isJackpot: hitCount === 5,
-            confidence: prediction.confidence,
-            breakdown: prediction.breakdown
-        });
+    for (let k = 0; k < kFolds; k++) {
+        let foldHits = 0;
+        const startIdx = k * foldSize;
+        const endIdx = startIdx + foldSize;
+        
+        for (let i = endIdx - 1; i >= startIdx; i--) {
+            // Index réel dans l'historique (en remontant le temps)
+            const realIdx = i; 
+            const targetDraw = allResults[realIdx];
+            const historyAtThatTime = allResults.slice(realIdx + 1); 
+            
+            const prediction = await generateMasterPrediction(drawName, historyAtThatTime, weightsToUse);
+            const predicted = prediction.suggestedNumbers;
+            const actual = targetDraw.gagnants;
+            const hits = predicted.filter(n => actual.includes(n));
+            const hitCount = hits.length;
+            
+            hitCountsArray.push(hitCount);
+            totalHitsAcc += hitCount;
+            foldHits += hitCount;
+            if (hitCount > 0) atLeastOneHitCount++;
+            
+            if (hitCount === 0) distribution.zero++;
+            else if (hitCount === 1) distribution.one++;
+            else if (hitCount === 2) distribution.two++;
+            else if (hitCount === 3) distribution.three++;
+            else if (hitCount === 4) distribution.four++;
+            else if (hitCount >= 5) distribution.five++;
 
-        if (onProgress) onProgress(Math.round(((actualSampleSize - i) / actualSampleSize) * 100));
-        // Petit délai pour ne pas freezer l'UI
-        if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            trainingResults.unshift({
+                date: targetDraw.date,
+                drawName,
+                predictedNumbers: predicted,
+                actualWinningNumbers: actual,
+                hits,
+                hitCount,
+                isJackpot: hitCount === 5,
+                confidence: prediction.confidence,
+                breakdown: prediction.breakdown
+            });
+
+            // Update Progress global
+            const currentStep = (k * foldSize) + (endIdx - 1 - i);
+            if (onProgress) onProgress(Math.round((currentStep / actualSampleSize) * 100));
+            if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+        
+        // Score du pli (Moyenne des hits)
+        foldScores.push(foldHits / foldSize);
     }
 
     const totalTests = trainingResults.length;
     const avg = totalTests > 0 ? totalHitsAcc / totalTests : 0;
-    const variance = hitCountsArray.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / (totalTests || 1);
-    const stabilityScore = Math.sqrt(variance);
     
-    // Score pondéré : récompense lourdement les hits > 3
-    const score = Math.min(100, Math.round((distribution.two * 10 + distribution.three * 60 + distribution.four * 250 + distribution.five * 1500) / totalTests * 2));
+    // Stabilité via l'écart-type des scores K-Fold
+    const foldMean = foldScores.reduce((a, b) => a + b, 0) / kFolds;
+    const variance = foldScores.reduce((acc, val) => acc + Math.pow(val - foldMean, 2), 0) / kFolds;
+    const stabilityScore = 1 / (1 + Math.sqrt(variance)); // 1 = Parfaitement stable, 0 = Instable
+
+    // Métriques avancées F1
+    const metrics = calculateClassMetrics(hitCountsArray, totalTests);
+    
+    // Score pondéré : récompense lourdement les hits > 3 et la stabilité
+    // Score de base (Performance) * Stabilité
+    const rawScore = (distribution.two * 10 + distribution.three * 60 + distribution.four * 250 + distribution.five * 1500) / totalTests * 2;
+    const score = Math.min(100, Math.round(rawScore * (0.8 + (stabilityScore * 0.2))));
 
     return {
         totalTests,
@@ -84,11 +122,11 @@ export const runBacktestTraining = async (
         averageHits: parseFloat(avg.toFixed(2)),
         successRate: totalTests > 0 ? Math.round((atLeastOneHitCount / totalTests) * 100) : 0,
         stabilityScore: parseFloat(stabilityScore.toFixed(2)),
-        stabilityLabel: stabilityScore < 0.7 ? 'Rocher' : stabilityScore > 1.8 ? 'Chaos' : 'Stable',
+        stabilityLabel: stabilityScore > 0.8 ? 'Rocher (Stable)' : stabilityScore > 0.5 ? 'Fluide' : 'Chaos (Instable)',
         winDistribution: distribution,
         history: trainingResults,
         score,
-        learnedPatternsSummary: {}, 
+        learnedPatternsSummary: { f1: metrics.f1.toFixed(3), precision: metrics.precision.toFixed(3) }, 
         regimeInfo: { regime: regime.regime, hurst: regime.hurst }
     };
 };
@@ -103,40 +141,33 @@ export const evolveNeuralDNA = async (
     const currentRules = getAdaptiveRules(drawName);
     const { data: fullHistory } = await fetchResults(drawName);
 
-    // Rapport initial (Baseline)
+    // Rapport initial (Baseline) avec Cross-Validation
     const oldReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, currentWeights);
     
     let bestWeights: AlgoWeights = currentWeights;
     let bestRules: any = currentRules;
-    let optimizationSource = 'LOCAL';
 
-    // Tentative Cloud (Désactivée temporairement ou pour fallback)
-    // Ici on privilégie le worker local pour le temps réel et l'interactivité
-    
-    if (optimizationSource === 'LOCAL') {
-        const optimization = await runGeneticOptimization(
-            drawName, 
-            currentWeights, 
-            currentRules,
-            { 
-                maxGenerations: options.generations, 
-                historyDepth: options.sampleSize,
-                mutationRate: 0.25
-            },
-            onTelemetry
-        );
-        bestWeights = optimization.bestChromosome.weights;
-        bestRules = optimization.bestChromosome.rules;
-    }
+    // Lancement de l'optimiseur génétique local
+    const optimization = await runGeneticOptimization(
+        drawName, 
+        currentWeights, 
+        currentRules,
+        { 
+            maxGenerations: options.generations, 
+            historyDepth: options.sampleSize,
+            // Mutation rate adaptatif géré dans le worker, on passe une base
+            mutationRate: 0.25 
+        },
+        onTelemetry
+    );
+    bestWeights = optimization.bestChromosome.weights;
+    bestRules = optimization.bestChromosome.rules;
 
-    // Validation finale
+    // Validation finale du meilleur candidat
     const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);
+    
+    // Calcul de l'amélioration (Delta Score + Delta Stabilité)
     const improvement = parseFloat((newReport.score - oldReport.score).toFixed(2));
-
-    if (improvement >= -1) { // On accepte une légère baisse si la stabilité est meilleure (logique future)
-        // Note: La sauvegarde effective se fait dans l'UI après validation utilisateur
-        // await saveAlgoWeights(drawName, bestWeights);
-    }
 
     return {
         bestWeights,

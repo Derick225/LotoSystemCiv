@@ -10,6 +10,7 @@ import { NeuralHeatmapGrid } from '../NeuralHeatmapGrid';
 import { ReliabilityMeter } from '../ReliabilityMeter';
 import { RiskProfile } from '../../types';
 import { QuantumTensionField } from '../QuantumTensionField';
+import { AlgoRadar } from '../AlgoRadar';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
@@ -32,6 +33,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
     const [showField, setShowField] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
+    const [showDNA, setShowDNA] = useState(false);
 
     // Mise à jour du nom de l'ADN affiché
     useEffect(() => {
@@ -106,6 +108,20 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         return Math.round(score);
     };
 
+    const getProbColor = (score: number) => {
+        if (score >= 80) return 'text-emerald-400';
+        if (score >= 60) return 'text-indigo-400';
+        if (score >= 40) return 'text-amber-400';
+        return 'text-rose-400';
+    };
+
+    const getProbBarColor = (score: number) => {
+        if (score >= 80) return 'bg-emerald-500';
+        if (score >= 60) return 'bg-indigo-500';
+        if (score >= 40) return 'bg-amber-500';
+        return 'bg-rose-500';
+    };
+
     if (nexusLoading) return (
         <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 animate-pulse">
             <Cpu className="text-indigo-500 animate-spin" size={48} />
@@ -129,10 +145,31 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     <Target size={48} className="text-indigo-500" />
                 </div>
                 <h3 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-4">Oracle Base v24.0</h3>
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/20 mb-8">
+                
+                <div 
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/20 mb-8 cursor-pointer hover:bg-indigo-500/20 transition-all active:scale-95"
+                    onClick={() => setShowDNA(!showDNA)}
+                >
                     <Dna size={14} className="text-indigo-400"/>
                     <span className="text-xs font-bold text-indigo-200 uppercase tracking-widest">ADN Actif : {activeDNA}</span>
                 </div>
+
+                <AnimatePresence>
+                    {showDNA && (
+                        <motion.div 
+                            initial={{ opacity: 0, height: 0, mb: 0 }}
+                            animate={{ opacity: 1, height: 'auto', mb: 32 }}
+                            exit={{ opacity: 0, height: 0, mb: 0 }}
+                            className="w-full max-w-md bg-slate-800/50 rounded-3xl p-6 border border-white/10 overflow-hidden text-left"
+                        >
+                            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2 justify-center">
+                                <Activity size={14} className="text-indigo-400"/> Composition Algorithmique
+                            </h4>
+                            <AlgoRadar weights={globalWeights} />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 <p className="text-slate-400 text-sm md:text-base font-medium mb-12 leading-relaxed max-w-lg mx-auto">
                     Configurez le profil de risque pour moduler l'influence de l'ADN algorithmique sur la sélection.
                 </p>
@@ -169,12 +206,16 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Context HUD */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                    { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/> },
+                    { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/>, action: () => setShowDNA(!showDNA) },
                     { label: 'Volatilité', val: `${volatility?.score || 0}%`, icon: <Wind className="text-amber-500"/> },
                     { label: 'Stratégie', val: riskProfile, icon: <Crosshair className="text-emerald-500"/> },
                     { label: 'Réalité T-1', val: `${lastPrediction?.realityAlignment || 0}%`, icon: <Gauge className="text-purple-500"/> }
                 ].map((item, i) => (
-                    <div key={i} className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-4 shadow-lg">
+                    <div 
+                        key={i} 
+                        className={`bg-slate-900 p-4 rounded-[2rem] border border-slate-800 flex items-center gap-4 shadow-lg ${item.action ? 'cursor-pointer hover:bg-slate-800 transition-colors' : ''}`}
+                        onClick={item.action}
+                    >
                         <div className="p-3 bg-slate-800 rounded-2xl">{item.icon}</div>
                         <div>
                             <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{item.label}</div>
@@ -183,6 +224,24 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                 ))}
             </div>
+
+            <AnimatePresence>
+                {showDNA && (
+                    <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="bg-slate-900/50 border border-slate-800 rounded-[2.5rem] p-6 overflow-hidden"
+                    >
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <Activity size={14} className="text-indigo-400"/> Composition Algorithmique
+                        </h4>
+                        <div className="max-w-2xl mx-auto">
+                            <AlgoRadar weights={globalWeights} />
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Main Result Card */}
             <div className="bg-slate-950 p-8 md:p-12 rounded-[3.5rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden group">
@@ -218,13 +277,14 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                         </div>
 
-                        {/* Les Boules avec Badge Symbiotique */}
+                        {/* Les Boules avec Badge Symbiotique et Probabilité */}
                         <div className="flex flex-wrap justify-center gap-4 md:gap-8 mb-12">
                             {lastPrediction?.suggestedNumbers.map((n, i) => {
                                 const bd = lastPrediction.breakdown?.[n];
                                 const isSpatialHot = symbioticContext?.spatialHotZones.includes(n);
                                 const isOrchestrated = symbioticContext?.orchestrationBoosts[n] !== undefined;
                                 const algoScore = getAlgoScore(bd, globalWeights);
+                                const prob = Math.min(99, Math.max(1, algoScore)); // Clamp
                                 
                                 return (
                                     <motion.div 
@@ -243,12 +303,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                             </div>
                                         </div>
                                         
-                                        <div className="flex flex-col items-center opacity-60 group-hover/ball:opacity-100 transition-opacity">
+                                        <div className="flex flex-col items-center opacity-80 group-hover/ball:opacity-100 transition-opacity">
                                             <div className="flex gap-0.5 h-1.5 w-12 bg-slate-800 rounded-full overflow-hidden mb-1.5">
-                                                <div className="h-full bg-indigo-500" style={{ width: `${Math.min(100, algoScore * 1.5)}%` }}></div>
+                                                <div className={`h-full ${getProbBarColor(prob)}`} style={{ width: `${prob}%` }}></div>
                                             </div>
-                                            <span className="text-[9px] font-mono font-bold text-indigo-400 uppercase tracking-tight">
-                                                SCR: {algoScore}
+                                            <span className={`text-[10px] font-mono font-black uppercase tracking-tight ${getProbColor(prob)}`}>
+                                                PROB: {prob}%
                                             </span>
                                         </div>
                                     </motion.div>

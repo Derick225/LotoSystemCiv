@@ -1,3 +1,4 @@
+
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
 
 export const FEATURES_LABELS = [
@@ -6,6 +7,7 @@ export const FEATURES_LABELS = [
 ];
 
 // Cache pour stocker la map de consensus associée à une référence d'historique spécifique
+// WeakMap permet au Garbage Collector de nettoyer si l'historique n'est plus utilisé ailleurs
 const consensusCache = new WeakMap<DrawResult[], Record<number, number>>();
 
 /**
@@ -24,44 +26,48 @@ const extractNumericFeatures = (
     globalConsensusMap: Record<number, number>, 
     activeIndices: number[]
 ): number[] => {
+    // Sanity checks rapides
     if (results.length < 5) return new Array(activeIndices.length).fill(0);
     if (num < 1 || num > 90) return new Array(activeIndices.length).fill(0);
 
-    const recent20 = results.slice(0, 20);
+    // Optimisation : On évite de recréer ces sets à chaque itération si possible, 
+    // mais ici c'est nécessaire car results[0] change lors du sliding window du training.
     const lastDraw = results[0];
-    
-    // Optimisation : Utilisation de Set pour recherche O(1) sur le dernier tirage
     const lastDrawWinners = new Set(lastDraw.gagnants);
     const lastDrawMachine = new Set(lastDraw.machine || []);
 
-    // 1. Fréquence amortie sur 20 derniers tirages (Boucle simple au lieu de filter)
+    // 1. Fréquence amortie sur 20 derniers tirages (Boucle simple au lieu de .filter().length pour perf)
     let rawFreq20 = 0;
-    for (const r of recent20) {
-        if (r.gagnants.includes(num)) rawFreq20++;
+    const limitFreq = Math.min(results.length, 20);
+    for (let i = 0; i < limitFreq; i++) {
+        if (results[i].gagnants.includes(num)) rawFreq20++;
     }
     const freqSignal = rawFreq20 >= 3 ? 1 : (rawFreq20 / 3);
 
-    // 2. Consensus
+    // 2. Consensus (Lecture O(1))
     const consensus = globalConsensusMap[num] || 0;
 
     // 3. Calcul du Gap (Écart)
+    // On s'arrête dès qu'on trouve le numéro (optimisation temporelle)
     let gap = 0;
-    for (let i = 0; i < results.length; i++) {
+    const maxLen = results.length;
+    let found = false;
+    for (let i = 0; i < maxLen; i++) {
         if (results[i].gagnants.includes(num)) {
             gap = i;
+            found = true;
             break;
         }
-        // Si on atteint la fin sans trouver, le gap est la longueur max
-        if (i === results.length - 1) gap = results.length;
     }
+    if (!found) gap = maxLen;
 
     // Construction du vecteur de features
     // Feature 0: Critical Gap (Zone de retour probable entre 8 et 18)
     // Feature 1: Frequency Signal
     // Feature 2: Shadow (Fréquence faible mais présente récemment)
     // Feature 3: Consensus Trap (Trop populaire)
-    // Feature 4: Neighbor (Voisin du dernier tirage +/- 1)
-    // Feature 5: Machine Leak (Présent dans la machine précédente)
+    // Feature 4: Neighbor (Voisin du dernier tirage +/- 1) - Optimisé avec Set.has
+    // Feature 5: Machine Leak (Présent dans la machine précédente) - Optimisé avec Set.has
     // Feature 6: Norm Gap (Écart normalisé)
 
     const allFeatures = [
@@ -74,12 +80,14 @@ const extractNumericFeatures = (
         Math.min(1, gap / 50)
     ];
 
-    // Filtrage selon les features actives demandées
+    // Filtrage dynamique selon les features actives demandées
+    // Utilisation d'une boucle simple map pour la performance sur petit tableau
     return activeIndices.map(idx => allFeatures[idx]);
 };
 
 /**
  * Exécute une forêt d'arbres décisionnels (Random Forest) via un Worker.
+ * Prépare le dataset d'entrainement et lance le calcul asynchrone.
  * 
  * @param history - Historique complet des tirages.
  * @param mode - Mode de filtrage des résultats ('consensus', 'average', 'shadow').
@@ -91,20 +99,22 @@ export const runDecisionForest = async (
     mode: 'consensus' | 'average' | 'shadow' = 'consensus', 
     activeFeatures: string[] = FEATURES_LABELS
 ): Promise<{ votes: ForestVote[], dataset: any[] }> => {
-    // Gestion d'erreurs basique
+    
     if (!history || history.length < 40) {
         console.warn("Historique insuffisant pour Decision Forest (Min 40).");
         return { votes: [], dataset: [] };
     }
 
+    // Mapping des indices actifs
     const activeIndices = activeFeatures.map(label => FEATURES_LABELS.indexOf(label)).filter(idx => idx !== -1);
     if (activeIndices.length === 0) return { votes: [], dataset: [] };
 
-    // Gestion du cache pour le consensus map
+    // Gestion du cache pour le consensus map via WeakMap
     let consensusMap = consensusCache.get(history);
     if (!consensusMap) {
         consensusMap = {};
         const slice50 = history.slice(0, 50);
+        // Calcul optimisé de la fréquence globale
         for (let i = 1; i <= 90; i++) {
             let freq = 0;
             for(const r of slice50) {
@@ -115,22 +125,23 @@ export const runDecisionForest = async (
         consensusCache.set(history, consensusMap);
     }
 
-    // Préparation du Dataset d'entraînement
-    // Label 1 = Le numéro est sorti
+    // Préparation du Dataset d'entraînement (Sliding Window)
+    // Label 1 = Le numéro est sorti au tirage T
     // Label 0 = Le numéro n'est pas sorti (échantillonnage négatif)
     const dataset: { features: number[], label: 0 | 1 }[] = [];
-    const trainingSlice = history.slice(0, 50);
+    const trainingSlice = history.slice(0, 50); // On s'entraine sur les 50 derniers tirages
 
     for (let idx = 0; idx < trainingSlice.length; idx++) {
         const target = trainingSlice[idx];
         const context = history.slice(idx + 1);
         
-        // On a besoin d'un contexte suffisant pour calculer les features
+        // On a besoin d'un contexte suffisant pour calculer les features (gap, freq...)
         if (context.length < 25) continue;
 
         const winners = target.gagnants;
+        const winnerSet = new Set(winners);
         
-        // Exemples Positifs
+        // Exemples Positifs (Ceux qui sont sortis)
         for (const n of winners) {
             dataset.push({ 
                 features: extractNumericFeatures(n, context, consensusMap, activeIndices), 
@@ -139,8 +150,8 @@ export const runDecisionForest = async (
         }
 
         // Exemples Négatifs (Ratio 1:1 pour équilibrer les classes)
+        // On choisit aléatoirement des numéros perdants pour éviter le biais
         let negativesCount = 0;
-        const winnerSet = new Set(winners);
         while (negativesCount < winners.length) {
             const rnd = Math.floor(Math.random() * 90) + 1;
             if (!winnerSet.has(rnd)) {
@@ -154,6 +165,7 @@ export const runDecisionForest = async (
     }
 
     // Préparation des candidats pour la prédiction (T+1)
+    // On calcule les features basées sur l'historique complet actuel (T=0)
     const candidates = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         return {
@@ -162,6 +174,7 @@ export const runDecisionForest = async (
         };
     });
 
+    // Délégation au Web Worker
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/forest.worker.ts', import.meta.url), { type: 'module' });
         
@@ -169,6 +182,12 @@ export const runDecisionForest = async (
             const { votes } = e.data;
             worker.terminate();
             
+            if (!votes) {
+                resolve({ votes: [], dataset });
+                return;
+            }
+
+            // Transformation des résultats bruts en objets ForestVote
             const finalVotes: ForestVote[] = votes.map((v: any) => ({
                 candidate: v.number,
                 score: Math.round(v.score),
@@ -177,8 +196,8 @@ export const runDecisionForest = async (
                 features: { isConsensusTrap: v.score > 85 }
             }));
 
+            // Filtrage selon le mode demandé
             let filtered: ForestVote[] = [];
-
             if (mode === 'consensus') {
                 // Les favoris > 60%
                 filtered = finalVotes.filter(v => v.score >= 60);
@@ -186,7 +205,7 @@ export const runDecisionForest = async (
                 // Zone de stabilité (40-60%)
                 filtered = finalVotes.filter(v => v.score >= 40 && v.score < 60);
             } else {
-                // Outsiders (15-40%)
+                // Outsiders (15-40%) - Potentiel de surprise
                 filtered = finalVotes.filter(v => v.score > 15 && v.score < 40);
             }
             
@@ -207,15 +226,20 @@ export const runDecisionForest = async (
 /**
  * Calcule l'importance des features en utilisant le coefficient de corrélation de Pearson.
  * r = Σ((x - mx)(y - my)) / sqrt(Σ(x - mx)^2 * Σ(y - my)^2)
+ * Utilise une Map pour retourner les résultats.
  * 
  * @param dataset - Le jeu de données utilisé pour l'entraînement.
  * @param activeFeatures - Les labels des features.
- * @returns Un objet mappant chaque feature à son score d'importance (0-100).
+ * @returns Une Map associant chaque feature à son score d'importance (0-100).
  */
-export const calculateFeatureImportance = (dataset: any[], activeFeatures: string[]): Record<string, number> => {
-    if (!dataset || dataset.length === 0) return {};
+export const calculateFeatureImportance = (
+    dataset: any[], 
+    activeFeatures: string[]
+): Map<string, number> => {
+    const importanceMap = new Map<string, number>();
+
+    if (!dataset || dataset.length === 0) return importanceMap;
     
-    const importance: Record<string, number> = {};
     const n = dataset.length;
     
     // Calcul de la moyenne de Y (Label)
@@ -244,11 +268,11 @@ export const calculateFeatureImportance = (dataset: any[], activeFeatures: strin
 
         const denominator = Math.sqrt(denominatorX * denominatorY);
         
-        // Protection division par zéro
+        // Protection division par zéro et valeur absolue pour la force de corrélation
         const correlation = denominator === 0 ? 0 : Math.abs(numerator / denominator);
         
-        importance[label] = Math.round(correlation * 100);
+        importanceMap.set(label, Math.round(correlation * 100));
     });
 
-    return importance;
+    return importanceMap;
 };

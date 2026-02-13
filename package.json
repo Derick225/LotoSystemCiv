@@ -28,7 +28,8 @@
     "tailwind-merge": "^2.3.0",
     "jspdf": "^2.5.1",
     "react-window": "^1.8.10",
-    "react-virtualized-auto-sizer": "^1.0.24"
+    "react-virtualized-auto-sizer": "^1.0.24",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.0.0",

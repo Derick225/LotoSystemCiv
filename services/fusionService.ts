@@ -7,49 +7,54 @@ import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } fro
  * pour détecter les tendances chaudes, combinée à une analyse des écarts (Gaps).
  */
 const calculatePythonVector = (history: DrawResult[]): { number: number, score: number }[] => {
-    const scores: Record<number, number> = {};
-    const ALPHA = 0.15; // Facteur de lissage exponentiel
+    // Optimisation : TypedArrays pour performance mémoire et calcul
+    const scores = new Float32Array(91); // Index 1-90
+    const gaps = new Int16Array(91);
     
-    // Initialisation
-    for(let i=1; i<=90; i++) scores[i] = 0;
+    const ALPHA = 0.15; // Facteur de lissage exponentiel
+    const limit = Math.min(history.length, 100);
+    
+    // Calcul EMA (Exponential Moving Average) inversé (du plus ancien au plus récent)
+    // On doit inverser l'historique pour que l'EMA fonctionne chronologiquement
+    const chronoHistory = [];
+    for(let i=limit-1; i>=0; i--) chronoHistory.push(history[i]);
 
-    // Calcul EMA
-    const chronoHistory = [...history].reverse(); 
-    const limit = Math.min(chronoHistory.length, 100);
-    const startIdx = chronoHistory.length - limit;
-
-    for (let i = startIdx; i < chronoHistory.length; i++) {
-        const draw = chronoHistory[i];
+    for (const draw of chronoHistory) {
         for (let num = 1; num <= 90; num++) {
             const isPresent = draw.gagnants.includes(num) ? 1 : 0;
+            // Formule EMA : Val_t = alpha * x_t + (1-alpha) * Val_t-1
             scores[num] = (ALPHA * (isPresent * 100)) + ((1 - ALPHA) * scores[num]);
         }
     }
 
-    // Calcul des Écarts
-    const currentGaps: Record<number, number> = {};
+    // Calcul des Écarts (Gaps) sur l'historique original (récent -> ancien)
     for (let num = 1; num <= 90; num++) {
         let gap = 0;
         for (const draw of history) {
             if (draw.gagnants.includes(num)) break;
             gap++;
         }
-        currentGaps[num] = gap;
+        gaps[num] = gap;
     }
 
-    return Object.entries(scores).map(([n, s]) => {
-        const num = parseInt(n);
-        const gap = currentGaps[num];
+    const result = [];
+    for (let num = 1; num <= 90; num++) {
+        let finalScore = scores[num];
+        const gap = gaps[num];
         
-        let finalScore = s;
         finalScore = Math.min(100, finalScore * 4); 
 
         // Bonus Maturité (Loi du retour)
         if (gap >= 10 && gap <= 30) finalScore += 15;
         if (gap > 40) finalScore += 25;
 
-        return { number: num, score: Math.min(100, Math.round(finalScore)) };
-    });
+        result.push({ 
+            number: num, 
+            score: Math.min(100, Math.round(finalScore)) 
+        });
+    }
+
+    return result;
 };
 
 /**
@@ -80,8 +85,9 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
 
     if (history.length < 2) return [];
     
+    // Fallback : Analyse associative simple si pas de prédiction Oracle active
     const lastDrawNumbers = history[0].gagnants;
-    const associationScores: Record<number, number> = {};
+    const associationScores = new Float32Array(91);
     const depth = Math.min(history.length - 1, 150);
     
     for (let i = 1; i < depth; i++) {
@@ -90,19 +96,21 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
         
         if (commonCount >= 1) { 
             const nextDraw = history[i-1];
+            // Poids décroissant selon la profondeur
             const weight = commonCount * (1 - (i/depth) * 0.5); 
             
             nextDraw.gagnants.forEach(n => {
-                associationScores[n] = (associationScores[n] || 0) + weight;
+                associationScores[n] += weight;
             });
         }
     }
     
-    const maxScore = Math.max(...Object.values(associationScores), 1);
-    return Object.entries(associationScores).map(([n, s]) => ({
-        number: parseInt(n),
-        score: (s / maxScore) * 100
-    }));
+    const maxScore = Math.max(...associationScores) || 1;
+    const result = [];
+    for(let i=1; i<=90; i++) {
+        result.push({ number: i, score: (associationScores[i] / maxScore) * 100 });
+    }
+    return result;
 };
 
 /**
@@ -139,6 +147,7 @@ export const calculateFusion = (
     const W_ORACLE = 1.0 + (dnaIntuition * 2);
 
     const scoreMap: Record<number, { score: number, sources: string[], details: any }> = {};
+    const entropyCounts = new Float32Array(91); // Pour le calcul d'entropie
 
     for (let i = 1; i <= 90; i++) {
         const sP = mPython.get(i) || 0;
@@ -148,8 +157,11 @@ export const calculateFusion = (
         // Seuil de bruit
         if (sP < 15 && sQ < 15 && sO < 15) continue;
 
+        // Moyenne pondérée par l'ADN
         const weightedScore = (sP * W_PYTHON) + (sQ * W_QUANTUM) + (sO * W_ORACLE);
         const finalScore = Math.min(100, Math.round(weightedScore / (W_PYTHON + W_QUANTUM + W_ORACLE)));
+        
+        entropyCounts[i] = finalScore;
 
         const sources = [];
         if (sP > 50) sources.push('Logique');
@@ -179,7 +191,7 @@ export const calculateFusion = (
     const finalTicket: number[] = [];
     const candidates = [...convergedNumbers];
     
-    // Stratégie Pilier + Diversité
+    // Stratégie Pilier (Top 2) + Diversité (Suivants)
     for(let i=0; i<2; i++) {
         if(candidates.length > 0) finalTicket.push(candidates.shift()!.number);
     }
@@ -194,6 +206,23 @@ export const calculateFusion = (
     const strongAgreements = convergedNumbers.filter(c => c.sources.length >= 2).length;
     const confidence = Math.min(99, 60 + (strongAgreements * 8));
 
+    // 6. Calcul Entropie de Shannon sur les scores
+    // Mesure la diversité de la distribution des probabilités
+    let entropy = 0;
+    let sumScores = 0;
+    for(let i=1; i<=90; i++) sumScores += entropyCounts[i];
+    
+    if (sumScores > 0) {
+        for(let i=1; i<=90; i++) {
+            if (entropyCounts[i] > 0) {
+                const p = entropyCounts[i] / sumScores;
+                entropy -= p * Math.log(p);
+            }
+        }
+    }
+    // Normalisation approximative (Max entropy ~ log(90) = 4.5)
+    const normalizedEntropy = entropy / Math.log(90);
+
     return {
         sources: {
             python: vPython.sort((a,b) => b.score - a.score).slice(0, 5).map(v => v.number),
@@ -203,6 +232,6 @@ export const calculateFusion = (
         convergedNumbers,
         finalTicket: finalTicket.slice(0, 5),
         confidence,
-        entropy: 0.1
+        entropy: parseFloat(normalizedEntropy.toFixed(3))
     };
 };

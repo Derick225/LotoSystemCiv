@@ -24,6 +24,7 @@ const scoresBuffer = new Float32Array(91);
 
 /**
  * Prédiction rapide optimisée pour la simulation (Zéro allocation)
+ * Utilise le buffer global `scoresBuffer`.
  */
 const quickPredict = (history: DrawResultLite[], weights: AlgoWeights, buffer: Float32Array): number[] => {
     buffer.fill(0);
@@ -63,17 +64,18 @@ const quickPredict = (history: DrawResultLite[], weights: AlgoWeights, buffer: F
     }
 
     // Sélection Top 5 (Tri partiel in-place serait mieux, mais mapping simple ok pour <100 items)
-    // On utilise un tableau temporaire minimal
+    // On utilise un tableau temporaire minimal pour stocker index et score
     const candidates = [];
     for(let i=1; i<=90; i++) {
-        candidates.push({ n: i, s: buffer[i] });
+        if (buffer[i] > 0) candidates.push({ n: i, s: buffer[i] });
     }
     // Tri décroissant
     candidates.sort((a,b) => b.s - a.s);
     
     // Extraction
     const result = new Array(5);
-    for(let i=0; i<5; i++) result[i] = candidates[i].n;
+    // Fill avec 0 si pas assez de candidats (ne devrait pas arriver avec freqWeight > 0)
+    for(let i=0; i<5; i++) result[i] = candidates[i] ? candidates[i].n : (i+1);
     return result;
 };
 
@@ -107,7 +109,7 @@ ctx.onmessage = (e: MessageEvent) => {
     let consecutiveLosses = 0;
     let bankruptcyAt: number | null = null;
     
-    // Métriques pour Sharpe Ratio
+    // Métriques pour Sharpe Ratio (Rendement par tirage)
     const returns: number[] = [];
     
     // Kelly Metrics (Adaptive)
@@ -124,6 +126,7 @@ ctx.onmessage = (e: MessageEvent) => {
         if (balance < UNIT_BET) {
             if (bankruptcyAt === null) bankruptcyAt = i;
             simHistory.push({ date: simWindow[i].date, balance: 0, bet: 0, hits: 0, profit: 0 });
+            // On continue la boucle pour avoir l'historique complet mais avec balance 0
             continue;
         }
 
@@ -148,13 +151,11 @@ ctx.onmessage = (e: MessageEvent) => {
         } 
         else if (strategy === 'KELLY') {
             // Kelly Adaptatif Fractionnel (Safe Kelly)
-            // On estime la probabilité de gain P basée sur la performance récente (fenêtre 20)
-            // Cote moyenne pondérée (On vise le 2N à 240x)
-            const ODDS = 240; 
+            const ODDS = 240; // Cote moyenne pondérée pour 2N
             
             // Estimation proba (Prior optimiste 5% + historique récent)
             const winRate = rollingDraws > 0 ? (rollingWins / rollingDraws) : 0.05;
-            const p = Math.max(0.01, winRate);
+            const p = Math.max(0.005, winRate); // Min 0.5% prob
             const q = 1 - p;
             
             // Formule Kelly : f* = (bp - q) / b
@@ -177,7 +178,7 @@ ctx.onmessage = (e: MessageEvent) => {
         let winAmount = 0;
         
         // Table des gains (Standard Loto)
-        if (hits === 2) winAmount = bet * 15; // 2N souvent x15 ou x240 selon type pari, ici standard conservateur
+        if (hits === 2) winAmount = bet * 15; // Gain standard pour 2 numéros
         else if (hits === 3) winAmount = bet * 100;
         else if (hits === 4) winAmount = bet * 1500;
         else if (hits === 5) winAmount = bet * 15000;
@@ -204,8 +205,9 @@ ctx.onmessage = (e: MessageEvent) => {
         }
         rollingDraws++;
 
-        // Return Tracking (pour Sharpe)
-        const periodReturn = (balance - prevBalance) / prevBalance;
+        // Return Tracking (pour Sharpe) - Rendement par trade
+        // Évite la division par zéro
+        const periodReturn = prevBalance > 0 ? (balance - prevBalance) / prevBalance : 0;
         returns.push(periodReturn);
 
         simHistory.push({
@@ -216,7 +218,7 @@ ctx.onmessage = (e: MessageEvent) => {
             profit
         });
 
-        // Reporting
+        // Reporting progressif
         if (i % progressStep === 0) {
             ctx.postMessage({ type: 'progress', percent: Math.round((i / depth) * 100) });
         }
@@ -225,10 +227,10 @@ ctx.onmessage = (e: MessageEvent) => {
     // --- ANALYSE FINALE ---
     
     // Calcul Sharpe Ratio (Annualisé simplifié)
-    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / (returns.length || 1);
     const stdDevReturn = calculateStandardDeviation(returns, avgReturn);
-    // Sharpe = (Rp - Rf) / Sigma. Rf (Risk Free) = 0.
-    // On annualise arbitrairement par sqrt(365) si c'était journalier, ici brut
+    // Sharpe = (Rp - Rf) / Sigma. Rf (Risk Free) = 0 ici.
+    // On normalise le ratio pour qu'il soit lisible (souvent annualisé, ici "par tirage")
     const sharpeRatio = stdDevReturn === 0 ? 0 : (avgReturn / stdDevReturn);
 
     const report = {
@@ -237,7 +239,7 @@ ctx.onmessage = (e: MessageEvent) => {
         roi: ((balance - INITIAL_BANKROLL) / INITIAL_BANKROLL) * 100,
         maxDrawdown: parseFloat((maxDrawdown * 100).toFixed(2)),
         winRate: parseFloat(((wins / depth) * 100).toFixed(2)),
-        sharpeRatio: parseFloat(sharpeRatio.toFixed(3)),
+        sharpeRatio: parseFloat(sharpeRatio.toFixed(4)),
         bankruptcyDraw: bankruptcyAt,
         strategy,
         history: simHistory
