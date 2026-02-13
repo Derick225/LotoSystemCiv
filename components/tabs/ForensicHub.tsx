@@ -6,9 +6,9 @@ import { performForensicAnalysis } from '../../services/postPredictionAnalysisSe
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
-import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX, Crown, ScanBarcode, FileSearch } from 'lucide-react';
+import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX, Crown, ScanBarcode, FileSearch, Radar as RadarIcon } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell, PolarRadiusAxis } from 'recharts';
 
 type ForensicMode = 'prediction' | 'structure';
 
@@ -81,7 +81,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         analyze();
     }, [drawName, history]);
 
-    // Calcul de la précision agrégée des neurones
+    // Calcul de la précision agrégée des neurones pour le Radar
     const algoRadarData = useMemo(() => {
         if (reports.length === 0) return [];
         const aggregates: Record<string, { sum: number, count: number }> = {};
@@ -94,9 +94,10 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             });
         });
 
+        // On normalise sur 100 pour le graphique radar
         return Object.entries(aggregates).map(([algo, data]) => ({
             algo: algo.charAt(0).toUpperCase() + algo.slice(1),
-            precision: Math.round(data.sum / Math.max(1, data.count)),
+            precision: Math.round((data.sum / Math.max(1, data.count)) * 1.5), // Scale up for visibility
             fullMark: 100
         })).sort((a, b) => b.precision - a.precision).slice(0, 6);
     }, [reports]);
@@ -171,47 +172,72 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                 </div>
             </div>
 
-            {/* MODE: STRUCTURE (NEW) */}
+            {/* MODE: STRUCTURE */}
             {mode === 'structure' && history.length > 0 && (
                 <ForensicResultAudit result={history[0]} history={history} />
             )}
 
-            {/* MODE: PREDICTION (EXISTING) */}
+            {/* MODE: PREDICTION */}
             {mode === 'prediction' && (
-                <>
-                    {/* Platinum Performance Monitor */}
-                    {platinumAudits.length > 0 && (
-                        <div className="bg-white dark:bg-slate-950 p-6 rounded-[3rem] border border-indigo-100 dark:border-indigo-900/30 shadow-xl overflow-hidden relative">
-                            <div className="absolute top-0 right-0 p-6 opacity-5"><Crown size={120} /></div>
-                            
-                            <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8 relative z-10">
-                                <div>
-                                    <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
-                                        <Crown size={14}/> Platinum Performance (20 derniers)
-                                    </h4>
-                                    <p className="text-[10px] text-slate-400 font-bold mt-1">Quelle Timeline domine le flux ?</p>
-                                </div>
-                                <div className="text-[9px] font-black bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-full border border-indigo-500/20">
-                                    LEADER: {platinumStats[0]?.name}
-                                </div>
+                <div className="space-y-8">
+                    {/* Top Stats Row */}
+                    <div className="grid md:grid-cols-2 gap-6">
+                        {/* Platinum Stats */}
+                        <div className="bg-white dark:bg-slate-950 p-6 rounded-[3rem] border border-indigo-100 dark:border-indigo-900/30 shadow-xl relative overflow-hidden">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
+                                    <Crown size={14}/> Platinum Leaders
+                                </h4>
+                                {platinumStats.length > 0 && (
+                                    <span className="text-[9px] font-black bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 px-2 py-1 rounded-lg">
+                                        TOP: {platinumStats[0].name}
+                                    </span>
+                                )}
                             </div>
-
-                            <div className="h-48 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={platinumStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
-                                        <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 'bold', fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
-                                        <Bar dataKey="hits" radius={[6, 6, 0, 0]} barSize={40}>
-                                            {platinumStats.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.color} />
-                                            ))}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
+                            <div className="h-40 w-full">
+                                {platinumStats.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={platinumStats}>
+                                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
+                                            <Bar dataKey="hits" radius={[6, 6, 6, 6]} barSize={30}>
+                                                {platinumStats.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">Pas assez de données Platinum</div>
+                                )}
                             </div>
                         </div>
-                    )}
+
+                        {/* Algo Accuracy Radar - NOUVEAU */}
+                        <div className="bg-slate-900 p-6 rounded-[3rem] border border-slate-800 shadow-xl relative overflow-hidden">
+                            <div className="flex justify-between items-center mb-4 relative z-10">
+                                <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                                    <RadarIcon size={14}/> Précision Heuristique
+                                </h4>
+                            </div>
+                            <div className="h-40 w-full relative z-10">
+                                {algoRadarData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={algoRadarData}>
+                                            <PolarGrid stroke="#334155" />
+                                            <PolarAngleAxis dataKey="algo" tick={{ fill: '#94a3b8', fontSize: 9, fontWeight: 'bold' }} />
+                                            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                            <Radar name="Précision" dataKey="precision" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.4} />
+                                            <Tooltip contentStyle={{ backgroundColor: '#020617', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px', color: '#fff' }} />
+                                        </RadarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">Données insuffisantes</div>
+                                )}
+                            </div>
+                            {/* Decor */}
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        </div>
+                    </div>
 
                     <div className="grid lg:grid-cols-12 gap-8">
                         {/* Reports List */}
@@ -224,11 +250,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <div className="flex flex-col items-center justify-center p-20 bg-slate-50 dark:bg-slate-900/40 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800 text-center">
                                     <SearchX size={48} className="text-slate-300 dark:text-slate-700 mb-4" />
                                     <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em] max-w-xs leading-relaxed">
-                                        Aucune prédiction ne correspond à un résultat du même jour dans l'historique actuel.
+                                        Aucune prédiction correspondante trouvée. Lancez une prédiction puis attendez le tirage.
                                     </p>
                                 </div>
                             ) : (
-                                <div className="space-y-4">
+                                <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scrollbar pr-2">
                                     {reports.map((rep, idx) => {
                                         const hits = rep.matches.filter(m => m.errorType === 'Hit').length;
                                         const proximity = rep.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length;
@@ -237,30 +263,23 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                             <div 
                                                 key={idx} 
                                                 onClick={() => setSelectedReport(rep)}
-                                                className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:border-rose-400 transition-all group relative overflow-hidden"
+                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700 cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500 transition-all group relative overflow-hidden"
                                             >
                                                 <div className="flex justify-between items-center relative z-10">
                                                     <div className="flex items-center gap-4">
-                                                        <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-slate-400 group-hover:text-rose-500 transition-colors">
-                                                            <Calendar size={20}/>
+                                                        <div className={`p-3 rounded-2xl transition-colors ${hits > 0 ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-slate-100 dark:bg-slate-900 text-slate-400'}`}>
+                                                            <Calendar size={18}/>
                                                         </div>
                                                         <div>
-                                                            <div className="text-lg font-black text-slate-800 dark:text-white leading-none">{rep.date}</div>
-                                                            <div className="flex gap-2 mt-2">
-                                                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${hits > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                                                                    {hits} Hit{hits > 1 ? 's' : ''} Direct
-                                                                </span>
-                                                                {proximity > 0 && (
-                                                                    <span className="text-[8px] font-black uppercase bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">
-                                                                        {proximity} Signaux Proches
-                                                                    </span>
-                                                                )}
+                                                            <div className="text-sm font-black text-slate-800 dark:text-white leading-none">{rep.date}</div>
+                                                            <div className="flex gap-2 mt-1.5">
+                                                                {hits > 0 && <span className="text-[8px] font-black uppercase bg-emerald-500 text-white px-2 py-0.5 rounded-md shadow-sm">{hits} Hits</span>}
+                                                                {proximity > 0 && <span className="text-[8px] font-black uppercase bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-800">{proximity} Proches</span>}
+                                                                {hits === 0 && proximity === 0 && <span className="text-[8px] font-bold text-slate-400 uppercase">Miss</span>}
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-full text-slate-400 group-hover:text-rose-600 transition-colors">
-                                                        <ChevronRight size={20} />
-                                                    </div>
+                                                    <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
                                                 </div>
                                             </div>
                                         );
@@ -269,9 +288,9 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             )}
                         </div>
 
-                        {/* Sidebar Insight & Trend Chart */}
+                        {/* Trend Chart */}
                         <div className="lg:col-span-5 space-y-6">
-                            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700 h-full flex flex-col">
                                 <div className="flex items-center gap-3 mb-6">
                                     <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl text-indigo-600">
                                         <Target size={20} />
@@ -279,7 +298,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     <h4 className="font-black text-slate-800 dark:text-white uppercase tracking-tight">Dérive de Précision</h4>
                                 </div>
                                 
-                                <div className="h-40 w-full mb-2">
+                                <div className="flex-1 min-h-[200px] w-full mb-2">
                                     {reports.length > 0 ? (
                                         <ResponsiveContainer width="100%" height="100%">
                                             <AreaChart data={trendData}>
@@ -310,19 +329,9 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> Proximité</span>
                                 </div>
                             </div>
-
-                            <div className="p-6 bg-slate-900 rounded-[2.5rem] text-white border border-slate-800 shadow-xl relative overflow-hidden">
-                                <Cpu className="absolute top-0 right-0 p-4 opacity-10" size={64} />
-                                <div className="relative z-10">
-                                    <h5 className="text-[10px] font-black uppercase text-rose-500 tracking-[0.2em] mb-3">Diagnostic de Rapprochement</h5>
-                                    <p className="text-xs text-slate-400 leading-relaxed font-medium italic">
-                                        "Le système détecte désormais les inversions (ex: 12 vs 21) et les ombres mathématiques pour affiner le calcul de la dérive."
-                                    </p>
-                                </div>
-                            </div>
                         </div>
                     </div>
-                </>
+                </div>
             )}
 
             {selectedReport && (

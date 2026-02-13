@@ -11,14 +11,15 @@ interface GlobalErrorBoundaryState {
 }
 
 /**
- * GlobalErrorBoundary v1.1
+ * GlobalErrorBoundary v1.2
  * Captures critical failures and provides a recovery path.
  */
-export class GlobalErrorBoundary extends React.Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
-  public state: GlobalErrorBoundaryState = {
-    hasError: false,
-    error: null,
-  };
+export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
+  public state: GlobalErrorBoundaryState = { hasError: false, error: null };
+
+  constructor(props: GlobalErrorBoundaryProps) {
+    super(props);
+  }
 
   static getDerivedStateFromError(error: Error): GlobalErrorBoundaryState {
     return { hasError: true, error };

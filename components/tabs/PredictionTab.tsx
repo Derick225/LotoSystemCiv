@@ -24,7 +24,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
     const { 
         history, lastPrediction, setLastPrediction, loading: nexusLoading,
-        globalWeights, spectral, wavelet, correlationMatrix, regularity, 
+        globalWeights, updateGlobalWeights, spectral, wavelet, correlationMatrix, regularity, 
         calibration, volatility, regime, symbioticContext, fractal
     } = useNexus();
 
@@ -49,8 +49,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         setComputingStep("Initialisation du Noyau...");
 
         // FETCH CRITIQUE : On recharge les poids spécifiques pour être sûr à 100% que c'est la config du tirage
+        // Ceci garantit que si l'utilisateur vient de l'onglet Tuning, ses changements sont appliqués
         const specificWeights = await getAlgoWeights(drawName);
         setActiveDNA(getStrategyName(specificWeights));
+        
+        // On met à jour le contexte global pour que les autres onglets soient sync
+        updateGlobalWeights(specificWeights);
 
         const steps = [
             { msg: `Chargement ADN : ${getStrategyName(specificWeights)}`, delay: 400 },
@@ -77,7 +81,11 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 }, symbioticContext || undefined, riskProfile);
                 
                 setLastPrediction(res);
+                
+                // CRITIQUE : Sauvegarde pour Forensic Hub
+                // Sans ça, l'onglet Forensic ne pourra pas comparer
                 await savePredictionToHistory(drawName, res);
+                
                 showToast("Prédiction générée via l'ADN actif.", "success");
             } catch (e) {
                 showToast("Erreur lors de l'inférence.", "error");
@@ -87,7 +95,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setComputingStep("");
             }
         }, 3500);
-    }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal]);
+    }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal, updateGlobalWeights]);
 
     const handleQuickSave = async () => {
         if (!lastPrediction) return;
