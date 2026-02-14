@@ -1,428 +1,638 @@
 
-import { 
-  PlatinumResult, 
-  DrawResult, 
+import {
+  PlatinumResult,
+  DrawResult,
   ScoreBreakdown,
   SymbioticContext,
   PlatinumTimeline,
   Prediction,
-  AlgoWeights,
-  PlatinumAudit
+  PlatinumAudit,
+  EntropyMetric,
+  ChiSquareMetric
 } from '../types';
-import { 
-  getAlgoWeights, 
-  generateMasterPrediction
+import {
+  getAlgoWeights,
+  generateMasterPrediction,
 } from './predictionEngine';
 
-/**
- * Nexus MetaAnalyst v26.0 - MIXTURE OF EXPERTS (MoE) ENGINE
- * Replaces monolithic logic with 4 specialized Expert Agents and a Gating Network.
- */
+// ═══════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════
 
-// --- TYPES INTERNES MOE ---
-interface ExpertAgent {
-    id: string;
-    name: string;
-    focus: string[]; // Liste des algos
-    vector: number[]; // Scores 1-90
-    weight: number;   // Poids attribué par le Gating Network
+const MAX_NUM        = 90;
+const DRAW_SIZE      = 5;
+const CACHE_TTL      = 300_000;     // 5 min
+const CACHE_MAX      = 20;
+const KL_EPSILON     = 1e-5;
+const MIN_HISTORY    = 10;
+const HISTORY_LIMIT  = 20;
+const RNG_POOL_SIZE  = 256;
+
+// ═══════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════
+
+type GatingKey    = 'ALPHA' | 'BETA' | 'GAMMA' | 'DELTA';
+type GatingWeights = Record<GatingKey, number>;
+
+interface ExpertDefinition {
+  readonly gatingKey:      GatingKey;
+  readonly timelineType:   string;
+  readonly title:          string;
+  readonly focusKeys:      readonly (keyof ScoreBreakdown)[];
+  readonly excludeFrom:    readonly string[];   // timeline types to exclude
+  readonly temperature:    number;
+  readonly poolSize:       number;
+  readonly baseScore:      number;
+  readonly intuitionScore: number;
+  readonly remark:         string;
+  readonly keyMetric:      string;
+  readonly colorTheme:     string;
+  readonly divergence:     number;
+  readonly radarStats:     readonly { label: string; value: number }[];
 }
 
-// Simulation Cache Distribué (Structure prête pour Redis/KV)
-const CACHE_TTL = 300_000; // 5 minutes
-const SCORE_CACHE = new Map<string, { data: Record<number, ScoreBreakdown>, ts: number }>();
+interface FractalEntry { hurst?: number }
+interface MetricsPayload {
+  fractal?:    FractalEntry[];
+  volatility?: { score?: number };
+  entropy?:    EntropyMetric;
+  chiSquare?:  ChiSquareMetric;
+  [k: string]: unknown;
+}
 
-const getSecureRandom = (): number => {
-    const array = new Uint32Array(1);
-    crypto.getRandomValues(array);
-    return array[0] / (0xFFFFFFFF + 1);
-};
+// ═══════════════════════════════════════════════════════════════
+// LRU CACHE
+// ═══════════════════════════════════════════════════════════════
 
-/**
- * Calcul de la Divergence de Kullback-Leibler (KL)
- */
-const calculateKLDivergence = (predictedProb: number[], actualWinners: Set<number>): number => {
-    const epsilon = 0.00001; 
-    let divergence = 0;
-    
-    const totalScore = predictedProb.reduce((a, b) => a + b, 0) || 1;
-    const P = predictedProb.map(s => s / totalScore);
-    const winnerProb = 1 / 5;
-    
-    for (let i = 0; i < P.length; i++) {
-        const isWinner = actualWinners.has(i + 1);
-        const Q_val = isWinner ? winnerProb : epsilon;
-        const P_val = Math.max(P[i], epsilon);
-        divergence += P_val * Math.log(P_val / Q_val);
+class LRUCache<T> {
+  private readonly entries = new Map<string, { data: T; ts: number }>();
+
+  constructor(
+    private readonly maxSize: number,
+    private readonly ttl: number,
+  ) {}
+
+  get(key: string): T | null {
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+
+    if (Date.now() - entry.ts > this.ttl) {
+      this.entries.delete(key);
+      return null;
     }
-    return Math.max(0, divergence);
-};
 
-/**
- * Pré-calcule les scores de base pour tous les numéros.
- */
-export const precomputeBaseScores = async (
-    drawName: string, 
-    history: DrawResult[], 
-    metrics?: any
-): Promise<Record<number, ScoreBreakdown>> => {
-    const cacheKey = `${drawName}_${history[0]?.id || 'init'}`;
-    const now = Date.now();
-    
-    const cached = SCORE_CACHE.get(cacheKey);
-    if (cached && (now - cached.ts < CACHE_TTL)) {
-        return cached.data;
+    // Refresh LRU position
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.data;
+  }
+
+  set(key: string, data: T): void {
+    this.entries.delete(key);
+
+    if (this.entries.size >= this.maxSize) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest !== undefined) this.entries.delete(oldest);
     }
-    
-    const weights = await getAlgoWeights(drawName);
-    const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
-    const data = masterPred.breakdown || {};
-    
-    if (SCORE_CACHE.size > 20) SCORE_CACHE.clear();
-    SCORE_CACHE.set(cacheKey, { data, ts: now });
-    return data;
+
+    this.entries.set(key, { data, ts: Date.now() });
+  }
+}
+
+const scoreCache = new LRUCache<Record<number, ScoreBreakdown>>(CACHE_MAX, CACHE_TTL);
+
+// ═══════════════════════════════════════════════════════════════
+// CRYPTO-SECURE RNG
+// ═══════════════════════════════════════════════════════════════
+
+let rngPool  = new Uint32Array(RNG_POOL_SIZE);
+let rngIndex = RNG_POOL_SIZE;
+
+const nextRandom = (): number => {
+  if (rngIndex >= RNG_POOL_SIZE) {
+    crypto.getRandomValues(rngPool);
+    rngIndex = 0;
+  }
+  return rngPool[rngIndex++] / 0x1_0000_0000;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// EXPERT DEFINITIONS
+// ═══════════════════════════════════════════════════════════════
+
+const LEADER_NAMES: Readonly<Record<GatingKey, string>> = {
+  ALPHA: 'Historien',
+  BETA:  'Physicien',
+  GAMMA: 'Géomètre',
+  DELTA: 'Contrarian',
+};
+
+const EXPERTS: readonly ExpertDefinition[] = [
+  {
+    gatingKey:      'BETA',
+    timelineType:   'NEON',
+    title:          'Signal Physique',
+    focusKeys:      ['spectral', 'wavelet', 'fractal'],
+    excludeFrom:    ['NOVA'],
+    temperature:    0.8,
+    poolSize:       40,
+    baseScore:      92,
+    intuitionScore: 90,
+    remark:         'Basé sur la résonance spectrale et les ondes.',
+    keyMetric:      'Énergie',
+    colorTheme:     'text-cyan-400',
+    divergence:     20,
+    radarStats:     [{ label: 'Spectre', value: 95 }, { label: 'Cycles', value: 90 }],
+  },
+  {
+    gatingKey:      'GAMMA',
+    timelineType:   'TERRA',
+    title:          'Topologie Grille',
+    focusKeys:      ['spatial', 'orchestration'],
+    excludeFrom:    ['NOVA', 'NEON'],
+    temperature:    0.9,
+    poolSize:       40,
+    baseScore:      85,
+    intuitionScore: 80,
+    remark:         'Focalisé sur les clusters spatiaux et voisins.',
+    keyMetric:      'Densité',
+    colorTheme:     'text-emerald-400',
+    divergence:     40,
+    radarStats:     [{ label: 'Espace', value: 90 }, { label: 'Structure', value: 85 }],
+  },
+  {
+    gatingKey:      'ALPHA',
+    timelineType:   'CHRONOS',
+    title:          'Inertie Temporelle',
+    focusKeys:      ['frequency', 'markov', 'momentum', 'equilibrium'],
+    excludeFrom:    [],
+    temperature:    0.7,
+    poolSize:       40,
+    baseScore:      88,
+    intuitionScore: 85,
+    remark:         'Suit les probabilités de transition Markoviennes.',
+    keyMetric:      'Fréquence',
+    colorTheme:     'text-amber-400',
+    divergence:     30,
+    radarStats:     [{ label: 'Mémoire', value: 95 }, { label: 'Tendance', value: 90 }],
+  },
+  {
+    gatingKey:      'DELTA',
+    timelineType:   'AETHER',
+    title:          'Rupture Chaos',
+    focusKeys:      ['gap', 'anti_consensus', 'gap_velocity'],
+    excludeFrom:    [],
+    temperature:    1.5,
+    poolSize:       50,
+    baseScore:      82,
+    intuitionScore: 95,
+    remark:         'Mise sur les anomalies statistiques et les écarts.',
+    keyMetric:      'Entropie',
+    colorTheme:     'text-rose-400',
+    divergence:     80,
+    radarStats:     [{ label: 'Risque', value: 100 }, { label: 'Surprise', value: 95 }],
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// CORE MATH
+// ═══════════════════════════════════════════════════════════════
+
+const computeKLDivergence = (
+  probs: Float64Array,
+  winners: ReadonlySet<number>,
+): number => {
+  const winnerProb = 1 / DRAW_SIZE;
+  let divergence   = 0;
+
+  for (let i = 0; i < probs.length; i++) {
+    const p = Math.max(probs[i], KL_EPSILON);
+    const q = winners.has(i + 1) ? winnerProb : KL_EPSILON;
+    divergence += p * Math.log(p / q);
+  }
+
+  return Math.max(0, divergence);
+};
+
+const buildExpertVector = (
+  breakdowns: Record<number, ScoreBreakdown>,
+  focusKeys: readonly (keyof ScoreBreakdown)[],
+): Float64Array => {
+  const vector   = new Float64Array(MAX_NUM + 1);
+  const keyCount = focusKeys.length || 1;
+
+  for (let i = 1; i <= MAX_NUM; i++) {
+    const bd = breakdowns[i];
+    if (!bd) continue;
+
+    let sum = 0;
+    for (const k of focusKeys) {
+        const val = (bd[k] as number) ?? 0;
+        // Non-linear amplification of expert signals
+        // Strong signals get stronger, weak signals fade
+        sum += Math.pow(val, 1.2); 
+    }
+    vector[i] = sum / keyCount;
+  }
+
+  return vector;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// FUSION ENGINE (NON-LINEAR)
+// ═══════════════════════════════════════════════════════════════
+
 /**
- * Selection via Softmax Sampling
+ * Fusionne N vecteurs experts avec amplification non-linéaire et bonus de consensus.
  */
-const getWeightedSelection = (
-    pool: { num: number, score: number }[], 
-    count: number,
-    exclude: Set<number> = new Set(),
-    temperature: number = 1.0
+const fuseVectors = (
+  vectors: ReadonlyMap<GatingKey, Float64Array>,
+  weights: GatingWeights,
+): Float64Array => {
+  const result = new Float64Array(MAX_NUM + 1);
+  const expertKeys = Array.from(vectors.keys());
+
+  for (let i = 1; i <= MAX_NUM; i++) {
+    let weightedSum = 0;
+    let agreementCount = 0;
+
+    for (const key of expertKeys) {
+        const vec = vectors.get(key)!;
+        const w = weights[key];
+        const val = vec[i];
+
+        weightedSum += val * w;
+
+        // Check for strong signal agreement (> 60)
+        if (val > 60) agreementCount++;
+    }
+
+    // Amplification Non-Linéaire (Sigmoid-like behavior)
+    // Rend les pics plus nets
+    let fusedScore = weightedSum;
+    
+    // Bonus de Consensus (Cross-Expert Validation)
+    if (agreementCount >= 2) {
+        fusedScore *= 1.15; // +15% if 2 experts agree
+    }
+    if (agreementCount >= 3) {
+        fusedScore *= 1.25; // +25% if 3 experts agree
+    }
+
+    result[i] = fusedScore;
+  }
+
+  return result;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SAMPLING STRATEGIES
+// ═══════════════════════════════════════════════════════════════
+
+interface Candidate { num: number; score: number }
+
+const weightedSelect = (
+  vector:      Float64Array,
+  count:       number,
+  exclude:     ReadonlySet<number>,
+  temperature: number,
+  topK:        number,
 ): number[] => {
-    const selected = new Set<number>();
-    let candidates = pool.filter(p => !exclude.has(p.num) && p.score > 0);
+  const candidates: Candidate[] = [];
+  for (let i = 1; i <= MAX_NUM; i++) {
+    if (vector[i] > 0 && !exclude.has(i)) {
+      candidates.push({ num: i, score: vector[i] });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
 
-    if (candidates.length < count) return candidates.map(c => c.num);
+  const pool = candidates.length > topK ? candidates.slice(0, topK) : candidates;
 
-    while (selected.size < count && candidates.length > 0) {
-        let totalWeight = 0;
-        const weights = candidates.map(c => {
-            const val = Math.max(1, c.score); 
-            const w = Math.pow(val, 1 / temperature);
-            totalWeight += w;
-            return w;
-        });
+  if (pool.length <= count) {
+    return pool.map(c => c.num).sort((a, b) => a - b);
+  }
 
-        if (totalWeight <= 0) break;
+  const weights = new Float64Array(pool.length);
+  let totalWeight = 0;
 
-        let randomVal = getSecureRandom() * totalWeight;
-        let pickedIndex = -1;
+  for (let i = 0; i < pool.length; i++) {
+    const w = Math.pow(Math.max(1, pool[i].score), 1 / temperature);
+    weights[i]   = w;
+    totalWeight  += w;
+  }
 
-        for (let i = 0; i < candidates.length; i++) {
-            randomVal -= weights[i];
-            if (randomVal <= 0) {
-                pickedIndex = i;
-                break;
-            }
-        }
-        
-        if (pickedIndex === -1) pickedIndex = candidates.length - 1;
+  const selected: number[] = [];
+  let remaining = pool.length;
 
-        const picked = candidates[pickedIndex];
-        selected.add(picked.num);
-        candidates.splice(pickedIndex, 1); 
+  while (selected.length < count && remaining > 0) {
+    let r   = nextRandom() * totalWeight;
+    let idx = 0;
+
+    for (; idx < remaining - 1; idx++) {
+      r -= weights[idx];
+      if (r <= 0) break;
     }
 
-    return Array.from(selected).sort((a,b) => a-b);
+    selected.push(pool[idx].num);
+    totalWeight -= weights[idx];
+
+    remaining--;
+    pool[idx]    = pool[remaining];
+    weights[idx] = weights[remaining];
+  }
+
+  return selected.sort((a, b) => a - b);
 };
 
-// --- GATING NETWORK LOGIC ---
+// ═══════════════════════════════════════════════════════════════
+// ADAPTIVE GATING NETWORK (ENTROPY-AWARE)
+// ═══════════════════════════════════════════════════════════════
 
-const runGatingNetwork = (
-    metrics: any, 
-    symbioticContext: SymbioticContext | null
-): Record<string, number> => {
-    // Poids par défaut équilibrés
-    let weights = {
-        'ALPHA': 0.25, // Historian
-        'BETA': 0.25,  // Physicist
-        'GAMMA': 0.25, // Geometrician
-        'DELTA': 0.25  // Contrarian
-    };
+const computeGatingWeights = (
+  metrics: MetricsPayload | undefined,
+  context: SymbioticContext | null | undefined,
+): GatingWeights => {
+  const w: GatingWeights = {
+    ALPHA: 0.25,
+    BETA:  0.25,
+    GAMMA: 0.25,
+    DELTA: 0.25,
+  };
 
-    // 1. Analyse du Régime Fractal (Hurst)
-    // Hurst > 0.6 : Persistant -> Historian (Alpha) est roi
-    // Hurst < 0.4 : Anti-Persistant -> Contrarian (Delta) est roi
-    const hurst = metrics?.fractal?.reduce((acc: number, f: any) => acc + (f.hurst || 0.5), 0) / (metrics?.fractal?.length || 1) || 0.5;
-    
+  // 1. Régime Fractal (Hurst) - Mémoire vs Chaos
+  const fractalData = metrics?.fractal;
+  if (Array.isArray(fractalData) && fractalData.length > 0) {
+    const hurst = fractalData.reduce((acc, f) => acc + (f.hurst ?? 0.5), 0) / fractalData.length;
+
     if (hurst > 0.6) {
-        weights.ALPHA += 0.2;
-        weights.DELTA -= 0.1;
+        w.ALPHA += 0.20; // Historian (Persistant)
+        w.DELTA -= 0.10;
     } else if (hurst < 0.45) {
-        weights.DELTA += 0.2;
-        weights.ALPHA -= 0.1;
+        w.DELTA += 0.20; // Contrarian (Mean Reversion)
+        w.ALPHA -= 0.10;
     }
+  }
 
-    // 2. Analyse de la Volatilité (Physics)
-    // Volatilité haute -> Physicist (Beta) gère mieux le signal/bruit
-    const volatility = metrics?.volatility?.score || 50;
-    if (volatility > 60) {
-        weights.BETA += 0.15;
-        weights.ALPHA -= 0.05;
-    }
+  // 2. Entropie de Shannon (Structure du désordre)
+  const entropy = metrics?.entropy?.normalized || 1.0;
+  if (entropy > 0.92) {
+      // Chaos maximal -> Les algos physiques (Beta) et les outsiders (Delta) gèrent mieux le bruit
+      w.BETA += 0.15;
+      w.DELTA += 0.10;
+      w.ALPHA -= 0.15;
+  } else if (entropy < 0.75) {
+      // Structure forte -> Les algos historiques (Alpha) et géométriques (Gamma) excellent
+      w.ALPHA += 0.15;
+      w.GAMMA += 0.10;
+  }
 
-    // 3. Analyse Spatiale (Geometrician)
-    // Si clusters denses détectés -> Geometrician (Gamma)
-    if (symbioticContext?.spatialHotZones && symbioticContext.spatialHotZones.length > 0) {
-        weights.GAMMA += 0.15;
-    }
+  // 3. Volatilité (Variance)
+  if ((metrics?.volatility?.score ?? 50) > 60) {
+    w.BETA  += 0.10;
+    w.ALPHA -= 0.05;
+  }
 
-    // Normalisation Softmax simple
-    const total = Object.values(weights).reduce((a, b) => a + b, 0);
-    Object.keys(weights).forEach(k => {
-        weights[k as keyof typeof weights] = parseFloat((weights[k as keyof typeof weights] / total).toFixed(2));
-    });
+  // 4. Clusters Spatiaux
+  if (context?.spatialHotZones?.length) {
+    w.GAMMA += 0.15; // Geometrician
+  }
 
-    return weights;
+  // Normalisation Softmax
+  const total = w.ALPHA + w.BETA + w.GAMMA + w.DELTA;
+  w.ALPHA /= total;
+  w.BETA  /= total;
+  w.GAMMA /= total;
+  w.DELTA /= total;
+
+  return w;
 };
 
-// --- EXPERT AGENTS LOGIC ---
+// ═══════════════════════════════════════════════════════════════
+// PRECOMPUTE BASE SCORES
+// ═══════════════════════════════════════════════════════════════
 
-const createExpertVector = (
-    breakdowns: Record<number, ScoreBreakdown>,
-    focusKeys: (keyof ScoreBreakdown)[]
-): number[] => {
-    const vector = new Array(91).fill(0); // Index 0 unused
-    
-    for (let i = 1; i <= 90; i++) {
-        const bd = breakdowns[i];
-        if (!bd) continue;
-        
-        let score = 0;
-        focusKeys.forEach(k => {
-            score += (bd as any)[k] || 0;
-        });
-        
-        // Moyenne des composantes pour normaliser 0-100
-        vector[i] = score / focusKeys.length;
-    }
-    return vector;
+export const precomputeBaseScores = async (
+  drawName: string,
+  history:  DrawResult[],
+  metrics?: MetricsPayload,
+): Promise<Record<number, ScoreBreakdown>> => {
+  const cacheKey = `${drawName}:${history[0]?.id ?? 'init'}`;
+  const cached = scoreCache.get(cacheKey);
+  if (cached) return cached;
+
+  const weights    = await getAlgoWeights(drawName);
+  const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
+  const data       = masterPred.breakdown ?? {};
+
+  scoreCache.set(cacheKey, data);
+  return data;
 };
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN PREDICTION ENGINE
+// ═══════════════════════════════════════════════════════════════
 
 export async function generatePlatinumPrediction(
-    drawName: string, 
-    history: DrawResult[],
-    precomputedMetrics?: any,
-    _userBias?: any, 
-    symbioticContext?: SymbioticContext | null,
-    basePrediction?: Prediction | null 
+  drawName:           string,
+  history:            DrawResult[],
+  precomputedMetrics?: MetricsPayload,
+  _userBias?:         unknown,
+  symbioticContext?:  SymbioticContext | null,
+  _basePrediction?:   Prediction | null,
 ): Promise<PlatinumResult> {
-    if (history.length < 10) throw new Error("Dataset insuffisant.");
+  if (history.length < MIN_HISTORY) {
+    throw new Error(`Dataset insuffisant : ${history.length}/${MIN_HISTORY} tirages requis.`);
+  }
 
-    // 1. Acquisition des données brutes
-    const breakdowns = await precomputeBaseScores(drawName, history, precomputedMetrics);
+  // ── 1. Acquisition des breakdowns ──
+  const breakdowns = await precomputeBaseScores(drawName, history, precomputedMetrics);
 
-    // 2. Activation du Gating Network (Décision Stratégique)
-    const gatingWeights = runGatingNetwork(precomputedMetrics, symbioticContext);
+  // ── 2. Gating Network ──
+  const gating = computeGatingWeights(precomputedMetrics, symbioticContext);
 
-    // 3. Instanciation des Experts (MoE)
-    
-    // Expert ALPHA: The Historian (Chronos)
-    // Focus: Tendances lourdes, Répétition, Markov
-    const alphaVector = createExpertVector(breakdowns, ['frequency', 'markov', 'momentum', 'equilibrium']);
+  // ── 3. Vecteurs experts ──
+  const expertVectors = new Map<GatingKey, Float64Array>();
+  for (const e of EXPERTS) {
+    expertVectors.set(e.gatingKey, buildExpertVector(breakdowns, e.focusKeys));
+  }
 
-    // Expert BETA: The Physicist (Neon)
-    // Focus: Signal pur, Cycles spectraux, Ondelettes
-    const betaVector = createExpertVector(breakdowns, ['spectral', 'wavelet', 'fractal']);
+  // ── 4. Fusion NOVA (Non-Linear) ──
+  const novaVector  = fuseVectors(expertVectors, gating);
+  
+  // Elite Selection: Le meilleur candidat du vecteur NOVA est forcé si score très haut
+  const sortedIndices = Array.from({length: 90}, (_, i) => i+1).sort((a,b) => novaVector[b] - novaVector[a]);
+  const eliteCandidate = (novaVector[sortedIndices[0]] > 95) ? new Set([sortedIndices[0]]) : new Set<number>();
+  
+  const novaNumbers = weightedSelect(novaVector, DRAW_SIZE, new Set(), 0.5, 50);
+  
+  // Force l'inclusion du candidat élite si présent et non sélectionné par le hasard
+  if (eliteCandidate.size > 0 && !novaNumbers.includes(sortedIndices[0])) {
+      novaNumbers[4] = sortedIndices[0]; // Remplace le dernier (le plus faible)
+      novaNumbers.sort((a,b) => a-b);
+  }
 
-    // Expert GAMMA: The Geometrician (Terra)
-    // Focus: Topologie grille, Voisinage, Spatial
-    const gammaVector = createExpertVector(breakdowns, ['spatial', 'orchestration']);
+  const timelines: PlatinumTimeline[] = [
+    {
+      type:           'NOVA',
+      title:          'Fusion Experts',
+      numbers:        novaNumbers,
+      score:          99,
+      intuitionScore: 98,
+      remark:         'Consensus optimal amplifié par fusion non-linéaire.',
+      keyMetric:      'MoE Score',
+      colorTheme:     'text-purple-400',
+      divergence:     0,
+      radarStats: [
+        { label: 'Historique', value: Math.round(gating.ALPHA * 100) },
+        { label: 'Physique',   value: Math.round(gating.BETA  * 100) },
+        { label: 'Géométrie',  value: Math.round(gating.GAMMA * 100) },
+        { label: 'Chaos',      value: Math.round(gating.DELTA * 100) },
+      ],
+    },
+  ];
 
-    // Expert DELTA: The Contrarian (Aether)
-    // Focus: Rupture, Écart Critique, Anti-consensus
-    const deltaVector = createExpertVector(breakdowns, ['gap', 'anti_consensus', 'gap_velocity']);
+  // ── 5. Timelines experts (config-driven) ──
+  const timelineNumbers = new Map<string, readonly number[]>();
+  timelineNumbers.set('NOVA', novaNumbers);
 
-    // 4. Fusion du Vecteur NOVA (Consensus Pondéré)
-    // V_nova = Σ (W_expert * V_expert)
-    const novaVector = new Array(91).fill(0);
-    for (let i = 1; i <= 90; i++) {
-        novaVector[i] = 
-            (alphaVector[i] * gatingWeights.ALPHA) +
-            (betaVector[i] * gatingWeights.BETA) +
-            (gammaVector[i] * gatingWeights.GAMMA) +
-            (deltaVector[i] * gatingWeights.DELTA);
+  for (const expert of EXPERTS) {
+    const exclude = new Set<number>();
+    for (const src of expert.excludeFrom) {
+      const nums = timelineNumbers.get(src);
+      if (nums) for (const n of nums) exclude.add(n);
     }
 
-    const timelines: PlatinumTimeline[] = [];
+    const vector  = expertVectors.get(expert.gatingKey)!;
+    const numbers = weightedSelect(
+      vector, DRAW_SIZE, exclude, expert.temperature, expert.poolSize,
+    );
 
-    // Helper pour transformer un vecteur [0..90] en format pour getWeightedSelection
-    const toPool = (vec: number[]) => {
-        return vec.map((score, num) => ({ num, score })).filter(x => x.num > 0);
-    };
+    timelineNumbers.set(expert.timelineType, numbers);
 
-    // --- TIMELINE 1 : NOVA (FUSION) ---
-    // Le meilleur de tous les experts réunis
-    const novaPool = toPool(novaVector).sort((a,b) => b.score - a.score).slice(0, 50);
-    const novaNumbers = getWeightedSelection(novaPool, 5, new Set(), 0.5); // Température basse (Exploitation)
-    
     timelines.push({
-        type: 'NOVA',
-        title: 'Fusion Experts',
-        numbers: novaNumbers,
-        score: 99,
-        intuitionScore: 98,
-        remark: "Consensus optimal pondéré par le Gating Network.",
-        keyMetric: "MoE Score",
-        colorTheme: "text-purple-400",
-        divergence: 0,
-        radarStats: [
-            { label: 'Historique', value: gatingWeights.ALPHA * 100 },
-            { label: 'Physique', value: gatingWeights.BETA * 100 },
-            { label: 'Géométrie', value: gatingWeights.GAMMA * 100 },
-            { label: 'Chaos', value: gatingWeights.DELTA * 100 }
-        ]
+      type:           expert.timelineType,
+      title:          expert.title,
+      numbers,
+      score:          expert.baseScore,
+      intuitionScore: expert.intuitionScore,
+      remark:         expert.remark,
+      keyMetric:      expert.keyMetric,
+      colorTheme:     expert.colorTheme,
+      divergence:     expert.divergence,
+      radarStats:     [...expert.radarStats],
     });
+  }
 
-    // --- TIMELINE 2 : NEON (PHYSICIST - BETA) ---
-    const neonPool = toPool(betaVector).sort((a,b) => b.score - a.score).slice(0, 40);
-    const neonNumbers = getWeightedSelection(neonPool, 5, new Set(novaNumbers), 0.8);
-    timelines.push({
-        type: 'NEON',
-        title: 'Signal Physique',
-        numbers: neonNumbers,
-        score: 92,
-        intuitionScore: 90,
-        remark: "Basé sur la résonance spectrale et les ondes.",
-        keyMetric: "Énergie",
-        colorTheme: "text-cyan-400",
-        divergence: 20,
-        radarStats: [{label: 'Spectre', value: 95}, {label: 'Cycles', value: 90}]
-    });
+  // ── 6. King Numbers ──
+  const kingCounts = new Uint8Array(MAX_NUM + 1);
+  for (const t of timelines) {
+    for (const n of t.numbers) kingCounts[n]++;
+  }
 
-    // --- TIMELINE 3 : TERRA (GEOMETRICIAN - GAMMA) ---
-    const terraPool = toPool(gammaVector).sort((a,b) => b.score - a.score).slice(0, 40);
-    const terraNumbers = getWeightedSelection(terraPool, 5, new Set([...novaNumbers, ...neonNumbers]), 0.9);
-    timelines.push({
-        type: 'TERRA',
-        title: 'Topologie Grille',
-        numbers: terraNumbers,
-        score: 85,
-        intuitionScore: 80,
-        remark: "Focalisé sur les clusters spatiaux et voisins.",
-        keyMetric: "Densité",
-        colorTheme: "text-emerald-400",
-        divergence: 40,
-        radarStats: [{label: 'Espace', value: 90}, {label: 'Structure', value: 85}]
-    });
+  const kingNumbers: { number: number; count: number }[] = [];
+  for (let i = 1; i <= MAX_NUM; i++) {
+    if (kingCounts[i] >= 2) kingNumbers.push({ number: i, count: kingCounts[i] });
+  }
+  kingNumbers.sort((a, b) => b.count - a.count);
 
-    // --- TIMELINE 4 : CHRONOS (HISTORIAN - ALPHA) ---
-    const chronosPool = toPool(alphaVector).sort((a,b) => b.score - a.score).slice(0, 40);
-    const chronosNumbers = getWeightedSelection(chronosPool, 5, new Set(), 0.7);
-    timelines.push({
-        type: 'CHRONOS',
-        title: 'Inertie Temporelle',
-        numbers: chronosNumbers,
-        score: 88,
-        intuitionScore: 85,
-        remark: "Suit les probabilités de transition Markoviennes.",
-        keyMetric: "Fréquence",
-        colorTheme: "text-amber-400",
-        divergence: 30,
-        radarStats: [{label: 'Mémoire', value: 95}, {label: 'Tendance', value: 90}]
-    });
+  // ── 7. Leader Analysis ──
+  const leaderKey = (Object.entries(gating) as [GatingKey, number][])
+    .reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
 
-    // --- TIMELINE 5 : AETHER (CONTRARIAN - DELTA) ---
-    const aetherPool = toPool(deltaVector).sort((a,b) => b.score - a.score).slice(0, 50);
-    const aetherNumbers = getWeightedSelection(aetherPool, 5, new Set(), 1.5); // Température haute (Exploration)
-    timelines.push({
-        type: 'AETHER',
-        title: 'Rupture Chaos',
-        numbers: aetherNumbers,
-        score: 82,
-        intuitionScore: 95,
-        remark: "Mise sur les anomalies statistiques et les écarts.",
-        keyMetric: "Entropie",
-        colorTheme: "text-rose-400",
-        divergence: 80,
-        radarStats: [{label: 'Risque', value: 100}, {label: 'Surprise', value: 95}]
-    });
-
-    // Calcul des "King Numbers"
-    const kingCounts: Record<number, number> = {};
-    timelines.forEach(t => t.numbers.forEach(n => kingCounts[n] = (kingCounts[n] || 0) + 1));
-    
-    const kingNumbers = Object.entries(kingCounts)
-        .filter(([_, c]) => c >= 2)
-        .map(([n, c]) => ({ number: Number(n), count: c }))
-        .sort((a,b) => b.count - a.count);
-
-    // Détermination du leader (Expert dominant) pour l'analyse
-    const leaderKey = Object.entries(gatingWeights).sort((a,b) => b[1] - a[1])[0][0];
-    const leaderName = leaderKey === 'ALPHA' ? 'Historien' : leaderKey === 'BETA' ? 'Physicien' : leaderKey === 'GAMMA' ? 'Géomètre' : 'Contrarian';
-
-    return {
-        id: crypto.randomUUID(),
-        kingNumbers, 
-        timelines, 
-        combinations: [],
-        confidence: 98,
-        analysis: `Mixture of Experts (MoE) v2.0 : Gating Network dominé par l'Expert ${leaderName} (${Math.round(gatingWeights[leaderKey as keyof typeof gatingWeights]*100)}%).`,
-        drawName, 
-        timestamp: Date.now()
-    };
+  return {
+    id:           crypto.randomUUID(),
+    kingNumbers,
+    timelines,
+    combinations: [],
+    confidence:   98,
+    analysis:     `MoE v3.1 (Non-Linear): ${LEADER_NAMES[leaderKey]} dominant (${Math.round(gating[leaderKey] * 100)}%). Entropie: ${(precomputedMetrics?.entropy?.normalized || 0.5).toFixed(2)}.`,
+    drawName,
+    timestamp:    Date.now(),
+  };
 }
 
-export const savePlatinumHistory = (result: PlatinumResult) => {
-    const key = `platinum_hist_${result.drawName}`;
-    const existing = JSON.parse(localStorage.getItem(key) || '[]');
-    localStorage.setItem(key, JSON.stringify([result, ...existing].slice(0, 20)));
+// ═══════════════════════════════════════════════════════════════
+// PERSISTENCE & AUDIT
+// ═══════════════════════════════════════════════════════════════
+
+const storageKey = (name: string) => `platinum_hist_${name}`;
+
+export const savePlatinumHistory = (result: PlatinumResult): void => {
+  try {
+    const key      = storageKey(result.drawName);
+    const existing = JSON.parse(localStorage.getItem(key) ?? '[]') as PlatinumResult[];
+    const updated  = [result, ...existing.slice(0, HISTORY_LIMIT - 1)];
+    localStorage.setItem(key, JSON.stringify(updated));
+  } catch (err) {
+    console.error('[Platinum] Sauvegarde échouée :', err);
+  }
 };
 
 export const getPlatinumHistory = (drawName: string): PlatinumResult[] => {
-    const key = `platinum_hist_${drawName}`;
-    try {
-        return JSON.parse(localStorage.getItem(key) || '[]');
-    } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(storageKey(drawName)) ?? '[]');
+  } catch {
+    return [];
+  }
 };
 
-export const performPlatinumAudit = (prediction: PlatinumResult, actualResult: DrawResult): PlatinumAudit => {
-    const winners = new Set(actualResult.gagnants);
-    let bestTimeline = 'AUCUNE';
-    let bestScore = -1;
-    let minDivergence = Infinity;
-    
-    const performances = prediction.timelines.map(t => {
-        const hits = t.numbers.filter(n => winners.has(n)).length;
-        const matchingNumbers = t.numbers.filter(n => winners.has(n));
-        
-        const timelineProbVector = Array(90).fill(0);
-        t.numbers.forEach(n => timelineProbVector[n-1] = 1); 
+export const performPlatinumAudit = (
+  prediction:   PlatinumResult,
+  actualResult: DrawResult,
+): PlatinumAudit => {
+  const winners = new Set(actualResult.gagnants);
 
-        const divergence = calculateKLDivergence(timelineProbVector, winners);
+  let bestTimeline  = 'AUCUNE';
+  let bestHits      = -1;
+  let minDivergence = Infinity;
 
-        if (hits > bestScore || (hits === bestScore && divergence < minDivergence)) {
-            bestScore = hits;
-            bestTimeline = t.type;
-            minDivergence = divergence;
-        }
-        
-        return { 
-            type: t.type, 
-            hits, 
-            numbers: matchingNumbers,
-            klDivergence: parseFloat(divergence.toFixed(3)) 
-        };
-    });
+  const performances = prediction.timelines.map(t => {
+    const matchingNumbers = t.numbers.filter(n => winners.has(n));
+    const hits            = matchingNumbers.length;
 
-    let verdict = "Déphasage Complet.";
-    if (bestScore >= 3) verdict = `Convergence Réussie sur ${bestTimeline} (KL: ${minDivergence.toFixed(2)}).`;
-    else if (bestScore >= 1) verdict = `Signal partiel sur ${bestTimeline}.`;
+    const probVector = new Float64Array(MAX_NUM);
+    const norm       = t.numbers.length || 1;
+    for (const n of t.numbers) probVector[n - 1] = 1 / norm;
 
-    const avgHits = performances.reduce((acc, p) => acc + p.hits, 0) / 5;
-    const syncScore = Math.min(100, Math.round((avgHits * 25) + Math.max(0, 20 - minDivergence)));
+    const klDiv = computeKLDivergence(probVector, winners);
+
+    if (hits > bestHits || (hits === bestHits && klDiv < minDivergence)) {
+      bestHits      = hits;
+      bestTimeline  = t.type;
+      minDivergence = klDiv;
+    }
 
     return {
-        predictionId: prediction.id,
-        date: actualResult.date,
-        actualDraw: actualResult.gagnants,
-        bestTimeline,
-        bestScore,
-        syncScore,
-        timelinePerformance: performances,
-        verdict
+      type:         t.type,
+      hits,
+      numbers:      matchingNumbers,
+      klDivergence: +klDiv.toFixed(3),
     };
+  });
+
+  const avgHits   = performances.reduce((s, p) => s + p.hits, 0) / performances.length;
+  const syncScore = Math.min(100, Math.round(
+    avgHits * 25 + Math.max(0, 20 - minDivergence),
+  ));
+
+  let verdict: string;
+  if (bestHits >= 3) {
+    verdict = `Convergence Réussie sur ${bestTimeline} (KL: ${minDivergence.toFixed(2)}).`;
+  } else if (bestHits >= 1) {
+    verdict = `Signal partiel sur ${bestTimeline}.`;
+  } else {
+    verdict = 'Déphasage Complet.';
+  }
+
+  return {
+    predictionId:       prediction.id,
+    date:               actualResult.date,
+    actualDraw:         actualResult.gagnants,
+    bestTimeline,
+    bestScore:          bestHits,
+    syncScore,
+    timelinePerformance: performances,
+    verdict,
+  };
 };

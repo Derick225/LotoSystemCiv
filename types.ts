@@ -402,7 +402,7 @@ export interface PlatinumAudit {
     bestTimeline: string;
     bestScore: number;
     syncScore: number;
-    timelinePerformance: { type: string; hits: number; numbers: number[] }[];
+    timelinePerformance: { type: string; hits: number; numbers: number[]; klDivergence?: number }[];
     verdict: string;
 }
 

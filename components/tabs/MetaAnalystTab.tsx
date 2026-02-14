@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
 import { saveTicket } from '../../services/userPreferencesService';
+import { calculateShannonEntropy, calculateChiSquare } from '../../services/mathService';
 import { useNexus } from '../NexusProvider';
 import type { PlatinumResult, PlatinumTimeline } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -18,7 +19,7 @@ interface MetaAnalystTabProps {
     drawName: string;
 }
 
-// Configuration des Thèmes Visuels par Timeline (Updated Descriptions for Experts)
+// Configuration des Thèmes Visuels par Timeline
 const TIMELINE_THEMES: Record<string, any> = {
     'NOVA': { 
         icon: <Brain size={24} />, 
@@ -27,7 +28,7 @@ const TIMELINE_THEMES: Record<string, any> = {
         bg: 'bg-purple-500/10', 
         glow: 'shadow-[0_0_30px_rgba(168,85,247,0.3)]',
         gradient: 'from-purple-900/40 to-slate-900',
-        expertName: 'MoE Fusion'
+        expertName: 'MoE Fusion 3.1'
     },
     'NEON': { 
         icon: <Activity size={20} />, 
@@ -67,8 +68,6 @@ const TIMELINE_THEMES: Record<string, any> = {
     }
 };
 
-// --- SOUS-COMPOSANTS ---
-
 const TimelineCard: React.FC<{ 
     timeline: PlatinumTimeline; 
     isSelected: boolean; 
@@ -87,7 +86,6 @@ const TimelineCard: React.FC<{
                 ${isSelected ? `${theme.border} bg-slate-900 ${theme.glow}` : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'}
             `}
         >
-            {/* Background Gradient */}
             <div className={`absolute inset-0 bg-gradient-to-br ${theme.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
             
             <div className="relative z-10">
@@ -124,20 +122,19 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline; onSave: (nums: number[]) 
             <div className="absolute inset-0 bg-purple-600/20 rounded-[3rem] blur-2xl group-hover:blur-3xl transition-all duration-1000 animate-pulse-slow"></div>
             <div className={`relative bg-slate-950 border border-purple-500/30 p-8 md:p-10 rounded-[3rem] shadow-2xl overflow-hidden`}>
                 
-                {/* FX Background */}
                 <div className="absolute top-0 right-0 p-10 opacity-10"><Atom size={200} className="text-purple-500 animate-spin-slow" /></div>
                 
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div className="text-center md:text-left">
                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full mb-4">
                             <Crown size={14} className="text-purple-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Gating Network Consensus</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">MoE Non-Linear Fusion</span>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-2">
                             NOVA <span className="text-purple-500">PRIME</span>
                         </h2>
                         <p className="text-slate-400 text-sm max-w-md">
-                            La fusion optimale de 4 experts neuronaux (Historien, Physicien, Géomètre, Contrarian). Pondérée par le régime actuel du tirage.
+                            La fusion optimale de 4 experts neuronaux (Historien, Physicien, Géomètre, Contrarian). Pondérée par l'entropie et le régime fractal.
                         </p>
                         
                         <button 
@@ -170,10 +167,10 @@ const LoadingSequence: React.FC = () => {
     const [step, setStep] = useState(0);
     const steps = [
         "Initialisation des 4 Experts...",
+        "Calcul d'Entropie & Hurst...",
         "Expert Beta : Analyse Spectrale...",
-        "Expert Alpha : Analyse Markovienne...",
-        "Gating Network : Pondération des Régimes...",
-        "Fusion Mixture of Experts (MoE)..."
+        "Gating Network : Pondération...",
+        "Fusion Non-Linéaire (MoE)..."
     ];
 
     useEffect(() => {
@@ -200,7 +197,7 @@ const LoadingSequence: React.FC = () => {
                 
                 <div className="text-center space-y-2">
                     <p className="text-indigo-400 font-black uppercase tracking-[0.3em] text-xs animate-pulse">
-                        Platinum MoE Engine v26.0
+                        Platinum MoE Engine v3.1
                     </p>
                     <div className="h-6 overflow-hidden">
                         <motion.p 
@@ -252,10 +249,26 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         try {
             await new Promise(r => setTimeout(r, 3000)); 
 
+            // Calculs Métriques avancées à la volée pour l'injection
+            const entropy = calculateShannonEntropy(history);
+            
+            const freqMap: Record<number, number> = {};
+            history.forEach(d => d.gagnants.forEach(n => freqMap[n] = (freqMap[n] || 0) + 1));
+            const chiSquare = calculateChiSquare(freqMap, history.length * 5);
+
             const data = await generatePlatinumPrediction(
                 drawName, 
                 history, 
-                { spectral, fractal, wavelet, correlationMatrix, regularity, volatility: {score: 50} }, // Mock volatility if needed or update hook
+                { 
+                    spectral, 
+                    fractal, 
+                    wavelet, 
+                    correlationMatrix, 
+                    regularity, 
+                    volatility: {score: 50},
+                    entropy,   // Ajout Entropie
+                    chiSquare  // Ajout Chi2
+                }, 
                 null,
                 symbioticContext,
                 lastPrediction
@@ -298,14 +311,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div>
                         <div className="flex items-center gap-3 mb-2">
                             <Sparkles size={20} className="text-purple-400" />
-                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-purple-400">Architecture MoE</h3>
+                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-purple-400">Architecture MoE v3</h3>
                         </div>
                         <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">
                             Platinum <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Experts</span>
                         </h2>
                         <div className="mt-2 flex flex-col gap-1">
                             <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg">
-                                4 Agents Experts (Historien, Physicien, Géomètre, Contrarian) analysent le flux. Le <strong>Gating Network</strong> pondère leurs avis selon le régime actuel.
+                                4 Agents Experts (Historien, Physicien, Géomètre, Contrarian) analysent le flux. Le <strong>Gating Network</strong> pondère leurs avis selon l'entropie et le Hurst.
                             </p>
                         </div>
                     </div>
