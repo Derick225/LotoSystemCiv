@@ -2,7 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult, SpectralMetric, FractalMetric, NumberRegularity } from '../types';
-import { normalizeDate, fetchResults, getDailySummary, fetchGlobalStats } from '../services/lotteryService';
+import { normalizeDate, fetchResults, getDailySummary, fetchGlobalStats, fetchRecentStats } from '../services/lotteryService';
 import { 
     calculateSpectralMetricsAsync, 
     calculateWaveletMetricsAsync, 
@@ -132,7 +132,8 @@ export const useDailySummary = (day: string) => {
 export const useGlobalStats = () => {
     return useQuery({
         queryKey: lotteryKeys.globalStats(),
-        queryFn: fetchGlobalStats,
+        // On demande spécifiquement les stats des 7 derniers jours pour "High-Heat 7d"
+        queryFn: () => fetchRecentStats(7),
         staleTime: 1000 * 60 * 30, 
     });
 };

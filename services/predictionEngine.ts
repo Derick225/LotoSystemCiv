@@ -1,12 +1,8 @@
-
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
 import { calculateACValue } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
-// --- CONFIGURATION PAR DÉFAUT ---
-
 export const getDefaultWeights = (): AlgoWeights => ({
-    // Configuration optimisée pour 5/90 (Base équilibrée)
     frequency: 0.20,
     markov: 0.20,
     gap: 0.15,
@@ -31,27 +27,20 @@ export const getDefaultRules = (): AdaptiveRules => ({
     dayEchoBoost: 1.1
 });
 
-// --- MOTEUR DE NORMALISATION AVANCÉE ---
-
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     let total = 0;
     const cleanWeights: AlgoWeights = {};
 
-    // 1. Sanitization & Clamping
     (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(key => {
         let val = weights[key];
-        // Protection contre NaN et valeurs négatives
         if (typeof val !== 'number' || isNaN(val) || val < 0) val = 0;
-        // Plafond logique à 1.0 par poids
         val = Math.min(1.0, val);
         cleanWeights[key] = val;
         total += val;
     });
 
-    // Fallback si tout est à 0
     if (total <= 0.0001) return getDefaultWeights();
 
-    // 2. Normalisation Proportionnelle (Somme = 1.0)
     (Object.keys(cleanWeights) as Array<keyof AlgoWeights>).forEach(key => {
         const val = cleanWeights[key] || 0;
         cleanWeights[key] = parseFloat((val / total).toFixed(4));
@@ -60,33 +49,31 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
     return cleanWeights;
 };
 
-// --- ADAPTATEURS DE CONTEXTE (RISQUE & RÉGIME) ---
-
 const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeights => {
     const modified = { ...weights };
     
     switch (profile) {
-        case 'PRUDENT': // Sécurité : Favorise la répétition et les suites logiques
+        case 'PRUDENT':
             modified.frequency = (modified.frequency || 0.20) * 1.8;
             modified.markov = (modified.markov || 0.20) * 1.5;
             modified.equilibrium = (modified.equilibrium || 0.05) * 1.3;
-            modified.gap = (modified.gap || 0.15) * 0.3; // Pénalise les écarts risqués
+            modified.gap = (modified.gap || 0.15) * 0.3; 
             modified.anti_consensus = 0;
             break;
 
-        case 'BALANCED': // Mixte optimal
+        case 'BALANCED': 
             modified.frequency = (modified.frequency || 0.20) * 1.1;
             modified.gap = (modified.gap || 0.15) * 1.1;
             modified.spectral = (modified.spectral || 0.10) * 1.1;
             break;
 
-        case 'AUDACIOUS': // Chasseur d'écarts et de momentum
+        case 'AUDACIOUS': 
             modified.gap = (modified.gap || 0.15) * 2.5;
             modified.momentum = (modified.momentum || 0.10) * 1.8;
             modified.frequency = (modified.frequency || 0.20) * 0.4;
             break;
 
-        case 'CHAOS': // Contrarian : Joue contre la statistique
+        case 'CHAOS': 
             modified.anti_consensus = 0.5;
             modified.spectral = 0.3;
             modified.frequency = 0;
@@ -103,20 +90,16 @@ const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regime: str
     const { regime, hurst } = regimeInfo;
     const adjusted = { ...weights };
     
-    // Adaptation Fractal (Hurst Exponent)
     if (hurst > 0.6) {
-        // Régime Persistant (Trend-following)
         adjusted.frequency = (adjusted.frequency || 0) * 1.4;
         adjusted.markov = (adjusted.markov || 0) * 1.4;
         adjusted.momentum = (adjusted.momentum || 0) * 1.3;
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 0.5;
     } else if (hurst < 0.4) {
-        // Régime Anti-Persistant (Mean Reversion)
         adjusted.gap = (adjusted.gap || 0) * 1.6;
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 1.5;
         adjusted.frequency = (adjusted.frequency || 0) * 0.6;
     } else {
-        // Régime Random (Brownian Motion)
         adjusted.spectral = (adjusted.spectral || 0) * 1.3;
         adjusted.wavelet = (adjusted.wavelet || 0) * 1.3;
         adjusted.monte_carlo = (adjusted.monte_carlo || 0) * 1.4;
@@ -124,8 +107,6 @@ const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regime: str
 
     return normalizeWeights(adjusted);
 };
-
-// --- MOTEUR DE GÉNÉRATION VECTORIELLE ---
 
 export const generateMasterPrediction = async (
     drawName: string, 
@@ -137,7 +118,6 @@ export const generateMasterPrediction = async (
 ): Promise<Prediction> => {
     if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
 
-    // 1. Préparation de l'ADN
     let weights = normalizeWeights(weightsToUse || await getAlgoWeights(drawName));
     weights = applyRiskProfile(weights, riskProfile);
     
@@ -155,13 +135,11 @@ export const generateMasterPrediction = async (
     const recentHistory = history.slice(0, sampleSize);
     const lastDraw = history[0].gagnants;
 
-    // 2. Pré-calculs Vectoriels (Maps O(1))
     const freqMap = new Map<number, number>();
     const gapsMap = new Map<number, number>();
     const markovMap = new Map<number, number>();
     const momentumMap = new Map<number, number>();
     
-    // Frequency & Gaps
     for (let i = 0; i < recentHistory.length; i++) {
         const draw = recentHistory[i];
         for (const n of draw.gagnants) {
@@ -169,15 +147,12 @@ export const generateMasterPrediction = async (
             if (!gapsMap.has(n)) gapsMap.set(n, i);
         }
     }
-    // Fill gaps for unseen numbers
     for (let i = 1; i <= N; i++) { if (!gapsMap.has(i)) gapsMap.set(i, sampleSize); }
 
-    // Markov Chains (1st Order)
     if (weights.markov && weights.markov > 0) {
         for (let i = 0; i < recentHistory.length - 1; i++) {
             const current = recentHistory[i].gagnants;
             const prev = recentHistory[i+1].gagnants;
-            // Si le tirage précédent avait une intersection avec le "lastDraw" actuel
             const common = prev.filter(n => lastDraw.includes(n));
             if (common.length > 0) {
                 current.forEach(n => markovMap.set(n, (markovMap.get(n) || 0) + common.length));
@@ -185,56 +160,40 @@ export const generateMasterPrediction = async (
         }
     }
 
-    // Momentum (Short Term Velocity)
     if (weights.momentum && weights.momentum > 0) {
         history.slice(0, 10).forEach(d => {
             d.gagnants.forEach(n => momentumMap.set(n, (momentumMap.get(n) || 0) + 1));
         });
     }
 
-    // 3. Boucle de Calcul des Scores (Fusion Hybride)
     const masterScores = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
         const nBreakdown: ScoreBreakdown = {};
         
-        // --- Calcul des Composantes ---
-        
-        // A. Frequency (0-100)
         const maxFreq = Math.max(...freqMap.values()) || 1;
         nBreakdown.frequency = ((freqMap.get(num) || 0) / maxFreq) * 100;
 
-        // B. Gap (Efficacité)
         const currentGap = gapsMap.get(num) || 0;
-        const theoreticalGap = 17; // 90/5
+        const theoreticalGap = 17; 
         let gapScore = 0;
-        // Courbe en cloche autour de 2x-3x l'écart théorique
         if (currentGap < theoreticalGap) gapScore = (currentGap / theoreticalGap) * 40; 
         else if (currentGap < theoreticalGap * 3) gapScore = 40 + ((currentGap - theoreticalGap) / (theoreticalGap * 2)) * 60;
-        else gapScore = 90; // Très en retard
+        else gapScore = 90; 
         nBreakdown.gap = gapScore;
 
-        // C. Markov
         const maxMarkov = Math.max(...markovMap.values()) || 1;
         nBreakdown.markov = ((markovMap.get(num) || 0) / maxMarkov) * 100;
 
-        // D. Spectral (FFT)
         nBreakdown.spectral = metrics?.spectral?.find((s: any) => s.number === num)?.energy || 0;
-
-        // E. Momentum
         nBreakdown.momentum = Math.min(100, (momentumMap.get(num) || 0) * 25);
-
-        // F. Anti-Consensus / Equilibrium
         nBreakdown.equilibrium = 100 - nBreakdown.frequency!;
         nBreakdown.anti_consensus = (200 - (nBreakdown.frequency! + nBreakdown.markov!)) / 2;
-
-        // G. External / Symbiotic
         nBreakdown.decision_forest = symbioticContext?.forestVotes?.[num] || 0;
         nBreakdown.orchestration = symbioticContext?.orchestrationBoosts?.[num] ? symbioticContext.orchestrationBoosts[num] * 20 : 0;
         nBreakdown.spatial = symbioticContext?.spatialHotZones?.includes(num) ? 80 : 0;
         nBreakdown.fractal = (metrics?.fractal?.find((f:any) => f.number === num)?.hurst || 0.5) * 100;
         nBreakdown.wavelet = (metrics?.wavelet?.find((w:any) => w.number === num)?.energy || 0);
 
-        // --- Agrégation Pondérée (Fusion) ---
         let finalScore = 0;
         let totalW = 0;
 
@@ -247,19 +206,12 @@ export const generateMasterPrediction = async (
             }
         });
 
-        // --- Application des Règles Adaptatives (Boosts) ---
-        
-        // Règle 1: Zone Critique (ex: 12-28)
         if (num >= rules.criticalZoneMin && num <= rules.criticalZoneMax) {
             finalScore *= 1.1; 
         }
-
-        // Règle 2: Écho Journalier (Intra-Day)
         if (symbioticContext?.dayMetrics?.echoNumbers.includes(num)) {
             finalScore *= (rules.dayEchoBoost || 1.1);
         }
-
-        // Règle 3: Bonus Orchestration & Spatial (Hors pondération)
         if (nBreakdown.orchestration) finalScore += (nBreakdown.orchestration * 0.15);
         if (nBreakdown.spatial) finalScore += (nBreakdown.spatial * 0.10);
 
@@ -268,8 +220,6 @@ export const generateMasterPrediction = async (
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
 
-    // 4. Stratégie de Sélection (DNA Driven)
-    // On définit la structure du ticket selon si on est en mode Chaos ou Stabilité
     const stabilityWeight = (weights.frequency || 0) + (weights.markov || 0) + (weights.equilibrium || 0);
     const chaosWeight = (weights.anti_consensus || 0) + (weights.gap || 0) + (weights.spectral || 0);
     
@@ -277,29 +227,23 @@ export const generateMasterPrediction = async (
     let outsiderCount = 2;
     
     if (chaosWeight > stabilityWeight * 1.5) {
-        topPickCount = 1; // Stratégie Hyper-Chaos : 1 Top + 4 Outsiders
+        topPickCount = 1; 
         outsiderCount = 4;
     } else if (chaosWeight > stabilityWeight) {
-        topPickCount = 2; // Stratégie Audacieuse
+        topPickCount = 2; 
         outsiderCount = 3;
     } else if (stabilityWeight > chaosWeight * 2) {
-        topPickCount = 5; // Stratégie Béton
+        topPickCount = 5; 
         outsiderCount = 0;
     }
 
     const topPicks = sorted.slice(0, topPickCount).map(s => s.num);
-    
-    // Les outsiders sont piochés dans le rang 15-35 (Zone grise)
     const outsiderPoolStart = Math.max(topPickCount + 2, 10);
     const outsiderPool = sorted.slice(outsiderPoolStart, outsiderPoolStart + 25);
-    const outsiders = outsiderPool
-        .sort(() => 0.5 - Math.random()) // Shuffle partiel
-        .slice(0, outsiderCount)
-        .map(s => s.num);
+    const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
 
     const selection = [...topPicks, ...outsiders].sort((a,b) => a-b);
 
-    // Construction de l'analyse textuelle
     const dnaDominant = Object.entries(weights).sort((a,b) => b[1]-a[1])[0];
     let dnaType = "Équilibré";
     if (dnaDominant[1] > 0.3) dnaType = `${dnaDominant[0].toUpperCase()} Dominant`;
@@ -317,8 +261,6 @@ export const generateMasterPrediction = async (
         realityAlignment: 0
     };
 };
-
-// --- PERSISTANCE & UTILITAIRES ---
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
     if (isSupabaseConfigured() && navigator.onLine) {

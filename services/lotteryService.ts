@@ -201,6 +201,45 @@ export const getNextScheduledDraw = () => {
   }
 };
 
+export const fetchRecentStats = async (days: number = 7) => {
+  const cacheKey = `nexus_recent_stats_${days}d`;
+  if (!isSupabaseConfigured() || !navigator.onLine) {
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : [];
+  }
+  try {
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - days);
+    const dateStr = dateLimit.toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('draw_results')
+      .select('gagnants')
+      .gte('date', dateStr);
+
+    if (error) throw error;
+    
+    const counts: Record<number, number> = {};
+    (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
+    
+    // Si pas de données récentes, on fallback sur une simulation (ou vide)
+    // Mais pour l'UX, on peut retourner les stats globales si vide pour ne pas casser l'affichage
+    if (Object.keys(counts).length === 0) {
+         return fetchGlobalStats();
+    }
+
+    const stats = Object.entries(counts)
+      .map(([n, c]) => ({ number: Number(n), count: c }))
+      .sort((a, b) => b.count - a.count);
+    
+    localStorage.setItem(cacheKey, JSON.stringify(stats));
+    return stats;
+  } catch (e) {
+    const cached = localStorage.getItem(cacheKey);
+    return cached ? JSON.parse(cached) : [];
+  }
+};
+
 export const fetchGlobalStats = async () => {
   const cacheKey = 'nexus_global_stats';
   if (!isSupabaseConfigured() || !navigator.onLine) {

@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import type { ForensicReport, ForensicEvidence, AlgoWeights, AdaptiveRules, PredictionFeedback } from '../types';
+import type { ForensicReport, ForensicEvidence, AlgoWeights, PredictionFeedback } from '../types';
 import { NumberBall } from './NumberBall';
-import { calculateCorrectionsFromForensics, getAlgoWeights, getAdaptiveRules, saveAlgoWeights, normalizeWeights } from '../services/predictionEngine';
+import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from '../services/predictionEngine';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { invokeEdgeFunction } from '../services/apiClient';
@@ -10,9 +10,9 @@ import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 import { 
     ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
-    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, BarChart3, RefreshCw, Dna
+    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, RefreshCw, Dna
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
 interface PredictionForensicsProps {
     report: ForensicReport;
@@ -25,6 +25,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     
     const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation'>('ballistic');
     const [applying, setApplying] = useState(false);
+    const [successApply, setSuccessApply] = useState(false);
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
     const [feedbackSent, setFeedbackSent] = useState(false);
     const [userRating, setUserRating] = useState<PredictionFeedback['userRating'] | null>(null);
@@ -32,7 +33,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     
     const [bestScenario, setBestScenario] = useState<any | null>(null);
 
-    // Détermination du meilleur scénario contrefactuel au chargement
     useEffect(() => {
         if (report.counterfactuals && report.counterfactuals.length > 0) {
             setBestScenario(report.counterfactuals[0]);
@@ -43,37 +43,23 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         if (!bestScenario) return;
         setApplying(true);
         try {
-            // 1. Charger les poids actuels (Configuration ADN active)
             const currentWeights = await getAlgoWeights(report.drawName);
-            
-            // 2. Identifier l'algo à booster (celui qui a le mieux performé dans la simulation "What If")
             const algoKey = bestScenario.algo as keyof AlgoWeights;
             const oldVal = currentWeights[algoKey] || 0;
-            
-            // 3. Appliquer un boost significatif mais contrôlé (+15% ou +0.15)
-            // Cela signale au système que cet algorithme est actuellement le plus pertinent pour ce tirage
             const boost = 0.15; 
             const newVal = oldVal + boost;
             
             const newWeights = { ...currentWeights };
             newWeights[algoKey] = newVal;
             
-            // 4. Normalisation CRITIQUE : Si on augmente un poids, les autres doivent baisser proportionnellement
-            // pour garder une somme de 1.0 (100% d'énergie décisionnelle)
             const normalized = normalizeWeights(newWeights);
             const finalVal = normalized[algoKey] || 0;
 
-            // 5. Sauvegarde Persistante (Affecte les futurs calculs "Oracle" et "Platinum")
             await saveAlgoWeights(report.drawName, normalized);
-            
-            // 6. Mise à jour du contexte live de l'application
             await updateGlobalWeights(normalized);
-            
-            // 7. Forcer un rafraîchissement des données pour que l'interface reflète le nouvel ADN
-            // (Note: Cela ne changera pas l'historique passé, mais préparera la prochaine prédiction)
             await refreshData(report.drawName, true); 
 
-            // Feedback visuel précis
+            setSuccessApply(true);
             const percentChange = Math.round((finalVal - (currentWeights[algoKey] || 0)) * 100);
             showToast(`🧬 Mutation ADN : ${algoKey.toUpperCase()} renforcé (+${percentChange}%). Configuration sauvegardée.`, "success");
             
@@ -118,20 +104,17 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         }
     };
     
-    // Visualization Data
     const spectralChartData = useMemo(() => {
         return report.spectralDeviations?.map(d => ({
             num: d.number,
             prediction: d.predictedEnergy,
             realite: d.actualEnergy,
             delta: d.delta,
-            // Couleur dynamique pour la barre Delta
             fill: d.delta > 50 ? '#f43f5e' : '#fbbf24'
         })) || [];
     }, [report]);
 
     const simChartData = useMemo(() => {
-        // On compare le nombre de hits potentiels par algo
         return report.counterfactuals?.slice(0, 6).map(c => ({
             algo: c.algo.charAt(0).toUpperCase() + c.algo.slice(1),
             hits: c.potentialHits,
@@ -162,7 +145,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
             <div className="bg-white dark:bg-slate-900 w-full max-w-5xl max-h-[90vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 relative">
                 
-                {/* Header */}
                 <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-indigo-500 rounded-2xl text-white shadow-lg shadow-indigo-500/30">
@@ -177,7 +159,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </div>
                     
-                    {/* Navigation Tabs */}
                     <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl">
                         <button onClick={() => setActiveTab('ballistic')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
                         <button onClick={() => setActiveTab('spectral')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
@@ -191,7 +172,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-10 bg-slate-50/50 dark:bg-slate-900/50">
                     
-                    {/* TAB 1: BALLISTIC ANALYSIS */}
                     {activeTab === 'ballistic' && (
                         <div className="animate-slide-up space-y-8">
                             <section className="bg-white dark:bg-slate-950/50 rounded-[2.5rem] p-8 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
@@ -200,7 +180,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                 </h4>
                                 
                                 <div className="relative flex flex-col md:flex-row justify-between items-center gap-10 md:gap-20">
-                                    {/* PREDICTED */}
                                     <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
                                         <span className="text-[9px] font-black text-indigo-500 uppercase bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1 rounded-full">Prédiction IA</span>
                                         <div className="flex flex-wrap md:flex-col gap-3 justify-center">
@@ -217,14 +196,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         </div>
                                     </div>
 
-                                    {/* CONNECTORS */}
                                     <div className="hidden md:flex flex-col items-center gap-2 opacity-30 flex-1">
                                         <ArrowRight size={24} className="text-slate-400"/>
                                         <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-400 to-transparent"></div>
                                         <span className="text-[9px] font-mono text-slate-500">MAPPING</span>
                                     </div>
 
-                                    {/* ACTUAL */}
                                     <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
                                         <span className="text-[9px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full">Résultat Réel</span>
                                         <div className="flex flex-wrap md:flex-col gap-3 justify-center">
@@ -288,7 +265,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     )}
 
-                    {/* TAB 2: SPECTRAL DEVIATION */}
                     {activeTab === 'spectral' && (
                         <div className="animate-slide-up space-y-6">
                             <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 h-[400px]">
@@ -317,7 +293,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     )}
 
-                    {/* TAB 3: COUNTERFACTUAL SIMULATION & DNA PATCH */}
                     {activeTab === 'simulation' && (
                         <div className="animate-slide-up space-y-6">
                             <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl relative overflow-hidden">
@@ -332,7 +307,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                 {bestScenario ? (
                                     <div className="space-y-6">
                                         <div className="grid md:grid-cols-2 gap-8">
-                                            {/* Bar Chart Comparatif */}
                                             <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
                                                 <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2">Performance Virtuelle</h5>
                                                 <ResponsiveContainer width="100%" height="100%">
@@ -349,7 +323,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                 </ResponsiveContainer>
                                             </div>
 
-                                            {/* Radar Comparison Chart (New) */}
                                             <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
                                                 <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2">
                                                     <Dna size={12}/> Comparaison ADN
@@ -382,11 +355,11 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         
                                         <button 
                                             onClick={handleApplyCorrection} 
-                                            disabled={applying}
-                                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white font-black rounded-2xl uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                                            disabled={applying || successApply}
+                                            className={`w-full py-4 rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 group ${successApply ? 'bg-slate-800 text-emerald-500' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
                                         >
-                                            {applying ? <RefreshCw className="animate-spin" size={16}/> : <GitMerge size={16}/>}
-                                            {applying ? 'Mutation de l\'ADN...' : 'Appliquer le Patch Cognitif'}
+                                            {applying ? <RefreshCw className="animate-spin" size={16}/> : successApply ? <CheckCircle2 size={16}/> : <GitMerge size={16}/>}
+                                            {applying ? 'Mutation de l\'ADN...' : successApply ? 'Patch Appliqué' : 'Appliquer le Patch Cognitif'}
                                         </button>
                                     </div>
                                 ) : (
@@ -398,7 +371,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     )}
 
-                    {/* FEEDBACK SECTION */}
                     <div className="border-t border-slate-200 dark:border-slate-800 pt-8">
                         <div className="flex items-center gap-3 mb-4">
                             <MessageSquare size={18} className="text-slate-400"/>

@@ -1,9 +1,9 @@
 
 import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
-import { analyzeForManipulation, ForensicIndicator } from '../services/forensicAuditService';
-import { ShieldAlert, Fingerprint, Activity, BarChart3, Lock, AlertTriangle, CheckCircle2, Search, Gauge } from 'lucide-react';
-import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Cell, ReferenceLine, CartesianGrid } from 'recharts';
+import { analyzeForManipulation } from '../../services/forensicAuditService';
+import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge } from 'lucide-react';
+import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
 
 interface ForensicResultAuditProps {
@@ -12,19 +12,14 @@ interface ForensicResultAuditProps {
 }
 
 export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result, history }) => {
-    // Audit logic: Analyze current result against the context of previous history
     const audit = useMemo(() => {
         const contextHistory = history.filter(h => h.id !== result.id);
         return analyzeForManipulation(result.gagnants, contextHistory);
     }, [result, history]);
 
     const benfordData = useMemo(() => {
-        // Simulation visuelle de la loi de Benford pour le graphique
-        // La courbe théorique est log(1 + 1/d)
-        // La barre réelle est modulée par le score de conformité réel calculé par le service
         return [1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => {
             const expected = Math.log10(1 + 1/d) * 100;
-            // On introduit du bruit proportionnel à l'inverse de la conformité
             const noiseFactor = (100 - audit.benfordCompliance) / 100; 
             const noise = (Math.random() - 0.5) * 20 * noiseFactor;
             const actual = Math.max(0, expected + noise);
@@ -51,7 +46,6 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
 
     return (
         <div className="space-y-8 animate-fade-in">
-            {/* Top Level Status - Design Industriel */}
             <div className="bg-slate-900 rounded-[2.5rem] p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
                 <div className={`absolute top-0 right-0 w-64 h-64 rounded-full blur-[100px] opacity-20 ${getBgColor(audit.suspicionScore)}`}></div>
                 
@@ -104,7 +98,6 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
             </div>
 
             <div className="grid lg:grid-cols-2 gap-8">
-                {/* Anomalies Detected */}
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
                         <Fingerprint size={16} className="text-rose-500" /> Indicateurs d'Anomalie
@@ -145,7 +138,6 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                     )}
                 </div>
 
-                {/* Benford Chart - Composed Chart */}
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
                         <BarChart3 size={16} className="text-indigo-500" /> Loi de Benford (Premier Chiffre)

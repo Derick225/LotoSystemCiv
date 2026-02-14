@@ -335,10 +335,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             </div>
                         </motion.div>
 
-                        {/* TOP FREQUENCE 7J */}
+                        {/* TOP FREQUENCE 7J (High-Heat 7d) */}
                         <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full min-h-[400px]">
+                            {/* Decorative gradient for heat effect */}
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-red-500 to-purple-500 opacity-80"></div>
+                            
                             <h3 className="font-black text-white flex items-center gap-3 mb-8 md:mb-10 text-xl md:text-2xl tracking-tight uppercase justify-center lg:justify-start">
-                                <Flame className="w-6 h-6 md:w-7 md:h-7 text-orange-500" /> High-Heat 7d
+                                <Flame className="w-6 h-6 md:w-7 md:h-7 text-orange-500 animate-pulse-slow" /> High-Heat 7d
                             </h3>
                             <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
                                 {globalHot.length === 0 ? (
@@ -350,10 +353,10 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                       initial={{ opacity: 0, x: 20 }}
                                       animate={{ opacity: 1, x: 0 }}
                                       transition={{ delay: i * 0.1 }}
-                                      className="flex items-center justify-between p-4 rounded-xl md:rounded-2xl bg-black/40 border border-white/5 hover:border-indigo-500/30 transition-all group"
+                                      className="flex items-center justify-between p-4 rounded-xl md:rounded-2xl bg-black/40 border border-white/5 hover:border-orange-500/30 transition-all group"
                                     >
                                         <div className="flex items-center gap-4">
-                                            <span className="text-[10px] font-black text-slate-600 group-hover:text-indigo-400">#{i+1}</span>
+                                            <span className={`text-[10px] font-black ${i === 0 ? 'text-orange-400' : 'text-slate-600'} group-hover:text-orange-300`}>#{i+1}</span>
                                             <NumberBall number={stat.number} size="sm" confidence={Math.round(80 - i * 3)} />
                                         </div>
                                         <div className="text-right">

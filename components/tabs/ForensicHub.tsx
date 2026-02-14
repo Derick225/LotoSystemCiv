@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNexus } from '../NexusProvider';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
 import { performForensicAnalysis } from '../../services/postPredictionAnalysisService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
-import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX, Crown, ScanBarcode, FileSearch, Radar as RadarIcon } from 'lucide-react';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 
@@ -19,67 +19,72 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [loading, setLoading] = useState(true);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [mode, setMode] = useState<ForensicMode>('prediction');
+    const [refreshKey, setRefreshKey] = useState(0);
+
+    const runAnalysis = useCallback(async () => {
+        if (history.length < 1) {
+            setLoading(false);
+            return;
+        }
+        setLoading(true);
+        try {
+            // 1. Audit Standard (Oracle)
+            const preds = await getPredictionHistoryAsync(drawName);
+            const computedReports: ForensicReport[] = [];
+
+            for (const pred of preds.slice(0, 30)) {
+                let actual = null;
+                if (pred.drawResultId) {
+                    actual = history.find(h => h.id === pred.drawResultId);
+                }
+                if (!actual) {
+                    const predDateLocale = new Date(pred.timestamp).toLocaleDateString('fr-FR');
+                    actual = history.find(h => h.date === predDateLocale);
+                }
+
+                if (actual) {
+                    const rep = await performForensicAnalysis(
+                        drawName, 
+                        actual.date, 
+                        pred.prediction.suggestedNumbers, 
+                        actual.gagnants, 
+                        pred.prediction.breakdown,
+                        pred.id
+                    );
+                    computedReports.push(rep);
+                }
+            }
+            setReports(computedReports);
+
+            // 2. Audit Platinum (Timelines)
+            const platHist = getPlatinumHistory(drawName);
+            const computedAudits: PlatinumAudit[] = [];
+            
+            for (const plat of platHist.slice(0, 20)) {
+                const platDateLocale = new Date(plat.timestamp).toLocaleDateString('fr-FR');
+                const actual = history.find(h => h.date === platDateLocale);
+                
+                if (actual) {
+                    const audit = performPlatinumAudit(plat, actual);
+                    computedAudits.push(audit);
+                }
+            }
+            setPlatinumAudits(computedAudits);
+
+        } catch (err) {
+            console.error("Forensic Hub Sync Error:", err);
+        } finally {
+            setLoading(false);
+        }
+    }, [drawName, history]);
 
     useEffect(() => {
-        const analyze = async () => {
-            if (history.length < 1) {
-                setLoading(false);
-                return;
-            }
-            setLoading(true);
-            try {
-                // 1. Audit Standard (Oracle)
-                const preds = await getPredictionHistoryAsync(drawName);
-                const computedReports: ForensicReport[] = [];
+        runAnalysis();
+    }, [runAnalysis, refreshKey]);
 
-                for (const pred of preds.slice(0, 30)) {
-                    let actual = null;
-                    if (pred.drawResultId) {
-                        actual = history.find(h => h.id === pred.drawResultId);
-                    }
-                    if (!actual) {
-                        const predDateLocale = new Date(pred.timestamp).toLocaleDateString('fr-FR');
-                        actual = history.find(h => h.date === predDateLocale);
-                    }
-
-                    if (actual) {
-                        const rep = await performForensicAnalysis(
-                            drawName, 
-                            actual.date, 
-                            pred.prediction.suggestedNumbers, 
-                            actual.gagnants, 
-                            pred.prediction.breakdown,
-                            pred.id
-                        );
-                        computedReports.push(rep);
-                    }
-                }
-                setReports(computedReports);
-
-                // 2. Audit Platinum (Timelines)
-                const platHist = getPlatinumHistory(drawName);
-                const computedAudits: PlatinumAudit[] = [];
-                
-                for (const plat of platHist.slice(0, 20)) {
-                    // Recherche stricte par date
-                    const platDateLocale = new Date(plat.timestamp).toLocaleDateString('fr-FR');
-                    const actual = history.find(h => h.date === platDateLocale);
-                    
-                    if (actual) {
-                        const audit = performPlatinumAudit(plat, actual);
-                        computedAudits.push(audit);
-                    }
-                }
-                setPlatinumAudits(computedAudits);
-
-            } catch (err) {
-                console.error("Forensic Hub Sync Error:", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        analyze();
-    }, [drawName, history]);
+    const handleRefresh = () => {
+        setRefreshKey(prev => prev + 1);
+    };
 
     // Calcul de la précision agrégée des neurones pour le Radar
     const algoRadarData = useMemo(() => {
@@ -94,28 +99,26 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             });
         });
 
-        // On normalise sur 100 pour le graphique radar
         return Object.entries(aggregates).map(([algo, data]) => ({
             algo: algo.charAt(0).toUpperCase() + algo.slice(1),
-            precision: Math.round((data.sum / Math.max(1, data.count)) * 1.5), // Scale up for visibility
+            precision: Math.round((data.sum / Math.max(1, data.count)) * 1.5), 
             fullMark: 100
         })).sort((a, b) => b.precision - a.precision).slice(0, 6);
     }, [reports]);
 
-    // Calcul de la performance des Timelines Platinum
     const platinumStats = useMemo(() => {
         if (platinumAudits.length === 0) return [];
         const stats: Record<string, number> = { 'Alpha Core': 0, 'Beta Flow': 0, 'Gamma Burst': 0 };
         
         platinumAudits.forEach(audit => {
             audit.timelinePerformance.forEach(tp => {
-                if (stats[tp.type] !== undefined) stats[tp.type] += tp.hits;
-                else stats[tp.type] = tp.hits;
+                const key = Object.keys(stats).find(k => tp.type.includes(k.split(' ')[0]));
+                if (key) stats[key] += tp.hits;
             });
         });
         
         return Object.entries(stats).map(([type, hits]) => ({
-            name: type.split(' ')[0], // Alpha, Beta...
+            name: type.split(' ')[0], 
             hits: hits,
             color: type.includes('Alpha') ? '#10b981' : type.includes('Beta') ? '#6366f1' : '#f43f5e'
         })).sort((a, b) => b.hits - a.hits);
@@ -129,16 +132,15 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         })).reverse();
     }, [reports]);
 
-    if (loading) return (
-        <div className="flex flex-col items-center justify-center p-20 gap-4 animate-pulse text-indigo-500">
-            <RefreshCw className="animate-spin" size={32} />
-            <p className="font-black uppercase text-[10px] tracking-[0.4em]">Comparaison des vecteurs...</p>
+    if (loading && reports.length === 0) return (
+        <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse">
+            <Microscope className="text-indigo-500 animate-bounce" size={48} />
+            <p className="font-black text-indigo-500 uppercase tracking-[0.4em] text-xs">Analyse Vectorielle Post-Mortem...</p>
         </div>
     );
 
     return (
         <div className="space-y-8 animate-fade-in pb-16">
-            {/* Header Forensic Unit */}
             <div className="bg-slate-900 text-white p-8 md:p-12 rounded-[3.5rem] shadow-2xl border border-slate-800 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform"><Network size={160} /></div>
                 
@@ -154,7 +156,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             Autopsie <span className="text-rose-500">Deep-Scan</span>
                         </h2>
                         
-                        {/* Mode Switcher */}
                         <div className="flex gap-2 bg-black/40 p-1.5 rounded-2xl border border-white/5 w-fit">
                             <button 
                                 onClick={() => setMode('prediction')}
@@ -170,18 +171,23 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </button>
                         </div>
                     </div>
+                    
+                    <button 
+                        onClick={handleRefresh}
+                        className="p-4 bg-slate-800/50 hover:bg-slate-800 rounded-2xl border border-white/10 text-slate-400 hover:text-white transition-all group"
+                        title="Relancer l'analyse"
+                    >
+                         <RefreshCw size={20} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
                 </div>
             </div>
 
-            {/* MODE: STRUCTURE */}
             {mode === 'structure' && history.length > 0 && (
                 <ForensicResultAudit result={history[0]} history={history} />
             )}
 
-            {/* MODE: PREDICTION */}
             {mode === 'prediction' && (
-                <div className="space-y-8">
-                    {/* Top Stats Row */}
+                <div className="space-y-8 animate-slide-up">
                     <div className="grid md:grid-cols-2 gap-6">
                         {/* Platinum Stats */}
                         <div className="bg-white dark:bg-slate-950 p-6 rounded-[3rem] border border-indigo-100 dark:border-indigo-900/30 shadow-xl relative overflow-hidden">
@@ -213,7 +219,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                         </div>
 
-                        {/* Algo Accuracy Radar - NOUVEAU */}
+                        {/* Algo Accuracy Radar */}
                         <div className="bg-slate-900 p-6 rounded-[3rem] border border-slate-800 shadow-xl relative overflow-hidden">
                             <div className="flex justify-between items-center mb-4 relative z-10">
                                 <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
@@ -235,7 +241,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">Données insuffisantes</div>
                                 )}
                             </div>
-                            {/* Decor */}
                             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
                         </div>
                     </div>
@@ -344,11 +349,3 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
     );
 };
-
-const RefreshCw = ({size, className}:any) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M23 4v6h-6"></path>
-        <path d="M1 20v-6h6"></path>
-        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-    </svg>
-);
