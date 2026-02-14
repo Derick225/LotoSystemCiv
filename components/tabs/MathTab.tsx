@@ -154,5 +154,6 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
                 </div>
             )}
         </div>
-    );
+    </div>
+  );
 };
