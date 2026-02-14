@@ -3,7 +3,7 @@ import React from 'react';
 import type { SmartInsight } from '../types';
 import { useNexus } from './NexusProvider';
 import { ArrowRight, TrendingUp, AlertTriangle, Lightbulb, Zap, Clock, Activity, BarChart2 } from 'lucide-react';
-import { audioEngine } from '../../utils/audioEngine';
+import { audioEngine } from '../utils/audioEngine';
 
 interface SmartInsightsProps {
     drawName: string;
