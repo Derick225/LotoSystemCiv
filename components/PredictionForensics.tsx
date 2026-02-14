@@ -10,9 +10,9 @@ import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 import { 
     ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
-    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, BarChart3, RefreshCw 
+    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, BarChart3, RefreshCw, Dna
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ReferenceLine, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
 interface PredictionForensicsProps {
     report: ForensicReport;
@@ -136,6 +136,15 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             algo: c.algo.charAt(0).toUpperCase() + c.algo.slice(1),
             hits: c.potentialHits,
             color: c.potentialHits >= 3 ? '#10b981' : '#6366f1'
+        })) || [];
+    }, [report]);
+
+    const dnaComparisonData = useMemo(() => {
+        return report.counterfactuals?.slice(0, 6).map(c => ({
+            subject: c.algo.charAt(0).toUpperCase() + c.algo.slice(1),
+            original: Math.round(c.originalWeight * 100),
+            optimal: Math.round(c.optimalWeight * 100),
+            fullMark: 100
         })) || [];
     }, [report]);
 
@@ -322,20 +331,41 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
                                 {bestScenario ? (
                                     <div className="space-y-6">
-                                        {/* Chart Comparatif */}
-                                        <div className="h-48 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={simChartData} layout="vertical">
-                                                    <XAxis type="number" hide />
-                                                    <YAxis dataKey="algo" type="category" width={80} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 'bold'}} />
-                                                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
-                                                    <Bar dataKey="hits" radius={[0, 4, 4, 0]} barSize={16}>
-                                                        {simChartData.map((entry, index) => (
-                                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                                        ))}
-                                                    </Bar>
-                                                </BarChart>
-                                            </ResponsiveContainer>
+                                        <div className="grid md:grid-cols-2 gap-8">
+                                            {/* Bar Chart Comparatif */}
+                                            <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2">Performance Virtuelle</h5>
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart data={simChartData} layout="vertical">
+                                                        <XAxis type="number" hide />
+                                                        <YAxis dataKey="algo" type="category" width={80} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 'bold'}} />
+                                                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
+                                                        <Bar dataKey="hits" radius={[0, 4, 4, 0]} barSize={16}>
+                                                            {simChartData.map((entry, index) => (
+                                                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                                            ))}
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+
+                                            {/* Radar Comparison Chart (New) */}
+                                            <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2">
+                                                    <Dna size={12}/> Comparaison ADN
+                                                </h5>
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={dnaComparisonData}>
+                                                        <PolarGrid stroke="#334155" strokeDasharray="3 3" />
+                                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 9, fontWeight: 'bold' }} />
+                                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                                        <Radar name="Original" dataKey="original" stroke="#6366f1" strokeWidth={2} fill="#6366f1" fillOpacity={0.3} />
+                                                        <Radar name="Optimal" dataKey="optimal" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.3} />
+                                                        <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px', color: '#fff' }} />
+                                                    </RadarChart>
+                                                </ResponsiveContainer>
+                                            </div>
                                         </div>
 
                                         <div className="flex items-start gap-3 text-xs text-slate-300 bg-white/5 p-4 rounded-xl border border-white/5">

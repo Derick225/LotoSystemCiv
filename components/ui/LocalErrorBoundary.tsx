@@ -3,6 +3,8 @@ import { RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface LocalErrorBoundaryProps {
   children?: ReactNode;
+  // Explicitly allow key to prevent TS errors in consumers
+  key?: React.Key;
 }
 
 interface LocalErrorBoundaryState {
@@ -14,10 +16,11 @@ interface LocalErrorBoundaryState {
  * LocalErrorBoundary v1.2
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-export class LocalErrorBoundary extends Component<LocalErrorBoundaryProps, LocalErrorBoundaryState> {
+export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps, LocalErrorBoundaryState> {
+  public state: LocalErrorBoundaryState = { hasError: false, error: null };
+
   constructor(props: LocalErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
   }
 
   // Standard static method for error boundaries
@@ -43,7 +46,7 @@ export class LocalErrorBoundary extends Component<LocalErrorBoundaryProps, Local
           </div>
           <div>
             <p className="font-black text-xs uppercase tracking-widest text-slate-800 dark:text-white mb-1">Module Indisponible</p>
-            <p className="text-[10px] opacity-70 max-w-[200px] mx-auto leading-relaxed">
+            <p className="text-slate-400 text-[10px] opacity-70 max-w-[200px] mx-auto leading-relaxed">
               {this.state.error?.message || "Erreur de rendu interne."}
             </p>
           </div>

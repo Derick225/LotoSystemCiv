@@ -1,11 +1,9 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchResults, addResult, updateResult, deleteResult, bulkAddResults } from '../../services/lotteryService';
-import { parseResultFromImage } from '../../services/geminiService';
 import { ExportService } from '../../services/exportService';
 import type { DrawResult } from '../../types';
 import { useToast } from '../ui/Toast';
-import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, Camera, Sparkles, Binary, History, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, Clipboard, DownloadCloud } from 'lucide-react';
+import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, Clipboard, DownloadCloud, FileText, Sparkles, Binary } from 'lucide-react';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
 
 interface DrawManagementProps {
@@ -27,11 +25,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const [loading, setLoading] = useState(true);
     const [activeSubTab, setActiveSubTab] = useState<'manual' | 'bulk' | 'audit' | 'export'>('manual');
     
-    // Vision OCR State
-    const [isScanning, setIsScanning] = useState(false);
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-
     // Manual Form State
     const [isEditing, setIsEditing] = useState(false);
     const [editId, setEditId] = useState<string | null>(null);
@@ -65,33 +58,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             const { data } = await fetchResults(drawName);
             setResults(data);
         } catch (e) { showToast("Erreur de chargement", "error"); } finally { setLoading(false); }
-    };
-
-    // --- MANUAL & CAMERA LOGIC ---
-    const startCamera = async () => {
-        setIsScanning(true);
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                videoRef.current.play();
-            }
-        } catch (err) {
-            showToast("Caméra inaccessible", "error");
-            setIsScanning(false);
-        }
-    };
-
-    const stopCamera = () => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-            tracks.forEach(t => t.stop());
-        }
-        setIsScanning(false);
-    };
-
-    const captureAndParse = async () => {
-        // ... (Code OCR inchangé pour la brièveté) ...
     };
 
     const validateNumbers = (nums: number[]) => {
@@ -142,65 +108,75 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         setFormDate(new Date().toISOString().split('T')[0]);
     };
 
-    // --- BULK IMPORT LOGIC (ROBUST PARSING UPDATED) ---
+    // --- BULK IMPORT LOGIC (ENHANCED FOR HISTORICAL FILES) ---
 
     const processRawData = (content: string) => {
         const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
         const preview: PreviewRow[] = [];
 
         lines.forEach((line, index) => {
-            // Détection et saut de l'en-tête CSV fourni (Date,G1,G2...)
+            // Ignorer l'en-tête technique
             const lowerLine = line.toLowerCase();
-            if (index === 0 && (lowerLine.includes('date') || lowerLine.includes('g1') || lowerLine.includes('gagnant'))) return;
+            if (index === 0 && (lowerLine.includes('date') || lowerLine.includes('g1'))) return;
 
             let separator = ',';
             if (line.includes('\t')) separator = '\t';
             else if (line.includes(';')) separator = ';';
             
-            // Nettoyage des guillemets
             const cleanLine = line.replace(/['"]/g, '').trim();
             const parts = cleanLine.split(separator).map(p => p.trim());
 
-            // Support du format : Date, G1-G5, M1-M5, ID (12 colonnes)
-            // OU format minimal : Date, G1-G5 (6 colonnes)
+            // Format attendu: Date, G1, G2, G3, G4, G5, M1, M2, M3, M4, M5, ID
             if (parts.length < 6) {
-                preview.push({ date: '?', gagnants: [], machine: [], isValid: false, error: 'Format incomplet (< 6 colonnes)', rawLine: line });
-                return;
+                return; // Ignore malformed lines
             }
 
             const dateStr = parts[0];
-            // Extraction Gagnants (colonnes 1 à 5)
-            const winners = parts.slice(1, 6).map(p => {
-                const n = parseInt(p, 10);
-                return (!isNaN(n) && n > 0 && n <= 90) ? n : null;
-            }).filter((n): n is number => n !== null);
+            
+            // Parsing des Gagnants (Colonnes 1 à 5)
+            const winners = parts.slice(1, 6).map(p => parseInt(p, 10)).filter(n => !isNaN(n) && n > 0 && n <= 90);
 
-            // Extraction Machine (colonnes 6 à 10, si elles existent et sont des nombres valides)
-            // Le format fourni a 12 colonnes, M1 est à l'index 6
+            // Parsing de la Machine (Colonnes 6 à 10)
+            // Gère les cas vides comme ",,,,,,"
             let machine: number[] = [];
             if (parts.length >= 11) {
-                 machine = parts.slice(6, 11).map(p => {
-                    const n = parseInt(p, 10);
-                    return (!isNaN(n) && n > 0 && n <= 90) ? n : null;
-                }).filter((n): n is number => n !== null);
+                 machine = parts.slice(6, 11).map(p => parseInt(p, 10)).filter(n => !isNaN(n) && n > 0 && n <= 90);
             }
 
             let isValid = true;
             let error = '';
 
-            // Validation Date (Accepte DD/MM/YYYY et YYYY-MM-DD)
-            if (!dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/) && !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                isValid = false; error = 'Date invalide';
+            // Validation Date stricte & Conversion
+            // Supporte DD/MM/YYYY (format fourni)
+            const ddmmyyyy = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            
+            let finalDate = dateStr;
+            if (!ddmmyyyy) {
+                 // Check if already ISO
+                 if(!dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                     isValid = false; error = 'Format Date invalide (requis: JJ/MM/AAAA)';
+                 }
+            } else {
+                 // Normalisation visuelle
+                 finalDate = `${ddmmyyyy[1].padStart(2,'0')}/${ddmmyyyy[2].padStart(2,'0')}/${ddmmyyyy[3]}`;
             }
+
             // Validation Numéros
             if (winners.length !== 5) {
-                isValid = false; error = `Gagnants invalides (${winners.length}/5)`;
+                isValid = false; error = `Gagnants incomplets (${winners.length}/5)`;
             } else if (new Set(winners).size !== 5) {
-                isValid = false; error = 'Doublons détectés';
+                isValid = false; error = 'Doublons dans les gagnants';
+            }
+            
+            // Si machine est présente mais incomplète (souvent vide dans les fichiers CSV fournis)
+            // On accepte machine vide (length 0), mais si elle contient des données partielles, c'est une erreur sauf si ignoré
+            if (machine.length > 0 && machine.length < 5) {
+                // Pour les fichiers historiques partiels, on considère simplement qu'il n'y a pas de machine
+                machine = [];
             }
 
             preview.push({
-                date: dateStr,
+                date: finalDate,
                 gagnants: winners,
                 machine: machine.length === 5 ? machine : [], 
                 isValid,
@@ -227,13 +203,12 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     };
 
     const downloadTemplate = () => {
-        // Mise à jour du template pour correspondre au format utilisateur
         const csvContent = "Date,G1,G2,G3,G4,G5,M1,M2,M3,M4,M5,ID\n02/02/2026,5,49,16,15,18,77,69,47,24,50,uuid-optionnel";
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'modele_import_nexus.csv';
+        a.download = 'nexus_import_template.csv';
         a.click();
     };
 
@@ -245,10 +220,17 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         try {
             const uniqueMap = new Map();
             validRows.forEach(row => {
-                // Conversion format date pour le backend si besoin (normalisé par le service)
-                uniqueMap.set(row.date, {
+                // Normalisation de la date pour le backend (YYYY-MM-DD)
+                let isoDate = row.date;
+                const ddmmyyyy = row.date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                if (ddmmyyyy) {
+                    isoDate = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+                }
+
+                // Clé unique pour éviter les doublons dans le lot
+                uniqueMap.set(isoDate, {
                     draw_name: drawName,
-                    date: row.date,
+                    date: isoDate,
                     gagnants: row.gagnants,
                     machine: row.machine,
                     version: 1
@@ -257,10 +239,20 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
             const batch = Array.from(uniqueMap.values());
             await bulkAddResults(drawName, batch);
-            showToast(`${batch.length} tirages importés avec succès.`, "success");
+            
+            showToast(`${batch.length} tirages historiques importés.`, "success");
+            
+            // Reset
             setPreviewData([]);
             setImportStep('upload');
             loadData();
+            
+            // Suggestion d'aller vers le training
+            showToast("Lancement de l'analyse post-import...", "info");
+            setTimeout(() => {
+                 window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'admin', subTab: 'training' } }));
+            }, 1500);
+            
         } catch (e: any) {
             showToast(`Erreur d'import : ${e.message}`, "error");
         } finally {
@@ -294,7 +286,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             {/* Header Actions Card */}
             <div className="bg-slate-900 text-white p-4 md:p-6 rounded-[2.2rem] md:rounded-[3rem] flex flex-col md:flex-row items-center justify-between shadow-2xl border border-slate-800 gap-4 w-full">
                 <div className="flex items-center gap-4 w-full md:w-auto">
-                    <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg"><History size={20} className="text-white" /></div>
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg"><FileText size={20} className="text-white" /></div>
                     <div>
                         <span className="text-[8px] md:text-[9px] font-black uppercase tracking-[0.2em] text-indigo-400">Registre Master</span>
                         <h4 className="text-base md:text-xl font-black leading-none">{drawName}</h4>
@@ -305,7 +297,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                         <Pencil size={12}/> Saisie
                     </button>
                     <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
-                        <LayoutGrid size={12}/> Import
+                        <LayoutGrid size={12}/> Import CSV
                     </button>
                     <button onClick={() => setActiveSubTab('export')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'export' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <DownloadCloud size={12}/> Export
@@ -404,22 +396,22 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                     <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-2xl"><Upload size={20}/></div>
                                     <div>
                                         <h3 className="font-black text-slate-800 dark:text-white uppercase text-sm md:text-base">Import de Masse</h3>
-                                        <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">Format: Date,G1-G5,M1-M5,ID</p>
+                                        <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">Supporte : Date(DD/MM/YYYY), G1-G5, M1-M5</p>
                                     </div>
                                 </div>
                                 <button onClick={downloadTemplate} className="text-[10px] md:text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"><Download size={14}/> Modèle CSV</button>
                             </div>
 
                             <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-full md:w-fit overflow-x-auto scrollbar-hide">
-                                <button onClick={() => setUploadMode('text')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400'}`}><Clipboard size={14}/> Copier/Coller</button>
+                                <button onClick={() => setUploadMode('text')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${uploadMode === 'text' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400'}`}><Clipboard size={14}/> Coller</button>
                                 <button onClick={() => setUploadMode('file')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${uploadMode === 'file' ? 'bg-white dark:bg-slate-800 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400'}`}>Fichier</button>
                             </div>
 
                             {uploadMode === 'file' ? (
-                                <div onClick={() => fileInputRef.current?.click()} className="w-full h-40 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-[2rem] flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 transition-all">
-                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="hidden" />
+                                <div onClick={() => fileInputRef.current?.click()} className="w-full h-40 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-[2rem] flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-500 transition-all bg-slate-50/50 dark:bg-slate-900/50">
+                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.txt" className="hidden" />
                                     <FileSpreadsheet size={32} className="text-slate-400" />
-                                    <p className="text-xs font-bold text-slate-500">Glisser un fichier CSV ici</p>
+                                    <p className="text-xs font-bold text-slate-500">Glisser le fichier historique ici</p>
                                 </div>
                             ) : (
                                 <div className="space-y-4">
@@ -427,7 +419,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                                         value={pasteContent} 
                                         onChange={(e) => setPasteContent(e.target.value)} 
                                         className="w-full h-40 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 font-mono text-[10px] text-slate-600 dark:text-slate-300 focus:border-indigo-500 outline-none transition-all resize-none" 
-                                        placeholder="02/02/2026,5,49,16,15,18,77,69,47,24,50,uuid..." 
+                                        placeholder="Format compatible : 02/02/2026,5,49,16,15,18..." 
                                     />
                                     <button onClick={() => processRawData(pasteContent)} disabled={!pasteContent.trim()} className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase shadow-xl disabled:opacity-50">Analyser les Données</button>
                                 </div>
@@ -485,7 +477,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
                             <div className="flex gap-3 justify-end">
                                 <button onClick={() => setImportStep('upload')} className="px-6 py-2.5 text-slate-500 font-bold text-[10px] uppercase">Annuler</button>
-                                <button onClick={confirmImport} disabled={isImporting || validCount === 0} className="px-8 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-emerald-500/20 disabled:opacity-50">Confirmer l'Import</button>
+                                <button onClick={confirmImport} disabled={isImporting || validCount === 0} className="px-8 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-emerald-500/20 disabled:opacity-50">Confirmer et Analyser</button>
                             </div>
                         </div>
                     )}

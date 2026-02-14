@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { evolveNeuralDNA } from '../../services/trainingService';
+import { evolveNeuralDNA, runBacktestTraining } from '../../services/trainingService';
 import { normalizeWeights, getAlgoWeights } from '../../services/predictionEngine';
 import { useNexus } from '../NexusProvider';
 import { AlgoRadar } from '../AlgoRadar';
@@ -8,10 +7,10 @@ import { useToast } from '../ui/Toast';
 import { audioEngine } from '../../utils/audioEngine';
 import { 
     Dna, Play, Save, X, Activity, Microscope, 
-    ArrowRight, TrendingUp, Zap, Cpu, Terminal, RefreshCw
+    ArrowRight, TrendingUp, Zap, Cpu, Terminal, RefreshCw, BarChart2
 } from 'lucide-react';
 import type { AlgoWeights, TrainingReport } from '../../types';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend, BarChart, Bar, Cell } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- SUB-COMPONENTS ---
@@ -42,7 +41,7 @@ const LogTerminal: React.FC<{ logs: string[] }> = ({ logs }) => {
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { globalWeights, updateGlobalWeights, refreshData } = useNexus();
+    const { globalWeights, updateGlobalWeights, refreshData, history } = useNexus();
     
     // Config
     const [generations, setGenerations] = useState(50);
@@ -55,6 +54,24 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [logs, setLogs] = useState<string[]>([]);
     const [finalReport, setFinalReport] = useState<TrainingReport | null>(null);
     const [improvement, setImprovement] = useState(0);
+    
+    // Benchmark state
+    const [initialScore, setInitialScore] = useState<number | null>(null);
+
+    // Initial Load Baseline
+    useEffect(() => {
+        const loadBaseline = async () => {
+            if (history.length > 50 && initialScore === null) {
+                try {
+                    const baseReport = await runBacktestTraining(drawName, history, sampleSize, undefined, globalWeights);
+                    setInitialScore(baseReport.score);
+                } catch (e) {
+                    console.warn("Baseline calc error");
+                }
+            }
+        };
+        loadBaseline();
+    }, [drawName, history, globalWeights]);
 
     // Handlers
     const addLog = (msg: string) => setLogs(prev => [...prev.slice(-19), msg]);
@@ -62,7 +79,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const handleStartTraining = async () => {
         setStatus('running');
         setEvolutionData([]);
-        setLogs(["Initialisation du Cluster Génétique...", "Chargement de l'historique...", "Population initiale: 40 génomes"]);
+        setLogs(["Initialisation du Cluster Génétique...", "Analyse de la base de données importée...", `Population initiale: ${history.length} entrées`]);
         audioEngine.play('scan');
         
         try {
@@ -87,7 +104,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setStatus('completed');
                 addLog("Convergence atteinte. Solution optimale isolée.");
                 audioEngine.play('success');
-                showToast("Entraînement terminé.", "success");
+                showToast("Optimisation terminée avec succès.", "success");
             }
 
         } catch (e: any) {
@@ -105,10 +122,15 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             await updateGlobalWeights(safeWeights);
             await refreshData(drawName, true);
             setStatus('idle');
-            showToast("ADN Neuronal mis à jour.", "success");
+            showToast("ADN Neuronal mis à jour avec les nouveaux paramètres.", "success");
             audioEngine.play('boot');
         }
     };
+
+    const benchmarkData = [
+        { name: 'Actuel', score: initialScore || 0, fill: '#6366f1' },
+        { name: 'Optimisé', score: finalReport ? finalReport.score : 0, fill: '#10b981' }
+    ];
 
     return (
         <div className="space-y-6 md:space-y-8 animate-fade-in pb-24 w-full overflow-hidden">
@@ -126,7 +148,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                         <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">Neural <span className="text-emerald-500">Darwinism</span></h2>
                         <p className="text-slate-400 text-xs md:text-sm font-medium mt-2 max-w-lg">
-                            Optimisez les poids du modèle via un algorithme génétique élitiste. Le système simule des milliers de mutations pour maximiser le ratio de Sharpe.
+                            Utilisez l'historique importé pour calibrer les poids. Le système va simuler des milliers de combinaisons pour trouver l'ADN parfait.
                         </p>
                     </div>
 
@@ -171,7 +193,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <div className="flex gap-2 mt-2">
                                 <button onClick={() => setStatus('idle')} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs uppercase"><X size={16}/></button>
                                 <button onClick={handleApply} className="flex-[3] py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-lg animate-pulse">
-                                    <Save size={16}/> Appliquer
+                                    <Save size={16}/> Appliquer Optimisation
                                 </button>
                             </div>
                         )}
@@ -240,17 +262,35 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
                                 <div className="text-[9px] font-black text-slate-500 uppercase mb-1">Score Actuel</div>
                                 <div className="text-2xl font-black text-slate-300">
-                                    {finalReport ? (finalReport.score - improvement).toFixed(1) : '--'}
+                                    {initialScore ? initialScore.toFixed(1) : '--'}
                                 </div>
                             </div>
                             <div className="bg-emerald-500/10 p-4 rounded-2xl border border-emerald-500/30 relative overflow-hidden">
                                 <div className="absolute -right-4 -top-4 bg-emerald-500/20 w-20 h-20 rounded-full blur-xl"></div>
-                                <div className="text-[9px] font-black text-emerald-400 uppercase mb-1">Nouveau Score (Projeté)</div>
+                                <div className="text-[9px] font-black text-emerald-400 uppercase mb-1">Score Optimisé</div>
                                 <div className="text-3xl font-black text-emerald-400 flex items-center gap-2">
                                     {finalReport ? finalReport.score.toFixed(1) : '--'}
                                     {improvement > 0 && <span className="text-xs bg-emerald-500 text-white px-2 py-1 rounded-lg">+{improvement.toFixed(1)}%</span>}
                                 </div>
                             </div>
+
+                            {/* Benchmark Bar Chart */}
+                            {finalReport && (
+                                <div className="h-32 w-full mt-2">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={benchmarkData} layout="vertical">
+                                            <XAxis type="number" hide />
+                                            <YAxis dataKey="name" type="category" width={60} tick={{fontSize: 10, fill: '#64748b', fontWeight: 'bold'}} />
+                                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
+                                            <Bar dataKey="score" barSize={16} radius={[0, 4, 4, 0]}>
+                                                {benchmarkData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            )}
                          </div>
                     </div>
                 </div>
@@ -284,7 +324,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     {/* Info Box */}
                     <div className="p-5 bg-indigo-50 dark:bg-indigo-900/20 rounded-[2rem] border border-indigo-100 dark:border-indigo-800/50">
                         <p className="text-[10px] text-indigo-800 dark:text-indigo-300 font-medium leading-relaxed italic">
-                            "Le Ratio de Sharpe est utilisé pour maximiser le rendement ajusté au risque. Une mutation réussie augmente la stabilité des prédictions."
+                            "Le moteur compare les résultats sur votre fichier historique. Un score > 85 indique que l'ADN est parfaitement calibré pour ce type de tirage."
                         </p>
                     </div>
                 </div>
