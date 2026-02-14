@@ -4,7 +4,7 @@ import {
     BookOpen, Zap, Activity, Layers, Target, 
     Sparkles, Binary, Waves, GraduationCap, 
     ShieldCheck, Lightbulb, ArrowRight, TrendingUp,
-    Compass, Microscope, ChevronRight, PlayCircle
+    Compass, Microscope
 } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
 
@@ -194,67 +194,6 @@ export const AcademyTab: React.FC = () => {
                     <Zap size={18} fill="currentColor" /> Ouvrir l'Oracle
                 </button>
             </div>
-
-            {/* Detailed Lesson Modal Overlay */}
-            {selectedLesson && (
-                <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedLesson(null)}>
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-indigo-500/30 w-full max-w-2xl rounded-[3rem] p-8 md:p-12 shadow-2xl relative animate-scale-in" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => setSelectedLesson(null)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white transition">
-                            <X size={24} />
-                        </button>
-                        
-                        <div className="flex items-center gap-4 mb-8">
-                            <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
-                                {selectedLesson.icon}
-                            </div>
-                            <div>
-                                <h3 className="text-2xl md:text-3xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">
-                                    {selectedLesson.title}
-                                </h3>
-                                <div className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Document Technique Nexus</div>
-                            </div>
-                        </div>
-
-                        <div className="prose dark:prose-invert max-w-none mb-10">
-                            <p className="text-slate-600 dark:text-slate-300 text-sm md:text-base leading-relaxed">
-                                {selectedLesson.content}
-                            </p>
-                        </div>
-
-                        <div className="p-6 bg-slate-50 dark:bg-white/5 rounded-3xl border border-slate-100 dark:border-white/10 flex items-center gap-6">
-                            <div className="shrink-0 w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center">
-                                <PlayCircle size={28} />
-                            </div>
-                            <div className="flex-1">
-                                <h4 className="text-[10px] font-black uppercase text-indigo-500 mb-1">Mise en pratique</h4>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold">
-                                    L'IA Apex utilise ce paramètre avec un poids de 25% dans le calcul du consensus.
-                                </p>
-                            </div>
-                            <button 
-                                onClick={() => navigateTo('Signaux', selectedLesson.id === 'ac' ? 'math' : selectedLesson.id)}
-                                className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-transform"
-                            >
-                                Voir Live
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div className="text-center">
-                <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.4em] opacity-40">
-                    Nexus Elite Engineering • Intelligence Collective • v11.1
-                </p>
-            </div>
         </div>
     );
 };
-
-// Simple X icon for the modal
-const X = ({size, className}:any) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-    </svg>
-);

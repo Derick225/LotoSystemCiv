@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase, testDatabaseConnection, isSupabaseConfigured } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
@@ -153,7 +154,7 @@ export const DatabaseControl: React.FC = () => {
                         <Copy size={16}/> Copier Script SQL
                     </button>
                     <p className="text-[9px] text-slate-400 text-center mt-3 font-mono">
-                        Collez dans : Supabase Dashboard {'>'} SQL Editor
+                        Collez dans : Supabase Dashboard &gt; SQL Editor
                     </p>
                 </div>
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { evolveNeuralDNA, runBacktestTraining } from '../../services/trainingService';
 import { normalizeWeights, getAlgoWeights } from '../../services/predictionEngine';
@@ -324,7 +325,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     {/* Info Box */}
                     <div className="p-5 bg-indigo-50 dark:bg-indigo-900/20 rounded-[2rem] border border-indigo-100 dark:border-indigo-800/50">
                         <p className="text-[10px] text-indigo-800 dark:text-indigo-300 font-medium leading-relaxed italic">
-                            "Le moteur compare les résultats sur votre fichier historique. Un score > 85 indique que l'ADN est parfaitement calibré pour ce type de tirage."
+                            "Le moteur compare les résultats sur votre fichier historique. Un score &gt; 85 indique que l'ADN est parfaitement calibré pour ce type de tirage."
                         </p>
                     </div>
                 </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNexus } from '../NexusProvider';
 import { runDeepPythonAnalysis } from '../../services/pythonAnalystService';
@@ -146,7 +147,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                 <button 
                     onClick={runAnalysis}
                     disabled={status === 'running'}
-                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg active:scale-95"
+                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-50 disabled:bg-slate-800 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg active:scale-95"
                 >
                     {status === 'running' ? <RefreshCw className="animate-spin" size={14}/> : <Play size={14}/>}
                     {status === 'running' ? 'Running...' : 'Run All'}
