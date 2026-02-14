@@ -1,17 +1,19 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+
+import React, { useState, useEffect, Suspense, lazy, useCallback } from 'react';
 import { useNexus } from './NexusProvider';
 import { 
   Database, Activity, Target, Share2, 
   ShieldCheck, RefreshCw, 
-  FlaskConical, Microscope, Clock
+  FlaskConical, Microscope, Clock, Navigation
 } from 'lucide-react';
 import { LocalErrorBoundary } from './ui/LocalErrorBoundary';
+import { audioEngine } from '../utils/audioEngine';
 
-// Lazy loading sécurisé
+// Lazy loading sécurisé des modules lourds
 const FluxHub = lazy(() => import('./tabs/FluxHub').then(m => ({ default: m.FluxHub })));
 const SignalHub = lazy(() => import('./tabs/SignalHub').then(m => ({ default: m.SignalHub })));
 const TopologyHub = lazy(() => import('./tabs/TopologyHub').then(m => ({ default: m.TopologyHub })));
-const OracleHub = lazy(() => import('./OracleHub').then(m => ({ default: m.OracleHub })));
+const OracleHub = lazy(() => import('./tabs/OracleHub').then(m => ({ default: m.OracleHub })));
 const SimulationTab = lazy(() => import('./tabs/SimulationTab').then(m => ({ default: m.SimulationTab })));
 const ForensicHub = lazy(() => import('./tabs/ForensicHub').then(m => ({ default: m.ForensicHub })));
 
@@ -21,22 +23,53 @@ export const DrawDetails: React.FC = () => {
   const { drawName, history, loading, refreshData } = useNexus();
   const [activeTab, setActiveTab] = useState<MainTab>('Flux');
 
+  // Système de Navigation par Bus d'Événements (Neural Event Bus)
   useEffect(() => {
-      const handleNav = (e: any) => {
-          if (e.detail?.mainTab) setActiveTab(e.detail.mainTab);
+      const handleNav = (e: CustomEvent) => {
+          if (e.detail?.mainTab) {
+              const targetTab = e.detail.mainTab as MainTab;
+              
+              // 1. Changement d'onglet principal
+              setActiveTab(targetTab);
+              audioEngine.play('click');
+
+              // 2. Gestion du sous-onglet (Propagation)
+              // On laisse un tick au React pour monter le composant avant de propager le subTab
+              if (e.detail.subTab) {
+                  setTimeout(() => {
+                      // On re-dispatch un événement local que le sous-composant (ex: SignalHub) écoutera
+                      // Le sous-composant doit être monté pour écouter
+                      window.dispatchEvent(new CustomEvent(`NAVIGATE_SUB_${targetTab.toUpperCase()}`, { 
+                          detail: { subTab: e.detail.subTab } 
+                      }));
+                  }, 100);
+              }
+
+              // 3. Scroll automatique vers le contenu
+              setTimeout(() => {
+                  const el = document.getElementById('module-container');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }, 50);
+          }
       };
-      window.addEventListener('NAVIGATE_TO_MODULE', handleNav);
-      return () => window.removeEventListener('NAVIGATE_TO_MODULE', handleNav);
+
+      window.addEventListener('NAVIGATE_TO_MODULE', handleNav as EventListener);
+      return () => window.removeEventListener('NAVIGATE_TO_MODULE', handleNav as EventListener);
+  }, []);
+
+  const handleTabChange = useCallback((tabId: MainTab) => {
+      audioEngine.play('click');
+      setActiveTab(tabId);
   }, []);
 
   if (loading && history.length === 0) {
       return (
-          <div className="h-[60vh] flex flex-col items-center justify-center gap-6">
+          <div className="h-[60vh] flex flex-col items-center justify-center gap-6 animate-pulse">
               <div className="relative">
-                  <div className="w-20 h-20 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <Database className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={24} />
+                  <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                  <Database className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={32} />
               </div>
-              <p className="text-xs font-black uppercase tracking-[0.4em] text-indigo-400">Accès au registre {drawName}...</p>
+              <p className="text-xs font-black uppercase tracking-[0.4em] text-indigo-400">Synchronisation du Registre {drawName}...</p>
           </div>
       );
   }
@@ -50,69 +83,81 @@ export const DrawDetails: React.FC = () => {
     { id: 'Forensic', icon: Microscope, label: 'Forensic', desc: 'Audit Post-Tirage' },
   ];
 
+  // Si on est en mode "ALL" (Archives globales), on restreint certaines vues trop spécifiques
   const tabs = drawName === 'ALL' 
     ? allTabs.filter(t => t.id === 'Flux') 
     : allTabs;
 
   return (
-    <div className="space-y-8 animate-fade-in pb-20 w-full overflow-x-hidden">
-      {/* Header Contextuel */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 bg-slate-900/40 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 backdrop-blur-md w-full">
-        <div className="space-y-2 w-full md:w-auto">
+    <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 w-full overflow-x-hidden font-sans">
+      
+      {/* Header Contextuel HPC */}
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 bg-slate-900/60 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 backdrop-blur-xl w-full shadow-2xl relative overflow-hidden">
+        {/* Background Grid FX */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
+
+        <div className="space-y-3 w-full md:w-auto relative z-10">
             <div className="flex items-center gap-3">
-                <span className="px-3 py-1 bg-indigo-500 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-500/20">Active Session</span>
-                <span className="text-[9px] font-mono text-slate-500 uppercase">{history.length} Séquences indexées</span>
+                <span className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+                    <Navigation size={10} /> Session Active
+                </span>
+                <span className="text-[9px] font-mono text-slate-500 uppercase">{history.length} Séquences chargées</span>
             </div>
             <h2 className="text-3xl md:text-6xl font-black text-white uppercase tracking-tighter leading-none truncate max-w-full">
-              {drawName === 'ALL' ? 'ARCHIVES' : drawName} <span className="text-indigo-500 text-xl md:text-2xl">v11.0</span>
+              {drawName === 'ALL' ? 'ARCHIVES' : drawName} <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400 text-xl md:text-3xl">v12.0</span>
             </h2>
             <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                <Clock size={12}/> Temps Réel : {new Date().toLocaleTimeString()}
+                <Clock size={12} className="text-indigo-500"/> Temps Système : {new Date().toLocaleTimeString()}
             </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-            <button onClick={() => refreshData(drawName, true)} className="p-3 md:p-4 bg-white/5 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-2xl transition-all active:scale-90 border border-white/5">
-                <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+        <div className="flex flex-wrap gap-3 relative z-10">
+            <button 
+                onClick={() => refreshData(drawName, true)} 
+                className="p-3 md:p-4 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-2xl transition-all active:scale-90 border border-white/5 shadow-lg group"
+                title="Forcer la synchronisation"
+            >
+                <RefreshCw size={18} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
             </button>
-            <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 md:px-6 py-3 md:py-4 rounded-2xl flex items-center gap-3">
+            <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 md:px-6 py-3 md:py-4 rounded-2xl flex items-center gap-3 backdrop-blur-md">
                 <ShieldCheck size={18} className="text-emerald-500" />
                 <div className="text-left">
                     <div className="text-[8px] md:text-[9px] font-black text-emerald-500 uppercase tracking-widest leading-none">Status</div>
-                    <div className="text-[10px] md:text-xs font-black text-emerald-400 uppercase mt-0.5">Sain</div>
+                    <div className="text-[10px] md:text-xs font-black text-emerald-400 uppercase mt-0.5">Opérationnel</div>
                 </div>
             </div>
         </div>
       </header>
 
-      {/* Navigation Interne - Mobile Optimized */}
-      <div className="relative sticky top-24 z-40">
-        <nav className="flex bg-slate-100 dark:bg-slate-800/50 p-1.5 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner backdrop-blur-xl -mx-2 px-2 mask-fade-right">
+      {/* Navigation Modulaire - Sticky & Scrollable */}
+      <div className="sticky top-[60px] md:top-24 z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-4 px-4 md:mx-0 md:px-0">
+        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
           {tabs.map((t) => (
             <button
               key={t.id}
-              onClick={() => setActiveTab(t.id as MainTab)}
+              onClick={() => handleTabChange(t.id as MainTab)}
               className={`
-                flex items-center gap-3 px-6 py-3 md:py-3.5 rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0
+                flex items-center gap-3 px-6 py-3 md:py-3.5 rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden
                 ${activeTab === t.id 
-                  ? 'bg-white dark:bg-slate-700 shadow-xl text-indigo-600 dark:text-white scale-105 z-10' 
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}
+                  ? 'bg-white dark:bg-slate-700 shadow-xl text-indigo-600 dark:text-white scale-105 z-10 font-bold' 
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-medium'}
               `}
             >
-              <t.icon size={16} className={activeTab === t.id ? 'animate-pulse' : ''} />
-              <div className="text-left">
-                  <div className="text-[10px] font-black uppercase tracking-widest leading-none">{t.label}</div>
-              </div>
+              <t.icon size={16} className={`relative z-10 ${activeTab === t.id ? 'animate-bounce-subtle' : ''}`} />
+              <span className="text-[10px] md:text-xs uppercase tracking-widest leading-none relative z-10">{t.label}</span>
+              {activeTab === t.id && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-purple-500/5 pointer-events-none"></div>
+              )}
             </button>
           ))}
         </nav>
       </div>
 
-      {/* Zone de Contenu Dynamique */}
-      <div className="min-h-[600px] relative w-full overflow-x-hidden">
+      {/* Zone de Contenu Dynamique avec Error Boundary Isolé */}
+      <div id="module-container" className="min-h-[600px] relative w-full overflow-x-hidden pt-4">
         <LocalErrorBoundary key={activeTab}>
           <Suspense fallback={
-            <div className="flex flex-col items-center justify-center py-32 gap-6 animate-pulse">
+            <div className="flex flex-col items-center justify-center py-32 gap-6 animate-pulse bg-slate-900/20 rounded-[3rem] border border-dashed border-slate-800">
                 <RefreshCw className="animate-spin text-indigo-500" size={32} />
                 <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Initialisation du module {activeTab}...</p>
             </div>

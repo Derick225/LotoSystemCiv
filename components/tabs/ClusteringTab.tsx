@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { calculateRegularity, performKMeansClusteringAsync, calculateACValue } from '../../services/mathService';
 import { addToWatchlist, removeFromWatchlist, isInWatchlist, saveTicket } from '../../services/userPreferencesService';

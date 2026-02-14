@@ -33,14 +33,15 @@ export const SignalHub: React.FC = () => {
     // SYMBIOSE : Écouteur d'événements pour navigation croisée
     useEffect(() => {
         const handleNavigation = (e: CustomEvent) => {
-            if (e.detail?.mainTab === 'Signaux' && e.detail?.subTab) {
+            if (e.detail?.subTab) {
                 setActiveSubTab(e.detail.subTab);
                 const contentElement = document.getElementById('signal-content');
                 if (contentElement) contentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         };
-        window.addEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
-        return () => window.removeEventListener('NAVIGATE_TO_MODULE' as any, handleNavigation);
+        // On écoute l'événement spécifique dispatché par DrawDetails
+        window.addEventListener('NAVIGATE_SUB_SIGNAUX' as any, handleNavigation);
+        return () => window.removeEventListener('NAVIGATE_SUB_SIGNAUX' as any, handleNavigation);
     }, []);
 
     const tabs = [

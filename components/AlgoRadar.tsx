@@ -1,54 +1,94 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { AlgoWeights } from '../types';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, Tooltip } from 'recharts';
 
 interface AlgoRadarProps {
     weights: AlgoWeights;
-    previousWeights?: AlgoWeights;
-    height?: number; // Gardé pour compatibilité props, mais non utilisé pour la hauteur fixe
+    previousWeights?: AlgoWeights; // Pour la comparaison Avant/Après
+    height?: number;
 }
 
 const LABELS: Record<string, string> = {
-    frequency: 'Fréquence (Les habitués)',
-    gap: 'Retard (Les absents)',
-    spectral: 'Forme du moment',
-    fractal: 'Cycles',
-    markov: 'Suites Logiques',
-    spatial: 'Position',
-    momentum: 'Élan',
+    frequency: 'Fréquence',
+    gap: 'Écart',
+    spectral: 'Spectral',
+    markov: 'Markov',
+    momentum: 'Momentum',
     equilibrium: 'Équilibre',
-    anti_consensus: 'Surprises',
-    resistance: 'Résistance'
+    anti_consensus: 'Chaos',
+    spatial: 'Spatial'
 };
 
-export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights }) => {
-    // On ne garde que les 6 critères les plus importants pour ne pas noyer l'utilisateur
-    const importantKeys = ['frequency', 'gap', 'spectral', 'markov', 'anti_consensus', 'equilibrium'];
-    
-    const data = importantKeys.map(key => ({
-        label: LABELS[key] || key,
-        value: Math.round((weights[key as keyof AlgoWeights] || 0) * 100)
-    })).sort((a, b) => b.value - a.value);
+export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {
+    const data = useMemo(() => {
+        // On normalise les clés pour l'affichage
+        const keys = Object.keys(LABELS) as Array<keyof AlgoWeights>;
+        
+        return keys.map(key => ({
+            subject: LABELS[key],
+            A: Math.round((weights[key] || 0) * 100), // Valeur Actuelle / Optimisée
+            B: previousWeights ? Math.round((previousWeights[key] || 0) * 100) : 0, // Valeur Précédente
+            fullMark: 100
+        }));
+    }, [weights, previousWeights]);
 
     return (
-        <div className="w-full space-y-4">
-            {data.map((item, idx) => (
-                <div key={idx} className="space-y-1">
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-                        <span>{item.label}</span>
-                        <span className="text-indigo-400">{item.value}%</span>
-                    </div>
-                    <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner border border-white/5">
-                        <div 
-                            className="h-full bg-gradient-to-r from-indigo-600 to-purple-500 rounded-full transition-all duration-1000" 
-                            style={{ width: `${Math.min(100, item.value * 3)}%` }} // *3 pour visibilité visuelle accentuée
-                        ></div>
-                    </div>
+        <div className="w-full relative" style={{ height: `${height}px` }}>
+            <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
+                    <PolarGrid stroke="#334155" strokeDasharray="3 3" />
+                    <PolarAngleAxis 
+                        dataKey="subject" 
+                        tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
+                    />
+                    <PolarRadiusAxis angle={30} domain={[0, 60]} tick={false} axisLine={false} />
+                    
+                    {/* Radar Actuel / Optimisé */}
+                    <Radar
+                        name={previousWeights ? "Optimisé IA" : "Configuration Actuelle"}
+                        dataKey="A"
+                        stroke="#818cf8"
+                        strokeWidth={3}
+                        fill="#818cf8"
+                        fillOpacity={previousWeights ? 0.6 : 0.4}
+                    />
+
+                    {/* Radar Précédent (Fantôme) pour comparaison */}
+                    {previousWeights && (
+                        <Radar
+                            name="Standard"
+                            dataKey="B"
+                            stroke="#94a3b8"
+                            strokeWidth={2}
+                            fill="#94a3b8"
+                            fillOpacity={0.1}
+                            strokeDasharray="4 4"
+                        />
+                    )}
+
+                    <Tooltip 
+                        contentStyle={{ 
+                            backgroundColor: '#0f172a', 
+                            border: '1px solid #1e293b', 
+                            borderRadius: '12px', 
+                            fontSize: '11px', 
+                            color: '#fff',
+                            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'
+                        }}
+                        itemStyle={{ padding: 0 }}
+                    />
+                    {previousWeights && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                </RadarChart>
+            </ResponsiveContainer>
+            
+            {!previousWeights && (
+                <div className="absolute bottom-0 w-full text-center">
+                    <p className="text-[9px] text-slate-500 italic">
+                        Visualisation de l'ADN algorithmique actif.
+                    </p>
                 </div>
-            ))}
-            <p className="text-[10px] text-slate-500 text-center mt-4 italic">
-                Ce graphique montre "les ingrédients" utilisés par l'IA pour ce tirage.
-            </p>
+            )}
         </div>
     );
 };

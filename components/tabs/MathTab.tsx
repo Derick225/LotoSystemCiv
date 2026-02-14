@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { calculateShadowNumbers, calculateRunsTest, calculateTrendOscillator, calculateCUSUM } from '../../services/mathService';
 import type { MathAnalysisReport, ShadowNumbers, TrendOscillatorPoint } from '../../types';
@@ -153,6 +154,5 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
                 </div>
             )}
         </div>
-    </div>
-  );
+    );
 };

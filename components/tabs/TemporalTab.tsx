@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { getSeasonalAffinity, getDayAffinity, type CyclicCandidate } from '../../services/temporalAnalysisService';
 import { fetchAssociatedNumbers } from '../../services/lotteryService';

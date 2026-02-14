@@ -1,7 +1,8 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
-import { generateMasterPrediction, getStrategyName, getAlgoWeights } from '../../services/predictionEngine';
+import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
+import { getOptimizedWeights } from '../../services/geminiService';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { saveTicket } from '../../services/userPreferencesService';
 import { NumberBall } from '../NumberBall';
@@ -16,7 +17,7 @@ import {
     Layers, Binary, Target, RefreshCw, Wallet, 
     Save, Wind, AlertTriangle, TrendingUp,
     MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
-    Atom
+    Atom, Brain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -34,13 +35,56 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [showField, setShowField] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [showDNA, setShowDNA] = useState(false);
+    
+    // États pour la Calibration IA
+    const [isOptimizing, setIsOptimizing] = useState(false);
+    const [optimizedWeights, setOptimizedWeights] = useState<any | null>(null);
+    const [previousWeights, setPreviousWeights] = useState<any | null>(null);
 
     // Mise à jour du nom de l'ADN affiché
     useEffect(() => {
         if(globalWeights) setActiveDNA(getStrategyName(globalWeights));
     }, [globalWeights]);
 
-    const runInference = useCallback(async () => {
+    const handleAiOptimization = async () => {
+        if (history.length < 10) {
+            showToast("Historique insuffisant pour l'IA.", "error");
+            return;
+        }
+
+        setIsOptimizing(true);
+        setShowDNA(true); // Ouvrir le radar pour voir l'effet
+        setPreviousWeights(globalWeights); // Sauvegarder l'état avant
+
+        try {
+            showToast("Gemini: Analyse du régime stochastique...", "info");
+            const newWeights = await getOptimizedWeights(drawName, history);
+            
+            if (newWeights) {
+                const normalized = normalizeWeights(newWeights);
+                setOptimizedWeights(normalized); // Pour la visualisation "Après"
+                
+                // On applique immédiatement pour le calcul
+                await updateGlobalWeights(normalized);
+                setActiveDNA(`IA Calibrée (${getStrategyName(normalized)})`);
+                
+                showToast("ADN muté par l'IA. Lancement de l'inférence...", "success");
+                
+                // Petit délai pour laisser l'utilisateur voir le radar changer
+                setTimeout(() => runInference(normalized), 1500);
+            } else {
+                showToast("Le Cloud n'a pas répondu. Fallback standard.", "error");
+                runInference();
+            }
+        } catch (e) {
+            showToast("Erreur connexion IA.", "error");
+            runInference();
+        } finally {
+            setIsOptimizing(false);
+        }
+    };
+
+    const runInference = useCallback(async (forcedWeights?: any) => {
         if (history.length < 5) {
             showToast("Historique insuffisant pour l'Oracle Base.", "error");
             return;
@@ -48,13 +92,16 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         setIsComputing(true);
         setComputingStep("Initialisation du Noyau...");
 
-        // FETCH CRITIQUE : On recharge les poids spécifiques pour être sûr à 100% que c'est la config du tirage
-        // Ceci garantit que si l'utilisateur vient de l'onglet Tuning, ses changements sont appliqués
-        const specificWeights = await getAlgoWeights(drawName);
-        setActiveDNA(getStrategyName(specificWeights));
+        // FETCH CRITIQUE : Si pas de poids forcés (par l'IA), on recharge les poids persistants
+        const specificWeights = forcedWeights || await getAlgoWeights(drawName);
         
-        // On met à jour le contexte global pour que les autres onglets soient sync
-        updateGlobalWeights(specificWeights);
+        if (!forcedWeights) {
+            // Si c'est un run manuel sans IA, on reset la vue comparative
+            setPreviousWeights(null);
+            setOptimizedWeights(null);
+            setActiveDNA(getStrategyName(specificWeights));
+            updateGlobalWeights(specificWeights);
+        }
 
         const steps = [
             { msg: `Chargement ADN : ${getStrategyName(specificWeights)}`, delay: 400 },
@@ -83,10 +130,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setLastPrediction(res);
                 
                 // CRITIQUE : Sauvegarde pour Forensic Hub
-                // Sans ça, l'onglet Forensic ne pourra pas comparer
                 await savePredictionToHistory(drawName, res);
                 
-                showToast("Prédiction générée via l'ADN actif.", "success");
+                if (!forcedWeights) showToast("Prédiction générée via l'ADN actif.", "success");
             } catch (e) {
                 showToast("Erreur lors de l'inférence.", "error");
                 console.error(e);
@@ -116,18 +162,18 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         return Math.round(score);
     };
 
-    const getProbColor = (score: number) => {
-        if (score >= 80) return 'text-emerald-400';
-        if (score >= 60) return 'text-indigo-400';
-        if (score >= 40) return 'text-amber-400';
-        return 'text-rose-400';
-    };
-
     const getProbBarColor = (score: number) => {
         if (score >= 80) return 'bg-emerald-500';
         if (score >= 60) return 'bg-indigo-500';
         if (score >= 40) return 'bg-amber-500';
         return 'bg-rose-500';
+    };
+
+    const getProbColor = (score: number) => {
+        if (score >= 80) return 'text-emerald-500';
+        if (score >= 60) return 'text-indigo-500';
+        if (score >= 40) return 'text-amber-500';
+        return 'text-rose-500';
     };
 
     if (nexusLoading) return (
@@ -150,7 +196,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             
             <div className="relative z-10 flex flex-col items-center w-full max-w-2xl text-center">
                 <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center shadow-2xl border border-slate-800 mb-8 group-hover:scale-110 transition-transform duration-500">
-                    <Target size={48} className="text-indigo-500" />
+                    {isOptimizing ? <RefreshCw className="animate-spin text-purple-500" size={48}/> : <Target size={48} className="text-indigo-500" />}
                 </div>
                 <h3 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-4">Oracle Base v24.0</h3>
                 
@@ -173,7 +219,16 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2 justify-center">
                                 <Activity size={14} className="text-indigo-400"/> Composition Algorithmique
                             </h4>
-                            <AlgoRadar weights={globalWeights} />
+                            {/* Affichage comparatif si optimisation en cours ou terminée */}
+                            <AlgoRadar 
+                                weights={optimizedWeights || globalWeights} 
+                                previousWeights={isOptimizing || optimizedWeights ? (previousWeights || globalWeights) : undefined} 
+                            />
+                            {optimizedWeights && (
+                                <p className="text-center text-[10px] text-emerald-400 mt-2 font-bold animate-pulse">
+                                    ▲ Optimisation par Intelligence Artificielle appliquée
+                                </p>
+                            )}
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -199,12 +254,22 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     ))}
                 </div>
 
-                <button 
-                    onClick={runInference}
-                    className="w-full md:w-auto px-16 py-6 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 hover:shadow-indigo-500/20"
-                >
-                    <Zap fill="currentColor" size={20} /> Exécuter l'ADN
-                </button>
+                <div className="flex gap-4 w-full justify-center">
+                    <button 
+                        onClick={() => runInference()}
+                        disabled={isOptimizing}
+                        className="px-8 py-6 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 hover:shadow-indigo-500/20 disabled:opacity-50"
+                    >
+                        <Zap fill="currentColor" size={20} /> Exécuter ADN
+                    </button>
+                    <button 
+                        onClick={handleAiOptimization}
+                        disabled={isOptimizing}
+                        className="px-8 py-6 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 hover:shadow-purple-500/20 disabled:opacity-50"
+                    >
+                        {isOptimizing ? <RefreshCw className="animate-spin" size={20}/> : <Brain size={20} />} Calibration IA
+                    </button>
+                </div>
             </div>
         </div>
     );
