@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
-import { analyzeForManipulation } from '../../services/forensicAuditService';
+import { analyzeForManipulation } from '../services/forensicAuditService';
 import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
