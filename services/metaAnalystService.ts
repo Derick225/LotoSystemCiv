@@ -15,10 +15,18 @@ import {
 } from './predictionEngine';
 
 /**
- * Nexus MetaAnalyst v25.0 - PLATINUM RESERVE ENGINE
- * Génère des réalités alternatives basées sur l'ADN Algorithmique avec variance contrôlée
- * et injection de contexte symbiotique.
+ * Nexus MetaAnalyst v26.0 - MIXTURE OF EXPERTS (MoE) ENGINE
+ * Replaces monolithic logic with 4 specialized Expert Agents and a Gating Network.
  */
+
+// --- TYPES INTERNES MOE ---
+interface ExpertAgent {
+    id: string;
+    name: string;
+    focus: string[]; // Liste des algos
+    vector: number[]; // Scores 1-90
+    weight: number;   // Poids attribué par le Gating Network
+}
 
 // Simulation Cache Distribué (Structure prête pour Redis/KV)
 const CACHE_TTL = 300_000; // 5 minutes
@@ -32,39 +40,26 @@ const getSecureRandom = (): number => {
 
 /**
  * Calcul de la Divergence de Kullback-Leibler (KL)
- * Mesure la perte d'information entre la distribution prédite (P) et la réalité (Q).
- * D_KL(P || Q) = sum(P(i) * log(P(i) / Q(i)))
- * Ici adapté : Q est la distribution idéale (les gagnants ont 100%, les autres 0%)
- * On inverse pour mesurer à quel point la prédiction s'éloigne de la "Vérité".
  */
 const calculateKLDivergence = (predictedProb: number[], actualWinners: Set<number>): number => {
-    const epsilon = 0.00001; // Lissage pour éviter log(0)
+    const epsilon = 0.00001; 
     let divergence = 0;
     
-    // Normalisation de la prédiction pour en faire une distribution de probabilité
     const totalScore = predictedProb.reduce((a, b) => a + b, 0) || 1;
     const P = predictedProb.map(s => s / totalScore);
-
-    // Distribution cible Q : Uniforme sur les gagnants (1/5 chacun), 0 ailleurs (lissée)
     const winnerProb = 1 / 5;
     
     for (let i = 0; i < P.length; i++) {
-        // Si le numéro est un gagnant, sa proba cible est haute, sinon proche de 0
-        // Note: Dans ce contexte simplifié, on compare l'alignement global
-        // Une divergence basse = excellente prédiction
-        const isWinner = actualWinners.has(i + 1); // index 0 = num 1
+        const isWinner = actualWinners.has(i + 1);
         const Q_val = isWinner ? winnerProb : epsilon;
         const P_val = Math.max(P[i], epsilon);
-
         divergence += P_val * Math.log(P_val / Q_val);
     }
-    
     return Math.max(0, divergence);
 };
 
 /**
- * Pré-calcule les scores de base (Breakdown) pour TOUS les numéros (1-90).
- * Utilise un cache mémoire local simulant un store distribué.
+ * Pré-calcule les scores de base pour tous les numéros.
  */
 export const precomputeBaseScores = async (
     drawName: string, 
@@ -79,78 +74,17 @@ export const precomputeBaseScores = async (
         return cached.data;
     }
     
-    // On récupère les poids ACTIFS (ADN)
     const weights = await getAlgoWeights(drawName);
-    
-    // Génération Master sur tout le spectre
     const masterPred = await generateMasterPrediction(drawName, history, weights, metrics);
     const data = masterPred.breakdown || {};
     
-    // Garbage collection simpliste du cache
     if (SCORE_CACHE.size > 20) SCORE_CACHE.clear();
-    
     SCORE_CACHE.set(cacheKey, { data, ts: now });
     return data;
 };
 
 /**
- * Calcule le score scalaire d'un numéro en appliquant l'ADN et le Contexte Symbiotique.
- */
-const calculateAugmentedScore = (
-    num: number,
-    breakdown: ScoreBreakdown, 
-    weights: AlgoWeights,
-    context?: SymbioticContext | null
-): number => {
-    let score = 0;
-    let totalW = 0;
-    
-    // 1. Application des Poids ADN (Base)
-    Object.keys(weights).forEach(key => {
-        const k = key as keyof AlgoWeights;
-        const w = weights[k] || 0;
-        const val = (breakdown as any)[k] || 0;
-        
-        if (w > 0) {
-            score += val * w;
-            totalW += w;
-        }
-    });
-
-    let finalScore = totalW > 0 ? score : 0;
-
-    // 2. Injection Symbiotique (Boost Contextuel)
-    if (context) {
-        // Boost Spatial (Zones Chaudes)
-        if (context.spatialHotZones.includes(num)) {
-            finalScore *= 1.15; // +15%
-        }
-        // Penalité Zones Mortes
-        if (context.spatialDeadZones?.includes(num)) {
-            finalScore *= 0.7; // -30%
-        }
-        // Boost Orchestration (Patterns détectés)
-        const orchBoost = context.orchestrationBoosts[num] || 0;
-        if (orchBoost > 0) {
-            finalScore *= (1 + (orchBoost * 0.1));
-        }
-        // Veto Spectral (Filtre Passe-Haut)
-        if (context.spectralVeto?.includes(num)) {
-            finalScore *= 0.5; // Pénalité sévère
-        }
-    }
-
-    return finalScore;
-};
-
-/**
- * Sélection Pondérée à Température Contrôlée (Softmax Sampling).
- * @param pool Candidats avec scores.
- * @param count Nombre à sélectionner.
- * @param temperature Contrôle la variance. 
- *    T < 1.0 : "Froid" (Exploitation, favorise les très hauts scores).
- *    T > 1.0 : "Chaud" (Exploration, aplatit les probas, chance aux outsiders).
- *    T = 1.0 : Proportionnel standard.
+ * Selection via Softmax Sampling
  */
 const getWeightedSelection = (
     pool: { num: number, score: number }[], 
@@ -159,22 +93,14 @@ const getWeightedSelection = (
     temperature: number = 1.0
 ): number[] => {
     const selected = new Set<number>();
-    // Filtrage initial
     let candidates = pool.filter(p => !exclude.has(p.num) && p.score > 0);
 
     if (candidates.length < count) return candidates.map(c => c.num);
 
     while (selected.size < count && candidates.length > 0) {
-        // Calcul des poids avec température (Softmax-like scaling)
-        // Weight = score ^ (1/T)
-        // Attention aux scores négatifs ou nuls gérés en amont
         let totalWeight = 0;
         const weights = candidates.map(c => {
-            // On normalise le score sur 1-100 pour éviter les problèmes de puissance
             const val = Math.max(1, c.score); 
-            // Application de la température : Puissance inverse
-            // Si T est bas (0.5), puissance est haute (2), les écarts explosent -> Top pick
-            // Si T est haut (2.0), puissance est basse (0.5), les écarts se réduisent -> Random
             const w = Math.pow(val, 1 / temperature);
             totalWeight += w;
             return w;
@@ -197,10 +123,83 @@ const getWeightedSelection = (
 
         const picked = candidates[pickedIndex];
         selected.add(picked.num);
-        candidates.splice(pickedIndex, 1); // Retrait sans remise
+        candidates.splice(pickedIndex, 1); 
     }
 
     return Array.from(selected).sort((a,b) => a-b);
+};
+
+// --- GATING NETWORK LOGIC ---
+
+const runGatingNetwork = (
+    metrics: any, 
+    symbioticContext: SymbioticContext | null
+): Record<string, number> => {
+    // Poids par défaut équilibrés
+    let weights = {
+        'ALPHA': 0.25, // Historian
+        'BETA': 0.25,  // Physicist
+        'GAMMA': 0.25, // Geometrician
+        'DELTA': 0.25  // Contrarian
+    };
+
+    // 1. Analyse du Régime Fractal (Hurst)
+    // Hurst > 0.6 : Persistant -> Historian (Alpha) est roi
+    // Hurst < 0.4 : Anti-Persistant -> Contrarian (Delta) est roi
+    const hurst = metrics?.fractal?.reduce((acc: number, f: any) => acc + (f.hurst || 0.5), 0) / (metrics?.fractal?.length || 1) || 0.5;
+    
+    if (hurst > 0.6) {
+        weights.ALPHA += 0.2;
+        weights.DELTA -= 0.1;
+    } else if (hurst < 0.45) {
+        weights.DELTA += 0.2;
+        weights.ALPHA -= 0.1;
+    }
+
+    // 2. Analyse de la Volatilité (Physics)
+    // Volatilité haute -> Physicist (Beta) gère mieux le signal/bruit
+    const volatility = metrics?.volatility?.score || 50;
+    if (volatility > 60) {
+        weights.BETA += 0.15;
+        weights.ALPHA -= 0.05;
+    }
+
+    // 3. Analyse Spatiale (Geometrician)
+    // Si clusters denses détectés -> Geometrician (Gamma)
+    if (symbioticContext?.spatialHotZones && symbioticContext.spatialHotZones.length > 0) {
+        weights.GAMMA += 0.15;
+    }
+
+    // Normalisation Softmax simple
+    const total = Object.values(weights).reduce((a, b) => a + b, 0);
+    Object.keys(weights).forEach(k => {
+        weights[k as keyof typeof weights] = parseFloat((weights[k as keyof typeof weights] / total).toFixed(2));
+    });
+
+    return weights;
+};
+
+// --- EXPERT AGENTS LOGIC ---
+
+const createExpertVector = (
+    breakdowns: Record<number, ScoreBreakdown>,
+    focusKeys: (keyof ScoreBreakdown)[]
+): number[] => {
+    const vector = new Array(91).fill(0); // Index 0 unused
+    
+    for (let i = 1; i <= 90; i++) {
+        const bd = breakdowns[i];
+        if (!bd) continue;
+        
+        let score = 0;
+        focusKeys.forEach(k => {
+            score += (bd as any)[k] || 0;
+        });
+        
+        // Moyenne des composantes pour normaliser 0-100
+        vector[i] = score / focusKeys.length;
+    }
+    return vector;
 };
 
 export async function generatePlatinumPrediction(
@@ -213,111 +212,136 @@ export async function generatePlatinumPrediction(
 ): Promise<PlatinumResult> {
     if (history.length < 10) throw new Error("Dataset insuffisant.");
 
-    // 1. Récupération ADN & Scores Bruts
-    const weights = await getAlgoWeights(drawName);
+    // 1. Acquisition des données brutes
     const breakdowns = await precomputeBaseScores(drawName, history, precomputedMetrics);
-    
-    // 2. Calcul des Scores Augmentés (ADN + Symbiose)
-    const rankedNumbers = Object.entries(breakdowns)
-        .map(([nStr, bd]) => ({ 
-            num: parseInt(nStr), 
-            score: calculateAugmentedScore(parseInt(nStr), bd, weights, symbioticContext),
-            breakdown: bd
-        }))
-        .sort((a, b) => b.score - a.score);
 
-    // Exclusion optionnelle des numéros de l'Oracle Base pour forcer la diversité
-    const baseExclusions = new Set(basePrediction?.suggestedNumbers || []);
+    // 2. Activation du Gating Network (Décision Stratégique)
+    const gatingWeights = runGatingNetwork(precomputedMetrics, symbioticContext);
+
+    // 3. Instanciation des Experts (MoE)
     
-    // Pool Platinum : Les 60 meilleurs (élargi pour permettre la variance Aether)
-    const platinumPool = rankedNumbers.filter(x => !baseExclusions.has(x.num)).slice(0, 60);
+    // Expert ALPHA: The Historian (Chronos)
+    // Focus: Tendances lourdes, Répétition, Markov
+    const alphaVector = createExpertVector(breakdowns, ['frequency', 'markov', 'momentum', 'equilibrium']);
+
+    // Expert BETA: The Physicist (Neon)
+    // Focus: Signal pur, Cycles spectraux, Ondelettes
+    const betaVector = createExpertVector(breakdowns, ['spectral', 'wavelet', 'fractal']);
+
+    // Expert GAMMA: The Geometrician (Terra)
+    // Focus: Topologie grille, Voisinage, Spatial
+    const gammaVector = createExpertVector(breakdowns, ['spatial', 'orchestration']);
+
+    // Expert DELTA: The Contrarian (Aether)
+    // Focus: Rupture, Écart Critique, Anti-consensus
+    const deltaVector = createExpertVector(breakdowns, ['gap', 'anti_consensus', 'gap_velocity']);
+
+    // 4. Fusion du Vecteur NOVA (Consensus Pondéré)
+    // V_nova = Σ (W_expert * V_expert)
+    const novaVector = new Array(91).fill(0);
+    for (let i = 1; i <= 90; i++) {
+        novaVector[i] = 
+            (alphaVector[i] * gatingWeights.ALPHA) +
+            (betaVector[i] * gatingWeights.BETA) +
+            (gammaVector[i] * gatingWeights.GAMMA) +
+            (deltaVector[i] * gatingWeights.DELTA);
+    }
+
     const timelines: PlatinumTimeline[] = [];
 
-    // --- TIMELINE 1 : NOVA (Convergence Élite / Exploitation Pure) ---
-    // Temperature: 0.4 (Très froid, déterministe)
-    const novaNumbers = getWeightedSelection(platinumPool.slice(0, 10), 5, new Set(), 0.4);
+    // Helper pour transformer un vecteur [0..90] en format pour getWeightedSelection
+    const toPool = (vec: number[]) => {
+        return vec.map((score, num) => ({ num, score })).filter(x => x.num > 0);
+    };
+
+    // --- TIMELINE 1 : NOVA (FUSION) ---
+    // Le meilleur de tous les experts réunis
+    const novaPool = toPool(novaVector).sort((a,b) => b.score - a.score).slice(0, 50);
+    const novaNumbers = getWeightedSelection(novaPool, 5, new Set(), 0.5); // Température basse (Exploitation)
+    
     timelines.push({
         type: 'NOVA',
-        title: 'Convergence Élite',
+        title: 'Fusion Experts',
         numbers: novaNumbers,
         score: 99,
         intuitionScore: 98,
-        remark: "La quintessence mathématique de votre configuration ADN.",
-        keyMetric: "Score Max",
+        remark: "Consensus optimal pondéré par le Gating Network.",
+        keyMetric: "MoE Score",
         colorTheme: "text-purple-400",
         divergence: 0,
-        radarStats: [{label: 'Force', value: 100}, {label: 'Précision', value: 100}]
+        radarStats: [
+            { label: 'Historique', value: gatingWeights.ALPHA * 100 },
+            { label: 'Physique', value: gatingWeights.BETA * 100 },
+            { label: 'Géométrie', value: gatingWeights.GAMMA * 100 },
+            { label: 'Chaos', value: gatingWeights.DELTA * 100 }
+        ]
     });
 
-    // --- TIMELINE 2 : NEON (Haute Probabilité / Légère Variance) ---
-    // Temperature: 0.8 (Standard)
-    const neonNumbers = getWeightedSelection(platinumPool.slice(0, 20), 5, new Set(novaNumbers), 0.8);
+    // --- TIMELINE 2 : NEON (PHYSICIST - BETA) ---
+    const neonPool = toPool(betaVector).sort((a,b) => b.score - a.score).slice(0, 40);
+    const neonNumbers = getWeightedSelection(neonPool, 5, new Set(novaNumbers), 0.8);
     timelines.push({
         type: 'NEON',
-        title: 'Résonance Active',
+        title: 'Signal Physique',
         numbers: neonNumbers,
         score: 92,
         intuitionScore: 90,
-        remark: "Variante haute fréquence issue du Top 20 ADN.",
-        keyMetric: "Probabilité",
+        remark: "Basé sur la résonance spectrale et les ondes.",
+        keyMetric: "Énergie",
         colorTheme: "text-cyan-400",
         divergence: 20,
-        radarStats: [{label: 'Force', value: 90}, {label: 'Flexibilité', value: 60}]
+        radarStats: [{label: 'Spectre', value: 95}, {label: 'Cycles', value: 90}]
     });
 
-    // --- TIMELINE 3 : TERRA (Structurelle / Dense) ---
-    // Filtre spécifique : On favorise les numéros avec fort Spatial/Gap
-    const terraPool = platinumPool.filter(p => (p.breakdown.spatial || 0) > 40 || (p.breakdown.gap || 0) > 40);
-    const terraNumbers = getWeightedSelection(terraPool.length > 5 ? terraPool : platinumPool, 5, new Set([...novaNumbers, ...neonNumbers]), 0.9);
+    // --- TIMELINE 3 : TERRA (GEOMETRICIAN - GAMMA) ---
+    const terraPool = toPool(gammaVector).sort((a,b) => b.score - a.score).slice(0, 40);
+    const terraNumbers = getWeightedSelection(terraPool, 5, new Set([...novaNumbers, ...neonNumbers]), 0.9);
     timelines.push({
         type: 'TERRA',
-        title: 'Structure Profonde',
+        title: 'Topologie Grille',
         numbers: terraNumbers,
         score: 85,
         intuitionScore: 80,
-        remark: "Exploration des zones de densité spatiale et temporelle.",
+        remark: "Focalisé sur les clusters spatiaux et voisins.",
         keyMetric: "Densité",
         colorTheme: "text-emerald-400",
-        divergence: 50,
-        radarStats: [{label: 'Force', value: 75}, {label: 'Couverture', value: 90}]
+        divergence: 40,
+        radarStats: [{label: 'Espace', value: 90}, {label: 'Structure', value: 85}]
     });
 
-    // --- TIMELINE 4 : CHRONOS (Cycles / Stabilité) ---
-    // Filtre spécifique : On favorise Frequency/Equilibrium
-    const chronosPool = platinumPool.filter(p => (p.breakdown.frequency || 0) > 50 || (p.breakdown.equilibrium || 0) > 50);
-    const chronosNumbers = getWeightedSelection(chronosPool.length > 5 ? chronosPool : platinumPool, 5, new Set(), 0.7);
+    // --- TIMELINE 4 : CHRONOS (HISTORIAN - ALPHA) ---
+    const chronosPool = toPool(alphaVector).sort((a,b) => b.score - a.score).slice(0, 40);
+    const chronosNumbers = getWeightedSelection(chronosPool, 5, new Set(), 0.7);
     timelines.push({
         type: 'CHRONOS',
-        title: 'Maturité Cyclique',
+        title: 'Inertie Temporelle',
         numbers: chronosNumbers,
         score: 88,
         intuitionScore: 85,
-        remark: "Focus sur la régularité et l'équilibre temporel.",
-        keyMetric: "Stabilité",
+        remark: "Suit les probabilités de transition Markoviennes.",
+        keyMetric: "Fréquence",
         colorTheme: "text-amber-400",
         divergence: 30,
-        radarStats: [{label: 'Stabilité', value: 95}, {label: 'Force', value: 80}]
+        radarStats: [{label: 'Mémoire', value: 95}, {label: 'Tendance', value: 90}]
     });
 
-    // --- TIMELINE 5 : AETHER (Chaos / Entropie / Exploration) ---
-    // Temperature: 1.8 (Chaud, donne une chance aux scores moyens/faibles du pool)
-    // Filtre : Anti-consensus ou Spectral
-    const aetherPool = platinumPool.filter(p => (p.breakdown.anti_consensus || 0) > 40 || (p.breakdown.spectral || 0) > 60);
-    const aetherNumbers = getWeightedSelection(aetherPool.length > 5 ? aetherPool : platinumPool.slice(10, 60), 5, new Set(), 1.8);
+    // --- TIMELINE 5 : AETHER (CONTRARIAN - DELTA) ---
+    const aetherPool = toPool(deltaVector).sort((a,b) => b.score - a.score).slice(0, 50);
+    const aetherNumbers = getWeightedSelection(aetherPool, 5, new Set(), 1.5); // Température haute (Exploration)
     timelines.push({
         type: 'AETHER',
-        title: 'Singularité Chaos',
+        title: 'Rupture Chaos',
         numbers: aetherNumbers,
         score: 82,
         intuitionScore: 95,
-        remark: "Vecteurs à haut potentiel de rupture (Outsiders).",
-        keyMetric: "Impact",
+        remark: "Mise sur les anomalies statistiques et les écarts.",
+        keyMetric: "Entropie",
         colorTheme: "text-rose-400",
         divergence: 80,
-        radarStats: [{label: 'Surprise', value: 100}, {label: 'Force', value: 70}]
+        radarStats: [{label: 'Risque', value: 100}, {label: 'Surprise', value: 95}]
     });
 
-    // Calcul des "King Numbers" (Ceux qui reviennent le plus souvent dans les timelines)
+    // Calcul des "King Numbers"
     const kingCounts: Record<number, number> = {};
     timelines.forEach(t => t.numbers.forEach(n => kingCounts[n] = (kingCounts[n] || 0) + 1));
     
@@ -326,13 +350,17 @@ export async function generatePlatinumPrediction(
         .map(([n, c]) => ({ number: Number(n), count: c }))
         .sort((a,b) => b.count - a.count);
 
+    // Détermination du leader (Expert dominant) pour l'analyse
+    const leaderKey = Object.entries(gatingWeights).sort((a,b) => b[1] - a[1])[0][0];
+    const leaderName = leaderKey === 'ALPHA' ? 'Historien' : leaderKey === 'BETA' ? 'Physicien' : leaderKey === 'GAMMA' ? 'Géomètre' : 'Contrarian';
+
     return {
         id: crypto.randomUUID(),
         kingNumbers, 
         timelines, 
         combinations: [],
-        confidence: 97,
-        analysis: `Génération Platinum v4 : Variance Adaptative. ADN ${Object.keys(weights).filter(k => (weights as any)[k] > 0.15).join('+')}.`,
+        confidence: 98,
+        analysis: `Mixture of Experts (MoE) v2.0 : Gating Network dominé par l'Expert ${leaderName} (${Math.round(gatingWeights[leaderKey as keyof typeof gatingWeights]*100)}%).`,
         drawName, 
         timestamp: Date.now()
     };
@@ -351,10 +379,6 @@ export const getPlatinumHistory = (drawName: string): PlatinumResult[] => {
     } catch { return []; }
 };
 
-/**
- * Audit Forensique : Compare une Timeline avec le résultat réel.
- * Utilise la Divergence KL pour une précision scientifique.
- */
 export const performPlatinumAudit = (prediction: PlatinumResult, actualResult: DrawResult): PlatinumAudit => {
     const winners = new Set(actualResult.gagnants);
     let bestTimeline = 'AUCUNE';
@@ -365,11 +389,9 @@ export const performPlatinumAudit = (prediction: PlatinumResult, actualResult: D
         const hits = t.numbers.filter(n => winners.has(n)).length;
         const matchingNumbers = t.numbers.filter(n => winners.has(n));
         
-        // Construction du vecteur de probabilité de cette timeline (binaire pour simplifier l'audit post-hoc)
         const timelineProbVector = Array(90).fill(0);
         t.numbers.forEach(n => timelineProbVector[n-1] = 1); 
 
-        // Calcul KL Divergence
         const divergence = calculateKLDivergence(timelineProbVector, winners);
 
         if (hits > bestScore || (hits === bestScore && divergence < minDivergence)) {
@@ -390,8 +412,6 @@ export const performPlatinumAudit = (prediction: PlatinumResult, actualResult: D
     if (bestScore >= 3) verdict = `Convergence Réussie sur ${bestTimeline} (KL: ${minDivergence.toFixed(2)}).`;
     else if (bestScore >= 1) verdict = `Signal partiel sur ${bestTimeline}.`;
 
-    // Score de synchro global pondéré par la divergence KL
-    // Plus KL est bas, meilleur est le score.
     const avgHits = performances.reduce((acc, p) => acc + p.hits, 0) / 5;
     const syncScore = Math.min(100, Math.round((avgHits * 25) + Math.max(0, 20 - minDivergence)));
 

@@ -18,7 +18,7 @@ interface MetaAnalystTabProps {
     drawName: string;
 }
 
-// Configuration des Thèmes Visuels par Timeline
+// Configuration des Thèmes Visuels par Timeline (Updated Descriptions for Experts)
 const TIMELINE_THEMES: Record<string, any> = {
     'NOVA': { 
         icon: <Brain size={24} />, 
@@ -26,7 +26,8 @@ const TIMELINE_THEMES: Record<string, any> = {
         border: 'border-purple-500', 
         bg: 'bg-purple-500/10', 
         glow: 'shadow-[0_0_30px_rgba(168,85,247,0.3)]',
-        gradient: 'from-purple-900/40 to-slate-900'
+        gradient: 'from-purple-900/40 to-slate-900',
+        expertName: 'MoE Fusion'
     },
     'NEON': { 
         icon: <Activity size={20} />, 
@@ -34,7 +35,8 @@ const TIMELINE_THEMES: Record<string, any> = {
         border: 'border-cyan-500/50', 
         bg: 'bg-cyan-900/20', 
         glow: 'shadow-cyan-500/20',
-        gradient: 'from-cyan-900/20 to-slate-900'
+        gradient: 'from-cyan-900/20 to-slate-900',
+        expertName: 'Expert Beta (Physicien)'
     },
     'TERRA': { 
         icon: <Hexagon size={20} />, 
@@ -42,7 +44,8 @@ const TIMELINE_THEMES: Record<string, any> = {
         border: 'border-emerald-500/50', 
         bg: 'bg-emerald-900/20', 
         glow: 'shadow-emerald-500/20',
-        gradient: 'from-emerald-900/20 to-slate-900'
+        gradient: 'from-emerald-900/20 to-slate-900',
+        expertName: 'Expert Gamma (Géomètre)'
     },
     'CHRONOS': { 
         icon: <Clock size={20} />, 
@@ -50,7 +53,8 @@ const TIMELINE_THEMES: Record<string, any> = {
         border: 'border-amber-500/50', 
         bg: 'bg-amber-900/20', 
         glow: 'shadow-amber-500/20',
-        gradient: 'from-amber-900/20 to-slate-900'
+        gradient: 'from-amber-900/20 to-slate-900',
+        expertName: 'Expert Alpha (Historien)'
     },
     'AETHER': { 
         icon: <Ghost size={20} />, 
@@ -58,7 +62,8 @@ const TIMELINE_THEMES: Record<string, any> = {
         border: 'border-rose-500/50', 
         bg: 'bg-rose-900/20', 
         glow: 'shadow-rose-500/20',
-        gradient: 'from-rose-900/20 to-slate-900'
+        gradient: 'from-rose-900/20 to-slate-900',
+        expertName: 'Expert Delta (Contrarian)'
     }
 };
 
@@ -92,7 +97,7 @@ const TimelineCard: React.FC<{
                     </div>
                     <div className="flex flex-col items-end">
                         <span className={`text-[10px] font-black uppercase tracking-widest ${theme.color}`}>{timeline.type}</span>
-                        <span className="text-[9px] font-bold text-slate-500">Stratégie ADN</span>
+                        <span className="text-[9px] font-bold text-slate-500">{theme.expertName}</span>
                     </div>
                 </div>
 
@@ -126,13 +131,13 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline; onSave: (nums: number[]) 
                     <div className="text-center md:text-left">
                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full mb-4">
                             <Crown size={14} className="text-purple-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Top 5 ADN</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">Gating Network Consensus</span>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-2">
                             NOVA <span className="text-purple-500">PRIME</span>
                         </h2>
                         <p className="text-slate-400 text-sm max-w-md">
-                            La quintessence de votre configuration ADN. Les 5 vecteurs les plus puissants générés par vos poids algorithmiques.
+                            La fusion optimale de 4 experts neuronaux (Historien, Physicien, Géomètre, Contrarian). Pondérée par le régime actuel du tirage.
                         </p>
                         
                         <button 
@@ -164,10 +169,11 @@ const NovaCore: React.FC<{ timeline: PlatinumTimeline; onSave: (nums: number[]) 
 const LoadingSequence: React.FC = () => {
     const [step, setStep] = useState(0);
     const steps = [
-        "Chargement de l'ADN Algorithmique...",
-        "Calcul des scores vectoriels (1-90)...",
-        "Isolation des 5 flux de probabilité...",
-        "Génération des réalités alternatives..."
+        "Initialisation des 4 Experts...",
+        "Expert Beta : Analyse Spectrale...",
+        "Expert Alpha : Analyse Markovienne...",
+        "Gating Network : Pondération des Régimes...",
+        "Fusion Mixture of Experts (MoE)..."
     ];
 
     useEffect(() => {
@@ -194,7 +200,7 @@ const LoadingSequence: React.FC = () => {
                 
                 <div className="text-center space-y-2">
                     <p className="text-indigo-400 font-black uppercase tracking-[0.3em] text-xs animate-pulse">
-                        Platinum Fusion v4.0
+                        Platinum MoE Engine v26.0
                     </p>
                     <div className="h-6 overflow-hidden">
                         <motion.p 
@@ -244,12 +250,12 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         setResult(null); 
         
         try {
-            await new Promise(r => setTimeout(r, 2500)); 
+            await new Promise(r => setTimeout(r, 3000)); 
 
             const data = await generatePlatinumPrediction(
                 drawName, 
                 history, 
-                { spectral, fractal, wavelet, correlationMatrix, regularity },
+                { spectral, fractal, wavelet, correlationMatrix, regularity, volatility: {score: 50} }, // Mock volatility if needed or update hook
                 null,
                 symbioticContext,
                 lastPrediction
@@ -259,7 +265,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 setResult(data);
                 setSelectedTimelineId(null); 
                 savePlatinumHistory(data);
-                showToast("Réalités Alternatives générées selon l'ADN.", "success");
+                showToast("Mixture of Experts convergée.", "success");
             }
         } catch (e: any) {
             if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
@@ -292,14 +298,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <div>
                         <div className="flex items-center gap-3 mb-2">
                             <Sparkles size={20} className="text-purple-400" />
-                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-purple-400">Continuité Quantique</h3>
+                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-purple-400">Architecture MoE</h3>
                         </div>
                         <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">
-                            Platinum <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Fusion</span>
+                            Platinum <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Experts</span>
                         </h2>
                         <div className="mt-2 flex flex-col gap-1">
                             <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg">
-                                Génération de <strong>5 Réalités Alternatives</strong> basées strictement sur votre ADN Algorithmique actif.
+                                4 Agents Experts (Historien, Physicien, Géomètre, Contrarian) analysent le flux. Le <strong>Gating Network</strong> pondère leurs avis selon le régime actuel.
                             </p>
                         </div>
                     </div>
@@ -309,7 +315,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                             onClick={() => setViewMode('generator')}
                             className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${viewMode === 'generator' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                         >
-                            <Zap size={14}/> Live
+                            <Zap size={14}/> Live Fusion
                         </button>
                         <button 
                             onClick={() => setViewMode('archives')}
@@ -329,13 +335,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] border border-slate-800 border-dashed">
                             <Binary size={48} className="text-slate-600 mb-6" />
                             <p className="text-slate-400 text-sm font-medium mb-8 max-w-md text-center">
-                                Le noyau va appliquer vos poids ADN pour calculer 5 stratégies distinctes (Elite, Probabiliste, Structurelle, Cyclique, Chaos).
+                                Le noyau va activer les 4 Experts et le Gating Network pour générer 5 réalités probabilistes.
                             </p>
                             <button 
                                 onClick={runMetaAnalysis} 
                                 className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 flex items-center gap-3 transition-all active:scale-95 group"
                             >
-                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Lancer Fusion (ADN)
+                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Activer les Experts
                             </button>
                         </div>
                     )}
@@ -377,7 +383,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                                     <h3 className={`text-2xl font-black uppercase tracking-tighter mb-2 ${TIMELINE_THEMES[selectedTimeline.type].color}`}>
                                                         Réalité {selectedTimeline.type}
                                                     </h3>
-                                                    <p className="text-slate-400 text-xs font-medium italic border-l-2 border-slate-700 pl-4">
+                                                    <span className="text-[10px] font-black bg-white/5 px-2 py-1 rounded text-slate-300 uppercase">
+                                                        Driven by: {TIMELINE_THEMES[selectedTimeline.type].expertName}
+                                                    </span>
+                                                    <p className="text-slate-400 text-xs font-medium italic border-l-2 border-slate-700 pl-4 mt-4">
                                                         "{selectedTimeline.remark}"
                                                     </p>
                                                 </div>

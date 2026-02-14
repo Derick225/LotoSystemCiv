@@ -82,7 +82,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                 history, 
                 'XGBoost', 
                 globalWeights, 
-                (p: any) => setProgress(typeof p === 'number' ? p : 0),  // Callback progression safely cast
+                (p: any) => setProgress(Number(p) || 0),  // Callback progression safely cast
                 (msg) => setLogs(prev => [...prev, msg]) // Callback logs
             );
             
