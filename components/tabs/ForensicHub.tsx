@@ -8,7 +8,7 @@ import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
 import { Microscope, Calendar, ChevronRight, Activity, TrendingUp, Cpu, Network, Target, SearchX, Crown, ScanBarcode, FileSearch, Radar as RadarIcon } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell, PolarRadiusAxis } from 'recharts';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 
 type ForensicMode = 'prediction' | 'structure';
 
@@ -105,18 +105,19 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     // Calcul de la performance des Timelines Platinum
     const platinumStats = useMemo(() => {
         if (platinumAudits.length === 0) return [];
-        const stats: Record<string, number> = { 'NOVA': 0, 'NEON': 0, 'TERRA': 0, 'CHRONOS': 0, 'AETHER': 0 };
+        const stats: Record<string, number> = { 'Alpha Core': 0, 'Beta Flow': 0, 'Gamma Burst': 0 };
         
         platinumAudits.forEach(audit => {
             audit.timelinePerformance.forEach(tp => {
-                stats[tp.type] += tp.hits;
+                if (stats[tp.type] !== undefined) stats[tp.type] += tp.hits;
+                else stats[tp.type] = tp.hits;
             });
         });
         
         return Object.entries(stats).map(([type, hits]) => ({
-            name: type,
+            name: type.split(' ')[0], // Alpha, Beta...
             hits: hits,
-            color: type === 'NOVA' ? '#a855f7' : type === 'NEON' ? '#06b6d4' : type === 'TERRA' ? '#10b981' : type === 'CHRONOS' ? '#f59e0b' : '#f43f5e'
+            color: type.includes('Alpha') ? '#10b981' : type.includes('Beta') ? '#6366f1' : '#f43f5e'
         })).sort((a, b) => b.hits - a.hits);
     }, [platinumAudits]);
 
