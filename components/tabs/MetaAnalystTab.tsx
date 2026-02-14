@@ -1,486 +1,309 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
 import { saveTicket } from '../../services/userPreferencesService';
-import { calculateShannonEntropy, calculateChiSquare } from '../../services/mathService';
 import { useNexus } from '../NexusProvider';
-import type { PlatinumResult, PlatinumTimeline } from '../../types';
+import type { PlatinumResult, PlatinumScenario } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { 
-    Brain, Sparkles, Activity,
-    Ghost, Layers, Hexagon, Clock, Workflow, Archive, FileSearch, Crown, Radar as RadarIcon, Atom, Zap, Binary, Wallet, Save
+    Activity, Layers, Zap, Hexagon, 
+    BarChart3, RefreshCw, Radio, 
+    Fingerprint, MousePointer2, AlertCircle, Save
 } from 'lucide-react';
+import { 
+    ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, 
+    CartesianGrid, ReferenceLine, Cell, AreaChart, Area 
+} from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface MetaAnalystTabProps {
     drawName: string;
 }
 
-// Configuration des Thèmes Visuels par Timeline
-const TIMELINE_THEMES: Record<string, any> = {
-    'NOVA': { 
-        icon: <Brain size={24} />, 
-        color: 'text-purple-400', 
-        border: 'border-purple-500', 
-        bg: 'bg-purple-500/10', 
-        glow: 'shadow-[0_0_30px_rgba(168,85,247,0.3)]',
-        gradient: 'from-purple-900/40 to-slate-900',
-        expertName: 'MoE Fusion 3.1'
-    },
-    'NEON': { 
-        icon: <Activity size={20} />, 
-        color: 'text-cyan-400', 
-        border: 'border-cyan-500/50', 
-        bg: 'bg-cyan-900/20', 
-        glow: 'shadow-cyan-500/20',
-        gradient: 'from-cyan-900/20 to-slate-900',
-        expertName: 'Expert Beta (Physicien)'
-    },
-    'TERRA': { 
-        icon: <Hexagon size={20} />, 
-        color: 'text-emerald-400', 
-        border: 'border-emerald-500/50', 
-        bg: 'bg-emerald-900/20', 
-        glow: 'shadow-emerald-500/20',
-        gradient: 'from-emerald-900/20 to-slate-900',
-        expertName: 'Expert Gamma (Géomètre)'
-    },
-    'CHRONOS': { 
-        icon: <Clock size={20} />, 
-        color: 'text-amber-400', 
-        border: 'border-amber-500/50', 
-        bg: 'bg-amber-900/20', 
-        glow: 'shadow-amber-500/20',
-        gradient: 'from-amber-900/20 to-slate-900',
-        expertName: 'Expert Alpha (Historien)'
-    },
-    'AETHER': { 
-        icon: <Ghost size={20} />, 
-        color: 'text-rose-400', 
-        border: 'border-rose-500/50', 
-        bg: 'bg-rose-900/20', 
-        glow: 'shadow-rose-500/20',
-        gradient: 'from-rose-900/20 to-slate-900',
-        expertName: 'Expert Delta (Contrarian)'
-    }
-};
-
-const TimelineCard: React.FC<{ 
-    timeline: PlatinumTimeline; 
+const ScenarioCard: React.FC<{ 
+    scenario: PlatinumScenario; 
     isSelected: boolean; 
-    onClick: () => void 
-}> = ({ timeline, isSelected, onClick }) => {
-    const theme = TIMELINE_THEMES[timeline.type] || TIMELINE_THEMES['NEON'];
-
+    onClick: () => void;
+    onSave: () => void;
+}> = ({ scenario, isSelected, onClick, onSave }) => {
     return (
         <motion.div 
             layout
             onClick={onClick}
-            whileHover={{ scale: 1.02, y: -5 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={{ y: -4 }}
             className={`
-                relative p-5 rounded-[2.5rem] border cursor-pointer overflow-hidden flex flex-col justify-between min-h-[180px] transition-all duration-300
-                ${isSelected ? `${theme.border} bg-slate-900 ${theme.glow}` : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'}
+                relative p-5 rounded-2xl border cursor-pointer overflow-hidden flex flex-col justify-between h-full transition-all duration-300
+                ${isSelected 
+                    ? 'bg-slate-800 border-white/20 shadow-2xl ring-1 ring-white/10' 
+                    : 'bg-slate-900/50 border-white/5 hover:bg-slate-800/50 hover:border-white/10'
+                }
             `}
         >
-            <div className={`absolute inset-0 bg-gradient-to-br ${theme.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+            {isSelected && (
+                <div 
+                    className="absolute top-0 left-0 w-full h-1" 
+                    style={{ backgroundColor: scenario.color }}
+                />
+            )}
             
-            <div className="relative z-10">
-                <div className="flex justify-between items-start mb-4">
-                    <div className={`p-3 rounded-2xl bg-black/40 border border-white/5 ${theme.color}`}>
-                        {theme.icon}
-                    </div>
-                    <div className="flex flex-col items-end">
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${theme.color}`}>{timeline.type}</span>
-                        <span className="text-[9px] font-bold text-slate-500">{theme.expertName}</span>
-                    </div>
+            <div>
+                <div className="flex justify-between items-start mb-3">
+                    <span 
+                        className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md"
+                        style={{ color: scenario.color, backgroundColor: `${scenario.color}15` }}
+                    >
+                        {scenario.risk} RISK
+                    </span>
+                    <span className="text-xs font-bold text-white">{scenario.probability}%</span>
                 </div>
 
-                <div className="mb-4">
-                    <h3 className="text-sm font-bold text-white mb-1 leading-tight">{timeline.title}</h3>
-                    <p className="text-[10px] text-slate-400 line-clamp-2">{timeline.remark}</p>
-                </div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tight mb-1">{scenario.name}</h3>
+                <p className="text-[10px] text-slate-400 font-medium leading-relaxed">{scenario.description}</p>
+            </div>
 
-                <div className="flex justify-between gap-1 mt-auto">
-                    {timeline.numbers.map((n) => (
-                        <div key={n} className="scale-90 transform -ml-1.5 first:ml-0">
-                            <NumberBall number={n} size="sm" />
-                        </div>
+            <div className="mt-6 space-y-4">
+                <div className="flex justify-between gap-1">
+                    {scenario.numbers.map(n => (
+                        <NumberBall key={n} number={n} size="sm" />
                     ))}
                 </div>
+                
+                {isSelected && (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onSave(); }}
+                        className="w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                        style={{ backgroundColor: scenario.color }}
+                    >
+                        <Save size={12}/> Sauvegarder
+                    </button>
+                )}
             </div>
         </motion.div>
     );
 };
 
-const NovaCore: React.FC<{ timeline: PlatinumTimeline; onSave: (nums: number[]) => void }> = ({ timeline, onSave }) => {
-    return (
-        <div className="relative group">
-            <div className="absolute inset-0 bg-purple-600/20 rounded-[3rem] blur-2xl group-hover:blur-3xl transition-all duration-1000 animate-pulse-slow"></div>
-            <div className={`relative bg-slate-950 border border-purple-500/30 p-8 md:p-10 rounded-[3rem] shadow-2xl overflow-hidden`}>
-                
-                <div className="absolute top-0 right-0 p-10 opacity-10"><Atom size={200} className="text-purple-500 animate-spin-slow" /></div>
-                
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                    <div className="text-center md:text-left">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full mb-4">
-                            <Crown size={14} className="text-purple-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">MoE Non-Linear Fusion</span>
-                        </div>
-                        <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-2">
-                            NOVA <span className="text-purple-500">PRIME</span>
-                        </h2>
-                        <p className="text-slate-400 text-sm max-w-md">
-                            La fusion optimale de 4 experts neuronaux (Historien, Physicien, Géomètre, Contrarian). Pondérée par l'entropie et le régime fractal.
-                        </p>
-                        
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); onSave(timeline.numbers); }}
-                            className="mt-6 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95"
-                        >
-                            <Save size={14}/> Sauvegarder Nova
-                        </button>
-                    </div>
-
-                    <div className="flex gap-3 md:gap-4">
-                        {timeline.numbers.map((n, i) => (
-                            <motion.div 
-                                key={n}
-                                initial={{ scale: 0, y: 20 }}
-                                animate={{ scale: 1, y: 0 }}
-                                transition={{ delay: i * 0.1, type: 'spring' }}
-                            >
-                                <NumberBall number={n} size="xl" isAttractor glow />
-                            </motion.div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const LoadingSequence: React.FC = () => {
-    const [step, setStep] = useState(0);
-    const steps = [
-        "Initialisation des 4 Experts...",
-        "Calcul d'Entropie & Hurst...",
-        "Expert Beta : Analyse Spectrale...",
-        "Gating Network : Pondération...",
-        "Fusion Non-Linéaire (MoE)..."
-    ];
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setStep(s => (s < steps.length - 1 ? s + 1 : s));
-        }, 800);
-        return () => clearInterval(interval);
-    }, []);
-
-    return (
-        <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 bg-slate-950 rounded-[3rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden">
-            <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
-                <div className="w-96 h-96 border border-indigo-500/20 rounded-full animate-[spin_10s_linear_infinite]"></div>
-                <div className="absolute w-64 h-64 border border-purple-500/20 rounded-full animate-[spin_7s_linear_infinite_reverse]"></div>
-            </div>
-            
-            <div className="relative z-10 flex flex-col items-center gap-6">
-                <div className="relative">
-                    <div className="w-20 h-20 bg-indigo-600 rounded-2xl animate-spin-slow"></div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                        <Workflow className="text-white w-10 h-10 animate-pulse" />
-                    </div>
-                </div>
-                
-                <div className="text-center space-y-2">
-                    <p className="text-indigo-400 font-black uppercase tracking-[0.3em] text-xs animate-pulse">
-                        Platinum MoE Engine v3.1
-                    </p>
-                    <div className="h-6 overflow-hidden">
-                        <motion.p 
-                            key={step}
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            exit={{ y: -20, opacity: 0 }}
-                            className="text-slate-300 text-sm font-mono font-bold"
-                        >
-                            {steps[step]}
-                        </motion.p>
-                    </div>
-                </div>
-                
-                <div className="flex gap-1.5 mt-4">
-                    {steps.map((_, i) => (
-                        <div key={i} className={`w-2 h-2 rounded-full transition-colors duration-500 ${i <= step ? 'bg-indigo-500' : 'bg-slate-800'}`}></div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading, spectral, fractal, wavelet, correlationMatrix, regularity, symbioticContext, lastPrediction } = useNexus();
+    const { history, loading: nexusLoading, spectral, fractal, volatility, correlationMatrix, regularity, symbioticContext } = useNexus();
     
-    const [viewMode, setViewMode] = useState<'generator' | 'archives'>('generator');
     const [result, setResult] = useState<PlatinumResult | null>(null);
     const [loading, setLoading] = useState(false);
-    const [selectedTimelineId, setSelectedTimelineId] = useState<string | null>(null);
-    const [archives, setArchives] = useState<PlatinumResult[]>([]);
-    
-    const isMounted = useRef(true);
+    const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-    useEffect(() => {
-        setArchives(getPlatinumHistory(drawName));
-    }, [drawName, viewMode]);
-
-    const runMetaAnalysis = async () => {
-        if (history.length < 25) {
-             showToast("Dataset insuffisant (Min 25).", "error");
+    const runAnalysis = async () => {
+        if (history.length < 15) {
+             showToast("Dataset insuffisant pour la convergence.", "error");
              return;
         }
         setLoading(true);
-        setResult(null); 
         
         try {
-            await new Promise(r => setTimeout(r, 3000)); 
-
-            // Calculs Métriques avancées à la volée pour l'injection
-            const entropy = calculateShannonEntropy(history);
-            
-            const freqMap: Record<number, number> = {};
-            history.forEach(d => d.gagnants.forEach(n => freqMap[n] = (freqMap[n] || 0) + 1));
-            const chiSquare = calculateChiSquare(freqMap, history.length * 5);
+            // Simulation de temps de calcul (UX)
+            await new Promise(r => setTimeout(r, 1500)); 
 
             const data = await generatePlatinumPrediction(
                 drawName, 
                 history, 
-                { 
-                    spectral, 
-                    fractal, 
-                    wavelet, 
-                    correlationMatrix, 
-                    regularity, 
-                    volatility: {score: 50},
-                    entropy,   // Ajout Entropie
-                    chiSquare  // Ajout Chi2
-                }, 
+                { spectral, fractal, volatility }, // Inject pre-computed metrics
                 null,
-                symbioticContext,
-                lastPrediction
+                symbioticContext
             );
             
-            if (isMounted.current) {
-                setResult(data);
-                setSelectedTimelineId(null); 
-                savePlatinumHistory(data);
-                showToast("Mixture of Experts convergée.", "success");
-            }
+            setResult(data);
+            setSelectedScenarioId('alpha'); // Select Conservative by default
+            savePlatinumHistory(data);
+            showToast("Convergence Tensorielle atteinte.", "success");
         } catch (e: any) {
-            if (isMounted.current) showToast("Erreur noyau : " + e.message, "error");
+            showToast("Erreur Hyper-Convergence : " + e.message, "error");
         } finally {
-            if (isMounted.current) setLoading(false);
+            setLoading(false);
         }
     };
 
-    const handleSaveTimeline = async (timelineType: string, numbers: number[]) => {
+    const handleSave = async (scenario: PlatinumScenario) => {
         await saveTicket({
-            numbers,
+            numbers: scenario.numbers,
             drawName,
-            strategy: `Platinum ${timelineType} (${new Date().toLocaleTimeString()})`
+            strategy: `Platinum ${scenario.name}`
         });
-        showToast(`Timeline ${timelineType} cristallisée dans le wallet.`, "success");
+        showToast("Vecteur sécurisé.", "success");
     };
 
-    const selectedTimeline = result?.timelines.find(t => t.type === selectedTimelineId);
+    // Data for the Spectrum Chart
+    const spectrumData = useMemo(() => {
+        if (!result) return [];
+        // Convert [0, ..., val, ...] to [{n: 1, v: val}, ...] skipping index 0
+        return Array.from({ length: 90 }, (_, i) => ({
+            n: i + 1,
+            v: Math.round(result.consensusVector[i + 1])
+        }));
+    }, [result]);
 
-    if (nexusLoading || loading) return <LoadingSequence />;
+    const selectedScenario = result?.scenarios.find(s => s.id === selectedScenarioId);
+
+    if (nexusLoading || loading) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[500px] gap-8 animate-pulse">
+                <div className="relative">
+                    <div className="w-32 h-32 rounded-full border-t-4 border-indigo-500 animate-spin"></div>
+                    <Hexagon className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={48} />
+                </div>
+                <div className="text-center">
+                    <h3 className="text-xl font-black text-white uppercase tracking-widest">Hyper-Convergence</h3>
+                    <p className="text-xs text-indigo-400 font-mono mt-2">Fusion des tenseurs probabilistes...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!result) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[500px] p-8 text-center bg-slate-900/50 rounded-[3rem] border border-white/5">
+                <div className="p-6 bg-slate-900 rounded-full shadow-2xl mb-8 border border-white/5">
+                    <Layers size={64} className="text-slate-500" />
+                </div>
+                <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter mb-4">
+                    Nexus <span className="text-indigo-500">Platinum</span>
+                </h2>
+                <p className="text-slate-400 max-w-md text-sm font-medium leading-relaxed mb-10">
+                    Activez le moteur de fusion tensorielle pour générer un spectre de probabilité unifié à partir de tous les modèles disponibles.
+                </p>
+                <button 
+                    onClick={runAnalysis}
+                    className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-3 group"
+                >
+                    <Zap size={18} className="group-hover:text-yellow-300 transition-colors"/> Initialiser le Système
+                </button>
+            </div>
+        );
+    }
 
     return (
-        <div className="space-y-8 animate-fade-in pb-24 w-full overflow-hidden">
+        <div className="space-y-6 animate-fade-in pb-20 w-full overflow-hidden">
             
-            {/* Header Control Panel */}
-            <div className="bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-[3rem] shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none"><Layers size={180} /></div>
-                
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
-                            <Sparkles size={20} className="text-purple-400" />
-                            <h3 className="text-xs font-black uppercase tracking-[0.3em] text-purple-400">Architecture MoE v3</h3>
-                        </div>
-                        <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter">
-                            Platinum <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Experts</span>
-                        </h2>
-                        <div className="mt-2 flex flex-col gap-1">
-                            <p className="text-slate-400 text-xs md:text-sm font-medium max-w-lg">
-                                4 Agents Experts (Historien, Physicien, Géomètre, Contrarian) analysent le flux. Le <strong>Gating Network</strong> pondère leurs avis selon l'entropie et le Hurst.
-                            </p>
-                        </div>
+            {/* 1. MISSION CONTROL HEADER */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Cohérence</span>
+                    <div className="text-2xl font-black text-white flex items-center gap-2">
+                        {result.coherence}% 
+                        <Activity size={16} className={result.coherence > 80 ? 'text-emerald-500' : 'text-amber-500'}/>
                     </div>
+                </div>
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Entropie</span>
+                    <div className="text-2xl font-black text-white flex items-center gap-2">
+                        {result.entropy.toFixed(2)}
+                        <Radio size={16} className="text-indigo-500"/>
+                    </div>
+                </div>
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Régime</span>
+                    <div className={`text-xl font-black uppercase ${result.regime === 'STABLE' ? 'text-emerald-400' : result.regime === 'CHAOTIC' ? 'text-rose-400' : 'text-amber-400'}`}>
+                        {result.regime}
+                    </div>
+                </div>
+                <button onClick={runAnalysis} className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl flex flex-col items-center justify-center text-white transition-colors group">
+                    <RefreshCw size={20} className="mb-1 group-hover:rotate-180 transition-transform duration-700"/>
+                    <span className="text-[9px] font-black uppercase tracking-widest">Re-Scan</span>
+                </button>
+            </div>
 
-                    <div className="flex bg-black/40 p-1.5 rounded-2xl border border-white/5">
-                        <button 
-                            onClick={() => setViewMode('generator')}
-                            className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${viewMode === 'generator' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            <Zap size={14}/> Live Fusion
-                        </button>
-                        <button 
-                            onClick={() => setViewMode('archives')}
-                            className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${viewMode === 'archives' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                        >
-                            <Archive size={14}/> Archives
-                        </button>
-                    </div>
+            {/* 2. HYPER-SPECTRUM CHART (The main visual) */}
+            <div className="bg-slate-900 p-6 md:p-8 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden">
+                <div className="flex justify-between items-center mb-6 px-2">
+                    <h3 className="text-lg font-black text-white uppercase tracking-widest flex items-center gap-3">
+                        <BarChart3 className="text-indigo-500" size={20} /> Spectre de Probabilité
+                    </h3>
+                    {hoveredIndex !== null && (
+                        <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full animate-fade-in">
+                            <span className="text-[10px] font-bold text-indigo-300">Vecteur {hoveredIndex}</span>
+                            <span className="text-xs font-black text-white">{spectrumData[hoveredIndex-1]?.v}%</span>
+                        </div>
+                    )}
+                </div>
+
+                <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={spectrumData} onMouseMove={(e) => { if (e.activeTooltipIndex !== undefined) setHoveredIndex(e.activeTooltipIndex + 1); }} onMouseLeave={() => setHoveredIndex(null)}>
+                            <defs>
+                                <linearGradient id="spectrumBar" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#818cf8" />
+                                    <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.4} />
+                                </linearGradient>
+                            </defs>
+                            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} content={<></>} />
+                            <Bar dataKey="v" radius={[2, 2, 0, 0]} animationDuration={1500}>
+                                {spectrumData.map((entry, index) => (
+                                    <Cell 
+                                        key={`cell-${index}`} 
+                                        fill={selectedScenario?.numbers.includes(entry.n) ? selectedScenario.color : (entry.v > 50 ? '#818cf8' : '#334155')}
+                                        className="transition-all duration-300"
+                                    />
+                                ))}
+                            </Bar>
+                            <ReferenceLine y={50} stroke="#334155" strokeDasharray="3 3" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+                
+                {/* X-Axis Labels (Simplified) */}
+                <div className="flex justify-between text-[9px] font-mono text-slate-600 px-1 mt-2">
+                    <span>1</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span><span>60</span><span>70</span><span>80</span><span>90</span>
                 </div>
             </div>
 
-            {/* MAIN GENERATOR VIEW */}
-            {viewMode === 'generator' && (
-                <div className="space-y-10 animate-slide-up">
-                    
-                    {!result && (
-                        <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] border border-slate-800 border-dashed">
-                            <Binary size={48} className="text-slate-600 mb-6" />
-                            <p className="text-slate-400 text-sm font-medium mb-8 max-w-md text-center">
-                                Le noyau va activer les 4 Experts et le Gating Network pour générer 5 réalités probabilistes.
-                            </p>
-                            <button 
-                                onClick={runMetaAnalysis} 
-                                className="px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 flex items-center gap-3 transition-all active:scale-95 group"
-                            >
-                                <Zap size={18} className="group-hover:rotate-12 transition-transform"/> Activer les Experts
-                            </button>
-                        </div>
-                    )}
+            {/* 3. SCENARIO SELECTOR */}
+            <div className="grid md:grid-cols-3 gap-6">
+                {result.scenarios.map((scenario) => (
+                    <ScenarioCard 
+                        key={scenario.id}
+                        scenario={scenario}
+                        isSelected={selectedScenarioId === scenario.id}
+                        onClick={() => setSelectedScenarioId(scenario.id)}
+                        onSave={() => handleSave(scenario)}
+                    />
+                ))}
+            </div>
 
-                    {result && (
-                        <>
-                            {/* NOVA CORE - The Main Result */}
-                            <NovaCore 
-                                timeline={result.timelines.find(t => t.type === 'NOVA')!} 
-                                onSave={(nums) => handleSaveTimeline('NOVA', nums)}
+            {/* 4. DEEP INSPECTION (Conditional) */}
+            <AnimatePresence>
+                {selectedScenario && (
+                    <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                    >
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
+                            <div className="flex items-center gap-3 mb-6">
+                                <Fingerprint className="text-slate-400" size={20} />
+                                <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">
+                                    Rayon-X : {selectedScenario.name}
+                                </h4>
+                            </div>
+                            
+                            <TicketXRay 
+                                numbers={selectedScenario.numbers} 
+                                score={selectedScenario.probability} // Use prob as a proxy for score visual
+                                showTitle={false}
                             />
-
-                            {/* TIMELINES GRID */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                {result.timelines.filter(t => t.type !== 'NOVA').map((timeline) => (
-                                    <TimelineCard 
-                                        key={timeline.type}
-                                        timeline={timeline}
-                                        isSelected={selectedTimelineId === timeline.type}
-                                        onClick={() => setSelectedTimelineId(selectedTimelineId === timeline.type ? null : timeline.type)}
-                                    />
-                                ))}
+                            
+                            <div className="mt-6 flex items-start gap-3 p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                                <AlertCircle size={16} className="text-indigo-500 shrink-0 mt-0.5" />
+                                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+                                    Ce scénario est optimisé pour un régime <strong>{result.regime}</strong>. 
+                                    La cohérence globale est de {result.coherence}%.
+                                </p>
                             </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-                            {/* DETAILED INSPECTOR PANEL */}
-                            <AnimatePresence>
-                                {selectedTimeline && (
-                                    <motion.div 
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        className="overflow-hidden"
-                                    >
-                                        <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-8 grid lg:grid-cols-2 gap-8 shadow-2xl relative">
-                                            <div className="absolute top-4 right-6 text-slate-700 cursor-pointer hover:text-white" onClick={() => setSelectedTimelineId(null)}>✕</div>
-                                            
-                                            <div className="space-y-6">
-                                                <div>
-                                                    <h3 className={`text-2xl font-black uppercase tracking-tighter mb-2 ${TIMELINE_THEMES[selectedTimeline.type].color}`}>
-                                                        Réalité {selectedTimeline.type}
-                                                    </h3>
-                                                    <span className="text-[10px] font-black bg-white/5 px-2 py-1 rounded text-slate-300 uppercase">
-                                                        Driven by: {TIMELINE_THEMES[selectedTimeline.type].expertName}
-                                                    </span>
-                                                    <p className="text-slate-400 text-xs font-medium italic border-l-2 border-slate-700 pl-4 mt-4">
-                                                        "{selectedTimeline.remark}"
-                                                    </p>
-                                                </div>
-                                                
-                                                <TicketXRay 
-                                                    numbers={selectedTimeline.numbers} 
-                                                    score={selectedTimeline.score}
-                                                    showTitle={false}
-                                                />
-                                                
-                                                <button 
-                                                    onClick={() => handleSaveTimeline(selectedTimeline.type, selectedTimeline.numbers)}
-                                                    className={`w-full py-4 rounded-xl text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 bg-gradient-to-r ${TIMELINE_THEMES[selectedTimeline.type].gradient}`}
-                                                >
-                                                    <Wallet size={16}/> Sauvegarder cette Timeline
-                                                </button>
-                                            </div>
-
-                                            <div className="bg-black/30 rounded-[2rem] p-6 border border-white/5">
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <RadarIcon size={16} className="text-indigo-400" />
-                                                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Radar de Potentiel</span>
-                                                </div>
-                                                <div className="h-64 w-full">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={selectedTimeline.radarStats}>
-                                                            <PolarGrid stroke="#334155" />
-                                                            <PolarAngleAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} />
-                                                            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                                                            <Radar name={selectedTimeline.type} dataKey="value" stroke="#818cf8" strokeWidth={3} fill="#818cf8" fillOpacity={0.4} />
-                                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '10px' }} />
-                                                        </RadarChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </>
-                    )}
-                </div>
-            )}
-
-            {/* ARCHIVES VIEW */}
-            {viewMode === 'archives' && (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 animate-slide-up">
-                    {archives.length === 0 ? (
-                        <div className="col-span-full py-20 text-center text-slate-500 font-medium italic">Aucune archive Platinum disponible.</div>
-                    ) : (
-                        archives.map((arch) => (
-                            <div key={arch.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 hover:border-purple-500 transition-all group shadow-sm flex flex-col h-full">
-                                <div className="flex justify-between items-start mb-6">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-3 bg-slate-100 dark:bg-slate-800 rounded-2xl text-purple-500"><FileSearch size={20}/></div>
-                                        <div>
-                                            <div className="text-sm font-black text-slate-800 dark:text-white">{new Date(arch.timestamp).toLocaleDateString()}</div>
-                                            <div className="text-[9px] font-bold text-slate-400 uppercase">{new Date(arch.timestamp).toLocaleTimeString()}</div>
-                                        </div>
-                                    </div>
-                                    <div className="text-xs font-black text-purple-500 bg-purple-500/10 px-3 py-1 rounded-full">{arch.confidence}%</div>
-                                </div>
-                                
-                                <div className="space-y-4 flex-1">
-                                    {arch.timelines.filter(t => t.type === 'NOVA' || t.score > 90).slice(0, 2).map(t => (
-                                        <div key={t.type} className="bg-slate-50 dark:bg-black/20 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
-                                            <div className="flex justify-between text-[10px] items-center mb-2">
-                                                <span className={`font-black uppercase tracking-widest ${t.type === 'NOVA' ? 'text-purple-400' : 'text-slate-500'}`}>{t.type}</span>
-                                                <span className="font-mono font-bold text-slate-400">{t.score}pts</span>
-                                            </div>
-                                            <div className="flex gap-1 justify-center">
-                                                {t.numbers.map(n => <span key={n} className="w-5 h-5 bg-white dark:bg-slate-800 rounded flex items-center justify-center text-[9px] font-black shadow-sm">{n}</span>)}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
-            )}
         </div>
     );
 };

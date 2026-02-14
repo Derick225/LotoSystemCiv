@@ -16,7 +16,8 @@ interface OracleHubProps { drawName: string; }
 export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const { regime: globalRegime, loading: nexusLoading, globalWeights } = useNexus();
     
-    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat' | 'convergence'>('convergence');
+    // Platinum est maintenant le moteur principal, mais on expose la Synthèse en premier plan
+    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat' | 'convergence'>('platinum');
     const [activeStrategy, setActiveStrategy] = useState("Standard");
     
     useEffect(() => {
@@ -39,9 +40,9 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     }, []);
 
     const subTabs = [
+        { id: 'platinum', label: 'Platinum Elite', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
         { id: 'convergence', label: 'Synthèse', icon: <Hexagon size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
         { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-violet-500', bg: 'hover:bg-violet-50' },
-        { id: 'platinum', label: 'Platinum', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
         { id: 'intel', label: 'Narratif', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
         { id: 'orch', label: 'Orchestra', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' },
         { id: 'chat', label: 'Chat', icon: <MessageSquareCode size={16}/>, color: 'text-blue-500', bg: 'hover:bg-blue-50' }

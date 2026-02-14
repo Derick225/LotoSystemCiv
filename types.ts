@@ -371,28 +371,32 @@ export interface DecisionNode {
     children?: DecisionNode[];
 }
 
+// --- HYPER-CONVERGENCE TYPES ---
+
 export interface PlatinumResult {
     id: string;
-    kingNumbers: { number: number; count: number }[];
-    timelines: PlatinumTimeline[];
-    combinations: any[];
-    confidence: number;
-    analysis: string;
     drawName: string;
     timestamp: number;
+    confidence: number;
+    
+    // Core Data
+    consensusVector: number[]; // Tableau de 90 scores (0-100)
+    scenarios: PlatinumScenario[];
+    
+    // Metrics
+    coherence: number; // 0-100 (Entropie inversée)
+    regime: 'STABLE' | 'CHAOTIC' | 'TRANSITION';
+    entropy: number;
 }
 
-export interface PlatinumTimeline {
-    type: string;
-    title: string;
+export interface PlatinumScenario {
+    id: string;
+    name: string;
+    description: string;
     numbers: number[];
-    score: number;
-    intuitionScore: number;
-    remark: string;
-    keyMetric: string;
-    colorTheme: string;
-    divergence?: number; // Distance par rapport au consensus
-    radarStats?: { label: string, value: number }[]; // Pour le graphique
+    probability: number;
+    risk: 'LOW' | 'MEDIUM' | 'HIGH';
+    color: string;
 }
 
 export interface PlatinumAudit {
