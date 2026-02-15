@@ -277,9 +277,9 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
 
                             {loading && (
                                 <div className="space-y-1">
-                                    <div className="text-emerald-500/80">> Initializing neural link... OK</div>
-                                    <div className="text-emerald-500/80">> Loading historical tensors... OK</div>
-                                    <div className="text-emerald-500/80 animate-pulse">> Computing fractal dimension...</div>
+                                    <div className="text-emerald-500/80">&gt; Initializing neural link... OK</div>
+                                    <div className="text-emerald-500/80">&gt; Loading historical tensors... OK</div>
+                                    <div className="text-emerald-500/80 animate-pulse">&gt; Computing fractal dimension...</div>
                                 </div>
                             )}
 
@@ -309,7 +309,7 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
 
                                     {/* Next Sequence */}
                                     <div>
-                                        <span className="text-[9px] text-indigo-400 block mb-2 uppercase">>>> PREDICTIVE_VECTOR</span>
+                                        <span className="text-[9px] text-indigo-400 block mb-2 uppercase">&gt;&gt;&gt; PREDICTIVE_VECTOR</span>
                                         <div className="text-indigo-300 font-bold">
                                             {analysis.nextSequence}
                                         </div>
