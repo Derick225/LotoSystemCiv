@@ -1,6 +1,7 @@
 
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity } from './mathService';
+import { DRAW_SCHEDULE } from '../constants';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -11,12 +12,6 @@ const extractMonth = (dateStr: string): number => {
 };
 
 const mean = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / (arr.length || 1);
-
-const stdDev = (arr: number[]) => {
-    const mu = mean(arr);
-    const variance = arr.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / (arr.length || 1);
-    return Math.sqrt(variance);
-};
 
 // Fonction d'Autocorrélation (ACF) pour détecter la saisonnalité
 const calculateAutocorrelation = (data: number[], lag: number) => {
@@ -38,7 +33,6 @@ const calculateAutocorrelation = (data: number[], lag: number) => {
 
 export const getSeasonalAffinity = (history: DrawResult[]): MonthStats => {
     const currentMonth = new Date().getMonth();
-    // Utilisation d'un Uint16Array pour performance
     const monthCounts = new Uint16Array(91); 
 
     history.forEach(draw => {
@@ -58,7 +52,6 @@ export const getSeasonalAffinity = (history: DrawResult[]): MonthStats => {
 };
 
 export const getDayAffinity = (history: DrawResult[]): { number: number, count: number, score: number }[] => {
-    // Score pondéré exponentiellement : Récence > Ancienneté
     const scores = new Float32Array(91);
     const DECAY_LAMBDA = 0.05; // Facteur d'oubli
     
@@ -80,6 +73,72 @@ export const getDayAffinity = (history: DrawResult[]): { number: number, count: 
         .sort((a, b) => b.score - a.score);
 };
 
+// --- NOUVEAU : ANALYSE CHRONOBIOLOGIQUE (Time Slots) ---
+export interface TimeSlotMetric {
+    slot: string; // '10:00', '13:00', '16:00', '18:00'
+    label: string; // 'Matin', 'Zénith', 'Après-midi', 'Soir'
+    activity: number; // Score global d'activité (Somme des sorties normalisée)
+    topNumbers: number[];
+}
+
+const getTimeSlotFromDrawName = (drawName: string): string => {
+    const upperName = drawName.toUpperCase().trim();
+    for (const day in DRAW_SCHEDULE) {
+        for (const time in DRAW_SCHEDULE[day]) {
+            if (DRAW_SCHEDULE[day][time].toUpperCase() === upperName) {
+                return time;
+            }
+        }
+    }
+    return 'UNKNOWN';
+};
+
+export const getTimeSlotAffinity = (history: DrawResult[]): TimeSlotMetric[] => {
+    const slots: Record<string, { count: number, numbers: Record<number, number> }> = {
+        '10:00': { count: 0, numbers: {} },
+        '13:00': { count: 0, numbers: {} },
+        '16:00': { count: 0, numbers: {} },
+        '18:15': { count: 0, numbers: {} }
+    };
+
+    const labels: Record<string, string> = {
+        '10:00': 'Matin', '13:00': 'Zénith', '16:00': 'Jour', '18:15': 'Crépuscule'
+    };
+
+    history.forEach(draw => {
+        const time = getTimeSlotFromDrawName(draw.drawName);
+        // Si on ne trouve pas exactement l'heure (ex: noms différents), on essaie de mapper approximativement ou on ignore
+        // Pour la robustesse, on mappe les clés connues.
+        let targetKey = '';
+        if (['10:00', '10H', 'MATIN'].some(k => time.includes(k))) targetKey = '10:00';
+        else if (['13:00', '13H', 'ZENITH'].some(k => time.includes(k))) targetKey = '13:00';
+        else if (['16:00', '16H', 'JOUR'].some(k => time.includes(k))) targetKey = '16:00';
+        else if (['18:00', '18:15', '18H', 'SOIR'].some(k => time.includes(k))) targetKey = '18:15';
+        else targetKey = time; // Fallback direct (si le drawName est directement mappé dans DRAW_SCHEDULE)
+
+        if (slots[targetKey]) {
+            slots[targetKey].count++;
+            draw.gagnants.forEach(n => {
+                slots[targetKey].numbers[n] = (slots[targetKey].numbers[n] || 0) + 1;
+            });
+        }
+    });
+
+    return Object.entries(slots).map(([time, data]) => {
+        const topNums = Object.entries(data.numbers)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(e => Number(e[0]));
+
+        return {
+            slot: time,
+            label: labels[time] || time,
+            activity: data.count,
+            topNumbers: topNums
+        };
+    }); // On ne trie pas ici pour garder l'ordre chronologique
+};
+
 export interface CyclicCandidate {
     number: number;
     score: number;
@@ -88,7 +147,7 @@ export interface CyclicCandidate {
     stdDev: number;
     historyStr: string;
     nextDateEstimate: string;
-    cycleStrength: number; // Force du signal périodique (ACF)
+    cycleStrength: number;
 }
 
 export const getCyclicCandidates = async (_drawName: string, history: DrawResult[]): Promise<CyclicCandidate[]> => {
@@ -97,32 +156,24 @@ export const getCyclicCandidates = async (_drawName: string, history: DrawResult
     const limit = Math.min(history.length, 100);
 
     regularity.forEach((reg: NumberRegularity) => {
-        // Transformation en signal binaire pour l'analyse ACF
         const signal = new Float32Array(limit);
         for(let i=0; i<limit; i++) {
             signal[i] = history[i].gagnants.includes(reg.number) ? 1 : 0;
         }
 
-        // Calcul de la périodicité dominante via Autocorrélation
-        // On teste les lags autour de la moyenne d'écart (Gap moyen)
         const lagTarget = Math.round(reg.avgGap);
         const acfScore = calculateAutocorrelation(Array.from(signal), lagTarget);
 
-        // Seuil de détection de cycle (ACF > 0.3 est significatif pour du bruit stochastique)
         if (acfScore > 0.25 || (reg.stdDev < 3.0 && reg.lastGaps.length >= 3)) {
-            
             const imminence = reg.currentGap / (reg.avgGap || 1);
-            
-            // Score composite : Précision (inverse variance) + Force du cycle (ACF) + Imminence
             const precisionScore = Math.max(0, (10 - reg.stdDev) * 8);
             const cycleBoost = acfScore * 100;
             const timingScore = (imminence >= 0.9 && imminence <= 1.3) ? 30 : 0;
 
             const totalScore = precisionScore + cycleBoost + timingScore;
 
-            // Estimation intervalle de confiance (95%)
-            const lowerBound = Math.round(reg.avgGap - 1.96 * reg.stdDev);
-            const upperBound = Math.round(reg.avgGap + 1.96 * reg.stdDev);
+            const lowerBound = Math.round(reg.avgGap - 1.5 * reg.stdDev);
+            const upperBound = Math.round(reg.avgGap + 1.5 * reg.stdDev);
 
             let status = "EN ATTENTE";
             if (reg.currentGap >= lowerBound && reg.currentGap <= upperBound) status = "CRITIQUE";
@@ -147,28 +198,38 @@ export const getCyclicCandidates = async (_drawName: string, history: DrawResult
 export const getTemporalScores = async (drawName: string, history: DrawResult[]): Promise<Record<number, number>> => {
     const scores: Record<number, number> = {};
     
-    // 1. Saisonnalité (Mois en cours)
+    // 1. Saisonnalité
     const seasonal = getSeasonalAffinity(history);
     const maxSeasonal = seasonal.topNumbers[0]?.count || 1;
     seasonal.topNumbers.forEach(item => {
         scores[item.number] = (scores[item.number] || 0) + (Math.sqrt(item.count / maxSeasonal) * 20);
     });
 
-    // 2. Tendance Journalière (Récence)
+    // 2. Tendance Journalière
     const dayAffinity = getDayAffinity(history);
     dayAffinity.slice(0, 20).forEach(item => {
         scores[item.number] = (scores[item.number] || 0) + (item.score * 0.3);
     });
 
-    // 3. Cycles & Périodicité
+    // 3. Cycles
     const cycles = await getCyclicCandidates(drawName, history);
     cycles.forEach(c => {
-        // Boost massif si le cycle est mature ("CRITIQUE")
         const multiplier = c.nextDateEstimate === 'CRITIQUE' ? 1.5 : 1.0;
         scores[c.number] = (scores[c.number] || 0) + (c.score * 0.5 * multiplier);
     });
 
-    // Normalisation finale (0-100)
+    // 4. Chronobiologie (Time Slot actuel)
+    // On détecte le slot du tirage courant (via drawName) et on booste les numéros forts de ce slot
+    const currentSlot = getTimeSlotFromDrawName(drawName);
+    const timeStats = getTimeSlotAffinity(history);
+    const matchingSlot = timeStats.find(s => s.slot === currentSlot);
+    
+    if (matchingSlot) {
+        matchingSlot.topNumbers.forEach((n, idx) => {
+            scores[n] = (scores[n] || 0) + (15 - idx * 2); // Boost léger pour le top 5 du slot
+        });
+    }
+
     const maxVal = Math.max(...Object.values(scores), 1);
     for(let i=1; i<=90; i++) {
         scores[i] = Math.round(((scores[i] || 0) / maxVal) * 100);

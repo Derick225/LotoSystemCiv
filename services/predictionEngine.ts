@@ -1,3 +1,4 @@
+
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
 import { calculateACValue } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
