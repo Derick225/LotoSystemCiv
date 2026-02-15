@@ -7,7 +7,6 @@ import { invokeEdgeFunction } from './apiClient';
 
 const CACHE_PREFIX = 'nexus_cache_history_';
 
-// ... (Garder isValidDate, formatDate, normalizeDate, normalizeDrawName inchangés) ...
 const isValidDate = (d: number, m: number, y: number): boolean => {
   const date = new Date(y, m - 1, d);
   return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
@@ -133,7 +132,6 @@ export const fetchResults = async (drawName: string): Promise<{ data: DrawResult
   return { data };
 };
 
-// ... (Garder getDailySummary, getNextScheduledDraw, fetchGlobalStats tels quels) ...
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort(); 
@@ -222,8 +220,6 @@ export const fetchRecentStats = async (days: number = 7) => {
     const counts: Record<number, number> = {};
     (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     
-    // Si pas de données récentes, on fallback sur une simulation (ou vide)
-    // Mais pour l'UX, on peut retourner les stats globales si vide pour ne pas casser l'affichage
     if (Object.keys(counts).length === 0) {
          return fetchGlobalStats();
     }
