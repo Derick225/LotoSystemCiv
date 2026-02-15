@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { invokeEdgeFunction } from '../../services/apiClient';
@@ -10,7 +11,7 @@ import { getBankroll } from '../../services/userPreferencesService';
 import { getStrategyName } from '../../services/predictionEngine';
 
 export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, lastPrediction, refreshData, globalWeights } = useNexus();
+    const { history, lastPrediction, refreshData, globalWeights, regime } = useNexus();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -22,33 +23,6 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages, isLoading]);
-
-    const executeFunctionCall = async (fc: any) => {
-        let result = "Fonction exécutée.";
-        
-        switch (fc.name) {
-            case "analyzeDrawDynamics":
-                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Signaux' } }));
-                result = `> Navigation : Module Signaux activé pour ${fc.args.drawName}.`;
-                break;
-            case "requestTicketSynthesis":
-                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Topologie', subTab: 'combinations' } }));
-                result = `> Configuration : Synthèse ${fc.args.riskProfile || 'Standard'} préparée.`;
-                break;
-            case "openForensicAudit":
-                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Forensic' } }));
-                result = "> Sécurité : Accès Forensic accordé.";
-                break;
-            case "showHistory":
-                window.dispatchEvent(new CustomEvent('NAVIGATE_TO_MODULE', { detail: { mainTab: 'Flux' } }));
-                result = "> Base de Données : Registre global ouvert.";
-                break;
-            default:
-                result = `> Erreur : Commande ${fc.name} inconnue.`;
-        }
-        
-        return result;
-    };
 
     const handleSend = async () => {
         if (!input.trim() || isLoading) return;
@@ -65,39 +39,35 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         setIsLoading(true);
         audioEngine.play('click');
 
+        // Construction du contexte riche pour l'IA
         const currentBankroll = getBankroll();
-        // Récupération de l'ADN actif
-        const dnaContext = globalWeights ? `ADN Actif : ${getStrategyName(globalWeights)}. Poids dominants: ${Object.entries(globalWeights).sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0)).slice(0, 3).map(e => e[0]).join(', ')}.` : "ADN Standard";
+        const strategyName = globalWeights ? getStrategyName(globalWeights) : "Standard";
+        const topWeights = globalWeights 
+            ? Object.entries(globalWeights).sort((a,b) => (Number(b[1])||0) - (Number(a[1])||0)).slice(0, 3).map(e => `${e[0]}: ${(Number(e[1])*100).toFixed(0)}%`).join(', ')
+            : "N/A";
+        
+        const regimeInfo = regime ? `Régime: ${regime.regime} (Hurst: ${regime.hurst})` : "Régime non calculé";
+        const predInfo = lastPrediction ? `Dernière prédiction: [${lastPrediction.suggestedNumbers.join(', ')}] (Confiance: ${lastPrediction.confidence}%)` : "Pas de prédiction active";
 
         try {
             const { data, error } = await invokeEdgeFunction('ask-oracle', {
                 body: {
                     task: 'chat',
                     drawName,
-                    history: messages.slice(-5).map(m => ({ role: m.role, content: m.content })),
+                    history: messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
                     userInput: userMsg.content,
                     currentContext: {
-                        regime: history.length > 20 ? "Stabilisé" : "Calibration",
-                        lastPrediction: lastPrediction?.suggestedNumbers,
-                        bankroll: currentBankroll,
-                        dnaInfo: dnaContext // Injection ici
+                        draw: drawName,
+                        bankroll: `${currentBankroll.toLocaleString()} F`,
+                        strategy: strategyName,
+                        weights: topWeights,
+                        regime: regimeInfo,
+                        prediction: predInfo
                     }
                 }
             });
 
             if (error) throw error;
-
-            if (data.functionCalls && data.functionCalls.length > 0) {
-                for (const fc of data.functionCalls) {
-                    const funcResult = await executeFunctionCall(fc);
-                    setMessages(prev => [...prev, {
-                        id: crypto.randomUUID(),
-                        role: 'assistant',
-                        content: `\`\`\`bash\n${funcResult}\n\`\`\``,
-                        timestamp: Date.now()
-                    }]);
-                }
-            }
 
             if (data.response) {
                 setMessages(prev => [...prev, {
@@ -113,7 +83,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             setMessages(prev => [...prev, {
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: "⚠️ **ERREUR CRITIQUE** : Perte de liaison avec le Noyau. Vérifiez votre connexion.",
+                content: "⚠️ **ERREUR CRITIQUE** : Liaison interrompue avec le Noyau Nexus.",
                 timestamp: Date.now()
             }]);
             audioEngine.play('error');
@@ -130,7 +100,7 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
     };
 
     return (
-        <div className="flex flex-col h-[700px] bg-slate-900/80 rounded-[3rem] border border-white/10 overflow-hidden shadow-2xl relative">
+        <div className="flex flex-col h-[650px] bg-slate-900/80 rounded-[3rem] border border-white/10 overflow-hidden shadow-2xl relative">
             {/* Header */}
             <div className="px-8 py-6 bg-slate-950 border-b border-white/5 flex justify-between items-center z-10">
                 <div className="flex items-center gap-4">
@@ -166,10 +136,10 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                         </div>
                         <div className="space-y-2">
                             <p className="text-xl font-black uppercase tracking-[0.4em] text-slate-300">Terminal Prêt</p>
-                            <p className="text-xs max-w-xs mx-auto font-medium text-slate-500">L'IA Tactique Apex v14 supervise les flux en mode <span className="text-indigo-400 font-bold">{globalWeights ? getStrategyName(globalWeights) : 'Standard'}</span>.</p>
+                            <p className="text-xs max-w-xs mx-auto font-medium text-slate-500">L'IA Tactique Apex v14 supervise les flux. <br/>Posez une question sur la stratégie, le risque ou les patterns.</p>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                            {['Analyser le risque', 'Ouvrir le Wallet', 'Audit Forensic', 'Synthèse Ticket'].map(cmd => (
+                            {['Analyse du risque actuel ?', 'Que dit la météo fractale ?', 'Conseil de mise Kelly ?', 'Synthèse du dernier tirage'].map(cmd => (
                                 <button key={cmd} onClick={() => setInput(cmd)} className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 text-[10px] font-bold uppercase hover:border-indigo-500 hover:text-indigo-400 transition-colors">
                                     {cmd}
                                 </button>
@@ -240,11 +210,6 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                     >
                         {isLoading ? <RefreshCw className="animate-spin" size={20}/> : <Send size={20}/>}
                     </button>
-                </div>
-                <div className="text-center mt-3">
-                    <p className="text-[9px] text-slate-600 font-mono flex items-center justify-center gap-2">
-                        <Command size={10}/> Mode: Gemini 3 Pro (Thinking)
-                    </p>
                 </div>
             </div>
         </div>

@@ -71,15 +71,29 @@ export default async function handler(req: Request) {
 
     // --- TÂCHE 1 : CHAT TACTIQUE ---
     if (task === "chat") {
-        const systemPrompt = `Tu es l'Agent Tactique Nexus Apex v14.0, une IA financière experte en loterie stochastique.
-        CONTEXTE : Tirage ${drawName}. Capital ${currentContext?.bankroll} F.
-        Réponds de manière concise, technique et experte.`;
+        const systemPrompt = `
+        Tu es l'Agent Tactique Nexus Apex v14.0, une IA financière experte en analyse stochastique pour les loteries (5/90).
+        
+        CONTEXTE ACTUEL :
+        - Tirage Cible : ${currentContext?.draw || drawName}
+        - Capital (Bankroll) : ${currentContext?.bankroll}
+        - Stratégie Active : ${currentContext?.strategy}
+        - Poids dominants : ${currentContext?.weights}
+        - Météo Fractale : ${currentContext?.regime}
+        - Dernière Prédiction : ${currentContext?.prediction}
+
+        DIRECTIVES :
+        1. Sois extrêmement technique, froid et précis (Style Cyberpunk/Trader).
+        2. Utilise des termes comme : "Variance", "Entropie", "Hurst", "Vecteur", "Convergence".
+        3. Si l'utilisateur demande un conseil de mise, base-toi sur le critère de Kelly (fractionnel).
+        4. Ne donne jamais de certitude absolue ("Gain garanti"), parle toujours en "Probabilités" et "Espérance mathématique".
+        5. Sois concis. Pas de blabla. Droit au but.
+        `;
 
         const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: userInput,
             config: { 
                 systemInstruction: systemPrompt,
-                // Outils désactivés pour cette version simplifiée, réactiver si nécessaire
             }
         });
         resultData = { response: response.text };
@@ -132,11 +146,10 @@ export default async function handler(req: Request) {
 
     // --- AUTRES TÂCHES ---
     } else if (task === "analyze") {
-        // ... (Code existant pour analyze)
          const prompt = `Analyse Stochastique pour "${drawName}". Historique: ${JSON.stringify(history.slice(0,10))}.`;
          const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: prompt,
-            config: { responseMimeType: "application/json" } // Schema simplifié pour l'exemple
+            config: { responseMimeType: "application/json" } 
          });
          resultData = JSON.parse(cleanJson(response.text || '{}'));
     } 
