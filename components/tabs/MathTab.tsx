@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { calculateShadowNumbers, calculateRunsTest, calculateTrendOscillator, calculateCUSUM } from '../../services/mathService';
+import { calculateShadowNumbers, calculateRunsTest, calculateTrendOscillator } from '../../services/mathService';
 import type { MathAnalysisReport, ShadowNumbers, TrendOscillatorPoint } from '../../types';
 import { 
     ResponsiveContainer, 

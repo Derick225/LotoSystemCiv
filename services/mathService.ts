@@ -205,8 +205,6 @@ export const getFollowersAnalysisAsync = async (history: DrawResult[]): Promise<
     for (let i = 1; i < history.length - 1; i++) {
         const prevGagnants = history[i + 1].gagnants;
         // Si le tirage précédent contient au moins un numéro du tirage "Target" (ici lastDraw)
-        // Note: La logique standard est "quels numéros suivent ceux sortis".
-        // Ici on regarde l'histoire : Si T-1 contenait un numéro de LastDraw, alors T est un follower.
         if (prevGagnants.some(n => lastDrawSet.has(n))) {
             const currentGagnants = history[i].gagnants;
             for (const n of currentGagnants) {
@@ -234,20 +232,8 @@ export const getMomentumScores = async (history: DrawResult[]): Promise<Record<n
     return scores;
 };
 
-export const getVelocityScores = async (history: DrawResult[]): Promise<Record<number, number>> => {
-    const scores: Record<number, number> = {};
-    const recent = history.slice(0, 5);
-    // Vélocité pure : présence dans les 5 derniers tirages = boost constant
-    recent.forEach(d => d.gagnants.forEach(n => scores[n] = (scores[n] || 0) + 20));
-    return scores;
-};
-
 // --- ALGORITHMES AVANCÉS OPTIMISÉS ---
 
-/**
- * Calcul rapide de l'exposant de Hurst (R/S Analysis Simplifiée).
- * Optimisé pour les performances mobiles (moins de fenêtres).
- */
 const calculateFastHurst = (signal: number[]): number => {
     const N = signal.length;
     if (N < 20) return 0.5;
@@ -262,7 +248,6 @@ const calculateFastHurst = (signal: number[]): number => {
     let maxCum = -Infinity;
     let minCum = Infinity;
     
-    // Single pass for Range
     for(let i=0; i<N; i++) {
         currentSum += y[i];
         if (currentSum > maxCum) maxCum = currentSum;
@@ -273,16 +258,11 @@ const calculateFastHurst = (signal: number[]): number => {
     const S = getStdDev(signal);
     
     if (R === 0 || S === 0) return 0.5;
-
-    // Approximation Anis-Lloyd : log(R/S) / log(N/2)
-    // N/2 est une constante empirique pour les petites séries temporelles de loto
     const hurst = Math.log(R / S) / Math.log(N / 2);
-    
     return Math.max(0.01, Math.min(0.99, hurst));
 };
 
 export const calculateHurstForNumber = (num: number, history: DrawResult[]): { hurst: number } => {
-    // Conversion en signal binaire (0/1) sur 100 tirages
     const limit = Math.min(history.length, 100);
     const signal = new Array(limit);
     for(let i=0; i<limit; i++) {
@@ -292,7 +272,6 @@ export const calculateHurstForNumber = (num: number, history: DrawResult[]): { h
 };
 
 export const calculateFractalIndex = (history: DrawResult[]): number => {
-    // Hurst global sur la somme des numéros
     const limit = Math.min(history.length, 100);
     const sums = new Array(limit);
     for(let i=0; i<limit; i++) {
@@ -316,9 +295,6 @@ export const calculateShadowNumbers = (draw: DrawResult): ShadowNumbers => {
     };
 };
 
-/**
- * Test de Wald-Wolfowitz (Runs Test) optimisé.
- */
 export const calculateRunsTest = (numbers: number[]): { zScore: number; isRandom: boolean } => {
     const N = numbers.length;
     if (N < 2) return { zScore: 0, isRandom: true };
@@ -355,27 +331,11 @@ export const calculateTrendOscillator = (history: DrawResult[], period: number):
         let s = 0;
         const w = history[i].gagnants;
         for(let k=0; k<w.length; k++) s += w[k];
-        // Centrage autour de 0 (Moyenne théorique 5*45.5 = 227.5)
-        // On divise par 5 pour ramener à l'échelle d'un numéro moyen (45.5)
         result[i] = { momentum: (s / 5) - 45.5 };
     }
     return result.reverse();
 };
 
-export const calculateCUSUM = (history: DrawResult[]): number[] => {
-    const sums = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
-    const mu = getMean(sums);
-    let cusum = 0;
-    return sums.map(s => {
-        cusum += (s - mu);
-        return cusum;
-    });
-};
-
-/**
- * Calcul de la Complexité Arithmétique (AC Value).
- * AC = D - (r - 1) où D est le nombre de différences uniques entre les numéros.
- */
 export const calculateACValue = (numbers: number[]): number => {
     if (numbers.length < 2) return 0;
     const diffs = new Set<number>();
@@ -390,7 +350,7 @@ export const calculateACValue = (numbers: number[]): number => {
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const res: NumberRegularity[] = [];
-    const limit = Math.min(history.length, 200); // Limit analysis depth
+    const limit = Math.min(history.length, 200); 
     const subset = history.slice(0, limit);
 
     for(let i=1; i<=90; i++) {
@@ -407,8 +367,6 @@ export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] =
                 currentGap++;
             }
         }
-        // Le gap actuel (depuis la dernière sortie) n'est pas "fermé", on le stocke à part
-        
         const avg = getMean(gaps);
         const std = getStdDev(gaps);
         
@@ -439,49 +397,6 @@ export const predictBarycenterShift = (trajectory: BarycenterPoint[]): { x: numb
     return { x: last.x + (last.x - prev.x), y: last.y + (last.y - prev.y) };
 };
 
-export const calculateNetworkCentralityAsync = async (history: DrawResult[]): Promise<{ number: number; normalized: number }[]> => {
-    const counts = new Uint16Array(91);
-    const limit = Math.min(history.length, 50);
-    
-    for(let i=0; i<limit; i++) {
-        const w = history[i].gagnants;
-        for(let j=0; j<w.length; j++) counts[w[j]]++;
-    }
-    
-    let max = 0;
-    for(let i=1; i<=90; i++) if(counts[i] > max) max = counts[i];
-    
-    const result = [];
-    for(let i=1; i<=90; i++) {
-        result.push({ number: i, normalized: max > 0 ? (counts[i]/max)*100 : 0 });
-    }
-    return result;
-};
-
-export const detectCommunities = (nodes: number[], matrix: any): Record<number, number> => {
-    const comms: Record<number, number> = {};
-    nodes.forEach(n => {
-        let bestAffinity = 0;
-        let bestTarget = n;
-        
-        const affinities = matrix[n]?.affinities || {};
-        for (const target in affinities) {
-            const score = affinities[target] as number;
-            if (score > bestAffinity) {
-                bestAffinity = score;
-                bestTarget = parseInt(target);
-            }
-        }
-        
-        if (bestAffinity > 0.2) {
-             comms[n] = bestTarget % 8; 
-        } else {
-             comms[n] = n % 8;
-        }
-    });
-    return comms;
-};
-
 export const calculateSuccessionMatrixAsync = async (history: DrawResult[]): Promise<{ matrix: Record<number, Record<number, number>>; totals: Record<number, number> }> => {
     const matrix: Record<number, Record<number, number>> = {};
     const totals: Record<number, number> = {};
@@ -504,7 +419,6 @@ export const calculateSuccessionMatrixAsync = async (history: DrawResult[]): Pro
 export const calculateVolatility = (history: DrawResult[]): { score: number; status: string } => {
     const sums = history.map(d => d.gagnants.reduce((a,b)=>a+b,0));
     const std = getStdDev(sums);
-    // Ecart-type attendu pour somme de 5 numéros uniformes [1,90] ~ 45
     const score = Math.min(100, Math.round((std / 45) * 100));
     return { score, status: score > 60 ? 'Chaos' : score > 30 ? 'Volatile' : 'Stable' };
 };
@@ -537,7 +451,6 @@ export const calculateShannonEntropy = (history: DrawResult[]): { normalized: nu
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
     const expected = totalObservations / 90; 
     let chiSq = 0;
-    
     for(let i=1; i<=90; i++) {
         const obs = observed[i] || 0;
         chiSq += ((obs - expected) ** 2) / expected;
@@ -579,13 +492,10 @@ export const findHistoricalMatches = (current: DrawResult, history: DrawResult[]
             for(const n of h.gagnants) {
                 if (currentSet.has(n)) intersection++;
             }
-            // Jaccard Index simplifié : Intersection / Union
-            // Union size = 5 + 5 - intersection
             const union = 10 - intersection;
-            
             return {
                 match: h,
-                nextDraw: history[idx - 1] || null, // Le tirage qui a SUIVI ce match historique
+                nextDraw: history[idx - 1] || null, 
                 similarity: (intersection / union) * 100
             };
         })
@@ -596,8 +506,10 @@ export const findHistoricalMatches = (current: DrawResult, history: DrawResult[]
     return matches;
 };
 
+// --- GET NUMBER DETAILED METRICS (Moteur Principal de l'Inspecteur) ---
 export const getNumberDetailedMetrics = async (num: number, history: DrawResult[], spectral: SpectralMetric[], fractal: FractalMetric[]): Promise<DetailedNumberMetrics> => {
     const { hurst } = calculateHurstForNumber(num, history);
+    
     let lastGap = 0;
     for(let i=0; i<history.length; i++) {
         if(history[i].gagnants.includes(num)) break;
@@ -607,38 +519,66 @@ export const getNumberDetailedMetrics = async (num: number, history: DrawResult[
     const freq20 = history.slice(0, 20).filter(d => d.gagnants.includes(num)).length;
     const temp = Math.min(100, freq20 * 20);
     
+    // --- Calcul des Synergies et Antagonismes ---
+    const coOccurrence = new Map<number, number>();
+    const depth = Math.min(history.length, 100);
+    let occurrences = 0;
+
+    for (let i = 0; i < depth; i++) {
+        if (history[i].gagnants.includes(num)) {
+            occurrences++;
+            history[i].gagnants.forEach(n => {
+                if (n !== num) coOccurrence.set(n, (coOccurrence.get(n) || 0) + 1);
+            });
+        }
+    }
+
+    const affinities = Array.from(coOccurrence.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(e => e[0]);
+
+    // Pour les antagonismes (Nemesis) : on cherche ceux qui sont sortis souvent globalement mais JAMAIS ou RAREMENT avec le numéro cible
+    const globalFreq = new Map<number, number>();
+    history.slice(0, depth).forEach(d => d.gagnants.forEach(n => globalFreq.set(n, (globalFreq.get(n)||0) + 1)));
+
+    const nemesis = Array.from(globalFreq.entries())
+        .filter(([n, freq]) => freq > 5 && (coOccurrence.get(n) || 0) === 0 && n !== num) // Fréquents mais 0 co-occurrence
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(e => e[0]);
+
+    // Graphe d'historique : Densité temporelle (1 si sorti, 0.5 si voisin, 0 sinon) pour plus de nuance
+    // Ou simplement le Gap history
+    const historyGraph = history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
+
     return {
         temperature: temp,
         hurst,
         lastGap,
         nextProb: Math.round((1 - Math.exp(-(freq20/20))) * 100),
-        historyGraph: history.slice(0, 20).map(d => d.gagnants.includes(num) ? 1 : 0).reverse(),
-        affinity: [],
-        nemesis: []
+        historyGraph,
+        affinity: affinities,
+        nemesis: nemesis
     };
 };
 
-/**
- * Transformée de Fourier Discrète (DFT) optimisée avec fenêtre de Hamming.
- */
 const computeDFT = (signal: number[]): number => {
     const N = signal.length;
     if (N < 4) return 0;
     
     let maxPower = 0;
-    // Pré-calcul de la fenêtre de Hamming
     const window = new Float32Array(N);
     const PI2_N = (2 * Math.PI) / (N - 1);
     for(let i=0; i<N; i++) window[i] = 0.54 - 0.46 * Math.cos(PI2_N * i);
 
-    // Analyse des 10 premières harmoniques (les plus pertinentes pour la périodicité loto)
     for (let k = 1; k < 10; k++) {
         let re = 0, im = 0;
         const angleStep = (2 * Math.PI * k) / N;
         
         for (let t = 0; t < N; t++) {
             const val = signal[t] * window[t];
-            if (val === 0) continue; // Skip zero
+            if (val === 0) continue;
             
             const angle = angleStep * t;
             re += val * Math.cos(angle);
@@ -647,7 +587,6 @@ const computeDFT = (signal: number[]): number => {
         const power = (re * re + im * im);
         if (power > maxPower) maxPower = power;
     }
-    // Normalisation heuristique
     return Math.min(100, Math.round(Math.sqrt(maxPower) * 20));
 };
 
@@ -657,18 +596,15 @@ export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Prom
     const signalBuffer = new Int8Array(limit);
     
     for (let i = 1; i <= 90; i++) {
-        // Remplissage buffer
         for(let j=0; j<limit; j++) {
             signalBuffer[j] = history[j].gagnants.includes(i) ? 1 : 0;
         }
-        // Conversion array pour computeDFT (qui attend number[])
         const energy = computeDFT(Array.from(signalBuffer));
         metrics.push({ number: i, energy, resonance: energy > 70 });
     }
     return metrics;
 };
 
-// Fallbacks simplifiés pour les métriques complexes (Wavelet)
 export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     return calculateSpectralMetricsAsync(history); 
 };
@@ -689,7 +625,6 @@ export const calculateCorrelationMatrixAsync = async (history: DrawResult[]): Pr
     const depth = Math.min(history.length, 100);
     const increment = 1 / depth;
     
-    // Boucle optimisée
     for (let k = 0; k < depth; k++) {
         const winners = history[k].gagnants;
         const len = winners.length;
