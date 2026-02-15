@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { Mic, MicOff, X, Radio, Activity, Waves, Command, Zap, BrainCircuit } from 'lucide-react';
@@ -304,7 +305,6 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             const ai = new GoogleGenAI({ apiKey });
             
             // Context Prompt Enrichi
-            // Fix: Explicit casting to prevent any/number operation errors in strict TS
             const dna = globalWeights ? Object.entries(globalWeights).sort((a,b)=>(Number(b[1])||0)-(Number(a[1])||0)).slice(0,3).map(k=>k[0]).join(',') : 'Standard';
             const contextPrompt = `
                 Tu es NEXUS, une IA Oracle connectée au moteur LotoPro.
