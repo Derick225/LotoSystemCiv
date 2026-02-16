@@ -458,26 +458,29 @@ export const calculateChiSquare = (observed: Record<number, number>, totalObserv
     return { score: chiSq };
 };
 
-export const calculateBenfordCompliance = (numbers: number[]): { score: number } => {
-    if (numbers.length === 0) return { score: 0 };
+export const calculateBenfordCompliance = (numbers: number[]): { score: number, distribution: number[] } => {
+    if (numbers.length === 0) return { score: 0, distribution: Array(9).fill(0) };
     const counts = new Uint32Array(10);
     
     for(const n of numbers) {
-        const leading = parseInt(n.toString()[0]);
+        const str = n.toString();
+        const leading = parseInt(str[0]);
         if(leading >= 1 && leading <= 9) counts[leading]++;
     }
     
     const total = numbers.length;
     let deviation = 0;
+    const distribution: number[] = [];
     
     for(let d=1; d<=9; d++) {
         const observed = counts[d] / total;
+        distribution.push(observed * 100); // Percentage
         const expected = Math.log10(1 + 1/d); 
         deviation += Math.abs(observed - expected);
     }
     
     const score = Math.max(0, 100 - (deviation * 200)); 
-    return { score };
+    return { score, distribution };
 };
 
 export const findHistoricalMatches = (current: DrawResult, history: DrawResult[], limit: number = 5): any[] => {

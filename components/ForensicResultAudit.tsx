@@ -20,17 +20,20 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
 
     // Préparation des données pour le graphique de Benford
     const benfordData = useMemo(() => {
-        return [1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => {
+        return [1, 2, 3, 4, 5, 6, 7, 8, 9].map((d, index) => {
             // Loi de Benford théorique : log10(1 + 1/d)
             const expected = Math.log10(1 + 1/d) * 100;
             
-            // Simulation de la distribution réelle basée sur le score de conformité
-            // Si conformité basse, on ajoute du bruit aléatoire pour simuler la déviation
-            const noiseFactor = (100 - audit.benfordCompliance) / 100; 
-            const noise = (Math.random() - 0.5) * 20 * noiseFactor;
-            
-            // Lissage pour l'affichage (évite les valeurs négatives)
-            const actual = Math.max(0, expected + noise);
+            // Utilisation des données réelles si disponibles, sinon simulation fallback
+            let actual = 0;
+            if (audit.benfordData && audit.benfordData.length === 9) {
+                actual = audit.benfordData[index];
+            } else {
+                // Fallback simulation (ne devrait pas arriver avec le nouveau service)
+                const noiseFactor = (100 - audit.benfordCompliance) / 100; 
+                const noise = (Math.random() - 0.5) * 20 * noiseFactor;
+                actual = Math.max(0, expected + noise);
+            }
             
             return {
                 digit: d,
