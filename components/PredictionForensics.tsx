@@ -142,9 +142,10 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
             <div className="bg-white dark:bg-slate-900 w-full max-w-5xl max-h-[90vh] rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 relative">
                 
+                {/* Header */}
                 <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-indigo-500 rounded-2xl text-white shadow-lg shadow-indigo-500/30">
@@ -174,6 +175,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                     
                     {activeTab === 'ballistic' && (
                         <div className="animate-slide-up space-y-8">
+                            {/* Balistique */}
                             <section className="bg-white dark:bg-slate-950/50 rounded-[2.5rem] p-8 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
                                 <h4 className="font-black text-slate-400 dark:text-slate-500 mb-8 uppercase text-xs tracking-[0.3em] text-center flex items-center justify-center gap-2">
                                     <ScanLine size={14}/> Trajectoire Vectorielle
@@ -225,6 +227,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                             </section>
 
                             <div className="grid md:grid-cols-2 gap-6">
+                                {/* Missed Opportunities */}
                                 {report.missedOpportunities.length > 0 && (
                                     <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
                                         <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
@@ -243,6 +246,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     </section>
                                 )}
                                 
+                                {/* Algorithm Drift */}
                                 <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
                                     <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
                                         <Activity size={14} className="text-indigo-500"/> Dérive Algorithmique
@@ -307,6 +311,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                 {bestScenario ? (
                                     <div className="space-y-6">
                                         <div className="grid md:grid-cols-2 gap-8">
+                                            {/* Bar Chart Simulation */}
                                             <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
                                                 <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2">Performance Virtuelle</h5>
                                                 <ResponsiveContainer width="100%" height="100%">
@@ -323,6 +328,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                 </ResponsiveContainer>
                                             </div>
 
+                                            {/* Radar Comparison */}
                                             <div className="h-64 w-full bg-black/30 rounded-2xl p-4 border border-white/5">
                                                 <h5 className="text-[10px] font-black text-slate-400 uppercase mb-2 flex items-center gap-2">
                                                     <Dna size={12}/> Comparaison ADN
@@ -371,6 +377,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     )}
 
+                    {/* Feedback Form */}
                     <div className="border-t border-slate-200 dark:border-slate-800 pt-8">
                         <div className="flex items-center gap-3 mb-4">
                             <MessageSquare size={18} className="text-slate-400"/>

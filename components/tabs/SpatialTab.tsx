@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateSpatialMetrics, getBarycenterTrajectory } from '../../services/spatialService';
 import { predictBarycenterShift } from '../../services/mathService';
@@ -193,7 +192,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                       </div>
                   </div>
 
-                  <div className="grid grid-cols-10 gap-1 sm:gap-2">
+                  <div className="grid grid-cols-10 gap-1 sm:gap-2 relative">
                       {Array.from({length: 90}, (_, i) => i + 1).map(n => {
                           const intensity = getCellIntensity(n);
                           // Couleur dynamique
@@ -218,13 +217,44 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                               </div>
                           );
                       })}
+
+                      {/* Bounding Box des Clusters (Visualisation) */}
+                      {metrics?.advancedClusters.map((cluster, i) => {
+                          if (cluster.numbers.length < 3) return null;
+                          
+                          // Calculate bounds for grid positioning
+                          let minX = 10, maxX = -1, minY = 10, maxY = -1;
+                          cluster.numbers.forEach(n => {
+                              const idx = n - 1;
+                              const x = idx % 10;
+                              const y = Math.floor(idx / 10);
+                              if(x < minX) minX = x;
+                              if(x > maxX) maxX = x;
+                              if(y < minY) minY = y;
+                              if(y > maxY) maxY = y;
+                          });
+
+                          return (
+                              <div 
+                                  key={`cluster-overlay-${i}`}
+                                  className="pointer-events-none rounded-xl border-2 z-20 absolute transition-all duration-500 hidden sm:block"
+                                  style={{
+                                      gridColumnStart: minX + 1,
+                                      gridColumnEnd: maxX + 2,
+                                      gridRowStart: minY + 1,
+                                      gridRowEnd: maxY + 2,
+                                      borderColor: cluster.color,
+                                      boxShadow: `0 0 15px ${cluster.color}40`,
+                                      background: `${cluster.color}05`
+                                  }}
+                              >
+                                  <div className="absolute -top-3 right-0 bg-slate-900 text-[8px] font-black text-white px-2 py-0.5 rounded-full border border-slate-700 shadow-sm" style={{ borderColor: cluster.color }}>
+                                      ZONE {i+1}
+                                  </div>
+                              </div>
+                          );
+                      })}
                   </div>
-                  
-                  {/* Bounding Box des Clusters (Visualisation simplifiée) */}
-                  {metrics?.advancedClusters.map((cluster, i) => {
-                      if (cluster.numbers.length < 3) return null;
-                      return null; 
-                  })}
               </div>
 
               {/* Sidebar Info & Compass */}

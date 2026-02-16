@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
 import { analyzeForManipulation } from '../services/forensicAuditService';
-import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge } from 'lucide-react';
+import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge, Activity } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
 
@@ -13,15 +13,23 @@ interface ForensicResultAuditProps {
 
 export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result, history }) => {
     const audit = useMemo(() => {
+        // On exclut le résultat actuel de l'historique de contexte pour éviter le biais d'auto-inclusion
         const contextHistory = history.filter(h => h.id !== result.id);
         return analyzeForManipulation(result.gagnants, contextHistory);
     }, [result, history]);
 
+    // Préparation des données pour le graphique de Benford
     const benfordData = useMemo(() => {
         return [1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => {
+            // Loi de Benford théorique : log10(1 + 1/d)
             const expected = Math.log10(1 + 1/d) * 100;
+            
+            // Simulation de la distribution réelle basée sur le score de conformité
+            // Si conformité basse, on ajoute du bruit aléatoire pour simuler la déviation
             const noiseFactor = (100 - audit.benfordCompliance) / 100; 
             const noise = (Math.random() - 0.5) * 20 * noiseFactor;
+            
+            // Lissage pour l'affichage (évite les valeurs négatives)
             const actual = Math.max(0, expected + noise);
             
             return {
@@ -45,7 +53,8 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
     };
 
     return (
-        <div className="space-y-8 animate-fade-in">
+        <div className="space-y-8 animate-fade-in w-full">
+            {/* Carte de Suspicion Principale */}
             <div className="bg-slate-900 rounded-[2.5rem] p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
                 <div className={`absolute top-0 right-0 w-64 h-64 rounded-full blur-[100px] opacity-20 ${getBgColor(audit.suspicionScore)}`}></div>
                 
@@ -67,9 +76,9 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                     </div>
 
                     <div className="md:col-span-2 space-y-6">
-                        <div className="bg-black/30 rounded-2xl p-6 border border-white/5 grid grid-cols-2 gap-8">
+                        <div className="bg-black/30 rounded-3xl p-6 border border-white/5 grid grid-cols-2 gap-8">
                             <div className="flex flex-col items-center">
-                                <div className="relative w-24 h-24">
+                                <div className="relative w-20 h-20">
                                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                                         <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b" strokeWidth="8" />
                                         <circle 
@@ -85,9 +94,9 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                                 <span className="text-[9px] font-black uppercase text-slate-500 mt-2">Conformité Benford</span>
                             </div>
                             
-                            <div className="flex flex-col items-center justify-center">
-                                <Gauge size={32} className={audit.entropyCollapse ? 'text-rose-500' : 'text-emerald-500'} />
-                                <div className={`text-xl font-black mt-2 ${audit.entropyCollapse ? 'text-rose-500' : 'text-emerald-500'}`}>
+                            <div className="flex flex-col items-center justify-center text-center">
+                                <Gauge size={32} className={audit.entropyCollapse ? 'text-rose-500 mb-2' : 'text-emerald-500 mb-2'} />
+                                <div className={`text-lg font-black ${audit.entropyCollapse ? 'text-rose-500' : 'text-emerald-500'}`}>
                                     {audit.entropyCollapse ? 'COLLAPSUS' : 'NOMINAL'}
                                 </div>
                                 <span className="text-[9px] font-black uppercase text-slate-500 mt-1">Stabilité Entropique</span>
@@ -98,18 +107,19 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
             </div>
 
             <div className="grid lg:grid-cols-2 gap-8">
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                {/* Liste des Indicateurs d'Anomalie */}
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700 h-full flex flex-col">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
                         <Fingerprint size={16} className="text-rose-500" /> Indicateurs d'Anomalie
                     </h4>
                     
                     {audit.indicators.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-400 flex-1">
                             <CheckCircle2 size={48} className="text-emerald-500 mb-4 opacity-50" />
-                            <p className="text-xs font-bold uppercase">Structure Saine</p>
+                            <p className="text-xs font-bold uppercase">Structure Saine - Aucune anomalie détectée</p>
                         </div>
                     ) : (
-                        <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                        <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2 max-h-[350px]">
                             {audit.indicators.map((ind, i) => (
                                 <motion.div 
                                     key={i}
@@ -121,7 +131,7 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                                     <div className={`p-1.5 rounded-lg shrink-0 ${ind.severity === 'high' ? 'bg-rose-500 text-white' : 'bg-amber-500 text-white'}`}>
                                         <AlertTriangle size={14} />
                                     </div>
-                                    <div>
+                                    <div className="w-full">
                                         <div className="flex justify-between items-start w-full">
                                             <span className={`text-[10px] font-black uppercase ${ind.severity === 'high' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`}>
                                                 {ind.label}
@@ -138,9 +148,10 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                     )}
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                {/* Graphique Benford */}
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] shadow-xl border border-slate-100 dark:border-slate-700 flex flex-col">
                     <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                        <BarChart3 size={16} className="text-indigo-500" /> Loi de Benford (Premier Chiffre)
+                        <BarChart3 size={16} className="text-indigo-500" /> Loi de Benford (1er Chiffre)
                     </h4>
                     <div className="h-64 w-full">
                         <ResponsiveContainer width="100%" height="100%">
@@ -161,7 +172,7 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                             </ComposedChart>
                         </ResponsiveContainer>
                     </div>
-                    <div className="mt-4 flex gap-4 justify-center text-[9px] font-bold text-slate-400 uppercase">
+                    <div className="mt-auto pt-4 flex gap-4 justify-center text-[9px] font-bold text-slate-400 uppercase">
                         <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> Théorique</div>
                         <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Conforme</div>
                         <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Anomalie</div>
