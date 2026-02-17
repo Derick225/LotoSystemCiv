@@ -1,9 +1,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
-import { calculateSuccessionMatrixAsync } from '../../services/mathService';
+import { calculateSuccessionMatrixAsync, findFrequentTriplets } from '../../services/mathService';
 import { NumberBall } from '../NumberBall';
-import { Users, ArrowRight, Activity, Zap, ShieldCheck, Heart, UserMinus, Search, Target, Network, Info, Link } from 'lucide-react';
+import { Users, ArrowRight, Activity, Zap, ShieldCheck, Heart, UserMinus, Search, Target, Network, Info, Link, Atom } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface SynergyTabProps { drawName: string; }
@@ -12,6 +12,7 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
     const { history, correlationMatrix, loading: nexusLoading } = useNexus();
     const [selectedNum, setSelectedNum] = useState<number | null>(null);
     const [successors, setSuccessors] = useState<{ number: number; prob: number }[]>([]);
+    const [triplets, setTriplets] = useState<{ triplet: number[]; count: number }[]>([]);
     const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
     // --- ANALYSE AUTOMATIQUE DU DERNIER TIRAGE ---
@@ -46,6 +47,17 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
         }
         return scores.sort((a, b) => b.score - a.score).slice(0, 8);
     }, [history, correlationMatrix]);
+
+    // --- ANALYSE TRIPLETS (NOYAUX ATOMIQUES) ---
+    useEffect(() => {
+        if (history.length > 20) {
+            // Calcul asynchrone léger
+            setTimeout(() => {
+                const foundTriplets = findFrequentTriplets(history, selectedNum);
+                setTriplets(foundTriplets);
+            }, 10);
+        }
+    }, [history, selectedNum]);
 
     // --- ANALYSE MANUELLE ---
     useEffect(() => {
@@ -96,6 +108,37 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                         </div>
                         <h3 className="text-2xl md:text-4xl font-black text-white tracking-tighter uppercase">Moteur de <span className="text-indigo-500">Synergie</span></h3>
                     </div>
+                </div>
+            </div>
+
+            {/* SECTION: NOYAUX ATOMIQUES (TRIPLETS) */}
+            <div className="bg-white dark:bg-slate-900/50 p-6 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-xl">
+                <div className="flex justify-between items-center mb-6">
+                    <h4 className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
+                        <Atom size={16} className="text-purple-500"/> Noyaux Atomiques
+                    </h4>
+                    <span className="text-[9px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+                        Triplets Indissociables
+                    </span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {triplets.map((t, idx) => (
+                        <div key={idx} className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between group hover:border-purple-400 transition-all">
+                            <div className="flex gap-2">
+                                {t.triplet.map(n => <NumberBall key={n} number={n} size="sm" />)}
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-black text-purple-600 dark:text-purple-400">x{t.count}</div>
+                                <div className="text-[8px] font-bold text-slate-400 uppercase">Récurrence</div>
+                            </div>
+                        </div>
+                    ))}
+                    {triplets.length === 0 && (
+                        <div className="col-span-full text-center py-8 text-slate-400 text-xs italic">
+                            Aucun triplet fréquent détecté pour la sélection actuelle.
+                        </div>
+                    )}
                 </div>
             </div>
 

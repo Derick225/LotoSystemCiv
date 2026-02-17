@@ -8,8 +8,9 @@ import { TacticalChatTab } from './TacticalChatTab';
 import { ConvergenceTab } from './ConvergenceTab';
 import { useNexus } from '../NexusProvider';
 import { getStrategyName } from '../../services/predictionEngine';
-import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, MessageSquareCode, Hexagon } from 'lucide-react';
+import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, MessageSquareCode, Hexagon, ScanBarcode } from 'lucide-react';
 import { OracleLiveAssistant } from '../OracleLiveAssistant';
+import { TicketScanner } from '../TicketScanner';
 
 interface OracleHubProps { drawName: string; }
 
@@ -17,7 +18,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const { regime: globalRegime, loading: nexusLoading, globalWeights } = useNexus();
     
     // Platinum est maintenant le moteur principal, mais on expose la Synthèse en premier plan
-    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat' | 'convergence'>('platinum');
+    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'chat' | 'convergence' | 'vision'>('platinum');
     const [activeStrategy, setActiveStrategy] = useState("Standard");
     
     useEffect(() => {
@@ -42,6 +43,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const subTabs = [
         { id: 'platinum', label: 'Platinum Elite', icon: <Medal size={16}/>, color: 'text-amber-500', bg: 'hover:bg-amber-50' },
         { id: 'convergence', label: 'Synthèse', icon: <Hexagon size={16}/>, color: 'text-indigo-500', bg: 'hover:bg-indigo-50' },
+        { id: 'vision', label: 'Vision OCR', icon: <ScanBarcode size={16}/>, color: 'text-cyan-500', bg: 'hover:bg-cyan-50' },
         { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-violet-500', bg: 'hover:bg-violet-50' },
         { id: 'intel', label: 'Narratif', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
         { id: 'orch', label: 'Orchestra', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' },
@@ -84,6 +86,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
 
             <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px]">
                 {subTab === 'convergence' && <ConvergenceTab drawName={drawName} />}
+                {subTab === 'vision' && <TicketScanner />}
                 {subTab === 'oracle' && <PredictionTab drawName={drawName} />}
                 {subTab === 'chat' && <TacticalChatTab drawName={drawName} />}
                 {subTab === 'platinum' && <MetaAnalystTab drawName={drawName} />}

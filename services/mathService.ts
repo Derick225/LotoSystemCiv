@@ -664,3 +664,39 @@ export const performKMeansClusteringAsync = async (history: DrawResult[]): Promi
         };
     });
 };
+
+/**
+ * Trouve les triplets fréquents (numéros sortis ensemble par 3)
+ */
+export const findFrequentTriplets = (history: DrawResult[], filterNumber?: number | null): { triplet: number[], count: number }[] => {
+    const tripletCounts = new Map<string, number>();
+    const limit = Math.min(history.length, 150); // Analyse sur 150 derniers tirages
+
+    for (let i = 0; i < limit; i++) {
+        const numbers = history[i].gagnants.sort((a, b) => a - b);
+        // Si un numéro de filtre est fourni, on ne garde que les tirages qui le contiennent
+        if (filterNumber && !numbers.includes(filterNumber)) continue;
+
+        // Génération des triplets (nCk avec k=3)
+        for (let a = 0; a < numbers.length - 2; a++) {
+            for (let b = a + 1; b < numbers.length - 1; b++) {
+                for (let c = b + 1; c < numbers.length; c++) {
+                    const triplet = [numbers[a], numbers[b], numbers[c]];
+                    // Si filtre, le triplet DOIT contenir le numéro
+                    if (filterNumber && !triplet.includes(filterNumber)) continue;
+                    
+                    const key = triplet.join('-');
+                    tripletCounts.set(key, (tripletCounts.get(key) || 0) + 1);
+                }
+            }
+        }
+    }
+
+    const results = Array.from(tripletCounts.entries())
+        .map(([key, count]) => ({ triplet: key.split('-').map(Number), count }))
+        .filter(t => t.count >= 2) // On ne garde que les récurrences
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+    return results;
+};
