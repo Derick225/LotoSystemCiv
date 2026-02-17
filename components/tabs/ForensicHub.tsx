@@ -183,7 +183,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             </div>
 
             {mode === 'structure' && history.length > 0 && (
-                <ForensicResultAudit result={history[0]} history={history} />
+                <ForensicResultAudit 
+                    result={history[0]} 
+                    history={history} 
+                    onBack={() => setMode('prediction')} 
+                />
             )}
 
             {mode === 'prediction' && (

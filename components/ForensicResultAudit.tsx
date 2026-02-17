@@ -2,16 +2,17 @@
 import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
 import { analyzeForManipulation } from '../services/forensicAuditService';
-import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge, Activity } from 'lucide-react';
+import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge, Activity, ArrowLeft } from 'lucide-react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
 
 interface ForensicResultAuditProps {
     result: DrawResult;
     history: DrawResult[];
+    onBack?: () => void;
 }
 
-export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result, history }) => {
+export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result, history, onBack }) => {
     const audit = useMemo(() => {
         // On exclut le résultat actuel de l'historique de contexte pour éviter le biais d'auto-inclusion
         const contextHistory = history.filter(h => h.id !== result.id);
@@ -57,6 +58,18 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
 
     return (
         <div className="space-y-8 animate-fade-in w-full">
+            {onBack && (
+                <button 
+                    onClick={onBack}
+                    className="flex items-center gap-3 text-slate-500 hover:text-white transition-all group mb-2 px-2"
+                >
+                    <div className="p-2 bg-slate-800 rounded-xl group-hover:bg-indigo-600 transition-colors shadow-lg border border-slate-700 group-hover:border-indigo-500">
+                        <ArrowLeft size={16} />
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-widest group-hover:translate-x-1 transition-transform">Retour Dashboard</span>
+                </button>
+            )}
+
             {/* Carte de Suspicion Principale */}
             <div className="bg-slate-900 rounded-[2.5rem] p-8 border border-slate-800 shadow-2xl relative overflow-hidden">
                 <div className={`absolute top-0 right-0 w-64 h-64 rounded-full blur-[100px] opacity-20 ${getBgColor(audit.suspicionScore)}`}></div>
