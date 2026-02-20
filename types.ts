@@ -235,6 +235,7 @@ export interface AlgoWeights {
     leader_succession?: number;
     anti_consensus?: number;
     monte_carlo?: number;
+    lstm?: number;
     lstm_pattern?: number;
     bayes?: number;
     temporal?: number;
@@ -259,6 +260,7 @@ export interface ScoreBreakdown {
     gap_velocity?: number;
     day_echo?: number; // Nouveau score d'écho journalier
     anti_consensus?: number;
+    lstm?: number;
 }
 
 export interface ScoreComposition {

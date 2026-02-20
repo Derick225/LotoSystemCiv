@@ -211,9 +211,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <AnimatePresence>
                     {showDNA && (
                         <motion.div 
-                            initial={{ opacity: 0, height: 0, mb: 0 }}
-                            animate={{ opacity: 1, height: 'auto', mb: 32 }}
-                            exit={{ opacity: 0, height: 0, mb: 0 }}
+                            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                            animate={{ opacity: 1, height: 'auto', marginBottom: 32 }}
+                            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                             className="w-full max-w-md bg-slate-800/50 rounded-3xl p-6 border border-white/10 overflow-hidden text-left"
                         >
                             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2 justify-center">

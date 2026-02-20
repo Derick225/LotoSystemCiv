@@ -29,7 +29,7 @@ const isValidSupabaseUrl = (url: string): boolean => {
 };
 
 const isValidSupabaseKey = (key: string): boolean => {
-  return key && key.length > 20 && key !== 'placeholder';
+  return Boolean(key && key.length > 20 && key !== 'placeholder');
 };
 
 export const isSupabaseConfigured = (): boolean => {

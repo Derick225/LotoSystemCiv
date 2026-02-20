@@ -1,6 +1,6 @@
 
 import { jsPDF } from "jspdf";
-import * as XLSX from "https://esm.sh/xlsx@0.18.5"; 
+import * as XLSX from "xlsx"; 
 import type { Prediction, DrawResult } from '../types';
 
 export const ExportService = {

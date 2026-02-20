@@ -160,8 +160,10 @@ export const evolveNeuralDNA = async (
         },
         onTelemetry
     );
-    bestWeights = optimization.bestChromosome.weights;
-    bestRules = optimization.bestChromosome.rules;
+    if (optimization.bestChromosome) {
+        bestWeights = optimization.bestChromosome.weights;
+        bestRules = optimization.bestChromosome.rules;
+    }
 
     // Validation finale du meilleur candidat
     const newReport = await runBacktestTraining(drawName, fullHistory, options.sampleSize, undefined, bestWeights);

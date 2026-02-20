@@ -1,12 +1,7 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { NexusProvider, useNexus } from './components/NexusProvider';
-import { GlobalDashboard } from './components/GlobalDashboard';
-import { DrawDetails } from './components/DrawDetails';
-import { AdminPanel } from './components/admin/AdminPanel';
-import { QuantumLab } from './components/QuantumLab';
 import { AppShell, ViewMode } from './components/layout/AppShell';
-import { UserWallet } from './components/UserWallet';
 import { GlobalErrorBoundary } from './components/ui/GlobalErrorBoundary';
 import { GlobalErrorListener } from './components/GlobalErrorListener';
 import { ToastProvider, useToast } from './components/ui/Toast';
@@ -23,8 +18,15 @@ import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from './servi
 import { hydrateUserData, getSettings, saveSettings } from './services/userPreferencesService';
 import { supabase } from './services/supabaseClient';
 import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
-import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
+import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
+
+// Lazy loading des composants lourds pour optimiser le TTI (Time To Interactive)
+const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m => ({ default: m.GlobalDashboard })));
+const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
+const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const QuantumLab = lazy(() => import('./components/QuantumLab').then(m => ({ default: m.QuantumLab })));
+const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -218,15 +220,23 @@ const AppContent: React.FC = () => {
   }
 
   const renderContent = () => {
-    if (showWallet) return <UserWallet />;
-    if (selectedDraw) return <DrawDetails />;
-
-    switch (viewMode) {
-      case 'home': return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
-      case 'lab': return <QuantumLab />;
-      case 'admin': return isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />;
-      default: return <GlobalDashboard onSelectDraw={handleSelectDraw} />;
+    let content;
+    if (showWallet) content = <UserWallet />;
+    else if (selectedDraw) content = <DrawDetails />;
+    else {
+        switch (viewMode) {
+          case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+          case 'lab': content = <QuantumLab />; break;
+          case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;
+          default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+        }
     }
+    
+    return (
+        <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+            {content}
+        </Suspense>
+    );
   };
 
   return (

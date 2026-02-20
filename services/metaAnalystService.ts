@@ -125,7 +125,7 @@ export async function generatePlatinumPrediction(
   // 1. ACQUISITION DES SIGNAUX BRUTS (Base Prediction)
   // On réutilise le moteur de prédiction standard pour obtenir les breakdowns par numéro
   const weights = await getAlgoWeights(drawName);
-  const masterPred = await generateMasterPrediction(drawName, history, weights, metrics, symbioticContext);
+  const masterPred = await generateMasterPrediction(drawName, history, weights, metrics, symbioticContext || undefined);
   const breakdowns = masterPred.breakdown || {};
 
   // 2. CONSTRUCTION DU VECTEUR CONSENSUS (TENSOR AGGREGATION)

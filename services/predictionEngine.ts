@@ -2,10 +2,11 @@
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
 import { calculateACValue } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { LSTMService } from './lstmService';
 
 export const getDefaultWeights = (): AlgoWeights => ({
     frequency: 0.20,
-    markov: 0.20,
+    markov: 0.15,
     gap: 0.15,
     spectral: 0.10,
     poisson: 0.05,
@@ -19,7 +20,8 @@ export const getDefaultWeights = (): AlgoWeights => ({
     spatial: 0.0,
     orchestration: 0.0,
     gap_velocity: 0.05,
-    anti_consensus: 0.0
+    anti_consensus: 0.0,
+    lstm: 0.05 // Experimental
 });
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -109,6 +111,51 @@ const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regime: str
     return normalizeWeights(adjusted);
 };
 
+const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): AlgoWeights => {
+    if (history.length < 20) return weights;
+    
+    // Évaluation de la performance des stratégies sur les 5 derniers tirages
+    const recentDraws = history.slice(0, 5);
+    const evaluationHistory = history.slice(5, 55); // 50 tirages précédents
+    
+    let freqScore = 0;
+    let gapScore = 0;
+    
+    const freqMap = new Map<number, number>();
+    const gapsMap = new Map<number, number>();
+    
+    evaluationHistory.forEach((d, idx) => {
+        d.gagnants.forEach(n => {
+            freqMap.set(n, (freqMap.get(n) || 0) + 1);
+            if (!gapsMap.has(n)) gapsMap.set(n, idx);
+        });
+    });
+    
+    recentDraws.forEach(draw => {
+        draw.gagnants.forEach(n => {
+            const freq = freqMap.get(n) || 0;
+            if (freq > 4) freqScore += 1; // Succès de la stratégie Fréquence
+            
+            const gap = gapsMap.get(n) || 50;
+            if (gap > 12) gapScore += 1; // Succès de la stratégie Écart
+        });
+    });
+    
+    const dynamicWeights = { ...weights };
+    const learningRate = 0.25; // Taux d'apprentissage
+    
+    // Ajustement dynamique des poids (Online Stacking)
+    if (freqScore > gapScore * 1.5) {
+        dynamicWeights.frequency = (dynamicWeights.frequency || 0) * (1 + learningRate);
+        dynamicWeights.gap = (dynamicWeights.gap || 0) * (1 - learningRate * 0.5);
+    } else if (gapScore > freqScore * 1.5) {
+        dynamicWeights.gap = (dynamicWeights.gap || 0) * (1 + learningRate);
+        dynamicWeights.frequency = (dynamicWeights.frequency || 0) * (1 - learningRate * 0.5);
+    }
+    
+    return normalizeWeights(dynamicWeights);
+};
+
 export const generateMasterPrediction = async (
     drawName: string, 
     history: DrawResult[],
@@ -120,6 +167,7 @@ export const generateMasterPrediction = async (
     if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
 
     let weights = normalizeWeights(weightsToUse || await getAlgoWeights(drawName));
+    weights = applyMetaLearning(weights, history);
     weights = applyRiskProfile(weights, riskProfile);
     
     if (metrics?.fractal && Array.isArray(metrics.fractal)) {
@@ -140,6 +188,17 @@ export const generateMasterPrediction = async (
     const gapsMap = new Map<number, number>();
     const markovMap = new Map<number, number>();
     const momentumMap = new Map<number, number>();
+    
+    // --- LSTM PREDICTION (Experimental) ---
+    let lstmProbs: number[] = new Array(90).fill(0);
+    if (weights.lstm && weights.lstm > 0) {
+        try {
+            const { probabilities } = await LSTMService.runPrediction(history);
+            lstmProbs = probabilities;
+        } catch (e) {
+            console.error("LSTM Error:", e);
+        }
+    }
     
     for (let i = 0; i < recentHistory.length; i++) {
         const draw = recentHistory[i];
@@ -194,6 +253,7 @@ export const generateMasterPrediction = async (
         nBreakdown.spatial = symbioticContext?.spatialHotZones?.includes(num) ? 80 : 0;
         nBreakdown.fractal = (metrics?.fractal?.find((f:any) => f.number === num)?.hurst || 0.5) * 100;
         nBreakdown.wavelet = (metrics?.wavelet?.find((w:any) => w.number === num)?.energy || 0);
+        nBreakdown.lstm = (lstmProbs[i] || 0) * 100;
 
         let finalScore = 0;
         let totalW = 0;

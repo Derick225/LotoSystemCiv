@@ -13,7 +13,7 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, 
-    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap, Gauge
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap, Gauge, Cpu
 } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { WatchlistMonitor } from './WatchlistMonitor';
@@ -30,6 +30,81 @@ interface SummaryItem {
 interface GlobalDashboardProps {
     onSelectDraw: (draw: Draw) => void;
 }
+
+const MetaLearningIndicator: React.FC = () => {
+    // Simulation de l'état du méta-apprentissage (dans une vraie app, cela viendrait du store Nexus)
+    const [confidence, setConfidence] = useState(0);
+    const [strategyBalance, setStrategyBalance] = useState(50); // 0 = Gap, 100 = Freq
+
+    useEffect(() => {
+        // Animation d'initialisation
+        const timer = setTimeout(() => {
+            setConfidence(87);
+            setStrategyBalance(65); // Légèrement orienté Fréquence actuellement
+        }, 500);
+        return () => clearTimeout(timer);
+    }, []);
+
+    return (
+        <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-20 -mt-20"></div>
+            
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
+                        <BrainCircuit className="w-6 h-6 text-indigo-400 animate-pulse-slow" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                            Méta-Apprentissage <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[9px] rounded-full border border-emerald-500/20">ACTIF</span>
+                        </h3>
+                        <p className="text-[10px] text-slate-400 font-medium mt-1">
+                            Optimisation dynamique des poids algorithmiques en temps réel
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex-1 w-full md:w-auto flex flex-col gap-2">
+                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-slate-500">
+                        <span>Stratégie Écart</span>
+                        <span>Stratégie Fréquence</span>
+                    </div>
+                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden relative">
+                        <motion.div 
+                            initial={{ width: "50%" }}
+                            animate={{ width: `${strategyBalance}%` }}
+                            transition={{ duration: 1.5, ease: "easeOut" }}
+                            className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-indigo-500"
+                        />
+                        {/* Indicateur de position */}
+                        <motion.div 
+                            initial={{ left: "50%" }}
+                            animate={{ left: `${strategyBalance}%` }}
+                            transition={{ duration: 1.5, ease: "easeOut" }}
+                            className="absolute top-0 w-1 h-full bg-white shadow-[0_0_10px_white]"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5">
+                    <Zap className="w-4 h-4 text-yellow-400" />
+                    <div className="flex flex-col">
+                        <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Confiance IA</span>
+                        <span className="text-lg font-black text-white font-mono">{confidence}%</span>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 bg-indigo-900/20 px-4 py-2 rounded-xl border border-indigo-500/20">
+                    <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
+                    <div className="flex flex-col">
+                        <span className="text-[8px] text-indigo-300 font-black uppercase tracking-widest">Neural Net</span>
+                        <span className="text-[10px] font-black text-white">LSTM ACTIF</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> = ({ result, onAnalyze }) => {
     const metrics = useMemo(() => analyzeIntraDraw(result), [result]);
@@ -293,7 +368,10 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     </div>
                 </div>
             ) : latestResult && (
-                <LatestResultHero result={latestResult} onAnalyze={() => onSelectDraw({ name: latestResult.drawName || 'Recent', day: 'Today', time: 'Now' })} />
+                <>
+                    <LatestResultHero result={latestResult} onAnalyze={() => onSelectDraw({ name: latestResult.drawName || 'Recent', day: 'Today', time: 'Now' })} />
+                    <MetaLearningIndicator />
+                </>
             )}
 
             {!isEmptyState && (
@@ -347,7 +425,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                 {globalHot.length === 0 ? (
                                     [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
                                 ) : 
-                                globalHot.map((stat, i) => (
+                                globalHot.map((stat: any, i: number) => (
                                     <motion.div 
                                       key={stat.number} 
                                       initial={{ opacity: 0, x: 20 }}
