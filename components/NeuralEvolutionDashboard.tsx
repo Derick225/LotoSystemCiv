@@ -88,7 +88,7 @@ export const NeuralEvolutionDashboard: React.FC<NeuralEvolutionDashboardProps> =
                                     <stop offset="100%" stopColor="#a855f7" />
                                 </linearGradient>
                             </defs>
-                            <Tooltip cursor={{stroke: 'rgba(255,255,255,0.1)'}} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', fontSize: '10px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }} />
+                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', fontSize: '10px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }} />
                             <Line type="monotone" dataKey="stability" stroke="url(#lineGrad)" strokeWidth={4} dot={false} animationDuration={2000} />
                             <Line type="monotone" dataKey="learning" stroke="#334155" strokeWidth={2} strokeDasharray="4 4" dot={false} />
                         </LineChart>

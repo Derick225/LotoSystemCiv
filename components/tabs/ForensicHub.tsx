@@ -209,7 +209,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 {platinumStats.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <BarChart data={platinumStats}>
-                                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
+                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
                                             <Bar dataKey="hits" radius={[6, 6, 6, 6]} barSize={30}>
                                                 {platinumStats.map((entry, index) => (
                                                     <Cell key={`cell-${index}`} fill={entry.color} />

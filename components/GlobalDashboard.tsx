@@ -13,8 +13,9 @@ import {
     Flame, Calendar, Clock, Activity, 
     RefreshCw, 
     Binary, Signal, 
-    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap, Gauge, Cpu
+    Microscope, ArrowUpRight, ShieldCheck, HeartPulse, Monitor, Layers, Database, BrainCircuit, Zap, Gauge, Cpu, FileText
 } from 'lucide-react';
+import { generateTacticalReport } from '../services/reportService';
 import { useToast } from './ui/Toast';
 import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -303,6 +304,37 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     // Couleur de l'indicateur de pouls global
     const pulseColor = volatility?.score && volatility.score > 60 ? 'text-rose-500' : 'text-emerald-500';
 
+    const handleExportReport = () => {
+        if (!latestResult) return;
+        // Simulation de données de prédiction pour le rapport (à connecter au vrai moteur si dispo)
+        const mockPrediction: any = {
+            confidence: 87,
+            analysis: "Analyse spectrale confirmant une convergence des cycles de Poisson. Les attracteurs étranges indiquent une forte probabilité de retour à la moyenne pour les décades 30 et 40.",
+            suggestedNumbers: [7, 14, 23, 38, 42],
+            breakdown: {
+                7: { frequency: 85, gap: 12, lstm: 92 },
+                14: { frequency: 78, gap: 45, lstm: 65 },
+                23: { frequency: 60, gap: 88, lstm: 74 },
+                38: { frequency: 91, gap: 5, lstm: 89 },
+                42: { frequency: 72, gap: 30, lstm: 81 }
+            }
+        };
+
+        generateTacticalReport({
+            drawName: latestResult.drawName,
+            prediction: mockPrediction,
+            weights: {
+                frequency: 0.2,
+                gap: 0.15,
+                markov: 0.15,
+                spectral: 0.1,
+                lstm: 0.05,
+                poisson: 0.05
+            }
+        });
+        showToast("Rapport Tactique généré.", "success");
+    };
+
     return (
         <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
             
@@ -333,6 +365,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 </div>
                 
                 <div className="flex gap-4 w-full md:w-auto relative z-10">
+                    <button 
+                        onClick={handleExportReport}
+                        className="group flex-1 md:flex-none px-6 md:px-8 py-4 md:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3"
+                    >
+                        <FileText size={16} />
+                        <span>Rapport PDF</span>
+                    </button>
                     <button 
                         onClick={handleManualSync}
                         disabled={fullSyncing}

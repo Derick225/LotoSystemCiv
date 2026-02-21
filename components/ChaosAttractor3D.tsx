@@ -1,7 +1,7 @@
 
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Text } from '@react-three/drei';
+import { OrbitControls, Stars, Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { DrawResult } from '../types';
 
@@ -11,39 +11,47 @@ interface ChaosAttractorProps {
 
 const AttractorPoints: React.FC<{ history: DrawResult[] }> = ({ history }) => {
     const pointsRef = useRef<THREE.Points>(null);
+    const [hovered, setHovered] = useState<number | null>(null);
 
-    const { positions, colors } = useMemo(() => {
+    const { positions, colors, meta } = useMemo(() => {
         const pos: number[] = [];
         const cols: number[] = [];
+        const metadata: any[] = [];
         const color = new THREE.Color();
 
         // Chaos Embedding: (x=n, y=n+1, z=n+2)
-        // On prend les 3 premiers numéros de chaque tirage comme coordonnées 3D
         history.slice(0, 200).forEach((draw, i) => {
             const nums = draw.gagnants.slice(0, 3);
             if (nums.length === 3) {
-                // Normalisation 1-90 -> -10 à +10
                 const x = (nums[0] / 90) * 20 - 10;
                 const y = (nums[1] / 90) * 20 - 10;
                 const z = (nums[2] / 90) * 20 - 10;
                 pos.push(x, y, z);
 
-                // Couleur basée sur la récence (plus récent = plus chaud/brillant)
                 const heat = 1 - (i / 200);
-                color.setHSL(0.6 + (heat * 0.4), 1.0, 0.5); // Bleu -> Rouge
+                color.setHSL(0.6 + (heat * 0.4), 1.0, 0.5);
                 cols.push(color.r, color.g, color.b);
+                
+                metadata.push({
+                    id: i,
+                    drawName: draw.drawName,
+                    date: draw.date,
+                    numbers: draw.gagnants.join(', '),
+                    position: [x, y, z]
+                });
             }
         });
 
         return {
             positions: new Float32Array(pos),
-            colors: new Float32Array(cols)
+            colors: new Float32Array(cols),
+            meta: metadata
         };
     }, [history]);
 
     useFrame((state) => {
-        if (pointsRef.current) {
-            pointsRef.current.rotation.y += 0.002; // Rotation lente
+        if (pointsRef.current && !hovered) {
+            pointsRef.current.rotation.y += 0.002;
             pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.2) * 0.1;
         }
     });
@@ -56,16 +64,42 @@ const AttractorPoints: React.FC<{ history: DrawResult[] }> = ({ history }) => {
     }, [positions, colors]);
 
     return (
-        <points ref={pointsRef} geometry={geometry}>
-            <pointsMaterial
-                size={0.4}
-                vertexColors
-                transparent
-                opacity={0.8}
-                sizeAttenuation
-                blending={THREE.AdditiveBlending}
-            />
-        </points>
+        <group>
+            <points 
+                ref={pointsRef} 
+                geometry={geometry}
+                onPointerOver={(e) => {
+                    e.stopPropagation();
+                    if (e.index !== undefined) {
+                        setHovered(e.index);
+                        document.body.style.cursor = 'pointer';
+                    }
+                }}
+                onPointerOut={() => {
+                    setHovered(null);
+                    document.body.style.cursor = 'auto';
+                }}
+            >
+                <pointsMaterial
+                    size={0.6}
+                    vertexColors
+                    transparent
+                    opacity={0.8}
+                    sizeAttenuation
+                    blending={THREE.AdditiveBlending}
+                />
+            </points>
+
+            {hovered !== null && meta[hovered] && (
+                <Html position={meta[hovered].position as [number, number, number]} style={{ pointerEvents: 'none' }}>
+                    <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-indigo-500/30 text-xs w-48 shadow-2xl transform -translate-x-1/2 -translate-y-full mt-[-10px]">
+                        <div className="font-bold text-white mb-1">{meta[hovered].drawName}</div>
+                        <div className="text-indigo-400 font-mono mb-1">{meta[hovered].date}</div>
+                        <div className="text-slate-300 font-mono tracking-widest">{meta[hovered].numbers}</div>
+                    </div>
+                </Html>
+            )}
+        </group>
     );
 };
 

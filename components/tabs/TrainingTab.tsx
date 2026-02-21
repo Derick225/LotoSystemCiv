@@ -282,7 +282,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         <BarChart data={benchmarkData} layout="vertical">
                                             <XAxis type="number" hide />
                                             <YAxis dataKey="name" type="category" width={60} tick={{fontSize: 10, fill: '#64748b', fontWeight: 'bold'}} />
-                                            <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
+                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', fontSize: '10px' }} />
                                             <Bar dataKey="score" barSize={16} radius={[0, 4, 4, 0]}>
                                                 {benchmarkData.map((entry, index) => (
                                                     <Cell key={`cell-${index}`} fill={entry.fill} />

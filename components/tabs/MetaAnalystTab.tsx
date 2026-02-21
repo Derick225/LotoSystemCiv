@@ -235,7 +235,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                                     <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.4} />
                                 </linearGradient>
                             </defs>
-                            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} content={<></>} />
+                            <Tooltip />
                             <Bar dataKey="v" radius={[2, 2, 0, 0]} animationDuration={1500}>
                                 {spectrumData.map((entry, index) => (
                                     <Cell 

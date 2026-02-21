@@ -254,7 +254,6 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                 tickLine={false} 
                             />
                             <Tooltip 
-                                cursor={{ strokeDasharray: '3 3' }} 
                                 content={({ active, payload }) => {
                                     if (active && payload && payload.length) {
                                         const p = payload[0].payload;

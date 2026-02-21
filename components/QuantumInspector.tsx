@@ -140,7 +140,6 @@ export const QuantumInspector: React.FC = () => {
                                                 </defs>
                                                 <Tooltip 
                                                     contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: '10px' }}
-                                                    cursor={{ stroke: 'rgba(255,255,255,0.1)' }}
                                                 />
                                                 <Area 
                                                     type="step" 

@@ -280,7 +280,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                                         <XAxis dataKey="num" tick={{ fontSize: 10 }} />
                                         <YAxis />
-                                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
+                                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }} />
                                         <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                         <Bar dataKey="prediction" name="Énergie Prédite" fill="#8884d8" radius={[4, 4, 0, 0]} barSize={20} />
                                         <Bar dataKey="realite" name="Énergie Réelle" fill="#82ca9d" radius={[4, 4, 0, 0]} barSize={20} />

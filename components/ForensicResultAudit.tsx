@@ -175,7 +175,6 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                                 <XAxis dataKey="digit" tickLine={false} axisLine={false} tick={{fontSize: 10, fill: '#64748b', fontWeight: 'bold'}} />
                                 <Tooltip 
-                                    cursor={{fill: 'transparent'}}
                                     contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', fontSize: '11px', color: '#fff' }}
                                     formatter={(value: number, name: string) => [value.toFixed(1) + '%', name]}
                                 />
