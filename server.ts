@@ -23,13 +23,21 @@ async function startServer() {
         return res.status(500).json({ error: "Clé API Gemini manquante côté serveur." });
       }
 
-      const { task, drawName, history } = req.body;
+      const { task } = req.body;
+      
+      if (!task) {
+        return res.status(400).json({ error: "Paramètre 'task' manquant." });
+      }
+
       const ai = new GoogleGenAI({ apiKey });
       
       let prompt = "";
       if (task === 'analyze') {
+        const { drawName, history } = req.body;
+        if (!history || !Array.isArray(history)) return res.status(400).json({ error: "Historique invalide pour l'analyse." });
+
         prompt = `
-          Tu es un expert en analyse statistique de loterie. Analyse les tirages suivants pour le jeu "${drawName}".
+          Tu es un expert en analyse statistique de loterie. Analyse les tirages suivants pour le jeu "${drawName || 'Inconnu'}".
           Historique récent: ${JSON.stringify(history)}
           
           Fournis une réponse au format JSON strict avec la structure suivante :
@@ -44,8 +52,11 @@ async function startServer() {
           }
         `;
       } else if (task === 'optimize_weights') {
+        const { drawName, history } = req.body;
+        if (!history || !Array.isArray(history)) return res.status(400).json({ error: "Historique invalide pour l'optimisation." });
+
         prompt = `
-          En te basant sur l'historique fourni pour "${drawName}", suggère des poids optimaux pour les algorithmes de prédiction suivants :
+          En te basant sur l'historique fourni pour "${drawName || 'Inconnu'}", suggère des poids optimaux pour les algorithmes de prédiction suivants :
           Frequency, Gap, Markov, Spectral, LSTM, Poisson.
           La somme des poids doit être égale à 1.0.
           
@@ -62,14 +73,14 @@ async function startServer() {
           }
         `;
       } else if (task === 'python_kernel') {
-        const { dataset, modelType, computedContext } = req.body;
+        const { drawName, dataset, modelType, computedContext } = req.body;
         prompt = `
           Tu es un Data Scientist Expert spécialisé en modélisation stochastique pour loterie.
           
           CONTEXTE:
-          Jeu: "${drawName}"
-          Modèle: ${modelType}
-          Données calculées (Client): ${JSON.stringify(computedContext)}
+          Jeu: "${drawName || 'Inconnu'}"
+          Modèle: ${modelType || 'Générique'}
+          Données calculées (Client): ${JSON.stringify(computedContext || {})}
           
           TACHE:
           1. Génère un script Python (fictif/éducatif) qui aurait pu produire ces résultats.
@@ -90,10 +101,10 @@ async function startServer() {
           Ton ton est professionnel, précis, cyber-futuriste mais utile.
           
           CONTEXTE ACTUEL:
-          ${JSON.stringify(currentContext)}
+          ${JSON.stringify(currentContext || {})}
 
           HISTORIQUE CONVERSATION:
-          ${JSON.stringify(chatHistory)}
+          ${JSON.stringify(chatHistory || [])}
 
           DERNIER MESSAGE UTILISATEUR:
           "${userInput}"
@@ -105,11 +116,11 @@ async function startServer() {
           }
         `;
       } else {
-        return res.status(400).json({ error: "Tâche inconnue." });
+        return res.status(400).json({ error: `Tâche inconnue: ${task}` });
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-flash-latest",
         contents: prompt,
         config: {
           responseMimeType: "application/json"

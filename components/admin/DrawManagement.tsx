@@ -115,33 +115,58 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
         const preview: PreviewRow[] = [];
 
-        lines.forEach((line, index) => {
-            // Ignorer l'en-tête technique
-            const lowerLine = line.toLowerCase();
-            if (index === 0 && (lowerLine.includes('date') || lowerLine.includes('g1'))) return;
+        // Détection du séparateur sur la première ligne
+        const firstLine = lines[0] || '';
+        let separator = ',';
+        if ((firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length) separator = ';';
+        else if ((firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length) separator = '\t';
 
-            let separator = ',';
-            if (line.includes('\t')) separator = '\t';
-            else if (line.includes(';')) separator = ';';
-            
+        lines.forEach((line, index) => {
+            // Ignorer l'en-tête technique si détecté (contient des lettres là où on attend des chiffres, sauf Date)
+            const lowerLine = line.toLowerCase();
+            // Si la ligne contient "date" ou "g1" ou "draw", c'est probablement un header
+            if (index === 0 && (lowerLine.includes('date') || lowerLine.includes('g1') || lowerLine.includes('tirage'))) return;
+
             const cleanLine = line.replace(/['"]/g, '').trim();
             const parts = cleanLine.split(separator).map(p => p.trim());
 
-            // Format attendu: Date, G1, G2, G3, G4, G5, M1, M2, M3, M4, M5, ID
-            if (parts.length < 6) {
-                return; // Ignore malformed lines
+            // Tentative de détection intelligente des colonnes
+            // On cherche une date valide
+            let dateIndex = -1;
+            let dateStr = '';
+            
+            // Regex pour DD/MM/YYYY ou YYYY-MM-DD
+            const dateRegex = /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})|(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/;
+
+            // On scanne les parties pour trouver la date
+            for(let i=0; i<parts.length; i++) {
+                if (parts[i].match(dateRegex)) {
+                    dateIndex = i;
+                    dateStr = parts[i];
+                    break;
+                }
             }
 
-            const dateStr = parts[0];
-            
-            // Parsing des Gagnants (Colonnes 1 à 5)
-            const winners = parts.slice(1, 6).map(p => parseInt(p, 10)).filter(n => !isNaN(n) && n > 0 && n <= 90);
+            // Si pas de date trouvée, on suppose index 0 par défaut si format standard
+            if (dateIndex === -1 && parts.length >= 6) {
+                 // Fallback standard
+                 dateIndex = 0;
+                 dateStr = parts[0];
+            }
 
-            // Parsing de la Machine (Colonnes 6 à 10)
-            // Gère les cas vides comme ",,,,,,"
+            if (dateIndex === -1) return; // Ligne invalide sans date
+
+            // On cherche les numéros (valeurs numériques entre 1 et 90)
+            // On exclut l'index de la date
+            const potentialNumbers = parts.filter((p, i) => i !== dateIndex && !isNaN(parseInt(p)) && parseInt(p) >= 1 && parseInt(p) <= 90).map(Number);
+            
+            // On prend les 5 premiers comme gagnants
+            const winners = potentialNumbers.slice(0, 5);
+            
+            // Les suivants comme machine (si dispo)
             let machine: number[] = [];
-            if (parts.length >= 11) {
-                 machine = parts.slice(6, 11).map(p => parseInt(p, 10)).filter(n => !isNaN(n) && n > 0 && n <= 90);
+            if (potentialNumbers.length >= 10) {
+                machine = potentialNumbers.slice(5, 10);
             }
 
             let isValid = true;
@@ -169,13 +194,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                 isValid = false; error = 'Doublons dans les gagnants';
             }
             
-            // Si machine est présente mais incomplète (souvent vide dans les fichiers CSV fournis)
-            // On accepte machine vide (length 0), mais si elle contient des données partielles, c'est une erreur sauf si ignoré
-            if (machine.length > 0 && machine.length < 5) {
-                // Pour les fichiers historiques partiels, on considère simplement qu'il n'y a pas de machine
-                machine = [];
-            }
-
             preview.push({
                 date: finalDate,
                 gagnants: winners,

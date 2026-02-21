@@ -167,6 +167,119 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
             });
         }
 
+        // 5. Anti-Consensus (Contrarian)
+        const antiConsensusWeight = w.anti_consensus || 0;
+        if (antiConsensusWeight > 0.01) {
+            // Favorise les numéros qui NE SONT PAS dans les favoris fréquence/markov
+            // On calcule un score inverse basé sur la fréquence récente
+            const freqMap = new Map<number, number>();
+            subPast.forEach(d => d.gagnants.forEach(n => freqMap.set(n, (freqMap.get(n) || 0) + 1)));
+            
+            for(let n=1; n<=90; n++) {
+                const freq = freqMap.get(n) || 0;
+                // Score élevé si fréquence faible (mais pas nulle, pour éviter les numéros morts)
+                // Idéalement : fréquence faible ou moyenne, mais pas top
+                let score = 0;
+                if (freq === 0) score = 80; // Froid
+                else if (freq === 1) score = 100; // Tiède-Froid (potentiel réveil)
+                else if (freq > 3) score = 20; // Trop chaud
+                else score = 60;
+                
+                candidates.set(n, (candidates.get(n)||0) + (score * antiConsensusWeight));
+            }
+        }
+
+        // 6. Equilibrium (Retour à la moyenne)
+        const equilibriumWeight = w.equilibrium || 0;
+        if (equilibriumWeight > 0.01) {
+             // Favorise l'équilibre Pair/Impair et Bas/Haut par rapport à l'historique récent
+             let oddCount = 0;
+             let lowCount = 0; // 1-45
+             let totalNums = 0;
+             
+             subPast.slice(0, 10).forEach(d => {
+                 d.gagnants.forEach(n => {
+                     if (n % 2 !== 0) oddCount++;
+                     if (n <= 45) lowCount++;
+                     totalNums++;
+                 });
+             });
+             
+             const oddRatio = totalNums > 0 ? oddCount / totalNums : 0.5;
+             const lowRatio = totalNums > 0 ? lowCount / totalNums : 0.5;
+             
+             // Si trop de pairs récemment (oddRatio < 0.5), on favorise les impairs
+             // Si trop de hauts récemment (lowRatio < 0.5), on favorise les bas
+             
+             for(let n=1; n<=90; n++) {
+                 let score = 50;
+                 const isOdd = n % 2 !== 0;
+                 const isLow = n <= 45;
+                 
+                 if (oddRatio < 0.45 && isOdd) score += 25;
+                 else if (oddRatio > 0.55 && !isOdd) score += 25;
+                 
+                 if (lowRatio < 0.45 && isLow) score += 25;
+                 else if (lowRatio > 0.55 && !isLow) score += 25;
+                 
+                 candidates.set(n, (candidates.get(n)||0) + (score * equilibriumWeight));
+             }
+        }
+
+        // 7. Spectral (Simulation simplifiée de périodicité)
+        const spectralWeight = w.spectral || 0;
+        if (spectralWeight > 0.01) {
+            // On cherche les numéros qui ont une périodicité régulière
+            // Simplification : on regarde l'écart type des écarts
+            const gapsRegistry = new Map<number, number[]>();
+            
+            // On scanne plus loin pour le spectral
+            const spectralPast = past.slice(0, 60);
+            
+            spectralPast.forEach((d, idx) => {
+                d.gagnants.forEach(n => {
+                    const gaps = gapsRegistry.get(n) || [];
+                    gaps.push(idx);
+                    gapsRegistry.set(n, gaps);
+                });
+            });
+            
+            gapsRegistry.forEach((indices, n) => {
+                if (indices.length < 3) return; // Pas assez de données
+                
+                // Calcul des intervalles entre apparitions
+                const intervals: number[] = [];
+                for(let k=0; k<indices.length-1; k++) {
+                    intervals.push(Math.abs(indices[k] - indices[k+1]));
+                }
+                
+                // Moyenne et Ecart-type
+                const avg = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+                const variance = intervals.reduce((a,b)=>a+Math.pow(b-avg, 2),0) / intervals.length;
+                const stdDev = Math.sqrt(variance);
+                
+                // Si l'écart-type est faible, le numéro est régulier (périodique)
+                // Score inversement proportionnel à la variabilité (CV)
+                const cv = stdDev / (avg || 1);
+                let score = 0;
+                if (cv < 0.3) score = 100; // Très régulier
+                else if (cv < 0.6) score = 70;
+                else if (cv < 1.0) score = 30;
+                
+                // Bonus si on est proche du cycle attendu
+                const lastSeenIndex = indices[0]; // Le plus récent (car on a itéré sur l'historique inversé ou non ? past est slice(i+1), donc indices[0] est le plus proche de i)
+                // Attends, past[0] est le tirage i+1 (le plus récent par rapport à i).
+                // Donc indices[0] est l'index dans past où le numéro est apparu. C'est le gap actuel.
+                
+                const currentGap = lastSeenIndex;
+                const distToCycle = Math.abs(currentGap - avg);
+                
+                if (distToCycle < avg * 0.2) score += 50; // On est dans la fenêtre de tir
+                
+                candidates.set(n, (candidates.get(n)||0) + (Math.min(100, score) * spectralWeight));
+            });
+        }
+
         // Top 5 Prediction
         const top5 = Array.from(candidates.entries())
             .sort((a,b) => b[1] - a[1])
