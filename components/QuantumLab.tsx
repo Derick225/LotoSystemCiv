@@ -6,6 +6,7 @@ import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'rec
 import { NumberBall } from './NumberBall';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Database, Globe, Zap, Activity, Binary, Waves, ShieldCheck, Cpu, Network, ArrowRight, GitBranch, RotateCcw } from 'lucide-react';
+import { ChaosAttractor3D } from './ChaosAttractor3D';
 
 interface BounceCandidate {
     number: number;
@@ -98,38 +99,8 @@ export const QuantumLab: React.FC = () => {
         <div className="space-y-8 animate-fade-in pb-24">
             {/* Header Telemetry */}
             <div className="grid md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 bg-slate-950 p-8 rounded-[3rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[120px] -mr-32 -mt-32"></div>
-                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                        <div>
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
-                                    <Activity size={20} className="text-indigo-400" />
-                                </div>
-                                <h3 className="text-sm font-mono font-bold tracking-[0.2em] text-indigo-300 uppercase">Analyse de Causalité</h3>
-                            </div>
-                            <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none">
-                                Vecteurs de <span className="text-amber-500">Rebond</span>
-                            </h2>
-                            <p className="text-slate-400 text-xs md:text-sm font-medium mt-4 max-w-xl leading-relaxed">
-                                L'IA identifie les numéros qui réagissent positivement à une sortie source. Sélectionnez un point d'ancrage pour voir ses satellites.
-                            </p>
-                        </div>
-                        
-                        <div className="flex flex-col items-center gap-4">
-                            {selectedNumber ? (
-                                <div className="bg-black/40 backdrop-blur-md p-6 rounded-3xl border border-white/10 min-w-[180px] text-center animate-scale-in">
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Signal Source</div>
-                                    <div className="flex justify-center mb-2"><NumberBall number={selectedNumber} size="lg" selected /></div>
-                                    <div className="text-[9px] font-mono text-indigo-400 bg-indigo-400/10 py-1 rounded-full uppercase">Locked</div>
-                                </div>
-                            ) : (
-                                <div className="w-32 h-32 rounded-full border-2 border-dashed border-slate-700 flex items-center justify-center animate-pulse">
-                                    <span className="text-[10px] font-black text-slate-600 uppercase text-center px-4">Choisissez une base</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                <div className="md:col-span-2">
+                    <ChaosAttractor3D history={history} />
                 </div>
 
                 <div className="bg-slate-900 p-8 rounded-[3rem] border border-slate-800 flex flex-col justify-between shadow-xl">
