@@ -33,21 +33,38 @@ interface GlobalDashboardProps {
 }
 
 const MetaLearningIndicator: React.FC = () => {
-    // Simulation de l'état du méta-apprentissage (dans une vraie app, cela viendrait du store Nexus)
-    const [confidence, setConfidence] = useState(0);
-    const [strategyBalance, setStrategyBalance] = useState(50); // 0 = Gap, 100 = Freq
+    const { globalWeights, calibration } = useNexus();
+    
+    // Calculs dérivés des poids réels
+    const strategyBalance = useMemo(() => {
+        if (!globalWeights || Object.keys(globalWeights).length === 0) return 50;
+        const freq = globalWeights.frequency || 0;
+        const gap = globalWeights.gap || 0;
+        const total = freq + gap;
+        if (total === 0) return 50;
+        // 0 = 100% Gap, 100 = 100% Freq
+        return Math.round((freq / total) * 100);
+    }, [globalWeights]);
 
-    useEffect(() => {
-        // Animation d'initialisation
-        const timer = setTimeout(() => {
-            setConfidence(87);
-            setStrategyBalance(65); // Légèrement orienté Fréquence actuellement
-        }, 500);
-        return () => clearTimeout(timer);
-    }, []);
+    const confidence = useMemo(() => {
+        // La confiance globale est une combinaison de la fiabilité historique (calibration)
+        // et de la force des poids actuels (si un poids domine, l'IA est "sûre" d'elle)
+        const baseConfidence = calibration?.reliability || 75;
+        
+        if (!globalWeights) return baseConfidence;
+        
+        // Calcul de l'entropie des poids (plus c'est concentré, plus c'est confiant)
+        const values = Object.values(globalWeights).filter(v => typeof v === 'number') as number[];
+        if (values.length === 0) return baseConfidence;
+        
+        const maxWeight = Math.max(...values);
+        const boost = maxWeight > 0.4 ? 10 : 0; // Bonus si une stratégie domine
+        
+        return Math.min(99, baseConfidence + boost);
+    }, [globalWeights, calibration]);
 
     return (
-        <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8">
+        <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-20 -mt-20"></div>
             
             <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
@@ -67,8 +84,8 @@ const MetaLearningIndicator: React.FC = () => {
 
                 <div className="flex-1 w-full md:w-auto flex flex-col gap-2">
                     <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-slate-500">
-                        <span>Stratégie Écart</span>
-                        <span>Stratégie Fréquence</span>
+                        <span className={strategyBalance < 40 ? 'text-indigo-400' : ''}>Stratégie Écart</span>
+                        <span className={strategyBalance > 60 ? 'text-indigo-400' : ''}>Stratégie Fréquence</span>
                     </div>
                     <div className="h-2 bg-slate-800 rounded-full overflow-hidden relative">
                         <motion.div 
@@ -99,7 +116,9 @@ const MetaLearningIndicator: React.FC = () => {
                     <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
                     <div className="flex flex-col">
                         <span className="text-[8px] text-indigo-300 font-black uppercase tracking-widest">Neural Net</span>
-                        <span className="text-[10px] font-black text-white">LSTM ACTIF</span>
+                        <span className="text-[10px] font-black text-white">
+                            {globalWeights?.lstm && globalWeights.lstm > 0.15 ? 'LSTM DOMINANT' : 'HYBRIDE ACTIF'}
+                        </span>
                     </div>
                 </div>
             </div>

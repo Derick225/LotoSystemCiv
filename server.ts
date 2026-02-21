@@ -61,6 +61,49 @@ async function startServer() {
             "poisson": 0.x
           }
         `;
+      } else if (task === 'python_kernel') {
+        const { dataset, modelType, computedContext } = req.body;
+        prompt = `
+          Tu es un Data Scientist Expert spécialisé en modélisation stochastique pour loterie.
+          
+          CONTEXTE:
+          Jeu: "${drawName}"
+          Modèle: ${modelType}
+          Données calculées (Client): ${JSON.stringify(computedContext)}
+          
+          TACHE:
+          1. Génère un script Python (fictif/éducatif) qui aurait pu produire ces résultats.
+          2. Interprète les résultats (P-Value, Vecteurs) pour donner un insight stratégique.
+          3. Simule une sortie console (stdout) réaliste pour ce script.
+
+          Réponds uniquement avec un objet JSON :
+          {
+            "script": "Code python...",
+            "stdout": ["Ligne 1", "Ligne 2"...],
+            "insight": "Analyse stratégique courte..."
+          }
+        `;
+      } else if (task === 'chat') {
+        const { userInput, currentContext, history: chatHistory } = req.body;
+        prompt = `
+          Tu es "Apex", une IA tactique de haut niveau pour l'analyse de loterie.
+          Ton ton est professionnel, précis, cyber-futuriste mais utile.
+          
+          CONTEXTE ACTUEL:
+          ${JSON.stringify(currentContext)}
+
+          HISTORIQUE CONVERSATION:
+          ${JSON.stringify(chatHistory)}
+
+          DERNIER MESSAGE UTILISATEUR:
+          "${userInput}"
+
+          Réponds à l'utilisateur en tant qu'Apex. Sois concis (max 3 phrases sauf si demande complexe).
+          Réponds uniquement avec un objet JSON :
+          {
+            "response": "Ta réponse ici..."
+          }
+        `;
       } else {
         return res.status(400).json({ error: "Tâche inconnue." });
       }
