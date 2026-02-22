@@ -457,6 +457,26 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 Vecteurs secondaires à surveiller
                             </p>
                         </div>
+
+                        {/* Protocole Shadow */}
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700">
+                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                <GitMerge size={14} className="text-amber-500"/> Protocole Shadow (+/- 1)
+                            </h4>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                                {lastPrediction?.suggestedNumbers
+                                    .flatMap(n => [n-1, n+1])
+                                    .filter(n => n > 0 && n <= 90 && !lastPrediction?.suggestedNumbers.includes(n))
+                                    .filter((n, i, self) => self.indexOf(n) === i) // Unique
+                                    .slice(0, 10)
+                                    .map((n, i) => (
+                                    <NumberBall key={`shadow-${i}`} number={n} size="xs" />
+                                ))}
+                            </div>
+                            <p className="text-center text-[9px] text-slate-400 mt-6 font-bold uppercase tracking-widest leading-relaxed">
+                                Couverture des zones adjacentes pour contrer la dérive de ±1.
+                            </p>
+                        </div>
                     </div>
                 </div>
             )}

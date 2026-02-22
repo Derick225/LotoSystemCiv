@@ -153,10 +153,17 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                         <div>
                             <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Forensic Hub</h3>
-                            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                                Tirage {report.drawName} • {report.date} 
-                                {report.rmse && <span className="bg-slate-200 dark:bg-slate-800 px-2 rounded text-[9px]">RMSE: {report.rmse.toFixed(2)}</span>}
-                            </p>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                    Tirage {report.drawName} • {report.date} 
+                                    {report.rmse && <span className="bg-slate-200 dark:bg-slate-800 px-2 rounded text-[9px]">RMSE: {report.rmse.toFixed(2)}</span>}
+                                </p>
+                                {report.matches.filter(m => m.errorType === 'Voisin').length > 0 && (
+                                    <span className="bg-blue-100 text-blue-800 border border-blue-200 px-2 rounded text-[9px] font-black uppercase flex items-center gap-1">
+                                        <GitMerge size={10} /> {report.matches.filter(m => m.errorType === 'Voisin').length} Voisins
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
                     
@@ -189,7 +196,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                 <div key={`pred-${i}`} className="relative group">
                                                     <NumberBall number={m.predicted} size="md" glow={m.errorType === 'Hit'} />
                                                     {m.errorType !== 'Hit' && m.errorType !== 'None' && (
-                                                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] font-bold text-slate-400 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] font-bold whitespace-nowrap transition-opacity ${m.errorType === 'Voisin' ? 'opacity-100 text-blue-500' : 'opacity-0 group-hover:opacity-100 text-slate-400'}`}>
                                                             {m.errorType} ({m.delta})
                                                         </div>
                                                     )}

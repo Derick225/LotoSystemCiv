@@ -20,6 +20,9 @@ export default defineConfig(({ mode }) => {
   if (apiKey) {
     clientEnv['API_KEY'] = apiKey;
   }
+  if (env.GEMINI_API_KEY) {
+    clientEnv['GEMINI_API_KEY'] = env.GEMINI_API_KEY;
+  }
 
   // 2. MAPPING SUPABASE (Compatibilité Vercel/Supabase env vars)
   if (!clientEnv['VITE_SUPABASE_URL'] && env.SUPABASE_URL) {

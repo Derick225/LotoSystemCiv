@@ -5,7 +5,7 @@ import { useNexus } from './NexusProvider';
 
 export interface NumberBallProps {
   number: number;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   glow?: boolean;
   confidence?: number;
   isAttractor?: boolean;
@@ -23,6 +23,7 @@ export const NumberBall: React.FC<NumberBallProps> = ({
   const { setHoveredNumber } = useNexus();
 
   const sizes = { 
+    xs: 'w-6 h-6 text-[10px]',
     sm: 'w-8 h-8 text-xs', 
     md: 'w-12 h-12 text-lg', 
     lg: 'w-16 h-16 text-2xl',

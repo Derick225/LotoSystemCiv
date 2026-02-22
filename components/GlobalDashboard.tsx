@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
+import { runAutoLearn } from '../services/predictionEngine';
 import { useNexus } from './NexusProvider';
 import { useGlobalMarketHistory, useDailySummary, useGlobalStats, lotteryKeys } from '../hooks/useLottery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -47,21 +48,16 @@ const MetaLearningIndicator: React.FC = () => {
     }, [globalWeights]);
 
     const confidence = useMemo(() => {
-        // La confiance globale est une combinaison de la fiabilité historique (calibration)
-        // et de la force des poids actuels (si un poids domine, l'IA est "sûre" d'elle)
         const baseConfidence = calibration?.reliability || 75;
-        
         if (!globalWeights) return baseConfidence;
-        
-        // Calcul de l'entropie des poids (plus c'est concentré, plus c'est confiant)
         const values = Object.values(globalWeights).filter(v => typeof v === 'number') as number[];
         if (values.length === 0) return baseConfidence;
-        
         const maxWeight = Math.max(...values);
-        const boost = maxWeight > 0.4 ? 10 : 0; // Bonus si une stratégie domine
-        
+        const boost = maxWeight > 0.4 ? 10 : 0;
         return Math.min(99, baseConfidence + boost);
     }, [globalWeights, calibration]);
+
+    const isShadowActive = (globalWeights?.shadow_factor || 0) > 0.05;
 
     return (
         <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
@@ -94,7 +90,6 @@ const MetaLearningIndicator: React.FC = () => {
                             transition={{ duration: 1.5, ease: "easeOut" }}
                             className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-indigo-500"
                         />
-                        {/* Indicateur de position */}
                         <motion.div 
                             initial={{ left: "50%" }}
                             animate={{ left: `${strategyBalance}%` }}
@@ -104,21 +99,30 @@ const MetaLearningIndicator: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5">
-                    <Zap className="w-4 h-4 text-yellow-400" />
-                    <div className="flex flex-col">
-                        <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Confiance IA</span>
-                        <span className="text-lg font-black text-white font-mono">{confidence}%</span>
+                <div className="flex items-center gap-3">
+                    {isShadowActive && (
+                        <div className="flex items-center gap-2 bg-purple-500/10 px-3 py-2 rounded-xl border border-purple-500/20">
+                            <Layers className="w-4 h-4 text-purple-400" />
+                            <span className="text-[8px] text-purple-300 font-black uppercase tracking-widest">Shadow</span>
+                        </div>
+                    )}
+                    
+                    <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5">
+                        <Zap className="w-4 h-4 text-yellow-400" />
+                        <div className="flex flex-col">
+                            <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Confiance IA</span>
+                            <span className="text-lg font-black text-white font-mono">{confidence}%</span>
+                        </div>
                     </div>
-                </div>
 
-                <div className="flex items-center gap-3 bg-indigo-900/20 px-4 py-2 rounded-xl border border-indigo-500/20">
-                    <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
-                    <div className="flex flex-col">
-                        <span className="text-[8px] text-indigo-300 font-black uppercase tracking-widest">Neural Net</span>
-                        <span className="text-[10px] font-black text-white">
-                            {globalWeights?.lstm && globalWeights.lstm > 0.15 ? 'LSTM DOMINANT' : 'HYBRIDE ACTIF'}
-                        </span>
+                    <div className="flex items-center gap-3 bg-indigo-900/20 px-4 py-2 rounded-xl border border-indigo-500/20">
+                        <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
+                        <div className="flex flex-col">
+                            <span className="text-[8px] text-indigo-300 font-black uppercase tracking-widest">Neural Net</span>
+                            <span className="text-[10px] font-black text-white">
+                                {globalWeights?.lstm && globalWeights.lstm > 0.15 ? 'LSTM DOMINANT' : 'HYBRIDE ACTIF'}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -239,7 +243,7 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
 
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const { regime, volatility, refreshData, history } = useNexus(); 
+    const { regime, volatility, refreshData, history, lastPrediction, globalWeights } = useNexus(); 
     const queryClient = useQueryClient();
     
     // Hooks React Query
@@ -256,6 +260,74 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     
     const latestResult = recentGlobalResults && recentGlobalResults.length > 0 ? recentGlobalResults[0] : null;
     const globalHot = globalHotData.slice(0, 6);
+
+    // Calculs Dynamiques pour le Dashboard (Reflétant les changements de poids/prédiction)
+    const dynamicVolatility = useMemo(() => {
+        const histVol = volatility?.score || 0;
+        // Si une prédiction est active, la volatilité perçue est modérée par la confiance de l'IA
+        // Une haute confiance réduit la volatilité perçue (système plus stable)
+        if (lastPrediction?.confidence) {
+            const stabilityFactor = lastPrediction.confidence / 100;
+            return Math.round(histVol * (1 - stabilityFactor * 0.3)); // Réduction max de 30% si très confiant
+        }
+        return histVol;
+    }, [volatility, lastPrediction]);
+
+    const dynamicRegime = useMemo(() => {
+        let base = regime?.regime || 'IDLE';
+        // Enrichissement du régime affiché en fonction des poids actifs
+        if (globalWeights?.shadow_factor && globalWeights.shadow_factor > 0.05) {
+            return `${base} :: SHADOW`;
+        }
+        if (globalWeights?.lstm && globalWeights.lstm > 0.2) {
+            return `${base} :: NEURAL`;
+        }
+        return base;
+    }, [regime, globalWeights]);
+
+    // AUTO-LEARN TRIGGER (Nightly Build Simulation)
+    useEffect(() => {
+        const triggerAutoLearn = async () => {
+            if (recentGlobalResults && recentGlobalResults.length > 60) {
+                const drawName = recentGlobalResults[0]?.drawName || 'Global';
+                // We don't force it here, so it respects the 24h check inside runAutoLearn
+                const result = await runAutoLearn(drawName, recentGlobalResults);
+                if (result.success) {
+                    showToast(result.message, "success");
+                    refreshData(drawName);
+                }
+            }
+        };
+        
+        // Delay to let UI settle
+        const t = setTimeout(triggerAutoLearn, 5000);
+        return () => clearTimeout(t);
+    }, [recentGlobalResults]);
+
+    const handleAutoLearn = async () => {
+        if (!recentGlobalResults || recentGlobalResults.length < 60) {
+            showToast("Historique insuffisant (>60 requis).", "error");
+            return;
+        }
+        setFullSyncing(true);
+        try {
+            const drawName = recentGlobalResults[0]?.drawName || 'Global';
+            // Force execution by clearing timestamp
+            localStorage.removeItem(`nexus_autolearn_last_${drawName}`);
+            
+            const result = await runAutoLearn(drawName, recentGlobalResults);
+            if (result.success) {
+                showToast(result.message, "success");
+                refreshData(drawName);
+            } else {
+                showToast(result.message, "info");
+            }
+        } catch (e) {
+            showToast("Erreur Auto-Learn.", "error");
+        } finally {
+            setFullSyncing(false);
+        }
+    };
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -321,7 +393,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const isEmptyState = !latestResult && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
 
     // Couleur de l'indicateur de pouls global
-    const pulseColor = volatility?.score && volatility.score > 60 ? 'text-rose-500' : 'text-emerald-500';
+    const pulseColor = dynamicVolatility > 60 ? 'text-rose-500' : 'text-emerald-500';
 
     const handleExportReport = () => {
         if (!latestResult) return;
@@ -372,12 +444,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/5">
                                 <HeartPulse size={14} className={`${pulseColor} animate-pulse`} />
                                 <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                    Nexus Pulse : <span className="text-white">{volatility?.score || 0}%</span>
+                                    Nexus Pulse : <span className="text-white">{dynamicVolatility}%</span>
                                 </span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Activity size={14} className="text-indigo-400" />
-                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Régime : <span className="text-white">{regime?.regime || 'IDLE'}</span></span>
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Régime : <span className="text-white">{dynamicRegime}</span></span>
                             </div>
                         </div>
                     </div>
@@ -390,6 +462,14 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     >
                         <FileText size={16} />
                         <span>Rapport PDF</span>
+                    </button>
+                    <button 
+                        onClick={handleAutoLearn}
+                        disabled={fullSyncing}
+                        className="group flex-1 md:flex-none px-6 md:px-8 py-4 md:py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                        <BrainCircuit size={16} className={fullSyncing ? 'animate-pulse' : ''} />
+                        <span>Auto-Learn</span>
                     </button>
                     <button 
                         onClick={handleManualSync}

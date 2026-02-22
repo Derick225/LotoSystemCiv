@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
-import { calculateACValue } from './mathService';
+import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression, applyL2Regularization } from './mathService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
 
@@ -21,7 +21,8 @@ export const getDefaultWeights = (): AlgoWeights => ({
     orchestration: 0.0,
     gap_velocity: 0.05,
     anti_consensus: 0.0,
-    lstm: 0.05 // Experimental
+    lstm: 0.05,
+    shadow_factor: 0.0 // Protocole Shadow (+/- 1)
 });
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -46,7 +47,12 @@ export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 
     (Object.keys(cleanWeights) as Array<keyof AlgoWeights>).forEach(key => {
         const val = cleanWeights[key] || 0;
-        cleanWeights[key] = parseFloat((val / total).toFixed(4));
+        // On ne normalise pas shadow_factor car c'est un modificateur post-calcul, pas un poids contributif direct
+        if (key !== 'shadow_factor') {
+            cleanWeights[key] = parseFloat((val / total).toFixed(4));
+        } else {
+            cleanWeights[key] = val; // On garde la valeur brute (ex: 0.1)
+        }
     });
     
     return cleanWeights;
@@ -62,18 +68,21 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.equilibrium = (modified.equilibrium || 0.05) * 1.3;
             modified.gap = (modified.gap || 0.15) * 0.3; 
             modified.anti_consensus = 0;
+            modified.shadow_factor = 0.15; // Couverture défensive (+/- 1)
             break;
 
         case 'BALANCED': 
             modified.frequency = (modified.frequency || 0.20) * 1.1;
             modified.gap = (modified.gap || 0.15) * 1.1;
             modified.spectral = (modified.spectral || 0.10) * 1.1;
+            modified.shadow_factor = 0.05; // Légère couverture
             break;
 
         case 'AUDACIOUS': 
             modified.gap = (modified.gap || 0.15) * 2.5;
             modified.momentum = (modified.momentum || 0.10) * 1.8;
             modified.frequency = (modified.frequency || 0.20) * 0.4;
+            modified.shadow_factor = 0.0; // Tir direct, pas de couverture
             break;
 
         case 'CHAOS': 
@@ -81,6 +90,7 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.spectral = 0.3;
             modified.frequency = 0;
             modified.markov = 0;
+            modified.shadow_factor = 0.2; // Forte incertitude
             break;
     }
     
@@ -169,6 +179,16 @@ export const generateMasterPrediction = async (
     let weights = normalizeWeights(weightsToUse || await getAlgoWeights(drawName));
     weights = applyMetaLearning(weights, history);
     weights = applyRiskProfile(weights, riskProfile);
+
+    // --- L2 REGULARIZATION (Generalization) ---
+    // On applique une pénalité L2 pour éviter la sur-confiance dans un seul algo
+    const l2Lambda = 0.05;
+    (Object.keys(weights) as Array<keyof AlgoWeights>).forEach(key => {
+        if (key !== 'shadow_factor') {
+            weights[key] = (weights[key] || 0) * (1 - l2Lambda);
+        }
+    });
+    weights = normalizeWeights(weights);
     
     if (metrics?.fractal && Array.isArray(metrics.fractal)) {
         const avgHurst = metrics.fractal.reduce((acc: number, f: any) => acc + (f.hurst || 0.5), 0) / metrics.fractal.length;
@@ -278,6 +298,56 @@ export const generateMasterPrediction = async (
 
         return { num, score: finalScore, breakdown: nBreakdown };
     });
+
+    // --- PCA DENOISING (Réduction de dimensionnalité) ---
+    // On projette les features dans un espace latent pour réduire le bruit (95% variance conservée)
+    try {
+        const featureKeys = Object.keys(weights).filter(k => k !== 'shadow_factor') as Array<keyof AlgoWeights>;
+        const featureMatrix = masterScores.map(item => featureKeys.map(k => (item.breakdown as any)[k] || 0));
+        
+        const denoisedMatrix = denoiseFeaturesPCA(featureMatrix, 0.95);
+        
+        if (denoisedMatrix && denoisedMatrix.length === masterScores.length) {
+            masterScores.forEach((item, idx) => {
+                let newScore = 0;
+                featureKeys.forEach((key, fIdx) => {
+                    const val = Math.max(0, denoisedMatrix[idx][fIdx]); // Clamp to 0
+                    (item.breakdown as any)[key] = val; 
+                    newScore += val * (weights[key] || 0);
+                });
+                
+                // Ré-application des bonus contextuels
+                if (item.num >= rules.criticalZoneMin && item.num <= rules.criticalZoneMax) {
+                    newScore *= 1.1; 
+                }
+                if (symbioticContext?.dayMetrics?.echoNumbers.includes(item.num)) {
+                    newScore *= (rules.dayEchoBoost || 1.1);
+                }
+                if (item.breakdown?.orchestration) newScore += (item.breakdown.orchestration * 0.15);
+                if (item.breakdown?.spatial) newScore += (item.breakdown.spatial * 0.10);
+                
+                item.score = newScore;
+            });
+        }
+    } catch (e) {
+        console.warn("PCA Denoising failed, using raw scores:", e);
+    }
+
+    // --- SHADOW PROTOCOL (Voisinage +/- 1) ---
+    if (weights.shadow_factor && weights.shadow_factor > 0) {
+        const shadowStrength = weights.shadow_factor; 
+        const originalScores = [...masterScores.map(s => s.score)];
+        
+        masterScores.forEach((item, idx) => {
+            const prevIdx = idx === 0 ? 89 : idx - 1;
+            const nextIdx = idx === 89 ? 0 : idx + 1;
+            
+            // On ajoute une fraction du score des voisins
+            const neighborBoost = (originalScores[prevIdx] + originalScores[nextIdx]) * (shadowStrength * 0.5);
+            
+            item.score += neighborBoost;
+        });
+    }
 
     const sorted = masterScores.sort((a, b) => b.score - a.score);
 
@@ -416,4 +486,128 @@ export const calculateCorrectionsFromForensics = (weights: AlgoWeights, rules: A
     });
     
     return { newWeights: normalizeWeights(newWeights), newRules: rules, reasoning };
+};
+
+// --- AUTO-LEARN ENGINE ---
+
+const calculateSimpleFeatures = (num: number, history: DrawResult[]): number[] => {
+    // Features: [Frequency (last 10), Gap, Markov Score]
+    const recent = history.slice(0, 10);
+    const freq = recent.filter(d => d.gagnants.includes(num)).length;
+    
+    let gap = 0;
+    for (let i = 0; i < Math.min(history.length, 50); i++) {
+        if (history[i].gagnants.includes(num)) break;
+        gap++;
+    }
+    
+    // Markov simplified: How often num follows any number from the previous draw
+    let markov = 0;
+    if (history.length > 1) {
+        const lastDraw = history[0].gagnants;
+        // Look at previous transitions in history
+        for (let i = 1; i < Math.min(history.length, 50) - 1; i++) {
+            const prev = history[i+1].gagnants;
+            const curr = history[i].gagnants;
+            // If prev had any number from lastDraw, did curr have num?
+            const common = prev.filter(n => lastDraw.includes(n));
+            if (common.length > 0 && curr.includes(num)) {
+                markov++;
+            }
+        }
+    }
+    
+    return [freq, gap, markov];
+};
+
+export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]): Promise<{ success: boolean; message: string; newWeights?: AlgoWeights }> => {
+    const LAST_RUN_KEY = `nexus_autolearn_last_${drawName}`;
+    const lastRun = localStorage.getItem(LAST_RUN_KEY);
+    const now = Date.now();
+    
+    // Check if 24h passed (86400000 ms)
+    if (lastRun && (now - Number(lastRun)) < 86400000) {
+        return { success: false, message: "Auto-Learn déjà exécuté aujourd'hui." };
+    }
+    
+    if (fullHistory.length < 60) {
+        return { success: false, message: "Historique insuffisant pour Auto-Learn (>60 requis)." };
+    }
+    
+    // Training Data Collection
+    // We use the last 50 draws as validation targets
+    // For each target draw T (at index i), we use history starting at i+1
+    const trainingFeatures: number[][] = [];
+    const trainingLabels: number[] = [];
+    
+    const TRAINING_WINDOW = 50;
+    
+    for (let i = 0; i < TRAINING_WINDOW; i++) {
+        const targetDraw = fullHistory[i];
+        const historyContext = fullHistory.slice(i + 1); // History available AT THAT TIME
+        
+        // Positive samples (winners)
+        targetDraw.gagnants.forEach(num => {
+            trainingFeatures.push(calculateSimpleFeatures(num, historyContext));
+            trainingLabels.push(1);
+        });
+        
+        // Negative samples (random losers to balance)
+        // We pick 5 random losers per draw
+        let losersCount = 0;
+        while (losersCount < 5) {
+            const rnd = Math.floor(Math.random() * 90) + 1;
+            if (!targetDraw.gagnants.includes(rnd)) {
+                trainingFeatures.push(calculateSimpleFeatures(rnd, historyContext));
+                trainingLabels.push(0);
+                losersCount++;
+            }
+        }
+    }
+    
+    // Train Ridge Regression
+    // Features: [Freq, Gap, Markov]
+    // Weights returned: [w_freq, w_gap, w_markov]
+    try {
+        const learnedWeights = trainRidgeRegression(trainingFeatures, trainingLabels, 0.1);
+        
+        // Apply learned weights to global config
+        const currentWeights = await getAlgoWeights(drawName);
+        const newWeights = { ...currentWeights };
+        
+        // Normalize learned weights to be positive and relative
+        // Ridge can return negative weights, but our engine expects 0-1.
+        // We take absolute value or clamp, then normalize.
+        // Actually, negative weight for Gap means "smaller gap is better", which is usually true for hot numbers.
+        // But our engine logic: score = feature * weight.
+        // Feature Gap: 0..100 (normalized score).
+        // If Ridge says Gap is negative, it means high gap is bad.
+        // Our Gap Score logic already handles "high gap is bad" (or good depending on strategy).
+        // Let's assume learned weights are importance factors.
+        
+        const wFreq = Math.abs(learnedWeights[0] || 0);
+        const wGap = Math.abs(learnedWeights[1] || 0);
+        const wMarkov = Math.abs(learnedWeights[2] || 0);
+        
+        // Blend with existing (Alpha 0.3 = 30% new, 70% old)
+        const ALPHA = 0.3;
+        newWeights.frequency = (newWeights.frequency || 0) * (1 - ALPHA) + wFreq * ALPHA;
+        newWeights.gap = (newWeights.gap || 0) * (1 - ALPHA) + wGap * ALPHA;
+        newWeights.markov = (newWeights.markov || 0) * (1 - ALPHA) + wMarkov * ALPHA;
+        
+        const normalized = normalizeWeights(newWeights);
+        await saveAlgoWeights(drawName, normalized);
+        
+        localStorage.setItem(LAST_RUN_KEY, now.toString());
+        
+        return { 
+            success: true, 
+            message: `Auto-Learn terminé. Poids ajustés : Freq ${(wFreq*100).toFixed(0)}%, Gap ${(wGap*100).toFixed(0)}%, Markov ${(wMarkov*100).toFixed(0)}%.`,
+            newWeights: normalized
+        };
+        
+    } catch (e) {
+        console.error("Auto-Learn Error:", e);
+        return { success: false, message: "Erreur lors de l'apprentissage." };
+    }
 };

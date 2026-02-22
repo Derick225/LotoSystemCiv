@@ -240,6 +240,7 @@ export interface AlgoWeights {
     bayes?: number;
     temporal?: number;
     transformer?: number;
+    shadow_factor?: number;
 }
 
 export interface ScoreBreakdown {

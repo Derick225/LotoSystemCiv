@@ -1,7 +1,161 @@
 
+import * as tf from '@tensorflow/tfjs';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
 // --- UTILS STATISTIQUES VECTORISÉS ---
+
+/**
+ * Helper: Compute Eigen Decomposition using Power Iteration with Deflation.
+ * Robust fallback when tf.linalg.eigh/svd are unavailable.
+ * Assumes symmetric matrix (e.g. Covariance).
+ */
+const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vectors: tf.Tensor2D } => {
+    const n = matrix.shape[0];
+    let A = matrix.clone();
+    const eigenValues: number[] = [];
+    const eigenVectorsList: tf.Tensor[] = [];
+    
+    // Find all n eigenvectors/values
+    for (let i = 0; i < n; i++) {
+        let v = tf.randomNormal([n, 1]);
+        v = v.div(v.norm());
+        
+        // Power Iteration
+        for (let iter = 0; iter < 20; iter++) {
+            const Av = A.matMul(v);
+            const norm = Av.norm();
+            if (norm.dataSync()[0] < 1e-8) break;
+            v = Av.div(norm);
+        }
+        
+        const Av = A.matMul(v);
+        const eigenvalue = v.transpose().matMul(Av).dataSync()[0];
+        
+        eigenValues.push(eigenvalue);
+        eigenVectorsList.push(v);
+        
+        // Deflation: A = A - lambda * v * v^T
+        const vvT = v.matMul(v.transpose());
+        const deflation = vvT.mul(eigenvalue);
+        A = A.sub(deflation);
+    }
+    
+    const vectors = tf.concat(eigenVectorsList, 1) as tf.Tensor2D;
+    return { values: eigenValues, vectors };
+};
+
+/**
+ * Effectue une Analyse en Composantes Principales (PCA) sur une matrice de données.
+ * @param data Matrice [samples, features]
+ * @param nComponents Nombre de composants à garder (défaut: 3)
+ */
+export const performPCA = (data: number[][], nComponents: number = 3): number[][] => {
+    if (!data || data.length === 0) return [];
+
+    return tf.tidy(() => {
+        const x = tf.tensor2d(data);
+        const [nSamples, nFeatures] = x.shape;
+        
+        // 1. Centrage
+        const mean = x.mean(0);
+        const centered = x.sub(mean);
+        
+        // 2. Covariance
+        const covariance = centered.transpose().matMul(centered).div(nSamples - 1);
+        
+        // 3. Eigen Decomposition (Power Iteration)
+        const { vectors } = computeEigenDecomposition(covariance as tf.Tensor2D);
+        
+        // 4. Select Top K
+        const k = Math.min(nComponents, nFeatures);
+        const topKVectors = vectors.slice([0, 0], [nFeatures, k]);
+        
+        // 5. Project
+        const projected = centered.matMul(topKVectors);
+        
+        return projected.arraySync() as number[][];
+    });
+};
+
+/**
+ * Denoise features using PCA (Project to latent space and reconstruct).
+ * @param data Matrix [samples, features]
+ * @param varianceToKeep Variance threshold (e.g., 0.95 for 95%)
+ */
+export const denoiseFeaturesPCA = (data: number[][], varianceToKeep: number = 0.95): number[][] => {
+    if (!data || data.length === 0) return [];
+
+    return tf.tidy(() => {
+        const x = tf.tensor2d(data);
+        const [nSamples, nFeatures] = x.shape;
+        
+        const mean = x.mean(0);
+        const centered = x.sub(mean);
+        
+        const covariance = centered.transpose().matMul(centered).div(nSamples - 1);
+        
+        // Eigen Decomposition
+        const { values, vectors } = computeEigenDecomposition(covariance as tf.Tensor2D);
+        
+        // Calculate total variance
+        const totalVariance = values.reduce((a, b) => a + Math.abs(b), 0); // Use abs for robustness
+        
+        // Determine k
+        let k = 1;
+        let currentVar = 0;
+        for (let i = 0; i < nFeatures; i++) {
+            currentVar += Math.abs(values[i]);
+            if (totalVariance > 0 && currentVar / totalVariance >= varianceToKeep) {
+                k = i + 1;
+                break;
+            }
+        }
+        
+        // Select Top K
+        const topKVectors = vectors.slice([0, 0], [nFeatures, k]);
+        
+        // Project and Reconstruct
+        const projected = centered.matMul(topKVectors);
+        const reconstructed = projected.matMul(topKVectors.transpose()).add(mean);
+        
+        return reconstructed.arraySync() as number[][];
+    });
+};
+/**
+ * Train a Ridge Regression model (Linear Regression with L2 Regularization).
+ * @param features Matrix [samples, n_features]
+ * @param labels Vector [samples] (0 or 1)
+ * @param lambda L2 Penalty (default 0.1)
+ */
+export const trainRidgeRegression = (features: number[][], labels: number[], lambda: number = 0.1): number[] => {
+    if (!features || features.length === 0 || features.length !== labels.length) return [];
+
+    return tf.tidy(() => {
+        const X = tf.tensor2d(features);
+        const Y = tf.tensor1d(labels).reshape([-1, 1]);
+        const [nSamples, nFeatures] = X.shape;
+
+        // Initialize weights with zeros
+        const weights = tf.variable(tf.zeros([nFeatures, 1]));
+        const optimizer = tf.train.adam(0.1);
+        
+        // Gradient Descent Optimization
+        for (let i = 0; i < 100; i++) {
+            optimizer.minimize(() => {
+                const pred = X.matMul(weights);
+                const mse = tf.losses.meanSquaredError(Y, pred);
+                const l2 = weights.square().sum().mul(lambda);
+                return mse.add(l2) as tf.Scalar;
+            });
+        }
+        
+        return weights.flatten().arraySync() as number[];
+    });
+};
+
+export const applyL2Regularization = (weights: number[], lambda: number = 0.01): number[] => {
+    return weights.map(w => w * (1 - lambda));
+};
 
 /**
  * Calcule la factorielle d'un nombre (Mémoïsation basique).
