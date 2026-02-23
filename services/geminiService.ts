@@ -9,7 +9,7 @@ const CACHE_CAPACITY = 20;
 const analysisCache = new Map<string, { timestamp: number; data: GeminiReasoning }>();
 
 // Initialize Gemini Client Lazily
-const getGeminiClient = () => {
+export const getGeminiClient = () => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
         console.warn("Gemini API Key not found in environment.");

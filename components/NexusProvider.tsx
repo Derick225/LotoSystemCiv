@@ -28,6 +28,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // États persistants non-Query
   const [rlState, setRlState] = useState<RLState | null>(null);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
+  const [isGodMode, setIsGodMode] = useState(false);
 
   // --- DATA FETCHING VIA REACT QUERY ---
   const { 
@@ -56,10 +57,23 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const rawRL = localStorage.getItem(`rl_state_${drawName}`);
               if (rawRL && mounted) setRlState(JSON.parse(rawRL));
           } catch {}
+          
+          // Check for persisted God Mode
+          const god = localStorage.getItem('nexus_god_mode');
+          if (god === 'true' && mounted) setIsGodMode(true);
       };
       initConfig();
       return () => { mounted = false; };
   }, [drawName]);
+
+  const toggleGodMode = useCallback(() => {
+      setIsGodMode(prev => {
+          const next = !prev;
+          localStorage.setItem('nexus_god_mode', String(next));
+          if (next) console.log("%c GOD MODE ACTIVATED ", "background: #000; color: #f00; font-size: 20px; font-weight: bold;");
+          return next;
+      });
+  }, []);
 
   // 2. Calcul des Stats basiques (Rapide, synchrone)
   const { stats, gaps } = useMemo(() => {
@@ -176,10 +190,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setHoveredNumber,
     updateGlobalWeights,
     refresh: async () => { await refetchHistory(); },
-    refreshData
+    refreshData,
+    isGodMode,
+    toggleGodMode
   }), [
     drawName, history, stats, gaps, analytics, 
-    lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, calibration, hoveredNumber, rlState, vocalContext
+    lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, calibration, hoveredNumber, rlState, vocalContext, isGodMode
   ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;

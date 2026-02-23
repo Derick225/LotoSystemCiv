@@ -584,6 +584,10 @@ export interface NexusContextType {
     updateGlobalWeights: (w: AlgoWeights) => void;
     refresh: () => Promise<void>;
     refreshData: (name: string, force?: boolean) => Promise<void>;
+    
+    // GOD MODE
+    isGodMode: boolean;
+    toggleGodMode: () => void;
 }
 
 export interface ChatMessage {

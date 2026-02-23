@@ -18,6 +18,7 @@ import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from './servi
 import { hydrateUserData, getSettings, saveSettings } from './services/userPreferencesService';
 import { supabase } from './services/supabaseClient';
 import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
+import { OracleInterface } from './components/GodMode/OracleInterface';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
 
@@ -267,6 +268,7 @@ const AppContent: React.FC = () => {
       <GlobalNumberHUD />
       <TutorialOverlay />
       <InstallPrompt />
+      <OracleInterface />
     </>
   );
 };
