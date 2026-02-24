@@ -1,6 +1,7 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
 import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression, applyL2Regularization } from './mathService';
+import { workerService } from './workerService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
 
@@ -305,7 +306,12 @@ export const generateMasterPrediction = async (
         const featureKeys = Object.keys(weights).filter(k => k !== 'shadow_factor') as Array<keyof AlgoWeights>;
         const featureMatrix = masterScores.map(item => featureKeys.map(k => (item.breakdown as any)[k] || 0));
         
-        const denoisedMatrix = denoiseFeaturesPCA(featureMatrix, 0.95);
+        let denoisedMatrix: number[][];
+        if (workerService.isAvailable()) {
+            denoisedMatrix = await workerService.runTask<number[][]>('DENOISE_PCA', { matrix: featureMatrix, variance: 0.95 });
+        } else {
+            denoisedMatrix = denoiseFeaturesPCA(featureMatrix, 0.95);
+        }
         
         if (denoisedMatrix && denoisedMatrix.length === masterScores.length) {
             masterScores.forEach((item, idx) => {
@@ -569,7 +575,12 @@ export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]):
     // Features: [Freq, Gap, Markov]
     // Weights returned: [w_freq, w_gap, w_markov]
     try {
-        const learnedWeights = trainRidgeRegression(trainingFeatures, trainingLabels, 0.1);
+        let learnedWeights: number[];
+        if (workerService.isAvailable()) {
+            learnedWeights = await workerService.runTask<number[]>('TRAIN_RIDGE', { trainingFeatures, trainingLabels, lambda: 0.1 });
+        } else {
+            learnedWeights = trainRidgeRegression(trainingFeatures, trainingLabels, 0.1);
+        }
         
         // Apply learned weights to global config
         const currentWeights = await getAlgoWeights(drawName);

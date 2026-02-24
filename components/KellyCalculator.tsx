@@ -70,43 +70,43 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({ confidence }) 
     if (!bet) return null;
 
     return (
-        <div className="bg-gradient-to-r from-emerald-900 to-teal-900 p-6 rounded-[2rem] text-white shadow-lg border border-emerald-700/50 mt-6 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-6 opacity-10"><Percent size={80} /></div>
+        <div className="bg-gradient-to-r from-emerald-900 to-teal-900 p-5 md:p-6 rounded-3xl md:rounded-[2rem] text-white shadow-lg border border-emerald-700/50 mt-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-6 opacity-10"><Percent size={80} className="w-16 h-16 md:w-20 md:h-20" /></div>
             
-            <div className="flex flex-col gap-6 mb-6 relative z-10">
-                <h4 className="flex items-center gap-2 font-bold text-lg">
-                    <span className="text-2xl">⚖️</span> Kelly Money Management
+            <div className="flex flex-col gap-4 md:gap-6 mb-5 md:mb-6 relative z-10">
+                <h4 className="flex items-center gap-2 font-bold text-base md:text-lg">
+                    <span className="text-xl md:text-2xl">⚖️</span> Kelly Money Management
                 </h4>
                 
-                <div className="flex flex-wrap gap-2 bg-black/20 p-1.5 rounded-2xl">
+                <div className="grid grid-cols-3 gap-1.5 bg-black/20 p-1 rounded-2xl">
                     <button 
                         onClick={() => setGameMode('STANDARD')}
-                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'STANDARD' ? 'bg-emerald-500 text-white shadow-lg' : 'text-emerald-300 hover:bg-white/5'}`}
+                        className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'STANDARD' ? 'bg-emerald-500 text-white shadow-lg' : 'text-emerald-300 hover:bg-white/5'}`}
                     >
-                        <Layers size={12}/> Standard
+                        <Layers size={10}/> Standard
                     </button>
                     <button 
                         onClick={() => setGameMode('DOUBLE_CHANCE')}
-                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE' ? 'bg-indigo-500 text-white shadow-lg' : 'text-indigo-300 hover:bg-white/5'}`}
+                        className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE' ? 'bg-indigo-500 text-white shadow-lg' : 'text-indigo-300 hover:bg-white/5'}`}
                     >
-                        <Shuffle size={12}/> DC (G+M)
+                        <Shuffle size={10}/> DC (G+M)
                     </button>
                     <button 
                         onClick={() => setGameMode('DOUBLE_CHANCE_MACHINE')}
-                        className={`flex-1 px-2 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE_MACHINE' ? 'bg-amber-500 text-white shadow-lg' : 'text-amber-300 hover:bg-white/5'}`}
+                        className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE_MACHINE' ? 'bg-amber-500 text-white shadow-lg' : 'text-amber-300 hover:bg-white/5'}`}
                     >
-                        <Bot size={12}/> DC Machine
+                        <Bot size={10}/> DC Machine
                     </button>
                 </div>
             </div>
             
-            <div className="flex flex-col md:flex-row gap-6 items-start relative z-10">
-                <div className="flex-1 w-full space-y-4">
+            <div className="flex flex-col lg:flex-row gap-4 md:gap-6 items-start relative z-10">
+                <div className="flex-1 w-full space-y-3 md:space-y-4">
                     <div className="relative group">
                         <select 
                             value={selectedBetType}
                             onChange={(e) => setSelectedBetType(e.target.value)}
-                            className="w-full appearance-none bg-black/30 border border-emerald-500/30 text-emerald-100 py-3 pl-4 pr-10 rounded-xl text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer hover:bg-black/40 transition-colors"
+                            className="w-full appearance-none bg-black/30 border border-emerald-500/30 text-emerald-100 py-2.5 md:py-3 pl-4 pr-10 rounded-xl text-[10px] md:text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer hover:bg-black/40 transition-colors"
                         >
                             {betOptions.map(opt => (
                                 <option key={opt.key} value={opt.key} className="bg-slate-900 text-slate-300">
@@ -118,33 +118,33 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({ confidence }) 
                     </div>
 
                     <div>
-                        <label className="block text-[10px] font-black uppercase text-emerald-400/80 mb-2 tracking-widest">
+                        <label className="block text-[8px] md:text-[10px] font-black uppercase text-emerald-400/80 mb-1.5 md:mb-2 tracking-widest">
                             Capital Total (F CFA)
                         </label>
                         <input 
                             type="number" 
                             value={bankroll}
                             onChange={(e) => setBankroll(Number(e.target.value))}
-                            className="w-full p-3 rounded-xl bg-black/20 border border-emerald-500/30 text-white font-mono font-bold text-lg focus:ring-2 focus:ring-emerald-400 outline-none transition-all placeholder-emerald-800"
+                            className="w-full p-2.5 md:p-3 rounded-xl bg-black/20 border border-emerald-500/30 text-white font-mono font-bold text-base md:text-lg focus:ring-2 focus:ring-emerald-400 outline-none transition-all placeholder-emerald-800"
                             placeholder="Ex: 5000"
                         />
                     </div>
                 </div>
 
-                <div className="flex-1 w-full bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm flex flex-col justify-center min-h-[120px]">
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="text-[10px] font-black uppercase text-emerald-200 tracking-widest">Mise Conseillée</div>
-                        <div className="text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded text-emerald-100">
+                <div className="flex-1 w-full bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm flex flex-col justify-center min-h-[100px] md:min-h-[120px]">
+                    <div className="flex justify-between items-start mb-1.5 md:mb-2">
+                        <div className="text-[8px] md:text-[10px] font-black uppercase text-emerald-200 tracking-widest">Mise Conseillée</div>
+                        <div className="text-[8px] md:text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded text-emerald-100">
                             Côte: x{betOptions.find(o => o.key === selectedBetType)?.odds}
                         </div>
                     </div>
-                    <div className="flex items-baseline gap-2 mt-1">
-                        <span className="text-3xl font-black text-white tracking-tight">{isNaN(bet.betAmount) ? '...' : `${bet.betAmount.toLocaleString()} F`}</span>
-                        <span className="text-xs font-bold text-emerald-400 bg-emerald-900/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                    <div className="flex items-baseline gap-2 mt-0.5 md:mt-1">
+                        <span className="text-2xl md:text-3xl font-black text-white tracking-tight">{isNaN(bet.betAmount) ? '...' : `${bet.betAmount.toLocaleString()} F`}</span>
+                        <span className="text-[10px] md:text-xs font-bold text-emerald-400 bg-emerald-900/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
                             {isNaN(bet.percentage) ? '0' : bet.percentage}%
                         </span>
                     </div>
-                    <p className="text-[10px] text-emerald-100/60 mt-2 italic font-medium border-t border-white/5 pt-2">
+                    <p className="text-[9px] md:text-[10px] text-emerald-100/60 mt-2 italic font-medium border-t border-white/5 pt-2">
                         "{bet.advice}"
                     </p>
                 </div>

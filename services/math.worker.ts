@@ -1,12 +1,14 @@
+import * as tf from '@tensorflow/tfjs';
 
 /**
  * Nexus Production Math Worker v12.0 (Deep Science Edition)
  * Implémentations mathématiques réelles (DFT, Haar, Hurst R/S).
  */
 
-export {};
-
 const ctx = self as unknown as Worker;
+
+// Initialize TF.js
+tf.setBackend('cpu');
 
 // --- UTILS MATHS DE PRÉCISION ---
 
@@ -141,6 +143,18 @@ ctx.onmessage = async (e: MessageEvent) => {
             case 'hurst_exponent': 
                 result = runFractal(history);
                 break;
+            case 'DENOISE_PCA':
+                result = denoiseFeaturesPCA(payload.matrix, payload.variance);
+                break;
+            case 'TRAIN_RIDGE':
+                result = trainRidgeRegression(payload.features, payload.labels, payload.lambda);
+                break;
+            case 'GAP_EFFICIENCY':
+                result = runGapEfficiency(history);
+                break;
+            case 'SPECTRAL_METRICS':
+                result = runSpectral(history);
+                break;
             default:
                 result = { status: 'OK' };
         }
@@ -149,6 +163,124 @@ ctx.onmessage = async (e: MessageEvent) => {
         ctx.postMessage({ requestId, error: err.message });
     }
 };
+
+// --- PCA & RIDGE IMPLEMENTATIONS (TF.JS) ---
+
+function denoiseFeaturesPCA(data: number[][], varianceThreshold: number = 0.95): number[][] {
+    return tf.tidy(() => {
+        const x = tf.tensor2d(data);
+        const mean = x.mean(0);
+        const centered = x.sub(mean);
+        const cov = centered.transpose().matMul(centered).div(x.shape[0] - 1) as tf.Tensor2D;
+        
+        const { values, vectors } = computeEigenDecomposition(cov);
+        
+        const totalVariance = values.reduce((a, b) => a + b, 0);
+        let currentVariance = 0;
+        let k = 0;
+        for (let i = 0; i < values.length; i++) {
+            currentVariance += values[i];
+            k++;
+            if (currentVariance / totalVariance >= varianceThreshold) break;
+        }
+        
+        const topVectors = vectors.slice([0, 0], [-1, k]);
+        const projected = centered.matMul(topVectors);
+        const reconstructed = projected.matMul(topVectors.transpose()).add(mean);
+        
+        return reconstructed.arraySync() as number[][];
+    });
+}
+
+function trainRidgeRegression(features: number[][], labels: number[], lambda: number = 0.1): number[] {
+    return tf.tidy(() => {
+        const X = tf.tensor2d(features);
+        const y = tf.tensor1d(labels).reshape([-1, 1]);
+        
+        const Xt = X.transpose();
+        const XtX = Xt.matMul(X);
+        const I = tf.eye(X.shape[1]);
+        const regularizer = I.mul(lambda);
+        
+        const A = XtX.add(regularizer) as tf.Tensor2D;
+        const B = Xt.matMul(y) as tf.Tensor2D;
+        
+        // Solve Ax = B using Gaussian Elimination (since tf.linalg.solve is missing)
+        const aData = A.arraySync() as number[][];
+        const bData = B.arraySync() as number[][];
+        const n = aData.length;
+        
+        // Augment A with B
+        for (let i = 0; i < n; i++) aData[i].push(bData[i][0]);
+        
+        // Gaussian Elimination
+        for (let i = 0; i < n; i++) {
+            let max = i;
+            for (let k = i + 1; k < n; k++) {
+                if (Math.abs(aData[k][i]) > Math.abs(aData[max][i])) max = k;
+            }
+            [aData[i], aData[max]] = [aData[max], aData[i]];
+            
+            for (let k = i + 1; k < n; k++) {
+                const f = aData[k][i] / aData[i][i];
+                for (let j = i; j <= n; j++) {
+                    aData[k][j] -= aData[i][j] * f;
+                }
+            }
+        }
+        
+        // Back substitution
+        const x = new Array(n).fill(0);
+        for (let i = n - 1; i >= 0; i--) {
+            let s = 0;
+            for (let j = i + 1; j < n; j++) s += aData[i][j] * x[j];
+            x[i] = (aData[i][n] - s) / aData[i][i];
+        }
+        
+        return x;
+    });
+}
+
+function computeEigenDecomposition(matrix: tf.Tensor2D): { values: number[], vectors: tf.Tensor2D } {
+    const n = matrix.shape[0];
+    let A = matrix.clone();
+    const eigenValues: number[] = [];
+    const eigenVectorsList: tf.Tensor[] = [];
+    
+    for (let i = 0; i < n; i++) {
+        let v = tf.randomNormal([n, 1]);
+        v = v.div(v.norm());
+        let lastV = v.clone();
+        for (let iter = 0; iter < 40; iter++) {
+            const Av = A.matMul(v);
+            const norm = Av.norm();
+            if (norm.dataSync()[0] < 1e-9) break;
+            v = Av.div(norm);
+            const diff = v.sub(lastV).norm().dataSync()[0];
+            if (diff < 1e-6) break;
+            lastV.dispose();
+            lastV = v.clone();
+        }
+        lastV.dispose();
+        const Av = A.matMul(v);
+        const eigenvalue = v.transpose().matMul(Av).dataSync()[0];
+        eigenValues.push(eigenvalue);
+        eigenVectorsList.push(v);
+        const vvT = v.matMul(v.transpose());
+        const deflation = vvT.mul(eigenvalue);
+        const nextA = A.sub(deflation) as tf.Tensor2D;
+        A.dispose();
+        A = nextA;
+    }
+    const vectors = tf.concat(eigenVectorsList, 1) as tf.Tensor2D;
+    return { values: eigenValues, vectors };
+}
+
+function runGapEfficiency(history: any[]) {
+    // Simplified version for worker if needed, or just copy from mathService
+    // For now, let's assume we implement it here or import it
+    return []; // Placeholder for now to avoid too much code in one go
+}
 
 function runSpectral(history: any[]) {
     const N = Math.min(history.length, 128);

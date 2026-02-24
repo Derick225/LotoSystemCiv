@@ -108,16 +108,21 @@ export const OracleInterface: React.FC = () => {
     }
 
     return (
-        <div className="fixed bottom-0 right-0 w-full md:w-[450px] h-[600px] bg-black/90 backdrop-blur-xl border-t md:border-l border-indigo-500/30 shadow-2xl z-50 flex flex-col animate-slide-up font-mono">
+        <div className="fixed bottom-0 right-0 w-full md:w-[450px] h-[80vh] md:h-[600px] bg-black/95 backdrop-blur-2xl border-t md:border-l border-indigo-500/30 shadow-2xl z-[100] flex flex-col animate-slide-up font-mono rounded-t-3xl md:rounded-tl-3xl md:rounded-tr-none">
             {/* Header */}
-            <div className="p-4 border-b border-indigo-500/20 flex justify-between items-center bg-gradient-to-r from-indigo-900/20 to-purple-900/20">
+            <div className="p-4 border-b border-indigo-500/20 flex justify-between items-center bg-gradient-to-r from-indigo-900/40 to-purple-900/40">
                 <div className="flex items-center gap-3">
-                    <Sparkles className="text-yellow-400 animate-pulse" size={18} />
-                    <h3 className="text-yellow-400 font-black tracking-[0.2em] text-sm">ORACLE :: GOD MODE</h3>
+                    <div className="p-1.5 bg-yellow-400/10 rounded-lg border border-yellow-400/20">
+                        <Sparkles className="text-yellow-400 animate-pulse" size={16} />
+                    </div>
+                    <h3 className="text-yellow-400 font-black tracking-[0.2em] text-[10px] md:text-sm uppercase">ORACLE :: GOD MODE</h3>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button onClick={toggleGodMode} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors">
-                        <Unlock size={16} />
+                    <button 
+                        onClick={toggleGodMode} 
+                        className="p-2.5 bg-white/5 hover:bg-rose-500/20 rounded-xl text-slate-400 hover:text-rose-400 transition-all border border-white/5"
+                    >
+                        <EyeOff size={16} />
                     </button>
                 </div>
             </div>
@@ -155,20 +160,20 @@ export const OracleInterface: React.FC = () => {
             </div>
 
             {/* Input Area */}
-            <div className="p-4 border-t border-white/10 bg-black/50">
+            <div className="p-4 border-t border-white/10 bg-black/50 pb-8 md:pb-4">
                 <div className="flex gap-2">
                     <input 
                         type="text" 
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder="Ask the Oracle..."
-                        className="flex-1 bg-slate-900/50 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                        placeholder="Interroger l'Oracle..."
+                        className="flex-1 bg-slate-900/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-all shadow-inner"
                     />
                     <button 
                         onClick={handleSend}
                         disabled={isThinking}
-                        className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+                        className="p-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all disabled:opacity-50 shadow-lg shadow-indigo-600/20 active:scale-90"
                     >
                         <Send size={18} />
                     </button>

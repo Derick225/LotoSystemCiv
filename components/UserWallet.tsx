@@ -235,36 +235,36 @@ export const UserWallet: React.FC = () => {
                 </div>
             )}
 
-            <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
+            <div className="bg-white dark:bg-slate-800 p-5 md:p-8 rounded-3xl md:rounded-[3rem] shadow-xl relative overflow-hidden group border border-slate-100 dark:border-slate-700">
                 <div className="relative z-10 flex flex-col lg:grid lg:grid-cols-2 gap-6 md:gap-8">
                     <div>
-                        <div className="flex justify-between items-start mb-6">
+                        <div className="flex justify-between items-start mb-4 md:mb-6">
                             <div>
-                                <h2 className="text-2xl md:text-3xl font-black tracking-tighter mb-2 flex items-center gap-2 text-slate-900 dark:text-white">
-                                    <Briefcase className="text-emerald-500" size={24} /> Portefeuille
+                                <h2 className="text-xl md:text-3xl font-black tracking-tighter mb-1 md:mb-2 flex items-center gap-2 text-slate-900 dark:text-white">
+                                    <Briefcase className="text-emerald-500 w-5 h-5 md:w-6 md:h-6" /> Portefeuille
                                 </h2>
-                                <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[10px] tracking-widest">Bankroll Actuel</p>
+                                <p className="text-slate-400 font-bold uppercase text-[8px] md:text-[10px] tracking-widest">Bankroll Actuel</p>
                             </div>
-                            <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col items-end text-emerald-600 dark:text-emerald-400">
-                                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest">Disponible</span>
-                                <span className="text-2xl md:text-3xl font-black whitespace-nowrap">{bankroll.toLocaleString()} F</span>
+                            <div className="px-3 md:px-4 py-1.5 md:py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl md:rounded-2xl flex flex-col items-end text-emerald-600 dark:text-emerald-400">
+                                <span className="text-[7px] md:text-[10px] font-black uppercase tracking-widest">Disponible</span>
+                                <span className="text-xl md:text-3xl font-black whitespace-nowrap">{bankroll.toLocaleString()} F</span>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 md:gap-4">
-                            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <div className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase mb-1">Mises Total</div>
-                                <div className="text-base md:text-xl font-black text-slate-700 dark:text-slate-200 whitespace-nowrap">{totalSpent.toLocaleString()} F</div>
+                        <div className="grid grid-cols-2 gap-2 md:gap-4">
+                            <div className="bg-slate-50 dark:bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-200 dark:border-slate-700">
+                                <div className="text-[7px] md:text-[10px] font-black text-slate-400 uppercase mb-0.5 md:mb-1">Mises Total</div>
+                                <div className="text-sm md:text-xl font-black text-slate-700 dark:text-slate-200 whitespace-nowrap">{totalSpent.toLocaleString()} F</div>
                             </div>
-                            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <div className="text-[8px] md:text-[10px] font-black text-emerald-500 uppercase mb-1">Gains Estimés</div>
-                                <div className="text-base md:text-xl font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{totalWinnings.toLocaleString()} F</div>
+                            <div className="bg-slate-50 dark:bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-200 dark:border-slate-700">
+                                <div className="text-[7px] md:text-[10px] font-black text-emerald-500 uppercase mb-0.5 md:mb-1">Gains Estimés</div>
+                                <div className="text-sm md:text-xl font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{totalWinnings.toLocaleString()} F</div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="h-32 md:h-40 w-full bg-slate-50 dark:bg-slate-900 rounded-2xl p-3 md:p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
-                        <div className="absolute top-2 left-4 text-[8px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest z-10">Evolution Performance</div>
+                    <div className="h-28 md:h-40 w-full bg-slate-50 dark:bg-slate-900 rounded-xl md:rounded-2xl p-2 md:p-4 border border-slate-200 dark:border-slate-700 relative overflow-hidden">
+                        <div className="absolute top-2 left-4 text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest z-10">Performance</div>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={financialHistory}>
                                 <defs>
@@ -272,7 +272,7 @@ export const UserWallet: React.FC = () => {
                                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                                     </linearGradient>
                                 </defs>
-                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '9px' }} />
+                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: '#0f172a', color: '#fff', fontSize: '8px' }} />
                                 <Area type="monotone" dataKey="balance" stroke="#10b981" strokeWidth={2} fill="url(#colorBal)" />
                             </AreaChart>
                         </ResponsiveContainer>
@@ -335,52 +335,52 @@ export const UserWallet: React.FC = () => {
                             >
                                 {win > 0 && <div className="absolute top-0 left-0 w-1 md:w-1.5 h-full bg-emerald-500"></div>}
                                 
-                                <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6">
+                                <div className="flex flex-col md:flex-row items-center gap-3 md:gap-6">
                                     <div className="flex-1 w-full md:w-auto">
-                                        <div className="flex justify-between items-start mb-3">
+                                        <div className="flex justify-between items-start mb-2 md:mb-3">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[8px] md:text-[10px] font-black uppercase text-white bg-slate-900 px-2.5 py-1 rounded-lg">{ticket.drawName}</span>
-                                                <span className="text-[8px] md:text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
+                                                <span className="text-[7px] md:text-[10px] font-black uppercase text-white bg-slate-900 px-2 py-0.5 md:px-2.5 md:py-1 rounded-md md:rounded-lg">{ticket.drawName}</span>
+                                                <span className="text-[7px] md:text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
                                             </div>
-                                            <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(ticket.id); }} className="text-slate-300 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={14}/></button>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(ticket.id); }} className="text-slate-300 hover:text-rose-500 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={12}/></button>
                                         </div>
-                                        <div className="flex gap-1.5 md:gap-2 justify-center md:justify-start flex-wrap">
-                                            {ticket.numbers.map(n => <NumberBall key={n} number={n} size="sm" />)}
+                                        <div className="flex gap-1 md:gap-2 justify-center md:justify-start flex-wrap">
+                                            {ticket.numbers.map(n => <NumberBall key={n} number={n} size="xs" />)}
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-50 dark:border-slate-700">
+                                    <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-slate-50 dark:border-slate-700">
                                         {status === 'checked' ? (
                                             <div className="text-right">
                                                 {win > 0 ? (
-                                                    <div className="flex flex-col items-end gap-1.5">
-                                                        <div className="text-emerald-500 font-black text-base md:text-lg flex items-center justify-end gap-1.5">
-                                                            <Trophy size={14}/> {win.toLocaleString()} F
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        <div className="text-emerald-500 font-black text-sm md:text-lg flex items-center justify-end gap-1">
+                                                            <Trophy size={12}/> {win.toLocaleString()} F
                                                         </div>
                                                         <button 
                                                             onClick={(e) => { e.stopPropagation(); handleClaim(ticket, win); }}
-                                                            className="px-3 py-1 bg-emerald-500 text-white rounded-lg text-[8px] font-black uppercase shadow-lg hover:bg-emerald-600 transition"
+                                                            className="px-2.5 py-1 bg-emerald-500 text-white rounded-lg text-[7px] font-black uppercase shadow-lg hover:bg-emerald-600 transition"
                                                         >
                                                             Claim
                                                         </button>
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col items-end">
-                                                        <div className="text-slate-400 font-bold text-[10px] md:text-xs flex items-center gap-1.5">
-                                                            <AlertCircle size={12}/> Non Gagnant
+                                                        <div className="text-slate-400 font-bold text-[9px] md:text-xs flex items-center gap-1">
+                                                            <AlertCircle size={10}/> Perdu
                                                         </div>
-                                                        <div className="text-[8px] font-bold text-slate-300 uppercase">Archive {drawDate}</div>
+                                                        <div className="text-[7px] font-bold text-slate-300 uppercase">{drawDate}</div>
                                                     </div>
                                                 )}
                                             </div>
                                         ) : (
-                                            <div className="flex items-center gap-1.5 text-slate-400 bg-slate-50 dark:bg-slate-900/50 px-2.5 py-1 rounded-lg">
+                                            <div className="flex items-center gap-1 text-slate-400 bg-slate-50 dark:bg-slate-900/50 px-2 py-0.5 rounded-lg">
                                                 <Clock size={10} className="animate-spin-slow" />
-                                                <span className="text-[8px] md:text-[9px] font-black uppercase">En Attente</span>
+                                                <span className="text-[7px] md:text-[9px] font-black uppercase">Attente</span>
                                             </div>
                                         )}
-                                        <div className={`p-1.5 rounded-full transition-all ${isExpanded ? 'bg-indigo-100 text-indigo-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
-                                            <ChevronDown size={14} />
+                                        <div className={`p-1 rounded-full transition-all ${isExpanded ? 'bg-indigo-100 text-indigo-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
+                                            <ChevronDown size={12} />
                                         </div>
                                     </div>
                                 </div>

@@ -92,59 +92,59 @@ export const DrawDetails: React.FC = () => {
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 w-full overflow-x-hidden font-sans">
       
       {/* Header Contextuel HPC */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 bg-slate-900/60 p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border border-white/5 backdrop-blur-xl w-full shadow-2xl relative overflow-hidden">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-4 md:gap-6 bg-slate-900/60 p-5 md:p-8 rounded-3xl md:rounded-[3.5rem] border border-white/5 backdrop-blur-xl w-full shadow-2xl relative overflow-hidden">
         {/* Background Grid FX */}
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
 
-        <div className="space-y-3 w-full md:w-auto relative z-10">
-            <div className="flex items-center gap-3">
-                <span className="px-3 py-1 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+        <div className="space-y-2 md:space-y-3 w-full md:w-auto relative z-10">
+            <div className="flex items-center gap-2 md:gap-3">
+                <span className="px-2.5 py-0.5 md:px-3 md:py-1 bg-indigo-600 text-white text-[8px] md:text-[9px] font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-600/20 flex items-center gap-1.5 md:gap-2">
                     <Navigation size={10} /> Session Active
                 </span>
-                <span className="text-[9px] font-mono text-slate-500 uppercase">{history.length} Séquences chargées</span>
+                <span className="text-[8px] md:text-[9px] font-mono text-slate-500 uppercase">{history.length} Séquences</span>
             </div>
-            <h2 className="text-3xl md:text-6xl font-black text-white uppercase tracking-tighter leading-none truncate max-w-full">
-              {drawName === 'ALL' ? 'ARCHIVES' : drawName} <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400 text-xl md:text-3xl">v12.0</span>
+            <h2 className="text-2xl md:text-6xl font-black text-white uppercase tracking-tighter leading-none truncate max-w-full">
+              {drawName === 'ALL' ? 'ARCHIVES' : drawName} <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400 text-lg md:text-3xl">v12.0</span>
             </h2>
-            <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                <Clock size={12} className="text-indigo-500"/> Temps Système : {new Date().toLocaleTimeString()}
+            <div className="flex items-center gap-2 text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <Clock size={10} className="text-indigo-500"/> {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
             </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 relative z-10">
+        <div className="flex gap-2 md:gap-3 relative z-10 w-full md:w-auto justify-end">
             <button 
                 onClick={() => refreshData(drawName, true)} 
-                className="p-3 md:p-4 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-2xl transition-all active:scale-90 border border-white/5 shadow-lg group"
+                className="p-2.5 md:p-4 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-xl md:rounded-2xl transition-all active:scale-90 border border-white/5 shadow-lg group"
                 title="Forcer la synchronisation"
             >
-                <RefreshCw size={18} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw size={16} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
             </button>
-            <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 md:px-6 py-3 md:py-4 rounded-2xl flex items-center gap-3 backdrop-blur-md">
-                <ShieldCheck size={18} className="text-emerald-500" />
+            <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 md:px-6 py-2.5 md:py-4 rounded-xl md:rounded-2xl flex items-center gap-2 md:gap-3 backdrop-blur-md">
+                <ShieldCheck size={16} className="text-emerald-500" />
                 <div className="text-left">
-                    <div className="text-[8px] md:text-[9px] font-black text-emerald-500 uppercase tracking-widest leading-none">Status</div>
-                    <div className="text-[10px] md:text-xs font-black text-emerald-400 uppercase mt-0.5">Opérationnel</div>
+                    <div className="text-[7px] md:text-[9px] font-black text-emerald-500 uppercase tracking-widest leading-none">Status</div>
+                    <div className="text-[9px] md:text-xs font-black text-emerald-400 uppercase mt-0.5">Opérationnel</div>
                 </div>
             </div>
         </div>
       </header>
 
       {/* Navigation Modulaire - Sticky & Scrollable */}
-      <div className="sticky top-[60px] md:top-24 z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-4 px-4 md:mx-0 md:px-0">
-        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
+      <div className="sticky top-[56px] md:top-24 z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-3 px-3 md:mx-0 md:px-0">
+        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-[2rem] md:rounded-[2.5rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => handleTabChange(t.id as MainTab)}
               className={`
-                flex items-center gap-3 px-6 py-3 md:py-3.5 rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden
+                flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2.5 md:py-3.5 rounded-[1.8rem] md:rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden
                 ${activeTab === t.id 
-                  ? 'bg-white dark:bg-slate-700 shadow-xl text-indigo-600 dark:text-white scale-105 z-10 font-bold' 
+                  ? 'bg-white dark:bg-slate-700 shadow-lg text-indigo-600 dark:text-white scale-105 z-10 font-bold' 
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-medium'}
               `}
             >
-              <t.icon size={16} className={`relative z-10 ${activeTab === t.id ? 'animate-bounce-subtle' : ''}`} />
-              <span className="text-[10px] md:text-xs uppercase tracking-widest leading-none relative z-10">{t.label}</span>
+              <t.icon size={14} className={`relative z-10 ${activeTab === t.id ? 'animate-bounce-subtle' : ''}`} />
+              <span className="text-[9px] md:text-xs uppercase tracking-widest leading-none relative z-10">{t.label}</span>
               {activeTab === t.id && (
                   <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-purple-500/5 pointer-events-none"></div>
               )}

@@ -60,30 +60,30 @@ const MetaLearningIndicator: React.FC = () => {
     const isShadowActive = (globalWeights?.shadow_factor || 0) > 0.05;
 
     return (
-        <div className="bg-slate-900/80 backdrop-blur-md p-6 rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
+        <div className="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-3xl md:rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-20 -mt-20"></div>
             
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
-                        <BrainCircuit className="w-6 h-6 text-indigo-400 animate-pulse-slow" />
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 relative z-10">
+                <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto">
+                    <div className="p-2.5 md:p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30 shrink-0">
+                        <BrainCircuit className="w-5 h-5 md:w-6 md:h-6 text-indigo-400 animate-pulse-slow" />
                     </div>
                     <div>
-                        <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                            Méta-Apprentissage <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[9px] rounded-full border border-emerald-500/20">ACTIF</span>
+                        <h3 className="text-[10px] md:text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                            Méta-Apprentissage <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] md:text-[9px] rounded-full border border-emerald-500/20">ACTIF</span>
                         </h3>
-                        <p className="text-[10px] text-slate-400 font-medium mt-1">
-                            Optimisation dynamique des poids algorithmiques en temps réel
+                        <p className="text-[9px] md:text-[10px] text-slate-400 font-medium mt-0.5 md:mt-1">
+                            Optimisation dynamique en temps réel
                         </p>
                     </div>
                 </div>
 
-                <div className="flex-1 w-full md:w-auto flex flex-col gap-2">
-                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-slate-500">
-                        <span className={strategyBalance < 40 ? 'text-indigo-400' : ''}>Stratégie Écart</span>
-                        <span className={strategyBalance > 60 ? 'text-indigo-400' : ''}>Stratégie Fréquence</span>
+                <div className="flex-1 w-full flex flex-col gap-2">
+                    <div className="flex justify-between text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-500">
+                        <span className={strategyBalance < 40 ? 'text-indigo-400' : ''}>Écart</span>
+                        <span className={strategyBalance > 60 ? 'text-indigo-400' : ''}>Fréquence</span>
                     </div>
-                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden relative">
+                    <div className="h-1.5 md:h-2 bg-slate-800 rounded-full overflow-hidden relative">
                         <motion.div 
                             initial={{ width: "50%" }}
                             animate={{ width: `${strategyBalance}%` }}
@@ -135,65 +135,65 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
     const [showXRay, setShowXRay] = useState(false);
     
     return (
-        <div className="relative overflow-hidden rounded-[2.5rem] md:rounded-[4rem] p-6 md:p-14 text-white shadow-2xl group border border-white/5 mb-12 transition-all duration-700 bg-slate-950 mx-auto w-full">
+        <div className="relative overflow-hidden rounded-3xl md:rounded-[4rem] p-5 md:p-14 text-white shadow-2xl group border border-white/5 mb-8 md:mb-12 transition-all duration-700 bg-slate-950 mx-auto w-full">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/60 via-slate-900 to-black opacity-90"></div>
             
             <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-indigo-600/10 rounded-full blur-[140px] -mr-48 -mt-48 group-hover:bg-indigo-500/20 transition-all duration-1000"></div>
 
             <div className="relative z-10">
-                <div className="flex flex-col lg:flex-row gap-8 lg:gap-12 items-center justify-between">
-                    <div className="flex-1 space-y-6 md:space-y-8 text-center lg:text-left w-full">
+                <div className="flex flex-col lg:flex-row gap-6 md:gap-12 items-center justify-between">
+                    <div className="flex-1 space-y-4 md:space-y-8 text-center lg:text-left w-full">
                         <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 md:gap-4">
                             <motion.div 
                               initial={{ opacity: 0, x: -20 }}
                               animate={{ opacity: 1, x: 0 }}
-                              className="inline-flex items-center gap-2.5 px-3 md:px-5 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/30 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] text-indigo-300"
+                              className="inline-flex items-center gap-2 px-3 md:px-5 py-1.5 md:py-2 bg-indigo-500/10 rounded-full border border-indigo-500/30 text-[7px] md:text-[10px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-indigo-300"
                             >
-                                <Signal size={12} className="text-indigo-400 animate-pulse" /> Signal Entrant • {result.drawName}
+                                <Signal size={10} className="text-indigo-400 animate-pulse" /> Signal Entrant • {result.drawName}
                             </motion.div>
-                            <div className="inline-flex items-center gap-2.5 px-3 md:px-5 py-2 bg-emerald-500/10 rounded-full border border-emerald-500/30 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] text-emerald-400">
-                                <ShieldCheck size={12} /> {result.date}
+                            <div className="inline-flex items-center gap-2 px-3 md:px-5 py-1.5 md:py-2 bg-emerald-500/10 rounded-full border border-emerald-500/30 text-[7px] md:text-[10px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] text-emerald-400">
+                                <ShieldCheck size={10} /> {result.date}
                             </div>
                         </div>
                         
-                        <h2 className="text-4xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl uppercase break-words">
+                        <h2 className="text-3xl md:text-8xl font-black tracking-tighter leading-none text-white drop-shadow-2xl uppercase break-words">
                             {result.drawName || 'TERMINAL'}
                         </h2>
                         
-                        <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
+                        <div className="flex flex-wrap gap-2 md:gap-3 justify-center lg:justify-start">
                             <InfoTooltip title="Somme Sigma (Σ)" content="Masse numérique totale du tirage. Moyenne théorique: 227.5.">
-                                <div className="px-4 md:px-6 py-3 md:py-4 bg-black/40 rounded-2xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[100px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
-                                    <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Somme Σ</span>
-                                    <span className={`text-xl md:text-2xl font-mono font-black ${Math.abs(metrics.sum - 227.5) > 50 ? 'text-rose-400' : 'text-emerald-400'}`}>{metrics.sum}</span>
+                                <div className="px-3 md:px-6 py-2 md:py-4 bg-black/40 rounded-xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[80px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
+                                    <span className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 md:mb-1.5">Somme Σ</span>
+                                    <span className={`text-base md:text-2xl font-mono font-black ${Math.abs(metrics.sum - 227.5) > 50 ? 'text-rose-400' : 'text-emerald-400'}`}>{metrics.sum}</span>
                                 </div>
                             </InfoTooltip>
 
                             <InfoTooltip title="Complexité Arithmétique" content="Score d'imprévisibilité structurelle (0-10).">
-                                <div className="px-4 md:px-6 py-3 md:py-4 bg-black/40 rounded-2xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[100px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
-                                    <span className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Complexité</span>
-                                    <span className="text-xl md:text-2xl font-mono font-black text-indigo-400">{metrics.acValue}/10</span>
+                                <div className="px-3 md:px-6 py-2 md:py-4 bg-black/40 rounded-xl md:rounded-3xl border border-white/5 backdrop-blur-xl flex flex-col items-center min-w-[80px] md:min-w-[120px] hover:border-indigo-500/50 transition-colors shadow-inner">
+                                    <span className="text-[7px] md:text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 md:mb-1.5">Complexité</span>
+                                    <span className="text-base md:text-2xl font-mono font-black text-indigo-400">{metrics.acValue}/10</span>
                                 </div>
                             </InfoTooltip>
 
                             <button 
                                 onClick={(e) => { e.stopPropagation(); audioEngine.play('click'); setShowXRay(!showXRay); }}
-                                className={`px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl border flex flex-col items-center min-w-[100px] md:min-w-[120px] transition-all transform active:scale-95 shadow-xl
+                                className={`px-3 md:px-6 py-2 md:py-4 rounded-xl md:rounded-3xl border flex flex-col items-center min-w-[80px] md:min-w-[120px] transition-all transform active:scale-95 shadow-xl
                                   ${showXRay 
                                     ? 'bg-indigo-600 border-indigo-400 shadow-indigo-500/30' 
                                     : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
                             >
-                                <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest mb-1.5 opacity-60">Diagnostic</span>
-                                <div className="flex items-center gap-2">
-                                    <Microscope size={14} />
-                                    <span className="text-[10px] md:text-xs font-black uppercase tracking-widest">Rayon-X</span>
+                                <span className="text-[7px] md:text-[9px] font-black uppercase tracking-widest mb-1 md:mb-1.5 opacity-60">Diagnostic</span>
+                                <div className="flex items-center gap-1.5 md:gap-2">
+                                    <Microscope size={12} />
+                                    <span className="text-[9px] md:text-xs font-black uppercase tracking-widest">Rayon-X</span>
                                 </div>
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex flex-col items-center gap-6 md:gap-10 bg-black/40 p-6 md:p-14 rounded-[3rem] md:rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden w-full lg:w-auto">
+                    <div className="flex flex-col items-center gap-4 md:gap-10 bg-black/40 p-5 md:p-14 rounded-3xl md:rounded-[4.5rem] border border-white/10 backdrop-blur-3xl shadow-2xl relative overflow-hidden w-full lg:w-auto">
                         <div className="absolute inset-0 bg-indigo-600/5 opacity-30" />
-                        <div className="flex gap-2 md:gap-5 relative z-10 justify-center flex-wrap">
+                        <div className="flex gap-1.5 md:gap-5 relative z-10 justify-center flex-wrap">
                             {result.gagnants.map((n, i) => (
                                 <motion.div 
                                     key={n} 
@@ -202,20 +202,20 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
                                     transition={{ delay: i * 0.1, type: "spring" }}
                                     className="transform hover:scale-110 transition-transform duration-500"
                                 >
-                                    <NumberBall number={n} size={window.innerWidth < 640 ? 'sm' : 'lg'} isAttractor={i===0} confidence={92} />
+                                    <NumberBall number={n} size="sm" isAttractor={i===0} confidence={92} />
                                 </motion.div>
                             ))}
                         </div>
                         
-                        <div className="flex items-center gap-4 md:gap-8 w-full px-2 md:px-4 relative z-10">
+                        <div className="flex items-center gap-3 md:gap-8 w-full px-1 md:px-4 relative z-10">
                             <div className="h-px flex-1 bg-white/10"></div>
-                            <div className="flex items-center gap-3 md:gap-5">
-                                <span className="text-[8px] md:text-[10px] font-black uppercase text-slate-500 tracking-[0.2em] flex items-center gap-2 whitespace-nowrap">
-                                    <Binary size={12} /> Machine Loop
+                            <div className="flex items-center gap-2 md:gap-5">
+                                <span className="text-[7px] md:text-[10px] font-black uppercase text-slate-500 tracking-[0.1em] md:tracking-[0.2em] flex items-center gap-1.5 md:gap-2 whitespace-nowrap">
+                                    <Binary size={10} /> Machine
                                 </span>
-                                <div className="flex gap-2 md:gap-3">
+                                <div className="flex gap-1.5 md:gap-3">
                                     {result.machine?.map((n) => (
-                                        <span key={n} className="text-xs md:text-sm font-mono font-black text-slate-400 opacity-50 hover:opacity-100 transition-opacity">{n}</span>
+                                        <span key={n} className="text-[10px] md:text-sm font-mono font-black text-slate-400 opacity-50 hover:opacity-100 transition-opacity">{n}</span>
                                     ))}
                                 </div>
                             </div>
@@ -524,32 +524,32 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         <motion.div 
                           initial={{ opacity: 0, scale: 0.98 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className={`lg:col-span-8 rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
+                          className={`lg:col-span-8 rounded-3xl md:rounded-[4rem] p-6 md:p-14 text-white shadow-2xl relative overflow-hidden group border transition-all duration-700 ${nextDraw?.isUrgent ? 'bg-rose-950 border-rose-500/40 ring-4 ring-rose-500/10 shadow-rose-900/40' : 'bg-slate-900 border-white/5'}`}
                         >
                             <div className={`absolute top-0 right-0 w-[600px] h-[600px] rounded-full blur-[160px] -mr-48 -mt-48 transition-colors duration-1000 ${nextDraw?.isUrgent ? 'bg-rose-500/20' : 'bg-indigo-600/10'}`}></div>
                             
                             <div className="relative z-10 flex flex-col h-full">
                                 <div className="flex justify-between items-start">
-                                    <div className="inline-flex items-center gap-3 px-4 md:px-5 py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
-                                        <Clock className={`w-4 h-4 md:w-5 md:h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
-                                        <span className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-300">
+                                    <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-5 py-1.5 md:py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
+                                        <Clock className={`w-3.5 h-3.5 md:w-5 md:h-5 ${nextDraw?.isUrgent ? 'text-rose-400 animate-spin' : 'text-indigo-400'}`} />
+                                        <span className="text-[8px] md:text-[11px] font-black uppercase tracking-widest text-slate-300">
                                             {nextDraw ? `${nextDraw.day} ${nextDraw.time}` : 'En attente...'}
                                         </span>
                                     </div>
                                     {nextDraw?.isUrgent && (
-                                        <span className="px-3 md:px-4 py-1 md:py-1.5 bg-rose-600 text-white text-[8px] md:text-[9px] font-black uppercase rounded-lg animate-pulse shadow-lg shadow-rose-600/40">Urgent</span>
+                                        <span className="px-2.5 md:px-4 py-1 md:py-1.5 bg-rose-600 text-white text-[7px] md:text-[9px] font-black uppercase rounded-lg animate-pulse shadow-lg shadow-rose-600/40">Urgent</span>
                                     )}
                                 </div>
 
-                                <div className="mt-8 md:mt-14 mb-8 md:mb-10 text-center md:text-left">
-                                    <h3 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight truncate uppercase">
+                                <div className="mt-6 md:mt-14 mb-6 md:mb-10 text-center md:text-left">
+                                    <h3 className="text-2xl md:text-7xl font-black tracking-tighter leading-tight truncate uppercase">
                                         {nextDraw ? nextDraw.name : 'Vecteur...'}
                                     </h3>
-                                    <p className="text-slate-500 font-bold uppercase text-[10px] md:text-xs tracking-widest mt-2 md:mt-4">Ouverture du flux dans :</p>
+                                    <p className="text-slate-500 font-bold uppercase text-[8px] md:text-xs tracking-widest mt-1 md:mt-4">Ouverture du flux dans :</p>
                                 </div>
 
-                                <div className="bg-black/50 backdrop-blur-3xl rounded-[2rem] md:rounded-[3rem] p-6 md:p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
-                                    <div className={`text-5xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
+                                <div className="bg-black/50 backdrop-blur-3xl rounded-2xl md:rounded-[3rem] p-5 md:p-10 border border-white/10 flex flex-col items-center justify-center shadow-inner group-hover:border-white/20 transition-all">
+                                    <div className={`text-4xl md:text-[8rem] font-mono font-black tracking-tighter transition-all duration-500 ${nextDraw?.isUrgent ? 'text-rose-400 scale-105' : 'text-white'}`}>
                                         {nextDraw ? nextDraw.timeLeft : '00:00:00'}
                                     </div>
                                 </div>
@@ -557,16 +557,16 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         </motion.div>
 
                         {/* TOP FREQUENCE 7J (High-Heat 7d) */}
-                        <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full min-h-[400px]">
+                        <div className="lg:col-span-4 bg-white/5 backdrop-blur-md rounded-3xl md:rounded-[4rem] p-6 md:p-10 shadow-2xl border border-white/5 relative overflow-hidden flex flex-col h-full min-h-[350px] md:min-h-[400px]">
                             {/* Decorative gradient for heat effect */}
                             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 via-red-500 to-purple-500 opacity-80"></div>
                             
-                            <h3 className="font-black text-white flex items-center gap-3 mb-8 md:mb-10 text-xl md:text-2xl tracking-tight uppercase justify-center lg:justify-start">
-                                <Flame className="w-6 h-6 md:w-7 md:h-7 text-orange-500 animate-pulse-slow" /> High-Heat 7d
+                            <h3 className="font-black text-white flex items-center gap-2 md:gap-3 mb-6 md:mb-10 text-lg md:text-2xl tracking-tight uppercase justify-center lg:justify-start">
+                                <Flame className="w-5 h-5 md:w-7 md:h-7 text-orange-500 animate-pulse-slow" /> High-Heat 7d
                             </h3>
-                            <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-2 md:space-y-3 flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
                                 {globalHot.length === 0 ? (
-                                    [1,2,3,4,5].map(i => <div key={i} className="h-16 bg-white/5 rounded-2xl animate-pulse"></div>)
+                                    [1,2,3,4,5].map(i => <div key={i} className="h-14 md:h-16 bg-white/5 rounded-xl md:rounded-2xl animate-pulse"></div>)
                                 ) : 
                                 globalHot.map((stat: any, i: number) => (
                                     <motion.div 
@@ -574,15 +574,15 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                       initial={{ opacity: 0, x: 20 }}
                                       animate={{ opacity: 1, x: 0 }}
                                       transition={{ delay: i * 0.1 }}
-                                      className="flex items-center justify-between p-4 rounded-xl md:rounded-2xl bg-black/40 border border-white/5 hover:border-orange-500/30 transition-all group"
+                                      className="flex items-center justify-between p-3 md:p-4 rounded-xl md:rounded-2xl bg-black/40 border border-white/5 hover:border-orange-500/30 transition-all group"
                                     >
-                                        <div className="flex items-center gap-4">
-                                            <span className={`text-[10px] font-black ${i === 0 ? 'text-orange-400' : 'text-slate-600'} group-hover:text-orange-300`}>#{i+1}</span>
+                                        <div className="flex items-center gap-3 md:gap-4">
+                                            <span className={`text-[9px] md:text-[10px] font-black ${i === 0 ? 'text-orange-400' : 'text-slate-600'} group-hover:text-orange-300`}>#{i+1}</span>
                                             <NumberBall number={stat.number} size="sm" confidence={Math.round(80 - i * 3)} />
                                         </div>
                                         <div className="text-right">
-                                            <span className="text-lg md:text-xl font-mono font-black text-white">{stat.count}</span>
-                                            <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Signaux</div>
+                                            <span className="text-base md:text-xl font-mono font-black text-white">{stat.count}</span>
+                                            <div className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest">Signaux</div>
                                         </div>
                                     </motion.div>
                                 ))}

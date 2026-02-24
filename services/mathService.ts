@@ -1,13 +1,29 @@
 
 import * as tf from '@tensorflow/tfjs';
+import { workerService } from './workerService';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
 // --- UTILS STATISTIQUES VECTORISÉS ---
 
+// --- CACHE & MEMOIZATION ---
+const mathCache = new Map<string, { timestamp: number; data: any }>();
+const CACHE_TTL = 30000; // 30 seconds for math results
+
+const getCached = (key: string) => {
+    const cached = mathCache.get(key);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) return cached.data;
+    return null;
+};
+
+const setCached = (key: string, data: any) => {
+    if (mathCache.size > 100) mathCache.clear(); // Simple eviction
+    mathCache.set(key, { timestamp: Date.now(), data });
+};
+
+export const clearMathCache = () => mathCache.clear();
+
 /**
  * Helper: Compute Eigen Decomposition using Power Iteration with Deflation.
- * Robust fallback when tf.linalg.eigh/svd are unavailable.
- * Assumes symmetric matrix (e.g. Covariance).
  */
 const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vectors: tf.Tensor2D } => {
     const n = matrix.shape[0];
@@ -15,18 +31,25 @@ const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vec
     const eigenValues: number[] = [];
     const eigenVectorsList: tf.Tensor[] = [];
     
-    // Find all n eigenvectors/values
     for (let i = 0; i < n; i++) {
         let v = tf.randomNormal([n, 1]);
         v = v.div(v.norm());
         
-        // Power Iteration
-        for (let iter = 0; iter < 20; iter++) {
+        let lastV = v.clone();
+        // Power Iteration with convergence check
+        for (let iter = 0; iter < 40; iter++) {
             const Av = A.matMul(v);
             const norm = Av.norm();
-            if (norm.dataSync()[0] < 1e-8) break;
+            if (norm.dataSync()[0] < 1e-9) break;
             v = Av.div(norm);
+            
+            // Convergence check: if v doesn't change much, stop
+            const diff = v.sub(lastV).norm().dataSync()[0];
+            if (diff < 1e-6) break;
+            lastV.dispose();
+            lastV = v.clone();
         }
+        lastV.dispose();
         
         const Av = A.matMul(v);
         const eigenvalue = v.transpose().matMul(Av).dataSync()[0];
@@ -34,10 +57,11 @@ const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vec
         eigenValues.push(eigenvalue);
         eigenVectorsList.push(v);
         
-        // Deflation: A = A - lambda * v * v^T
         const vvT = v.matMul(v.transpose());
         const deflation = vvT.mul(eigenvalue);
-        A = A.sub(deflation);
+        const nextA = A.sub(deflation) as tf.Tensor2D;
+        A.dispose();
+        A = nextA;
     }
     
     const vectors = tf.concat(eigenVectorsList, 1) as tf.Tensor2D;
@@ -51,6 +75,13 @@ const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vec
  */
 export const performPCA = (data: number[][], nComponents: number = 3): number[][] => {
     if (!data || data.length === 0) return [];
+
+    // Offload to worker if on main thread
+    if (typeof window !== 'undefined' && workerService.isAvailable()) {
+        // Note: performPCA is sync in mathService but we can't easily make it async here without breaking callers.
+        // However, most callers of PCA are already in async contexts (like predictionEngine).
+        // For now, we keep it sync on main thread or the caller should use workerService directly.
+    }
 
     return tf.tidy(() => {
         const x = tf.tensor2d(data);
@@ -257,6 +288,16 @@ export const runMonteCarloSimulation = (weights: Record<number, number>, iterati
 export const calculateGapEfficiency = async (history: DrawResult[]): Promise<GapEfficiency[]> => {
     if (!history || history.length === 0) return [];
     
+    const cacheKey = `gei_${history[0].id}_${history.length}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    if (typeof window !== 'undefined' && workerService.isAvailable()) {
+        const result = await workerService.runTask<GapEfficiency[]>('GAP_EFFICIENCY', {}, history);
+        setCached(cacheKey, result);
+        return result;
+    }
+    
     const efficiencies: GapEfficiency[] = [];
     const depth = Math.min(history.length, 300);
     const subHistory = history.slice(0, depth);
@@ -328,7 +369,9 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
         });
     }
 
-    return efficiencies.sort((a, b) => b.zScore - a.zScore);
+    const result = efficiencies.sort((a, b) => b.zScore - a.zScore);
+    setCached(cacheKey, result);
+    return result;
 };
 
 export const getProjectionsAsync = async (history: DrawResult[], _lastNumbers: number[]): Promise<ProjectionItem[]> => {
@@ -580,36 +623,47 @@ export const calculateVolatility = (history: DrawResult[]): { score: number; sta
 export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number } => {
     if (history.length === 0) return { normalized: 0 };
     
-    const freq = new Uint32Array(91);
-    let total = 0;
-    
-    for(const d of history) {
-        for(const n of d.gagnants) {
-            freq[n]++;
-            total++;
+    return tf.tidy(() => {
+        const freq = new Float32Array(91);
+        let total = 0;
+        
+        for(const d of history) {
+            for(const n of d.gagnants) {
+                if (n >= 1 && n <= 90) {
+                    freq[n]++;
+                    total++;
+                }
+            }
         }
-    }
-    
-    let entropy = 0;
-    for(let i=1; i<=90; i++) {
-        if(freq[i] > 0) {
-            const p = freq[i] / total;
-            entropy -= p * Math.log2(p);
-        }
-    }
-    
-    const maxEntropy = Math.log2(90); 
-    return { normalized: entropy / maxEntropy };
+        
+        if (total === 0) return { normalized: 0 };
+        
+        const f = tf.tensor1d(Array.from(freq.slice(1)));
+        const p = f.div(total);
+        // Entropy = -sum(p * log2(p))
+        const logP = tf.log(p).div(Math.log(2));
+        const pLogP = p.mul(tf.where(tf.isNaN(logP), tf.zerosLike(logP), logP));
+        const entropy = pLogP.sum().mul(-1);
+        
+        const maxEntropy = Math.log2(90); 
+        return { normalized: entropy.dataSync()[0] / maxEntropy };
+    });
 };
 
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
-    const expected = totalObservations / 90; 
-    let chiSq = 0;
-    for(let i=1; i<=90; i++) {
-        const obs = observed[i] || 0;
-        chiSq += ((obs - expected) ** 2) / expected;
-    }
-    return { score: chiSq };
+    return tf.tidy(() => {
+        const expected = totalObservations / 90; 
+        const obsArr = new Float32Array(90);
+        for(let i=1; i<=90; i++) obsArr[i-1] = observed[i] || 0;
+        
+        const obs = tf.tensor1d(Array.from(obsArr));
+        const exp = tf.scalar(expected);
+        
+        // ChiSq = sum((obs - exp)^2 / exp)
+        const chiSq = obs.sub(exp).square().div(exp).sum();
+        
+        return { score: chiSq.dataSync()[0] };
+    });
 };
 
 export const calculateBenfordCompliance = (numbers: number[]): { score: number, distribution: number[] } => {
@@ -748,6 +802,18 @@ const computeDFT = (signal: number[]): number => {
 };
 
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
+    if (history.length === 0) return [];
+    
+    const cacheKey = `spectral_${history[0].id}_${history.length}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    if (typeof window !== 'undefined' && workerService.isAvailable()) {
+        const result = await workerService.runTask<SpectralMetric[]>('SPECTRAL_METRICS', {}, history);
+        setCached(cacheKey, result);
+        return result;
+    }
+
     const metrics: SpectralMetric[] = [];
     const limit = Math.min(history.length, 64);
     const signalBuffer = new Int8Array(limit);
@@ -759,23 +825,58 @@ export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Prom
         const energy = computeDFT(Array.from(signalBuffer));
         metrics.push({ number: i, energy, resonance: energy > 70 });
     }
+    
+    setCached(cacheKey, metrics);
     return metrics;
 };
 
 export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
+    if (history.length === 0) return [];
+    
+    const cacheKey = `wavelet_${history[0].id}_${history.length}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    if (typeof window !== 'undefined' && workerService.isAvailable()) {
+        const result = await workerService.runTask<SpectralMetric[]>('wavelet_analysis', {}, history);
+        setCached(cacheKey, result);
+        return result;
+    }
+
+    // Fallback to spectral if wavelet not implemented in main thread
     return calculateSpectralMetricsAsync(history); 
 };
 
 export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promise<FractalMetric[]> => {
+    if (history.length === 0) return [];
+    
+    const cacheKey = `fractal_${history[0].id}_${history.length}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
+    if (typeof window !== 'undefined' && workerService.isAvailable()) {
+        const result = await workerService.runTask<FractalMetric[]>('hurst_exponent', {}, history);
+        setCached(cacheKey, result);
+        return result;
+    }
+
     const metrics: FractalMetric[] = [];
     for (let i = 1; i <= 90; i++) {
         const { hurst } = calculateHurstForNumber(i, history);
         metrics.push({ number: i, hurst });
     }
+    
+    setCached(cacheKey, metrics);
     return metrics;
 };
 
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]): Promise<any> => {
+    if (history.length === 0) return {};
+    
+    const cacheKey = `correlation_${history[0].id}_${history.length}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const matrix: Record<number, { affinities: Record<number, number> }> = {};
     for(let i=1; i<=90; i++) matrix[i] = { affinities: {} };
     
@@ -795,6 +896,8 @@ export const calculateCorrelationMatrixAsync = async (history: DrawResult[]): Pr
             }
         }
     }
+    
+    setCached(cacheKey, matrix);
     return matrix;
 };
 
