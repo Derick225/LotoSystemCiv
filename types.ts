@@ -262,6 +262,11 @@ export interface ScoreBreakdown {
     day_echo?: number; // Nouveau score d'écho journalier
     anti_consensus?: number;
     lstm?: number;
+    resistance?: number;
+    temporal?: number;
+    transformer?: number;
+    digital_root?: number;
+    leader_succession?: number;
 }
 
 export interface ScoreComposition {

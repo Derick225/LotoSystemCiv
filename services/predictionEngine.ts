@@ -1,6 +1,16 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
 import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression, applyL2Regularization } from './mathService';
+import { 
+    calculateSpatialHotSpots, 
+    calculateDigitalRootAnalysis, 
+    calculateResistanceScores, 
+    calculateGapVelocityScores, 
+    calculateSelfAttentionScores, 
+    calculateTemporalScores, 
+    calculatePoissonScores,
+    calculateLeaderSuccession
+} from './advancedMathService';
 import { workerService } from './workerService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
@@ -275,6 +285,16 @@ export const generateMasterPrediction = async (
         });
     }
 
+    // --- ADVANCED METRICS CALCULATION ---
+    const spatialHotSpots = calculateSpatialHotSpots(history);
+    const digitalRootScores = calculateDigitalRootAnalysis(history);
+    const resistanceScores = calculateResistanceScores(history);
+    const gapVelocityScores = calculateGapVelocityScores(history);
+    const selfAttentionScores = calculateSelfAttentionScores(history);
+    const temporalScores = calculateTemporalScores(history);
+    const poissonScores = calculatePoissonScores(history);
+    const leaderSuccessionScores = calculateLeaderSuccession(history);
+
     const masterScores = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
         const nBreakdown: ScoreBreakdown = {};
@@ -299,10 +319,23 @@ export const generateMasterPrediction = async (
         nBreakdown.anti_consensus = (200 - (nBreakdown.frequency! + nBreakdown.markov!)) / 2;
         nBreakdown.decision_forest = symbioticContext?.forestVotes?.[num] || 0;
         nBreakdown.orchestration = symbioticContext?.orchestrationBoosts?.[num] ? symbioticContext.orchestrationBoosts[num] * 20 : 0;
-        nBreakdown.spatial = symbioticContext?.spatialHotZones?.includes(num) ? 80 : 0;
+        
+        // Merged Spatial Logic
+        const isSpatialHot = spatialHotSpots.includes(num);
+        nBreakdown.spatial = (symbioticContext?.spatialHotZones?.includes(num) || isSpatialHot) ? 80 : 0;
+        
         nBreakdown.fractal = (metrics?.fractal?.find((f:any) => f.number === num)?.hurst || 0.5) * 100;
         nBreakdown.wavelet = (metrics?.wavelet?.find((w:any) => w.number === num)?.energy || 0);
         nBreakdown.lstm = (lstmProbs[i] || 0) * 100;
+
+        // New Advanced Metrics
+        nBreakdown.poisson = poissonScores[num] || 0;
+        nBreakdown.resistance = resistanceScores[num] || 0;
+        nBreakdown.gap_velocity = gapVelocityScores[num] || 0;
+        nBreakdown.transformer = selfAttentionScores[num] || 0;
+        nBreakdown.temporal = temporalScores[num] || 0;
+        nBreakdown.digital_root = digitalRootScores[num] || 0;
+        nBreakdown.leader_succession = leaderSuccessionScores[num] || 0;
 
         let finalScore = 0;
         let totalW = 0;

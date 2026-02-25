@@ -16,13 +16,16 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = ({ breakdown,
             const scores = breakdown?.[num];
             if (!scores) return { num, intensity: 0, topAlgo: 'N/A' };
 
-            // Moyenne pondérée des scores principaux
-            const avg = (
-                (scores.frequency || 0) + 
-                (scores.spectral || 0) + 
-                (scores.markov || 0) + 
-                (scores.momentum || 0)
-            ) / 4;
+            // Moyenne dynamique de tous les scores disponibles
+            let sum = 0;
+            let count = 0;
+            Object.values(scores).forEach(val => {
+                if (typeof val === 'number') {
+                    sum += val;
+                    count++;
+                }
+            });
+            const avg = count > 0 ? sum / count : 0;
 
             // Identification de l'algo dominant
             let maxScore = -1;
