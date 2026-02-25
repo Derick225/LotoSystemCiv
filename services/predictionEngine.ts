@@ -433,30 +433,45 @@ export const generateMasterPrediction = async (
         const seed = sorted[0].num;
         currentSelection.push(seed);
 
-        // Get affinities for the seed
-        const seedAffinities = affinityMap.get(seed) || new Map();
-        
-        // Adjust scores based on affinity to the seed
-        const adjustedSorted = sorted.map(s => {
-            const affinityBoost = seedAffinities.get(s.num) || 0;
-            return { ...s, score: s.score + (affinityBoost * 5) }; // Boost score by affinity
-        }).sort((a, b) => b.score - a.score);
+        // Iteratively pick numbers based on affinity to the CURRENT selection
+        for (let i = 1; i < 5; i++) {
+            const isOutsiderSlot = i >= (5 - outsiderCount);
+            
+            // Calculate combined affinity to all numbers already in currentSelection
+            const adjustedSorted = sorted
+                .filter(s => !currentSelection.includes(s.num))
+                .map(s => {
+                    let totalAffinity = 0;
+                    currentSelection.forEach(selectedNum => {
+                        const affinities = affinityMap.get(selectedNum);
+                        if (affinities) {
+                            totalAffinity += (affinities.get(s.num) || 0);
+                        }
+                    });
+                    // Boost score by total affinity found
+                    return { ...s, tempScore: s.score + (totalAffinity * 3) };
+                })
+                .sort((a, b) => b.tempScore - a.tempScore);
 
-        // Pick top picks
-        const topPicks = adjustedSorted.filter(s => !currentSelection.includes(s.num)).slice(0, topPickCount - 1).map(s => s.num);
-        currentSelection.push(...topPicks);
+            if (adjustedSorted.length === 0) break;
 
-        // Pick outsiders
-        const outsiderPoolStart = Math.max(topPickCount + 1, 10);
-        const outsiderPool = adjustedSorted.slice(outsiderPoolStart, outsiderPoolStart + 25);
-        const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
-        currentSelection.push(...outsiders);
+            if (isOutsiderSlot) {
+                // Pick a random number from a lower probability pool for variety
+                const pool = adjustedSorted.slice(10, 35);
+                const picked = pool[Math.floor(Math.random() * pool.length)] || adjustedSorted[0];
+                currentSelection.push(picked.num);
+            } else {
+                // Pick the best one based on affinity + base score
+                currentSelection.push(adjustedSorted[0].num);
+            }
+        }
 
-        currentSelection = currentSelection.sort((a, b) => a - b);
-
-        if (isValidCombination(currentSelection)) {
-            selection = currentSelection;
-            break;
+        if (currentSelection.length === 5) {
+            const sortedCombo = [...currentSelection].sort((a, b) => a - b);
+            if (isValidCombination(sortedCombo)) {
+                selection = sortedCombo;
+                break;
+            }
         }
     }
 

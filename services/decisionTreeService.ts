@@ -178,7 +178,14 @@ export const runDecisionForest = async (
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/forest.worker.ts', import.meta.url), { type: 'module' });
         
+        const timeout = setTimeout(() => {
+            console.warn("Decision Forest Worker timed out");
+            worker.terminate();
+            resolve({ votes: [], dataset });
+        }, 30000); // 30s timeout
+
         worker.onmessage = (e) => {
+            clearTimeout(timeout);
             const { votes } = e.data;
             worker.terminate();
             
@@ -213,6 +220,7 @@ export const runDecisionForest = async (
         };
 
         worker.onerror = (err) => { 
+            clearTimeout(timeout);
             worker.terminate(); 
             console.error("Decision Forest Worker Error", err);
             reject(new Error("Echec du calcul Forest Worker")); 

@@ -96,6 +96,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
       if (!analytics || !history || history.length < 10) return;
 
+      let mounted = true;
       const runEngine = async () => {
           try {
               // Génération de la prédiction Master
@@ -111,7 +112,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   }, 
                   analytics.symbioticContext || undefined
               );
-              setLastPrediction(prediction);
+              if (mounted) setLastPrediction(prediction);
 
               // Insights
               const insights = await generateSmartInsights(
@@ -121,11 +122,11 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   analytics.regularity.map(r => ({ number: r.number, gap: r.currentGap })), 
                   analytics.regularity
               );
-              setSmartInsights(insights);
+              if (mounted) setSmartInsights(insights);
 
               // Calibration (Backtesting historique des prédictions)
               const preds = await getPredictionHistoryAsync(drawName);
-              if (preds.length > 0) {
+              if (preds.length > 0 && mounted) {
                   const perf = calculateHistoricalPerformance(preds, history);
                   setCalibration({
                       overallScore: 0.25,
@@ -140,6 +141,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       runEngine();
+      return () => { mounted = false; };
   }, [drawName, history, analytics, globalWeights]);
 
   // --- ACTIONS ---

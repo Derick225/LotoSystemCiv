@@ -16,8 +16,15 @@ export const LSTMService = {
             const worker = new Worker(new URL('./lstm.worker.ts', import.meta.url), { type: 'module' });
             const id = Date.now().toString();
 
+            const timeout = setTimeout(() => {
+                console.warn("LSTM Prediction timed out");
+                worker.terminate();
+                resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
+            }, 30000); // 30s timeout for LSTM
+
             worker.onmessage = (e) => {
                 if (e.data.id === id) {
+                    clearTimeout(timeout);
                     if (e.data.error) {
                         console.error("LSTM Worker Error:", e.data.error);
                         resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
@@ -32,6 +39,7 @@ export const LSTMService = {
             };
 
             worker.onerror = (err) => {
+                clearTimeout(timeout);
                 console.error("LSTM Worker Fatal Error:", err);
                 worker.terminate();
                 resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });

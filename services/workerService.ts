@@ -46,7 +46,23 @@ class WorkerService {
 
         const requestId = Math.random().toString(36).substring(7);
         return new Promise((resolve, reject) => {
-            this.taskCallbacks.set(requestId, { resolve, reject });
+            const timeout = setTimeout(() => {
+                if (this.taskCallbacks.has(requestId)) {
+                    this.taskCallbacks.delete(requestId);
+                    reject(new Error(`Task ${task} timed out after 30s`));
+                }
+            }, 30000);
+
+            this.taskCallbacks.set(requestId, { 
+                resolve: (res: T) => {
+                    clearTimeout(timeout);
+                    resolve(res);
+                }, 
+                reject: (err: Error) => {
+                    clearTimeout(timeout);
+                    reject(err);
+                } 
+            });
             this.worker!.postMessage({ task, payload, history, requestId });
         });
     }

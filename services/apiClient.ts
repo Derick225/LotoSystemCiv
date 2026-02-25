@@ -24,30 +24,40 @@ export const invokeEdgeFunction = async (functionName: string, options: { body?:
     };
 
     // Appel vers l'API Vercel (Chemin relatif /api/...)
-    // Note: En local (Vite), cela nécessite un proxy configuré dans vite.config.ts si le backend tourne sur un autre port
-    const response = await fetch(`/api/${functionName}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(options.body || {})
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
-    let data;
     try {
-        const text = await response.text();
-        data = text ? JSON.parse(text) : null;
-    } catch (parseError) {
-        console.error("API Response Parse Error", parseError);
-        // Si le parsing échoue mais que le statut est ok, on retourne success (cas rare)
-        if (response.ok) return { data: { success: true }, error: null };
-        throw new Error(`Erreur serveur (${response.status}) : Réponse non-JSON`);
-    }
-    
-    if (!response.ok) {
-        // On propage l'erreur renvoyée par l'API
-        return { data: null, error: data?.error || data || new Error(`Erreur HTTP ${response.status}`) };
-    }
+      const response = await fetch(`/api/${functionName}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(options.body || {}),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
-    return { data, error: null };
+      let data;
+      try {
+          const text = await response.text();
+          data = text ? JSON.parse(text) : null;
+      } catch (parseError) {
+          console.error("API Response Parse Error", parseError);
+          if (response.ok) return { data: { success: true }, error: null };
+          throw new Error(`Erreur serveur (${response.status}) : Réponse non-JSON`);
+      }
+      
+      if (!response.ok) {
+          return { data: null, error: data?.error || data || new Error(`Erreur HTTP ${response.status}`) };
+      }
+
+      return { data, error: null };
+    } catch (e: any) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        return { data: null, error: new Error(`Request to ${functionName} timed out`) };
+      }
+      throw e;
+    }
   } catch (e: any) {
     console.error(`Edge Function ${functionName} failed:`, e);
     return { data: null, error: e };

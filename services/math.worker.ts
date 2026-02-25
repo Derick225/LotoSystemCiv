@@ -125,12 +125,12 @@ function computeRobustHurst(signal: number[]): number {
 
 ctx.onmessage = async (e: MessageEvent) => {
     const { requestId, task, history, payload } = e.data;
-    if (!history || history.length === 0) return;
 
     try {
         let result: any;
         switch (task) {
             case 'full_analysis':
+                if (!history || history.length === 0) throw new Error("History required for full_analysis");
                 result = {
                     spectral: runSpectral(history),
                     wavelet: runWavelet(history),
@@ -138,9 +138,11 @@ ctx.onmessage = async (e: MessageEvent) => {
                 };
                 break;
             case 'wavelet_analysis':
+                if (!history || history.length === 0) throw new Error("History required for wavelet_analysis");
                 result = runWavelet(history);
                 break;
             case 'hurst_exponent': 
+                if (!history || history.length === 0) throw new Error("History required for hurst_exponent");
                 result = runFractal(history);
                 break;
             case 'DENOISE_PCA':
@@ -150,9 +152,11 @@ ctx.onmessage = async (e: MessageEvent) => {
                 result = trainRidgeRegression(payload.features, payload.labels, payload.lambda);
                 break;
             case 'GAP_EFFICIENCY':
+                if (!history || history.length === 0) throw new Error("History required for GAP_EFFICIENCY");
                 result = runGapEfficiency(history);
                 break;
             case 'SPECTRAL_METRICS':
+                if (!history || history.length === 0) throw new Error("History required for SPECTRAL_METRICS");
                 result = runSpectral(history);
                 break;
             default:
