@@ -54,8 +54,8 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
 
     return (
         <div className="space-y-8 animate-fade-in relative">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                <div className="sticky top-[70px] z-20 w-full md:w-auto bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-6 relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+                <div className="w-full md:w-auto">
                     <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.5rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
                         {subTabs.map((tab) => (
                             <button 
@@ -84,7 +84,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                 </div>
             </div>
 
-            <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px]">
+            <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px] scroll-mt-[300px] md:scroll-mt-[280px]">
                 {subTab === 'convergence' && <ConvergenceTab drawName={drawName} />}
                 {subTab === 'vision' && <TicketScanner />}
                 {subTab === 'oracle' && <PredictionTab drawName={drawName} />}

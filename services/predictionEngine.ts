@@ -209,6 +209,7 @@ export const generateMasterPrediction = async (
     const gapsMap = new Map<number, number>();
     const markovMap = new Map<number, number>();
     const momentumMap = new Map<number, number>();
+    const affinityMap = new Map<number, Map<number, number>>();
     
     // --- LSTM PREDICTION (Experimental) ---
     let lstmProbs: number[] = new Array(90).fill(0);
@@ -230,15 +231,42 @@ export const generateMasterPrediction = async (
     }
     for (let i = 1; i <= N; i++) { if (!gapsMap.has(i)) gapsMap.set(i, sampleSize); }
 
+    // --- MARKOV TRANSITION MATRIX & AFFINITY MODULE ---
+    const markovTransitionMap = new Map<number, Map<number, number>>();
+
+    for (let i = 0; i < recentHistory.length - 1; i++) {
+        const current = recentHistory[i].gagnants;
+        const prev = recentHistory[i+1].gagnants;
+        
+        // Markov: What came after 'prev' numbers? ('current' came after 'prev')
+        prev.forEach(p => {
+            if (!markovTransitionMap.has(p)) markovTransitionMap.set(p, new Map());
+            const transitions = markovTransitionMap.get(p)!;
+            current.forEach(c => {
+                transitions.set(c, (transitions.get(c) || 0) + 1);
+            });
+        });
+
+        // Affinity: What numbers appear together in 'current'?
+        current.forEach(c1 => {
+            if (!affinityMap.has(c1)) affinityMap.set(c1, new Map());
+            const affinities = affinityMap.get(c1)!;
+            current.forEach(c2 => {
+                if (c1 !== c2) affinities.set(c2, (affinities.get(c2) || 0) + 1);
+            });
+        });
+    }
+
     if (weights.markov && weights.markov > 0) {
-        for (let i = 0; i < recentHistory.length - 1; i++) {
-            const current = recentHistory[i].gagnants;
-            const prev = recentHistory[i+1].gagnants;
-            const common = prev.filter(n => lastDraw.includes(n));
-            if (common.length > 0) {
-                current.forEach(n => markovMap.set(n, (markovMap.get(n) || 0) + common.length));
+        // Boost scores based on the LAST draw (Markov)
+        lastDraw.forEach(lastNum => {
+            const transitions = markovTransitionMap.get(lastNum);
+            if (transitions) {
+                transitions.forEach((count, nextNum) => {
+                    markovMap.set(nextNum, (markovMap.get(nextNum) || 0) + count);
+                });
             }
-        }
+        });
     }
 
     if (weights.momentum && weights.momentum > 0) {
@@ -374,12 +402,72 @@ export const generateMasterPrediction = async (
         outsiderCount = 0;
     }
 
-    const topPicks = sorted.slice(0, topPickCount).map(s => s.num);
-    const outsiderPoolStart = Math.max(topPickCount + 2, 10);
-    const outsiderPool = sorted.slice(outsiderPoolStart, outsiderPoolStart + 25);
-    const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
+    // --- COMBINATION GENERATION WITH FILTERS & AFFINITY ---
+    const isValidCombination = (combo: number[]) => {
+        if (combo.length !== 5) return false;
+        const sum = combo.reduce((a, b) => a + b, 0);
+        if (sum < 100 || sum > 350) return false; // Sum filter
+        
+        const evens = combo.filter(n => n % 2 === 0).length;
+        if (evens === 0 || evens === 5) return false; // Parity filter (no all-even or all-odd)
+        
+        let consecutiveCount = 0;
+        const sortedCombo = [...combo].sort((a, b) => a - b);
+        for (let i = 0; i < sortedCombo.length - 1; i++) {
+            if (sortedCombo[i] + 1 === sortedCombo[i+1]) consecutiveCount++;
+        }
+        if (consecutiveCount > 2) return false; // Max 2 consecutive numbers
+        
+        return true;
+    };
 
-    const selection = [...topPicks, ...outsiders].sort((a,b) => a-b);
+    let selection: number[] = [];
+    let attempts = 0;
+    const maxAttempts = 100;
+
+    while (selection.length !== 5 && attempts < maxAttempts) {
+        attempts++;
+        let currentSelection: number[] = [];
+        
+        // Start with the absolute best number
+        const seed = sorted[0].num;
+        currentSelection.push(seed);
+
+        // Get affinities for the seed
+        const seedAffinities = affinityMap.get(seed) || new Map();
+        
+        // Adjust scores based on affinity to the seed
+        const adjustedSorted = sorted.map(s => {
+            const affinityBoost = seedAffinities.get(s.num) || 0;
+            return { ...s, score: s.score + (affinityBoost * 5) }; // Boost score by affinity
+        }).sort((a, b) => b.score - a.score);
+
+        // Pick top picks
+        const topPicks = adjustedSorted.filter(s => !currentSelection.includes(s.num)).slice(0, topPickCount - 1).map(s => s.num);
+        currentSelection.push(...topPicks);
+
+        // Pick outsiders
+        const outsiderPoolStart = Math.max(topPickCount + 1, 10);
+        const outsiderPool = adjustedSorted.slice(outsiderPoolStart, outsiderPoolStart + 25);
+        const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
+        currentSelection.push(...outsiders);
+
+        currentSelection = currentSelection.sort((a, b) => a - b);
+
+        if (isValidCombination(currentSelection)) {
+            selection = currentSelection;
+            break;
+        }
+    }
+
+    // Fallback if filters are too strict
+    if (selection.length !== 5) {
+        const topPicks = sorted.slice(0, topPickCount).map(s => s.num);
+        const outsiderPoolStart = Math.max(topPickCount + 2, 10);
+        const outsiderPool = sorted.slice(outsiderPoolStart, outsiderPoolStart + 25);
+        const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
+        selection = [...topPicks, ...outsiders].sort((a,b) => a-b);
+    }
 
     const dnaDominant = Object.entries(weights).sort((a,b) => b[1]-a[1])[0];
     let dnaType = "Équilibré";
@@ -577,7 +665,7 @@ export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]):
     try {
         let learnedWeights: number[];
         if (workerService.isAvailable()) {
-            learnedWeights = await workerService.runTask<number[]>('TRAIN_RIDGE', { trainingFeatures, trainingLabels, lambda: 0.1 });
+            learnedWeights = await workerService.runTask<number[]>('TRAIN_RIDGE', { features: trainingFeatures, labels: trainingLabels, lambda: 0.1 });
         } else {
             learnedWeights = trainRidgeRegression(trainingFeatures, trainingLabels, 0.1);
         }

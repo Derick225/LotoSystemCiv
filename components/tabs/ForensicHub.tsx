@@ -249,7 +249,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                     </div>
 
-                    <div className="grid lg:grid-cols-12 gap-8">
+                    <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
                         {/* Reports List */}
                         <div className="lg:col-span-7 space-y-6">
                             <h4 className="px-4 text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">

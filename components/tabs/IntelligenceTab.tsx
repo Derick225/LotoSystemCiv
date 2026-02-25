@@ -154,7 +154,7 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
             </div>
 
             {/* MAIN CONTENT GRID */}
-            <div className="grid lg:grid-cols-12 gap-8">
+            <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
                 
                 {/* LEFT: NARRATIVE REPORT (Bloomberg Style) */}
                 <div className="lg:col-span-7 flex flex-col gap-6">

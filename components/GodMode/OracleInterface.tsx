@@ -58,7 +58,7 @@ export const OracleInterface: React.FC = () => {
             `;
 
             const result = await ai.models.generateContent({
-                model: "gemini-2.5-flash-latest",
+                model: "gemini-3-flash-preview",
                 contents: context
             });
             
@@ -108,7 +108,7 @@ export const OracleInterface: React.FC = () => {
     }
 
     return (
-        <div className="fixed bottom-0 right-0 w-full md:w-[450px] h-[80vh] md:h-[600px] bg-black/95 backdrop-blur-2xl border-t md:border-l border-indigo-500/30 shadow-2xl z-[100] flex flex-col animate-slide-up font-mono rounded-t-3xl md:rounded-tl-3xl md:rounded-tr-none">
+        <div className="fixed bottom-[88px] md:bottom-0 right-0 w-full md:w-[450px] h-[70vh] md:h-[600px] bg-black/95 backdrop-blur-2xl border-t md:border-l border-indigo-500/30 shadow-2xl z-[100] flex flex-col animate-slide-up font-mono rounded-t-3xl md:rounded-tl-3xl md:rounded-tr-none">
             {/* Header */}
             <div className="p-4 border-b border-indigo-500/20 flex justify-between items-center bg-gradient-to-r from-indigo-900/40 to-purple-900/40">
                 <div className="flex items-center gap-3">

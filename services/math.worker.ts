@@ -277,9 +277,80 @@ function computeEigenDecomposition(matrix: tf.Tensor2D): { values: number[], vec
 }
 
 function runGapEfficiency(history: any[]) {
-    // Simplified version for worker if needed, or just copy from mathService
-    // For now, let's assume we implement it here or import it
-    return []; // Placeholder for now to avoid too much code in one go
+    if (!history || history.length === 0) return [];
+    
+    const efficiencies = [];
+    const depth = Math.min(history.length, 300);
+    const subHistory = history.slice(0, depth);
+
+    // Pré-calculer les gagnants pour éviter les accès objets répétés
+    const draws = subHistory.map(h => new Set(h.gagnants));
+
+    for (let num = 1; num <= 90; num++) {
+        const gaps: number[] = [];
+        let currentCounter = 0;
+        let isFirst = true;
+        let currentGap = 0;
+
+        for (const drawSet of draws) {
+            if (drawSet.has(num)) {
+                if (isFirst) {
+                    currentGap = currentCounter;
+                    isFirst = false;
+                } else {
+                    gaps.push(currentCounter);
+                }
+                currentCounter = 0;
+            } else {
+                currentCounter++;
+            }
+        }
+        if (isFirst) currentGap = currentCounter;
+
+        // Stats des gaps
+        let maxGap = currentGap;
+        let avgGap = 0;
+        let sigma = 1;
+
+        if (gaps.length > 0) {
+            maxGap = Math.max(Math.max(...gaps), currentGap);
+            let sum = 0;
+            for(let g of gaps) sum += g;
+            avgGap = sum / gaps.length;
+            
+            let sumSq = 0;
+            for(let g of gaps) sumSq += (g - avgGap) ** 2;
+            sigma = Math.sqrt(sumSq / gaps.length) || 1;
+        }
+
+        const zScore = (currentGap - avgGap) / sigma;
+        const breakoutProb = (1 / (1 + Math.exp(-(zScore - 0.5) * 1.5))) * 100;
+        const fatigueIndex = avgGap > 0 ? (maxGap / avgGap) : 1;
+
+        const positionScore = maxGap > 0 ? (currentGap / maxGap) * 100 : 0;
+        const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33));
+        const maturityScore = Math.round((positionScore * 0.4) + (pressureScore * 0.6));
+
+        let zone = 'COLD';
+        if (zScore > 2.5 || maturityScore > 90) zone = 'CRITICAL';
+        else if (zScore > 1.0 || maturityScore > 70) zone = 'HOT';
+        else if (zScore > 0 || maturityScore > 40) zone = 'WARMING';
+
+        efficiencies.push({
+            number: num,
+            currentGap,
+            maxGap,
+            avgGap,
+            probabilityAtCurrentGap: Math.round(breakoutProb),
+            maturityScore,
+            zone,
+            zScore,
+            fatigueIndex,
+            breakoutProb
+        });
+    }
+
+    return efficiencies.sort((a: any, b: any) => b.zScore - a.zScore);
 }
 
 function runSpectral(history: any[]) {

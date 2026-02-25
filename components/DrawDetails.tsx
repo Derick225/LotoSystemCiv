@@ -130,7 +130,7 @@ export const DrawDetails: React.FC = () => {
       </header>
 
       {/* Navigation Modulaire - Sticky & Scrollable */}
-      <div className="sticky top-[56px] md:top-24 z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-3 px-3 md:mx-0 md:px-0">
+      <div className="sticky top-[104px] md:top-[120px] z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-3 px-3 md:mx-0 md:px-0">
         <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-[2rem] md:rounded-[2.5rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
           {tabs.map((t) => (
             <button
@@ -154,7 +154,7 @@ export const DrawDetails: React.FC = () => {
       </div>
 
       {/* Zone de Contenu Dynamique avec Error Boundary Isolé */}
-      <div id="module-container" className="min-h-[600px] relative w-full overflow-x-hidden pt-4">
+      <div id="module-container" className="min-h-[600px] relative w-full overflow-x-hidden pt-4 scroll-mt-[180px] md:scroll-mt-[200px]">
         <LocalErrorBoundary key={activeTab}>
           <Suspense fallback={
             <div className="flex flex-col items-center justify-center py-32 gap-6 animate-pulse bg-slate-900/20 rounded-[3rem] border border-dashed border-slate-800">

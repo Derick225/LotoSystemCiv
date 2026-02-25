@@ -97,7 +97,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       </header>
 
       {/* Main Content Area - Padding bottom augmented to clear mobile nav */}
-      <main className="container mx-auto px-3 md:px-4 pt-24 md:pt-44 pb-32 md:pb-40 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden">
+      <main className="container mx-auto px-3 md:px-4 pt-32 md:pt-44 pb-32 md:pb-40 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden">
         <AnimatePresence mode="wait">
             <motion.div key={viewMode + isDrawSelected + showWallet} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }}>
                 {children}

@@ -49,8 +49,8 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
 
     return (
         <div className="space-y-8 animate-fade-in">
-            {/* Navigation Sticky sur Mobile */}
-            <div className="sticky top-[70px] z-20 bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+            {/* Navigation sur Mobile */}
+            <div className="relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
                 <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.2rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
                     <button 
                         onClick={() => setSubTab('spatial')} 
@@ -91,7 +91,7 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                 </div>
             </div>
             
-            <div id="topology-content" className="animate-slide-up transition-all duration-500">
+            <div id="topology-content" className="animate-slide-up transition-all duration-500 scroll-mt-[240px] md:scroll-mt-[280px]">
                 <LocalErrorBoundary key={subTab}>
                     <Suspense fallback={<TabLoader />}>
                         {renderTab()}

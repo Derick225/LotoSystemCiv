@@ -59,8 +59,8 @@ export const SignalHub: React.FC = () => {
 
             <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
                 <div className="lg:col-span-8 space-y-6 min-w-0">
-                    {/* Navigation Onglets Mobile Optimized avec Fading Edge */}
-                    <div className="relative sticky top-[70px] z-20 bg-nexus-950/80 backdrop-blur-md py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
+                    {/* Navigation Onglets Mobile Optimized */}
+                    <div className="relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
                         <div className="overflow-x-auto scrollbar-hide pb-2 mask-fade-right">
                             <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-[2.5rem] w-max border border-slate-200 dark:border-slate-700 shadow-inner">
                                 {tabs.map((tab) => (
@@ -92,7 +92,7 @@ export const SignalHub: React.FC = () => {
                         `}} />
                     </div>
 
-                    <div id="signal-content" className="min-h-[400px] transition-all duration-500">
+                    <div id="signal-content" className="min-h-[400px] transition-all duration-500 scroll-mt-[240px] md:scroll-mt-[280px]">
                         <LocalErrorBoundary key={activeSubTab}>
                             <Suspense fallback={
                                 <div className="py-20 flex flex-col items-center justify-center gap-4">

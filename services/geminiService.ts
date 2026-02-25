@@ -74,7 +74,8 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
                         anti_consensus: { type: Type.NUMBER },
                         lstm: { type: Type.NUMBER },
                         shadow_factor: { type: Type.NUMBER }
-                    }
+                    },
+                    required: ["frequency", "gap", "spectral", "fractal", "markov", "poisson", "momentum", "equilibrium", "ai_intuition", "decision_forest", "wavelet", "resistance", "spatial", "orchestration", "gap_velocity", "anti_consensus", "lstm", "shadow_factor"]
                 }
             }
         });
