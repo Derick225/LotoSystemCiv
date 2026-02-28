@@ -100,7 +100,7 @@ export const QuantumLab: React.FC = () => {
             {/* Header Telemetry */}
             <div className="grid md:grid-cols-3 gap-6">
                 <div className="md:col-span-2">
-                    <ChaosAttractor3D history={history} />
+                    <ChaosAttractor3D history={history} spectralData={spectral || []} />
                 </div>
 
                 <div className="bg-slate-900 p-8 rounded-[3rem] border border-slate-800 flex flex-col justify-between shadow-xl">

@@ -286,3 +286,103 @@ export const calculateLeaderSuccession = (history: DrawResult[]): Record<number,
 
     return scores;
 };
+
+// --- BAYESIAN ANALYSIS ---
+// Calculates the probability of each number based on the previous draw using Bayes' Theorem.
+// P(Next=N | Prev=D) = P(Prev=D | Next=N) * P(Next=N) / P(Prev=D)
+export const calculateBayesianScore = (history: DrawResult[]): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    if (history.length < 2) return scores;
+
+    const lastDraw = history[0].gagnants;
+    const totalDraws = history.length;
+    
+    // P(N): Prior probability of N (Frequency)
+    const priors = new Map<number, number>();
+    history.forEach(d => d.gagnants.forEach(n => priors.set(n, (priors.get(n) || 0) + 1)));
+
+    // P(Prev=D | Next=N): Likelihood
+    // How often did the numbers in 'lastDraw' appear in the draw *immediately preceding* a draw containing N?
+    const likelihoods = new Map<number, number>();
+    
+    for (let i = 0; i < totalDraws - 1; i++) {
+        const currentDraw = history[i].gagnants; // Draw T (Next)
+        const prevDraw = history[i+1].gagnants;  // Draw T-1 (Prev)
+        
+        // Count matches between prevDraw and lastDraw
+        const matches = prevDraw.filter(n => lastDraw.includes(n)).length;
+        
+        // If there's a significant similarity (e.g., >= 2 numbers match), we consider it a similar context
+        if (matches >= 2) {
+            currentDraw.forEach(n => {
+                likelihoods.set(n, (likelihoods.get(n) || 0) + 1);
+            });
+        }
+    }
+
+    // Calculate Posterior
+    let maxPosterior = 0;
+    for (let n = 1; n <= 90; n++) {
+        const prior = (priors.get(n) || 0) / totalDraws;
+        const likelihood = (likelihoods.get(n) || 0) / totalDraws; // Simplified normalization
+        const posterior = prior * likelihood;
+        scores[n] = posterior;
+        if (posterior > maxPosterior) maxPosterior = posterior;
+    }
+
+    // Normalize to 0-100
+    if (maxPosterior > 0) {
+        for (let n = 1; n <= 90; n++) {
+            scores[n] = (scores[n] / maxPosterior) * 100;
+        }
+    }
+
+    return scores;
+};
+
+// --- AI INTUITION (Heuristic Ensemble) ---
+// Combines pattern recognition and anomaly detection to simulate "intuition".
+export const calculateAiIntuition = (history: DrawResult[], metrics: any): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    
+    // 1. Pattern Recognition: Detect arithmetic sequences in recent history
+    const recent = history.slice(0, 10);
+    const sequenceBoost = new Set<number>();
+    
+    recent.forEach(d => {
+        const nums = d.gagnants.sort((a,b)=>a-b);
+        for(let i=0; i<nums.length-1; i++) {
+            const diff = nums[i+1] - nums[i];
+            if (diff > 0 && diff < 10) {
+                // Predict next in sequence
+                const next = nums[i+1] + diff;
+                if (next <= 90) sequenceBoost.add(next);
+            }
+        }
+    });
+
+    // 2. Anomaly Detection: High Spectral Energy but Low Frequency (Hidden Resonance)
+    const hiddenResonance = new Set<number>();
+    if (metrics?.spectral) {
+        metrics.spectral.forEach((s: any) => {
+            if (s.energy > 80 && s.frequency < 20) { // High energy, low freq
+                hiddenResonance.add(s.number);
+            }
+        });
+    }
+
+    for (let n = 1; n <= 90; n++) {
+        let score = 50; // Base intuition
+        if (sequenceBoost.has(n)) score += 20;
+        if (hiddenResonance.has(n)) score += 30;
+        
+        // Random "Gut Feeling" noise (simulating non-linear intuition)
+        // In a real AI, this would be the output of a black-box neural net
+        const noise = (Math.sin(n * Date.now()) + 1) * 5; 
+        score += noise;
+
+        scores[n] = Math.min(100, Math.max(0, score));
+    }
+
+    return scores;
+};

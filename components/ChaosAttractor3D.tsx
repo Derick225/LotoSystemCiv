@@ -1,171 +1,128 @@
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Text, Html } from '@react-three/drei';
+import { OrbitControls, Stars, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { DrawResult } from '../types';
+import { DrawResult, SpectralMetric } from '../types';
 
 interface ChaosAttractorProps {
     history: DrawResult[];
+    spectralData: SpectralMetric[];
 }
 
-const AttractorPoints: React.FC<{ history: DrawResult[] }> = ({ history }) => {
-    const pointsRef = useRef<THREE.Points>(null);
-    const [hovered, setHovered] = useState<number | null>(null);
-
-    const { positions, colors, meta } = useMemo(() => {
-        const pos: number[] = [];
-        const cols: number[] = [];
-        const metadata: any[] = [];
-        const color = new THREE.Color();
-
-        // Chaos Embedding: (x=n, y=n+1, z=n+2)
-        history.slice(0, 200).forEach((draw, i) => {
-            const nums = draw.gagnants.slice(0, 3);
-            if (nums.length === 3) {
-                const x = (nums[0] / 90) * 20 - 10;
-                const y = (nums[1] / 90) * 20 - 10;
-                const z = (nums[2] / 90) * 20 - 10;
-                pos.push(x, y, z);
-
-                const heat = 1 - (i / 200);
-                color.setHSL(0.6 + (heat * 0.4), 1.0, 0.5);
-                cols.push(color.r, color.g, color.b);
-                
-                metadata.push({
-                    id: i,
-                    drawName: draw.drawName,
-                    date: draw.date,
-                    numbers: draw.gagnants.join(', '),
-                    position: [x, y, z]
-                });
-            }
-        });
-
-        return {
-            positions: new Float32Array(pos),
-            colors: new Float32Array(cols),
-            meta: metadata
-        };
-    }, [history]);
-
+const NumberPoint = ({ position, color, number, size }: { position: [number, number, number], color: string, number: number, size: number }) => {
+    const mesh = useRef<THREE.Mesh>(null);
+    
     useFrame((state) => {
-        if (pointsRef.current && !hovered) {
-            pointsRef.current.rotation.y += 0.002;
-            pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.2) * 0.1;
+        if (mesh.current) {
+            mesh.current.rotation.x = state.clock.getElapsedTime() * 0.5;
+            mesh.current.rotation.y = state.clock.getElapsedTime() * 0.5;
         }
     });
 
-    const geometry = useMemo(() => {
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        return geo;
-    }, [positions, colors]);
-
     return (
-        <group>
-            <points 
-                ref={pointsRef} 
-                geometry={geometry}
-                onPointerOver={(e) => {
-                    e.stopPropagation();
-                    if (e.index !== undefined) {
-                        setHovered(e.index);
-                        document.body.style.cursor = 'pointer';
-                    }
-                }}
-                onPointerOut={() => {
-                    setHovered(null);
-                    document.body.style.cursor = 'auto';
-                }}
+        <group position={position}>
+            <mesh ref={mesh}>
+                <sphereGeometry args={[size, 16, 16]} />
+                <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} />
+            </mesh>
+            <Text
+                position={[0, size + 0.5, 0]}
+                fontSize={0.5}
+                color="white"
+                anchorX="center"
+                anchorY="middle"
             >
-                <pointsMaterial
-                    size={0.6}
-                    vertexColors
-                    transparent
-                    opacity={0.8}
-                    sizeAttenuation
-                    blending={THREE.AdditiveBlending}
-                />
-            </points>
-
-            {hovered !== null && meta[hovered] && (
-                <Html position={meta[hovered].position as [number, number, number]} style={{ pointerEvents: 'none' }}>
-                    <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-indigo-500/30 text-xs w-48 shadow-2xl transform -translate-x-1/2 -translate-y-full mt-[-10px]">
-                        <div className="font-bold text-white mb-1">{meta[hovered].drawName}</div>
-                        <div className="text-indigo-400 font-mono mb-1">{meta[hovered].date}</div>
-                        <div className="text-slate-300 font-mono tracking-widest">{meta[hovered].numbers}</div>
-                    </div>
-                </Html>
-            )}
+                {number}
+            </Text>
         </group>
     );
 };
 
-const ConnectingLines: React.FC<{ history: DrawResult[] }> = ({ history }) => {
-    const lineRef = useRef<THREE.Line>(null);
-
+const Scene = ({ history, spectralData }: ChaosAttractorProps) => {
     const points = useMemo(() => {
-        const pts: THREE.Vector3[] = [];
-        history.slice(0, 50).forEach((draw) => { // Seulement les 50 derniers pour la lisibilité
-            const nums = draw.gagnants.slice(0, 3);
-            if (nums.length === 3) {
-                const x = (nums[0] / 90) * 20 - 10;
-                const y = (nums[1] / 90) * 20 - 10;
-                const z = (nums[2] / 90) * 20 - 10;
-                pts.push(new THREE.Vector3(x, y, z));
-            }
+        const data: { position: [number, number, number], color: string, number: number, size: number }[] = [];
+        
+        // Calculate metrics for 3D mapping
+        // X: Frequency (Normalized 0-100) -> Mapped to -20 to 20
+        // Y: Gap (Normalized 0-100) -> Mapped to -20 to 20
+        // Z: Spectral Energy (Normalized 0-100) -> Mapped to -20 to 20
+
+        const freqs = new Map<number, number>();
+        const gaps = new Map<number, number>();
+        
+        history.slice(0, 100).forEach((d, i) => {
+            d.gagnants.forEach(n => {
+                freqs.set(n, (freqs.get(n) || 0) + 1);
+                if (!gaps.has(n)) gaps.set(n, i);
+            });
         });
-        return pts;
-    }, [history]);
 
-    useFrame(() => {
-        if (lineRef.current) {
-            lineRef.current.rotation.y += 0.002;
+        const maxFreq = Math.max(...freqs.values()) || 1;
+        const maxGap = Math.max(...gaps.values()) || 1;
+
+        for (let n = 1; n <= 90; n++) {
+            const f = (freqs.get(n) || 0) / maxFreq;
+            const g = (gaps.get(n) || 0) / maxGap;
+            const s = (spectralData.find(sd => sd.number === n)?.energy || 0) / 100;
+
+            // Map to 3D Space (-20 to 20)
+            const x = (f - 0.5) * 40;
+            const y = (g - 0.5) * 40;
+            const z = (s - 0.5) * 40;
+
+            // Color based on "Heat" (Combination of metrics)
+            const heat = (f + s) / 2;
+            const color = new THREE.Color().setHSL(0.6 - (heat * 0.6), 1, 0.5).getStyle(); // Blue (cold) to Red (hot)
+            
+            // Size based on importance
+            const size = 0.2 + (heat * 0.8);
+
+            data.push({ position: [x, y, z], color, number: n, size });
         }
-    });
-
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        return data;
+    }, [history, spectralData]);
 
     return (
-        <primitive object={new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: "#6366f1", opacity: 0.3, transparent: true, linewidth: 1 }))} ref={lineRef} />
+        <>
+            <ambientLight intensity={0.5} />
+            <pointLight position={[10, 10, 10]} intensity={1} />
+            <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+            
+            {points.map((p) => (
+                <NumberPoint key={p.number} {...p} />
+            ))}
+
+            {/* Axes Helpers */}
+            <line>
+                <bufferGeometry attach="geometry" onUpdate={geo => geo.setFromPoints([new THREE.Vector3(-20, 0, 0), new THREE.Vector3(20, 0, 0)])} />
+                <lineBasicMaterial attach="material" color="red" opacity={0.5} transparent />
+            </line>
+            <line>
+                <bufferGeometry attach="geometry" onUpdate={geo => geo.setFromPoints([new THREE.Vector3(0, -20, 0), new THREE.Vector3(0, 20, 0)])} />
+                <lineBasicMaterial attach="material" color="green" opacity={0.5} transparent />
+            </line>
+            <line>
+                <bufferGeometry attach="geometry" onUpdate={geo => geo.setFromPoints([new THREE.Vector3(0, 0, -20), new THREE.Vector3(0, 0, 20)])} />
+                <lineBasicMaterial attach="material" color="blue" opacity={0.5} transparent />
+            </line>
+
+            <OrbitControls autoRotate autoRotateSpeed={0.5} />
+        </>
     );
 };
 
-export const ChaosAttractor3D: React.FC<ChaosAttractorProps> = ({ history }) => {
+export const ChaosAttractor3D: React.FC<ChaosAttractorProps> = (props) => {
     return (
-        <div className="w-full h-[400px] md:h-[500px] rounded-[2rem] overflow-hidden bg-slate-950 border border-white/10 shadow-2xl relative">
-            <div className="absolute top-4 left-6 z-10 pointer-events-none">
-                <h3 className="text-white font-black text-xl uppercase tracking-tighter">Attracteur de Lorenz</h3>
-                <p className="text-indigo-400 text-xs font-mono">Projection Phase-Space (n, n+1, n+2)</p>
+        <div className="w-full h-[400px] rounded-2xl overflow-hidden border border-white/10 bg-black/80 relative">
+            <div className="absolute top-4 left-4 z-10 text-xs font-mono text-white/50 pointer-events-none">
+                <div>X: Fréquence</div>
+                <div>Y: Écart (Gap)</div>
+                <div>Z: Énergie Spectrale</div>
             </div>
-            
-            <Canvas camera={{ position: [0, 0, 25], fov: 45 }}>
-                <color attach="background" args={['#020617']} />
-                <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-                <ambientLight intensity={0.5} />
-                <pointLight position={[10, 10, 10]} intensity={1} color="#fbbf24" />
-                
-                <AttractorPoints history={history} />
-                <ConnectingLines history={history} />
-                
-                <OrbitControls autoRotate autoRotateSpeed={0.5} enableZoom={false} />
-                
-                {/* Axes Helper customisé */}
-                <group position={[-12, -12, -12]}>
-                    <Text position={[1, 0, 0]} fontSize={0.5} color="red">X</Text>
-                    <Text position={[0, 1, 0]} fontSize={0.5} color="green">Y</Text>
-                    <Text position={[0, 0, 1]} fontSize={0.5} color="blue">Z</Text>
-                </group>
+            <Canvas camera={{ position: [30, 30, 30], fov: 45 }}>
+                <Scene {...props} />
             </Canvas>
-            
-            <div className="absolute bottom-4 right-6 z-10 pointer-events-none text-right">
-                <div className="flex items-center gap-2 justify-end text-white/50 text-[10px] uppercase tracking-widest">
-                    <span className="w-2 h-2 rounded-full bg-red-500"></span> Récent
-                    <span className="w-2 h-2 rounded-full bg-blue-500 ml-2"></span> Ancien
-                </div>
-            </div>
         </div>
     );
 };

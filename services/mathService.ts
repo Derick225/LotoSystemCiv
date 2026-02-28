@@ -207,7 +207,7 @@ const factorial = (() => {
  * Calcule la moyenne arithmétique d'un tableau.
  * Sécurisé contre la division par zéro.
  */
-const getMean = (data: number[]): number => {
+export const calculateMean = (data: number[]): number => {
     if (!data || data.length === 0) return 0;
     let sum = 0;
     for (let i = 0; i < data.length; i++) sum += data[i];
@@ -217,15 +217,19 @@ const getMean = (data: number[]): number => {
 /**
  * Calcule l'écart-type (Standard Deviation) d'un tableau.
  */
-const getStdDev = (data: number[]): number => {
+export const calculateStandardDeviation = (data: number[]): number => {
     if (!data || data.length < 2) return 0;
-    const mu = getMean(data);
+    const mu = calculateMean(data);
     let sumSq = 0;
     for (let i = 0; i < data.length; i++) {
         sumSq += (data[i] - mu) ** 2;
     }
     return Math.sqrt(sumSq / data.length);
 };
+
+// Alias for internal use if needed, or replace internal usages
+const getMean = calculateMean;
+const getStdDev = calculateStandardDeviation;
 
 /**
  * Calcule la probabilité de Poisson P(k; lambda).

@@ -12,12 +12,15 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { RiskProfile } from '../../types';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { AlgoRadar } from '../AlgoRadar';
+import { AutoTuner } from '../AutoTuner';
+import { ChaosAttractor3D } from '../ChaosAttractor3D';
+import { StrategyBattle } from '../StrategyBattle';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
     Save, Wind, AlertTriangle, TrendingUp,
     MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
-    Atom, Brain
+    Atom, Brain, FlaskConical, Box
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -33,8 +36,10 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [computingStep, setComputingStep] = useState<string>("");
     const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
     const [showField, setShowField] = useState(false);
+    const [show3D, setShow3D] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [showDNA, setShowDNA] = useState(false);
+    const [showAdvancedLab, setShowAdvancedLab] = useState(false);
     
     // États pour la Calibration IA
     const [isOptimizing, setIsOptimizing] = useState(false);
@@ -408,6 +413,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             >
                                 <Atom size={16} /> Champ Quantum
                             </button>
+                            <button 
+                                onClick={() => setShow3D(!show3D)}
+                                className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${show3D ? 'bg-rose-600/20 border-rose-500 text-rose-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
+                            >
+                                <Box size={16} /> 3D Chaos
+                            </button>
                         </div>
 
                         <div className="mt-10 bg-black/40 p-8 rounded-[2.5rem] border border-white/5 backdrop-blur-md">
@@ -434,7 +445,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <Layers className="text-indigo-500" />
                             <h3 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tighter">Matrice de Convergence</h3>
                         </div>
-                        {showField ? (
+                        {show3D ? (
+                            <ChaosAttractor3D history={history} spectralData={spectral || []} />
+                        ) : showField ? (
                             <QuantumTensionField breakdown={lastPrediction.breakdown || {}} suggestedNumbers={lastPrediction.suggestedNumbers} />
                         ) : (
                             <NeuralHeatmapGrid breakdown={lastPrediction.breakdown} suggestedNumbers={lastPrediction.suggestedNumbers} />
@@ -480,6 +493,31 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                 </div>
             )}
+
+            {/* LABORATOIRE AVANCÉ */}
+            <div className="mt-12 border-t border-white/10 pt-8">
+                <button 
+                    onClick={() => setShowAdvancedLab(!showAdvancedLab)}
+                    className="flex items-center gap-3 text-slate-400 hover:text-white transition-colors mb-6 mx-auto"
+                >
+                    <FlaskConical size={20} />
+                    <span className="text-xs font-black uppercase tracking-widest">Laboratoire Avancé</span>
+                </button>
+
+                <AnimatePresence>
+                    {showAdvancedLab && (
+                        <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="grid md:grid-cols-2 gap-8 overflow-hidden"
+                        >
+                            <AutoTuner />
+                            <StrategyBattle />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
         </div>
     );
 };

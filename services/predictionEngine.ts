@@ -9,30 +9,34 @@ import {
     calculateSelfAttentionScores, 
     calculateTemporalScores, 
     calculatePoissonScores,
-    calculateLeaderSuccession
+    calculateLeaderSuccession,
+    calculateBayesianScore,
+    calculateAiIntuition
 } from './advancedMathService';
 import { workerService } from './workerService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
 
 export const getDefaultWeights = (): AlgoWeights => ({
-    frequency: 0.20,
+    frequency: 0.15,
     markov: 0.15,
-    gap: 0.15,
+    gap: 0.10,
     spectral: 0.10,
     poisson: 0.05,
-    momentum: 0.10,
+    momentum: 0.05,
     equilibrium: 0.05,
-    ai_intuition: 0.0,
+    ai_intuition: 0.05,
     decision_forest: 0.05,
     fractal: 0.05,
-    wavelet: 0.0,
-    resistance: 0.0,
-    spatial: 0.0,
+    wavelet: 0.05,
+    resistance: 0.05,
+    spatial: 0.05,
     orchestration: 0.0,
     gap_velocity: 0.05,
     anti_consensus: 0.0,
     lstm: 0.05,
+    bayes: 0.05,
+    leader_succession: 0.05,
     shadow_factor: 0.0 // Protocole Shadow (+/- 1)
 });
 
@@ -294,6 +298,8 @@ export const generateMasterPrediction = async (
     const temporalScores = calculateTemporalScores(history);
     const poissonScores = calculatePoissonScores(history);
     const leaderSuccessionScores = calculateLeaderSuccession(history);
+    const bayesianScores = calculateBayesianScore(history);
+    const aiIntuitionScores = calculateAiIntuition(history, metrics);
 
     const masterScores = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
@@ -336,6 +342,8 @@ export const generateMasterPrediction = async (
         nBreakdown.temporal = temporalScores[num] || 0;
         nBreakdown.digital_root = digitalRootScores[num] || 0;
         nBreakdown.leader_succession = leaderSuccessionScores[num] || 0;
+        nBreakdown.bayes = bayesianScores[num] || 0;
+        nBreakdown.ai_intuition = aiIntuitionScores[num] || 0;
 
         let finalScore = 0;
         let totalW = 0;
