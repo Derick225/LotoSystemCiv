@@ -138,7 +138,7 @@ const evaluateWeights = async (drawName: string, history: DrawResult[], weights:
 
         try {
              // We use the real engine but on a very small sample
-             const prediction = await generateMasterPrediction(drawName, context, weights, undefined, undefined, 'AUDACIOUS');
+             const prediction = await generateMasterPrediction(drawName, context, weights, undefined, undefined, 'BALANCED');
              
              const winners = targetDraw.gagnants;
              const predicted = prediction.suggestedNumbers;

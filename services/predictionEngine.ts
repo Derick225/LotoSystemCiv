@@ -16,6 +16,7 @@ import {
 import { workerService } from './workerService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
+import { PatternMatcherService } from './patternMatcherService';
 
 export const getDefaultWeights = (): AlgoWeights => ({
     frequency: 0.15,
@@ -37,6 +38,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
     lstm: 0.05,
     bayes: 0.05,
     leader_succession: 0.05,
+    twin: 0.10,
     shadow_factor: 0.0 // Protocole Shadow (+/- 1)
 });
 
@@ -83,6 +85,7 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.equilibrium = (modified.equilibrium || 0.05) * 1.3;
             modified.gap = (modified.gap || 0.15) * 0.3; 
             modified.anti_consensus = 0;
+            modified.twin = (modified.twin || 0.10) * 1.5; // L'histoire se répète
             modified.shadow_factor = 0.15; // Couverture défensive (+/- 1)
             break;
 
@@ -90,6 +93,7 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.frequency = (modified.frequency || 0.20) * 1.1;
             modified.gap = (modified.gap || 0.15) * 1.1;
             modified.spectral = (modified.spectral || 0.10) * 1.1;
+            modified.twin = (modified.twin || 0.10) * 1.2;
             modified.shadow_factor = 0.05; // Légère couverture
             break;
 
@@ -97,6 +101,7 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.gap = (modified.gap || 0.15) * 2.5;
             modified.momentum = (modified.momentum || 0.10) * 1.8;
             modified.frequency = (modified.frequency || 0.20) * 0.4;
+            modified.twin = (modified.twin || 0.10) * 0.8;
             modified.shadow_factor = 0.0; // Tir direct, pas de couverture
             break;
 
@@ -105,6 +110,7 @@ const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): AlgoWeigh
             modified.spectral = 0.3;
             modified.frequency = 0;
             modified.markov = 0;
+            modified.twin = 0; // Le chaos ne se répète pas
             modified.shadow_factor = 0.2; // Forte incertitude
             break;
     }
@@ -122,11 +128,13 @@ const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regime: str
         adjusted.frequency = (adjusted.frequency || 0) * 1.4;
         adjusted.markov = (adjusted.markov || 0) * 1.4;
         adjusted.momentum = (adjusted.momentum || 0) * 1.3;
+        adjusted.twin = (adjusted.twin || 0) * 1.5; // Les patterns se répètent
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 0.5;
     } else if (hurst < 0.4) {
         adjusted.gap = (adjusted.gap || 0) * 1.6;
         adjusted.equilibrium = (adjusted.equilibrium || 0) * 1.5;
         adjusted.frequency = (adjusted.frequency || 0) * 0.6;
+        adjusted.twin = (adjusted.twin || 0) * 0.8; // Moins de répétition exacte
     } else {
         adjusted.spectral = (adjusted.spectral || 0) * 1.3;
         adjusted.wavelet = (adjusted.wavelet || 0) * 1.3;
@@ -301,6 +309,13 @@ export const generateMasterPrediction = async (
     const bayesianScores = calculateBayesianScore(history);
     const aiIntuitionScores = calculateAiIntuition(history, metrics);
 
+    // --- TWIN ENGINE (Pattern Matching) ---
+    let twinScores: number[] = new Array(91).fill(0);
+    if (weights.twin && weights.twin > 0) {
+        const twinMatches = PatternMatcherService.findTwinDraws(history);
+        twinScores = PatternMatcherService.predictFromTwins(twinMatches);
+    }
+
     const masterScores = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
         const nBreakdown: ScoreBreakdown = {};
@@ -344,6 +359,7 @@ export const generateMasterPrediction = async (
         nBreakdown.leader_succession = leaderSuccessionScores[num] || 0;
         nBreakdown.bayes = bayesianScores[num] || 0;
         nBreakdown.ai_intuition = aiIntuitionScores[num] || 0;
+        nBreakdown.twin = twinScores[num] || 0;
 
         let finalScore = 0;
         let totalW = 0;
@@ -586,7 +602,8 @@ export const getStrategyName = (weights: AlgoWeights): string => {
         anti_consensus: 'Contrarian',
         momentum: 'Vélocité',
         equilibrium: 'Retour Moyenne',
-        fractal: 'Fractal Pulse'
+        fractal: 'Fractal Pulse',
+        twin: 'Miroir Temporel'
     };
     
     return strategies[topAlgo] || `Hybride (${topAlgo})`;

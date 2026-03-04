@@ -241,6 +241,7 @@ export interface AlgoWeights {
     temporal?: number;
     transformer?: number;
     shadow_factor?: number;
+    twin?: number; // Nouveau score de tirages jumeaux
 }
 
 export interface ScoreBreakdown {
@@ -259,7 +260,7 @@ export interface ScoreBreakdown {
     wavelet?: number;
     bayes?: number;
     gap_velocity?: number;
-    day_echo?: number; // Nouveau score d'écho journalier
+    day_echo?: number; 
     anti_consensus?: number;
     lstm?: number;
     resistance?: number;
@@ -267,6 +268,7 @@ export interface ScoreBreakdown {
     transformer?: number;
     digital_root?: number;
     leader_succession?: number;
+    twin?: number; // Nouveau score de tirages jumeaux
 }
 
 export interface ScoreComposition {
@@ -581,11 +583,13 @@ export interface NexusContextType {
     hoveredNumber: number | null;
     rlState: RLState | null;
     vocalContext: OracleVocalContext | null;
+    riskProfile: RiskProfile;
     
     setDrawName: (name: string) => void;
     setLastPrediction: (p: Prediction | null) => void;
     setInspectingNumber: (n: number | null) => void;
     setHoveredNumber: (n: number | null) => void;
+    setRiskProfile: (p: RiskProfile) => void;
     updateGlobalWeights: (w: AlgoWeights) => void;
     refresh: () => Promise<void>;
     refreshData: (name: string, force?: boolean) => Promise<void>;

@@ -3,18 +3,20 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNexus } from '../NexusProvider';
 import { invokeEdgeFunction } from '../../services/apiClient';
 import { ChatMessage } from '../../types';
-import { Send, Terminal, Bot, User, RefreshCw, Brain, Activity, Wallet, Trash2, Command, Cpu } from 'lucide-react';
+import { Send, Terminal, Bot, User, RefreshCw, Brain, Activity, Wallet, Trash2, Command, Cpu, Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SafeMarkdown } from '../ui/SafeMarkdown';
 import { audioEngine } from '../../utils/audioEngine';
 import { getBankroll } from '../../services/userPreferencesService';
 import { getStrategyName } from '../../services/predictionEngine';
+import { VoiceService } from '../../services/voiceService';
 
 export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, lastPrediction, refreshData, globalWeights, regime } = useNexus();
+    const { history, lastPrediction, refreshData, globalWeights, regime, setInspectingNumber } = useNexus();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isListening, setIsListening] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom
@@ -24,13 +26,64 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         }
     }, [messages, isLoading]);
 
-    const handleSend = async () => {
-        if (!input.trim() || isLoading) return;
+    const handleVoiceCommand = () => {
+        if (!VoiceService.isSupported()) {
+            alert("Reconnaissance vocale non supportée sur ce navigateur.");
+            return;
+        }
+
+        if (isListening) {
+            // Stop logic if needed, but recognition stops automatically on result
+            setIsListening(false);
+            return;
+        }
+
+        setIsListening(true);
+        VoiceService.startListening(
+            (text) => {
+                setIsListening(false);
+                setInput(text);
+                
+                // Auto-send if command is clear
+                const command = VoiceService.parseCommand(text);
+                if (command.intent !== 'UNKNOWN') {
+                    handleCommandAction(command);
+                } else {
+                    // Just fill input for manual send
+                }
+            },
+            (err) => {
+                setIsListening(false);
+                console.error("Voice Error:", err);
+            }
+        );
+    };
+
+    const handleCommandAction = (cmd: any) => {
+        if (cmd.intent === 'ANALYZE_NUMBER' && cmd.entity) {
+            setInspectingNumber(cmd.entity);
+            VoiceService.speak(`Affichage de l'analyse pour le numéro ${cmd.entity}`);
+            setMessages(prev => [...prev, {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `✅ Commande Vocale : Inspection du **${cmd.entity}** activée.`,
+                timestamp: Date.now()
+            }]);
+        }
+        else if (cmd.intent === 'PREDICT') {
+             // Trigger prediction logic via context if exposed, or just chat
+             handleSend(true); // Force send "Prédiction"
+        }
+    };
+
+    const handleSend = async (forceInput?: boolean | string) => {
+        const textToSend = typeof forceInput === 'string' ? forceInput : (forceInput === true ? input : input);
+        if (!textToSend.trim() || isLoading) return;
 
         const userMsg: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'user',
-            content: input,
+            content: textToSend,
             timestamp: Date.now()
         };
 
@@ -204,7 +257,14 @@ export const TacticalChatTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                         rows={1}
                     />
                     <button 
-                        onClick={handleSend}
+                        onClick={handleVoiceCommand}
+                        className={`p-3 rounded-full transition-all shadow-lg active:scale-95 ${isListening ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        title="Commande Vocale"
+                    >
+                        {isListening ? <MicOff size={20}/> : <Mic size={20}/>}
+                    </button>
+                    <button 
+                        onClick={() => handleSend()}
                         disabled={!input.trim() || isLoading}
                         className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-full transition-all shadow-lg active:scale-95"
                     >

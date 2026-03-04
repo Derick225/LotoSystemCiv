@@ -29,12 +29,13 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { 
         history, lastPrediction, setLastPrediction, loading: nexusLoading,
         globalWeights, updateGlobalWeights, spectral, wavelet, correlationMatrix, regularity, 
-        calibration, volatility, regime, symbioticContext, fractal
+        calibration, volatility, regime, symbioticContext, fractal,
+        riskProfile, setRiskProfile
     } = useNexus();
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
-    const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED');
+    // const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED'); // REMOVED
     const [showField, setShowField] = useState(false);
     const [show3D, setShow3D] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");

@@ -2,12 +2,13 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   NexusContextType, DrawResult, Prediction, SmartInsight, 
-  AlgoWeights, RLState, OracleVocalContext
+  AlgoWeights, RLState, OracleVocalContext, RiskProfile
 } from '../types';
 import { getNextScheduledDraw } from '../services/lotteryService';
 import { getAlgoWeights, saveAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance } from '../services/predictionHistoryService';
+import { getSettings, saveSettings } from '../services/userPreferencesService';
 import { useDrawHistory, useNexusAnalytics } from '../hooks/useLottery';
 
 const NexusContext = createContext<NexusContextType | null>(null);
@@ -25,7 +26,10 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [smartInsights, setSmartInsights] = useState<SmartInsight[]>([]);
   const [calibration, setCalibration] = useState<any>(null);
   
-  // États persistants non-Query
+  // États persistants
+  const [riskProfile, setRiskProfileState] = useState<RiskProfile>(() => {
+      return getSettings().riskProfile as RiskProfile || 'BALANCED';
+  });
   const [rlState, setRlState] = useState<RLState | null>(null);
   const [vocalContext, setVocalContext] = useState<OracleVocalContext | null>(null);
   const [isGodMode, setIsGodMode] = useState(false);
@@ -159,6 +163,12 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   };
 
+  const setRiskProfile = useCallback(async (p: RiskProfile) => {
+      setRiskProfileState(p);
+      const currentSettings = getSettings();
+      await saveSettings({ ...currentSettings, riskProfile: p });
+  }, []);
+
   // --- CONTEXT VALUE ---
   const contextValue = useMemo<NexusContextType>(() => ({
     drawName,
@@ -185,11 +195,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     hoveredNumber,
     rlState,
     vocalContext,
+    riskProfile,
     
     setDrawName: setDrawNameState,
     setLastPrediction,
     setInspectingNumber,
     setHoveredNumber,
+    setRiskProfile,
     updateGlobalWeights,
     refresh: async () => { await refetchHistory(); },
     refreshData,
@@ -197,7 +209,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     toggleGodMode
   }), [
     drawName, history, stats, gaps, analytics, 
-    lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, calibration, hoveredNumber, rlState, vocalContext, isGodMode
+    lastPrediction, inspectingNumber, smartInsights, globalWeights, loading, calibration, hoveredNumber, rlState, vocalContext, riskProfile, isGodMode
   ]);
 
   return <NexusContext.Provider value={contextValue}>{children}</NexusContext.Provider>;

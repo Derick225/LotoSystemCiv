@@ -8,8 +8,8 @@ import { Swords, Shield, Zap, Scale, Target } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const StrategyBattle: React.FC = () => {
-    const { history, drawName } = useNexus();
-    const [leftProfile, setLeftProfile] = useState<RiskProfile>('PRUDENT');
+    const { history, drawName, riskProfile } = useNexus();
+    const [leftProfile, setLeftProfile] = useState<RiskProfile>(riskProfile || 'PRUDENT');
     const [rightProfile, setRightProfile] = useState<RiskProfile>('AUDACIOUS');
     const [leftPred, setLeftPred] = useState<Prediction | null>(null);
     const [rightPred, setRightPred] = useState<Prediction | null>(null);

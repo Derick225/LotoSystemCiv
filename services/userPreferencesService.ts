@@ -158,14 +158,15 @@ export interface UserSettings {
     haptics: boolean;
     highPerf: boolean;
     theme: 'light' | 'dark' | 'system';
+    riskProfile: 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS';
 }
 
 export const getSettings = (): UserSettings => {
     try {
         const raw = localStorage.getItem(SETTINGS_KEY);
-        return raw ? JSON.parse(raw) : { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+        return raw ? { riskProfile: 'BALANCED', ...JSON.parse(raw) } : { sound: true, haptics: true, highPerf: true, theme: 'dark', riskProfile: 'BALANCED' };
     } catch (e) {
-        return { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+        return { sound: true, haptics: true, highPerf: true, theme: 'dark', riskProfile: 'BALANCED' };
     }
 };
 
