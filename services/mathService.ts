@@ -3,6 +3,20 @@ import * as tf from '@tensorflow/tfjs';
 import { workerService } from './workerService';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
+// --- HELPERS SIMPLES ---
+
+export const calculateGap = (history: DrawResult[], number: number): number => {
+    for (let i = 0; i < history.length; i++) {
+        if (history[i].gagnants.includes(number)) return i;
+    }
+    return history.length;
+};
+
+export const calculateFrequency = (history: DrawResult[], number: number, limit: number = 50): number => {
+    const subset = history.slice(0, limit);
+    return subset.filter(d => d.gagnants.includes(number)).length;
+};
+
 // --- UTILS STATISTIQUES VECTORISÉS ---
 
 // --- CACHE & MEMOIZATION ---
