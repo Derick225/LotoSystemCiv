@@ -1,8 +1,9 @@
 
 import type { Prediction, LearningSession, PredictionHistoryItem, OrchestrationPattern, PredictionFeedback, PatternType, DrawResult } from '../types';
+import { syncPredictions, syncLearningSessions } from './syncService';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
-const LEARNING_SESSION_KEY = 'learning_session_latest';
+const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
 const HISTORY_KEY_PREFIX = 'pred_';
 
 // Helper interne pour lire l'historique local (remplace cacheService)
@@ -26,7 +27,29 @@ const getLocalHistory = (): PredictionHistoryItem[] => {
     return items.sort((a,b) => b.timestamp - a.timestamp);
 };
 
+// ... (existing imports)
+
+export const syncAllHistory = async (drawName: string): Promise<PredictionHistoryItem[]> => {
+    const local = getLocalHistory().filter(p => p.drawName === drawName);
+    try {
+        const synced = await syncPredictions(local);
+        
+        // Mettre à jour le localStorage avec les données fusionnées
+        synced.forEach(item => {
+            const key = `${HISTORY_KEY_PREFIX}${item.id}`;
+            localStorage.setItem(key, JSON.stringify(item));
+        });
+        
+        return synced;
+    } catch (e) {
+        console.error("Sync failed, returning local", e);
+        return local;
+    }
+};
+
 export const getPredictionHistoryAsync = async (drawName: string): Promise<PredictionHistoryItem[]> => {
+    // On tente une synchro rapide en arrière-plan si on est en ligne ?
+    // Pour l'instant, on retourne le local, et l'UI déclenchera la synchro explicite.
     const all = getLocalHistory();
     return all.filter(p => p.drawName === drawName);
 };
@@ -70,15 +93,56 @@ export const clearPredictionHistory = async (drawName: string) => {
     toDelete.forEach(p => localStorage.removeItem(`${HISTORY_KEY_PREFIX}${p.id}`));
 };
 
-export const saveLearningSession = (drawName: string, session: LearningSession) => {
-    localStorage.setItem(`${LEARNING_SESSION_KEY}_${drawName}`, JSON.stringify(session));
+export const saveLearningSession = async (drawName: string, sessionData: any) => {
+    const session: LearningSession = {
+        id: crypto.randomUUID(),
+        drawName,
+        timestamp: Date.now(),
+        ...sessionData
+    };
+    
+    const key = `${LEARNING_SESSION_KEY_PREFIX}${session.id}`;
+    localStorage.setItem(key, JSON.stringify(session));
+    
+    // Sync background
+    try {
+        await syncLearningSessions([session]);
+    } catch (e) {
+        console.error("Learning session sync failed", e);
+    }
+    
+    return session;
 };
 
-export const getLearningSession = (drawName: string): LearningSession | null => {
+export const getLearningSessions = (drawName: string): LearningSession[] => {
+    const sessions: LearningSession[] = [];
+    if (typeof localStorage === 'undefined') return [];
+    
+    for(let i=0; i<localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if(k && k.startsWith(LEARNING_SESSION_KEY_PREFIX)) {
+            try {
+                const item = JSON.parse(localStorage.getItem(k) || '{}');
+                if (item.drawName === drawName) {
+                    sessions.push(item);
+                }
+            } catch(e) {}
+        }
+    }
+    return sessions.sort((a,b) => b.timestamp - a.timestamp);
+};
+
+export const syncLearningSessionsWithCloud = async (drawName: string) => {
+    const local = getLearningSessions(drawName);
     try {
-        const raw = localStorage.getItem(`${LEARNING_SESSION_KEY}_${drawName}`);
-        return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+        const synced = await syncLearningSessions(local);
+        synced.forEach(s => {
+            localStorage.setItem(`${LEARNING_SESSION_KEY_PREFIX}${s.id}`, JSON.stringify(s));
+        });
+        return synced;
+    } catch (e) {
+        return local;
+    }
 };
 
 export const getOrchestrationPatterns = (drawName: string): OrchestrationPattern[] => {

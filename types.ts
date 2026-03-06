@@ -99,6 +99,7 @@ export interface SpectralDeviation {
 }
 
 export interface ForensicReport {
+    id: string;
     drawName: string;
     date: string;
     predictionId?: string;
@@ -134,7 +135,16 @@ export interface SpectralMetric {
 export type RiskProfile = 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS';
 
 export interface LearningSession {
-    id?: string;
+    id: string;
+    drawName: string;
+    timestamp: number;
+    adjustments?: {
+        algo: string;
+        oldWeight: number;
+        newWeight: number;
+        reason: string;
+    }[];
+    missedNumber?: number;
 }
 
 export interface OrchestrationPattern {

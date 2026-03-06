@@ -1,6 +1,49 @@
 
 import type { ForensicReport, ForensicEvidence, ScoreBreakdown, CounterfactualResult, SpectralDeviation, AlgoWeights, DrawResult } from '../types';
 import { normalizeWeights } from './predictionEngine';
+import { syncForensicReports } from './syncService';
+
+const FORENSIC_KEY_PREFIX = 'forensic_report_';
+
+export const saveForensicReport = (report: ForensicReport) => {
+    try {
+        localStorage.setItem(`${FORENSIC_KEY_PREFIX}${report.id}`, JSON.stringify(report));
+    } catch (e) {
+        console.error("Failed to save forensic report", e);
+    }
+};
+
+export const getLocalForensicReports = (): ForensicReport[] => {
+    const reports: ForensicReport[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(FORENSIC_KEY_PREFIX)) {
+            try {
+                const item = JSON.parse(localStorage.getItem(key) || '{}');
+                reports.push(item);
+            } catch (e) {
+                console.error("Error parsing forensic report", e);
+            }
+        }
+    }
+    return reports.sort((a, b) => new Date(b.date.split('/').reverse().join('-')).getTime() - new Date(a.date.split('/').reverse().join('-')).getTime());
+};
+
+export const syncForensicReportsWithCloud = async (): Promise<ForensicReport[]> => {
+    const local = getLocalForensicReports();
+    try {
+        const synced = await syncForensicReports(local);
+        synced.forEach(saveForensicReport);
+        return synced;
+    } catch (e) {
+        console.error("Forensic sync failed", e);
+        return local;
+    }
+};
+
+export const deleteForensicReportLocal = (id: string) => {
+    localStorage.removeItem(`${FORENSIC_KEY_PREFIX}${id}`);
+};
 
 /**
  * Effectue une autopsie mathématique complète du résultat réel face à la prédiction faite.
@@ -155,6 +198,7 @@ export const performForensicAnalysis = async (
     }
 
     return { 
+        id: crypto.randomUUID(),
         drawName, 
         date, 
         predictionId, 

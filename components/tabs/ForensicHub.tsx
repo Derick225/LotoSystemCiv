@@ -2,21 +2,25 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNexus } from '../NexusProvider';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
-import { performForensicAnalysis } from '../../services/postPredictionAnalysisService';
+import { performForensicAnalysis, saveForensicReport, getLocalForensicReports, syncForensicReportsWithCloud, deleteForensicReportLocal } from '../../services/postPredictionAnalysisService';
+import { deleteForensicReportCloud } from '../../services/syncService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
-import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw } from 'lucide-react';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2 } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
+import { useToast } from '../ui/Toast';
 
 type ForensicMode = 'prediction' | 'structure';
 
 export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { history } = useNexus();
+    const { showToast } = useToast();
     const [reports, setReports] = useState<ForensicReport[]>([]);
     const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [mode, setMode] = useState<ForensicMode>('prediction');
     const [refreshKey, setRefreshKey] = useState(0);
@@ -28,11 +32,17 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
         setLoading(true);
         try {
-            // 1. Audit Standard (Oracle)
+            // 1. Charger les rapports existants (Local First)
+            let currentReports = getLocalForensicReports().filter(r => r.drawName === drawName);
+            
+            // 2. Identifier les prédictions sans rapport
             const preds = await getPredictionHistoryAsync(drawName);
-            const computedReports: ForensicReport[] = [];
+            let newReportsCount = 0;
 
             for (const pred of preds.slice(0, 30)) {
+                // Si rapport existe déjà pour cette prédiction, skip
+                if (currentReports.some(r => r.predictionId === pred.id)) continue;
+
                 let actual = null;
                 if (pred.drawResultId) {
                     actual = history.find(h => h.id === pred.drawResultId);
@@ -40,6 +50,16 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                 if (!actual) {
                     const predDateLocale = new Date(pred.timestamp).toLocaleDateString('fr-FR');
                     actual = history.find(h => h.date === predDateLocale);
+                    
+                    // Fallback date approximative
+                    if (!actual) {
+                         const predTime = pred.timestamp;
+                         const sortedHistory = [...history].sort((a, b) => new Date(a.date.split('/').reverse().join('-')).getTime() - new Date(b.date.split('/').reverse().join('-')).getTime());
+                         actual = sortedHistory.find(d => {
+                             const dTime = new Date(d.date.split('/').reverse().join('-')).getTime();
+                             return dTime >= predTime && (dTime - predTime) < 48 * 3600 * 1000;
+                         });
+                    }
                 }
 
                 if (actual) {
@@ -51,12 +71,22 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         pred.prediction.breakdown,
                         pred.id
                     );
-                    computedReports.push(rep);
+                    // Sauvegarder immédiatement
+                    saveForensicReport(rep);
+                    currentReports.push(rep);
+                    newReportsCount++;
                 }
             }
-            setReports(computedReports);
+            
+            // Trier par date décroissante
+            currentReports.sort((a, b) => new Date(b.date.split('/').reverse().join('-')).getTime() - new Date(a.date.split('/').reverse().join('-')).getTime());
+            setReports(currentReports);
 
-            // 2. Audit Platinum (Timelines)
+            if (newReportsCount > 0) {
+                showToast(`${newReportsCount} nouvelles autopsies générées.`, "success");
+            }
+
+            // 3. Audit Platinum (Timelines) - Recalculé à la volée car léger
             const platHist = getPlatinumHistory(drawName);
             const computedAudits: PlatinumAudit[] = [];
             
@@ -73,10 +103,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
         } catch (err) {
             console.error("Forensic Hub Sync Error:", err);
+            showToast("Erreur lors de l'analyse Forensic.", "error");
         } finally {
             setLoading(false);
         }
-    }, [drawName, history]);
+    }, [drawName, history, showToast]);
 
     useEffect(() => {
         runAnalysis();
@@ -85,6 +116,36 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const handleRefresh = () => {
         setRefreshKey(prev => prev + 1);
     };
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            const synced = await syncForensicReportsWithCloud();
+            setReports(synced.filter(r => r.drawName === drawName));
+            showToast("Synchronisation Cloud terminée.", "success");
+        } catch (e) {
+            showToast("Erreur de synchronisation.", "error");
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const handleDeleteReport = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm("Supprimer ce rapport Forensic (Local + Cloud) ?")) return;
+
+        try {
+            deleteForensicReportLocal(id);
+            await deleteForensicReportCloud(id);
+            setReports(prev => prev.filter(r => r.id !== id));
+            if (selectedReport?.id === id) setSelectedReport(null);
+            showToast("Rapport supprimé.", "info");
+        } catch (e) {
+            showToast("Erreur suppression.", "error");
+        }
+    };
+
+    // ... (rest of the component logic: useMemo, render)
 
     // Calcul de la précision agrégée des neurones pour le Radar
     const algoRadarData = useMemo(() => {
@@ -172,13 +233,23 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                     </div>
                     
-                    <button 
-                        onClick={handleRefresh}
-                        className="p-4 bg-slate-800/50 hover:bg-slate-800 rounded-2xl border border-white/10 text-slate-400 hover:text-white transition-all group"
-                        title="Relancer l'analyse"
-                    >
-                         <RefreshCw size={20} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={handleSync}
+                            disabled={syncing}
+                            className={`p-4 bg-indigo-600/20 hover:bg-indigo-600/40 rounded-2xl border border-indigo-500/30 text-indigo-400 hover:text-white transition-all group ${syncing ? 'animate-pulse' : ''}`}
+                            title="Synchroniser Cloud"
+                        >
+                             <Cloud size={20} className={syncing ? 'animate-bounce' : ''} />
+                        </button>
+                        <button 
+                            onClick={handleRefresh}
+                            className="p-4 bg-slate-800/50 hover:bg-slate-800 rounded-2xl border border-white/10 text-slate-400 hover:text-white transition-all group"
+                            title="Relancer l'analyse"
+                        >
+                             <RefreshCw size={20} className={`group-hover:rotate-180 transition-transform duration-700 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -291,6 +362,14 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                                     </div>
                                                     <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
                                                 </div>
+                                                
+                                                <button 
+                                                    onClick={(e) => handleDeleteReport(rep.id, e)}
+                                                    className="absolute top-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all z-20"
+                                                    title="Supprimer"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
                                             </div>
                                         );
                                     })}
