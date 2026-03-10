@@ -1,6 +1,6 @@
 
 import type { ForensicReport, ForensicEvidence, ScoreBreakdown, CounterfactualResult, SpectralDeviation, AlgoWeights, DrawResult } from '../types';
-import { normalizeWeights } from './predictionEngine';
+import { normalizeWeights, getAlgoWeights } from './predictionEngine';
 import { syncForensicReports } from './syncService';
 
 const FORENSIC_KEY_PREFIX = 'forensic_report_';
@@ -191,9 +191,8 @@ export const performForensicAnalysis = async (
     // ou si on avait boosté cet algo.
     let counterfactuals: CounterfactualResult[] = [];
     if (predictionBreakdown) {
-        // On utilise des poids fictifs de base pour la comparaison
-        // Dans une app réelle, on passerait les poids utilisés lors de la prédiction
-        const baseWeights: AlgoWeights = { frequency: 0.1, gap: 0.1, spectral: 0.1, markov: 0.1, momentum: 0.1, equilibrium: 0.1 }; 
+        // On utilise les poids actuels pour la comparaison
+        const baseWeights: AlgoWeights = await getAlgoWeights(drawName); 
         counterfactuals = runCounterfactualSimulation(baseWeights, predictionBreakdown, actualWinningNumbers);
     }
 
@@ -213,7 +212,8 @@ export const performForensicAnalysis = async (
 
 /**
  * Moteur Contrefactuel : "Et si ?"
- * Simule quel aurait été le résultat si on avait modifié les poids pour isoler chaque algo.
+ * Simule quel aurait été le résultat si on avait modifié les poids pour isoler chaque algo,
+ * les booster, les réduire, ou créer des synergies.
  */
 export const runCounterfactualSimulation = (
     currentWeights: AlgoWeights,
@@ -222,50 +222,158 @@ export const runCounterfactualSimulation = (
 ): CounterfactualResult[] => {
     const results: CounterfactualResult[] = [];
     
-    // Liste des algos disponibles dans le breakdown
-    const sampleBreakdown = Object.values(breakdown)[0];
-    if (!sampleBreakdown) return [];
+    if (!breakdown || Object.keys(breakdown).length === 0) return [];
     
+    // 1. Identify available algos
+    const sampleBreakdown = Object.values(breakdown).find(b => b && Object.keys(b).length > 0);
+    if (!sampleBreakdown) return [];
     const algos = Object.keys(sampleBreakdown).filter(k => typeof (sampleBreakdown as any)[k] === 'number');
 
-    algos.forEach(algo => {
-        // Scénario : Isolation Pure (Poids = 1.0 pour cet algo, 0 pour les autres)
-        // Cela permet de voir si l'algo "savait" la réponse.
-        
+    if (algos.length === 0) return [];
+
+    // Helper to calculate scores and ranks given a set of weights
+    const evaluateWeights = (weights: AlgoWeights) => {
         const scores: { n: number, s: number }[] = [];
-        
-        for(let i=1; i<=90; i++) {
+        for (let i = 1; i <= 90; i++) {
             const bd = breakdown[i];
-            if(bd) {
-                const val = (bd as any)[algo] || 0;
-                scores.push({ n: i, s: val });
+            let totalScore = 0;
+            if (bd) {
+                for (const algo of algos) {
+                    const w = (weights as any)[algo] || 0;
+                    const s = (bd as any)[algo] || 0;
+                    totalScore += w * s;
+                }
             }
+            scores.push({ n: i, s: totalScore });
         }
+        scores.sort((a, b) => b.s - a.s);
         
-        // On trie par score décroissant
-        scores.sort((a,b) => b.s - a.s);
-        
-        // On regarde le Top 5 de cet algo pur
         const top5 = scores.slice(0, 5).map(x => x.n);
-        const hits = top5.filter(n => actualWinners.includes(n)).length;
+        const hits = top5.filter(n => actualWinners.includes(n));
         
-        // On calcule l'amélioration théorique
-        // Si cet algo donne 3 hits, c'est une piste majeure
-        if (hits >= 2) {
-             // On construit le poids "Optimal" suggéré : Boost de cet algo
-             const optimalWeights = { ...currentWeights };
-             optimalWeights[algo as keyof AlgoWeights] = (optimalWeights[algo as keyof AlgoWeights] || 0) + 0.3;
-             
-             results.push({
-                 algo,
-                 originalWeight: currentWeights[algo as keyof AlgoWeights] || 0,
-                 optimalWeight: normalizeWeights(optimalWeights)[algo as keyof AlgoWeights] || 0,
-                 potentialHits: hits,
-                 potentialNumbers: top5.filter(n => actualWinners.includes(n)),
-                 improvement: hits * 20 // Score arbitraire d'amélioration
-             });
+        // Calculate average rank of winning numbers
+        let rankSum = 0;
+        actualWinners.forEach(winner => {
+            const rank = scores.findIndex(x => x.n === winner) + 1;
+            rankSum += rank > 0 ? rank : 90;
+        });
+        const avgRank = actualWinners.length > 0 ? rankSum / actualWinners.length : 90;
+
+        return { top5, hits, avgRank, scores };
+    };
+
+    // 2. Baseline Evaluation
+    const baseline = evaluateWeights(currentWeights);
+
+    // 3. Test Scenarios for each algo
+    algos.forEach(algo => {
+        const originalWeight = (currentWeights as any)[algo] || 0;
+
+        // Scenario A: Pure Isolation (Weight = 1.0, others = 0)
+        const isolatedWeights: any = {};
+        algos.forEach(a => isolatedWeights[a] = a === algo ? 1.0 : 0.0);
+        const isolated = evaluateWeights(isolatedWeights);
+
+        if (isolated.hits.length >= 2 || isolated.avgRank < baseline.avgRank - 10) {
+            results.push({
+                algo,
+                originalWeight,
+                optimalWeight: 1.0,
+                potentialHits: isolated.hits.length,
+                potentialNumbers: isolated.hits,
+                improvement: Math.max(0, baseline.avgRank - isolated.avgRank),
+                action: 'ISOLATE',
+                description: `Si on avait écouté uniquement '${algo}', on aurait eu ${isolated.hits.length} numéros gagnants dans le Top 5.`,
+                rankImprovement: baseline.avgRank - isolated.avgRank
+            });
+        }
+
+        // Scenario B: Boost (Weight + 0.5)
+        const boostedWeights = { ...currentWeights };
+        (boostedWeights as any)[algo] = originalWeight + 0.5;
+        const normalizedBoosted = normalizeWeights(boostedWeights);
+        const boosted = evaluateWeights(normalizedBoosted);
+
+        if (boosted.hits.length > baseline.hits.length || boosted.avgRank < baseline.avgRank - 5) {
+            results.push({
+                algo,
+                originalWeight,
+                optimalWeight: (normalizedBoosted as any)[algo],
+                potentialHits: boosted.hits.length,
+                potentialNumbers: boosted.hits,
+                improvement: Math.max(0, baseline.avgRank - boosted.avgRank),
+                action: 'BOOST',
+                description: `Augmenter l'importance de '${algo}' aurait fait remonter les numéros gagnants de ${Math.round(baseline.avgRank - boosted.avgRank)} places en moyenne.`,
+                rankImprovement: baseline.avgRank - boosted.avgRank
+            });
+        }
+
+        // Scenario C: Exclusion/Reduce (Weight = 0)
+        if (originalWeight > 0.05) {
+            const reducedWeights = { ...currentWeights };
+            (reducedWeights as any)[algo] = 0;
+            const normalizedReduced = normalizeWeights(reducedWeights);
+            const reduced = evaluateWeights(normalizedReduced);
+
+            if (reduced.hits.length > baseline.hits.length || reduced.avgRank < baseline.avgRank - 5) {
+                results.push({
+                    algo,
+                    originalWeight,
+                    optimalWeight: 0,
+                    potentialHits: reduced.hits.length,
+                    potentialNumbers: reduced.hits,
+                    improvement: Math.max(0, baseline.avgRank - reduced.avgRank),
+                    action: 'REDUCE',
+                    description: `L'algorithme '${algo}' a induit le système en erreur. L'ignorer aurait amélioré le classement des gagnants.`,
+                    rankImprovement: baseline.avgRank - reduced.avgRank
+                });
+            }
         }
     });
 
-    return results.sort((a,b) => b.potentialHits - a.potentialHits);
+    // 4. Test Synergy (Pairs of top 3 isolated algos)
+    // Find top 3 algos by isolation avgRank
+    const isolationRanks = algos.map(algo => {
+        const w: any = {};
+        algos.forEach(a => w[a] = a === algo ? 1.0 : 0.0);
+        return { algo, rank: evaluateWeights(w).avgRank };
+    }).sort((a, b) => a.rank - b.rank).slice(0, 3);
+
+    if (isolationRanks.length >= 2) {
+        for (let i = 0; i < isolationRanks.length; i++) {
+            for (let j = i + 1; j < isolationRanks.length; j++) {
+                const algo1 = isolationRanks[i].algo;
+                const algo2 = isolationRanks[j].algo;
+                
+                const synergyWeights: any = {};
+                algos.forEach(a => {
+                    synergyWeights[a] = (a === algo1 || a === algo2) ? 0.5 : 0.0;
+                });
+                
+                const synergy = evaluateWeights(synergyWeights);
+                
+                if (synergy.hits.length >= 2 || synergy.avgRank < baseline.avgRank - 5) {
+                    results.push({
+                        algo: `${algo1} + ${algo2}`,
+                        originalWeight: ((currentWeights as any)[algo1] || 0) + ((currentWeights as any)[algo2] || 0),
+                        optimalWeight: 1.0, // Combined weight
+                        potentialHits: synergy.hits.length,
+                        potentialNumbers: synergy.hits,
+                        improvement: Math.max(0, baseline.avgRank - synergy.avgRank),
+                        action: 'SYNERGY',
+                        description: `La combinaison de '${algo1}' et '${algo2}' crée une forte synergie, capturant ${synergy.hits.length} gagnants.`,
+                        rankImprovement: baseline.avgRank - synergy.avgRank
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by rank improvement (highest first), then by potential hits
+    return results.sort((a, b) => {
+        if (b.potentialHits !== a.potentialHits) {
+            return b.potentialHits - a.potentialHits;
+        }
+        return (b.rankImprovement || 0) - (a.rankImprovement || 0);
+    });
 };

@@ -89,6 +89,9 @@ export interface CounterfactualResult {
     potentialHits: number;
     potentialNumbers: number[];
     improvement: number; // % d'amélioration
+    action?: 'BOOST' | 'REDUCE' | 'ISOLATE' | 'SYNERGY';
+    description?: string;
+    rankImprovement?: number;
 }
 
 export interface SpectralDeviation {

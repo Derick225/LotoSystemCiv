@@ -44,24 +44,34 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         setApplying(true);
         try {
             const currentWeights = await getAlgoWeights(report.drawName);
-            const algoKey = bestScenario.algo as keyof AlgoWeights;
-            const oldVal = currentWeights[algoKey] || 0;
-            const boost = 0.15; 
-            const newVal = oldVal + boost;
-            
             const newWeights = { ...currentWeights };
-            newWeights[algoKey] = newVal;
+            let message = "";
+            
+            if (bestScenario.action === 'SYNERGY') {
+                const algos = bestScenario.algo.split(' + ');
+                algos.forEach((a: string) => {
+                    const algoKey = a as keyof AlgoWeights;
+                    newWeights[algoKey] = (newWeights[algoKey] || 0) + 0.15;
+                });
+                message = `Synergie ${bestScenario.algo} renforcée`;
+            } else if (bestScenario.action === 'REDUCE') {
+                const algoKey = bestScenario.algo as keyof AlgoWeights;
+                newWeights[algoKey] = Math.max(0, (newWeights[algoKey] || 0) - 0.15);
+                message = `Poids de ${algoKey.toUpperCase()} réduit`;
+            } else { // BOOST or ISOLATE
+                const algoKey = bestScenario.algo as keyof AlgoWeights;
+                newWeights[algoKey] = (newWeights[algoKey] || 0) + 0.15;
+                message = `${algoKey.toUpperCase()} renforcé`;
+            }
             
             const normalized = normalizeWeights(newWeights);
-            const finalVal = normalized[algoKey] || 0;
 
             await saveAlgoWeights(report.drawName, normalized);
             await updateGlobalWeights(normalized);
             await refreshData(report.drawName, true); 
 
             setSuccessApply(true);
-            const percentChange = Math.round((finalVal - (currentWeights[algoKey] || 0)) * 100);
-            showToast(`🧬 Mutation ADN : ${algoKey.toUpperCase()} renforcé (+${percentChange}%). Configuration sauvegardée.`, "success");
+            showToast(`🧬 Mutation ADN : ${message}. Configuration sauvegardée.`, "success");
             
             setTimeout(onClose, 2000);
         } catch(e) {
@@ -359,10 +369,21 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                 <Zap size={16}/>
                                             </div>
                                             <div>
-                                                <span className="text-emerald-400 font-bold block mb-1">DÉCOUVERTE MAJEURE</span>
-                                                L'algorithme <strong className="text-white">{bestScenario.algo.toUpperCase()}</strong> a isolé {bestScenario.potentialHits} gagnants ({bestScenario.potentialNumbers.join(', ')}). 
+                                                <span className="text-emerald-400 font-bold block mb-1">
+                                                    {bestScenario.action === 'REDUCE' ? 'CORRECTION REQUISE' : 'DÉCOUVERTE MAJEURE'}
+                                                </span>
+                                                {bestScenario.description || `L'algorithme ${bestScenario.algo.toUpperCase()} a isolé ${bestScenario.potentialHits} gagnants (${bestScenario.potentialNumbers.join(', ')}).`}
+                                                {bestScenario.rankImprovement > 0 && (
+                                                    <div className="mt-2 text-emerald-400 font-medium">
+                                                        Gain de classement moyen : +{Math.round(bestScenario.rankImprovement)} places
+                                                    </div>
+                                                )}
                                                 <br/>
-                                                <span className="text-slate-400 text-[10px]">Appliquer le patch renforcera ce facteur dans l'ADN du jeu pour les futurs tirages.</span>
+                                                <span className="text-slate-400 text-[10px]">
+                                                    {bestScenario.action === 'REDUCE' 
+                                                        ? "Appliquer le patch réduira l'influence de ce facteur dans l'ADN du jeu." 
+                                                        : "Appliquer le patch renforcera ce facteur dans l'ADN du jeu pour les futurs tirages."}
+                                                </span>
                                             </div>
                                         </div>
                                         
