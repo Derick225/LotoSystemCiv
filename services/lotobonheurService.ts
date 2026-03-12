@@ -1,5 +1,6 @@
 import type { DrawResult } from '../types';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { isSupabaseConfigured } from './supabaseClient';
+import { invokeEdgeFunction } from './apiClient';
 import { DRAW_SCHEDULE } from '../constants';
 
 const getMonthParam = (date: Date) => {
@@ -34,7 +35,7 @@ export const ExternalProviderService = {
             const targetUpper = drawName.toUpperCase();
 
             for (const monthParam of targetMonths) {
-                const { data: resultsData, error } = await supabase.functions.invoke('proxy-results', {
+                const { data: resultsData, error } = await invokeEdgeFunction('proxy-results', {
                     body: { month: monthParam }
                 });
 

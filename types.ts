@@ -88,6 +88,7 @@ export interface CounterfactualResult {
     optimalWeight: number;
     potentialHits: number;
     potentialNumbers: number[];
+    missedNumbers?: number[];
     improvement: number; // % d'amélioration
     action?: 'BOOST' | 'REDUCE' | 'ISOLATE' | 'SYNERGY';
     description?: string;

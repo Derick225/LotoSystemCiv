@@ -212,6 +212,16 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                     )}
                                                 </div>
                                             ))}
+                                            
+                                            {/* LES MANQUEMENTS (Empty slots for prediction) */}
+                                            {report.missedOpportunities.length > 0 && (
+                                                <div className="mt-4 pt-4 border-t border-transparent flex flex-col gap-3 items-center">
+                                                    <span className="text-[8px] font-black text-transparent uppercase">Manquements</span>
+                                                    {report.missedOpportunities.map((_, i) => (
+                                                        <div key={`empty-pred-${i}`} className="w-12 h-12 rounded-full border-2 border-dashed border-rose-200 dark:border-rose-900/30 flex items-center justify-center text-rose-300 dark:text-rose-800 font-bold">X</div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -238,6 +248,21 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                     )}
                                                 </div>
                                             ))}
+                                            
+                                            {/* LES MANQUEMENTS */}
+                                            {report.missedOpportunities.length > 0 && (
+                                                <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-3 items-center">
+                                                    <span className="text-[8px] font-black text-rose-500 uppercase">Manquements</span>
+                                                    {report.missedOpportunities.map((miss, i) => (
+                                                        <div key={`miss-${i}`} className="relative">
+                                                            <NumberBall number={miss.number} size="md" />
+                                                            <div className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full text-[8px] font-black uppercase border bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-700">
+                                                                Oubli
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -248,10 +273,10 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                 {report.missedOpportunities.length > 0 && (
                                     <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
                                         <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
-                                            <AlertOctagon size={14} className="text-amber-500"/> Signaux Manqués
+                                            <AlertOctagon size={14} className="text-amber-500"/> Manquements (Signaux Manqués)
                                         </h4>
                                         <div className="space-y-3">
-                                            {report.missedOpportunities.slice(0, 4).map((miss, idx) => (
+                                            {report.missedOpportunities.map((miss, idx) => (
                                                 <div key={idx} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 p-3 rounded-2xl flex items-center gap-3">
                                                     <NumberBall number={miss.number} size="sm" />
                                                     <div className="flex-1">
@@ -373,6 +398,11 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                     {bestScenario.action === 'REDUCE' ? 'CORRECTION REQUISE' : 'DÉCOUVERTE MAJEURE'}
                                                 </span>
                                                 {bestScenario.description || `L'algorithme ${bestScenario.algo.toUpperCase()} a isolé ${bestScenario.potentialHits} gagnants (${bestScenario.potentialNumbers.join(', ')}).`}
+                                                {bestScenario.missedNumbers && bestScenario.missedNumbers.length > 0 && (
+                                                    <div className="mt-2 text-rose-400/80 text-[10px] font-medium">
+                                                        Manquements : {bestScenario.missedNumbers.join(', ')}
+                                                    </div>
+                                                )}
                                                 {bestScenario.rankImprovement > 0 && (
                                                     <div className="mt-2 text-emerald-400 font-medium">
                                                         Gain de classement moyen : +{Math.round(bestScenario.rankImprovement)} places

@@ -250,6 +250,7 @@ export const runCounterfactualSimulation = (
         
         const top5 = scores.slice(0, 5).map(x => x.n);
         const hits = top5.filter(n => actualWinners.includes(n));
+        const missedNumbers = actualWinners.filter(n => !top5.includes(n));
         
         // Calculate average rank of winning numbers
         let rankSum = 0;
@@ -259,7 +260,7 @@ export const runCounterfactualSimulation = (
         });
         const avgRank = actualWinners.length > 0 ? rankSum / actualWinners.length : 90;
 
-        return { top5, hits, avgRank, scores };
+        return { top5, hits, missedNumbers, avgRank, scores };
     };
 
     // 2. Baseline Evaluation
@@ -281,6 +282,7 @@ export const runCounterfactualSimulation = (
                 optimalWeight: 1.0,
                 potentialHits: isolated.hits.length,
                 potentialNumbers: isolated.hits,
+                missedNumbers: isolated.missedNumbers,
                 improvement: Math.max(0, baseline.avgRank - isolated.avgRank),
                 action: 'ISOLATE',
                 description: `Si on avait écouté uniquement '${algo}', on aurait eu ${isolated.hits.length} numéros gagnants dans le Top 5.`,
@@ -301,6 +303,7 @@ export const runCounterfactualSimulation = (
                 optimalWeight: (normalizedBoosted as any)[algo],
                 potentialHits: boosted.hits.length,
                 potentialNumbers: boosted.hits,
+                missedNumbers: boosted.missedNumbers,
                 improvement: Math.max(0, baseline.avgRank - boosted.avgRank),
                 action: 'BOOST',
                 description: `Augmenter l'importance de '${algo}' aurait fait remonter les numéros gagnants de ${Math.round(baseline.avgRank - boosted.avgRank)} places en moyenne.`,
@@ -322,6 +325,7 @@ export const runCounterfactualSimulation = (
                     optimalWeight: 0,
                     potentialHits: reduced.hits.length,
                     potentialNumbers: reduced.hits,
+                    missedNumbers: reduced.missedNumbers,
                     improvement: Math.max(0, baseline.avgRank - reduced.avgRank),
                     action: 'REDUCE',
                     description: `L'algorithme '${algo}' a induit le système en erreur. L'ignorer aurait amélioré le classement des gagnants.`,
@@ -359,6 +363,7 @@ export const runCounterfactualSimulation = (
                         optimalWeight: 1.0, // Combined weight
                         potentialHits: synergy.hits.length,
                         potentialNumbers: synergy.hits,
+                        missedNumbers: synergy.missedNumbers,
                         improvement: Math.max(0, baseline.avgRank - synergy.avgRank),
                         action: 'SYNERGY',
                         description: `La combinaison de '${algo1}' et '${algo2}' crée une forte synergie, capturant ${synergy.hits.length} gagnants.`,

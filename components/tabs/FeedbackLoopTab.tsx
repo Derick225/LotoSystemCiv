@@ -330,7 +330,7 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                             {/* Missed Opportunities Analysis */}
                             <div className="space-y-4">
                                 <h3 className="text-xs font-bold uppercase text-rose-500 tracking-widest flex items-center gap-2">
-                                    <AlertTriangle size={14} /> Opportunités Manquées
+                                    <AlertTriangle size={14} /> Manquements (Opportunités Manquées)
                                 </h3>
                                 <div className="grid grid-cols-1 gap-3">
                                     {missedAnalysis.map((analysis) => (
