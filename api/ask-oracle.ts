@@ -146,10 +146,47 @@ export default async function handler(req: Request) {
 
     // --- AUTRES TÂCHES ---
     } else if (task === "analyze") {
-         const prompt = `Analyse Stochastique pour "${drawName}". Historique: ${JSON.stringify(history.slice(0,10))}.`;
+         const prompt = `Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique et fractale pour la loterie (5/90).
+         
+         CONTEXTE :
+         Jeu : "${drawName}".
+         Historique Récent (10 derniers tirages) : ${JSON.stringify(history.slice(0,10))}.
+         Métriques actuelles : ${JSON.stringify(metrics || {})}.
+         
+         ANALYSE REQUISE :
+         Génère une analyse stochastique profonde et structurée. Utilise un ton froid, technique, cyberpunk et probabiliste.
+         
+         FORMAT DE SORTIE ATTENDU (JSON STRICT) :
+         {
+             "trend": "BULLISH" | "BEARISH" | "CHAOTIC" | "STABLE",
+             "regime": "Description du régime fractal actuel (ex: Haute Entropie, Retour à la moyenne)",
+             "hotNumbers": [array de 3 à 5 numéros chauds],
+             "coldNumbers": [array de 3 à 5 numéros froids en écart],
+             "recommendedStrategy": "Nom de la stratégie recommandée (ex: Chasse aux Écarts, Suivi de Tendance)",
+             "confidenceScore": nombre entre 0 et 100,
+             "analysisText": "Texte détaillé de l'analyse (max 4 phrases, style très technique)",
+             "warnings": ["Avertissement 1", "Avertissement 2"]
+         }`;
+         
          const response = await generateWithFallback(genAI, "gemini-3-pro-preview", {
             contents: prompt,
-            config: { responseMimeType: "application/json" } 
+            config: { 
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        trend: { type: Type.STRING },
+                        regime: { type: Type.STRING },
+                        hotNumbers: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                        coldNumbers: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                        recommendedStrategy: { type: Type.STRING },
+                        confidenceScore: { type: Type.NUMBER },
+                        analysisText: { type: Type.STRING },
+                        warnings: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ["trend", "regime", "hotNumbers", "coldNumbers", "recommendedStrategy", "confidenceScore", "analysisText"]
+                }
+            } 
          });
          resultData = JSON.parse(cleanJson(response.text || '{}'));
     } 

@@ -132,14 +132,15 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
         const historyPayload = history.slice(0, 15).map(h => ({ date: h.date, gagnants: h.gagnants }));
         
         const prompt = `
+        Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique et fractale pour la loterie (5/90).
         Analyse les 15 derniers tirages de "${drawName}" :
         ${JSON.stringify(historyPayload)}
 
-        Fournis une analyse logique détaillée, identifie le type de pattern dominant, suggère la prochaine séquence probable, liste les anomalies détectées, donne un conseil stratégique, suggère des numéros à surveiller (focus), et un score d'intuition (0-100).
+        Fournis une analyse logique détaillée et probabiliste, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), suggère la prochaine séquence probable, liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, suggère des numéros à surveiller (focus), et un score d'intuition (0-100).
         `;
 
         const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-3.1-pro-preview",
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
