@@ -1,6 +1,6 @@
 
 import { isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
+import { apiClient } from '../core/api/apiClient';
 import { DrawResult, PredictionHistoryItem, AlgoWeights } from '../types';
 
 export interface LearningStatus {
@@ -21,14 +21,10 @@ export const LearningService = {
         }
 
         try {
-            const { data, error } = await invokeEdgeFunction('self-learn', {
-                body: {
-                    drawName,
-                    currentWeights: customWeights // Injection des poids actuels pour guidage
-                }
+            const data = await apiClient.post<any>('self-learn', {
+                drawName,
+                currentWeights: customWeights // Injection des poids actuels pour guidage
             });
-
-            if (error) throw error;
 
             if (data?.success) {
                 const delta = parseFloat(data.delta || "0");

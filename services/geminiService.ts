@@ -186,3 +186,147 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
         };
     }
 };
+
+/**
+ * Génère un rapport narratif (NarrativeReport) via Gemini Flash.
+ */
+export const getNarrativeAnalysis = async (drawName: string, history: DrawResult[], metrics: any): Promise<any | null> => {
+    if (!navigator.onLine) return null;
+
+    const ai = getGeminiClient();
+    if (!ai) return null;
+
+    try {
+        const prompt = `
+        Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique et fractale pour la loterie (5/90).
+        
+        CONTEXTE :
+        Jeu : "${drawName}".
+        Historique Récent (5 derniers tirages) : ${JSON.stringify(history.slice(0, 5).map(h => h.gagnants))}.
+        Métriques actuelles : ${JSON.stringify(metrics || {})}.
+        
+        ANALYSE REQUISE :
+        Génère une analyse stochastique profonde et structurée. Utilise un ton froid, technique, cyberpunk et probabiliste.
+        
+        Retourne un objet JSON strict avec les propriétés suivantes :
+        - summary: Résumé de l'analyse (texte).
+        - technicalVerdict: Verdict technique court (ex: "Suivi de Tendance").
+        - riskAssessment: Évaluation du risque (ex: "Modéré").
+        - confidence: Score de confiance (nombre entre 0 et 100).
+        `;
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        summary: { type: Type.STRING },
+                        technicalVerdict: { type: Type.STRING },
+                        riskAssessment: { type: Type.STRING },
+                        confidence: { type: Type.NUMBER }
+                    },
+                    required: ["summary", "technicalVerdict", "riskAssessment", "confidence"]
+                }
+            }
+        });
+
+        const jsonText = response.text;
+        if (!jsonText) return null;
+
+        return JSON.parse(jsonText);
+    } catch (e: any) {
+        console.error("Gemini Narrative Error:", e);
+        return null;
+    }
+};
+
+/**
+ * Génère un script Python et une analyse via Gemini Flash.
+ */
+export const getPythonKernelAnalysis = async (drawName: string, history: DrawResult[], modelType: string, computedContext: any): Promise<any | null> => {
+    if (!navigator.onLine) return null;
+
+    const ai = getGeminiClient();
+    if (!ai) return null;
+
+    try {
+        const prompt = `
+        Agis comme un Data Scientist Senior spécialisé en modélisation stochastique.
+        
+        CONTEXTE :
+        Jeu : "${drawName}".
+        Historique Récent : ${JSON.stringify(history.map(h => h.gagnants))}.
+        Modèle demandé : ${modelType}.
+        Contexte calculé : ${JSON.stringify(computedContext || {})}.
+        
+        TÂCHE :
+        1. Génère un script Python (utilisant pandas, numpy, scikit-learn, xgboost, ou pymc3 selon le modèle) qui modéliserait ce comportement.
+        2. Fournis une analyse (insight) des résultats attendus.
+        
+        Retourne un objet JSON strict avec les propriétés suivantes :
+        - script: Le code Python généré (string).
+        - stdout: Les lignes de sortie console simulées (array de strings).
+        - insight: L'analyse des résultats (string).
+        `;
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        script: { type: Type.STRING },
+                        stdout: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        insight: { type: Type.STRING }
+                    },
+                    required: ["script", "stdout", "insight"]
+                }
+            }
+        });
+
+        const jsonText = response.text;
+        if (!jsonText) return null;
+
+        return JSON.parse(jsonText);
+    } catch (e: any) {
+        console.error("Gemini Python Kernel Error:", e);
+        return null;
+    }
+};
+
+/**
+ * Analyse OCR d'un ticket de loterie via Gemini Flash Image.
+ */
+export const scanTicket = async (imageBase64: string): Promise<any | null> => {
+    if (!navigator.onLine) throw new Error("Mode hors-ligne : Scanner indisponible.");
+
+    const ai = getGeminiClient();
+    if (!ai) throw new Error("Clé API Gemini manquante.");
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image', 
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+                    { text: "ANALYSE OCR LOTO. Extrais les données de ce ticket ou résultat. Format strict: Date (YYYY-MM-DD), 5 Numéros Gagnants, 5 Numéros Machine (si présents). Si illisible, renvoie des tableaux vides. Retourne uniquement un objet JSON valide avec les clés 'date', 'gagnants' et 'machine'." }
+                ]
+            }
+        });
+
+        const jsonStr = response.text;
+        if (!jsonStr) throw new Error("Réponse OCR vide.");
+
+        // Clean JSON string
+        const cleanedJsonStr = jsonStr.replace(/```json\n?|\n?```/g, '').trim();
+        return JSON.parse(cleanedJsonStr);
+    } catch (e: any) {
+        console.error("Gemini OCR Error:", e);
+        throw e;
+    }
+};

@@ -3,7 +3,7 @@ import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
 import { DRAW_SCHEDULE } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
-import { invokeEdgeFunction } from './apiClient';
+import { apiClient } from '../core/api/apiClient';
 
 const CACHE_PREFIX = 'nexus_cache_history_';
 
@@ -102,10 +102,7 @@ export const lotteryService = {
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   if (!isSupabaseConfigured()) return 0;
   try {
-    const { data, error } = await invokeEdgeFunction('cron-sync', { 
-      body: { drawName, manualTrigger: true } 
-    });
-    if (error) throw error;
+    const data = await apiClient.post<{ count: number }>('cron-sync', { drawName, manualTrigger: true });
     return data?.count || 0;
   } catch (e: any) {
     console.warn("Cloud Sync Failover:", e?.message);
@@ -118,10 +115,8 @@ export const checkAndSyncRecentResults = syncDrawExternal;
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
   if (!isSupabaseConfigured()) return false;
   try {
-    const { error } = await invokeEdgeFunction('compute-nexus-analytics', {
-      body: { drawName }
-    });
-    return !error;
+    await apiClient.post('compute-nexus-analytics', { drawName });
+    return true;
   } catch (e) {
     return false;
   }

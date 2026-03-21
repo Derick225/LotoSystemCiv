@@ -1,6 +1,6 @@
 
 import { isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
+import { getNarrativeAnalysis } from './geminiService';
 import type { NarrativeReport, DrawResult, EntropyMetric, ChiSquareMetric } from "../types";
 
 /**
@@ -74,21 +74,9 @@ export const generateNarrativeReport = async (
     };
     
     try {
-        const { data, error } = await invokeEdgeFunction('ask-oracle', {
-            body: {
-                task: 'narrative',
-                drawName,
-                history: history.slice(0, 5),
-                metrics: contextData.metrics
-            }
-        });
+        const data = await getNarrativeAnalysis(drawName, history, contextData.metrics);
 
-        if (error) {
-            console.warn("Narrative Cloud Error:", error);
-            return fallbackReport;
-        }
-        
-        if (data) return data as NarrativeReport;
+        if (data) return data;
         
         return fallbackReport;
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { ScanBarcode, Camera, Upload, AlertCircle, CheckCircle, RefreshCw, X, FileText } from 'lucide-react';
-import { invokeEdgeFunction } from '../services/apiClient';
+import { scanTicket } from '../services/geminiService';
 import { useNexus } from './NexusProvider';
 import { useToast } from './ui/Toast';
 import { NumberBall } from './NumberBall';
@@ -24,12 +24,8 @@ export const TicketScanner: React.FC = () => {
             // 1. Compression Client-Side (Canvas)
             const compressedBase64 = await compressImage(file);
             
-            // 2. Appel Edge Function (Gemini Vision)
-            const { data, error } = await invokeEdgeFunction('vision-ocr', {
-                body: { imageBase64: compressedBase64 }
-            });
-
-            if (error) throw error;
+            // 2. Appel Gemini Vision
+            const data = await scanTicket(compressedBase64);
 
             if (data && data.gagnants && Array.isArray(data.gagnants)) {
                 setScannedData({

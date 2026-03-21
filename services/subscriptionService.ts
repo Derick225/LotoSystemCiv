@@ -1,6 +1,6 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
+import { apiClient } from '../core/api/apiClient';
 import { initiateRealPayment, PaymentConfig } from './paymentService';
 import type { SubscriptionState } from '../types';
 
@@ -105,15 +105,13 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
     // 1. Try Backend Edge Function (Preferred for Security)
     if (isSupabaseConfigured()) {
         try {
-            const { data, error } = await invokeEdgeFunction('init-payment', {
-                body: {
-                    userId,
-                    amount: SUBSCRIPTION_COST,
-                    provider
-                }
+            const data = await apiClient.post<{ payment_url: string }>('init-payment', {
+                userId,
+                amount: SUBSCRIPTION_COST,
+                provider
             });
 
-            if (!error && data?.payment_url) {
+            if (data?.payment_url) {
                 window.location.href = data.payment_url;
                 return true;
             }

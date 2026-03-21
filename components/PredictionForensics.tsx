@@ -5,7 +5,7 @@ import { NumberBall } from './NumberBall';
 import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from '../services/predictionEngine';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
-import { invokeEdgeFunction } from '../services/apiClient';
+import { apiClient } from '../core/api/apiClient';
 import { useToast } from './ui/Toast';
 import { useNexus } from './NexusProvider';
 import { 
@@ -92,14 +92,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             });
 
             if (isSupabaseConfigured()) {
-                await invokeEdgeFunction('process-rlhf', {
-                    body: {
-                        predictionId: report.predictionId,
-                        rating: userRating,
-                        drawName: report.drawName,
-                        actualHits: report.matches.filter(m => m.errorType === 'Hit').length,
-                        user_comment: userComment
-                    }
+                await apiClient.post('process-rlhf', {
+                    predictionId: report.predictionId,
+                    rating: userRating,
+                    drawName: report.drawName,
+                    actualHits: report.matches.filter(m => m.errorType === 'Hit').length,
+                    user_comment: userComment
                 });
             }
 

@@ -1,6 +1,6 @@
 import type { DrawResult } from '../types';
 import { isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
+import { apiClient } from '../core/api/apiClient';
 import { DRAW_SCHEDULE } from '../constants';
 
 const getMonthParam = (date: Date) => {
@@ -35,13 +35,12 @@ export const ExternalProviderService = {
             const targetUpper = drawName.toUpperCase();
 
             for (const monthParam of targetMonths) {
-                const { data: resultsData, error } = await invokeEdgeFunction('proxy-results', {
-                    body: { month: monthParam }
-                });
+                try {
+                    const resultsData = await apiClient.post<any>('proxy-results', { month: monthParam });
 
-                if (error || !resultsData?.success) continue;
+                    if (!resultsData?.success) continue;
 
-                const weeks = resultsData.drawsResultsWeekly || [];
+                    const weeks = resultsData.drawsResultsWeekly || [];
                 for (const week of weeks) {
                     const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
                     const year = yearMatch ? yearMatch[0] : now.getFullYear().toString();
@@ -86,6 +85,9 @@ export const ExternalProviderService = {
                             }
                         }
                     }
+                    }
+                } catch (e) {
+                    console.warn(`Failed to fetch results for ${monthParam}`, e);
                 }
             }
 

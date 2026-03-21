@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from './supabaseClient';
-import { invokeEdgeFunction } from './apiClient';
+import { getPythonKernelAnalysis } from './geminiService';
 import { DrawResult, PythonAnalysisResult, NotebookCell, AlgoWeights } from "../types";
 import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimulation } from './mathService';
 
@@ -201,15 +201,12 @@ export const runDeepPythonAnalysis = async (
             anomalies: "Detected high-gap recurrence (>15 draws) on key vectors."
         };
 
-        const { data, error } = await invokeEdgeFunction('ask-oracle', {
-            body: {
-                task: 'python_kernel',
-                drawName,
-                dataset: history.slice(0, 5), 
-                modelType,
-                computedContext: contextPayload 
-            }
-        });
+        const data = await getPythonKernelAnalysis(
+            drawName,
+            history.slice(0, 5),
+            modelType,
+            contextPayload
+        );
 
         if (onProgress) onProgress(90); // Oracle returned
 
