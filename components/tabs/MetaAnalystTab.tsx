@@ -272,7 +272,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             </div>
 
             {/* 3. SCENARIO SELECTOR */}
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {result.scenarios.map((scenario) => (
                     <ScenarioCard 
                         key={scenario.id}

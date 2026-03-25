@@ -180,7 +180,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     const platinumStats = useMemo(() => {
         if (platinumAudits.length === 0) return [];
-        const stats: Record<string, number> = { 'Alpha Core': 0, 'Beta Flow': 0, 'Gamma Burst': 0 };
+        const stats: Record<string, number> = { 'Alpha Core': 0, 'Beta Flow': 0, 'Gamma Burst': 0, 'Delta Convergence': 0 };
         
         platinumAudits.forEach(audit => {
             audit.timelinePerformance.forEach(tp => {
@@ -192,7 +192,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         return Object.entries(stats).map(([type, hits]) => ({
             name: type.split(' ')[0], 
             hits: hits,
-            color: type.includes('Alpha') ? '#10b981' : type.includes('Beta') ? '#6366f1' : '#f43f5e'
+            color: type.includes('Alpha') ? '#10b981' : type.includes('Beta') ? '#6366f1' : type.includes('Gamma') ? '#f43f5e' : '#f59e0b'
         })).sort((a, b) => b.hits - a.hits);
     }, [platinumAudits]);
 

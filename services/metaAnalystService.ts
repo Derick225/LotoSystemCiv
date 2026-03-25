@@ -73,7 +73,8 @@ const sampleFromVector = (
         const score = vector[i];
         if (score > 1) {
             // Softmax-like temperature scaling
-            const adjustedScore = Math.pow(score, 1 / temperature);
+            let adjustedScore = Math.pow(score, 1 / temperature);
+            if (!isFinite(adjustedScore) || adjustedScore > 1e100) adjustedScore = 1e100;
             candidates.push({ n: i, score: adjustedScore });
         }
     }
@@ -123,87 +124,132 @@ export async function generatePlatinumPrediction(
   if (history.length < 10) throw new Error("Dataset insuffisant.");
 
   // 1. ACQUISITION DES SIGNAUX BRUTS (Base Prediction)
-  // On réutilise le moteur de prédiction standard pour obtenir les breakdowns par numéro
   const weights = await getAlgoWeights(drawName);
   const masterPred = await generateMasterPrediction(drawName, history, weights, metrics, symbioticContext || undefined);
   const breakdowns = masterPred.breakdown || {};
 
   // 2. CONSTRUCTION DU VECTEUR CONSENSUS (TENSOR AGGREGATION)
-  // On aplatit tous les signaux (freq, gap, spectral, etc.) dans un seul vecteur maître
-  const consensusVector = new Float64Array(MAX_NUM + 1); // Index 1-90
+  const consensusVector = new Float64Array(MAX_NUM + 1);
+  const momentumVector = new Float64Array(MAX_NUM + 1);
+  const gapVector = new Float64Array(MAX_NUM + 1);
+  const spectralVector = new Float64Array(MAX_NUM + 1);
 
   for (let i = 1; i <= MAX_NUM; i++) {
       const bd = breakdowns[i];
       if (!bd) continue;
       
-      let score = 0;
-      // Agrégation non-linéaire : On favorise les signaux forts concordants
-      // Si plusieurs algos donnent > 50, le score explose (Résonance)
-      const values = Object.values(bd).filter(v => typeof v === 'number') as number[];
-      const strongSignals = values.filter(v => v > 60).length;
-      const baseSum = values.reduce((a,b) => a+b, 0);
+      // Extraction des signaux spécifiques
+      const freq = bd.frequency || 0;
+      const gap = bd.gap || 0;
+      const momentum = bd.momentum || 0;
+      const spectral = bd.spectral || 0;
+      const ai = bd.ai_intuition || 0;
+      const fractal = bd.fractal || 0;
+      const lstm = bd.lstm || 0;
+      const bayes = bd.bayes || 0;
+      const markov = bd.markov || 0;
+      const poisson = bd.poisson || 0;
+      const quantum = bd.quantum_entanglement || 0;
+      const fractalResonance = bd.fractal_resonance || 0;
+
+      momentumVector[i] = momentum;
+      gapVector[i] = gap;
+      spectralVector[i] = spectral;
+
+      // Agrégation non-linéaire avancée (Quantum Resonance)
+      const values = [freq, gap, momentum, spectral, ai, fractal, lstm, bayes, markov, poisson, quantum, fractalResonance].filter(v => v > 0);
+      const strongSignals = values.filter(v => v > 65).length;
+      const criticalSignals = values.filter(v => v > 85).length;
       
-      // Formule de Fusion
-      score = baseSum;
-      if (strongSignals >= 2) score *= 1.2;
-      if (strongSignals >= 3) score *= 1.5;
+      let baseSum = values.reduce((a, b) => a + b, 0);
+      
+      // Formule de Fusion Platinum v11
+      let score = baseSum * (1 + (strongSignals * 0.15)) * (1 + (criticalSignals * 0.3));
+      
+      // Bonus de résonance fractale et quantique
+      if (fractal > 70 && spectral > 70) score *= 1.4;
+      if (quantum > 80) score *= 1.25;
+      if (fractalResonance > 80) score *= 1.25;
+      
+      // Pénalité de bruit (si trop de signaux moyens sans pic)
+      if (strongSignals === 0 && values.length > 3) score *= 0.8;
+
+      // Bonus Symbiotique (si l'utilisateur a un biais fort et que le numéro est dans son aura)
+      if (symbioticContext && symbioticContext.spatialHotZones && symbioticContext.spatialHotZones.includes(i)) {
+          score *= 1.2; // 20% boost for being in a spatial hot zone
+      }
+      if (symbioticContext && symbioticContext.forestVotes && symbioticContext.forestVotes[i]) {
+          score *= (1 + (symbioticContext.forestVotes[i] * 0.1)); // Up to 10% boost based on forest votes
+      }
 
       consensusVector[i] = score;
   }
 
   // Normalisation (0-100) pour l'affichage et l'échantillonnage
   const normalizedVector = normalizeVector(consensusVector);
+  const normalizedMomentum = normalizeVector(momentumVector);
+  const normalizedGap = normalizeVector(gapVector);
+  const normalizedSpectral = normalizeVector(spectralVector);
 
   // 3. ANALYSE DU RÉGIME
   const entropyScore = computeVectorEntropy(normalizedVector);
   let regime: 'STABLE' | 'TRANSITION' | 'CHAOTIC' = 'TRANSITION';
   
-  if (entropyScore < 0.75) regime = 'STABLE'; // Pics très nets, prédiction confiante
-  else if (entropyScore > 0.90) regime = 'CHAOTIC'; // Distribution plate, bruit élevé
+  if (entropyScore < 0.72) regime = 'STABLE';
+  else if (entropyScore > 0.88) regime = 'CHAOTIC';
 
   // 4. GÉNÉRATION DES SCÉNARIOS STRATÉGIQUES
-  // Au lieu de "Personnages", on génère des profils de risque mathématiques
-  
   const scenarios: PlatinumScenario[] = [];
 
-  // Scénario A : CONSERVATEUR (Low Temperature)
-  // Prend les pics les plus hauts du consensus. Minimise la variance.
+  // Scénario A : Alpha Core (Top absolu, variance minimale)
   scenarios.push({
       id: 'alpha',
       name: 'Alpha Core',
-      description: 'Convergence maximale des modèles. Cible les pics de probabilité les plus stables.',
-      numbers: sampleFromVector(normalizedVector, DRAW_SIZE, 0.4), // Température basse
-      probability: 95,
+      description: 'Convergence maximale. Sélection déterministe des pics de résonance quantique.',
+      numbers: sampleFromVector(normalizedVector, DRAW_SIZE, 0.1), // Température quasi-nulle
+      probability: 92,
       risk: 'LOW',
       color: '#10b981' // Emerald
   });
 
-  // Scénario B : ÉQUILIBRÉ (Mid Temperature)
-  // Mélange les favoris et les outsiders forts (Zone médiane).
+  // Scénario B : Beta Flow (Équilibre dynamique)
   scenarios.push({
       id: 'beta',
       name: 'Beta Flow',
-      description: 'Équilibre dynamique. Intègre les vecteurs secondaires à fort potentiel de rupture.',
-      numbers: sampleFromVector(normalizedVector, DRAW_SIZE, 1.0), // Température moyenne
-      probability: 85,
+      description: 'Équilibre stochastique. Intègre les vecteurs secondaires à fort potentiel de rupture.',
+      numbers: sampleFromVector(normalizedVector, DRAW_SIZE, 0.85),
+      probability: 78,
       risk: 'MEDIUM',
       color: '#6366f1' // Indigo
   });
 
-  // Scénario C : AGRESSIF (High Temperature)
-  // Cherche dans la "queue" de distribution des signaux forts mais non-dominants (Black Swans).
+  // Scénario C : Gamma Burst (Haute variance, focus sur le Momentum)
+  const gammaVector = new Float64Array(MAX_NUM + 1);
+  for(let i=1; i<=MAX_NUM; i++) gammaVector[i] = (normalizedVector[i] * 0.4) + (normalizedMomentum[i] * 0.6);
   scenarios.push({
       id: 'gamma',
       name: 'Gamma Burst',
-      description: 'Haute variance. Cible les anomalies statistiques et les signaux cachés.',
-      numbers: sampleFromVector(normalizedVector, DRAW_SIZE, 1.8), // Température haute
-      probability: 60,
+      description: 'Haute vélocité. Cible les anomalies statistiques et les numéros en accélération (Momentum).',
+      numbers: sampleFromVector(gammaVector, DRAW_SIZE, 1.2),
+      probability: 65,
       risk: 'HIGH',
       color: '#f43f5e' // Rose
   });
 
+  // Scénario D : Delta Convergence (Stratégie de l'Écart)
+  const deltaVector = new Float64Array(MAX_NUM + 1);
+  for(let i=1; i<=MAX_NUM; i++) deltaVector[i] = (normalizedVector[i] * 0.3) + (normalizedGap[i] * 0.7);
+  scenarios.push({
+      id: 'delta',
+      name: 'Delta Convergence',
+      description: 'Théorie des écarts. Identifie les numéros en dormance profonde prêts pour une correction.',
+      numbers: sampleFromVector(deltaVector, DRAW_SIZE, 0.9),
+      probability: 70,
+      risk: 'MEDIUM',
+      color: '#f59e0b' // Amber
+  });
+
   // 5. CALCUL DE LA COHÉRENCE GLOBALE
-  // Inverse de l'entropie : plus c'est bas, plus le système est "sûr" de lui
   const coherence = Math.round((1 - entropyScore) * 100);
 
   return {
@@ -211,7 +257,7 @@ export async function generatePlatinumPrediction(
       drawName,
       timestamp: Date.now(),
       confidence: coherence,
-      consensusVector: Array.from(normalizedVector), // Convert to standard array for JSON
+      consensusVector: Array.from(normalizedVector),
       scenarios,
       coherence,
       regime,
