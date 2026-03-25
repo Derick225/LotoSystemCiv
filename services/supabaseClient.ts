@@ -22,7 +22,7 @@ const SUPABASE_ANON_KEY = cleanEnv(
 
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
-    if (!url || url.includes('your-project-url') || url.includes('placeholder')) return false;
+    if (!url || url.includes('your-project-url') || url.includes('placeholder') || url.includes('your-project-ref')) return false;
     const u = new URL(url);
     return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
   } catch { return false; }
@@ -59,7 +59,7 @@ const createSafeClient = (): SupabaseClient => {
             global: { 
                 headers: { 'x-nexus-client': 'platinum-v12-prod' },
                 fetch: (url, options) => {
-                    return fetch(url, { ...options, signal: AbortSignal.timeout(20000) }); // Global Timeout 20s
+                    return fetch(url, options);
                 }
             },
         });

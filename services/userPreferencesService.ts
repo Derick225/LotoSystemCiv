@@ -67,15 +67,17 @@ export const isInWatchlist = (number: number): boolean => {
 export const syncWatchlist = async () => {
     if (!isSupabaseConfigured()) return;
     try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("syncWatchlist timeout")), 5000));
+        const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (session) {
             const localList = getWatchlist();
-            // Upsert intelligent : on ne lit pas avant, on écrase car le local est la vérité utilisateur active
-            await supabase.from('user_preferences').upsert({ 
+            const upsertPromise = supabase.from('user_preferences').upsert({ 
                 user_id: session.user.id, 
                 watchlist: localList, 
                 updated_at: new Date().toISOString() 
             });
+            await Promise.race([upsertPromise, timeoutPromise]);
         }
     } catch (e) { console.warn("Sync Watchlist failed", e); }
 };
@@ -212,11 +214,13 @@ export const hydrateUserData = async (userId: string) => {
     if (!isSupabaseConfigured()) return;
     
     try {
-        const { data, error } = await supabase
+        const queryPromise = supabase
             .from('user_preferences')
             .select('watchlist, saved_tickets, settings')
             .eq('user_id', userId)
             .single();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 5000));
+        const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
 
         if (error || !data) {
             // Si pas de données distantes, on pousse les locales (First Sync)
@@ -224,11 +228,12 @@ export const hydrateUserData = async (userId: string) => {
             // On sauvegarde aussi les tickets initiaux
             const tickets = getSavedTickets();
             if(tickets.length > 0) {
-                 await supabase.from('user_preferences').upsert({
+                 const upsertPromise = supabase.from('user_preferences').upsert({
                     user_id: userId,
                     saved_tickets: tickets,
                     updated_at: new Date().toISOString()
                 });
+                await Promise.race([upsertPromise, timeoutPromise]);
             }
             return;
         }

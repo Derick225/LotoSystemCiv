@@ -12,11 +12,14 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
         return { status: 'active', daysLeft: 30, expiresAt: new Date(Date.now() + 86400000 * 30).toISOString(), plan: 'premium' };
     }
 
-    const { data, error } = await supabase
-        .from('user_preferences')
-        .select('subscription')
-        .eq('user_id', userId)
-        .single();
+    try {
+        const queryPromise = supabase
+            .from('user_preferences')
+            .select('subscription')
+            .eq('user_id', userId)
+            .single();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("checkSubscriptionStatus timeout")), 5000));
+        const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
 
     const now = new Date();
     
@@ -64,6 +67,10 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
         expiresAt: sub.expires_at,
         plan: 'premium'
     };
+    } catch (e) {
+        console.warn("checkSubscriptionStatus error or timeout:", e);
+        return { status: 'active', daysLeft: 30, expiresAt: new Date(Date.now() + 86400000 * 30).toISOString(), plan: 'premium' };
+    }
 };
 
 export const subscribeToSubscriptionUpdates = (userId: string, onUpdate: (sub: SubscriptionState) => void) => {
