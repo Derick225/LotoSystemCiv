@@ -1,6 +1,6 @@
 
 import React, { useState, Suspense, lazy, useEffect } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { SmartInsights } from '../SmartInsights';
 import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box, TrendingUp } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
@@ -8,6 +8,7 @@ import { ChaosAttractor } from '../ChaosAttractor';
 import { calculateGapEfficiency } from '../../services/mathService';
 import { GapEfficiencyMeter } from '../GapEfficiencyMeter';
 import type { GapEfficiency } from '../../types';
+import { audioEngine } from '../../utils/audioEngine';
 
 const StatsTab = lazy(() => import('./StatsTab').then(m => ({ default: m.StatsTab })));
 const SpectralTab = lazy(() => import('./SpectralTab').then(m => ({ default: m.SpectralTab })));
@@ -18,7 +19,9 @@ const ClusteringTab = lazy(() => import('./ClusteringTab').then(m => ({ default:
 const AcademyTab = lazy(() => import('./AcademyTab').then(m => ({ default: m.AcademyTab })));
 
 export const SignalHub: React.FC = () => {
-    const { history, drawName, currentDrawName } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const drawName = useNexusStore(state => state.drawName);
+    const currentDrawName = useNexusStore(state => state.currentDrawName);
     const activeDraw = drawName || currentDrawName;
     
     const [activeSubTab, setActiveSubTab] = useState('stats');
@@ -66,7 +69,7 @@ export const SignalHub: React.FC = () => {
                                 {tabs.map((tab) => (
                                     <button 
                                         key={tab.id}
-                                        onClick={() => setActiveSubTab(tab.id)}
+                                        onClick={() => { audioEngine.play('click'); setActiveSubTab(tab.id); }}
                                         className={`
                                             px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
                                             ${activeSubTab === tab.id 

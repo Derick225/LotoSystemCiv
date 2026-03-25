@@ -1,10 +1,11 @@
 
 import React from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 export const FractalTab: React.FC<{ drawName: string }> = () => {
-  const { regime, loading } = useNexus();
+  const regime = useNexusStore(state => state.regime);
+  const loading = useNexusStore(state => state.loading);
 
   if (loading) return (
       <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 animate-pulse">

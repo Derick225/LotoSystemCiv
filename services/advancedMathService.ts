@@ -386,3 +386,85 @@ export const calculateAiIntuition = (history: DrawResult[], metrics: any): Recor
 
     return scores;
 };
+
+// --- QUANTUM ENTANGLEMENT (Correlation Analysis) ---
+// Identifies numbers that are "entangled" (appear together more often than chance).
+export const calculateQuantumEntanglementScores = (history: DrawResult[]): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    if (history.length < 10) return scores;
+
+    const lastDraw = history[0].gagnants;
+    const entanglementMatrix = new Map<number, Map<number, number>>();
+    const sample = history.slice(0, 100);
+
+    // Build Correlation Matrix
+    sample.forEach(d => {
+        d.gagnants.forEach(n1 => {
+            if (!entanglementMatrix.has(n1)) entanglementMatrix.set(n1, new Map());
+            const row = entanglementMatrix.get(n1)!;
+            d.gagnants.forEach(n2 => {
+                if (n1 !== n2) {
+                    row.set(n2, (row.get(n2) || 0) + 1);
+                }
+            });
+        });
+    });
+
+    // Calculate Entanglement Score based on Last Draw
+    for (let n = 1; n <= 90; n++) {
+        let entanglement = 0;
+        lastDraw.forEach(lastNum => {
+            const row = entanglementMatrix.get(lastNum);
+            if (row) {
+                entanglement += (row.get(n) || 0);
+            }
+        });
+
+        // Normalize based on sample size and draw size
+        scores[n] = Math.min(100, (entanglement / (sample.length * 0.1)) * 100);
+    }
+
+    return scores;
+};
+
+// --- FRACTAL RESONANCE (Self-Similarity) ---
+// Detects if a number follows a self-similar (fractal) pattern in time.
+export const calculateFractalResonance = (history: DrawResult[]): Record<number, number> => {
+    const scores: Record<number, number> = {};
+    const N = 90;
+    const limit = Math.min(history.length, 200);
+    
+    for (let n = 1; n <= N; n++) {
+        const appearances: number[] = [];
+        for (let i = 0; i < limit; i++) {
+            if (history[i].gagnants.includes(n)) {
+                appearances.push(i);
+            }
+        }
+
+        if (appearances.length < 3) {
+            scores[n] = 30; // Neutral
+            continue;
+        }
+
+        // Calculate gaps between appearances
+        const gaps: number[] = [];
+        for (let i = 0; i < appearances.length - 1; i++) {
+            gaps.push(appearances[i+1] - appearances[i]);
+        }
+
+        // Check for self-similarity (ratio of consecutive gaps)
+        let resonance = 0;
+        for (let i = 0; i < gaps.length - 1; i++) {
+            const ratio = gaps[i] / (gaps[i+1] || 1);
+            // Golden ratio or integer ratios are "resonant"
+            if (Math.abs(ratio - 1.618) < 0.2 || Math.abs(ratio - 1) < 0.1 || Math.abs(ratio - 2) < 0.2) {
+                resonance += 1;
+            }
+        }
+
+        scores[n] = Math.min(100, 40 + (resonance / (gaps.length || 1)) * 60);
+    }
+
+    return scores;
+};

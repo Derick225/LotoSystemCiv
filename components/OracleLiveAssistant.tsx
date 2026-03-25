@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { Mic, MicOff, X, Radio, Activity, Waves, Command, Zap, BrainCircuit } from 'lucide-react';
 import { useToast } from './ui/Toast';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { ALL_DRAWS } from '../constants';
 
 interface OracleLiveAssistantProps {
@@ -73,7 +73,7 @@ function encodeAudioToBase64(bytes: Uint8Array): string {
 
 export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { lastPrediction, regime, setInspectingNumber, setDrawName, refreshData, globalWeights } = useNexus();
+    const { lastPrediction, regime, setInspectingNumber, setDrawName, refreshData, globalWeights } = useNexusStore();
     
     const [isActive, setIsActive] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);

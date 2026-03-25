@@ -4,6 +4,7 @@ import { useDailySummary } from '../hooks/useLottery';
 import { NumberBall } from './NumberBall';
 import { Eye, Bell, X, CheckCircle2, Clock, Zap } from 'lucide-react';
 import { useToast } from './ui/Toast';
+import { audioEngine } from '../utils/audioEngine';
 
 export const WatchlistMonitor: React.FC = () => {
     const { showToast } = useToast();
@@ -32,7 +33,9 @@ export const WatchlistMonitor: React.FC = () => {
     }, [summary, watchlist]);
 
     const handleRemove = (num: number) => {
+        audioEngine.play('click');
         removeFromWatchlist(num);
+        audioEngine.play('success');
         showToast(`Numéro ${num} retiré des favoris.`, "info");
         // Force update trick not needed as React will re-render parent or we can use local state if strictly needed, 
         // but typically watchlist management should be in a hook/context if we want full reactivity.

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { adminService, AdminUser } from '../../services/adminService';
 import { useToast } from '../ui/Toast';
 import { Users, Shield, ShieldAlert, Trash2, Search, UserCheck, Crown, Clock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const UserManagement: React.FC = () => {
     const { showToast } = useToast();
@@ -13,6 +14,7 @@ export const UserManagement: React.FC = () => {
     const [processingId, setProcessingId] = useState<string | null>(null);
 
     const loadUsers = async () => {
+        audioEngine.play('scan');
         setLoading(true);
         setError(null);
         try {
@@ -22,10 +24,12 @@ export const UserManagement: React.FC = () => {
             } else {
                 throw new Error("Format de données invalide reçu du serveur.");
             }
+            audioEngine.play('success');
         } catch (e: any) {
             console.error(e);
             setError(e.message || "Erreur de chargement.");
             showToast(e.message || "Erreur chargement utilisateurs", "error");
+            audioEngine.play('error');
         } finally {
             setLoading(false);
         }
@@ -36,16 +40,19 @@ export const UserManagement: React.FC = () => {
     }, []);
 
     const handleRoleUpdate = async (userId: string, currentRole: string) => {
+        audioEngine.play('click');
         const newRole = currentRole === 'admin' ? 'user' : 'admin';
         if (!confirm(`Voulez-vous vraiment passer cet utilisateur en ${newRole.toUpperCase()} ?`)) return;
 
         setProcessingId(userId);
         try {
             await adminService.updateUserRole(userId, newRole);
+            audioEngine.play('success');
             showToast(`Rôle mis à jour : ${newRole}`, "success");
             // Mise à jour optimiste locale
             setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
         } catch (e: any) {
+            audioEngine.play('error');
             showToast("Erreur mise à jour rôle", "error");
         } finally {
             setProcessingId(null);
@@ -53,14 +60,17 @@ export const UserManagement: React.FC = () => {
     };
 
     const handleDelete = async (userId: string) => {
+        audioEngine.play('click');
         if (!confirm("ATTENTION: Cette action est irréversible. Supprimer l'utilisateur ?")) return;
 
         setProcessingId(userId);
         try {
             await adminService.deleteUser(userId);
+            audioEngine.play('success');
             showToast("Utilisateur supprimé", "success");
             setUsers(prev => prev.filter(u => u.id !== userId));
         } catch (e: any) {
+            audioEngine.play('error');
             showToast("Erreur suppression", "error");
         } finally {
             setProcessingId(null);

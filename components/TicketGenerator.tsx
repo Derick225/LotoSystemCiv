@@ -7,6 +7,7 @@ import { saveTicket } from '../services/userPreferencesService';
 import { useToast } from './ui/Toast';
 import { Wand2, RefreshCw, Save, Sliders, ShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { audioEngine } from '../utils/audioEngine';
 
 interface TicketGeneratorProps {
     prediction: Prediction | null;
@@ -24,6 +25,7 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ prediction, dr
     });
 
     const generate = () => {
+        audioEngine.play('click');
         if (!prediction) return;
         
         // Pool de numéros : Suggestions + Candidats (Outsiders)
@@ -62,16 +64,19 @@ export const TicketGenerator: React.FC<TicketGeneratorProps> = ({ prediction, dr
         }
 
         setTicket(bestCandidate);
+        audioEngine.play('success');
         showToast(`Ticket généré (Score Qualité: ${bestScore})`, "success");
     };
 
     const handleSave = async () => {
+        audioEngine.play('click');
         if (ticket.length !== 5) return;
         await saveTicket({
             numbers: ticket,
             drawName,
             strategy: 'Générateur Tactique'
         });
+        audioEngine.play('success');
         showToast("Ticket sauvegardé.", "success");
     };
 

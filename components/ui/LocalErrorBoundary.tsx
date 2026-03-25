@@ -34,6 +34,10 @@ export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps,
 
   // Restore the module by resetting error state
   handleReload = () => {
+    try {
+      // @ts-ignore
+      if (window.audioEngine) window.audioEngine.play('click');
+    } catch (e) {}
     this.setState({ hasError: false, error: null });
   };
 

@@ -2,6 +2,7 @@
 import { isSupabaseConfigured } from './supabaseClient';
 import { getNarrativeAnalysis } from './geminiService';
 import type { NarrativeReport, DrawResult, EntropyMetric, ChiSquareMetric } from "../types";
+import { AppError, logError } from '../utils/AppError';
 
 /**
  * Génère un rapport narratif sur l'état du flux stochastique actuel.
@@ -80,8 +81,8 @@ export const generateNarrativeReport = async (
         
         return fallbackReport;
 
-    } catch (e) {
-        console.warn("Nexus Cloud Narrative failed. Using mathematical fallback.", e);
+    } catch (e: any) {
+        logError(new AppError(e.message || "Nexus Cloud Narrative failed. Using mathematical fallback.", "NARRATIVE_ERROR", "low", { error: e }), { source: 'generateNarrativeReport' });
         return fallbackReport;
     }
 };

@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { formatDate, syncDrawExternal } from '../../services/lotteryService';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { RefreshCw, Search, Activity, Clock, Binary, Download, GitCompare, SearchCode, Calendar, Layers, Eye } from 'lucide-react';
 import { ExportService } from '../../services/exportService';
 import { useToast } from '../ui/Toast';
@@ -100,7 +100,9 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
 };
 
 export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
-  const { currentDrawName, refreshData, loading } = useNexus();
+  const currentDrawName = useNexusStore(state => state.currentDrawName);
+  const refreshData = useNexusStore(state => state.refreshData);
+  const loading = useNexusStore(state => state.loading);
   const { showToast } = useToast();
   
   const [searchTerm, setSearchTerm] = useState('');

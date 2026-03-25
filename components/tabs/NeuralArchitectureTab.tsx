@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Network, Activity, Cpu, Zap, Layers, Grid, Share2, RefreshCw } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface NodeData { 
     id: number; 
@@ -32,7 +33,9 @@ const COMMUNITY_BG = [
 ];
 
 export const NeuralArchitectureTab: React.FC = () => {
-    const { correlationMatrix, drawName, spectral } = useNexus();
+    const correlationMatrix = useNexusStore(state => state.correlationMatrix);
+    const drawName = useNexusStore(state => state.drawName);
+    const spectral = useNexusStore(state => state.spectral);
     const { showToast } = useToast();
     
     // State
@@ -83,6 +86,7 @@ export const NeuralArchitectureTab: React.FC = () => {
 
     // --- ALGORITHME DE MARCHE ALÉATOIRE PONDÉRÉE ---
     const generateNeuralPath = async () => {
+        audioEngine.play('click');
         if (!selectedNodeData) return;
         setIsWalking(true);
         setGeneratedPath([]);
@@ -145,10 +149,12 @@ export const NeuralArchitectureTab: React.FC = () => {
         }
 
         setIsWalking(false);
+        audioEngine.play('success');
         showToast("Chemin neuronal tracé.", "success");
     };
 
     const savePath = async () => {
+        audioEngine.play('click');
         if (generatedPath.length < 5) return;
         const sortedPath = [...generatedPath].sort((a, b) => a - b);
         await saveTicket({
@@ -156,6 +162,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             drawName,
             strategy: `Architecture (Source #${selectedNodeId})`
         });
+        audioEngine.play('success');
         showToast("Chemin sauvegardé dans le Wallet.", "success");
     };
 
@@ -225,7 +232,11 @@ export const NeuralArchitectureTab: React.FC = () => {
                             return (
                                 <button
                                     key={node.id}
-                                    onClick={() => { setSelectedNodeId(node.id === selectedNodeId ? null : node.id); setGeneratedPath([]); }}
+                                    onClick={() => { 
+                                        audioEngine.play('click');
+                                        setSelectedNodeId(node.id === selectedNodeId ? null : node.id); 
+                                        setGeneratedPath([]); 
+                                    }}
                                     className={`
                                         aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-xs font-black transition-all duration-300 relative border
                                         ${bgClass} ${scaleClass}

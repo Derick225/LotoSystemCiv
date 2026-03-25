@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import type { DrawResult, GeminiReasoning, AlgoWeights } from "../types";
+import { AppError, logError } from '../utils/AppError';
 
 // --- CONFIGURATION ---
 const CACHE_TTL = 3600 * 1000; // 1 heure
@@ -12,7 +13,7 @@ const analysisCache = new Map<string, { timestamp: number; data: GeminiReasoning
 export const getGeminiClient = () => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
-        console.warn("Gemini API Key not found in environment.");
+        logError(new AppError("Gemini API Key not found in environment.", "GEMINI_KEY_MISSING", "high"), { source: 'getGeminiClient' });
         return null;
     }
     return new GoogleGenAI({ apiKey });
@@ -23,7 +24,7 @@ export const getGeminiClient = () => {
  */
 export const getOptimizedWeights = async (drawName: string, history: DrawResult[]): Promise<AlgoWeights | null> => {
     if (!navigator.onLine) {
-        console.warn("Mode hors-ligne : Optimisation IA indisponible.");
+        logError(new AppError("Mode hors-ligne : Optimisation IA indisponible.", "OFFLINE_MODE", "low"), { source: 'getOptimizedWeights' });
         return null;
     }
 
@@ -43,7 +44,7 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
         ${JSON.stringify(historyPayload)}
 
         Ta tâche est de déterminer les poids optimaux (entre 0.0 et 1.0) pour chaque algorithme de prédiction afin de maximiser la précision pour le prochain tirage.
-        Les algorithmes sont : frequency, gap, spectral, fractal, markov, poisson, momentum, equilibrium, ai_intuition, decision_forest, wavelet, resistance, spatial, orchestration, gap_velocity, anti_consensus, lstm, shadow_factor.
+        Les algorithmes sont : frequency, gap, spectral, fractal, markov, poisson, momentum, equilibrium, ai_intuition, decision_forest, wavelet, resistance, spatial, orchestration, gap_velocity, anti_consensus, lstm, shadow_factor, quantum_entanglement, fractal_resonance.
         
         Retourne un objet JSON strict correspondant à l'interface AlgoWeights.
         `;
@@ -73,9 +74,11 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
                         gap_velocity: { type: Type.NUMBER },
                         anti_consensus: { type: Type.NUMBER },
                         lstm: { type: Type.NUMBER },
+                        quantum_entanglement: { type: Type.NUMBER },
+                        fractal_resonance: { type: Type.NUMBER },
                         shadow_factor: { type: Type.NUMBER }
                     },
-                    required: ["frequency", "gap", "spectral", "fractal", "markov", "poisson", "momentum", "equilibrium", "ai_intuition", "decision_forest", "wavelet", "resistance", "spatial", "orchestration", "gap_velocity", "anti_consensus", "lstm", "shadow_factor"]
+                    required: ["frequency", "gap", "spectral", "fractal", "markov", "poisson", "momentum", "equilibrium", "ai_intuition", "decision_forest", "wavelet", "resistance", "spatial", "orchestration", "gap_velocity", "anti_consensus", "lstm", "quantum_entanglement", "fractal_resonance", "shadow_factor"]
                 }
             }
         });
@@ -87,7 +90,7 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
         return data as AlgoWeights;
 
     } catch (e: any) {
-        console.error("Optimized Weights Error:", e);
+        logError(new AppError(e.message || "Optimized Weights Error", "GEMINI_OPTIMIZE_ERROR", "medium", { error: e }), { source: 'getOptimizedWeights' });
         return null;
     }
 };
@@ -174,7 +177,7 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
 
         return result;
     } catch (e: any) {
-        console.error("Gemini Analysis Error:", e);
+        logError(new AppError(e.message || "Gemini Analysis Error", "GEMINI_ANALYSIS_ERROR", "medium", { error: e }), { source: 'analyzeDrawLogic' });
         return {
             logicalAnalysis: "Erreur de connexion à l'Oracle Neural. Le système a basculé en mode protection.",
             patternType: "Erreur",
@@ -238,7 +241,7 @@ export const getNarrativeAnalysis = async (drawName: string, history: DrawResult
 
         return JSON.parse(jsonText);
     } catch (e: any) {
-        console.error("Gemini Narrative Error:", e);
+        logError(new AppError(e.message || "Gemini Narrative Error", "GEMINI_NARRATIVE_ERROR", "medium", { error: e }), { source: 'getNarrativeAnalysis' });
         return null;
     }
 };
@@ -294,7 +297,7 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
 
         return JSON.parse(jsonText);
     } catch (e: any) {
-        console.error("Gemini Python Kernel Error:", e);
+        logError(new AppError(e.message || "Gemini Python Kernel Error", "GEMINI_PYTHON_ERROR", "medium", { error: e }), { source: 'getPythonKernelAnalysis' });
         return null;
     }
 };
@@ -303,10 +306,10 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
  * Analyse OCR d'un ticket de loterie via Gemini Flash Image.
  */
 export const scanTicket = async (imageBase64: string): Promise<any | null> => {
-    if (!navigator.onLine) throw new Error("Mode hors-ligne : Scanner indisponible.");
+    if (!navigator.onLine) throw new AppError("Mode hors-ligne : Scanner indisponible.", "OFFLINE_MODE", "low");
 
     const ai = getGeminiClient();
-    if (!ai) throw new Error("Clé API Gemini manquante.");
+    if (!ai) throw new AppError("Clé API Gemini manquante.", "GEMINI_KEY_MISSING", "high");
 
     try {
         const response = await ai.models.generateContent({
@@ -320,13 +323,13 @@ export const scanTicket = async (imageBase64: string): Promise<any | null> => {
         });
 
         const jsonStr = response.text;
-        if (!jsonStr) throw new Error("Réponse OCR vide.");
+        if (!jsonStr) throw new AppError("Réponse OCR vide.", "OCR_EMPTY_RESPONSE", "medium");
 
         // Clean JSON string
         const cleanedJsonStr = jsonStr.replace(/```json\n?|\n?```/g, '').trim();
         return JSON.parse(cleanedJsonStr);
     } catch (e: any) {
-        console.error("Gemini OCR Error:", e);
+        logError(new AppError(e.message || "Gemini OCR Error", "GEMINI_OCR_ERROR", "high", { error: e }), { source: 'scanTicket' });
         throw e;
     }
 };

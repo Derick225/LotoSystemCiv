@@ -2,6 +2,7 @@ import { isSupabaseConfigured } from './supabaseClient';
 import { getPythonKernelAnalysis } from './geminiService';
 import { DrawResult, PythonAnalysisResult, NotebookCell, AlgoWeights } from "../types";
 import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimulation } from './mathService';
+import { AppError, logError } from '../utils/AppError';
 
 // Helpers Statistiques Locaux
 const calculateZScore = (observed: number, expected: number, stdDev: number) => {
@@ -284,7 +285,7 @@ confidence = ${confidence / 100}
         };
 
     } catch (e: any) {
-        console.error("Python Kernel Error:", e);
+        logError(new AppError(e.message || "Python Kernel Error", "PYTHON_KERNEL_ERROR", "medium", { error: e }), { source: 'runPythonKernel' });
         if (onLog) onLog(`[CRITICAL] Kernel Panic: ${e.message}`);
         throw e;
     }

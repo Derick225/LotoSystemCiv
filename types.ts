@@ -254,6 +254,8 @@ export interface AlgoWeights {
     bayes?: number;
     temporal?: number;
     transformer?: number;
+    quantum_entanglement?: number;
+    fractal_resonance?: number;
     shadow_factor?: number;
     twin?: number; // Nouveau score de tirages jumeaux
 }
@@ -282,6 +284,8 @@ export interface ScoreBreakdown {
     transformer?: number;
     digital_root?: number;
     leader_succession?: number;
+    quantum_entanglement?: number;
+    fractal_resonance?: number;
     twin?: number; // Nouveau score de tirages jumeaux
 }
 

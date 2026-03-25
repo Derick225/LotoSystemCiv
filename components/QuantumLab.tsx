@@ -1,12 +1,14 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { calculateShannonEntropy, calculateACValue } from '../services/mathService';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { NumberBall } from './NumberBall';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Database, Globe, Zap, Activity, Binary, Waves, ShieldCheck, Cpu, Network, ArrowRight, GitBranch, RotateCcw } from 'lucide-react';
+import { Database, Globe, Zap, Activity, Binary, Waves, ShieldCheck, Cpu, Network, ArrowRight, GitBranch, RotateCcw, Layers } from 'lucide-react';
 import { ChaosAttractor3D } from './ChaosAttractor3D';
+import { DRAW_SCHEDULE } from '../constants';
+import { audioEngine } from '../utils/audioEngine';
 
 interface BounceCandidate {
     number: number;
@@ -17,9 +19,56 @@ interface BounceCandidate {
 }
 
 export const QuantumLab: React.FC = () => {
-    const { history, loading, drawName, stats, fractal, spectral, rlState } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const loading = useNexusStore(state => state.loading);
+    const drawName = useNexusStore(state => state.drawName);
+    const setDrawName = useNexusStore(state => state.setDrawName);
+    const refreshData = useNexusStore(state => state.refreshData);
+    const stats = useNexusStore(state => state.stats);
+    const fractal = useNexusStore(state => state.fractal);
+    const spectral = useNexusStore(state => state.spectral);
+    const rlState = useNexusStore(state => state.rlState);
     const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
     const [bounceCandidates, setBounceCandidates] = useState<BounceCandidate[]>([]);
+
+    const allDraws = useMemo(() => {
+        const draws = new Set<string>();
+        Object.values(DRAW_SCHEDULE).forEach(day => {
+            Object.values(day).forEach(name => draws.add(name));
+        });
+        return Array.from(draws).sort();
+    }, []);
+
+    const handleDrawChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newDraw = e.target.value;
+        audioEngine.play('click');
+        setDrawName(newDraw);
+        setSelectedNumber(null);
+        await refreshData(newDraw);
+    };
+
+    const renderDrawSelector = () => (
+        <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-2xl border border-white/5 mb-8">
+            <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
+                    <Layers size={20} className="text-indigo-400" />
+                </div>
+                <div>
+                    <h3 className="text-xs font-black text-white uppercase tracking-widest">Cible d'Analyse</h3>
+                    <p className="text-[10px] text-slate-500 font-medium">Sélectionnez le tirage à analyser</p>
+                </div>
+            </div>
+            <select
+                value={drawName}
+                onChange={handleDrawChange}
+                className="bg-black/50 border border-white/10 text-white text-sm font-bold rounded-xl px-4 py-2 outline-none focus:border-indigo-500 transition-colors"
+            >
+                {allDraws.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                ))}
+            </select>
+        </div>
+    );
     
     // Analyse des corrélations de rebond asynchrone
     useEffect(() => {
@@ -89,14 +138,19 @@ export const QuantumLab: React.FC = () => {
     }, [history, rlState]);
 
     if (loading) return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 animate-pulse">
-            <Globe className="text-indigo-500 animate-spin" size={64} />
-            <p className="text-xs font-black uppercase tracking-[0.4em] text-slate-400">Accès au Laboratoire Quantum...</p>
+        <div className="animate-fade-in">
+            {renderDrawSelector()}
+            <div className="flex flex-col items-center justify-center min-h-[50vh] gap-6 animate-pulse">
+                <Globe className="text-indigo-500 animate-spin" size={64} />
+                <p className="text-xs font-black uppercase tracking-[0.4em] text-slate-400">Accès au Laboratoire Quantum...</p>
+            </div>
         </div>
     );
 
     return (
         <div className="space-y-8 animate-fade-in pb-24">
+            {renderDrawSelector()}
+            
             {/* Header Telemetry */}
             <div className="grid md:grid-cols-3 gap-6">
                 <div className="md:col-span-2">
@@ -138,7 +192,7 @@ export const QuantumLab: React.FC = () => {
                         <h4 className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
                             <Database size={14} className="text-indigo-600"/> Matrice Quantum-Shift
                         </h4>
-                        <button onClick={() => setSelectedNumber(null)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-400 hover:text-rose-500 transition shadow-sm"><RotateCcw size={14}/></button>
+                        <button onClick={() => { audioEngine.play('click'); setSelectedNumber(null); }} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-400 hover:text-rose-500 transition shadow-sm"><RotateCcw size={14}/></button>
                     </div>
 
                     <div className="grid grid-cols-10 gap-2 sm:gap-3">
@@ -149,7 +203,7 @@ export const QuantumLab: React.FC = () => {
                             return (
                                 <button
                                     key={n}
-                                    onClick={() => setSelectedNumber(isSelected ? null : n)}
+                                    onClick={() => { audioEngine.play('click'); setSelectedNumber(isSelected ? null : n); }}
                                     className={`
                                         aspect-square rounded-xl flex items-center justify-center text-[10px] sm:text-xs font-black transition-all duration-300 relative group border
                                         ${isSelected 

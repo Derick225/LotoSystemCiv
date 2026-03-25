@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { PredictionHistoryItem, DrawResult, AlgoWeights, LearningSession } from '../../types';
 import { getPredictionHistoryAsync, syncAllHistory, saveLearningSession, getLearningSessions } from '../../services/predictionHistoryService';
 import { deletePredictionCloud } from '../../services/syncService';
@@ -7,6 +7,7 @@ import { Brain, CheckCircle, TrendingUp, AlertTriangle, ArrowRight, Save, Histor
 import { motion } from 'framer-motion';
 import { calculateGap, calculateFrequency } from '../../services/mathService';
 import { useToast } from '../ui/Toast';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface MissedNumberAnalysis {
     number: number;
@@ -19,7 +20,9 @@ interface MissedNumberAnalysis {
 }
 
 export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history: drawHistory, globalWeights, updateGlobalWeights } = useNexus();
+    const drawHistory = useNexusStore(state => state.history);
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
     const { showToast } = useToast();
     const [predictions, setPredictions] = useState<PredictionHistoryItem[]>([]);
     const [selectedPred, setSelectedPred] = useState<PredictionHistoryItem | null>(null);
@@ -65,14 +68,18 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
     };
 
     const handleSync = async () => {
+        audioEngine.play('click');
         setSyncing(true);
         try {
+            audioEngine.play('loading');
             const synced = await syncAllHistory(drawName);
             const validPreds = synced.filter(p => findMatchingDraw(p, drawHistory) !== undefined)
                                      .sort((a, b) => b.timestamp - a.timestamp);
             setPredictions(validPreds);
+            audioEngine.play('success');
             showToast("Synchronisation Cloud terminée.", "success");
         } catch (e) {
+            audioEngine.play('error');
             showToast("Erreur de synchronisation.", "error");
         } finally {
             setSyncing(false);
@@ -80,6 +87,7 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
     };
 
     const handleDeletePrediction = async (id: string, e: React.MouseEvent) => {
+        audioEngine.play('click');
         e.stopPropagation();
         if (!confirm("Supprimer définitivement cette prédiction (Local + Cloud) ?")) return;
 
@@ -88,13 +96,16 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             await deletePredictionCloud(id);
             setPredictions(prev => prev.filter(p => p.id !== id));
             if (selectedPred?.id === id) setSelectedPred(null);
+            audioEngine.play('success');
             showToast("Prédiction supprimée.", "info");
         } catch (e) {
+            audioEngine.play('error');
             showToast("Erreur lors de la suppression.", "error");
         }
     };
 
     const handleSelectPrediction = (pred: PredictionHistoryItem) => {
+        audioEngine.play('click');
         setSelectedPred(pred);
         analyzePrediction(pred);
     };
@@ -158,6 +169,7 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
     };
 
     const applyLesson = async (analysis: MissedNumberAnalysis) => {
+        audioEngine.play('click');
         if (!globalWeights) return;
 
         const currentWeight = globalWeights[analysis.suggestedAdjustment] || 0;
@@ -184,6 +196,7 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         });
 
         loadLearningSessions();
+        audioEngine.play('success');
         showToast(`Leçon intégrée : ${analysis.suggestedAdjustment} +${(analysis.adjustmentValue * 100).toFixed(0)}%`, "success");
     };
 
@@ -205,7 +218,7 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                             <Cloud size={16} />
                         </button>
                         <button 
-                            onClick={loadHistory} 
+                            onClick={() => { audioEngine.play('click'); loadHistory(); }} 
                             className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-400"
                             title="Rafraîchir Local"
                         >

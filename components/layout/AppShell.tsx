@@ -1,6 +1,6 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { Home, Settings, FlaskConical, Wallet, Activity, LogOut, Mic, MicOff } from 'lucide-react';
+import { Home, Settings, FlaskConical, Wallet, Activity, LogOut, Mic, MicOff, Brain } from 'lucide-react';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
 import { CommandPalette } from '../ui/CommandPalette';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,7 +8,7 @@ import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
 import { QuantumInspector } from '../QuantumInspector';
 
-export type ViewMode = 'home' | 'admin' | 'lab';
+export type ViewMode = 'home' | 'admin' | 'lab' | 'ensemble';
 
 interface AppShellProps {
   children: ReactNode;
@@ -48,6 +48,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const navItems = [
     { id: 'home', icon: Home, label: 'Station' },
+    { id: 'ensemble', icon: Brain, label: 'Ensemble' },
     { id: 'lab', icon: FlaskConical, label: 'Lab' },
     ...(isAdmin ? [{ id: 'admin', icon: Settings, label: 'Admin' }] : []),
   ];
@@ -84,13 +85,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </nav>
 
                 <div className="flex items-center gap-1 md:gap-3">
-                    <button onClick={toggleListening} className={`p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border ${isListening ? 'bg-rose-600 text-white border-rose-500 shadow-rose-900/50' : 'bg-white/5 text-slate-400 hover:text-white border-white/10'}`}>
+                    <button onClick={() => { audioEngine.play('click'); toggleListening(); }} className={`p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border ${isListening ? 'bg-rose-600 text-white border-rose-500 shadow-rose-900/50' : 'bg-white/5 text-slate-400 hover:text-white border-white/10'}`}>
                         {isListening ? <Mic size={14} className="animate-pulse" /> : <MicOff size={14} />}
                     </button>
                     <button onClick={() => { audioEngine.play('click'); setShowWallet(!showWallet); }} className={`hidden md:flex p-2.5 md:p-3.5 rounded-xl md:rounded-2xl transition-all border ${showWallet ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white/5 text-slate-400 border-white/10'}`}>
                         <Wallet size={16} />
                     </button>
-                    <button onClick={onLogout} className="p-2 md:p-3.5 bg-rose-500/10 rounded-lg md:rounded-2xl text-rose-400 border border-rose-500/20 active:scale-90 transition-all"><LogOut size={14} /></button>
+                    <button onClick={() => { audioEngine.play('click'); onLogout(); }} className="p-2 md:p-3.5 bg-rose-500/10 rounded-lg md:rounded-2xl text-rose-400 border border-rose-500/20 active:scale-90 transition-all"><LogOut size={14} /></button>
                 </div>
             </div>
         </div>

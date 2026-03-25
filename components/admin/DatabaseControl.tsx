@@ -4,6 +4,7 @@ import { supabase, testDatabaseConnection, isSupabaseConfigured } from '../../se
 import { useToast } from '../ui/Toast';
 import { NEXUS_DATABASE_SCHEMA } from '../../services/databaseSchema';
 import { Database, HardDrive, Trash2, Server, Activity, Copy, RefreshCw, Save, ShieldCheck, AlertCircle } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const DatabaseControl: React.FC = () => {
     const { showToast } = useToast();
@@ -23,6 +24,7 @@ export const DatabaseControl: React.FC = () => {
     }, []);
 
     const refreshMetrics = async () => {
+        audioEngine.play('click');
         if (!isSupabaseConfigured()) {
             setConnectionStatus('error');
             setLastError("Configuration .env manquante");
@@ -65,26 +67,32 @@ export const DatabaseControl: React.FC = () => {
                 feedback: feedback.count || 0,
                 localStorageSize: Math.round(total / 1024)
             });
+            audioEngine.play('success');
         } catch (e: any) {
             console.error("Metrics error", e);
             setConnectionStatus('error');
             setLastError(e.message);
+            audioEngine.play('error');
         } finally {
             setLoading(false);
         }
     };
 
     const handleClearCache = () => {
+        audioEngine.play('click');
         if (confirm("Attention : Cela effacera tous les tickets locaux, l'historique de navigation et les préférences. Continuer ?")) {
             localStorage.clear();
             refreshMetrics();
+            audioEngine.play('success');
             showToast("Cache local purgé.", "success");
             window.location.reload();
         }
     };
 
     const copySqlToClipboard = () => {
+        audioEngine.play('click');
         navigator.clipboard.writeText(NEXUS_DATABASE_SCHEMA);
+        audioEngine.play('success');
         showToast("Script SQL copié. Collez-le dans l'éditeur SQL Supabase.", "success");
     };
 

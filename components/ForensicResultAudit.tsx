@@ -6,6 +6,8 @@ import { ShieldAlert, Fingerprint, BarChart3, AlertTriangle, CheckCircle2, Gauge
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, Tooltip, Cell, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
 
+import { audioEngine } from '../utils/audioEngine';
+
 interface ForensicResultAuditProps {
     result: DrawResult;
     history: DrawResult[];
@@ -60,7 +62,7 @@ export const ForensicResultAudit: React.FC<ForensicResultAuditProps> = ({ result
         <div className="space-y-8 animate-fade-in w-full">
             {onBack && (
                 <button 
-                    onClick={onBack}
+                    onClick={() => { audioEngine.play('click'); onBack(); }}
                     className="flex items-center gap-3 text-slate-500 hover:text-white transition-all group mb-2 px-2"
                 >
                     <div className="p-2 bg-slate-800 rounded-xl group-hover:bg-indigo-600 transition-colors shadow-lg border border-slate-700 group-hover:border-indigo-500">

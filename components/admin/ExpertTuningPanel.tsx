@@ -5,8 +5,9 @@ import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights,
 import { LearningService } from '../../services/learningService'; 
 import type { AlgoWeights, AdaptiveRules } from '../../types';
 import { useToast } from '../ui/Toast';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Sliders, Save, Scale, Gauge, RefreshCw, BrainCircuit, CheckCircle2, AlertTriangle, Dna } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface ExpertTuningPanelProps {
     selectedDrawName: string;
@@ -14,7 +15,7 @@ interface ExpertTuningPanelProps {
 
 export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDrawName }) => {
     const { showToast } = useToast();
-    const { updateGlobalWeights, refreshData, history, drawName: activeDrawName } = useNexus();
+    const { updateGlobalWeights, refreshData, history, drawName: activeDrawName } = useNexusStore();
     
     const [localWeights, setLocalWeights] = useState<AlgoWeights>({} as AlgoWeights);
     const [rules, setRules] = useState<AdaptiveRules>(getDefaultRules());
@@ -54,6 +55,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     }, [localWeights]);
 
     const handleWeightChange = (key: keyof AlgoWeights, value: string) => {
+        audioEngine.play('click');
         const numValue = parseFloat(value);
         setLocalWeights(prev => {
             const next = { ...prev, [key]: numValue };
@@ -64,6 +66,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     };
 
     const handleAutoNormalize = () => {
+        audioEngine.play('click');
         if (totalWeight === 0) return;
         const normalized = normalizeWeights(localWeights);
         setLocalWeights(normalized);
@@ -73,7 +76,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     };
 
     const handleDeepLearning = async () => {
+        audioEngine.play('scan');
         if (history.length < 20) {
+            audioEngine.play('error');
             showToast("Données insuffisantes pour le Deep Learning (Min 20).", "error");
             return;
         }
@@ -96,15 +101,18 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                     await refreshData(selectedDrawName, true); // Force le recalcul
                 }
                 
+                audioEngine.play('success');
                 showToast(`✅ ADN optimisé avec succès.`, "success");
                 const nowStr = new Date().toLocaleTimeString();
                 setLastLearnStatus(nowStr);
                 localStorage.setItem(`nexus_last_learn_${selectedDrawName}`, nowStr);
                 setIsDirty(false);
             } else {
+                audioEngine.play('error');
                 showToast(result.message || "Aucune amélioration significative.", "info");
             }
         } catch (e) {
+            audioEngine.play('error');
             showToast("Rupture du lien d'apprentissage.", "error");
         } finally {
             setIsCalibrating(false);
@@ -112,6 +120,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
     };
 
     const handleSave = async () => {
+        audioEngine.play('click');
         let weightsToSave = { ...localWeights };
         // Normalisation automatique à la sauvegarde si déséquilibré
         if (Math.abs(totalWeight - 1.0) > 0.01) {
@@ -130,6 +139,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         }
 
         setIsDirty(false);
+        audioEngine.play('success');
         showToast(`Configuration ADN cristallisée pour ${selectedDrawName}.`, "success");
     };
 

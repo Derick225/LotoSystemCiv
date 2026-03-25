@@ -4,6 +4,7 @@ import { DRAW_SCHEDULE } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
+import { AppError, logError } from '../utils/AppError';
 
 const CACHE_PREFIX = 'nexus_cache_history_';
 
@@ -72,7 +73,7 @@ export const lotteryService = {
             
             const { data, error } = await query;
             
-            if (error) throw error;
+            if (error) throw new AppError(error.message, 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });
             
             if (data) {
                 remoteData = data.map(row => ({
@@ -86,7 +87,7 @@ export const lotteryService = {
                 try { localStorage.setItem(cacheKey, JSON.stringify(remoteData)); } catch (e) {}
             }
         } catch (e) {
-            console.warn("Supabase fetch failed", e);
+            logError(e, { source: 'lotteryService.fetchHistory' });
             fetchError = e;
         }
     }
@@ -105,7 +106,7 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
     const data = await apiClient.post<{ count: number }>('cron-sync', { drawName, manualTrigger: true });
     return data?.count || 0;
   } catch (e: any) {
-    console.warn("Cloud Sync Failover:", e?.message);
+    logError(new AppError(e?.message || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal' });
     return 0;
   }
 };
@@ -329,5 +330,5 @@ export const injectDemoData = async () => {
             demoData.push({ draw_name: drawName, date: dateStr, gagnants: Array.from(numbers), machine: Array.from(machine) });
         }
     });
-    try { await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' }); } catch (e) { console.error("Demo injection failed", e); }
+    try { await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' }); } catch (e: any) { logError(new AppError(e.message || "Demo injection failed", "DEMO_INJECTION_ERROR", "low", { error: e }), { source: 'injectDemoData' }); }
 };

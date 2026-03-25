@@ -2,6 +2,7 @@
 import React, { useEffect } from 'react';
 import { useToast } from './ui/Toast';
 import { getUserFriendlyError } from '../utils/errorHandler';
+import { logError } from '../utils/AppError';
 
 export const GlobalErrorListener: React.FC = () => {
     const { showToast } = useToast();
@@ -13,7 +14,7 @@ export const GlobalErrorListener: React.FC = () => {
             if (event.message?.includes('ResizeObserver')) return;
 
             const friendlyMsg = getUserFriendlyError(event.error || event.message);
-            console.error("Global Error Caught:", event.error);
+            logError(event.error || new Error(event.message), { source: 'GlobalErrorListener' });
             
             // On affiche un toast au lieu de laisser l'app crasher silencieusement (si possible)
             showToast(friendlyMsg, "error");
@@ -22,7 +23,7 @@ export const GlobalErrorListener: React.FC = () => {
         // Gestionnaire pour les Promesses rejetées non gérées (Async)
         const handlePromiseRejection = (event: PromiseRejectionEvent) => {
             const friendlyMsg = getUserFriendlyError(event.reason);
-            console.error("Unhandled Promise Rejection:", event.reason);
+            logError(event.reason, { source: 'UnhandledPromiseRejection' });
             
             showToast(friendlyMsg, "error");
         };

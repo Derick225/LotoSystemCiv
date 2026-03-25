@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
 import { runAutoLearn } from '../services/predictionEngine';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { useGlobalMarketHistory, useDailySummary, useGlobalStats, lotteryKeys } from '../hooks/useLottery';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Draw, DrawResult } from '../types';
@@ -34,7 +34,8 @@ interface GlobalDashboardProps {
 }
 
 const MetaLearningIndicator: React.FC = () => {
-    const { globalWeights, calibration } = useNexus();
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const calibration = useNexusStore(state => state.calibration);
     
     // Calculs dérivés des poids réels
     const strategyBalance = useMemo(() => {
@@ -243,7 +244,14 @@ const LatestResultHero: React.FC<{ result: DrawResult, onAnalyze: () => void }> 
 
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const { regime, volatility, refreshData, history, lastPrediction, globalWeights, isGodMode } = useNexus(); 
+    const regime = useNexusStore(state => state.regime);
+    const volatility = useNexusStore(state => state.volatility);
+    const refreshData = useNexusStore(state => state.refreshData);
+    const history = useNexusStore(state => state.history);
+    const lastPrediction = useNexusStore(state => state.lastPrediction);
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const isGodMode = useNexusStore(state => state.isGodMode);
+    
     const queryClient = useQueryClient();
     
     // Hooks React Query
@@ -599,7 +607,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             </div>
                             
                             <button 
-                                onClick={() => onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' })}
+                                onClick={() => { audioEngine.play('click'); onSelectDraw({ name: 'ALL', day: 'Tous', time: 'Archive' }); }}
                                 className="mx-auto md:mx-0 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
                             >
                                 <Layers size={14} className="text-indigo-400 group-hover:text-white transition-colors"/>
@@ -644,7 +652,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                                         initial={{ opacity: 0, y: 30 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ delay: idx * 0.1 }}
-                                        onClick={() => onSelectDraw({ day: selectedDay, time: item.time, name: item.name })}
+                                        onClick={() => { audioEngine.play('click'); onSelectDraw({ day: selectedDay, time: item.time, name: item.name }); }}
                                         className={`group p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? 'bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl' : isNext ? 'bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20' : 'bg-black/40 border-white/5 opacity-60 hover:opacity-100'}`}
                                     >
                                         <div className="flex justify-between items-start mb-6 md:mb-8 relative z-10">

@@ -1,6 +1,7 @@
 
 import { supabase } from './supabaseClient';
 import { PredictionHistoryItem, ForensicReport, LearningSession } from '../types';
+import { AppError, logError } from '../utils/AppError';
 
 const BATCH_SIZE = 50;
 
@@ -74,8 +75,8 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         }
 
         return mergedList;
-    } catch (err) {
-        console.error("Sync Predictions Error:", err);
+    } catch (err: any) {
+        logError(new AppError(err.message || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", "medium", { error: err }), { source: 'syncPredictions' });
         return localItems; // Fallback local
     }
 };
@@ -137,8 +138,8 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
         }
 
         return mergedList;
-    } catch (err) {
-        console.error("Sync Forensic Error:", err);
+    } catch (err: any) {
+        logError(new AppError(err.message || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", "medium", { error: err }), { source: 'syncForensicReports' });
         return localReports;
     }
 };
@@ -190,8 +191,8 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
         }
 
         return mergedList;
-    } catch (err) {
-        console.error("Sync Learning Error:", err);
+    } catch (err: any) {
+        logError(new AppError(err.message || "Sync Learning Error", "SYNC_LEARNING_ERROR", "medium", { error: err }), { source: 'syncLearningSessions' });
         return localSessions;
     }
 };

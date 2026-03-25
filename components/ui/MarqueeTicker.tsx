@@ -1,11 +1,11 @@
 
 import React from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { getNextScheduledDraw } from '../../services/lotteryService';
 import { Zap, Clock, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export const MarqueeTicker: React.FC = () => {
-    const { history, volatility, regime } = useNexus();
+    const { history, volatility, regime } = useNexusStore();
     
     if (history.length === 0) return null;
 

@@ -1,14 +1,18 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { runSurvivalSimulation, BacktestReport } from '../../services/backtestingEngine';
 import { Play, RefreshCw, Trophy, PiggyBank, ThumbsUp, ThumbsDown, Activity, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
 import { ParallelSimulationTab } from './ParallelSimulationTab';
 import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
 import { ResponsiveContainer, AreaChart, Area, Tooltip, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, globalWeights, loading: nexusLoading, rlState } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const nexusLoading = useNexusStore(state => state.loading);
+    const rlState = useNexusStore(state => state.rlState);
     const [mode, setMode] = useState<'single' | 'comparative'>('single');
     const [simulating, setSimulating] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -19,6 +23,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     const handleRun = async () => {
         if (history.length < 50) return;
+        audioEngine.play('click');
         setSimulating(true);
         setReport(null);
         setProgress(0);
@@ -35,12 +40,14 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             );
             
             if (isMounted.current) {
+                audioEngine.play('success');
                 setReport(result);
                 setSimulating(false);
                 setProgress(100);
             }
         } catch (e) {
             console.error(e);
+            audioEngine.play('error');
             if(isMounted.current) setSimulating(false);
         }
     };
@@ -60,13 +67,13 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             <div className="flex justify-center mb-4">
                 <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 shadow-inner">
                     <button 
-                        onClick={() => setMode('single')} 
+                        onClick={() => { audioEngine.play('click'); setMode('single'); }} 
                         className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${mode === 'single' ? 'bg-white text-slate-900 shadow-lg' : 'text-slate-500 hover:text-white'}`}
                     >
                         <Activity size={14}/> Backtest Standard
                     </button>
                     <button 
-                        onClick={() => setMode('comparative')} 
+                        onClick={() => { audioEngine.play('click'); setMode('comparative'); }} 
                         className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${mode === 'comparative' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                     >
                         <TrendingUp size={14}/> Comparateur Stratégique

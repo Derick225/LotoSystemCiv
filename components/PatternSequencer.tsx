@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { NumberBall } from './NumberBall';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { analyzeTicketStrength } from '../services/predictionEngine';
 import { saveTicket } from '../services/userPreferencesService';
 import { useToast } from './ui/Toast';
@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { spectral, correlationMatrix } = useNexus();
+    const { spectral, correlationMatrix } = useNexusStore();
     
     const [selection, setSelection] = useState<number[]>([]);
     const [metrics, setMetrics] = useState<TicketAnalysisResult | null>(null);

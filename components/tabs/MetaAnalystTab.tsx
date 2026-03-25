@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
 import { saveTicket } from '../../services/userPreferencesService';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import type { PlatinumResult, PlatinumScenario } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
@@ -17,6 +17,7 @@ import {
     CartesianGrid, ReferenceLine, Cell, AreaChart, Area 
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface MetaAnalystTabProps {
     drawName: string;
@@ -31,7 +32,7 @@ const ScenarioCard: React.FC<{
     return (
         <motion.div 
             layout
-            onClick={onClick}
+            onClick={() => { audioEngine.play('click'); onClick(); }}
             whileHover={{ y: -4 }}
             className={`
                 relative p-5 rounded-2xl border cursor-pointer overflow-hidden flex flex-col justify-between h-full transition-all duration-300
@@ -86,7 +87,14 @@ const ScenarioCard: React.FC<{
 
 export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading, spectral, fractal, volatility, correlationMatrix, regularity, symbioticContext } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const nexusLoading = useNexusStore(state => state.loading);
+    const spectral = useNexusStore(state => state.spectral);
+    const fractal = useNexusStore(state => state.fractal);
+    const volatility = useNexusStore(state => state.volatility);
+    const correlationMatrix = useNexusStore(state => state.correlationMatrix);
+    const regularity = useNexusStore(state => state.regularity);
+    const symbioticContext = useNexusStore(state => state.symbioticContext);
     
     const [result, setResult] = useState<PlatinumResult | null>(null);
     const [loading, setLoading] = useState(false);
@@ -94,11 +102,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
     const runAnalysis = async () => {
+        audioEngine.play('click');
         if (history.length < 15) {
+             audioEngine.play('error');
              showToast("Dataset insuffisant pour la convergence.", "error");
              return;
         }
         setLoading(true);
+        audioEngine.play('loading');
         
         try {
             // Simulation de temps de calcul (UX)
@@ -115,8 +126,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             setResult(data);
             setSelectedScenarioId('alpha'); // Select Conservative by default
             savePlatinumHistory(data);
+            audioEngine.play('success');
             showToast("Convergence Tensorielle atteinte.", "success");
         } catch (e: any) {
+            audioEngine.play('error');
             showToast("Erreur Hyper-Convergence : " + e.message, "error");
         } finally {
             setLoading(false);
@@ -124,11 +137,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     };
 
     const handleSave = async (scenario: PlatinumScenario) => {
+        audioEngine.play('click');
         await saveTicket({
             numbers: scenario.numbers,
             drawName,
             strategy: `Platinum ${scenario.name}`
         });
+        audioEngine.play('success');
         showToast("Vecteur sécurisé.", "success");
     };
 

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import type { SmartInsight } from '../types';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { ArrowRight, TrendingUp, AlertTriangle, Lightbulb, Zap, Clock, Activity, BarChart2 } from 'lucide-react';
 import { audioEngine } from '../utils/audioEngine';
 
@@ -10,7 +10,7 @@ interface SmartInsightsProps {
 }
 
 export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
-    const { smartInsights, loading: nexusLoading } = useNexus();
+    const { smartInsights, loading: nexusLoading } = useNexusStore();
 
     const handleNavigate = (insight: SmartInsight) => {
         audioEngine.play('click');

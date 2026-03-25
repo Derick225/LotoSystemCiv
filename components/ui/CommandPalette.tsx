@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, ArrowRight, Zap, LayoutGrid, Terminal, Wallet, Settings, X, Activity } from 'lucide-react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { useToast } from './Toast';
 import { audioEngine } from '../../utils/audioEngine';
 import { ALL_DRAWS } from '../../constants';
@@ -14,7 +14,7 @@ interface CommandPaletteProps {
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, onNavigate, onAction }) => {
-    const { setDrawName, refreshData, currentDrawName } = useNexus();
+    const { setDrawName, refreshData, currentDrawName } = useNexusStore();
     const { showToast } = useToast();
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);

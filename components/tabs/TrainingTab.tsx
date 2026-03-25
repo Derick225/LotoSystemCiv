@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { evolveNeuralDNA, runBacktestTraining } from '../../services/trainingService';
 import { normalizeWeights, getAlgoWeights } from '../../services/predictionEngine';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { AlgoRadar } from '../AlgoRadar';
 import { useToast } from '../ui/Toast';
 import { audioEngine } from '../../utils/audioEngine';
@@ -42,7 +42,10 @@ const LogTerminal: React.FC<{ logs: string[] }> = ({ logs }) => {
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { globalWeights, updateGlobalWeights, refreshData, history } = useNexus();
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
+    const refreshData = useNexusStore(state => state.refreshData);
+    const history = useNexusStore(state => state.history);
     
     // Config
     const [generations, setGenerations] = useState(50);
@@ -161,7 +164,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                             <input 
                                 type="range" min="20" max="200" step="10" 
-                                value={generations} onChange={(e) => setGenerations(Number(e.target.value))}
+                                value={generations} onChange={(e) => { audioEngine.play('click'); setGenerations(Number(e.target.value)); }}
                                 disabled={status === 'running'}
                                 className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500"
                             />
@@ -173,7 +176,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                             <input 
                                 type="range" min="50" max="300" step="50" 
-                                value={sampleSize} onChange={(e) => setSampleSize(Number(e.target.value))}
+                                value={sampleSize} onChange={(e) => { audioEngine.play('click'); setSampleSize(Number(e.target.value)); }}
                                 disabled={status === 'running'}
                                 className="w-full h-2 bg-slate-800 rounded-full appearance-none cursor-pointer accent-emerald-500"
                             />
@@ -181,7 +184,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         
                         {status === 'idle' ? (
                             <button 
-                                onClick={handleStartTraining}
+                                onClick={() => { audioEngine.play('click'); handleStartTraining(); }}
                                 className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95 group mt-2"
                             >
                                 <Play size={16} className="fill-current group-hover:scale-110 transition-transform"/> Lancer l'Évolution
@@ -192,8 +195,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                         ) : (
                             <div className="flex gap-2 mt-2">
-                                <button onClick={() => setStatus('idle')} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs uppercase"><X size={16}/></button>
-                                <button onClick={handleApply} className="flex-[3] py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-lg animate-pulse">
+                                <button onClick={() => { audioEngine.play('click'); setStatus('idle'); }} className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs uppercase"><X size={16}/></button>
+                                <button onClick={() => { audioEngine.play('click'); handleApply(); }} className="flex-[3] py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-lg animate-pulse">
                                     <Save size={16}/> Appliquer Optimisation
                                 </button>
                             </div>

@@ -1,5 +1,6 @@
 
 import { DrawResult } from '../types';
+import { AppError, logError } from '../utils/AppError';
 
 export const LSTMService = {
     /**
@@ -8,7 +9,7 @@ export const LSTMService = {
     runPrediction: async (history: DrawResult[]): Promise<{ probabilities: number[], accuracy: number }> => {
         return new Promise((resolve, reject) => {
             if (typeof Worker === 'undefined') {
-                console.warn("Web Workers not supported");
+                logError(new AppError("Web Workers not supported", "WORKER_NOT_SUPPORTED", "low"), { source: 'LSTMService' });
                 resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
                 return;
             }
@@ -17,7 +18,7 @@ export const LSTMService = {
             const id = Date.now().toString();
 
             const timeout = setTimeout(() => {
-                console.warn("LSTM Prediction timed out");
+                logError(new AppError("LSTM Prediction timed out", "LSTM_TIMEOUT", "medium"), { source: 'LSTMService' });
                 worker.terminate();
                 resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
             }, 30000); // 30s timeout for LSTM
@@ -26,7 +27,7 @@ export const LSTMService = {
                 if (e.data.id === id) {
                     clearTimeout(timeout);
                     if (e.data.error) {
-                        console.error("LSTM Worker Error:", e.data.error);
+                        logError(new AppError(e.data.error, "LSTM_WORKER_ERROR", "high"), { source: 'LSTMService' });
                         resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
                     } else {
                         resolve({ 
@@ -40,7 +41,7 @@ export const LSTMService = {
 
             worker.onerror = (err) => {
                 clearTimeout(timeout);
-                console.error("LSTM Worker Fatal Error:", err);
+                logError(new AppError(err.message || "LSTM Worker Fatal Error", "LSTM_FATAL_ERROR", "high", { error: err }), { source: 'LSTMService' });
                 worker.terminate();
                 resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
             };

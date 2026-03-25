@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getLocalForensicReports, syncForensicReportsWithCloud, deleteForensicReportLocal } from '../../services/postPredictionAnalysisService';
 import { deleteForensicReportCloud } from '../../services/syncService';
@@ -12,10 +12,12 @@ import { ForensicReport, PlatinumAudit } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { useToast } from '../ui/Toast';
 
+import { audioEngine } from '../../utils/audioEngine';
+
 type ForensicMode = 'prediction' | 'structure';
 
 export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history } = useNexus();
+    const history = useNexusStore(state => state.history);
     const { showToast } = useToast();
     const [reports, setReports] = useState<ForensicReport[]>([]);
     const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
@@ -83,6 +85,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             setReports(currentReports);
 
             if (newReportsCount > 0) {
+                audioEngine.play('success');
                 showToast(`${newReportsCount} nouvelles autopsies générées.`, "success");
             }
 
@@ -103,6 +106,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
         } catch (err) {
             console.error("Forensic Hub Sync Error:", err);
+            audioEngine.play('error');
             showToast("Erreur lors de l'analyse Forensic.", "error");
         } finally {
             setLoading(false);
@@ -114,16 +118,20 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     }, [runAnalysis, refreshKey]);
 
     const handleRefresh = () => {
+        audioEngine.play('click');
         setRefreshKey(prev => prev + 1);
     };
 
     const handleSync = async () => {
+        audioEngine.play('click');
         setSyncing(true);
         try {
             const synced = await syncForensicReportsWithCloud();
             setReports(synced.filter(r => r.drawName === drawName));
+            audioEngine.play('success');
             showToast("Synchronisation Cloud terminée.", "success");
         } catch (e) {
+            audioEngine.play('error');
             showToast("Erreur de synchronisation.", "error");
         } finally {
             setSyncing(false);
@@ -132,6 +140,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     const handleDeleteReport = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
+        audioEngine.play('click');
         if (!confirm("Supprimer ce rapport Forensic (Local + Cloud) ?")) return;
 
         try {
@@ -139,8 +148,10 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             await deleteForensicReportCloud(id);
             setReports(prev => prev.filter(r => r.id !== id));
             if (selectedReport?.id === id) setSelectedReport(null);
+            audioEngine.play('success');
             showToast("Rapport supprimé.", "info");
         } catch (e) {
+            audioEngine.play('error');
             showToast("Erreur suppression.", "error");
         }
     };
@@ -219,13 +230,13 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         
                         <div className="flex gap-2 bg-black/40 p-1.5 rounded-2xl border border-white/5 w-fit">
                             <button 
-                                onClick={() => setMode('prediction')}
+                                onClick={() => { audioEngine.play('click'); setMode('prediction'); }}
                                 className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'prediction' ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-500 hover:text-white'}`}
                             >
                                 <Target size={14}/> Prédictions
                             </button>
                             <button 
-                                onClick={() => setMode('structure')}
+                                onClick={() => { audioEngine.play('click'); setMode('structure'); }}
                                 className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'structure' ? 'bg-rose-600 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}
                             >
                                 <ScanBarcode size={14}/> Intégrité Tirage
@@ -257,7 +268,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <ForensicResultAudit 
                     result={history[0]} 
                     history={history} 
-                    onBack={() => setMode('prediction')} 
+                    onBack={() => { audioEngine.play('click'); setMode('prediction'); }} 
                 />
             )}
 

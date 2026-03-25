@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
-import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression, applyL2Regularization } from './mathService';
+import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression } from './mathService';
 import { 
     calculateSpatialHotSpots, 
     calculateDigitalRootAnalysis, 
@@ -11,12 +11,15 @@ import {
     calculatePoissonScores,
     calculateLeaderSuccession,
     calculateBayesianScore,
-    calculateAiIntuition
+    calculateAiIntuition,
+    calculateQuantumEntanglementScores,
+    calculateFractalResonance
 } from './advancedMathService';
 import { workerService } from './workerService';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { LSTMService } from './lstmService';
 import { PatternMatcherService } from './patternMatcherService';
+import { AppError, logError } from '../utils/AppError';
 
 export const getDefaultWeights = (): AlgoWeights => ({
     frequency: 0.15,
@@ -39,6 +42,8 @@ export const getDefaultWeights = (): AlgoWeights => ({
     bayes: 0.05,
     leader_succession: 0.05,
     twin: 0.10,
+    quantum_entanglement: 0.05,
+    fractal_resonance: 0.05,
     shadow_factor: 0.0 // Protocole Shadow (+/- 1)
 });
 
@@ -239,8 +244,8 @@ export const generateMasterPrediction = async (
         try {
             const { probabilities } = await LSTMService.runPrediction(history);
             lstmProbs = probabilities;
-        } catch (e) {
-            console.error("LSTM Error:", e);
+        } catch (e: any) {
+            logError(new AppError(e.message || "LSTM Error", "LSTM_PREDICTION_ERROR", "medium", { error: e }), { source: 'generateMasterPrediction' });
         }
     }
     
@@ -308,6 +313,8 @@ export const generateMasterPrediction = async (
     const leaderSuccessionScores = calculateLeaderSuccession(history);
     const bayesianScores = calculateBayesianScore(history);
     const aiIntuitionScores = calculateAiIntuition(history, metrics);
+    const quantumEntanglementScores = calculateQuantumEntanglementScores(history);
+    const fractalResonanceScores = calculateFractalResonance(history);
 
     // --- TWIN ENGINE (Pattern Matching) ---
     let twinScores: number[] = new Array(91).fill(0);
@@ -359,6 +366,8 @@ export const generateMasterPrediction = async (
         nBreakdown.leader_succession = leaderSuccessionScores[num] || 0;
         nBreakdown.bayes = bayesianScores[num] || 0;
         nBreakdown.ai_intuition = aiIntuitionScores[num] || 0;
+        nBreakdown.quantum_entanglement = quantumEntanglementScores[num] || 0;
+        nBreakdown.fractal_resonance = fractalResonanceScores[num] || 0;
         nBreakdown.twin = twinScores[num] || 0;
 
         let finalScore = 0;
@@ -420,8 +429,8 @@ export const generateMasterPrediction = async (
                 item.score = newScore;
             });
         }
-    } catch (e) {
-        console.warn("PCA Denoising failed, using raw scores:", e);
+    } catch (e: any) {
+        logError(new AppError(e.message || "PCA Denoising failed", "PCA_DENOISING_ERROR", "low", { error: e }), { source: 'generatePrediction' });
     }
 
     // --- SHADOW PROTOCOL (Voisinage +/- 1) ---
@@ -778,8 +787,8 @@ export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]):
             newWeights: normalized
         };
         
-    } catch (e) {
-        console.error("Auto-Learn Error:", e);
+    } catch (e: any) {
+        logError(new AppError(e.message || "Auto-Learn Error", "AUTO_LEARN_ERROR", "medium", { error: e }), { source: 'triggerAutoLearn' });
         return { success: false, message: "Erreur lors de l'apprentissage." };
     }
 };

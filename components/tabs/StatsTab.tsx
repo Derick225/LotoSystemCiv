@@ -1,13 +1,15 @@
 
 import React, { useMemo } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { ProbabilityField } from '../ProbabilityField';
 import { Trophy, Clock, Flame } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 
 export const StatsTab: React.FC<{ drawName: string }> = () => {
-  const { stats, gaps, loading } = useNexus();
+  const stats = useNexusStore(state => state.stats);
+  const gaps = useNexusStore(state => state.gaps);
+  const loading = useNexusStore(state => state.loading);
 
   if (loading || stats.length === 0) return <StatsSkeleton />;
 

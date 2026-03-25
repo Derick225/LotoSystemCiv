@@ -1,22 +1,26 @@
 
 import React, { useState, useMemo } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { runComparativeSimulation, BacktestReport, BettingStrategy } from '../../services/backtestingEngine';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { TrendingUp, Scale, Zap, Trophy, RefreshCw } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const ParallelSimulationTab: React.FC = () => {
-    const { history, drawName, globalWeights } = useNexus();
+    const { history, drawName, globalWeights } = useNexusStore();
     const [reports, setReports] = useState<Record<BettingStrategy, BacktestReport> | null>(null);
     const [loading, setLoading] = useState(false);
 
     const handleRun = async () => {
+        audioEngine.play('click');
         setLoading(true);
         try {
             const results = await runComparativeSimulation(drawName, history, globalWeights, 60);
+            audioEngine.play('success');
             setReports(results);
         } catch (e) {
             console.error(e);
+            audioEngine.play('error');
         } finally {
             setLoading(false);
         }

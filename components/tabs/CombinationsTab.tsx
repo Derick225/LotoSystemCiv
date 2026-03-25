@@ -6,12 +6,13 @@ import { runAntColonyOptimization } from '../../services/acoService';
 import { getUniqueSortedNumbers } from '../../utils/arrayUtils';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Calculator, Zap, Ghost, Terminal, Network, Edit3, Cpu, Save, Lock, Unlock, Layers, ShieldCheck, AlertOctagon, RefreshCw } from 'lucide-react';
 import type { AntColonyPath } from '../../types';
 import { TicketXRay } from '../TicketXRay';
 import { PatternSequencer } from '../PatternSequencer';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface CombinationsTabProps { drawName: string; }
 
@@ -26,7 +27,11 @@ interface GeneratedTicket {
 
 export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, spectral, vocalContext, globalWeights, loading: nexusLoading } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const spectral = useNexusStore(state => state.spectral);
+    const vocalContext = useNexusStore(state => state.vocalContext);
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const nexusLoading = useNexusStore(state => state.loading);
     
     // Mode Switcher
     const [mode, setMode] = useState<'auto' | 'manual'>('auto');
@@ -80,6 +85,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
 
     // --- MOTEUR DE GÉNÉRATION PRINCIPAL ---
     const handleGenerate = async () => {
+        audioEngine.play('click');
         // Extraction du pool et des bankers
         const rawPool = inputs.filter(i => i.val !== '').map(i => Number(i.val));
         const bankers = inputs.filter(i => i.val !== '' && i.isBanker).map(i => Number(i.val));
@@ -87,10 +93,11 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
         const pool = getUniqueSortedNumbers(rawPool);
         const uniqueBankers = getUniqueSortedNumbers(bankers);
 
-        if (pool.length < 5) { showToast("Min 5 numéros requis dans le pool.", "error"); return; }
-        if (uniqueBankers.length > 4) { showToast("Trop de bases (Max 4).", "error"); return; }
-        if (minSum >= maxSum) { showToast("Plage de Somme invalide.", "error"); return; }
+        if (pool.length < 5) { audioEngine.play('error'); showToast("Min 5 numéros requis dans le pool.", "error"); return; }
+        if (uniqueBankers.length > 4) { audioEngine.play('error'); showToast("Trop de bases (Max 4).", "error"); return; }
+        if (minSum >= maxSum) { audioEngine.play('error'); showToast("Plage de Somme invalide.", "error"); return; }
         
+        audioEngine.play('loading');
         setIsGenerating(true);
         setLogs(["Initialisation Architecte v3.0...", `Pool: ${pool.length} | Bases: ${uniqueBankers.length}`]);
         setGenProgress(0);
@@ -102,6 +109,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
             
             if (systemType === 'full') {
                 if (pool.length > 14) {
+                    audioEngine.play('error');
                     showToast("Max 14 numéros pour Système Intégral (Protection Mémoire)", "error");
                     setIsGenerating(false);
                     return;
@@ -182,10 +190,12 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
             setGeneratedTickets(output);
             
             addLog(`Optimisation terminée : ${output.length} tickets valides.`);
+            audioEngine.play('success');
             showToast(`${output.length} tickets générés et classés.`, "success");
 
         } catch (e: any) { 
             console.error(e);
+            audioEngine.play('error');
             showToast("Erreur critique : " + e.message, "error"); 
         } finally { 
             setIsGenerating(false); 
@@ -194,21 +204,25 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
     };
 
     const handleSaveTicket = async (t: GeneratedTicket) => {
+        audioEngine.play('click');
         await saveTicket({
             numbers: t.numbers,
             drawName: drawName,
             strategy: `Architecte v3 (Score ${t.nexusScore})`
         });
+        audioEngine.play('success');
         showToast("Ticket sauvegardé.", "success");
     };
 
     const handleApplyAco = (numbers: number[]) => {
+        audioEngine.play('click');
         // Remplir les inputs avec les numéros ACO
         const newInputs = inputs.map(i => ({ val: '', isBanker: false }));
         numbers.forEach((n, idx) => {
             if (idx < newInputs.length) newInputs[idx].val = n.toString();
         });
         setInputs(newInputs);
+        audioEngine.play('success');
         showToast("Chemin ACO injecté dans le pool.", "info");
     };
 
@@ -219,13 +233,13 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
             <div className="flex justify-center mb-6">
                 <div className="bg-slate-900 p-1.5 rounded-2xl border border-slate-800 flex shadow-lg">
                     <button 
-                        onClick={() => setMode('auto')} 
+                        onClick={() => { audioEngine.play('click'); setMode('auto'); }} 
                         className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${mode === 'auto' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                     >
                         <Zap size={14}/> Architecte Auto
                     </button>
                     <button 
-                        onClick={() => setMode('manual')} 
+                        onClick={() => { audioEngine.play('click'); setMode('manual'); }} 
                         className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${mode === 'manual' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                     >
                         <Edit3 size={14}/> Séquenceur Manuel
@@ -424,7 +438,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
                                         initial={{ opacity: 0, y: 10 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         transition={{ delay: idx * 0.03 }}
-                                        onClick={() => setExpandedTicketId(expandedTicketId === t.id ? null : t.id)}
+                                        onClick={() => { audioEngine.play('click'); setExpandedTicketId(expandedTicketId === t.id ? null : t.id); }}
                                         className={`
                                             bg-white dark:bg-slate-800 p-4 rounded-[2rem] border shadow-sm cursor-pointer transition-all relative overflow-hidden group
                                             ${expandedTicketId === t.id ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-300'}

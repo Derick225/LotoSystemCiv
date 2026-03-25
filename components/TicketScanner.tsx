@@ -2,22 +2,25 @@
 import React, { useState, useRef } from 'react';
 import { ScanBarcode, Camera, Upload, AlertCircle, CheckCircle, RefreshCw, X, FileText } from 'lucide-react';
 import { scanTicket } from '../services/geminiService';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { useToast } from './ui/Toast';
 import { NumberBall } from './NumberBall';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../utils/audioEngine';
 
 export const TicketScanner: React.FC = () => {
     const { showToast } = useToast();
-    const { lastPrediction } = useNexus();
+    const { lastPrediction } = useNexusStore();
     
     const [isScanning, setIsScanning] = useState(false);
     const [scannedData, setScannedData] = useState<{date: string, gagnants: number[], machine: number[]} | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const processImage = async (file: File) => {
+        audioEngine.play('click');
         setIsScanning(true);
         setScannedData(null);
+        audioEngine.play('loading');
         showToast("Analyse optique en cours (Quantum Vision)...", "info");
 
         try {
@@ -33,6 +36,7 @@ export const TicketScanner: React.FC = () => {
                     gagnants: data.gagnants,
                     machine: data.machine || []
                 });
+                audioEngine.play('success');
                 showToast("Ticket décodé avec succès.", "success");
             } else {
                 throw new Error("Format non reconnu.");
@@ -40,6 +44,7 @@ export const TicketScanner: React.FC = () => {
 
         } catch (e: any) {
             console.error("OCR Error", e);
+            audioEngine.play('error');
             showToast("Échec de la lecture optique. Réessayez avec une image plus claire.", "error");
         } finally {
             setIsScanning(false);
@@ -106,7 +111,7 @@ export const TicketScanner: React.FC = () => {
 
                     <div className="flex gap-4">
                         <button 
-                            onClick={() => fileInputRef.current?.click()}
+                            onClick={() => { audioEngine.play('click'); fileInputRef.current?.click(); }}
                             disabled={isScanning}
                             className="px-8 py-4 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-50 min-w-[200px]"
                         >
@@ -142,7 +147,7 @@ export const TicketScanner: React.FC = () => {
                                     <p className="text-[10px] text-slate-400 font-bold">{scannedData.date}</p>
                                 </div>
                             </div>
-                            <button onClick={() => setScannedData(null)} className="p-2 text-slate-400 hover:text-rose-500 transition"><X size={18}/></button>
+                            <button onClick={() => { audioEngine.play('click'); setScannedData(null); }} className="p-2 text-slate-400 hover:text-rose-500 transition"><X size={18}/></button>
                         </div>
 
                         <div className="space-y-8">

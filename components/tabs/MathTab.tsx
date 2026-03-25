@@ -9,14 +9,15 @@ import {
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { NumberBall } from '../NumberBall';
 import { RotateCw, Activity, Layers, Target, AlertOctagon, ThermometerSun, HelpCircle, CheckCircle2, Waves, Wind } from 'lucide-react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 
 interface MathTabProps {
   drawName: string;
 }
 
 export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
-  const { history, loading: nexusLoading } = useNexus();
+  const history = useNexusStore(state => state.history);
+  const nexusLoading = useNexusStore(state => state.loading);
   const [report, setReport] = useState<MathAnalysisReport | null>(null);
   const [shadows, setShadows] = useState<ShadowNumbers | null>(null);
   const [trendData, setTrendData] = useState<TrendOscillatorPoint[]>([]);

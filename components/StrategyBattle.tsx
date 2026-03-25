@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { generateMasterPrediction, getAlgoWeights } from '../services/predictionEngine';
 import { RiskProfile, Prediction } from '../types';
 import { NumberBall } from './NumberBall';
@@ -8,7 +8,10 @@ import { Swords, Shield, Zap, Scale, Target } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const StrategyBattle: React.FC = () => {
-    const { history, drawName, riskProfile } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const drawName = useNexusStore(state => state.drawName);
+    const riskProfile = useNexusStore(state => state.riskProfile);
+    
     const [leftProfile, setLeftProfile] = useState<RiskProfile>(riskProfile || 'PRUDENT');
     const [rightProfile, setRightProfile] = useState<RiskProfile>('AUDACIOUS');
     const [leftPred, setLeftPred] = useState<Prediction | null>(null);

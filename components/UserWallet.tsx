@@ -13,7 +13,8 @@ import { TicketXRay } from './TicketXRay';
 import { LOTO_PAYOUTS } from '../constants';
 import { useToast } from './ui/Toast';
 import { KellyCalculator } from './KellyCalculator';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
+import { audioEngine } from '../utils/audioEngine';
 
 const calculateWinAmount = (hits: number) => {
     const payouts = LOTO_PAYOUTS.STANDARD.SIMPLE;
@@ -45,7 +46,7 @@ const parseDateSafe = (dateStr: string): Date => {
 
 export const UserWallet: React.FC = () => {
     const { showToast } = useToast();
-    const { spectral } = useNexus(); 
+    const { spectral } = useNexusStore(); 
     const queryClient = useQueryClient();
     
     const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
@@ -153,30 +154,38 @@ export const UserWallet: React.FC = () => {
     // --- ACTIONS ---
 
     const handleSyncWallet = async () => {
+        audioEngine.play('click');
         const sess = sessionData?.session;
         if (sess?.user) {
             await hydrateUserData(sess.user.id);
             queryClient.invalidateQueries({ queryKey: ['tickets'] });
+            audioEngine.play('success');
             showToast("Sync Cloud OK.", "success");
         } else {
+            audioEngine.play('error');
             showToast("Connexion requise.", "error");
         }
     };
 
     const handleScanLive = async () => {
+        audioEngine.play('click');
         const count = await checkAndSyncRecentResults();
         if (count > 0) {
             queryClient.invalidateQueries({ queryKey: ['ticketResults'] });
+            audioEngine.play('success');
             showToast(`${count} nouveaux tirages.`, "success");
         } else {
+            audioEngine.play('success');
             showToast("À jour.", "success");
         }
     };
 
     const handleClaim = (ticket: SavedTicket, winAmount: number) => {
+        audioEngine.play('click');
         if (confirm(`Encaisser ${winAmount.toLocaleString()} F ?`)) {
             bankrollMutation.mutate(winAmount);
             archiveMutation.mutate(ticket.id);
+            audioEngine.play('success');
             showToast("Gain ajouté !", "success");
         }
     };
@@ -282,7 +291,7 @@ export const UserWallet: React.FC = () => {
 
             <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
                 <button 
-                    onClick={() => setShowKelly(!showKelly)}
+                    onClick={() => { audioEngine.play('click'); setShowKelly(!showKelly); }}
                     className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-4 rounded-2xl md:rounded-[2rem] border transition-all whitespace-nowrap ${showKelly ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
                 >
                     <Calculator size={16} />
@@ -330,7 +339,7 @@ export const UserWallet: React.FC = () => {
                         return (
                             <div 
                                 key={ticket.id} 
-                                onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}
+                                onClick={() => { audioEngine.play('click'); setExpandedTicketId(isExpanded ? null : ticket.id); }}
                                 className={`bg-white dark:bg-slate-800 p-4 md:p-5 rounded-[2rem] md:rounded-[2.5rem] border shadow-sm flex flex-col relative overflow-hidden group transition-all cursor-pointer ${isExpanded ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-300'}`}
                             >
                                 {win > 0 && <div className="absolute top-0 left-0 w-1 md:w-1.5 h-full bg-emerald-500"></div>}
@@ -342,7 +351,7 @@ export const UserWallet: React.FC = () => {
                                                 <span className="text-[7px] md:text-[10px] font-black uppercase text-white bg-slate-900 px-2 py-0.5 md:px-2.5 md:py-1 rounded-md md:rounded-lg">{ticket.drawName}</span>
                                                 <span className="text-[7px] md:text-[10px] text-slate-400 font-bold">{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
                                             </div>
-                                            <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(ticket.id); }} className="text-slate-300 hover:text-rose-500 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={12}/></button>
+                                            <button onClick={(e) => { e.stopPropagation(); audioEngine.play('click'); deleteMutation.mutate(ticket.id); }} className="text-slate-300 hover:text-rose-500 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={12}/></button>
                                         </div>
                                         <div className="flex gap-1 md:gap-2 justify-center md:justify-start flex-wrap">
                                             {ticket.numbers.map(n => <NumberBall key={n} number={n} size="xs" />)}

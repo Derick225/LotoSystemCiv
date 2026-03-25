@@ -1,4 +1,6 @@
 
+import { AppError, logError } from '../utils/AppError';
+
 /**
  * NEXUS WORKER SERVICE
  * Orchestre les calculs lourds en arrière-plan pour garder l'UI fluide.
@@ -27,10 +29,10 @@ class WorkerService {
                 };
 
                 this.worker.onerror = (e) => {
-                    console.error("MathWorker Error:", e);
+                    logError(new AppError(e.message || "MathWorker Error", "MATH_WORKER_ERROR", "high", { error: e }), { source: 'WorkerService' });
                 };
-            } catch (e) {
-                console.warn("Impossible d'initialiser le MathWorker, repli sur le thread principal.", e);
+            } catch (e: any) {
+                logError(new AppError(e.message || "Impossible d'initialiser le MathWorker", "WORKER_INIT_ERROR", "medium", { error: e }), { source: 'WorkerService' });
             }
         }
     }
@@ -41,7 +43,7 @@ class WorkerService {
 
     public async runTask<T>(task: string, payload: any = {}, history: any[] = []): Promise<T> {
         if (!this.worker) {
-            throw new Error("Worker not available");
+            throw new AppError("Worker not available", "WORKER_NOT_AVAILABLE", "medium");
         }
 
         const requestId = Math.random().toString(36).substring(7);
@@ -49,7 +51,7 @@ class WorkerService {
             const timeout = setTimeout(() => {
                 if (this.taskCallbacks.has(requestId)) {
                     this.taskCallbacks.delete(requestId);
-                    reject(new Error(`Task ${task} timed out after 30s`));
+                    reject(new AppError(`Task ${task} timed out after 30s`, "WORKER_TIMEOUT", "medium"));
                 }
             }, 30000);
 

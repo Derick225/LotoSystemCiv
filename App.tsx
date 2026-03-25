@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
-import { NexusProvider, useNexus } from './components/NexusProvider';
+import { NexusProvider } from './components/NexusProvider';
+import { useNexusStore } from './store/useNexusStore';
+import { useAuth } from './hooks/useAuth';
 import { AppShell, ViewMode } from './components/layout/AppShell';
 import { GlobalErrorBoundary } from './components/ui/GlobalErrorBoundary';
 import { GlobalErrorListener } from './components/GlobalErrorListener';
@@ -27,6 +29,7 @@ const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m
 const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
 const QuantumLab = lazy(() => import('./components/QuantumLab').then(m => ({ default: m.QuantumLab })));
+const EnsemblePredictorTab = lazy(() => import('./components/tabs/EnsemblePredictorTab').then(m => ({ default: m.EnsemblePredictorTab })));
 const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
 
 // Composant de sécurité pour les accès non autorisés
@@ -51,7 +54,7 @@ const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
       </div>
       
       <button 
-        onClick={onBack}
+        onClick={() => { audioEngine.play('click'); onBack(); }}
         className="w-full py-4 bg-white text-slate-900 hover:bg-indigo-50 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg hover:animate-pulse"
       >
         <ArrowLeft size={16} /> Retour Station
@@ -62,13 +65,11 @@ const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
 
 // Composant Interne qui a accès au contexte Nexus et Auth
 const AppContent: React.FC = () => {
-  const { setDrawName, refreshData } = useNexus();
+  const setDrawName = useNexusStore(state => state.setDrawName);
+  const refreshData = useNexusStore(state => state.refreshData);
   const { showToast } = useToast();
   
-  const [session, setSession] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
+  const { session, isAdmin, loading: authLoading, subscription, refreshSubscription } = useAuth();
   
   const [isBooted, setIsBooted] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('home');
@@ -81,85 +82,19 @@ const AppContent: React.FC = () => {
   });
 
   useEffect(() => {
-    let isMounted = true;
-    const checkAuthAndSub = async () => {
-      setAuthLoading(true);
-      
-      try {
-          const currentSession = await authService.getSession();
-          if (!isMounted) return;
-          setSession(currentSession);
-          
-          const savedSettings = getSettings();
-          audioEngine.setEnabled(savedSettings.sound);
-          
-          if (currentSession?.user) {
-            await hydrateUserData(currentSession.user.id);
-            
-            const syncedSettings = getSettings();
-            if (syncedSettings.theme !== 'system') setTheme(syncedSettings.theme);
+    const savedSettings = getSettings();
+    audioEngine.setEnabled(savedSettings.sound);
+    if (savedSettings.theme !== 'system') setTheme(savedSettings.theme);
 
-            const adminStatus = authService.isAdminUser(currentSession.user);
-            setIsAdmin(adminStatus);
-            
-            if (adminStatus) {
-                setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
-            } else {
-                const subState = await checkSubscriptionStatus(currentSession.user.id);
-                setSubscription(subState);
-                
-                // ACTIVER LE LISTENER REALTIME POUR PAIEMENT INSTANTANÉ
-                const unsubscribe = subscribeToSubscriptionUpdates(currentSession.user.id, (newSub) => {
-                    setSubscription(newSub);
-                    if (newSub.status === 'active') {
-                        showToast("Accès débloqué en temps réel !", "success");
-                        audioEngine.play('success');
-                    }
-                });
-            }
-          }
-      } catch (e) {
-          console.error("Auth Check Error", e);
-      } finally {
-          if (isMounted) setAuthLoading(false);
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('payment') === 'success') {
-          showToast("Paiement confirmé ! Abonnement activé.", "success");
-          audioEngine.play('success');
-          window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (params.get('payment') === 'cancel') {
-          showToast("Paiement annulé.", "info");
-          window.history.replaceState({}, document.title, window.location.pathname);
-      }
-
-      const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-        if (!isMounted) return;
-        setSession(newSession);
-        if (newSession?.user) {
-          await hydrateUserData(newSession.user.id);
-          const adminStatus = authService.isAdminUser(newSession.user);
-          setIsAdmin(adminStatus);
-          
-          if (adminStatus) {
-             setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
-          } else {
-             const subState = await checkSubscriptionStatus(newSession.user.id);
-             setSubscription(subState);
-          }
-        } else {
-          setIsAdmin(false);
-          setSubscription(null);
-        }
-      });
-
-      return () => authListener.unsubscribe();
-    };
-
-    checkAuthAndSub();
-    
-    return () => { isMounted = false; };
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+        showToast("Paiement confirmé ! Abonnement activé.", "success");
+        audioEngine.play('success');
+        window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('payment') === 'cancel') {
+        showToast("Paiement annulé.", "info");
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, [showToast]);
 
   useEffect(() => {
@@ -192,18 +127,12 @@ const AppContent: React.FC = () => {
 
   const handleLogout = async () => {
     await authService.logout();
-    setSession(null);
-    setIsAdmin(false);
-    setSubscription(null);
     showToast("Déconnexion réussie", "info");
   };
 
   const handlePaymentSuccess = async () => {
       // Callback local immédiat (optimiste)
-      if (session?.user) {
-          const subState = await checkSubscriptionStatus(session.user.id);
-          setSubscription(subState);
-      }
+      await refreshSubscription();
   };
 
   if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
@@ -227,6 +156,7 @@ const AppContent: React.FC = () => {
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+          case 'ensemble': content = <EnsemblePredictorTab />; break;
           case 'lab': content = <QuantumLab />; break;
           case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;
           default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
@@ -246,8 +176,10 @@ const AppContent: React.FC = () => {
       <AppShell 
         viewMode={viewMode} 
         setViewMode={(mode) => { 
+            audioEngine.play('click');
             if (mode === 'admin' && !isAdmin) {
                 showToast("Accès refusé : Privilèges Admin requis.", "error");
+                audioEngine.play('error');
                 return;
             }
             setViewMode(mode); 
@@ -258,7 +190,7 @@ const AppContent: React.FC = () => {
         setTheme={setTheme} 
         onReset={handleReset}
         showWallet={showWallet}
-        setShowWallet={setShowWallet}
+        setShowWallet={(show) => { audioEngine.play('click'); setShowWallet(show); }}
         isDrawSelected={!!selectedDraw}
         isAdmin={isAdmin}
         onLogout={handleLogout}

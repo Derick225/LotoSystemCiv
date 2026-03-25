@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { ForensicResultAudit } from './ForensicResultAudit';
 import { PredictionForensics } from './PredictionForensics';
 import { Microscope, ShieldCheck, AlertTriangle, FileText, Search, Fingerprint } from 'lucide-react';
@@ -9,7 +9,7 @@ import { DrawResult, ForensicReport } from '../types';
 import { analyzeForManipulation } from '../services/forensicAuditService';
 
 export const ForensicLab: React.FC = () => {
-    const { history, loading } = useNexus();
+    const { history, loading } = useNexusStore();
     const [selectedDraw, setSelectedDraw] = useState<DrawResult | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
 

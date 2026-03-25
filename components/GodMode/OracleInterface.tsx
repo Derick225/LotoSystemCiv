@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { getGeminiClient } from '../../services/geminiService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Bot, User, Sparkles, Zap, Lock, Unlock, Eye, EyeOff } from 'lucide-react';
@@ -13,7 +13,7 @@ interface Message {
 }
 
 export const OracleInterface: React.FC = () => {
-    const { history, lastPrediction, globalWeights, isGodMode, toggleGodMode } = useNexus();
+    const { history, lastPrediction, globalWeights, isGodMode, toggleGodMode } = useNexusStore();
     const [messages, setMessages] = useState<Message[]>([
         { id: '0', role: 'system', content: 'ORACLE SYSTEM ONLINE. WAITING FOR INPUT.', timestamp: Date.now() }
     ]);

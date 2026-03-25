@@ -3,10 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getCyclicCandidates, type CyclicCandidate, getTimeSlotAffinity, type TimeSlotMetric } from '../../services/temporalAnalysisService';
 import { fetchAssociatedNumbers } from '../../services/lotteryService';
 import { NumberBall } from '../NumberBall';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Clock, Calendar, Sparkles, RotateCw, Link, ArrowRight, Activity, Hourglass, Sun, Moon, Sunrise, Sunset } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, Cell, YAxis } from 'recharts';
 import { motion } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface DependencyFlow {
     source: number;
@@ -57,7 +58,9 @@ const ChronobiologicalChart: React.FC<{ data: TimeSlotMetric[] }> = ({ data }) =
 };
 
 export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, regularity, loading: nexusLoading } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const regularity = useNexusStore(state => state.regularity);
+    const nexusLoading = useNexusStore(state => state.loading);
     const [cyclicData, setCyclicData] = useState<CyclicCandidate[]>([]);
     const [dependencies, setDependencies] = useState<DependencyFlow[]>([]);
     const [timeMetrics, setTimeMetrics] = useState<TimeSlotMetric[]>([]);

@@ -1,11 +1,12 @@
 
 import React, { useMemo } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { NumberBall } from '../NumberBall';
 import { Zap, Battery, BatteryCharging, BatteryWarning, Info, Sparkles } from 'lucide-react';
 
 export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-  const { spectral, loading } = useNexus();
+  const spectral = useNexusStore(state => state.spectral);
+  const loading = useNexusStore(state => state.loading);
 
   const highEnergy = useMemo(() => {
       return [...spectral]

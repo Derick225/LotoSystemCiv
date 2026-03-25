@@ -1,5 +1,5 @@
 import { supabase } from '../../services/supabaseClient';
-import { AppError } from '../errors/AppError';
+import { AppError, logError } from '../../utils/AppError';
 
 interface ApiOptions extends RequestInit {
   requireAuth?: boolean;
@@ -40,25 +40,33 @@ export const apiClient = {
         data = text ? JSON.parse(text) : null;
       } catch (parseError) {
         if (response.ok) return { success: true } as unknown as T;
-        throw new AppError('NETWORK_ERR', `Erreur serveur (${response.status}) : Réponse non-JSON`, parseError);
+        throw new AppError(`Erreur serveur (${response.status}) : Réponse non-JSON`, 'NETWORK_ERR', 'high', { error: parseError });
       }
 
       if (!response.ok) {
         throw new AppError(
-          response.status === 401 ? 'AUTH_ERR' : 'NETWORK_ERR',
           data?.error || data?.message || `Erreur HTTP ${response.status}`,
-          data
+          response.status === 401 ? 'AUTH_ERR' : 'NETWORK_ERR',
+          'high',
+          { data }
         );
       }
 
       return data as T;
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (error instanceof AppError) throw error;
-      if (error.name === 'AbortError') {
-        throw new AppError('NETWORK_ERR', `Timeout lors de l'appel à ${endpoint}`, error);
+      if (error instanceof AppError) {
+        logError(error, { endpoint });
+        throw error;
       }
-      throw new AppError('UNKNOWN_ERR', 'Impossible de contacter le serveur', error);
+      if (error.name === 'AbortError') {
+        const timeoutError = new AppError(`Timeout lors de l'appel à ${endpoint}`, 'NETWORK_ERR', 'medium', { error });
+        logError(timeoutError, { endpoint });
+        throw timeoutError;
+      }
+      const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', 'high', { error });
+      logError(unknownError, { endpoint });
+      throw unknownError;
     }
   }
 };

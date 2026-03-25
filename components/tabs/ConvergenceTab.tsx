@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { calculateFusion } from '../../services/fusionService';
 import { FusionResult } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -9,9 +9,14 @@ import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Cpu, Zap, Brain, Hexagon, ArrowDown, Save, RefreshCw, Layers, GitMerge } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, stats, spectral, lastPrediction, globalWeights } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const stats = useNexusStore(state => state.stats);
+    const spectral = useNexusStore(state => state.spectral);
+    const lastPrediction = useNexusStore(state => state.lastPrediction);
+    const globalWeights = useNexusStore(state => state.globalWeights);
     const { showToast } = useToast();
     
     const [fusionResult, setFusionResult] = useState<FusionResult | null>(null);
@@ -19,10 +24,13 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
     const [step, setStep] = useState(0); 
 
     const handleFusion = () => {
+        audioEngine.play('click');
         if (history.length < 5) {
+            audioEngine.play('error');
             showToast("Historique insuffisant pour la convergence.", "error");
             return;
         }
+        audioEngine.play('loading');
         setIsFusing(true);
         setStep(1); 
         
@@ -36,16 +44,19 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
             setFusionResult(result);
             setIsFusing(false);
             setStep(0);
+            audioEngine.play('success');
         }, 1800);
     };
 
     const handleSave = async () => {
+        audioEngine.play('click');
         if (!fusionResult) return;
         await saveTicket({
             numbers: fusionResult.finalTicket,
             drawName,
             strategy: `Hyper-Convergence (${fusionResult.confidence}%)`
         });
+        audioEngine.play('success');
         showToast("Ticket Fusion sauvegardé.", "success");
     };
 

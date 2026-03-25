@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
-import { useNexus } from '../components/NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
 
@@ -16,7 +16,7 @@ export const useVoiceControl = (
     triggerGeneration?: () => void
 ) => {
     const { showToast } = useToast();
-    const { refreshData, currentDrawName } = useNexus();
+    const { refreshData, currentDrawName } = useNexusStore();
     
     const [isListening, setIsListening] = useState(false);
     const [transcript, setTranscript] = useState('');

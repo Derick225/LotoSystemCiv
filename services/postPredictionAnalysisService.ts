@@ -2,14 +2,15 @@
 import type { ForensicReport, ForensicEvidence, ScoreBreakdown, CounterfactualResult, SpectralDeviation, AlgoWeights, DrawResult } from '../types';
 import { normalizeWeights, getAlgoWeights } from './predictionEngine';
 import { syncForensicReports } from './syncService';
+import { AppError, logError } from '../utils/AppError';
 
 const FORENSIC_KEY_PREFIX = 'forensic_report_';
 
 export const saveForensicReport = (report: ForensicReport) => {
     try {
         localStorage.setItem(`${FORENSIC_KEY_PREFIX}${report.id}`, JSON.stringify(report));
-    } catch (e) {
-        console.error("Failed to save forensic report", e);
+    } catch (e: any) {
+        logError(new AppError(e.message || "Failed to save forensic report", "FORENSIC_SAVE_ERROR", "low", { error: e, reportId: report.id }), { source: 'saveForensicReport' });
     }
 };
 
@@ -21,8 +22,8 @@ export const getLocalForensicReports = (): ForensicReport[] => {
             try {
                 const item = JSON.parse(localStorage.getItem(key) || '{}');
                 reports.push(item);
-            } catch (e) {
-                console.error("Error parsing forensic report", e);
+            } catch (e: any) {
+                logError(new AppError(e.message || "Error parsing forensic report", "FORENSIC_PARSE_ERROR", "low", { error: e, key }), { source: 'getLocalForensicReports' });
             }
         }
     }
@@ -35,8 +36,8 @@ export const syncForensicReportsWithCloud = async (): Promise<ForensicReport[]> 
         const synced = await syncForensicReports(local);
         synced.forEach(saveForensicReport);
         return synced;
-    } catch (e) {
-        console.error("Forensic sync failed", e);
+    } catch (e: any) {
+        logError(new AppError(e.message || "Forensic sync failed", "FORENSIC_SYNC_ERROR", "medium", { error: e }), { source: 'syncForensicReportsWithCloud' });
         return local;
     }
 };

@@ -17,7 +17,9 @@ const LABELS: Record<string, string> = {
     momentum: 'Momentum',
     equilibrium: 'Équilibre',
     anti_consensus: 'Chaos',
-    spatial: 'Spatial'
+    spatial: 'Spatial',
+    quantum_entanglement: 'Intrication',
+    fractal_resonance: 'Fractale'
 };
 
 export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {

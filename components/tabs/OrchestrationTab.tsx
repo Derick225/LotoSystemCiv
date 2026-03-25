@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getFullOrchestrationAnalysis, analyzeShortTermMimicry } from '../../services/orchestrationService';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import type { OrchestrationMetrics, DrawResult, MimicryMetric, ScoreComposition } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { OrchestrationRadar } from '../OrchestrationRadar';
@@ -10,6 +10,7 @@ import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface OrchestrationTabProps { drawName: string; }
 
@@ -196,7 +197,9 @@ const MimicryCard: React.FC<{ mimicry: MimicryMetric[] }> = ({ mimicry }) => {
 };
 
 export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) => {
-    const { history, loading: nexusLoading, globalWeights } = useNexus(); // Ajout globalWeights
+    const history = useNexusStore(state => state.history);
+    const nexusLoading = useNexusStore(state => state.loading);
+    const globalWeights = useNexusStore(state => state.globalWeights);
     const { showToast } = useToast();
     
     const [metrics, setMetrics] = useState<(OrchestrationMetrics & { candidatesDetails?: Record<number, ScoreComposition> }) | null>(null);
@@ -232,6 +235,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     }, [drawName, history, globalWeights]); // Recalcul si les poids changent
 
     const handleGenerateTicket = () => {
+        audioEngine.play('click');
         if (!metrics || metrics.topCandidates.length < 5) return;
         
         // Algorithme de synthèse intelligente : Coeur solide + Dispersion
@@ -244,16 +248,19 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         const finalTicket = [...core, ...shuffledFillers.slice(0, 2)].sort((a,b) => a-b);
         
         setGeneratedTicket(finalTicket);
+        audioEngine.play('success');
         showToast("Synthèse Harmonique terminée.", "success");
     };
 
     const handleSaveTicket = async () => {
+        audioEngine.play('click');
         if(!generatedTicket) return;
         await saveTicket({
             numbers: generatedTicket,
             drawName,
             strategy: 'Orchestration Elite'
         });
+        audioEngine.play('success');
         showToast("Ticket sauvegardé.", "success");
     };
 

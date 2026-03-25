@@ -2,14 +2,14 @@
 import React, { useMemo } from 'react';
 import { DrawResult } from '../types';
 import { Activity, Wind, AlertTriangle, ShieldCheck, Gauge } from 'lucide-react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 
 interface ChaosAttractorProps {
     history: DrawResult[];
 }
 
 export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
-    const { regime, volatility } = useNexus();
+    const { regime, volatility } = useNexusStore();
     
     const turbulence = volatility?.score || 50;
     

@@ -9,6 +9,7 @@ import { UserManagement } from './UserManagement';
 import { Server, BrainCircuit, Activity, Sliders, Database, ShieldCheck, Users } from 'lucide-react';
 import { ALL_DRAWS } from '../../constants';
 import { RefreshCw } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const AdminPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'tuning' | 'training' | 'management' | 'users' | 'integrity' | 'database'>('tuning');
@@ -40,7 +41,7 @@ export const AdminPanel: React.FC = () => {
                     ].map(tab => (
                         <button 
                             key={tab.id} 
-                            onClick={() => setActiveTab(tab.id as any)} 
+                            onClick={() => { audioEngine.play('click'); setActiveTab(tab.id as any); }} 
                             className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all whitespace-nowrap flex items-center gap-3 ${activeTab === tab.id ? 'bg-white dark:bg-indigo-600 shadow-xl text-indigo-600 dark:text-white scale-105 z-10' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                         >
                             {tab.icon} {tab.label}
@@ -55,7 +56,7 @@ export const AdminPanel: React.FC = () => {
                         <div className="relative group w-full md:min-w-[280px] md:w-auto">
                             <select 
                                 value={selectedDraw} 
-                                onChange={(e) => setSelectedDraw(e.target.value)} 
+                                onChange={(e) => { audioEngine.play('click'); setSelectedDraw(e.target.value); }} 
                                 className="w-full appearance-none p-5 bg-white dark:bg-slate-800 rounded-[2rem] border border-indigo-100 dark:border-indigo-900 shadow-sm font-black text-sm outline-none focus:ring-4 ring-indigo-500/10 transition-all uppercase tracking-widest"
                             >
                                 {ALL_DRAWS.map(d => <option key={d.name} value={d.name}>{d.name} ({d.day})</option>)}

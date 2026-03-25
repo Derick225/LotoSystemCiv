@@ -4,8 +4,9 @@ import { runDecisionForest, calculateFeatureImportance, FEATURES_LABELS } from '
 import type { ForestVote } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Vote, Users, BrainCircuit, Ghost, EyeOff, ShieldCheck, Check, Sparkles, HelpCircle, Scale } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface DecisionTreeTabProps { drawName: string; }
 
@@ -13,7 +14,8 @@ type FilterMode = 'consensus' | 'average' | 'shadow';
 
 export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const nexusLoading = useNexusStore(state => state.loading);
     
     const [candidates, setCandidates] = useState<ForestVote[]>([]);
     const [selectedCandidate, setSelectedCandidate] = useState<ForestVote | null>(null);
@@ -110,19 +112,19 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                     {/* SELECTEUR DE MODE */}
                     <div className="flex bg-slate-950 p-1.5 rounded-[2rem] border border-slate-800 shadow-inner">
                         <button 
-                            onClick={() => setFilterMode('consensus')}
+                            onClick={() => { audioEngine.play('click'); setFilterMode('consensus'); }}
                             className={`px-5 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === 'consensus' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                         >
                             <ShieldCheck size={14}/> Top
                         </button>
                         <button 
-                            onClick={() => setFilterMode('average')}
+                            onClick={() => { audioEngine.play('click'); setFilterMode('average'); }}
                             className={`px-5 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === 'average' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                         >
                             <Scale size={14}/> Moyen
                         </button>
                         <button 
-                            onClick={() => setFilterMode('shadow')}
+                            onClick={() => { audioEngine.play('click'); setFilterMode('shadow'); }}
                             className={`px-5 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === 'shadow' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
                         >
                             <EyeOff size={14}/> Ombre
@@ -148,7 +150,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                         {candidates.slice(0, 10).map((c, idx) => (
                             <button 
                                 key={c.candidate} 
-                                onClick={() => setSelectedCandidate(c)} 
+                                onClick={() => { audioEngine.play('click'); setSelectedCandidate(c); }} 
                                 className={`w-full flex items-center justify-between p-4 rounded-3xl border transition-all transform active:scale-95 ${selectedCandidate?.candidate === c.candidate ? `${theme.bg} ${theme.border} text-white shadow-lg scale-105` : 'bg-slate-50 dark:bg-slate-900 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                             >
                                 <div className="flex items-center gap-4">

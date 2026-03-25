@@ -7,7 +7,8 @@ import { updatePredictionFeedback } from '../services/predictionHistoryService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { apiClient } from '../core/api/apiClient';
 import { useToast } from './ui/Toast';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
+import { audioEngine } from '../utils/audioEngine';
 import { 
     ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
     AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, RefreshCw, Dna
@@ -21,7 +22,7 @@ interface PredictionForensicsProps {
 
 export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report, onClose }) => {
     const { showToast } = useToast();
-    const { updateGlobalWeights, refreshData } = useNexus();
+    const { updateGlobalWeights, refreshData } = useNexusStore();
     
     const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation'>('ballistic');
     const [applying, setApplying] = useState(false);
@@ -41,6 +42,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
     const handleApplyCorrection = async () => {
         if (!bestScenario) return;
+        audioEngine.play('click');
         setApplying(true);
         try {
             const currentWeights = await getAlgoWeights(report.drawName);
@@ -71,11 +73,13 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             await refreshData(report.drawName, true); 
 
             setSuccessApply(true);
+            audioEngine.play('success');
             showToast(`🧬 Mutation ADN : ${message}. Configuration sauvegardée.`, "success");
             
             setTimeout(onClose, 2000);
         } catch(e) {
             console.error(e);
+            audioEngine.play('error');
             showToast("Erreur lors de la mutation de l'ADN.", "error");
             setApplying(false);
         }
@@ -83,6 +87,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
     const handleSubmitFeedback = async () => {
         if (!report.predictionId || !userRating) return;
+        audioEngine.play('click');
         setSubmittingFeedback(true);
         try {
             updatePredictionFeedback(report.predictionId, {
@@ -102,9 +107,11 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             }
 
             setFeedbackSent(true);
+            audioEngine.play('success');
             showToast("Signal RL envoyé au Cloud.", "success");
 
         } catch (e) {
+            audioEngine.play('error');
             showToast("Feedback sauvegardé localement.", "info");
             setFeedbackSent(true);
         } finally {
@@ -176,12 +183,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                     </div>
                     
                     <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl">
-                        <button onClick={() => setActiveTab('ballistic')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
-                        <button onClick={() => setActiveTab('spectral')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
-                        <button onClick={() => setActiveTab('simulation')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'simulation' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600 dark:text-white' : 'text-slate-500'}`}>Simulation</button>
+                        <button onClick={() => { audioEngine.play('click'); setActiveTab('ballistic'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
+                        <button onClick={() => { audioEngine.play('click'); setActiveTab('spectral'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
+                        <button onClick={() => { audioEngine.play('click'); setActiveTab('simulation'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'simulation' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600 dark:text-white' : 'text-slate-500'}`}>Simulation</button>
                     </div>
 
-                    <button onClick={onClose} className="p-3 bg-white dark:bg-slate-800 rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-500 transition shadow-sm border border-slate-200 dark:border-slate-700">
+                    <button onClick={() => { audioEngine.play('click'); onClose(); }} className="p-3 bg-white dark:bg-slate-800 rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-500 transition shadow-sm border border-slate-200 dark:border-slate-700">
                         <XIcon size={20} />
                     </button>
                 </div>
@@ -452,7 +459,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     {[{ id: 'Visionnaire', icon: <ThumbsUp size={16}/>, color: 'bg-emerald-500' }, { id: 'Standard', icon: <Meh size={16}/>, color: 'bg-amber-500' }, { id: 'Incohérente', icon: <ThumbsDown size={16}/>, color: 'bg-rose-500' }].map((rate) => (
                                         <button 
                                             key={rate.id} 
-                                            onClick={() => setUserRating(rate.id as any)} 
+                                            onClick={() => { audioEngine.play('click'); setUserRating(rate.id as any); }} 
                                             className={`flex-1 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all transform active:scale-95 ${userRating === rate.id ? `${rate.color} text-white shadow-lg scale-105` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
                                         >
                                             {rate.icon} {rate.id}

@@ -7,14 +7,15 @@ import { NumberBall } from './NumberBall';
 import { Trash2, History, CheckCircle2, Microscope, Link as LinkIcon, AlertCircle, Binary, ChevronDown, Activity, Clock } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { PredictionForensics } from './PredictionForensics';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { TicketXRay } from './TicketXRay';
+import { audioEngine } from '../utils/audioEngine';
 
 interface PredictionHistoryProps { drawName: string; }
 
 export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history: results, loading: nexusLoading } = useNexus();
+    const { history: results, loading: nexusLoading } = useNexusStore();
     const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [forensicReport, setForensicReport] = useState<ForensicReport | null>(null);
@@ -56,6 +57,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
 
     const handleOpenAudit = async (e: React.MouseEvent, result: DrawResult, predictionItem: PredictionHistoryItem) => {
         e.stopPropagation();
+        audioEngine.play('click');
         const report = await performForensicAnalysis(
             drawName, result.date, 
             predictionItem.prediction.suggestedNumbers, 
@@ -74,7 +76,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                     <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600"><History size={20}/></div>
                     <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter">Historique Inférence</h3>
                 </div>
-                <button onClick={() => { if(confirm("Vider l'historique ?")) { clearPredictionHistory(drawName); setHistory([]); }}} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-2 transition-colors"><Trash2 size={14}/> Reset Journal</button>
+                <button onClick={() => { audioEngine.play('click'); if(confirm("Vider l'historique ?")) { clearPredictionHistory(drawName); setHistory([]); audioEngine.play('success'); }}} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-2 transition-colors"><Trash2 size={14}/> Reset Journal</button>
             </div>
 
             <div className="grid gap-4">
@@ -87,7 +89,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                     return (
                         <div 
                             key={item.id} 
-                            onClick={() => setExpandedItem(isExpanded ? null : item.id)}
+                            onClick={() => { audioEngine.play('click'); setExpandedItem(isExpanded ? null : item.id); }}
                             className={`bg-white dark:bg-gray-800 rounded-[2rem] border shadow-sm overflow-hidden group transition-all cursor-pointer ${isExpanded ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-500'}`}
                         >
                             <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-50 dark:divide-slate-700">
@@ -174,7 +176,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                     );
                 })}
             </div>
-            {forensicReport && <PredictionForensics report={forensicReport} onClose={() => setForensicReport(null)} />}
+            {forensicReport && <PredictionForensics report={forensicReport} onClose={() => { audioEngine.play('click'); setForensicReport(null); }} />}
         </div>
     );
 };

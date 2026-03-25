@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { getNumberColor } from '../constants';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 
 export interface NumberBallProps {
   number: number;
@@ -20,7 +20,7 @@ export const NumberBall: React.FC<NumberBallProps> = ({
   isAttractor, 
   selected 
 }) => {
-  const { setHoveredNumber } = useNexus();
+  const { setHoveredNumber } = useNexusStore();
 
   const sizes = { 
     xs: 'w-6 h-6 text-[10px]',

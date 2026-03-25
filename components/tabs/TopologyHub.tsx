@@ -2,6 +2,7 @@
 import React, { useState, Suspense, lazy, useEffect } from 'react';
 import { Grid, GitBranch, Calculator, RefreshCw, Users, Terminal, Network } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
+import { audioEngine } from '../../utils/audioEngine';
 
 const SpatialTab = lazy(() => import('./SpatialTab').then(m => ({ default: m.SpatialTab })));
 const SynergyTab = lazy(() => import('./SynergyTab').then(m => ({ default: m.SynergyTab })));
@@ -53,37 +54,37 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
             <div className="relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
                 <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-[2.2rem] w-fit border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide max-w-full shadow-inner">
                     <button 
-                        onClick={() => setSubTab('spatial')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('spatial'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'spatial' ? 'bg-white dark:bg-slate-700 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <Grid size={16}/> Géométrie
                     </button>
                     <button 
-                        onClick={() => setSubTab('neural')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('neural'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'neural' ? 'bg-white dark:bg-slate-700 shadow-md text-indigo-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <Network size={16}/> Architecture
                     </button>
                     <button 
-                        onClick={() => setSubTab('synergy')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('synergy'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'synergy' ? 'bg-white dark:bg-slate-700 shadow-md text-blue-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <Users size={16}/> Synergie
                     </button>
                     <button 
-                        onClick={() => setSubTab('decision')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('decision'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'decision' ? 'bg-white dark:bg-slate-700 shadow-md text-emerald-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <GitBranch size={16}/> Décision
                     </button>
                     <button 
-                        onClick={() => setSubTab('combinations')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('combinations'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'combinations' ? 'bg-white dark:bg-slate-700 shadow-md text-rose-600 dark:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         <Calculator size={16}/> Architecte
                     </button>
                     <button 
-                        onClick={() => setSubTab('python')} 
+                        onClick={() => { audioEngine.play('click'); setSubTab('python'); }} 
                         className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2.5 whitespace-nowrap ${subTab === 'python' ? 'bg-emerald-600 text-white shadow-xl scale-105' : 'text-emerald-500 hover:text-emerald-400'}`}
                     >
                         <Terminal size={16}/> Deep Kernel

@@ -1,15 +1,18 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { calculateSuccessionMatrixAsync, findFrequentTriplets } from '../../services/mathService';
 import { NumberBall } from '../NumberBall';
 import { Users, ArrowRight, Activity, Zap, ShieldCheck, Heart, UserMinus, Search, Target, Network, Info, Link, Atom } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface SynergyTabProps { drawName: string; }
 
 export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
-    const { history, correlationMatrix, loading: nexusLoading } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const correlationMatrix = useNexusStore(state => state.correlationMatrix);
+    const nexusLoading = useNexusStore(state => state.loading);
     const [selectedNum, setSelectedNum] = useState<number | null>(null);
     const [successors, setSuccessors] = useState<{ number: number; prob: number }[]>([]);
     const [triplets, setTriplets] = useState<{ triplet: number[]; count: number }[]>([]);
@@ -192,7 +195,7 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                             <Search size={14} className="text-indigo-600"/> Inspecteur Manuel
                         </h4>
                         {selectedNum && (
-                            <button onClick={() => setSelectedNum(null)} className="text-[9px] font-black text-rose-600 uppercase bg-rose-50 px-3 py-1 rounded-full border border-rose-100 transition-all active:scale-95 shadow-sm">Reset</button>
+                            <button onClick={() => { audioEngine.play('click'); setSelectedNum(null); }} className="text-[9px] font-black text-rose-600 uppercase bg-rose-50 px-3 py-1 rounded-full border border-rose-100 transition-all active:scale-95 shadow-sm">Reset</button>
                         )}
                     </div>
                     
@@ -200,7 +203,7 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                         {Array.from({ length: 90 }, (_, i) => i + 1).map(n => (
                             <button
                                 key={n}
-                                onClick={() => setSelectedNum(n)}
+                                onClick={() => { audioEngine.play('click'); setSelectedNum(n); }}
                                 className={`aspect-square rounded-xl flex items-center justify-center text-[10px] font-black transition-all duration-300 border shadow-sm ${selectedNum === n ? 'bg-indigo-600 text-white border-indigo-700 scale-110 shadow-lg z-10 ring-4 ring-indigo-50' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/30'}`}
                             >
                                 {n}

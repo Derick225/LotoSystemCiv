@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { runDeepPythonAnalysis } from '../../services/pythonAnalystService';
 import { PythonAnalysisResult, NotebookCell } from '../../types';
 import { NumberBall } from '../NumberBall';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts';
 import { Terminal, Play, Cpu, Activity, BarChart2, CheckCircle, RefreshCw, Hash, Code, Save, Copy } from 'lucide-react';
 import { SafeMarkdown } from '../ui/SafeMarkdown';
+import { audioEngine } from '../../utils/audioEngine';
 
 // Composant Cellule de Code Style Jupyter
 const CodeCell: React.FC<{ content: string, onExecute?: () => void, isExecuting?: boolean }> = ({ content, onExecute, isExecuting }) => (
@@ -49,7 +50,8 @@ const OutputCell: React.FC<{ content: string }> = ({ content }) => (
 );
 
 export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-    const { history, globalWeights } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const globalWeights = useNexusStore(state => state.globalWeights);
     const { showToast } = useToast();
     
     const [status, setStatus] = useState<'idle' | 'running' | 'completed'>('idle');
@@ -64,6 +66,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
     }, [logs]);
 
     const runAnalysis = async () => {
+        audioEngine.play('click');
         setStatus('running');
         setResult(null);
         setProgress(0);
@@ -74,6 +77,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
         ]);
 
         try {
+            audioEngine.play('loading');
             // Injection des poids globaux pour que l'analyse Python respecte l'ADN
             // On passe explicitement le callback de progression ET le callback de log
             const data = await runDeepPythonAnalysis(
@@ -85,10 +89,12 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({ drawName }) =
                 (msg) => setLogs(prev => [...prev, msg]) // Callback logs
             );
             
+            audioEngine.play('success');
             setResult(data);
             setStatus('completed');
             showToast("Notebook exécuté avec succès.", "success");
         } catch (e: any) {
+            audioEngine.play('error');
             setStatus('idle');
             setLogs(prev => [...prev, `! [FATAL] ${e.message}`]);
         }

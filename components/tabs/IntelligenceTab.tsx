@@ -7,9 +7,10 @@ import type { GeminiReasoning, NarrativeReport } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { SafeMarkdown } from '../ui/SafeMarkdown';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Brain, Sparkles, Activity, ShieldCheck, Terminal, FileText, BrainCircuit, Target, Copy, RefreshCw, BarChart3, Wind, Fingerprint } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface IntelligenceTabProps {
     drawName: string;
@@ -17,7 +18,8 @@ interface IntelligenceTabProps {
 
 export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, stats } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const stats = useNexusStore(state => state.stats);
     
     // State
     const [analysis, setAnalysis] = useState<GeminiReasoning | null>(null);
@@ -42,16 +44,19 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
     }, [analysis]);
 
     const handleRunAnalysis = async () => {
+        audioEngine.play('click');
         if (isMounted.current) setLoading(true);
         try {
             if (history.length < 15) {
                 if (isMounted.current) {
+                    audioEngine.play('error');
                     showToast("Pas assez d'historique (Min 15 requis).", "error");
                     setLoading(false);
                 }
                 return;
             }
 
+            audioEngine.play('loading');
             // 1. Calculs Mathématiques Préalables (Le "Grounding")
             const freqMap: Record<number, number> = {};
             stats.forEach(s => freqMap[s.number] = s.count);
@@ -87,18 +92,24 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
                     setAnalysis(safeReasoning);
                 }
                 if (story) setNarrative(story);
+                audioEngine.play('success');
                 showToast("Inférence Nexus terminée.", "success");
             }
         } catch (e: any) {
             console.error("Inference Tab Error:", e);
-            if (isMounted.current) showToast(`Anomalie : ${e.message || "Échec de l'inférence"}`, "error");
+            if (isMounted.current) {
+                audioEngine.play('error');
+                showToast(`Anomalie : ${e.message || "Échec de l'inférence"}`, "error");
+            }
         } finally {
             if (isMounted.current) setLoading(false);
         }
     };
 
     const copyToClipboard = (text: string) => {
+        audioEngine.play('click');
         navigator.clipboard.writeText(text);
+        audioEngine.play('success');
         showToast("Rapport copié.", "success");
     };
 

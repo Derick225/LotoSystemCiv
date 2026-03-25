@@ -7,7 +7,8 @@ import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Responsive
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { Brain, Star, Activity, Info, Network, Zap, Clock, TrendingUp, UserCheck, HelpCircle, Ticket } from 'lucide-react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface ClusteringTabProps {
     drawName: string;
@@ -54,7 +55,8 @@ const CLUSTER_CONFIG: Record<string, ClusterSummary & { advice: string, metaphor
 
 export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history, loading: nexusLoading } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const nexusLoading = useNexusStore(state => state.loading);
     
     const [points, setPoints] = useState<ClusterPoint[]>([]);
     const [summary, setSummary] = useState<any[]>([]); 
@@ -114,18 +116,26 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     }, [selectedPoint, regularity]);
 
     const handleToggleWatchlist = (num: number) => {
+        audioEngine.play('click');
         if (isInWatchlist(num)) {
             removeFromWatchlist(num);
             showToast(`N°${num} retiré des favoris.`, "info");
         } else {
-            if (addToWatchlist(num)) showToast(`N°${num} ajouté aux favoris !`, "success");
-            else showToast("Limite de favoris atteinte.", "error");
+            if (addToWatchlist(num)) {
+                audioEngine.play('success');
+                showToast(`N°${num} ajouté aux favoris !`, "success");
+            } else {
+                audioEngine.play('error');
+                showToast("Limite de favoris atteinte.", "error");
+            }
         }
     };
 
     const handleGenerateFromCluster = async (clusterType: string) => {
+        audioEngine.play('click');
         const clusterPoints = points.filter(p => p.cluster === clusterType);
         if (clusterPoints.length < 5) {
+            audioEngine.play('error');
             showToast(`Pas assez de ${clusterType}s pour générer un ticket (Min 5).`, "error");
             return;
         }
@@ -152,6 +162,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 drawName,
                 strategy: `Cluster ${clusterType}`
             });
+            audioEngine.play('success');
             showToast(`Ticket ${clusterType} généré et sauvegardé (AC:${bestAC}).`, "success");
         }
     };
@@ -184,7 +195,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                     {summary.map(s => (
                         <div
                             key={s.type}
-                            onClick={() => { setActiveFilter(activeFilter === s.type ? null : s.type); setSelectedPoint(null); }}
+                            onClick={() => { audioEngine.play('click'); setActiveFilter(activeFilter === s.type ? null : s.type); setSelectedPoint(null); }}
                             className={`p-4 rounded-[2rem] border transition-all relative overflow-hidden group text-left cursor-pointer
                                 ${activeFilter === s.type 
                                     ? 'bg-slate-900 text-white shadow-xl scale-105 z-10 border-transparent' 
@@ -274,7 +285,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                             <Scatter 
                                 name="Numéros" 
                                 data={filteredPoints} 
-                                onClick={(p) => setSelectedPoint(p.payload)} 
+                                onClick={(p) => { audioEngine.play('click'); setSelectedPoint(p.payload); }} 
                                 animationDuration={800}
                             >
                                 {filteredPoints.map((p, index) => (

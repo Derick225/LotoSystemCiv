@@ -1,11 +1,12 @@
 
 import React from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { Activity, X, Microscope, ArrowRight } from 'lucide-react';
 import { getNumberColor } from '../../constants';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const GlobalNumberHUD: React.FC = () => {
-    const { hoveredNumber, setHoveredNumber, setInspectingNumber, stats, gaps, spectral } = useNexus();
+    const { hoveredNumber, setHoveredNumber, setInspectingNumber, stats, gaps, spectral } = useNexusStore();
 
     if (!hoveredNumber) return null;
 
@@ -26,10 +27,14 @@ export const GlobalNumberHUD: React.FC = () => {
     else if (gap > 25) { status = 'DORMEUR'; statusColor = 'text-indigo-400'; }
     else if (freq > 10) { status = 'FRÉQUENT'; statusColor = 'text-emerald-400'; }
 
-    const handleClose = () => setHoveredNumber(null);
+    const handleClose = () => {
+        audioEngine.play('click');
+        setHoveredNumber(null);
+    };
 
     const handleDeepScan = (e: React.MouseEvent) => {
         e.stopPropagation();
+        audioEngine.play('click');
         setInspectingNumber(hoveredNumber);
         setHoveredNumber(null);
     };

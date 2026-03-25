@@ -6,16 +6,19 @@ import { IntelligenceTab } from './IntelligenceTab';
 import { OrchestrationTab } from './OrchestrationTab';
 import { FeedbackLoopTab } from './FeedbackLoopTab';
 import { ConvergenceTab } from './ConvergenceTab';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { getStrategyName } from '../../services/predictionEngine';
 import { Sparkles, Medal, BrainCircuit, Network, AlertTriangle, ShieldCheck, Target, History, Hexagon, ScanBarcode } from 'lucide-react';
 import { OracleLiveAssistant } from '../OracleLiveAssistant';
 import { TicketScanner } from '../TicketScanner';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface OracleHubProps { drawName: string; }
 
 export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
-    const { regime: globalRegime, loading: nexusLoading, globalWeights } = useNexus();
+    const globalRegime = useNexusStore(state => state.regime);
+    const nexusLoading = useNexusStore(state => state.loading);
+    const globalWeights = useNexusStore(state => state.globalWeights);
     
     // Platinum est maintenant le moteur principal, mais on expose la Synthèse en premier plan
     const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'feedback' | 'convergence' | 'vision'>('platinum');
@@ -60,7 +63,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                         {subTabs.map((tab) => (
                             <button 
                                 key={tab.id}
-                                onClick={() => setSubTab(tab.id as any)} 
+                                onClick={() => { audioEngine.play('click'); setSubTab(tab.id as any); }} 
                                 className={`
                                     px-5 py-3 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap
                                     ${subTab === tab.id 

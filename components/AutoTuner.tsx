@@ -1,12 +1,15 @@
 
 import React, { useState } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { runMassiveCalibration, TuningResult } from '../services/autoTunerService';
 import { motion } from 'framer-motion';
 import { Cpu, Save, RefreshCw, CheckCircle } from 'lucide-react';
 
 export const AutoTuner: React.FC = () => {
-    const { history, drawName, updateGlobalWeights } = useNexus();
+    const history = useNexusStore(state => state.history);
+    const drawName = useNexusStore(state => state.drawName);
+    const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
+    
     const [isTuning, setIsTuning] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentRoi, setCurrentRoi] = useState(0);

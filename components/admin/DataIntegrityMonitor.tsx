@@ -5,6 +5,7 @@ import type { DrawResult } from '../../types';
 import { CheckCircle, Database, CalendarX, RefreshCw, AlertTriangle, Trash2, Zap, ShieldCheck } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useDeleteDrawMutation } from '../../hooks/useLottery';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface IntegrityReport {
     totalDraws: number;
@@ -25,6 +26,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
     const deleteMutation = useDeleteDrawMutation(drawName);
 
     const analyzeIntegrity = async () => {
+        audioEngine.play('scan');
         setLoading(true);
         try {
             const { data } = await fetchResults(drawName);
@@ -71,10 +73,12 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
                 lastGapDays: daysSinceLast,
                 status: score > 80 ? 'Excellent' : score > 50 ? 'Bon' : 'Critique'
             });
+            audioEngine.play('success');
         } finally { setLoading(false); }
     };
 
     const handleAutoClean = async () => {
+        audioEngine.play('click');
         if (!report) return;
         setFixing(true);
         try {
@@ -86,9 +90,11 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
             for (const corrupt of report.corruptData) {
                 await deleteMutation.mutateAsync(corrupt.id);
             }
+            audioEngine.play('success');
             showToast("Nettoyage terminé.", "success");
             analyzeIntegrity();
         } catch(e) {
+            audioEngine.play('error');
             showToast("Erreur lors du nettoyage.", "error");
         } finally {
             setFixing(false);
@@ -103,7 +109,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
                 <h3 className="font-black text-slate-800 dark:text-white flex items-center gap-4 uppercase tracking-tighter">
                     <Database className="w-6 h-6 text-indigo-500" /> Moniteur d'Intégrité HPC
                 </h3>
-                <button onClick={analyzeIntegrity} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-2xl hover:rotate-180 transition-all">
+                <button onClick={() => { audioEngine.play('click'); analyzeIntegrity(); }} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-2xl hover:rotate-180 transition-all">
                     <RefreshCw className={loading ? 'animate-spin text-indigo-500' : 'text-slate-500'} size={18} />
                 </button>
             </div>
@@ -141,7 +147,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
                             <h4 className="text-sm font-black uppercase mb-4 tracking-widest">Maintenance Directe</h4>
                             <div className="space-y-2 w-full">
                                 <button 
-                                    onClick={async () => { setFixing(true); await checkAndSyncRecentResults(); analyzeIntegrity(); setFixing(false); }}
+                                    onClick={async () => { audioEngine.play('click'); setFixing(true); await checkAndSyncRecentResults(); analyzeIntegrity(); setFixing(false); }}
                                     disabled={fixing}
                                     className="w-full py-3 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:scale-105 transition-all active:scale-95 disabled:opacity-50"
                                 >

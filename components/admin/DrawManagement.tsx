@@ -6,6 +6,7 @@ import type { DrawResult } from '../../types';
 import { useToast } from '../ui/Toast';
 import { Pencil, Trash2, Plus, Save, RotateCcw, Upload, LayoutGrid, Calendar, Download, Stethoscope, RefreshCw, FileSpreadsheet, CheckCircle2, AlertTriangle, Clipboard, DownloadCloud, FileText, Sparkles, Binary } from 'lucide-react';
 import { DataIntegrityMonitor } from './DataIntegrityMonitor';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface DrawManagementProps {
     drawName: string;
@@ -69,10 +70,11 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     };
 
     const handleSave = async () => {
+        audioEngine.play('click');
         const winNums = formWin.map(Number).filter(val => !isNaN(val) && val > 0);
         const macNums = formMac.map(Number).filter(val => !isNaN(val) && val > 0);
         const error = validateNumbers(winNums);
-        if (error) { showToast(error, "error"); return; }
+        if (error) { audioEngine.play('error'); showToast(error, "error"); return; }
         setIsSaving(true);
         
         // Formatage date pour affichage local avant envoi
@@ -89,6 +91,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     machine: macNums.length === 5 ? macNums : undefined,
                     version: 1
                 });
+                audioEngine.play('success');
                 showToast(`Registre mis à jour.`, "success");
             } else {
                 await addResult(drawName, { 
@@ -98,10 +101,11 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     machine: macNums.length === 5 ? macNums : undefined,
                     version: 1
                 });
+                audioEngine.play('success');
                 showToast(`Ajouté à ${drawName}.`, "success");
             }
             resetForm(); loadData();
-        } catch (e: any) { showToast(e.message, "error"); } finally { setIsSaving(false); }
+        } catch (e: any) { audioEngine.play('error'); showToast(e.message, "error"); } finally { setIsSaving(false); }
     };
 
     const resetForm = () => {
@@ -222,6 +226,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     };
 
     const downloadTemplate = () => {
+        audioEngine.play('click');
         const csvContent = "Date,G1,G2,G3,G4,G5,M1,M2,M3,M4,M5,ID\n02/02/2026,5,49,16,15,18,77,69,47,24,50,uuid-optionnel";
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
@@ -232,6 +237,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     };
 
     const confirmImport = async () => {
+        audioEngine.play('click');
         const validRows = previewData.filter(r => r.isValid);
         if (validRows.length === 0) return;
 
@@ -259,6 +265,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             const batch = Array.from(uniqueMap.values());
             await bulkAddResults(drawName, batch);
             
+            audioEngine.play('success');
             showToast(`${batch.length} tirages historiques importés.`, "success");
             
             // Reset
@@ -273,6 +280,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             }, 1500);
             
         } catch (e: any) {
+            audioEngine.play('error');
             showToast(`Erreur d'import : ${e.message}`, "error");
         } finally {
             setIsImporting(false);
@@ -281,14 +289,18 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
     // --- EXPORT LOGIC ---
     const handleExportJSON = () => {
-        if (results.length === 0) { showToast("Aucune donnée à exporter.", "error"); return; }
+        audioEngine.play('click');
+        if (results.length === 0) { audioEngine.play('error'); showToast("Aucune donnée à exporter.", "error"); return; }
         ExportService.exportToJSON(results, `Backup_${drawName.replace(/\s+/g, '_')}`);
+        audioEngine.play('success');
         showToast("Backup JSON généré.", "success");
     };
 
     const handleExportCSV = () => {
-        if (results.length === 0) { showToast("Aucune donnée à exporter.", "error"); return; }
+        audioEngine.play('click');
+        if (results.length === 0) { audioEngine.play('error'); showToast("Aucune donnée à exporter.", "error"); return; }
         ExportService.exportHistoryToCSV(results, `Export_${drawName.replace(/\s+/g, '_')}`);
+        audioEngine.play('success');
         showToast("Export CSV généré.", "success");
     };
 
@@ -312,16 +324,16 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     </div>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto overflow-x-auto scrollbar-hide pb-1">
-                    <button onClick={() => setActiveSubTab('manual')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'manual' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                    <button onClick={() => { audioEngine.play('click'); setActiveSubTab('manual'); }} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'manual' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <Pencil size={12}/> Saisie
                     </button>
-                    <button onClick={() => setActiveSubTab('bulk')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                    <button onClick={() => { audioEngine.play('click'); setActiveSubTab('bulk'); }} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'bulk' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <LayoutGrid size={12}/> Import CSV
                     </button>
-                    <button onClick={() => setActiveSubTab('export')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'export' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                    <button onClick={() => { audioEngine.play('click'); setActiveSubTab('export'); }} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'export' ? 'bg-white text-slate-900 shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <DownloadCloud size={12}/> Export
                     </button>
-                    <button onClick={() => setActiveSubTab('audit')} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
+                    <button onClick={() => { audioEngine.play('click'); setActiveSubTab('audit'); }} className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[8px] md:text-[9px] font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === 'audit' ? 'bg-emerald-50 text-white shadow-xl' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                         <Stethoscope size={12}/> Audit
                     </button>
                 </div>

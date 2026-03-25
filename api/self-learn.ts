@@ -1,5 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
+import { AppError, logError } from '../utils/AppError';
 
 export const config = {
   runtime: 'edge',
@@ -174,6 +175,7 @@ export default async function handler(req: Request) {
     });
 
   } catch (e: any) {
+    logError(new AppError(e.message || "Erreur lors de l'apprentissage", "SELF_LEARN_ERROR", "high", { error: e }), { source: 'api/self-learn' });
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
 }

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateSpatialMetrics, getBarycenterTrajectory } from '../../services/spatialService';
 import { predictBarycenterShift } from '../../services/mathService';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import type { SpatialMetrics, DrawResult, BarycenterPoint } from '../../types';
 import { Target, Activity, MoveUpRight, Layers, Globe, Clock, Play, Pause, RotateCcw, Compass, Map as MapIcon, Navigation } from 'lucide-react';
+import { audioEngine } from '../../utils/audioEngine';
 
 interface SpatialTabProps {
   drawName: string;
@@ -37,7 +38,8 @@ const GravityCompass: React.FC<{ vector: { x: number, y: number, angle: number, 
 };
 
 export function SpatialTab({ drawName }: SpatialTabProps) {
-  const { history, loading: nexusLoading } = useNexus();
+  const history = useNexusStore(state => state.history);
+  const nexusLoading = useNexusStore(state => state.loading);
   
   // Time Travel State (0 = Présent)
   const [timeIndex, setTimeIndex] = useState(0); 
@@ -152,7 +154,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
 
               <div className="flex-1 w-full flex items-center gap-4">
                   <button 
-                      onClick={() => setIsPlaying(!isPlaying)}
+                      onClick={() => { audioEngine.play('click'); setIsPlaying(!isPlaying); }}
                       className={`p-3 rounded-xl transition-all ${isPlaying ? 'bg-amber-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
                   >
                       {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
@@ -171,7 +173,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                       />
                   </div>
 
-                  <button onClick={() => { setIsPlaying(false); setTimeIndex(0); }} className="p-3 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-all" title="Retour au présent">
+                  <button onClick={() => { audioEngine.play('click'); setIsPlaying(false); setTimeIndex(0); }} className="p-3 bg-slate-800 text-slate-400 rounded-xl hover:text-white transition-all" title="Retour au présent">
                       <RotateCcw size={16} />
                   </button>
               </div>

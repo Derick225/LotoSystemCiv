@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { useNexus } from '../NexusProvider';
+import { useNexusStore } from '../../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
 import { getOptimizedWeights } from '../../services/geminiService';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -15,6 +15,7 @@ import { AlgoRadar } from '../AlgoRadar';
 import { AutoTuner } from '../AutoTuner';
 import { ChaosAttractor3D } from '../ChaosAttractor3D';
 import { StrategyBattle } from '../StrategyBattle';
+import { QuantumFractalAnalysis } from '../QuantumFractalAnalysis';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
@@ -23,15 +24,28 @@ import {
     Atom, Brain, FlaskConical, Box
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { audioEngine } from '../../utils/audioEngine';
 
 export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { 
-        history, lastPrediction, setLastPrediction, loading: nexusLoading,
-        globalWeights, updateGlobalWeights, spectral, wavelet, correlationMatrix, regularity, 
-        calibration, volatility, regime, symbioticContext, fractal,
-        riskProfile, setRiskProfile
-    } = useNexus();
+    
+    const history = useNexusStore(state => state.history);
+    const lastPrediction = useNexusStore(state => state.lastPrediction);
+    const setLastPrediction = useNexusStore(state => state.setLastPrediction);
+    const nexusLoading = useNexusStore(state => state.loading);
+    const globalWeights = useNexusStore(state => state.globalWeights);
+    const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
+    const spectral = useNexusStore(state => state.spectral);
+    const wavelet = useNexusStore(state => state.wavelet);
+    const correlationMatrix = useNexusStore(state => state.correlationMatrix);
+    const regularity = useNexusStore(state => state.regularity);
+    const calibration = useNexusStore(state => state.calibration);
+    const volatility = useNexusStore(state => state.volatility);
+    const regime = useNexusStore(state => state.regime);
+    const symbioticContext = useNexusStore(state => state.symbioticContext);
+    const fractal = useNexusStore(state => state.fractal);
+    const riskProfile = useNexusStore(state => state.riskProfile);
+    const setRiskProfile = useNexusStore(state => state.setRiskProfile);
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
@@ -53,7 +67,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     }, [globalWeights]);
 
     const handleAiOptimization = async () => {
+        audioEngine.play('click');
         if (history.length < 10) {
+            audioEngine.play('error');
             showToast("Historique insuffisant pour l'IA.", "error");
             return;
         }
@@ -63,6 +79,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         setPreviousWeights(globalWeights); // Sauvegarder l'état avant
 
         try {
+            audioEngine.play('loading');
             showToast("Gemini: Analyse du régime stochastique...", "info");
             const newWeights = await getOptimizedWeights(drawName, history);
             
@@ -74,15 +91,18 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 await updateGlobalWeights(normalized);
                 setActiveDNA(`IA Calibrée (${getStrategyName(normalized)})`);
                 
+                audioEngine.play('success');
                 showToast("ADN muté par l'IA. Lancement de l'inférence...", "success");
                 
                 // Petit délai pour laisser l'utilisateur voir le radar changer
                 setTimeout(() => runInference(normalized), 1500);
             } else {
+                audioEngine.play('error');
                 showToast("Le Cloud n'a pas répondu. Fallback standard.", "error");
                 runInference();
             }
         } catch (e) {
+            audioEngine.play('error');
             showToast("Erreur connexion IA.", "error");
             runInference();
         } finally {
@@ -91,12 +111,15 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     };
 
     const runInference = useCallback(async (forcedWeights?: any) => {
+        audioEngine.play('click');
         if (history.length < 5) {
+            audioEngine.play('error');
             showToast("Historique insuffisant pour l'Oracle Base.", "error");
             return;
         }
         setIsComputing(true);
         setComputingStep("Initialisation du Noyau...");
+        audioEngine.play('loading');
 
         // FETCH CRITIQUE : Si pas de poids forcés (par l'IA), on recharge les poids persistants
         const specificWeights = forcedWeights || await getAlgoWeights(drawName);
@@ -138,8 +161,12 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 // CRITIQUE : Sauvegarde pour Forensic Hub
                 await savePredictionToHistory(drawName, res);
                 
-                if (!forcedWeights) showToast("Prédiction générée via l'ADN actif.", "success");
+                if (!forcedWeights) {
+                    audioEngine.play('success');
+                    showToast("Prédiction générée via l'ADN actif.", "success");
+                }
             } catch (e) {
+                audioEngine.play('error');
                 showToast("Erreur lors de l'inférence.", "error");
                 console.error(e);
             } finally {
@@ -150,12 +177,14 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal, updateGlobalWeights]);
 
     const handleQuickSave = async () => {
+        audioEngine.play('click');
         if (!lastPrediction) return;
         await saveTicket({
             numbers: lastPrediction.suggestedNumbers,
             drawName,
             strategy: `Oracle ${riskProfile} (${lastPrediction.confidence}%)`
         });
+        audioEngine.play('success');
         showToast("Ticket sécurisé dans le Portefeuille.", "success");
     };
 
@@ -208,7 +237,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 
                 <div 
                     className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/20 mb-8 cursor-pointer hover:bg-indigo-500/20 transition-all active:scale-95"
-                    onClick={() => setShowDNA(!showDNA)}
+                    onClick={() => { audioEngine.play('click'); setShowDNA(!showDNA); }}
                 >
                     <Dna size={14} className="text-indigo-400"/>
                     <span className="text-xs font-bold text-indigo-200 uppercase tracking-widest">ADN Actif : {activeDNA}</span>
@@ -248,7 +277,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     {profiles.map(p => (
                         <button
                             key={p.id}
-                            onClick={() => setRiskProfile(p.id)}
+                            onClick={() => { audioEngine.play('click'); setRiskProfile(p.id); }}
                             className={`p-6 rounded-[2rem] border transition-all flex flex-col items-center gap-3 text-center ${riskProfile === p.id ? `${p.color} border-transparent text-white shadow-xl scale-105 z-10` : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750'}`}
                         >
                             {p.icon}
@@ -285,7 +314,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Context HUD */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                    { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/>, action: () => setShowDNA(!showDNA) },
+                    { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/>, action: () => { audioEngine.play('click'); setShowDNA(!showDNA); } },
                     { label: 'Volatilité', val: `${volatility?.score || 0}%`, icon: <Wind className="text-amber-500"/> },
                     { label: 'Stratégie', val: riskProfile, icon: <Crosshair className="text-emerald-500"/> },
                     { label: 'Réalité T-1', val: `${lastPrediction?.realityAlignment || 0}%`, icon: <Gauge className="text-purple-500"/> }
@@ -403,19 +432,19 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <Save size={16} /> Sauvegarder Ticket
                             </button>
                             <button 
-                                onClick={() => { setLastPrediction(null); }}
+                                onClick={() => { audioEngine.play('click'); setLastPrediction(null); }}
                                 className="px-8 py-4 bg-slate-800 text-slate-300 hover:text-white rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
                             >
                                 <RefreshCw size={16} /> Nouvelle Stratégie
                             </button>
                             <button 
-                                onClick={() => setShowField(!showField)}
+                                onClick={() => { audioEngine.play('click'); setShowField(!showField); }}
                                 className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${showField ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
                             >
                                 <Atom size={16} /> Champ Quantum
                             </button>
                             <button 
-                                onClick={() => setShow3D(!show3D)}
+                                onClick={() => { audioEngine.play('click'); setShow3D(!show3D); }}
                                 className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${show3D ? 'bg-rose-600/20 border-rose-500 text-rose-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
                             >
                                 <Box size={16} /> 3D Chaos
@@ -440,7 +469,11 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             </div>
 
             {lastPrediction && (
-                <div className="grid lg:grid-cols-12 gap-8">
+                <div className="space-y-8">
+                    {/* Quantum & Fractal Analysis */}
+                    <QuantumFractalAnalysis prediction={lastPrediction} />
+
+                    <div className="grid lg:grid-cols-12 gap-8">
                     <div className="lg:col-span-8 space-y-6">
                         <div className="flex items-center gap-3 px-4">
                             <Layers className="text-indigo-500" />
@@ -493,12 +526,13 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                     </div>
                 </div>
+            </div>
             )}
 
             {/* LABORATOIRE AVANCÉ */}
             <div className="mt-12 border-t border-white/10 pt-8">
                 <button 
-                    onClick={() => setShowAdvancedLab(!showAdvancedLab)}
+                    onClick={() => { audioEngine.play('click'); setShowAdvancedLab(!showAdvancedLab); }}
                     className="flex items-center gap-3 text-slate-400 hover:text-white transition-colors mb-6 mx-auto"
                 >
                     <FlaskConical size={20} />

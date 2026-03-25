@@ -40,7 +40,7 @@ class AudioEngine {
         this.enabled = val;
     }
 
-    public play(type: 'click' | 'success' | 'error' | 'scan' | 'boot') {
+    public play(type: 'click' | 'success' | 'error' | 'scan' | 'boot' | 'loading') {
         if (!this.enabled || !this.ctx || !this.masterGain) return;
         
         // Exécution sécurisée - ne pas attendre la promesse init pour éviter de bloquer le thread UI
@@ -89,6 +89,7 @@ class AudioEngine {
                     break;
 
                 case 'scan':
+                case 'loading':
                     osc.type = 'square';
                     osc.frequency.setValueAtTime(2000, now);
                     osc.frequency.linearRampToValueAtTime(500, now + 0.2);

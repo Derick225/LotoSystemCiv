@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { LOTO_PAYOUTS } from '../constants';
 import { ChevronDown, Percent, Layers, Shuffle, Bot } from 'lucide-react';
+import { audioEngine } from '../utils/audioEngine';
 
 interface KellyCalculatorProps {
     confidence: number;
@@ -80,19 +81,19 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({ confidence }) 
                 
                 <div className="grid grid-cols-3 gap-1.5 bg-black/20 p-1 rounded-2xl">
                     <button 
-                        onClick={() => setGameMode('STANDARD')}
+                        onClick={() => { audioEngine.play('click'); setGameMode('STANDARD'); }}
                         className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'STANDARD' ? 'bg-emerald-500 text-white shadow-lg' : 'text-emerald-300 hover:bg-white/5'}`}
                     >
                         <Layers size={10}/> Standard
                     </button>
                     <button 
-                        onClick={() => setGameMode('DOUBLE_CHANCE')}
+                        onClick={() => { audioEngine.play('click'); setGameMode('DOUBLE_CHANCE'); }}
                         className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE' ? 'bg-indigo-500 text-white shadow-lg' : 'text-indigo-300 hover:bg-white/5'}`}
                     >
                         <Shuffle size={10}/> DC (G+M)
                     </button>
                     <button 
-                        onClick={() => setGameMode('DOUBLE_CHANCE_MACHINE')}
+                        onClick={() => { audioEngine.play('click'); setGameMode('DOUBLE_CHANCE_MACHINE'); }}
                         className={`px-1 py-2 rounded-xl text-[8px] md:text-[9px] font-black uppercase flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 transition-all ${gameMode === 'DOUBLE_CHANCE_MACHINE' ? 'bg-amber-500 text-white shadow-lg' : 'text-amber-300 hover:bg-white/5'}`}
                     >
                         <Bot size={10}/> DC Machine
@@ -105,7 +106,7 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({ confidence }) 
                     <div className="relative group">
                         <select 
                             value={selectedBetType}
-                            onChange={(e) => setSelectedBetType(e.target.value)}
+                            onChange={(e) => { audioEngine.play('click'); setSelectedBetType(e.target.value); }}
                             className="w-full appearance-none bg-black/30 border border-emerald-500/30 text-emerald-100 py-2.5 md:py-3 pl-4 pr-10 rounded-xl text-[10px] md:text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer hover:bg-black/40 transition-colors"
                         >
                             {betOptions.map(opt => (

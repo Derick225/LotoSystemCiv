@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { getNumberDetailedMetrics } from '../services/mathService';
 import type { DetailedNumberMetrics } from '../types';
 import { NumberBall } from './NumberBall';
@@ -11,9 +11,10 @@ import {
     Crosshair, ShieldAlert, GitMerge 
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
+import { audioEngine } from '../utils/audioEngine';
 
 export const QuantumInspector: React.FC = () => {
-    const { inspectingNumber, setInspectingNumber, history, spectral, fractal } = useNexus();
+    const { inspectingNumber, setInspectingNumber, history, spectral, fractal } = useNexusStore();
     const [metrics, setMetrics] = useState<DetailedNumberMetrics | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -38,7 +39,7 @@ export const QuantumInspector: React.FC = () => {
     if (inspectingNumber === null) return null;
 
     return (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-2xl animate-fade-in" onClick={() => setInspectingNumber(null)}>
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-2xl animate-fade-in" onClick={() => { audioEngine.play('click'); setInspectingNumber(null); }}>
             <div 
                 className="bg-slate-900 w-full max-w-4xl rounded-[3rem] shadow-2xl border border-slate-700 overflow-hidden relative flex flex-col max-h-[90vh]" 
                 onClick={e => e.stopPropagation()}
@@ -66,7 +67,7 @@ export const QuantumInspector: React.FC = () => {
                     </div>
                     
                     <button 
-                        onClick={() => setInspectingNumber(null)} 
+                        onClick={() => { audioEngine.play('click'); setInspectingNumber(null); }} 
                         className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-colors relative z-10 border border-white/5 group"
                     >
                         <X size={24} className="text-slate-400 group-hover:text-white" />

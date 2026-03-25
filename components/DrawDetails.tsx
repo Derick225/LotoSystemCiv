@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, Suspense, lazy, useCallback } from 'react';
-import { useNexus } from './NexusProvider';
+import { useNexusStore } from '../store/useNexusStore';
 import { 
   Database, Activity, Target, Share2, 
   ShieldCheck, RefreshCw, 
@@ -20,7 +20,10 @@ const ForensicHub = lazy(() => import('./tabs/ForensicHub').then(m => ({ default
 type MainTab = 'Flux' | 'Signaux' | 'Topologie' | 'Oracle' | 'Simulation' | 'Forensic';
 
 export const DrawDetails: React.FC = () => {
-  const { drawName, history, loading, refreshData } = useNexus();
+  const drawName = useNexusStore(state => state.drawName);
+  const history = useNexusStore(state => state.history);
+  const loading = useNexusStore(state => state.loading);
+  const refreshData = useNexusStore(state => state.refreshData);
   const [activeTab, setActiveTab] = useState<MainTab>('Flux');
 
   // Système de Navigation par Bus d'Événements (Neural Event Bus)
@@ -113,7 +116,7 @@ export const DrawDetails: React.FC = () => {
 
         <div className="flex gap-2 md:gap-3 relative z-10 w-full md:w-auto justify-end">
             <button 
-                onClick={() => refreshData(drawName, true)} 
+                onClick={() => { audioEngine.play('click'); refreshData(drawName, true); }} 
                 className="p-2.5 md:p-4 bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-xl md:rounded-2xl transition-all active:scale-90 border border-white/5 shadow-lg group"
                 title="Forcer la synchronisation"
             >
