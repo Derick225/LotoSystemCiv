@@ -74,6 +74,9 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   const key = `${HISTORY_KEY_PREFIX}${newItem.id}`;
   localStorage.setItem(key, JSON.stringify(newItem));
   
+  // Automate sync in background
+  syncAllHistory(drawName).catch(e => console.error("Auto-sync prediction history failed", e));
+  
   return newItem;
 };
 
@@ -84,6 +87,8 @@ export const updatePredictionFeedback = async (id: string, feedback: PredictionF
         const item: PredictionHistoryItem = JSON.parse(raw);
         const updatedItem = { ...item, feedback };
         localStorage.setItem(key, JSON.stringify(updatedItem));
+        // Automate sync in background
+        syncAllHistory(item.drawName).catch(e => console.error("Auto-sync prediction feedback failed", e));
     }
 };
 
@@ -171,6 +176,8 @@ export const linkPredictionToResult = async (predictionId: string, drawResultId:
         if (item.drawResultId !== drawResultId) {
             const updatedItem = { ...item, drawResultId };
             localStorage.setItem(key, JSON.stringify(updatedItem));
+            // Automate sync in background
+            syncAllHistory(item.drawName).catch(e => console.error("Auto-sync prediction link failed", e));
         }
     }
 };

@@ -8,7 +8,7 @@ import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
 import { QuantumInspector } from '../QuantumInspector';
 
-export type ViewMode = 'home' | 'admin' | 'lab' | 'ensemble';
+export type ViewMode = 'home' | 'admin' | 'lab' | 'ensemble' | 'predictive';
 
 interface AppShellProps {
   children: ReactNode;
@@ -48,6 +48,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const navItems = [
     { id: 'home', icon: Home, label: 'Station' },
+    { id: 'predictive', icon: Activity, label: 'Prédictions' },
     { id: 'ensemble', icon: Brain, label: 'Ensemble' },
     { id: 'lab', icon: FlaskConical, label: 'Lab' },
     ...(isAdmin ? [{ id: 'admin', icon: Settings, label: 'Admin' }] : []),

@@ -6,6 +6,11 @@ import { AppError, logError } from '../utils/AppError';
 
 const FORENSIC_KEY_PREFIX = 'forensic_report_';
 
+export const getForensicReportByPredictionId = (predictionId: string): ForensicReport | undefined => {
+    const reports = getLocalForensicReports();
+    return reports.find(r => r.predictionId === predictionId);
+};
+
 export const saveForensicReport = (report: ForensicReport) => {
     try {
         localStorage.setItem(`${FORENSIC_KEY_PREFIX}${report.id}`, JSON.stringify(report));

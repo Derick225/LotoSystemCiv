@@ -14,8 +14,8 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const formData = await req.formData();
-    const transaction_id = formData.get('cpm_trans_id');
+    const body = await req.json();
+    const transaction_id = body.cpm_trans_id;
     
     if (!transaction_id) throw new Error("Transaction ID manquant");
 

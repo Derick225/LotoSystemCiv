@@ -30,6 +30,7 @@ const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ d
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
 const QuantumLab = lazy(() => import('./components/QuantumLab').then(m => ({ default: m.QuantumLab })));
 const EnsemblePredictorTab = lazy(() => import('./components/tabs/EnsemblePredictorTab').then(m => ({ default: m.EnsemblePredictorTab })));
+const PredictiveAnalyticsTab = lazy(() => import('./components/tabs/PredictiveAnalyticsTab').then(m => ({ default: m.PredictiveAnalyticsTab })));
 const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
 
 // Composant de sécurité pour les accès non autorisés
@@ -156,6 +157,7 @@ const AppContent: React.FC = () => {
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+          case 'predictive': content = <PredictiveAnalyticsTab />; break;
           case 'ensemble': content = <EnsemblePredictorTab />; break;
           case 'lab': content = <QuantumLab />; break;
           case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;

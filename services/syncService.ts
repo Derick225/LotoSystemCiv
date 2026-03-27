@@ -42,19 +42,33 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
             });
         });
 
-        // Ajouter Local (écraser si conflit et local plus récent ? Ici on assume ID unique = même objet)
-        // Si ID existe déjà, on garde la version Cloud pour l'instant (source of truth), sauf si local a changé ?
-        // Simplification : On fusionne tout.
+        // Ajouter Local (écraser si conflit et local plus récent ou plus complet)
         localItems.forEach(item => {
             if (!mergedMap.has(item.id)) {
                 mergedMap.set(item.id, item);
+            } else {
+                const cloudItem = mergedMap.get(item.id)!;
+                // Si le local a un drawResultId ou un feedback que le cloud n'a pas, on met à jour
+                if (item.drawResultId && !cloudItem.drawResultId) {
+                    cloudItem.drawResultId = item.drawResultId;
+                }
+                if (item.feedback && !cloudItem.feedback) {
+                    cloudItem.feedback = item.feedback;
+                }
             }
         });
 
         const mergedList = Array.from(mergedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
 
-        // 3. PUSH: Envoyer les nouveaux items locaux vers le Cloud
-        const toPush = localItems.filter(l => !cloudItems?.some((c: any) => c.id === l.id));
+        // 3. PUSH: Envoyer les nouveaux items locaux ou mis à jour vers le Cloud
+        const toPush = localItems.filter(l => {
+            const cloudItem = cloudItems?.find((c: any) => c.id === l.id);
+            if (!cloudItem) return true; // Nouveau
+            // Modifié (ex: link result, feedback)
+            if (l.drawResultId !== cloudItem.draw_result_id) return true;
+            if (JSON.stringify(l.feedback) !== JSON.stringify(cloudItem.feedback)) return true;
+            return false;
+        });
         
         if (toPush.length > 0) {
             const payload = toPush.map(p => ({

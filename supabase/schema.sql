@@ -142,3 +142,19 @@ CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public
 CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+
+-- 7. CRON JOBS (Automatisation des données historiques)
+-- Exécute la fonction cron-sync toutes les heures pour récupérer les nouveaux résultats
+-- Note: Pour que cela fonctionne sur Supabase, il faut configurer l'URL du projet.
+-- Remplacer PROJECT_REF par l'ID de votre projet Supabase.
+SELECT cron.schedule(
+  'sync-draw-results-hourly',
+  '0 * * * *',
+  $$
+  SELECT net.http_post(
+      url:='https://ais-pre-iexwhv27jnwut37iq2ksdr-108345727073.europe-west2.run.app/api/cron-sync',
+      headers:='{"Content-Type": "application/json"}'::jsonb,
+      body:='{"manualTrigger": false}'::jsonb
+  );
+  $$
+);

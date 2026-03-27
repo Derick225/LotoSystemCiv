@@ -38,6 +38,9 @@ export default async function handler(req: Request) {
 
     if (dbError) throw dbError;
 
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+    const proto = req.headers.get('x-forwarded-proto') || 'https';
+    
     const payload = {
         apikey: CINETPAY_API_KEY,
         site_id: CINETPAY_SITE_ID,
@@ -46,7 +49,7 @@ export default async function handler(req: Request) {
         currency: "XOF",
         description: "Abonnement LotoPro Premium 30J",
         return_url: `${req.headers.get('origin') || 'https://lotopro.vercel.app'}/?payment=success`, 
-        notify_url: `https://${req.headers.get('host')}/api/payment-webhook`,
+        notify_url: `${proto}://${host}/api/payment-webhook`,
         channels: "ALL",
         metadata: JSON.stringify({ userId, plan: 'premium' })
     };

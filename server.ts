@@ -18,6 +18,7 @@ async function startServer() {
 
   // Increase payload limit for large requests (e.g., OCR images)
   app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -65,6 +66,7 @@ async function startServer() {
 
           if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
             requestInit.body = JSON.stringify(req.body);
+            headers.set('Content-Type', 'application/json');
           }
 
           const webRequest = new Request(url.toString(), requestInit);

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { getPredictionHistoryAsync, clearPredictionHistory, linkPredictionToResult } from '../services/predictionHistoryService';
-import { performForensicAnalysis } from '../services/postPredictionAnalysisService';
+import { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, syncForensicReportsWithCloud } from '../services/postPredictionAnalysisService';
 import type { PredictionHistoryItem, DrawResult, ForensicReport } from '../types';
 import { NumberBall } from './NumberBall';
 import { Trash2, History, CheckCircle2, Microscope, Link as LinkIcon, AlertCircle, Binary, ChevronDown, Activity, Clock } from 'lucide-react';
@@ -34,37 +34,72 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
     const getResultById = useCallback((id: string) => results.find(r => r.id === id), [results]);
     const getResultByDate = useCallback((date: string) => results.find(r => r.date === date), [results]);
 
-    // Operational Auto-Linker
+    // Operational Auto-Linker & Forensic Automator
     useEffect(() => {
-        const linkOrphans = async () => {
+        const linkOrphansAndAutomateForensics = async () => {
             if (history.length > 0 && results.length > 0) {
                 let changed = false;
+                let forensicGenerated = false;
                 for (const item of history) {
+                    let match = item.drawResultId ? getResultById(item.drawResultId) : null;
+                    
                     if (!item.drawResultId) {
                         const dateStr = new Date(item.timestamp).toLocaleDateString('fr-FR');
-                        const match = getResultByDate(dateStr);
+                        match = getResultByDate(dateStr);
                         if (match) {
                             await linkPredictionToResult(item.id, match.id);
                             changed = true;
                         }
                     }
+
+                    // Automate Forensic Analysis if linked and no report exists
+                    if (match) {
+                        const existingReport = getForensicReportByPredictionId(item.id);
+                        if (!existingReport) {
+                            try {
+                                const report = await performForensicAnalysis(
+                                    drawName, match.date, 
+                                    item.prediction.suggestedNumbers, 
+                                    match.gagnants, item.prediction.breakdown,
+                                    item.id
+                                );
+                                saveForensicReport(report);
+                                forensicGenerated = true;
+                            } catch (error) {
+                                console.error("Failed to automate forensic analysis for prediction", item.id, error);
+                            }
+                        }
+                    }
+                }
+                if (forensicGenerated) {
+                    syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
                 }
                 if (changed) loadData();
             }
         };
-        linkOrphans();
-    }, [history, results, getResultByDate, loadData]);
+        linkOrphansAndAutomateForensics();
+    }, [history, results, getResultByDate, getResultById, loadData, drawName]);
 
     const handleOpenAudit = async (e: React.MouseEvent, result: DrawResult, predictionItem: PredictionHistoryItem) => {
         e.stopPropagation();
         audioEngine.play('click');
+        
+        const existingReport = getForensicReportByPredictionId(predictionItem.id);
+        if (existingReport) {
+            setForensicReport(existingReport);
+            return;
+        }
+
         const report = await performForensicAnalysis(
             drawName, result.date, 
             predictionItem.prediction.suggestedNumbers, 
             result.gagnants, predictionItem.prediction.breakdown,
             predictionItem.id
         );
+        saveForensicReport(report);
         setForensicReport(report);
+        // Automate sync in background
+        syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
     };
 
     if (loading || nexusLoading) return <div className="p-12 space-y-4"><div className="h-20 bg-slate-100 rounded-3xl animate-pulse"></div><div className="h-20 bg-slate-100 rounded-3xl animate-pulse"></div></div>;

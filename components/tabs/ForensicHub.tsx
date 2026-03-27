@@ -87,6 +87,8 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             if (newReportsCount > 0) {
                 audioEngine.play('success');
                 showToast(`${newReportsCount} nouvelles autopsies générées.`, "success");
+                // Automate sync in background
+                syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
             }
 
             // 3. Audit Platinum (Timelines) - Recalculé à la volée car léger
