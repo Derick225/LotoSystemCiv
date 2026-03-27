@@ -250,7 +250,7 @@ export const PredictiveAnalyticsTab: React.FC = () => {
                                 <span className="text-[10px] text-indigo-400 font-mono">{agent.confidence}% conf.</span>
                             </div>
                             <div className="flex flex-wrap gap-1 mt-3">
-                                {agent.prediction.slice(0, 5).map((n: number, i: number) => (
+                                {agent.prediction.suggestedNumbers.slice(0, 5).map((n: number, i: number) => (
                                     <div key={i} className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white">
                                         {n}
                                     </div>

@@ -21,7 +21,7 @@ export const LSTMService = {
                 logError(new AppError("LSTM Prediction timed out", "LSTM_TIMEOUT", "medium"), { source: 'LSTMService' });
                 worker.terminate();
                 resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
-            }, 30000); // 30s timeout for LSTM
+            }, 120000); // 120s timeout for LSTM
 
             worker.onmessage = (e) => {
                 if (e.data.id === id) {

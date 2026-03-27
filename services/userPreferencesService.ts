@@ -68,7 +68,7 @@ export const syncWatchlist = async () => {
     if (!isSupabaseConfigured()) return;
     try {
         const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("syncWatchlist timeout")), 5000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("syncWatchlist timeout")), 15000));
         const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (session) {
             const localList = getWatchlist();
@@ -219,7 +219,7 @@ export const hydrateUserData = async (userId: string) => {
             .select('watchlist, saved_tickets, settings')
             .eq('user_id', userId)
             .single();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 5000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 15000));
         const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
 
         if (error || !data) {

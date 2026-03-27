@@ -51,9 +51,9 @@ class WorkerService {
             const timeout = setTimeout(() => {
                 if (this.taskCallbacks.has(requestId)) {
                     this.taskCallbacks.delete(requestId);
-                    reject(new AppError(`Task ${task} timed out after 30s`, "WORKER_TIMEOUT", "medium"));
+                    reject(new AppError(`Task ${task} timed out after 120s`, "WORKER_TIMEOUT", "medium"));
                 }
-            }, 30000);
+            }, 120000);
 
             this.taskCallbacks.set(requestId, { 
                 resolve: (res: T) => {

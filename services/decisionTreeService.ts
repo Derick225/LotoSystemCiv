@@ -182,7 +182,7 @@ export const runDecisionForest = async (
             console.warn("Decision Forest Worker timed out");
             worker.terminate();
             resolve({ votes: [], dataset });
-        }, 30000); // 30s timeout
+        }, 120000); // 120s timeout
 
         worker.onmessage = (e) => {
             clearTimeout(timeout);

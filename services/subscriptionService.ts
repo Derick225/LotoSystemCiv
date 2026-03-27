@@ -18,7 +18,7 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
             .select('subscription')
             .eq('user_id', userId)
             .single();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("checkSubscriptionStatus timeout")), 5000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("checkSubscriptionStatus timeout")), 15000));
         const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
 
     const now = new Date();

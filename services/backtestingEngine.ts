@@ -99,11 +99,11 @@ export const runSurvivalSimulation = async (
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/simulation.worker.ts', import.meta.url), { type: 'module' });
         
-        // Timeout de sécurité pour le worker (15s)
+        // Timeout de sécurité pour le worker (60s)
         const timeoutId = setTimeout(() => {
             worker.terminate();
             reject(new Error("Simulation Timeout (Worker unresponsive)"));
-        }, 15000);
+        }, 60000);
 
         worker.onmessage = (e) => {
             const { type, report, percent, error, log } = e.data;
