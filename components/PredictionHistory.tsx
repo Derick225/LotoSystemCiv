@@ -15,7 +15,8 @@ interface PredictionHistoryProps { drawName: string; }
 
 export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const { history: results, loading: nexusLoading } = useNexusStore();
+    const results = useNexusStore(state => state.history);
+    const nexusLoading = useNexusStore(state => state.loading);
     const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [forensicReport, setForensicReport] = useState<ForensicReport | null>(null);
@@ -31,8 +32,21 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
 
     useEffect(() => { loadData(); }, [loadData]);
 
-    const getResultById = useCallback((id: string) => results.find(r => r.id === id), [results]);
-    const getResultByDate = useCallback((date: string) => results.find(r => r.date === date), [results]);
+    // O(1) Lookups for performance
+    const resultsById = React.useMemo(() => {
+        const map = new Map<string, DrawResult>();
+        results.forEach(r => map.set(r.id, r));
+        return map;
+    }, [results]);
+
+    const resultsByDate = React.useMemo(() => {
+        const map = new Map<string, DrawResult>();
+        results.forEach(r => map.set(r.date, r));
+        return map;
+    }, [results]);
+
+    const getResultById = useCallback((id: string) => resultsById.get(id), [resultsById]);
+    const getResultByDate = useCallback((date: string) => resultsByDate.get(date), [resultsByDate]);
 
     // Operational Auto-Linker & Forensic Automator
     useEffect(() => {

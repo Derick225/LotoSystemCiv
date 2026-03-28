@@ -12,7 +12,7 @@ export interface NumberBallProps {
   selected?: boolean;
 }
 
-export const NumberBall: React.FC<NumberBallProps> = ({ 
+export const NumberBall: React.FC<NumberBallProps> = React.memo(({ 
   number, 
   size = 'md', 
   glow, 
@@ -20,7 +20,7 @@ export const NumberBall: React.FC<NumberBallProps> = ({
   isAttractor, 
   selected 
 }) => {
-  const { setHoveredNumber } = useNexusStore();
+  const setHoveredNumber = useNexusStore(state => state.setHoveredNumber);
 
   const sizes = { 
     xs: 'w-6 h-6 text-[10px]',
@@ -53,4 +53,4 @@ export const NumberBall: React.FC<NumberBallProps> = ({
       )}
     </div>
   );
-};
+});

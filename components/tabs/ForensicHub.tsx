@@ -7,7 +7,8 @@ import { deleteForensicReportCloud } from '../../services/syncService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
-import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2 } from 'lucide-react';
+import { runSelfLearningLoop, LearningResult } from '../../services/selfLearningService';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { useToast } from '../ui/Toast';
@@ -23,9 +24,30 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [learning, setLearning] = useState(false);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [mode, setMode] = useState<ForensicMode>('prediction');
     const [refreshKey, setRefreshKey] = useState(0);
+
+    const handleSelfLearning = async () => {
+        audioEngine.play('scan');
+        setLearning(true);
+        try {
+            const result = await runSelfLearningLoop(drawName, 10);
+            if (result) {
+                audioEngine.play('success');
+                showToast(`Apprentissage terminé. ${result.adjustments.length} algos ajustés après analyse de ${result.reportsAnalyzed} tirages.`, "success");
+            } else {
+                audioEngine.play('click');
+                showToast("Aucun ajustement nécessaire. Les poids actuels sont optimaux.", "info");
+            }
+        } catch (e) {
+            audioEngine.play('error');
+            showToast("Erreur lors de l'apprentissage automatique.", "error");
+        } finally {
+            setLearning(false);
+        }
+    };
 
     const runAnalysis = useCallback(async () => {
         if (history.length < 1) {
@@ -41,17 +63,25 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             const preds = await getPredictionHistoryAsync(drawName);
             let newReportsCount = 0;
 
+            // O(1) Lookups
+            const historyById = new Map();
+            const historyByDate = new Map();
+            history.forEach(h => {
+                historyById.set(h.id, h);
+                historyByDate.set(h.date, h);
+            });
+
             for (const pred of preds.slice(0, 30)) {
                 // Si rapport existe déjà pour cette prédiction, skip
                 if (currentReports.some(r => r.predictionId === pred.id)) continue;
 
                 let actual = null;
                 if (pred.drawResultId) {
-                    actual = history.find(h => h.id === pred.drawResultId);
+                    actual = historyById.get(pred.drawResultId);
                 }
                 if (!actual) {
                     const predDateLocale = new Date(pred.timestamp).toLocaleDateString('fr-FR');
-                    actual = history.find(h => h.date === predDateLocale);
+                    actual = historyByDate.get(predDateLocale);
                     
                     // Fallback date approximative
                     if (!actual) {
@@ -97,7 +127,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             
             for (const plat of platHist.slice(0, 20)) {
                 const platDateLocale = new Date(plat.timestamp).toLocaleDateString('fr-FR');
-                const actual = history.find(h => h.date === platDateLocale);
+                const actual = historyByDate.get(platDateLocale);
                 
                 if (actual) {
                     const audit = performPlatinumAudit(plat, actual);
@@ -247,6 +277,14 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                     
                     <div className="flex gap-2">
+                        <button 
+                            onClick={handleSelfLearning}
+                            disabled={learning}
+                            className={`p-4 bg-emerald-600/20 hover:bg-emerald-600/40 rounded-2xl border border-emerald-500/30 text-emerald-400 hover:text-white transition-all group ${learning ? 'animate-pulse' : ''}`}
+                            title="Apprentissage Automatique (Auto-Tune)"
+                        >
+                             <BrainCircuit size={20} className={learning ? 'animate-spin' : ''} />
+                        </button>
                         <button 
                             onClick={handleSync}
                             disabled={syncing}
