@@ -112,11 +112,22 @@ const VectorFlowChart: React.FC<{ prevDraw: number[], candidates: number[] }> = 
                                         strokeLinecap="round"
                                         filter={isActive ? "url(#glow-line)" : ""}
                                         className="transition-all duration-500"
+                                        strokeDasharray={isActive ? "4 8" : "none"}
+                                        style={{
+                                            animation: isActive ? "flowAnimation 1s linear infinite" : "none"
+                                        }}
                                     />
                                 </g>
                             );
                         })}
                     </svg>
+                    
+                    <style dangerouslySetInnerHTML={{__html: `
+                        @keyframes flowAnimation {
+                            from { stroke-dashoffset: 24; }
+                            to { stroke-dashoffset: 0; }
+                        }
+                    `}} />
                     
                     {hoveredNode && links.map((link, i) => {
                          const isActive = isLinkActive(link.src, link.tgt);
@@ -208,6 +219,8 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     const [loading, setLoading] = useState(true);
     const [generatedTicket, setGeneratedTicket] = useState<number[] | null>(null);
     
+    const [isGenerating, setIsGenerating] = useState(false);
+    
     const isMounted = useRef(true);
 
     useEffect(() => {
@@ -238,18 +251,25 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         audioEngine.play('click');
         if (!metrics || metrics.topCandidates.length < 5) return;
         
-        // Algorithme de synthèse intelligente : Coeur solide + Dispersion
-        // 1. Cœur : Les 3 meilleurs vecteurs
-        const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
-        // 2. Dispersion : 2 numéros piochés dans le top 10 (hors top 3) pour la variance
-        const fillers = metrics.topCandidates.slice(3, 10).map(c => c.number);
+        setIsGenerating(true);
+        setGeneratedTicket(null);
         
-        const shuffledFillers = fillers.sort(() => 0.5 - Math.random());
-        const finalTicket = [...core, ...shuffledFillers.slice(0, 2)].sort((a,b) => a-b);
-        
-        setGeneratedTicket(finalTicket);
-        audioEngine.play('success');
-        showToast("Synthèse Harmonique terminée.", "success");
+        // Simulate complex generation
+        setTimeout(() => {
+            // Algorithme de synthèse intelligente : Coeur solide + Dispersion
+            // 1. Cœur : Les 3 meilleurs vecteurs
+            const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
+            // 2. Dispersion : 2 numéros piochés dans le top 10 (hors top 3) pour la variance
+            const fillers = metrics.topCandidates.slice(3, 10).map(c => c.number);
+            
+            const shuffledFillers = fillers.sort(() => 0.5 - Math.random());
+            const finalTicket = [...core, ...shuffledFillers.slice(0, 2)].sort((a,b) => a-b);
+            
+            setGeneratedTicket(finalTicket);
+            setIsGenerating(false);
+            audioEngine.play('success');
+            showToast("Synthèse Harmonique terminée.", "success");
+        }, 1500);
     };
 
     const handleSaveTicket = async () => {
@@ -402,13 +422,29 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
                     
                     <button 
                         onClick={handleGenerateTicket}
-                        className="px-10 py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-emerald-900/50 flex items-center gap-3 transition-all active:scale-95 group"
+                        disabled={isGenerating}
+                        className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl flex items-center gap-3 transition-all active:scale-95 group ${isGenerating ? 'bg-slate-800 text-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/50'}`}
                     >
-                        <Wand2 size={18} className="group-hover:rotate-12 transition-transform"/> Générer Le Ticket
+                        {isGenerating ? (
+                            <><Layers size={18} className="animate-spin" /> Analyse en cours...</>
+                        ) : (
+                            <><Wand2 size={18} className="group-hover:rotate-12 transition-transform"/> Générer Le Ticket</>
+                        )}
                     </button>
                 </div>
 
-                {generatedTicket && (
+                {isGenerating && (
+                    <div className="mt-10 pt-10 border-t border-white/10 flex flex-col items-center justify-center gap-6 animate-pulse">
+                        <div className="flex gap-4">
+                            {[1,2,3,4,5].map(i => (
+                                <div key={i} className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 animate-pulse" style={{ animationDelay: `${i * 0.1}s` }}></div>
+                            ))}
+                        </div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500">Alignement des vecteurs...</p>
+                    </div>
+                )}
+
+                {generatedTicket && !isGenerating && (
                     <div className="mt-10 pt-10 border-t border-white/10 animate-slide-up">
                         <div className="bg-white/5 rounded-3xl p-6 border border-emerald-500/30 flex flex-col items-center gap-8">
                             <div className="flex gap-4 scale-110 md:scale-125">

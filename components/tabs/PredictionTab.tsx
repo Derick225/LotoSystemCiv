@@ -252,17 +252,25 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             <div className="absolute top-6 left-6 right-6 flex items-center justify-between">
                 <button 
                     onClick={async () => {
+                        if (isOptimizing) return;
+                        setIsOptimizing(true);
                         audioEngine.play('scan');
                         showToast("Auto-Tune en cours...", "info");
+                        // Artificial delay for UX
+                        await new Promise(resolve => setTimeout(resolve, 1500));
                         await runSelfLearningLoop(drawName);
                         showToast("Poids algorithmiques calibrés avec succès.", "success");
                         audioEngine.play('success');
+                        setIsOptimizing(false);
                     }}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full border bg-slate-800/50 border-white/10 text-slate-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/50 hover:text-emerald-300 transition-all shadow-sm"
+                    disabled={isOptimizing}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all shadow-sm ${isOptimizing ? 'bg-emerald-900/50 border-emerald-500/30 text-emerald-400 cursor-not-allowed' : 'bg-slate-800/50 border-white/10 text-slate-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/50 hover:text-emerald-300'}`}
                     title="Calibrer les poids selon l'historique récent"
                 >
-                    <BrainCircuit size={14} />
-                    <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">Auto-Tune</span>
+                    <BrainCircuit size={14} className={isOptimizing ? 'animate-pulse' : ''} />
+                    <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">
+                        {isOptimizing ? 'Calibrage...' : 'Auto-Tune'}
+                    </span>
                 </button>
 
                 <div className="flex items-center gap-4">
@@ -489,7 +497,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             })}
                         </div>
                         
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
                             <button 
                                 onClick={handleQuickSave}
                                 className="px-12 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95"
@@ -502,17 +510,28 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             >
                                 <RefreshCw size={16} /> Nouvelle Stratégie
                             </button>
+                        </div>
+
+                        {/* View Toggles */}
+                        <div className="flex flex-wrap justify-center gap-3 border-t border-white/10 pt-8">
+                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest w-full text-center mb-2">Modes de Visualisation</span>
                             <button 
-                                onClick={() => { audioEngine.play('click'); setShowField(!showField); }}
-                                className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${showField ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
+                                onClick={() => { audioEngine.play('click'); setShowField(false); setShow3D(false); }}
+                                className={`px-6 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${!showField && !show3D ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-transparent text-slate-400 hover:bg-slate-700'}`}
                             >
-                                <Atom size={16} /> Champ Quantum
+                                <Layers size={14} /> Grille Neurale
                             </button>
                             <button 
-                                onClick={() => { audioEngine.play('click'); setShow3D(!show3D); }}
-                                className={`px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${show3D ? 'bg-rose-600/20 border-rose-500 text-rose-300' : 'bg-slate-800 border-transparent text-slate-400'}`}
+                                onClick={() => { audioEngine.play('click'); setShowField(true); setShow3D(false); }}
+                                className={`px-6 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${showField && !show3D ? 'bg-fuchsia-600/20 border-fuchsia-500 text-fuchsia-300' : 'bg-slate-800 border-transparent text-slate-400 hover:bg-slate-700'}`}
                             >
-                                <Box size={16} /> 3D Chaos
+                                <Atom size={14} /> Champ Quantum
+                            </button>
+                            <button 
+                                onClick={() => { audioEngine.play('click'); setShow3D(true); setShowField(false); }}
+                                className={`px-6 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border ${show3D ? 'bg-rose-600/20 border-rose-500 text-rose-300' : 'bg-slate-800 border-transparent text-slate-400 hover:bg-slate-700'}`}
+                            >
+                                <Box size={14} /> 3D Chaos
                             </button>
                         </div>
 
