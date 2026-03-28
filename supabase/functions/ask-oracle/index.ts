@@ -9,8 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Clé de secours OpenRouter fournie
-const OPENROUTER_KEY = "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";
+// Clé de secours OpenRouter (Fallback si Gemini est KO)
+const OPENROUTER_KEY = Deno.env.get("OPENROUTER_KEY") || "";
 
 function cleanJson(text: string) {
     if (!text) return '{}';
