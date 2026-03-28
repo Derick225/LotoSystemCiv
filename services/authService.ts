@@ -46,11 +46,11 @@ export const authService = {
     if (!isSupabaseConfigured()) return null;
     try {
         const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("getSession timeout")), 15000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("getSession timeout")), 3000));
         const { data } = await Promise.race([sessionPromise, timeoutPromise]) as any;
         return data?.session || null;
     } catch (e) {
-        console.warn("getSession error or timeout:", e);
+        // Silently handle timeout to avoid spamming console and blocking UI
         return null;
     }
   },

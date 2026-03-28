@@ -68,7 +68,7 @@ export const syncWatchlist = async () => {
     if (!isSupabaseConfigured()) return;
     try {
         const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("syncWatchlist timeout")), 15000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("syncWatchlist timeout")), 3000));
         const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
         if (session) {
             const localList = getWatchlist();
@@ -79,7 +79,9 @@ export const syncWatchlist = async () => {
             });
             await Promise.race([upsertPromise, timeoutPromise]);
         }
-    } catch (e) { console.warn("Sync Watchlist failed", e); }
+    } catch (e) { 
+        // Silently handle timeout
+    }
 };
 
 // --- SAVED TICKETS (WALLET) ---
@@ -108,13 +110,17 @@ export const saveTicket = async (ticket: Omit<SavedTicket, 'id' | 'createdAt' | 
     updateBankroll(-100); 
 
     if (isSupabaseConfigured()) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            await supabase.from('user_preferences').upsert({
-                user_id: session.user.id,
-                saved_tickets: updated,
-                updated_at: new Date().toISOString()
-            });
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                await supabase.from('user_preferences').upsert({
+                    user_id: session.user.id,
+                    saved_tickets: updated,
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.warn("Sync ticket failed", e);
         }
     }
 };
@@ -125,13 +131,17 @@ export const deleteTicket = async (id: string): Promise<void> => {
     localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
     
     if (isSupabaseConfigured()) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            await supabase.from('user_preferences').upsert({
-                user_id: session.user.id,
-                saved_tickets: updated,
-                updated_at: new Date().toISOString()
-            });
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                await supabase.from('user_preferences').upsert({
+                    user_id: session.user.id,
+                    saved_tickets: updated,
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.warn("Sync delete ticket failed", e);
         }
     }
 };
@@ -142,13 +152,17 @@ export const archiveTicket = async (id: string): Promise<void> => {
     localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
     
     if (isSupabaseConfigured()) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            await supabase.from('user_preferences').upsert({
-                user_id: session.user.id,
-                saved_tickets: updated,
-                updated_at: new Date().toISOString()
-            });
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                await supabase.from('user_preferences').upsert({
+                    user_id: session.user.id,
+                    saved_tickets: updated,
+                    updated_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            console.warn("Sync archive ticket failed", e);
         }
     }
 };
@@ -219,7 +233,7 @@ export const hydrateUserData = async (userId: string) => {
             .select('watchlist, saved_tickets, settings')
             .eq('user_id', userId)
             .single();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 15000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 3000));
         const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
 
         if (error || !data) {
@@ -276,6 +290,6 @@ export const hydrateUserData = async (userId: string) => {
         }
 
     } catch (e) { 
-        console.warn("Hydration Merge Failed", e); 
+        // Silently handle timeout
     }
 };
