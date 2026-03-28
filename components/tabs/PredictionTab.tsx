@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
 import { getOptimizedWeights } from '../../services/geminiService';
@@ -16,12 +16,14 @@ import { AutoTuner } from '../AutoTuner';
 import { ChaosAttractor3D } from '../ChaosAttractor3D';
 import { StrategyBattle } from '../StrategyBattle';
 import { QuantumFractalAnalysis } from '../QuantumFractalAnalysis';
+import { calculateShannonEntropy } from '../../services/mathService';
+import { runSelfLearningLoop } from '../../services/selfLearningService';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
     Save, Wind, AlertTriangle, TrendingUp,
     MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
-    Atom, Brain, FlaskConical, Box
+    Atom, Brain, FlaskConical, Box, Sparkles, BrainCircuit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
@@ -49,17 +51,23 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
-    // const [riskProfile, setRiskProfile] = useState<RiskProfile>('BALANCED'); // REMOVED
     const [showField, setShowField] = useState(false);
     const [show3D, setShow3D] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [showDNA, setShowDNA] = useState(false);
     const [showAdvancedLab, setShowAdvancedLab] = useState(false);
+    const [quantumMode, setQuantumMode] = useState(false);
     
     // États pour la Calibration IA
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [optimizedWeights, setOptimizedWeights] = useState<any | null>(null);
     const [previousWeights, setPreviousWeights] = useState<any | null>(null);
+
+    // Calcul de l'entropie en temps réel
+    const currentEntropy = useMemo(() => {
+        if (history.length === 0) return 0;
+        return calculateShannonEntropy(history.slice(0, 10)).normalized;
+    }, [history]);
 
     // Mise à jour du nom de l'ADN affiché
     useEffect(() => {
@@ -122,20 +130,31 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         audioEngine.play('loading');
 
         // FETCH CRITIQUE : Si pas de poids forcés (par l'IA), on recharge les poids persistants
-        const specificWeights = forcedWeights || await getAlgoWeights(drawName);
+        let specificWeights = forcedWeights || await getAlgoWeights(drawName);
         
+        // Si le mode Quantum est activé, on booste les algos non-linéaires
+        if (quantumMode) {
+            specificWeights = normalizeWeights({
+                ...specificWeights,
+                fractal: (specificWeights.fractal || 0) * 1.5,
+                spatial: (specificWeights.spatial || 0) * 1.5,
+                ai_intuition: (specificWeights.ai_intuition || 0) * 1.5,
+                wavelet: (specificWeights.wavelet || 0) * 1.5
+            });
+        }
+
         if (!forcedWeights) {
             // Si c'est un run manuel sans IA, on reset la vue comparative
             setPreviousWeights(null);
             setOptimizedWeights(null);
-            setActiveDNA(getStrategyName(specificWeights));
+            setActiveDNA(quantumMode ? `Quantum ${getStrategyName(specificWeights)}` : getStrategyName(specificWeights));
             updateGlobalWeights(specificWeights);
         }
 
         const steps = [
             { msg: `Chargement ADN : ${getStrategyName(specificWeights)}`, delay: 400 },
             { msg: `Stratégie : ${riskProfile}`, delay: 1000 },
-            { msg: "Injection Métriques Stochastiques...", delay: 1600 },
+            { msg: quantumMode ? "Distorsion Quantique..." : "Injection Métriques Stochastiques...", delay: 1600 },
             { msg: "Calcul de la Résultante...", delay: 2200 },
             { msg: "Convergence Vectorielle...", delay: 2800 }
         ];
@@ -226,21 +245,60 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     ];
 
     if (!lastPrediction && !isComputing) return (
-        <div className="flex flex-col items-center justify-center min-h-[600px] bg-slate-900/50 rounded-[3rem] border border-white/5 animate-fade-in relative overflow-hidden group p-8">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50"></div>
+        <div className={`flex flex-col items-center justify-center min-h-[600px] rounded-[3rem] border animate-fade-in relative overflow-hidden group p-8 transition-all duration-1000 ${quantumMode ? 'bg-indigo-950/40 border-indigo-500/30 shadow-[0_0_100px_rgba(99,102,241,0.15)]' : 'bg-slate-900/50 border-white/5'}`}>
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent ${quantumMode ? 'via-fuchsia-500' : 'via-indigo-500'} to-transparent opacity-50`}></div>
             
-            <div className="relative z-10 flex flex-col items-center w-full max-w-2xl text-center">
-                <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center shadow-2xl border border-slate-800 mb-8 group-hover:scale-110 transition-transform duration-500">
-                    {isOptimizing ? <RefreshCw className="animate-spin text-purple-500" size={48}/> : <Target size={48} className="text-indigo-500" />}
+            {/* Top Bar: Auto-Tune & Quantum Mode */}
+            <div className="absolute top-6 left-6 right-6 flex items-center justify-between">
+                <button 
+                    onClick={async () => {
+                        audioEngine.play('scan');
+                        showToast("Auto-Tune en cours...", "info");
+                        await runSelfLearningLoop(drawName);
+                        showToast("Poids algorithmiques calibrés avec succès.", "success");
+                        audioEngine.play('success');
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full border bg-slate-800/50 border-white/10 text-slate-400 hover:text-white hover:bg-emerald-500/20 hover:border-emerald-500/50 hover:text-emerald-300 transition-all shadow-sm"
+                    title="Calibrer les poids selon l'historique récent"
+                >
+                    <BrainCircuit size={14} />
+                    <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">Auto-Tune</span>
+                </button>
+
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
+                        <Activity size={12} className={currentEntropy > 0.7 ? 'text-rose-400' : currentEntropy < 0.4 ? 'text-emerald-400' : 'text-amber-400'} />
+                        <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">
+                            Entropie: {(currentEntropy * 100).toFixed(1)}%
+                        </span>
+                    </div>
+                    <button 
+                        onClick={() => { audioEngine.play('scan'); setQuantumMode(!quantumMode); }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${quantumMode ? 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-300 shadow-[0_0_20px_rgba(217,70,239,0.3)]' : 'bg-slate-800/50 border-white/10 text-slate-400 hover:text-white'}`}
+                    >
+                        <Atom size={14} className={quantumMode ? 'animate-spin-slow' : ''} />
+                        <span className="text-xs font-black uppercase tracking-widest">Quantum Mode</span>
+                    </button>
                 </div>
-                <h3 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-4">Oracle Base v24.0</h3>
+            </div>
+
+            <div className="relative z-10 flex flex-col items-center w-full max-w-2xl text-center mt-8">
+                <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center shadow-2xl border mb-8 group-hover:scale-110 transition-transform duration-500 ${quantumMode ? 'bg-fuchsia-900/30 border-fuchsia-500/30' : 'bg-slate-900 border-slate-800'}`}>
+                    {isOptimizing ? <RefreshCw className="animate-spin text-purple-500" size={48}/> : <Target size={48} className={quantumMode ? 'text-fuchsia-400' : 'text-indigo-500'} />}
+                </div>
+                <h3 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-2">
+                    Oracle Nexus <span className={quantumMode ? 'text-fuchsia-500' : 'text-indigo-500'}>v25.0</span>
+                </h3>
+                <p className="text-sm font-medium text-slate-400 mb-6 uppercase tracking-[0.2em]">
+                    {quantumMode ? 'Inférence Non-Linéaire Activée' : 'Moteur Stochastique Standard'}
+                </p>
                 
                 <div 
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500/10 rounded-full border border-indigo-500/20 mb-8 cursor-pointer hover:bg-indigo-500/20 transition-all active:scale-95"
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border mb-8 cursor-pointer transition-all active:scale-95 ${quantumMode ? 'bg-fuchsia-500/10 border-fuchsia-500/20 hover:bg-fuchsia-500/20' : 'bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20'}`}
                     onClick={() => { audioEngine.play('click'); setShowDNA(!showDNA); }}
                 >
-                    <Dna size={14} className="text-indigo-400"/>
-                    <span className="text-xs font-bold text-indigo-200 uppercase tracking-widest">ADN Actif : {activeDNA}</span>
+                    <Dna size={14} className={quantumMode ? 'text-fuchsia-400' : 'text-indigo-400'}/>
+                    <span className={`text-xs font-bold uppercase tracking-widest ${quantumMode ? 'text-fuchsia-200' : 'text-indigo-200'}`}>ADN Actif : {activeDNA}</span>
                 </div>
 
                 <AnimatePresence>
@@ -293,9 +351,10 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     <button 
                         onClick={() => runInference()}
                         disabled={isOptimizing}
-                        className="px-8 py-6 bg-white text-slate-900 hover:bg-indigo-50 rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 hover:shadow-indigo-500/20 disabled:opacity-50"
+                        className={`px-8 py-6 text-slate-900 rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm shadow-2xl flex items-center justify-center gap-4 transition-all active:scale-95 disabled:opacity-50 ${quantumMode ? 'bg-fuchsia-400 hover:bg-fuchsia-300 shadow-fuchsia-500/20' : 'bg-white hover:bg-indigo-50 hover:shadow-indigo-500/20'}`}
                     >
-                        <Zap fill="currentColor" size={20} /> Exécuter ADN
+                        {quantumMode ? <Sparkles fill="currentColor" size={20} /> : <Zap fill="currentColor" size={20} />} 
+                        {quantumMode ? 'Exécuter Quantum' : 'Exécuter ADN'}
                     </button>
                     <button 
                         onClick={handleAiOptimization}
@@ -358,12 +417,18 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 {isComputing ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-8">
                         <div className="relative">
-                            <div className="w-32 h-32 border-4 border-slate-800 border-t-indigo-500 rounded-full animate-spin"></div>
-                            <Cpu className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={40} />
+                            <div className={`w-32 h-32 border-4 border-slate-800 rounded-full animate-spin ${quantumMode ? 'border-t-fuchsia-500' : 'border-t-indigo-500'}`}></div>
+                            {quantumMode ? (
+                                <Atom className="absolute inset-0 m-auto text-fuchsia-500 animate-pulse" size={40} />
+                            ) : (
+                                <Cpu className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={40} />
+                            )}
                         </div>
                         <div className="text-center space-y-3">
                             <p className="text-lg font-black uppercase tracking-[0.2em] text-white animate-pulse">{computingStep}</p>
-                            <p className="text-xs text-slate-500 font-mono">Calcul tensoriel haute précision...</p>
+                            <p className="text-xs text-slate-500 font-mono">
+                                {quantumMode ? 'Distorsion probabiliste en cours...' : 'Calcul tensoriel haute précision...'}
+                            </p>
                         </div>
                     </div>
                 ) : (
@@ -371,10 +436,10 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
                             <div>
                                 <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none mb-3">
-                                    Vecteur <span className="text-indigo-500">Master</span>
+                                    Vecteur <span className={quantumMode ? 'text-fuchsia-500' : 'text-indigo-500'}>{quantumMode ? 'Quantum' : 'Master'}</span>
                                 </h2>
                                 <div className="flex items-center gap-4">
-                                    <span className="text-xs font-bold text-indigo-300 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 flex items-center gap-2">
+                                    <span className={`text-xs font-bold px-3 py-1 rounded-full border flex items-center gap-2 ${quantumMode ? 'text-fuchsia-300 bg-fuchsia-500/10 border-fuchsia-500/20' : 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20'}`}>
                                         <Dna size={12}/> {activeDNA}
                                     </span>
                                 </div>
