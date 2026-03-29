@@ -27,6 +27,21 @@ serve(async (req: Request) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // 1.5 Validation de l'utilisateur (Sécurité)
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+        throw new Error("Token d'authentification manquant.");
+    }
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user || user.id !== userId) {
+        return new Response(JSON.stringify({ error: "Utilisateur non authentifié ou ID invalide." }), { 
+            status: 401, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
     // 2. Créer une transaction en base (PENDING)
     const transactionId = crypto.randomUUID();
     const { error: dbError } = await supabase.from('transactions').insert({

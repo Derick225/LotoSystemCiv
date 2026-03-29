@@ -19,9 +19,9 @@ serve(async (req: Request) => {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    // Utilisation de gemini-2.5-flash-image, optimisé pour la vision
+    // Utilisation de gemini-3.1-flash-preview pour l'analyse multimodale (OCR)
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image', 
+      model: 'gemini-3.1-flash-preview', 
       contents: {
         parts: [
           { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },

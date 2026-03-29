@@ -14,7 +14,7 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const superAdminEnv = process.env.SUPER_ADMIN_EMAILS || '';
     const SUPER_ADMIN_EMAILS = superAdminEnv.split(',').map((e: string) => e.trim());
