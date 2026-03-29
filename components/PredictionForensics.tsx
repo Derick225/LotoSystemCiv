@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
+import { ForensicAutopsyView } from './ForensicAutopsyView';
+
 interface PredictionForensicsProps {
     report: ForensicReport;
     onClose: () => void;
@@ -24,7 +26,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const { showToast } = useToast();
     const { updateGlobalWeights, refreshData } = useNexusStore();
     
-    const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation'>('ballistic');
+    const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation' | 'autopsy'>('ballistic');
     const [applying, setApplying] = useState(false);
     const [successApply, setSuccessApply] = useState(false);
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
@@ -186,6 +188,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('ballistic'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('spectral'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('simulation'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'simulation' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600 dark:text-white' : 'text-slate-500'}`}>Simulation</button>
+                        <button onClick={() => { audioEngine.play('click'); setActiveTab('autopsy'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'autopsy' ? 'bg-white dark:bg-slate-700 shadow text-cyan-600 dark:text-white' : 'text-slate-500'}`}>Autopsie IA</button>
                     </div>
 
                     <button onClick={() => { audioEngine.play('click'); onClose(); }} className="p-3 bg-white dark:bg-slate-800 rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-500 transition shadow-sm border border-slate-200 dark:border-slate-700">
@@ -437,6 +440,18 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'autopsy' && (
+                        <div className="animate-slide-up space-y-8">
+                            {report.predictionId ? (
+                                <ForensicAutopsyView snapshotId={report.predictionId} drawResultId={report.drawResultId || ''} />
+                            ) : (
+                                <div className="p-8 text-center text-slate-500">
+                                    ID de prédiction manquant pour l'autopsie.
+                                </div>
+                            )}
                         </div>
                     )}
 

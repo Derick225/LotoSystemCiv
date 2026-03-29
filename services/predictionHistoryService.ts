@@ -1,6 +1,8 @@
 
 import type { Prediction, LearningSession, PredictionHistoryItem, OrchestrationPattern, PredictionFeedback, PatternType, DrawResult } from '../types';
 import { syncPredictions, syncLearningSessions } from './syncService';
+import { supabase } from './supabaseClient';
+import { getAlgoWeights } from './predictionEngine';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
@@ -62,7 +64,32 @@ export const findPredictionsByDate = async (drawName: string, date: string): Pro
     });
 };
 
-export const savePredictionToHistory = async (drawName: string, prediction: Prediction, drawResultId?: string): Promise<PredictionHistoryItem> => {
+export const savePredictionSnapshot = async (id: string, drawName: string, prediction: Prediction, metrics?: any) => {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return; // Only save snapshots for authenticated users
+
+        const weights = await getAlgoWeights(drawName);
+        
+        // Calculate target date (usually today or tomorrow depending on the draw)
+        const targetDate = new Date().toISOString().split('T')[0];
+
+        await supabase.from('prediction_snapshots').insert({
+            id: id,
+            user_id: user.id,
+            draw_name: drawName,
+            target_date: targetDate,
+            predicted_numbers: prediction.suggestedNumbers,
+            decision_dna: weights,
+            metrics_snapshot: metrics || {},
+            status: 'PENDING'
+        });
+    } catch (e) {
+        console.error("Failed to save prediction snapshot", e);
+    }
+};
+
+export const savePredictionToHistory = async (drawName: string, prediction: Prediction, drawResultId?: string, metrics?: any): Promise<PredictionHistoryItem> => {
   const newItem: PredictionHistoryItem = {
     id: crypto.randomUUID(),
     timestamp: Date.now(),
@@ -76,6 +103,9 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   
   // Automate sync in background
   syncAllHistory(drawName).catch(e => console.error("Auto-sync prediction history failed", e));
+  
+  // Save forensic snapshot
+  savePredictionSnapshot(newItem.id, drawName, prediction, metrics).catch(e => console.error("Snapshot save failed", e));
   
   return newItem;
 };

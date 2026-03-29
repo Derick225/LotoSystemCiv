@@ -60,7 +60,8 @@ export const performForensicAnalysis = async (
     predictedNumbers: number[], 
     actualWinningNumbers: number[], 
     predictionBreakdown?: Record<number, ScoreBreakdown>, 
-    predictionId?: string
+    predictionId?: string,
+    drawResultId?: string
 ): Promise<ForensicReport> => {
     const matches: ForensicEvidence[] = [];
     const actualSet = new Set(actualWinningNumbers);
@@ -206,7 +207,8 @@ export const performForensicAnalysis = async (
         id: crypto.randomUUID(),
         drawName, 
         date, 
-        predictionId, 
+        predictionId,
+        drawResultId, 
         matches, 
         missedOpportunities: missed, 
         scoreDivergence: scoreDivergence.sort((a,b) => b.impact - a.impact).slice(0, 5),

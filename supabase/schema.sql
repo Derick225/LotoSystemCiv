@@ -137,7 +137,33 @@ CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO se
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- 6. TRIGGERS
+-- ==========================================
+-- 6. PREDICTION SNAPSHOTS (FORENSIC)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.prediction_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    draw_name TEXT NOT NULL,
+    target_date DATE,
+    predicted_numbers INTEGER[] NOT NULL,
+    decision_dna JSONB,
+    metrics_snapshot JSONB,
+    status TEXT DEFAULT 'PENDING',
+    actual_numbers INTEGER[],
+    near_misses JSONB,
+    autopsy_report JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can insert their own snapshots" ON public.prediction_snapshots FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can view their own snapshots" ON public.prediction_snapshots FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
+
+-- ==========================================
+-- 7. TRIGGERS
+-- ==========================================
 CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);

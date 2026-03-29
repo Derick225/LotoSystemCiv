@@ -178,7 +178,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setLastPrediction(res);
                 
                 // CRITIQUE : Sauvegarde pour Forensic Hub
-                await savePredictionToHistory(drawName, res);
+                await savePredictionToHistory(drawName, res, undefined, {
+                    spectral, wavelet, correlationMatrix, regularity, volatility, fractal
+                });
                 
                 if (!forcedWeights) {
                     audioEngine.play('success');

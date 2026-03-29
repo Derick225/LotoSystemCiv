@@ -107,6 +107,7 @@ export interface ForensicReport {
     drawName: string;
     date: string;
     predictionId?: string;
+    drawResultId?: string;
     matches: ForensicEvidence[];
     missedOpportunities: { number: number; reason: string }[];
     scoreDivergence: { algo: string; impact: number }[];

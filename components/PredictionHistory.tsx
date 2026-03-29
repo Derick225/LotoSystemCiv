@@ -75,7 +75,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                                     drawName, match.date, 
                                     item.prediction.suggestedNumbers, 
                                     match.gagnants, item.prediction.breakdown,
-                                    item.id
+                                    item.id,
+                                    match.id
                                 );
                                 saveForensicReport(report);
                                 forensicGenerated = true;
@@ -108,7 +109,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
             drawName, result.date, 
             predictionItem.prediction.suggestedNumbers, 
             result.gagnants, predictionItem.prediction.breakdown,
-            predictionItem.id
+            predictionItem.id,
+            result.id
         );
         saveForensicReport(report);
         setForensicReport(report);

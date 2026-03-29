@@ -101,7 +101,8 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                         pred.prediction.suggestedNumbers, 
                         actual.gagnants, 
                         pred.prediction.breakdown,
-                        pred.id
+                        pred.id,
+                        actual.id
                     );
                     // Sauvegarder immédiatement
                     saveForensicReport(rep);
