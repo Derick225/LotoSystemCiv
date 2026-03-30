@@ -95,7 +95,7 @@ export const lotteryService = {
     if (remoteData) return remoteData;
     const cached = localStorage.getItem(cacheKey);
     if (cached) return JSON.parse(cached);
-    if (fetchError) throw fetchError;
+    if (fetchError) throw new AppError("Impossible de récupérer l'historique. Vérifiez votre connexion.", "NETWORK_ERR", "high", { error: fetchError });
     return [];
   }
 };

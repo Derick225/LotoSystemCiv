@@ -90,12 +90,6 @@ async function generateWithOpenRouter(params: any) {
 async function generateWithFallback(genAI: any, primaryModel: string, params: any) {
     const fallbackModel = "gemini-3.1-flash-preview";
     const config = { ...params.config };
-    
-    // Activer le mode "Thinking" pour les modèles Pro pour plus de rigueur mathématique
-    if (primaryModel.includes('pro')) {
-        // @ts-ignore - ThinkingLevel enum is not exported directly in this old import, using string equivalent
-        config.thinkingConfig = { thinkingLevel: "HIGH" }; 
-    }
 
     try {
         console.log(`Executing task with model: ${primaryModel}`);

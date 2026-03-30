@@ -1,14 +1,9 @@
-import * as tf from '@tensorflow/tfjs';
-
 /**
  * Nexus Production Math Worker v12.0 (Deep Science Edition)
  * Implémentations mathématiques réelles (DFT, Haar, Hurst R/S).
  */
 
 const ctx = self as unknown as Worker;
-
-// Initialize TF.js
-tf.setBackend('cpu');
 
 // --- UTILS MATHS DE PRÉCISION ---
 
@@ -168,116 +163,161 @@ ctx.onmessage = async (e: MessageEvent) => {
     }
 };
 
-// --- PCA & RIDGE IMPLEMENTATIONS (TF.JS) ---
+// --- PCA & RIDGE IMPLEMENTATIONS (NO TF.JS) ---
 
-function denoiseFeaturesPCA(data: number[][], varianceThreshold: number = 0.95): number[][] {
-    return tf.tidy(() => {
-        const x = tf.tensor2d(data);
-        const mean = x.mean(0);
-        const centered = x.sub(mean);
-        const cov = centered.transpose().matMul(centered).div(x.shape[0] - 1) as tf.Tensor2D;
+// Basic Matrix Operations
+const matMul = (A: number[][], B: number[][]): number[][] => {
+    const m = A.length;
+    const n = A[0].length;
+    const p = B[0].length;
+    const C = Array(m).fill(0).map(() => Array(p).fill(0));
+    for (let i = 0; i < m; i++) {
+        for (let j = 0; j < p; j++) {
+            let sum = 0;
+            for (let k = 0; k < n; k++) {
+                sum += A[i][k] * B[k][j];
+            }
+            C[i][j] = sum;
+        }
+    }
+    return C;
+};
+
+const transpose = (A: number[][]): number[][] => {
+    const m = A.length;
+    const n = A[0].length;
+    const C = Array(n).fill(0).map(() => Array(m).fill(0));
+    for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+            C[j][i] = A[i][j];
+        }
+    }
+    return C;
+};
+
+const matSub = (A: number[][], B: number[][]): number[][] => {
+    return A.map((row, i) => row.map((val, j) => val - B[i][j]));
+};
+
+const matAdd = (A: number[][], B: number[][]): number[][] => {
+    return A.map((row, i) => row.map((val, j) => val + B[i][j]));
+};
+
+const scalarMul = (A: number[][], scalar: number): number[][] => {
+    return A.map(row => row.map(val => val * scalar));
+};
+
+const vecNorm = (v: number[][]): number => {
+    let sum = 0;
+    for (let i = 0; i < v.length; i++) sum += v[i][0] * v[i][0];
+    return Math.sqrt(sum);
+};
+
+function computeEigenDecomposition(matrix: number[][]): { values: number[], vectors: number[][] } {
+    const n = matrix.length;
+    let A = matrix.map(row => [...row]);
+    const eigenValues: number[] = [];
+    const eigenVectors: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
+    
+    for (let i = 0; i < n; i++) {
+        let v = Array(n).fill(0).map(() => [Math.random() - 0.5]);
+        let norm = vecNorm(v);
+        if (norm === 0) {
+            v[0][0] = 1;
+            norm = 1;
+        }
+        v = scalarMul(v, 1/norm);
         
-        const { values, vectors } = computeEigenDecomposition(cov);
-        
-        const totalVariance = values.reduce((a, b) => a + b, 0);
-        let currentVariance = 0;
-        let k = 0;
-        for (let i = 0; i < values.length; i++) {
-            currentVariance += values[i];
-            k++;
-            if (currentVariance / totalVariance >= varianceThreshold) break;
+        let lastV = v.map(row => [...row]);
+        for (let iter = 0; iter < 40; iter++) {
+            const Av = matMul(A, v);
+            norm = vecNorm(Av);
+            if (norm < 1e-9) break;
+            v = scalarMul(Av, 1/norm);
+            
+            let diff = 0;
+            for(let k=0; k<n; k++) diff += Math.pow(v[k][0] - lastV[k][0], 2);
+            if (Math.sqrt(diff) < 1e-6) break;
+            lastV = v.map(row => [...row]);
         }
         
-        const topVectors = vectors.slice([0, 0], [-1, k]);
-        const projected = centered.matMul(topVectors);
-        const reconstructed = projected.matMul(topVectors.transpose()).add(mean);
+        const Av = matMul(A, v);
+        const eigenvalue = matMul(transpose(v), Av)[0][0];
         
-        return reconstructed.arraySync() as number[][];
-    });
+        eigenValues.push(eigenvalue);
+        for(let k=0; k<n; k++) eigenVectors[k][i] = v[k][0];
+        
+        const vvT = matMul(v, transpose(v));
+        const deflation = scalarMul(vvT, eigenvalue);
+        A = matSub(A, deflation);
+    }
+    
+    return { values: eigenValues, vectors: eigenVectors };
+}
+
+function denoiseFeaturesPCA(data: number[][], varianceThreshold: number = 0.95): number[][] {
+    if (!data || data.length === 0) return [];
+    const nSamples = data.length;
+    const nFeatures = data[0].length;
+    
+    const mean = Array(nFeatures).fill(0);
+    for(let i=0; i<nSamples; i++) {
+        for(let j=0; j<nFeatures; j++) mean[j] += data[i][j];
+    }
+    for(let j=0; j<nFeatures; j++) mean[j] /= nSamples;
+    
+    const centered = data.map(row => row.map((val, j) => val - mean[j]));
+    const covariance = scalarMul(matMul(transpose(centered), centered), 1 / (nSamples - 1));
+    
+    const { values, vectors } = computeEigenDecomposition(covariance);
+    
+    const totalVariance = values.reduce((a, b) => a + Math.abs(b), 0);
+    
+    let k = 1;
+    let currentVar = 0;
+    for (let i = 0; i < nFeatures; i++) {
+        currentVar += Math.abs(values[i]);
+        if (totalVariance > 0 && currentVar / totalVariance >= varianceThreshold) {
+            k = i + 1;
+            break;
+        }
+    }
+    
+    const topKVectors = vectors.map(row => row.slice(0, k));
+    const projected = matMul(centered, topKVectors);
+    const reconstructed = matAdd(matMul(projected, transpose(topKVectors)), Array(nSamples).fill(mean));
+    
+    return reconstructed;
 }
 
 function trainRidgeRegression(features: number[][], labels: number[], lambda: number = 0.1): number[] {
-    return tf.tidy(() => {
-        const X = tf.tensor2d(features);
-        const y = tf.tensor1d(labels).reshape([-1, 1]);
-        
-        const Xt = X.transpose();
-        const XtX = Xt.matMul(X);
-        const I = tf.eye(X.shape[1]);
-        const regularizer = I.mul(lambda);
-        
-        const A = XtX.add(regularizer) as tf.Tensor2D;
-        const B = Xt.matMul(y) as tf.Tensor2D;
-        
-        // Solve Ax = B using Gaussian Elimination (since tf.linalg.solve is missing)
-        const aData = A.arraySync() as number[][];
-        const bData = B.arraySync() as number[][];
-        const n = aData.length;
-        
-        // Augment A with B
-        for (let i = 0; i < n; i++) aData[i].push(bData[i][0]);
-        
-        // Gaussian Elimination
-        for (let i = 0; i < n; i++) {
-            let max = i;
-            for (let k = i + 1; k < n; k++) {
-                if (Math.abs(aData[k][i]) > Math.abs(aData[max][i])) max = k;
-            }
-            [aData[i], aData[max]] = [aData[max], aData[i]];
-            
-            for (let k = i + 1; k < n; k++) {
-                const f = aData[k][i] / aData[i][i];
-                for (let j = i; j <= n; j++) {
-                    aData[k][j] -= aData[i][j] * f;
-                }
-            }
-        }
-        
-        // Back substitution
-        const x = new Array(n).fill(0);
-        for (let i = n - 1; i >= 0; i--) {
-            let s = 0;
-            for (let j = i + 1; j < n; j++) s += aData[i][j] * x[j];
-            x[i] = (aData[i][n] - s) / aData[i][i];
-        }
-        
-        return x;
-    });
-}
-
-function computeEigenDecomposition(matrix: tf.Tensor2D): { values: number[], vectors: tf.Tensor2D } {
-    const n = matrix.shape[0];
-    let A = matrix.clone();
-    const eigenValues: number[] = [];
-    const eigenVectorsList: tf.Tensor[] = [];
+    if (!features || features.length === 0 || features.length !== labels.length) return [];
+    const nFeatures = features[0].length;
+    const nSamples = features.length;
     
-    for (let i = 0; i < n; i++) {
-        let v = tf.randomNormal([n, 1]);
-        v = v.div(v.norm());
-        let lastV = v.clone();
-        for (let iter = 0; iter < 40; iter++) {
-            const Av = A.matMul(v);
-            const norm = Av.norm();
-            if (norm.dataSync()[0] < 1e-9) break;
-            v = Av.div(norm);
-            const diff = v.sub(lastV).norm().dataSync()[0];
-            if (diff < 1e-6) break;
-            lastV.dispose();
-            lastV = v.clone();
+    let weights = Array(nFeatures).fill(0);
+    const learningRate = 0.01;
+    
+    for (let iter = 0; iter < 100; iter++) {
+        const gradients = Array(nFeatures).fill(0);
+        
+        for (let i = 0; i < nSamples; i++) {
+            let pred = 0;
+            for (let j = 0; j < nFeatures; j++) pred += features[i][j] * weights[j];
+            const error = pred - labels[i];
+            
+            for (let j = 0; j < nFeatures; j++) {
+                gradients[j] += (2 / nSamples) * error * features[i][j];
+            }
         }
-        lastV.dispose();
-        const Av = A.matMul(v);
-        const eigenvalue = v.transpose().matMul(Av).dataSync()[0];
-        eigenValues.push(eigenvalue);
-        eigenVectorsList.push(v);
-        const vvT = v.matMul(v.transpose());
-        const deflation = vvT.mul(eigenvalue);
-        const nextA = A.sub(deflation) as tf.Tensor2D;
-        A.dispose();
-        A = nextA;
+        
+        for (let j = 0; j < nFeatures; j++) {
+            gradients[j] += 2 * lambda * weights[j];
+            weights[j] -= learningRate * gradients[j];
+        }
     }
-    const vectors = tf.concat(eigenVectorsList, 1) as tf.Tensor2D;
-    return { values: eigenValues, vectors };
+    
+    return weights;
 }
 
 function runGapEfficiency(history: any[]) {

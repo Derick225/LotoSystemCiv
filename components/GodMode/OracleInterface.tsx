@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
-import { getGeminiClient } from '../../services/geminiService';
+import { getGeminiClient, generateWithFallback } from '../../services/geminiService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Bot, User, Sparkles, Zap, Lock, Unlock, Eye, EyeOff } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
@@ -57,8 +57,7 @@ export const OracleInterface: React.FC = () => {
                 User Query: ${userMsg.content}
             `;
 
-            const result = await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
+            const result = await generateWithFallback(ai, "gemini-3-flash-preview", {
                 contents: context
             });
             

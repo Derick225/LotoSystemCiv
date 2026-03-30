@@ -13,6 +13,8 @@ const BATCH_SIZE = 50;
 // --- PREDICTIONS ---
 
 export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
+    if (!navigator.onLine) return localItems; // Mode hors ligne
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localItems; // Mode hors ligne
 
@@ -98,6 +100,8 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 // --- FORENSIC REPORTS ---
 
 export const syncForensicReports = async (localReports: ForensicReport[]): Promise<ForensicReport[]> => {
+    if (!navigator.onLine) return localReports; // Mode hors ligne
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localReports;
 
@@ -161,6 +165,8 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 // --- LEARNING SESSIONS ---
 
 export const syncLearningSessions = async (localSessions: LearningSession[]): Promise<LearningSession[]> => {
+    if (!navigator.onLine) return localSessions; // Mode hors ligne
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localSessions;
 

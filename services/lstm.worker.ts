@@ -1,105 +1,150 @@
-
-import * as tf from '@tensorflow/tfjs';
 import type { DrawResult } from '../types';
 
-const SEQUENCE_LENGTH = 5;
-const NUM_FEATURES = 90;
-const EPOCHS = 20;
-const BATCH_SIZE = 4;
+const ctx = self as unknown as Worker;
 
-// Force CPU backend for stability in Web Worker context
-tf.setBackend('cpu');
-
+// 2nd-order Markov Chain implementation
 self.onmessage = async (e: MessageEvent) => {
     const { history, id } = e.data;
     
     try {
-        if (!history || history.length < SEQUENCE_LENGTH + 10) {
+        if (!history || history.length < 10) {
             self.postMessage({ id, probabilities: new Array(90).fill(0), accuracy: 0 });
             return;
         }
 
-        // Préparation des données
-        const data: number[][] = [];
-        const recentHistory = history.slice(0, 50).reverse(); 
+        // We want to build a transition matrix: P(N_t | N_{t-1}, N_{t-2})
+        // Since a draw has 5 numbers, we can look at transitions between consecutive draws.
+        // For simplicity and performance, we'll build a co-occurrence based Markov model.
+        // We track how often number C appears in draw T, given that A appeared in T-2 and B appeared in T-1.
         
-        recentHistory.forEach((draw: any) => {
-            const vector = new Array(NUM_FEATURES).fill(0);
-            draw.gagnants.forEach((n: number) => {
-                if (n >= 1 && n <= 90) vector[n - 1] = 1;
-            });
-            data.push(vector);
-        });
-
-        const X_data: number[][][] = [];
-        const y_data: number[][] = [];
-
-        for (let i = 0; i < data.length - SEQUENCE_LENGTH; i++) {
-            X_data.push(data.slice(i, i + SEQUENCE_LENGTH));
-            y_data.push(data[i + SEQUENCE_LENGTH]);
-        }
-
-        const xs = tf.tensor3d(X_data);
-        const ys = tf.tensor2d(y_data);
-
-        // Création du modèle
-        const model = tf.sequential();
-        model.add(tf.layers.lstm({
-            units: 64,
-            inputShape: [SEQUENCE_LENGTH, NUM_FEATURES],
-            returnSequences: false
-        }));
-        model.add(tf.layers.dropout({ rate: 0.2 }));
-        model.add(tf.layers.dense({
-            units: NUM_FEATURES,
-            activation: 'sigmoid'
-        }));
-
-        model.compile({
-            optimizer: tf.train.adam(0.01),
-            loss: 'binaryCrossentropy',
-            metrics: ['accuracy']
-        });
-
-        let accuracy = 0;
-        await model.fit(xs, ys, {
-            epochs: EPOCHS,
-            batchSize: BATCH_SIZE,
-            shuffle: true,
-            callbacks: {
-                onEpochEnd: (_epoch, logs) => {
-                    accuracy = logs?.acc || 0;
+        // To avoid massive memory usage (90x90x90), we'll use a Map for sparse transitions
+        const transitions = new Map<string, Map<number, number>>();
+        
+        // Build the model from history (reverse to go chronological)
+        const chronologicalHistory = [...history].reverse();
+        
+        for (let i = 2; i < chronologicalHistory.length; i++) {
+            const drawTMinus2 = chronologicalHistory[i - 2].gagnants;
+            const drawTMinus1 = chronologicalHistory[i - 1].gagnants;
+            const drawT = chronologicalHistory[i].gagnants;
+            
+            // For every combination of (A in T-2) and (B in T-1), record (C in T)
+            for (const a of drawTMinus2) {
+                for (const b of drawTMinus1) {
+                    const stateKey = `${a},${b}`;
+                    if (!transitions.has(stateKey)) {
+                        transitions.set(stateKey, new Map<number, number>());
+                    }
+                    const nextStates = transitions.get(stateKey)!;
+                    
+                    for (const c of drawT) {
+                        nextStates.set(c, (nextStates.get(c) || 0) + 1);
+                    }
                 }
             }
-        });
-
-        // Prédiction
-        const lastSequence: number[][] = [];
-        const predictDraws = history.slice(0, SEQUENCE_LENGTH).reverse();
+        }
         
-        predictDraws.forEach((draw: any) => {
-            const vector = new Array(NUM_FEATURES).fill(0);
-            draw.gagnants.forEach((n: number) => {
-                if (n >= 1 && n <= 90) vector[n - 1] = 1;
-            });
-            lastSequence.push(vector);
-        });
+        // Predict next draw based on the most recent 2 draws
+        const lastDraw = history[0].gagnants;
+        const prevDraw = history[1].gagnants;
+        
+        const probabilities = new Array(91).fill(0);
+        let totalWeight = 0;
+        
+        for (const a of prevDraw) {
+            for (const b of lastDraw) {
+                const stateKey = `${a},${b}`;
+                const nextStates = transitions.get(stateKey);
+                
+                if (nextStates) {
+                    for (const [c, count] of nextStates.entries()) {
+                        if (c >= 1 && c <= 90) {
+                            probabilities[c] += count;
+                            totalWeight += count;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Normalize probabilities
+        const normalizedProbabilities = new Array(90).fill(0);
+        if (totalWeight > 0) {
+            for (let i = 1; i <= 90; i++) {
+                normalizedProbabilities[i - 1] = probabilities[i] / totalWeight;
+            }
+        } else {
+            // Fallback to 1st order if 2nd order has no data
+            const firstOrderTransitions = new Map<number, Map<number, number>>();
+            for (let i = 1; i < chronologicalHistory.length; i++) {
+                const drawTMinus1 = chronologicalHistory[i - 1].gagnants;
+                const drawT = chronologicalHistory[i].gagnants;
+                for (const b of drawTMinus1) {
+                    if (!firstOrderTransitions.has(b)) firstOrderTransitions.set(b, new Map<number, number>());
+                    const nextStates = firstOrderTransitions.get(b)!;
+                    for (const c of drawT) {
+                        nextStates.set(c, (nextStates.get(c) || 0) + 1);
+                    }
+                }
+            }
+            
+            let fallbackWeight = 0;
+            for (const b of lastDraw) {
+                const nextStates = firstOrderTransitions.get(b);
+                if (nextStates) {
+                    for (const [c, count] of nextStates.entries()) {
+                        if (c >= 1 && c <= 90) {
+                            probabilities[c] += count;
+                            fallbackWeight += count;
+                        }
+                    }
+                }
+            }
+            
+            if (fallbackWeight > 0) {
+                for (let i = 1; i <= 90; i++) {
+                    normalizedProbabilities[i - 1] = probabilities[i] / fallbackWeight;
+                }
+            }
+        }
+        
+        // Calculate a pseudo-accuracy based on how well the model would have predicted the last draw
+        let accuracy = 0.5; // Default baseline
+        if (history.length >= 3) {
+            let correctPredictions = 0;
+            const testDrawTMinus2 = history[2].gagnants;
+            const testDrawTMinus1 = history[1].gagnants;
+            const actualDrawT = history[0].gagnants;
+            
+            const testProbs = new Array(91).fill(0);
+            for (const a of testDrawTMinus2) {
+                for (const b of testDrawTMinus1) {
+                    const stateKey = `${a},${b}`;
+                    const nextStates = transitions.get(stateKey);
+                    if (nextStates) {
+                        for (const [c, count] of nextStates.entries()) {
+                            testProbs[c] += count;
+                        }
+                    }
+                }
+            }
+            
+            // Get top 5 predictions
+            const topPredictions = Array.from({length: 90}, (_, i) => ({ num: i + 1, prob: testProbs[i + 1] }))
+                .sort((a, b) => b.prob - a.prob)
+                .slice(0, 5)
+                .map(p => p.num);
+                
+            for (const n of actualDrawT) {
+                if (topPredictions.includes(n)) correctPredictions++;
+            }
+            accuracy = correctPredictions / 5;
+        }
 
-        const input = tf.tensor3d([lastSequence]);
-        const prediction = model.predict(input) as tf.Tensor;
-        const probabilities = Array.from(prediction.dataSync());
-
-        // Nettoyage
-        xs.dispose();
-        ys.dispose();
-        model.dispose();
-        input.dispose();
-        prediction.dispose();
-
-        self.postMessage({ id, probabilities, accuracy });
-
+        self.postMessage({ id, probabilities: normalizedProbabilities, accuracy });
+        
     } catch (error) {
-        console.error("LSTM Worker Error:", error);
-        self.postMessage({ id, error: String(error) });
+        console.error("Markov Chain Worker Error:", error);
+        self.postMessage({ id, probabilities: new Array(90).fill(0), accuracy: 0, error: String(error) });
     }
 };

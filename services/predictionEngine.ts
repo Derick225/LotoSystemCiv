@@ -6,13 +6,12 @@ import {
     calculateDigitalRootAnalysis, 
     calculateResistanceScores, 
     calculateGapVelocityScores, 
-    calculateSelfAttentionScores, 
+    calculateCoOccurrenceScores, 
     calculateTemporalScores, 
     calculatePoissonScores,
     calculateLeaderSuccession,
     calculateBayesianScore,
     calculateAiIntuition,
-    calculateQuantumEntanglementScores,
     calculateFractalResonance
 } from './advancedMathService';
 import { workerService } from './workerService';
@@ -307,13 +306,12 @@ export const generateMasterPrediction = async (
     const digitalRootScores = calculateDigitalRootAnalysis(history);
     const resistanceScores = calculateResistanceScores(history);
     const gapVelocityScores = calculateGapVelocityScores(history);
-    const selfAttentionScores = calculateSelfAttentionScores(history);
+    const coOccurrenceScores = calculateCoOccurrenceScores(history);
     const temporalScores = calculateTemporalScores(history);
     const poissonScores = calculatePoissonScores(history);
     const leaderSuccessionScores = calculateLeaderSuccession(history);
     const bayesianScores = calculateBayesianScore(history);
     const aiIntuitionScores = calculateAiIntuition(history, metrics);
-    const quantumEntanglementScores = calculateQuantumEntanglementScores(history);
     const fractalResonanceScores = calculateFractalResonance(history);
 
     // --- TWIN ENGINE (Pattern Matching) ---
@@ -360,13 +358,13 @@ export const generateMasterPrediction = async (
         nBreakdown.poisson = poissonScores[num] || 0;
         nBreakdown.resistance = resistanceScores[num] || 0;
         nBreakdown.gap_velocity = gapVelocityScores[num] || 0;
-        nBreakdown.transformer = selfAttentionScores[num] || 0;
+        nBreakdown.transformer = coOccurrenceScores[num] || 0;
         nBreakdown.temporal = temporalScores[num] || 0;
         nBreakdown.digital_root = digitalRootScores[num] || 0;
         nBreakdown.leader_succession = leaderSuccessionScores[num] || 0;
         nBreakdown.bayes = bayesianScores[num] || 0;
         nBreakdown.ai_intuition = aiIntuitionScores[num] || 0;
-        nBreakdown.quantum_entanglement = quantumEntanglementScores[num] || 0;
+        nBreakdown.quantum_entanglement = coOccurrenceScores[num] || 0;
         nBreakdown.fractal_resonance = fractalResonanceScores[num] || 0;
         nBreakdown.twin = twinScores[num] || 0;
 

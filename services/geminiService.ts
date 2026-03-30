@@ -19,6 +19,30 @@ export const getGeminiClient = () => {
     return new GoogleGenAI({ apiKey });
 };
 
+export async function generateWithFallback(ai: any, primaryModel: string, params: any) {
+    const fallbackModel = "gemini-3.1-flash-preview";
+    const config = { ...params.config };
+
+    try {
+        console.log(`Executing task with model: ${primaryModel}`);
+        return await ai.models.generateContent({ ...params, model: primaryModel, config });
+    } catch (e: any) {
+        console.error(`Error with ${primaryModel}:`, e.message);
+        
+        if (primaryModel !== fallbackModel) {
+            console.warn(`Falling back to ${fallbackModel}...`);
+            try {
+                return await ai.models.generateContent({ ...params, model: fallbackModel, config });
+            } catch (e2: any) {
+                console.error(`Error with ${fallbackModel}:`, e2.message);
+                throw e2;
+            }
+        } else {
+            throw e;
+        }
+    }
+}
+
 /**
  * Récupère des poids algorithmiques optimisés par l'IA via Gemini Flash.
  */
@@ -49,8 +73,7 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
         Retourne un objet JSON strict correspondant à l'interface AlgoWeights.
         `;
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -142,8 +165,7 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
         Fournis une analyse logique détaillée et probabiliste, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), suggère la prochaine séquence probable, liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, suggère des numéros à surveiller (focus), et un score d'intuition (0-100).
         `;
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3.1-pro-preview",
+        const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -218,8 +240,7 @@ export const getNarrativeAnalysis = async (drawName: string, history: DrawResult
         - confidence: Score de confiance (nombre entre 0 et 100).
         `;
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -275,8 +296,7 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
         - insight: L'analyse des résultats (string).
         `;
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -312,8 +332,7 @@ export const scanTicket = async (imageBase64: string): Promise<any | null> => {
     if (!ai) throw new AppError("Clé API Gemini manquante.", "GEMINI_KEY_MISSING", "high");
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image', 
+        const response = await generateWithFallback(ai, 'gemini-2.5-flash-image', {
             contents: {
                 parts: [
                     { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },

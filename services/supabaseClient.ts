@@ -22,7 +22,7 @@ const SUPABASE_ANON_KEY = cleanEnv(
 
 const isValidSupabaseUrl = (url: string): boolean => {
   try {
-    if (!url || url.includes('your-project-url') || url.includes('placeholder') || url.includes('your-project-ref')) return false;
+    if (!url || url.includes('your-project-url') || url.includes('placeholder') || url.includes('your-project-ref') || url.includes('votre-projet')) return false;
     const u = new URL(url);
     return u.protocol === 'https:' && (u.hostname.includes('supabase.co') || u.hostname.includes('localhost') || u.hostname.includes('127.0.0.1'));
   } catch { return false; }
@@ -57,17 +57,35 @@ const createSafeClient = (): SupabaseClient => {
                 storage: typeof window !== 'undefined' ? window.localStorage : undefined 
             },
             global: { 
-                headers: { 'x-nexus-client': 'platinum-v12-prod' },
-                fetch: (url, options) => {
-                    return fetch(url, options);
-                }
+                headers: { 'x-nexus-client': 'platinum-v12-prod' }
             },
         });
     } else {
         // Mock client pour éviter le crash au chargement, les appels échoueront gracieusement via isSupabaseConfigured() check
         console.warn("Supabase non configuré correctement. Mode hors-ligne strict activé.");
+        
+        const mockChain: any = new Proxy(function() {}, {
+            get: (target, prop) => {
+                if (prop === 'then') return undefined; // Pour ne pas être traité comme une Promise infinie
+                return mockChain;
+            },
+            apply: () => mockChain
+        });
+
+        const mockPromise = Promise.resolve({ data: null, error: { message: "Supabase not configured" } });
+
+        const mockQueryBuilder: any = new Proxy(function() {}, {
+            get: (target, prop) => {
+                if (prop === 'then') return mockPromise.then.bind(mockPromise);
+                if (prop === 'catch') return mockPromise.catch.bind(mockPromise);
+                if (prop === 'finally') return mockPromise.finally.bind(mockPromise);
+                return mockQueryBuilder;
+            },
+            apply: () => mockQueryBuilder
+        });
+
         return {
-            from: () => ({ select: () => ({ data: null, error: { message: "Supabase not configured" } }) }),
+            from: () => mockQueryBuilder,
             auth: {
                 getSession: async () => ({ data: { session: null }, error: null }),
                 onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
@@ -75,7 +93,7 @@ const createSafeClient = (): SupabaseClient => {
                 signInWithPassword: async () => ({ data: null, error: { message: "No config" } }),
                 signOut: async () => ({ error: null }),
             },
-            channel: () => ({ on: () => ({ subscribe: () => {} }), unsubscribe: () => {} }),
+            channel: () => ({ on: () => mockChain, unsubscribe: () => {} }),
             removeChannel: () => {},
             functions: { invoke: async () => ({ data: null, error: { message: "No config" } }) }
         } as unknown as SupabaseClient;

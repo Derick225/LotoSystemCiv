@@ -7,6 +7,30 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+async function generateWithFallback(genAI: any, primaryModel: string, params: any) {
+    const fallbackModel = "gemini-3.1-flash-preview";
+    const config = { ...params.config };
+
+    try {
+        console.log(`Executing task with model: ${primaryModel}`);
+        return await genAI.models.generateContent({ ...params, model: primaryModel, config });
+    } catch (e: any) {
+        console.error(`Error with ${primaryModel}:`, e.message);
+        
+        if (primaryModel !== fallbackModel) {
+            console.warn(`Falling back to ${fallbackModel}...`);
+            try {
+                return await genAI.models.generateContent({ ...params, model: fallbackModel, config });
+            } catch (e2: any) {
+                console.error(`Error with ${fallbackModel}:`, e2.message);
+                throw e2;
+            }
+        } else {
+            throw e;
+        }
+    }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -94,8 +118,7 @@ serve(async (req) => {
     - "bias_detected": Un biais potentiel détecté dans l'ADN de la décision (ex: "Trop de poids sur la fréquence").
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+    const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
       contents: prompt,
       config: {
         responseMimeType: "application/json",

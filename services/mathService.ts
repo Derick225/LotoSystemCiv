@@ -1,5 +1,4 @@
 
-import * as tf from '@tensorflow/tfjs';
 import { workerService } from './workerService';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 
@@ -36,50 +35,97 @@ const setCached = (key: string, data: any) => {
 
 export const clearMathCache = () => mathCache.clear();
 
+// Basic Matrix Operations
+const matMul = (A: number[][], B: number[][]): number[][] => {
+    const m = A.length;
+    const n = A[0].length;
+    const p = B[0].length;
+    const C = Array(m).fill(0).map(() => Array(p).fill(0));
+    for (let i = 0; i < m; i++) {
+        for (let j = 0; j < p; j++) {
+            let sum = 0;
+            for (let k = 0; k < n; k++) {
+                sum += A[i][k] * B[k][j];
+            }
+            C[i][j] = sum;
+        }
+    }
+    return C;
+};
+
+const transpose = (A: number[][]): number[][] => {
+    const m = A.length;
+    const n = A[0].length;
+    const C = Array(n).fill(0).map(() => Array(m).fill(0));
+    for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+            C[j][i] = A[i][j];
+        }
+    }
+    return C;
+};
+
+const matSub = (A: number[][], B: number[][]): number[][] => {
+    return A.map((row, i) => row.map((val, j) => val - B[i][j]));
+};
+
+const matAdd = (A: number[][], B: number[][]): number[][] => {
+    return A.map((row, i) => row.map((val, j) => val + B[i][j]));
+};
+
+const scalarMul = (A: number[][], scalar: number): number[][] => {
+    return A.map(row => row.map(val => val * scalar));
+};
+
+const vecNorm = (v: number[][]): number => {
+    let sum = 0;
+    for (let i = 0; i < v.length; i++) sum += v[i][0] * v[i][0];
+    return Math.sqrt(sum);
+};
+
 /**
  * Helper: Compute Eigen Decomposition using Power Iteration with Deflation.
  */
-const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vectors: tf.Tensor2D } => {
-    const n = matrix.shape[0];
-    let A = matrix.clone();
+const computeEigenDecomposition = (matrix: number[][]): { values: number[], vectors: number[][] } => {
+    const n = matrix.length;
+    let A = matrix.map(row => [...row]);
     const eigenValues: number[] = [];
-    const eigenVectorsList: tf.Tensor[] = [];
+    const eigenVectors: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
     
     for (let i = 0; i < n; i++) {
-        let v = tf.randomNormal([n, 1]);
-        v = v.div(v.norm());
-        
-        let lastV = v.clone();
-        // Power Iteration with convergence check
-        for (let iter = 0; iter < 40; iter++) {
-            const Av = A.matMul(v);
-            const norm = Av.norm();
-            if (norm.dataSync()[0] < 1e-9) break;
-            v = Av.div(norm);
-            
-            // Convergence check: if v doesn't change much, stop
-            const diff = v.sub(lastV).norm().dataSync()[0];
-            if (diff < 1e-6) break;
-            lastV.dispose();
-            lastV = v.clone();
+        let v = Array(n).fill(0).map(() => [Math.random() - 0.5]);
+        let norm = vecNorm(v);
+        if (norm === 0) {
+            v[0][0] = 1;
+            norm = 1;
         }
-        lastV.dispose();
+        v = scalarMul(v, 1/norm);
         
-        const Av = A.matMul(v);
-        const eigenvalue = v.transpose().matMul(Av).dataSync()[0];
+        let lastV = v.map(row => [...row]);
+        for (let iter = 0; iter < 40; iter++) {
+            const Av = matMul(A, v);
+            norm = vecNorm(Av);
+            if (norm < 1e-9) break;
+            v = scalarMul(Av, 1/norm);
+            
+            let diff = 0;
+            for(let k=0; k<n; k++) diff += Math.pow(v[k][0] - lastV[k][0], 2);
+            if (Math.sqrt(diff) < 1e-6) break;
+            lastV = v.map(row => [...row]);
+        }
+        
+        const Av = matMul(A, v);
+        const eigenvalue = matMul(transpose(v), Av)[0][0];
         
         eigenValues.push(eigenvalue);
-        eigenVectorsList.push(v);
+        for(let k=0; k<n; k++) eigenVectors[k][i] = v[k][0];
         
-        const vvT = v.matMul(v.transpose());
-        const deflation = vvT.mul(eigenvalue);
-        const nextA = A.sub(deflation) as tf.Tensor2D;
-        A.dispose();
-        A = nextA;
+        const vvT = matMul(v, transpose(v));
+        const deflation = scalarMul(vvT, eigenvalue);
+        A = matSub(A, deflation);
     }
     
-    const vectors = tf.concat(eigenVectorsList, 1) as tf.Tensor2D;
-    return { values: eigenValues, vectors };
+    return { values: eigenValues, vectors: eigenVectors };
 };
 
 /**
@@ -89,37 +135,32 @@ const computeEigenDecomposition = (matrix: tf.Tensor2D): { values: number[], vec
  */
 export const performPCA = (data: number[][], nComponents: number = 3): number[][] => {
     if (!data || data.length === 0) return [];
-
-    // Offload to worker if on main thread
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        // Note: performPCA is sync in mathService but we can't easily make it async here without breaking callers.
-        // However, most callers of PCA are already in async contexts (like predictionEngine).
-        // For now, we keep it sync on main thread or the caller should use workerService directly.
+    const nSamples = data.length;
+    const nFeatures = data[0].length;
+    
+    // 1. Centrage
+    const mean = Array(nFeatures).fill(0);
+    for(let i=0; i<nSamples; i++) {
+        for(let j=0; j<nFeatures; j++) mean[j] += data[i][j];
     }
-
-    return tf.tidy(() => {
-        const x = tf.tensor2d(data);
-        const [nSamples, nFeatures] = x.shape;
-        
-        // 1. Centrage
-        const mean = x.mean(0);
-        const centered = x.sub(mean);
-        
-        // 2. Covariance
-        const covariance = centered.transpose().matMul(centered).div(nSamples - 1);
-        
-        // 3. Eigen Decomposition (Power Iteration)
-        const { vectors } = computeEigenDecomposition(covariance as tf.Tensor2D);
-        
-        // 4. Select Top K
-        const k = Math.min(nComponents, nFeatures);
-        const topKVectors = vectors.slice([0, 0], [nFeatures, k]);
-        
-        // 5. Project
-        const projected = centered.matMul(topKVectors);
-        
-        return projected.arraySync() as number[][];
-    });
+    for(let j=0; j<nFeatures; j++) mean[j] /= nSamples;
+    
+    const centered = data.map(row => row.map((val, j) => val - mean[j]));
+    
+    // 2. Covariance
+    const covariance = scalarMul(matMul(transpose(centered), centered), 1 / (nSamples - 1));
+    
+    // 3. Eigen Decomposition
+    const { vectors } = computeEigenDecomposition(covariance);
+    
+    // 4. Select Top K
+    const k = Math.min(nComponents, nFeatures);
+    const topKVectors = vectors.map(row => row.slice(0, k));
+    
+    // 5. Project
+    const projected = matMul(centered, topKVectors);
+    
+    return projected;
 };
 
 /**
@@ -129,43 +170,39 @@ export const performPCA = (data: number[][], nComponents: number = 3): number[][
  */
 export const denoiseFeaturesPCA = (data: number[][], varianceToKeep: number = 0.95): number[][] => {
     if (!data || data.length === 0) return [];
-
-    return tf.tidy(() => {
-        const x = tf.tensor2d(data);
-        const [nSamples, nFeatures] = x.shape;
-        
-        const mean = x.mean(0);
-        const centered = x.sub(mean);
-        
-        const covariance = centered.transpose().matMul(centered).div(nSamples - 1);
-        
-        // Eigen Decomposition
-        const { values, vectors } = computeEigenDecomposition(covariance as tf.Tensor2D);
-        
-        // Calculate total variance
-        const totalVariance = values.reduce((a, b) => a + Math.abs(b), 0); // Use abs for robustness
-        
-        // Determine k
-        let k = 1;
-        let currentVar = 0;
-        for (let i = 0; i < nFeatures; i++) {
-            currentVar += Math.abs(values[i]);
-            if (totalVariance > 0 && currentVar / totalVariance >= varianceToKeep) {
-                k = i + 1;
-                break;
-            }
+    const nSamples = data.length;
+    const nFeatures = data[0].length;
+    
+    const mean = Array(nFeatures).fill(0);
+    for(let i=0; i<nSamples; i++) {
+        for(let j=0; j<nFeatures; j++) mean[j] += data[i][j];
+    }
+    for(let j=0; j<nFeatures; j++) mean[j] /= nSamples;
+    
+    const centered = data.map(row => row.map((val, j) => val - mean[j]));
+    const covariance = scalarMul(matMul(transpose(centered), centered), 1 / (nSamples - 1));
+    
+    const { values, vectors } = computeEigenDecomposition(covariance);
+    
+    const totalVariance = values.reduce((a, b) => a + Math.abs(b), 0);
+    
+    let k = 1;
+    let currentVar = 0;
+    for (let i = 0; i < nFeatures; i++) {
+        currentVar += Math.abs(values[i]);
+        if (totalVariance > 0 && currentVar / totalVariance >= varianceToKeep) {
+            k = i + 1;
+            break;
         }
-        
-        // Select Top K
-        const topKVectors = vectors.slice([0, 0], [nFeatures, k]);
-        
-        // Project and Reconstruct
-        const projected = centered.matMul(topKVectors);
-        const reconstructed = projected.matMul(topKVectors.transpose()).add(mean);
-        
-        return reconstructed.arraySync() as number[][];
-    });
+    }
+    
+    const topKVectors = vectors.map(row => row.slice(0, k));
+    const projected = matMul(centered, topKVectors);
+    const reconstructed = matAdd(matMul(projected, transpose(topKVectors)), Array(nSamples).fill(mean));
+    
+    return reconstructed;
 };
+
 /**
  * Train a Ridge Regression model (Linear Regression with L2 Regularization).
  * @param features Matrix [samples, n_features]
@@ -174,28 +211,32 @@ export const denoiseFeaturesPCA = (data: number[][], varianceToKeep: number = 0.
  */
 export const trainRidgeRegression = (features: number[][], labels: number[], lambda: number = 0.1): number[] => {
     if (!features || features.length === 0 || features.length !== labels.length) return [];
-
-    return tf.tidy(() => {
-        const X = tf.tensor2d(features);
-        const Y = tf.tensor1d(labels).reshape([-1, 1]);
-        const [nSamples, nFeatures] = X.shape;
-
-        // Initialize weights with zeros
-        const weights = tf.variable(tf.zeros([nFeatures, 1]));
-        const optimizer = tf.train.adam(0.1);
+    const nFeatures = features[0].length;
+    const nSamples = features.length;
+    
+    let weights = Array(nFeatures).fill(0);
+    const learningRate = 0.01;
+    
+    for (let iter = 0; iter < 100; iter++) {
+        const gradients = Array(nFeatures).fill(0);
         
-        // Gradient Descent Optimization
-        for (let i = 0; i < 100; i++) {
-            optimizer.minimize(() => {
-                const pred = X.matMul(weights);
-                const mse = tf.losses.meanSquaredError(Y, pred);
-                const l2 = weights.square().sum().mul(lambda);
-                return mse.add(l2) as tf.Scalar;
-            });
+        for (let i = 0; i < nSamples; i++) {
+            let pred = 0;
+            for (let j = 0; j < nFeatures; j++) pred += features[i][j] * weights[j];
+            const error = pred - labels[i];
+            
+            for (let j = 0; j < nFeatures; j++) {
+                gradients[j] += (2 / nSamples) * error * features[i][j];
+            }
         }
         
-        return weights.flatten().arraySync() as number[];
-    });
+        for (let j = 0; j < nFeatures; j++) {
+            gradients[j] += 2 * lambda * weights[j];
+            weights[j] -= learningRate * gradients[j];
+        }
+    }
+    
+    return weights;
 };
 
 export const applyL2Regularization = (weights: number[], lambda: number = 0.01): number[] => {
@@ -641,47 +682,42 @@ export const calculateVolatility = (history: DrawResult[]): { score: number; sta
 export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number } => {
     if (history.length === 0) return { normalized: 0 };
     
-    return tf.tidy(() => {
-        const freq = new Float32Array(91);
-        let total = 0;
-        
-        for(const d of history) {
-            for(const n of d.gagnants) {
-                if (n >= 1 && n <= 90) {
-                    freq[n]++;
-                    total++;
-                }
+    const freq = new Float32Array(91);
+    let total = 0;
+    
+    for(const d of history) {
+        for(const n of d.gagnants) {
+            if (n >= 1 && n <= 90) {
+                freq[n]++;
+                total++;
             }
         }
-        
-        if (total === 0) return { normalized: 0 };
-        
-        const f = tf.tensor1d(Array.from(freq.slice(1)));
-        const p = f.div(total);
-        // Entropy = -sum(p * log2(p))
-        const logP = tf.log(p).div(Math.log(2));
-        const pLogP = p.mul(tf.where(tf.isNaN(logP), tf.zerosLike(logP), logP));
-        const entropy = pLogP.sum().mul(-1);
-        
-        const maxEntropy = Math.log2(90); 
-        return { normalized: entropy.dataSync()[0] / maxEntropy };
-    });
+    }
+    
+    if (total === 0) return { normalized: 0 };
+    
+    let entropy = 0;
+    for (let i = 1; i <= 90; i++) {
+        if (freq[i] > 0) {
+            const p = freq[i] / total;
+            entropy -= p * Math.log2(p);
+        }
+    }
+    
+    const maxEntropy = Math.log2(90); 
+    return { normalized: entropy / maxEntropy };
 };
 
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
-    return tf.tidy(() => {
-        const expected = totalObservations / 90; 
-        const obsArr = new Float32Array(90);
-        for(let i=1; i<=90; i++) obsArr[i-1] = observed[i] || 0;
-        
-        const obs = tf.tensor1d(Array.from(obsArr));
-        const exp = tf.scalar(expected);
-        
-        // ChiSq = sum((obs - exp)^2 / exp)
-        const chiSq = obs.sub(exp).square().div(exp).sum();
-        
-        return { score: chiSq.dataSync()[0] };
-    });
+    const expected = totalObservations / 90; 
+    let chiSq = 0;
+    
+    for(let i=1; i<=90; i++) {
+        const obs = observed[i] || 0;
+        chiSq += Math.pow(obs - expected, 2) / expected;
+    }
+    
+    return { score: chiSq };
 };
 
 export const calculateBenfordCompliance = (numbers: number[]): { score: number, distribution: number[] } => {

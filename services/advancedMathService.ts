@@ -155,47 +155,55 @@ export const calculateGapVelocityScores = (history: DrawResult[]): Record<number
     return scores;
 };
 
-// --- SELF-ATTENTION (Simplified Transformer) ---
-// Calculates how much a number "attends" to other numbers in the history.
-// Returns a score based on the current context (last draw).
-export const calculateSelfAttentionScores = (history: DrawResult[]): Record<number, number> => {
+// --- GRAPH CO-OCCURRENCE CLUSTERING ---
+// Merges Self-Attention and Quantum Entanglement concepts.
+// Identifies numbers that frequently appear together (co-occurrence graph).
+export const calculateCoOccurrenceScores = (history: DrawResult[]): Record<number, number> => {
     const scores: Record<number, number> = {};
     if (history.length < 2) return scores;
 
     const lastDraw = history[0].gagnants;
-    const contextSize = 50;
-    const sample = history.slice(1, contextSize + 1);
+    const sample = history.slice(1, 100); // Use last 100 draws for context
 
-    // Build Attention Matrix (Co-occurrence)
-    const attention = new Map<number, Map<number, number>>();
+    // Build Co-occurrence Graph
+    const graph = new Map<number, Map<number, number>>();
     
     sample.forEach(d => {
         d.gagnants.forEach(n1 => {
-            if (!attention.has(n1)) attention.set(n1, new Map());
+            if (!graph.has(n1)) graph.set(n1, new Map());
+            const edges = graph.get(n1)!;
             d.gagnants.forEach(n2 => {
                 if (n1 !== n2) {
-                    const map = attention.get(n1)!;
-                    map.set(n2, (map.get(n2) || 0) + 1);
+                    edges.set(n2, (edges.get(n2) || 0) + 1);
                 }
             });
         });
     });
 
-    // Calculate Attention Score for each candidate based on Last Draw
+    // Score based on connectivity to the last draw
+    let maxScore = 0;
     for (let n = 1; n <= 90; n++) {
         let score = 0;
         lastDraw.forEach(ctxNum => {
-            const att = attention.get(ctxNum);
-            if (att) {
-                score += (att.get(n) || 0);
+            const edges = graph.get(ctxNum);
+            if (edges) {
+                score += (edges.get(n) || 0);
             }
         });
-        // Normalize roughly
-        scores[n] = Math.min(100, score * 2);
+        scores[n] = score;
+        if (score > maxScore) maxScore = score;
+    }
+
+    // Normalize
+    if (maxScore > 0) {
+        for (let n = 1; n <= 90; n++) {
+            scores[n] = (scores[n] / maxScore) * 100;
+        }
     }
 
     return scores;
 };
+
 
 // --- TEMPORAL SCORES (Time Decay) ---
 // Weights recent appearances much higher than older ones.
@@ -289,7 +297,7 @@ export const calculateLeaderSuccession = (history: DrawResult[]): Record<number,
 
 // --- BAYESIAN ANALYSIS ---
 // Calculates the probability of each number based on the previous draw using Bayes' Theorem.
-// P(Next=N | Prev=D) = P(Prev=D | Next=N) * P(Next=N) / P(Prev=D)
+// Includes Laplace Smoothing and sliding window likelihood.
 export const calculateBayesianScore = (history: DrawResult[]): Record<number, number> => {
     const scores: Record<number, number> = {};
     if (history.length < 2) return scores;
@@ -301,30 +309,43 @@ export const calculateBayesianScore = (history: DrawResult[]): Record<number, nu
     const priors = new Map<number, number>();
     history.forEach(d => d.gagnants.forEach(n => priors.set(n, (priors.get(n) || 0) + 1)));
 
-    // P(Prev=D | Next=N): Likelihood
-    // How often did the numbers in 'lastDraw' appear in the draw *immediately preceding* a draw containing N?
+    // P(Prev=Context | Next=N): Likelihood using sliding window
     const likelihoods = new Map<number, number>();
+    const windowSize = 3; // Look at the 3 draws preceding N
     
-    for (let i = 0; i < totalDraws - 1; i++) {
-        const currentDraw = history[i].gagnants; // Draw T (Next)
-        const prevDraw = history[i+1].gagnants;  // Draw T-1 (Prev)
+    for (let i = 0; i < totalDraws - windowSize; i++) {
+        const targetDraw = history[i].gagnants; // Draw T (Next)
         
-        // Count matches between prevDraw and lastDraw
-        const matches = prevDraw.filter(n => lastDraw.includes(n)).length;
+        // Context window: Draws T-1, T-2, T-3
+        let contextMatches = 0;
+        for (let w = 1; w <= windowSize; w++) {
+            const prevDraw = history[i+w].gagnants;
+            contextMatches += prevDraw.filter(n => lastDraw.includes(n)).length;
+        }
         
-        // If there's a significant similarity (e.g., >= 2 numbers match), we consider it a similar context
-        if (matches >= 2) {
-            currentDraw.forEach(n => {
-                likelihoods.set(n, (likelihoods.get(n) || 0) + 1);
+        // If there's overlap in the context window
+        if (contextMatches > 0) {
+            targetDraw.forEach(n => {
+                likelihoods.set(n, (likelihoods.get(n) || 0) + contextMatches);
             });
         }
     }
 
-    // Calculate Posterior
+    // Calculate Posterior with Laplace Smoothing
+    // Smoothing factor alpha = 1, vocabulary size V = 90
+    const alpha = 1;
+    const V = 90;
+    
     let maxPosterior = 0;
     for (let n = 1; n <= 90; n++) {
-        const prior = (priors.get(n) || 0) / totalDraws;
-        const likelihood = (likelihoods.get(n) || 0) / totalDraws; // Simplified normalization
+        const countN = priors.get(n) || 0;
+        const prior = (countN + alpha) / (totalDraws + alpha * V);
+        
+        // Likelihood: matches context / total occurrences of N
+        // P(Context | N) = (count of Context when N happened + alpha) / (countN + alpha * V)
+        const likelihoodCount = likelihoods.get(n) || 0;
+        const likelihood = (likelihoodCount + alpha) / (countN + alpha * V); 
+        
         const posterior = prior * likelihood;
         scores[n] = posterior;
         if (posterior > maxPosterior) maxPosterior = posterior;
@@ -350,7 +371,7 @@ export const calculateAiIntuition = (history: DrawResult[], metrics: any): Recor
     const sequenceBoost = new Set<number>();
     
     recent.forEach(d => {
-        const nums = d.gagnants.sort((a,b)=>a-b);
+        const nums = [...d.gagnants].sort((a,b)=>a-b);
         for(let i=0; i<nums.length-1; i++) {
             const diff = nums[i+1] - nums[i];
             if (diff > 0 && diff < 10) {
@@ -361,7 +382,30 @@ export const calculateAiIntuition = (history: DrawResult[], metrics: any): Recor
         }
     });
 
-    // 2. Anomaly Detection: High Spectral Energy but Low Frequency (Hidden Resonance)
+    // 2. Anomaly Detection (Simplified Isolation Forest concept)
+    // We look for numbers whose behavior (frequency & gap) is statistically anomalous
+    const freqs = new Array(91).fill(0);
+    const gaps = new Array(91).fill(100);
+    
+    history.slice(0, 50).forEach((d, idx) => {
+        d.gagnants.forEach(n => {
+            freqs[n]++;
+            if (gaps[n] === 100) gaps[n] = idx;
+        });
+    });
+    
+    const avgFreq = freqs.slice(1).reduce((a,b)=>a+b,0) / 90;
+    const stdFreq = Math.sqrt(freqs.slice(1).reduce((a,b)=>a + Math.pow(b-avgFreq, 2), 0) / 90);
+    
+    const anomalies = new Set<number>();
+    for (let n = 1; n <= 90; n++) {
+        // Anomaly: Frequency is > 2 standard deviations from mean
+        if (Math.abs(freqs[n] - avgFreq) > stdFreq * 2) {
+            anomalies.add(n);
+        }
+    }
+
+    // 3. Hidden Resonance
     const hiddenResonance = new Set<number>();
     if (metrics?.spectral) {
         metrics.spectral.forEach((s: any) => {
@@ -373,13 +417,9 @@ export const calculateAiIntuition = (history: DrawResult[], metrics: any): Recor
 
     for (let n = 1; n <= 90; n++) {
         let score = 50; // Base intuition
-        if (sequenceBoost.has(n)) score += 20;
-        if (hiddenResonance.has(n)) score += 30;
-        
-        // Random "Gut Feeling" noise (simulating non-linear intuition)
-        // In a real AI, this would be the output of a black-box neural net
-        const noise = (Math.sin(n * Date.now()) + 1) * 5; 
-        score += noise;
+        if (sequenceBoost.has(n)) score += 15;
+        if (hiddenResonance.has(n)) score += 20;
+        if (anomalies.has(n)) score += 15; // Anomalies get a boost in "intuition"
 
         scores[n] = Math.min(100, Math.max(0, score));
     }
@@ -387,45 +427,6 @@ export const calculateAiIntuition = (history: DrawResult[], metrics: any): Recor
     return scores;
 };
 
-// --- QUANTUM ENTANGLEMENT (Correlation Analysis) ---
-// Identifies numbers that are "entangled" (appear together more often than chance).
-export const calculateQuantumEntanglementScores = (history: DrawResult[]): Record<number, number> => {
-    const scores: Record<number, number> = {};
-    if (history.length < 10) return scores;
-
-    const lastDraw = history[0].gagnants;
-    const entanglementMatrix = new Map<number, Map<number, number>>();
-    const sample = history.slice(0, 100);
-
-    // Build Correlation Matrix
-    sample.forEach(d => {
-        d.gagnants.forEach(n1 => {
-            if (!entanglementMatrix.has(n1)) entanglementMatrix.set(n1, new Map());
-            const row = entanglementMatrix.get(n1)!;
-            d.gagnants.forEach(n2 => {
-                if (n1 !== n2) {
-                    row.set(n2, (row.get(n2) || 0) + 1);
-                }
-            });
-        });
-    });
-
-    // Calculate Entanglement Score based on Last Draw
-    for (let n = 1; n <= 90; n++) {
-        let entanglement = 0;
-        lastDraw.forEach(lastNum => {
-            const row = entanglementMatrix.get(lastNum);
-            if (row) {
-                entanglement += (row.get(n) || 0);
-            }
-        });
-
-        // Normalize based on sample size and draw size
-        scores[n] = Math.min(100, (entanglement / (sample.length * 0.1)) * 100);
-    }
-
-    return scores;
-};
 
 // --- FRACTAL RESONANCE (Self-Similarity) ---
 // Detects if a number follows a self-similar (fractal) pattern in time.
