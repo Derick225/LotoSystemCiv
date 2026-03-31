@@ -52,8 +52,7 @@ export const SignalHub: React.FC = () => {
         { id: 'spectral', label: 'Spectral', icon: Waves, color: 'text-purple-500' },
         { id: 'fractal', label: 'Météo', icon: Layers, color: 'text-emerald-500' },
         { id: 'math', label: 'Maths', icon: Activity, color: 'text-rose-500' },
-        { id: 'temporal', label: 'Temps', icon: Clock, color: 'text-amber-500' },
-        { id: 'academy', label: 'Academy', icon: BookOpen, color: 'text-white' }
+        { id: 'temporal', label: 'Temps', icon: Clock, color: 'text-amber-500' }
     ];
 
     return (
@@ -108,7 +107,6 @@ export const SignalHub: React.FC = () => {
                                 {activeSubTab === 'fractal' && <FractalTab drawName={activeDraw} />}
                                 {activeSubTab === 'math' && <MathTab drawName={activeDraw} />}
                                 {activeSubTab === 'temporal' && <TemporalTab drawName={activeDraw} />}
-                                {activeSubTab === 'academy' && <AcademyTab />}
                                 {activeSubTab === 'cluster' && <ClusteringTab drawName={activeDraw} />}
                             </Suspense>
                         </LocalErrorBoundary>

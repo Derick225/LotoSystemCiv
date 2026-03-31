@@ -21,7 +21,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const globalWeights = useNexusStore(state => state.globalWeights);
     
     // Platinum est maintenant le moteur principal, mais on expose la Synthèse en premier plan
-    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'feedback' | 'convergence' | 'vision'>('platinum');
+    const [subTab, setSubTab] = useState<'oracle' | 'platinum' | 'intel' | 'orch' | 'convergence' | 'vision'>('platinum');
     const [activeStrategy, setActiveStrategy] = useState("Standard");
     
     useEffect(() => {
@@ -49,8 +49,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
         { id: 'vision', label: 'Vision OCR', icon: <ScanBarcode size={16}/>, color: 'text-cyan-500', bg: 'hover:bg-cyan-50' },
         { id: 'oracle', label: 'Oracle Base', icon: <Sparkles size={16}/>, color: 'text-violet-500', bg: 'hover:bg-violet-50' },
         { id: 'intel', label: 'Narratif', icon: <BrainCircuit size={16}/>, color: 'text-emerald-500', bg: 'hover:bg-emerald-50' },
-        { id: 'orch', label: 'Orchestra', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' },
-        { id: 'feedback', label: 'Leçons', icon: <History size={16}/>, color: 'text-blue-500', bg: 'hover:bg-blue-50' }
+        { id: 'orch', label: 'Orchestra', icon: <Network size={16}/>, color: 'text-pink-500', bg: 'hover:bg-pink-50' }
     ];
 
     if (nexusLoading) return <div className="p-20 text-center animate-pulse text-indigo-500">Connexion Oracle...</div>;
@@ -91,7 +90,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                 {subTab === 'convergence' && <ConvergenceTab drawName={drawName} />}
                 {subTab === 'vision' && <TicketScanner />}
                 {subTab === 'oracle' && <PredictionTab drawName={drawName} />}
-                {subTab === 'feedback' && <FeedbackLoopTab drawName={drawName} />}
                 {subTab === 'platinum' && <MetaAnalystTab drawName={drawName} />}
                 {subTab === 'intel' && <IntelligenceTab drawName={drawName} />}
                 {subTab === 'orch' && <OrchestrationTab drawName={drawName} />}

@@ -58,8 +58,21 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                     let match = item.drawResultId ? getResultById(item.drawResultId) : null;
                     
                     if (!item.drawResultId) {
-                        const dateStr = new Date(item.timestamp).toLocaleDateString('fr-FR');
+                        const predDate = new Date(item.timestamp);
+                        const dateStr = predDate.toLocaleDateString('fr-FR');
                         match = getResultByDate(dateStr);
+                        
+                        // Fallback: Find closest draw result within 48 hours AFTER the prediction
+                        if (!match) {
+                            const predTime = item.timestamp;
+                            const sortedHistory = [...results].sort((a, b) => new Date(a.date.split('/').reverse().join('-')).getTime() - new Date(b.date.split('/').reverse().join('-')).getTime());
+                            match = sortedHistory.find(d => {
+                                const dTime = new Date(d.date.split('/').reverse().join('-')).getTime();
+                                // Allow up to 24h before just in case of timezone issues
+                                return dTime >= (predTime - 86400000) && (dTime - predTime) < 48 * 3600 * 1000;
+                            }) || null;
+                        }
+
                         if (match) {
                             await linkPredictionToResult(item.id, match.id);
                             changed = true;

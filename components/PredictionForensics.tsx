@@ -92,7 +92,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         audioEngine.play('click');
         setSubmittingFeedback(true);
         try {
-            updatePredictionFeedback(report.predictionId, {
+            await updatePredictionFeedback(report.predictionId, {
                 keyLearning: userRating === 'Visionnaire' ? 'Résonance validée' : 'Décalage structurel',
                 userRating,
                 userComment

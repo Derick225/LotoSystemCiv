@@ -28,7 +28,7 @@ import type { Draw, SubscriptionState } from './types';
 const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m => ({ default: m.GlobalDashboard })));
 const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
-const QuantumLab = lazy(() => import('./components/QuantumLab').then(m => ({ default: m.QuantumLab })));
+const BacktestTab = lazy(() => import('./components/tabs/BacktestTab').then(m => ({ default: m.BacktestTab })));
 const EnsemblePredictorTab = lazy(() => import('./components/tabs/EnsemblePredictorTab').then(m => ({ default: m.EnsemblePredictorTab })));
 const PredictiveAnalyticsTab = lazy(() => import('./components/tabs/PredictiveAnalyticsTab').then(m => ({ default: m.PredictiveAnalyticsTab })));
 const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
@@ -67,6 +67,7 @@ const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
 // Composant Interne qui a accès au contexte Nexus et Auth
 const AppContent: React.FC = () => {
   const setDrawName = useNexusStore(state => state.setDrawName);
+  const drawName = useNexusStore(state => state.drawName);
   const refreshData = useNexusStore(state => state.refreshData);
   const { showToast } = useToast();
   
@@ -159,7 +160,7 @@ const AppContent: React.FC = () => {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
           case 'predictive': content = <PredictiveAnalyticsTab />; break;
           case 'ensemble': content = <EnsemblePredictorTab />; break;
-          case 'lab': content = <QuantumLab />; break;
+          case 'backtest': content = <BacktestTab drawName={drawName} />; break;
           case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;
           default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
         }

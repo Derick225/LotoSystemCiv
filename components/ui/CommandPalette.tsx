@@ -23,7 +23,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
     // Filtered Commands
     const commands = [
         { id: 'nav-home', label: 'Aller à la Station', icon: <LayoutGrid size={16}/>, group: 'Navigation', action: () => onNavigate('home') },
-        { id: 'nav-lab', label: 'Ouvrir Quantum Lab', icon: <Activity size={16}/>, group: 'Navigation', action: () => onNavigate('lab') },
+        { id: 'nav-predictive', label: 'Aller aux Prédictions', icon: <Activity size={16}/>, group: 'Navigation', action: () => onNavigate('predictive') },
+        { id: 'nav-ensemble', label: 'Aller à l\'Ensemble', icon: <Terminal size={16}/>, group: 'Navigation', action: () => onNavigate('ensemble') },
+        { id: 'nav-backtest', label: 'Aller au Backtest', icon: <Zap size={16}/>, group: 'Navigation', action: () => onNavigate('backtest') },
         { id: 'nav-wallet', label: 'Mon Portefeuille', icon: <Wallet size={16}/>, group: 'Navigation', action: () => onAction('wallet') },
         { id: 'sys-scan', label: 'Forcer Scan Cloud', icon: <Zap size={16}/>, group: 'Système', action: () => { refreshData(currentDrawName || '', true); showToast('Scan lancé...', 'info'); } },
         { id: 'sys-settings', label: 'Paramètres', icon: <Settings size={16}/>, group: 'Système', action: () => onAction('settings') },

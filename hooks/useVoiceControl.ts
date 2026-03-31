@@ -11,7 +11,7 @@ export interface VoiceCommandState {
 }
 
 export const useVoiceControl = (
-    navigate: (view: 'home' | 'lab' | 'admin') => void,
+    navigate: (view: 'home' | 'backtest' | 'admin' | 'ensemble' | 'predictive') => void,
     toggleWallet: (show: boolean) => void,
     triggerGeneration?: () => void
 ) => {
@@ -55,9 +55,9 @@ export const useVoiceControl = (
             navigate('home');
             feedback('Retour à la station.');
         }
-        else if (cmd.includes('labo') || cmd.includes('quantum') || cmd.includes('analyse')) {
-            navigate('lab');
-            feedback('Ouverture du Laboratoire.');
+        else if (cmd.includes('backtest') || cmd.includes('simulation') || cmd.includes('analyse')) {
+            navigate('backtest');
+            feedback('Ouverture du Simulateur Backtest.');
         }
         else if (cmd.includes('admin') || cmd.includes('système')) {
             navigate('admin');

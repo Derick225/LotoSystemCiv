@@ -1,21 +1,23 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
-import { getPredictionHistoryAsync } from '../../services/predictionHistoryService';
+import { getPredictionHistoryAsync, linkPredictionToResult } from '../../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getLocalForensicReports, syncForensicReportsWithCloud, deleteForensicReportLocal } from '../../services/postPredictionAnalysisService';
 import { deleteForensicReportCloud } from '../../services/syncService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
 import { runSelfLearningLoop, LearningResult } from '../../services/selfLearningService';
-import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit } from 'lucide-react';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History } from 'lucide-react';
 import { ForensicReport, PlatinumAudit } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { useToast } from '../ui/Toast';
 
 import { audioEngine } from '../../utils/audioEngine';
 
-type ForensicMode = 'prediction' | 'structure';
+import { PredictionHistory } from '../PredictionHistory';
+
+type ForensicMode = 'prediction' | 'structure' | 'historique';
 
 export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
@@ -88,7 +90,13 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                          const predTime = pred.timestamp;
                          const sortedHistory = [...history].sort((a, b) => new Date(a.date.split('/').reverse().join('-')).getTime() - new Date(b.date.split('/').reverse().join('-')).getTime());
                          actual = sortedHistory.find(d => {
-                             const dTime = new Date(d.date.split('/').reverse().join('-')).getTime();
+                             // Set dTime to the end of the draw day (23:59:59) to ensure it's after the prediction time if on the same day
+                             const dDate = new Date(d.date.split('/').reverse().join('-'));
+                             dDate.setHours(23, 59, 59, 999);
+                             const dTime = dDate.getTime();
+                             
+                             // The draw must happen after the prediction, or on the same day
+                             // And we allow a window of up to 48 hours after the prediction
                              return dTime >= predTime && (dTime - predTime) < 48 * 3600 * 1000;
                          });
                     }
@@ -108,6 +116,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     saveForensicReport(rep);
                     currentReports.push(rep);
                     newReportsCount++;
+                    
+                    // Lier la prédiction au résultat si ce n'est pas déjà fait
+                    if (!pred.drawResultId) {
+                        await linkPredictionToResult(pred.id, actual.id);
+                    }
                 }
             }
             
@@ -269,6 +282,12 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <Target size={14}/> Prédictions
                             </button>
                             <button 
+                                onClick={() => { audioEngine.play('click'); setMode('historique'); }}
+                                className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'historique' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}
+                            >
+                                <History size={14}/> Historique
+                            </button>
+                            <button 
                                 onClick={() => { audioEngine.play('click'); setMode('structure'); }}
                                 className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'structure' ? 'bg-rose-600 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}
                             >
@@ -311,6 +330,10 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     history={history} 
                     onBack={() => { audioEngine.play('click'); setMode('prediction'); }} 
                 />
+            )}
+
+            {mode === 'historique' && (
+                <PredictionHistory drawName={drawName} />
             )}
 
             {mode === 'prediction' && (

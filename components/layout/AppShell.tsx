@@ -8,7 +8,7 @@ import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
 import { QuantumInspector } from '../QuantumInspector';
 
-export type ViewMode = 'home' | 'admin' | 'lab' | 'ensemble' | 'predictive';
+export type ViewMode = 'home' | 'admin' | 'backtest' | 'ensemble' | 'predictive';
 
 interface AppShellProps {
   children: ReactNode;
@@ -50,7 +50,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     { id: 'home', icon: Home, label: 'Station' },
     { id: 'predictive', icon: Activity, label: 'Prédictions' },
     { id: 'ensemble', icon: Brain, label: 'Ensemble' },
-    { id: 'lab', icon: FlaskConical, label: 'Lab' },
+    { id: 'backtest', icon: FlaskConical, label: 'Backtest' },
     ...(isAdmin ? [{ id: 'admin', icon: Settings, label: 'Admin' }] : []),
   ];
 

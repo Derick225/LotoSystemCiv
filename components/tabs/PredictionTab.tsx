@@ -55,7 +55,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [show3D, setShow3D] = useState(false);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [showDNA, setShowDNA] = useState(false);
-    const [showAdvancedLab, setShowAdvancedLab] = useState(false);
     const [quantumMode, setQuantumMode] = useState(false);
     
     // États pour la Calibration IA
@@ -614,31 +613,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 </div>
             </div>
             )}
-
-            {/* LABORATOIRE AVANCÉ */}
-            <div className="mt-12 border-t border-white/10 pt-8">
-                <button 
-                    onClick={() => { audioEngine.play('click'); setShowAdvancedLab(!showAdvancedLab); }}
-                    className="flex items-center gap-3 text-slate-400 hover:text-white transition-colors mb-6 mx-auto"
-                >
-                    <FlaskConical size={20} />
-                    <span className="text-xs font-black uppercase tracking-widest">Laboratoire Avancé</span>
-                </button>
-
-                <AnimatePresence>
-                    {showAdvancedLab && (
-                        <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="grid md:grid-cols-2 gap-8 overflow-hidden"
-                        >
-                            <AutoTuner />
-                            <StrategyBattle />
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
         </div>
     );
 };
