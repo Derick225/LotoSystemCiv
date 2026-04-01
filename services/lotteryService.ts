@@ -66,7 +66,7 @@ export const lotteryService = {
               .order('date', { ascending: false });
 
             if (drawName && drawName !== 'ALL') {
-                query = query.ilike('draw_name', `%${drawName}%`);
+                query = query.eq('draw_name', drawName);
             }
             
             query = query.limit(2000);
@@ -142,7 +142,7 @@ export const getDailySummary = async (day: string) => {
               const { data } = await supabase
                 .from('draw_results')
                 .select('*')
-                .ilike('draw_name', `%${name}%`)
+                .eq('draw_name', name)
                 .order('date', { ascending: false })
                 .limit(1);
               if (data && data[0]) {

@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getCyclicCandidates, type CyclicCandidate, getTimeSlotAffinity, type TimeSlotMetric } from '../../services/temporalAnalysisService';
+import { getCyclicCandidates, type CyclicCandidate } from '../../services/temporalAnalysisService';
 import { fetchAssociatedNumbers } from '../../services/lotteryService';
 import { NumberBall } from '../NumberBall';
 import { useNexusStore } from '../../store/useNexusStore';
-import { Clock, Calendar, Sparkles, RotateCw, Link, ArrowRight, Activity, Hourglass, Sun, Moon, Sunrise, Sunset } from 'lucide-react';
+import { Clock, Calendar, Sparkles, RotateCw, Link, ArrowRight, Activity, Hourglass } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, Cell, YAxis } from 'recharts';
 import { motion } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
@@ -14,56 +14,12 @@ interface DependencyFlow {
     targets: { number: number; count: number }[];
 }
 
-const ChronobiologicalChart: React.FC<{ data: TimeSlotMetric[] }> = ({ data }) => {
-    const getIcon = (label: string) => {
-        if (label === 'Matin') return <Sunrise size={14}/>;
-        if (label === 'Zénith') return <Sun size={14}/>;
-        if (label === 'Jour') return <Sun size={14} className="text-orange-400"/>;
-        return <Moon size={14}/>;
-    };
-
-    return (
-        <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 shadow-xl overflow-hidden relative">
-            <div className="flex justify-between items-center mb-6">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Clock size={14} className="text-amber-500"/> Chronobiologie
-                </h4>
-                <span className="text-[9px] font-bold text-slate-500 uppercase bg-slate-800 px-2 py-1 rounded-lg">Performance / Créneau</span>
-            </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {data.map((slot, i) => (
-                    <div key={i} className="flex flex-col gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors">
-                        <div className="flex justify-between items-center text-slate-400">
-                            <span className="text-[10px] font-black uppercase tracking-wider flex items-center gap-2">
-                                {getIcon(slot.label)} {slot.label}
-                            </span>
-                            <span className="text-[9px] font-mono opacity-50">{slot.slot}</span>
-                        </div>
-                        <div className="flex gap-1 justify-center">
-                            {slot.topNumbers.slice(0, 3).map(n => (
-                                <span key={n} className="w-6 h-6 rounded-lg bg-slate-800 text-white flex items-center justify-center text-[9px] font-black shadow-sm border border-slate-700">
-                                    {n}
-                                </span>
-                            ))}
-                        </div>
-                        <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden mt-1">
-                            <div className="h-full bg-amber-500" style={{ width: `${Math.min(100, slot.activity / 5)}%` }}></div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
 export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
     const regularity = useNexusStore(state => state.regularity);
     const nexusLoading = useNexusStore(state => state.loading);
     const [cyclicData, setCyclicData] = useState<CyclicCandidate[]>([]);
     const [dependencies, setDependencies] = useState<DependencyFlow[]>([]);
-    const [timeMetrics, setTimeMetrics] = useState<TimeSlotMetric[]>([]);
     const [loadingDeps, setLoadingDeps] = useState(false);
     
     const isMounted = useRef(true);
@@ -76,11 +32,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 const cycles = await getCyclicCandidates(drawName, history);
                 if (isMounted.current) setCyclicData(cycles.slice(0, 6));
 
-                // 2. Chronobiologie
-                const slots = getTimeSlotAffinity(history);
-                if (isMounted.current) setTimeMetrics(slots);
-
-                // 3. Dépendances (T-1 -> T)
+                // 2. Dépendances (T-1 -> T)
                 setLoadingDeps(true);
                 const lastWinners = history[0].gagnants;
                 const deps: DependencyFlow[] = [];
@@ -169,27 +121,11 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 </div>
             </div>
 
-            {/* CHRONOBIOLOGIE & FLUX */}
+            {/* FLUX DE CAUSALITÉ */}
             <div className="grid lg:grid-cols-12 gap-8">
                 
-                {/* LEFT: CHRONOBIOLOGY */}
-                <div className="lg:col-span-5 space-y-6">
-                    <ChronobiologicalChart data={timeMetrics} />
-                    
-                    <div className="bg-white dark:bg-slate-800 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-xl">
-                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <Activity size={14} className="text-indigo-500"/> Saisonnalité
-                        </h4>
-                        <div className="p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-800/30">
-                            <p className="text-[10px] text-indigo-800 dark:text-indigo-200 font-medium leading-relaxed italic">
-                                "Les algorithmes détectent que les numéros {timeMetrics[0]?.topNumbers.slice(0,3).join(', ')} performent 40% mieux dans le créneau du {timeMetrics[0]?.label}."
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* RIGHT: CAUSAL FLOW */}
-                <div className="lg:col-span-7 bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700 relative overflow-hidden">
+                {/* CAUSAL FLOW */}
+                <div className="lg:col-span-12 bg-white dark:bg-slate-800 p-8 rounded-[3rem] shadow-xl border border-slate-100 dark:border-slate-700 relative overflow-hidden">
                     <div className="flex justify-between items-center mb-8 relative z-10">
                         <div>
                             <h4 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight flex items-center gap-3">

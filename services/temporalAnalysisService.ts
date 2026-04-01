@@ -1,7 +1,6 @@
 
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity } from './mathService';
-import { DRAW_SCHEDULE } from '../constants';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -71,72 +70,6 @@ export const getDayAffinity = (history: DrawResult[]): { number: number, count: 
             score: Math.round((scores[n] / maxScore) * 100) 
         }))
         .sort((a, b) => b.score - a.score);
-};
-
-// --- NOUVEAU : ANALYSE CHRONOBIOLOGIQUE (Time Slots) ---
-export interface TimeSlotMetric {
-    slot: string; // '10:00', '13:00', '16:00', '18:00'
-    label: string; // 'Matin', 'Zénith', 'Après-midi', 'Soir'
-    activity: number; // Score global d'activité (Somme des sorties normalisée)
-    topNumbers: number[];
-}
-
-const getTimeSlotFromDrawName = (drawName: string): string => {
-    const upperName = drawName.toUpperCase().trim();
-    for (const day in DRAW_SCHEDULE) {
-        for (const time in DRAW_SCHEDULE[day]) {
-            if (DRAW_SCHEDULE[day][time].toUpperCase() === upperName) {
-                return time;
-            }
-        }
-    }
-    return 'UNKNOWN';
-};
-
-export const getTimeSlotAffinity = (history: DrawResult[]): TimeSlotMetric[] => {
-    const slots: Record<string, { count: number, numbers: Record<number, number> }> = {
-        '10:00': { count: 0, numbers: {} },
-        '13:00': { count: 0, numbers: {} },
-        '16:00': { count: 0, numbers: {} },
-        '18:15': { count: 0, numbers: {} }
-    };
-
-    const labels: Record<string, string> = {
-        '10:00': 'Matin', '13:00': 'Zénith', '16:00': 'Jour', '18:15': 'Crépuscule'
-    };
-
-    history.forEach(draw => {
-        const time = getTimeSlotFromDrawName(draw.drawName);
-        // Si on ne trouve pas exactement l'heure (ex: noms différents), on essaie de mapper approximativement ou on ignore
-        // Pour la robustesse, on mappe les clés connues.
-        let targetKey = '';
-        if (['10:00', '10H', 'MATIN'].some(k => time.includes(k))) targetKey = '10:00';
-        else if (['13:00', '13H', 'ZENITH'].some(k => time.includes(k))) targetKey = '13:00';
-        else if (['16:00', '16H', 'JOUR'].some(k => time.includes(k))) targetKey = '16:00';
-        else if (['18:00', '18:15', '18H', 'SOIR'].some(k => time.includes(k))) targetKey = '18:15';
-        else targetKey = time; // Fallback direct (si le drawName est directement mappé dans DRAW_SCHEDULE)
-
-        if (slots[targetKey]) {
-            slots[targetKey].count++;
-            draw.gagnants.forEach(n => {
-                slots[targetKey].numbers[n] = (slots[targetKey].numbers[n] || 0) + 1;
-            });
-        }
-    });
-
-    return Object.entries(slots).map(([time, data]) => {
-        const topNums = Object.entries(data.numbers)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(e => Number(e[0]));
-
-        return {
-            slot: time,
-            label: labels[time] || time,
-            activity: data.count,
-            topNumbers: topNums
-        };
-    }); // On ne trie pas ici pour garder l'ordre chronologique
 };
 
 export interface CyclicCandidate {
@@ -217,18 +150,6 @@ export const getTemporalScores = async (drawName: string, history: DrawResult[])
         const multiplier = c.nextDateEstimate === 'CRITIQUE' ? 1.5 : 1.0;
         scores[c.number] = (scores[c.number] || 0) + (c.score * 0.5 * multiplier);
     });
-
-    // 4. Chronobiologie (Time Slot actuel)
-    // On détecte le slot du tirage courant (via drawName) et on booste les numéros forts de ce slot
-    const currentSlot = getTimeSlotFromDrawName(drawName);
-    const timeStats = getTimeSlotAffinity(history);
-    const matchingSlot = timeStats.find(s => s.slot === currentSlot);
-    
-    if (matchingSlot) {
-        matchingSlot.topNumbers.forEach((n, idx) => {
-            scores[n] = (scores[n] || 0) + (15 - idx * 2); // Boost léger pour le top 5 du slot
-        });
-    }
 
     const maxVal = Math.max(...Object.values(scores), 1);
     for(let i=1; i<=90; i++) {

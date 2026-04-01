@@ -67,7 +67,7 @@ export default async function handler(req: Request) {
 
             for (const week of weeks) {
                 const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
-                const year = yearMatch ? yearMatch[0] : currentYear;
+                const startYear = yearMatch ? parseInt(yearMatch[0]) : new Date().getFullYear();
 
                 if (!week.drawResultsDaily) continue;
 
@@ -76,7 +76,14 @@ export default async function handler(req: Request) {
                     const dateMatch = dateStr.match(/(\d{2})\/(\d{2})/);
                     if (!dateMatch) continue;
                     
-                    const dbDate = `${year}-${dateMatch[2]}-${dateMatch[1]}`;
+                    let currentYear = startYear;
+                    if (dateMatch[2] === '01' && week.startDate && (week.startDate.includes('/12/') || week.startDate.includes('-12-'))) {
+                        currentYear += 1;
+                    } else if (dateMatch[2] === '12' && week.startDate && (week.startDate.includes('/01/') || week.startDate.includes('-01-'))) {
+                        currentYear -= 1;
+                    }
+                    
+                    const dbDate = `${currentYear}-${dateMatch[2]}-${dateMatch[1]}`;
                     
                     const apiDraws = [
                         ...(daily.drawResults?.standardDraws || []),
@@ -86,6 +93,9 @@ export default async function handler(req: Request) {
                     for (const draw of apiDraws) {
                         let rawName = (draw.drawName || "").trim().toUpperCase();
                         rawName = rawName.replace(/^TIRAGE\s+/, "");
+                        
+                        // Normalize accents
+                        rawName = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
                         const canonicalName = DRAW_NAMES_MAP[rawName];
                         if (!canonicalName) continue;

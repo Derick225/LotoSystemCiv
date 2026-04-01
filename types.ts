@@ -297,25 +297,10 @@ export interface ScoreComposition {
     trend: number;
 }
 
-export interface DayFlowMetrics {
-    dayMomentum: number;
-    echoNumbers: number[];
-    hotDecades: number[];
-    morningToEveningBias: number;
-}
-
-export interface InterGameHeat {
-    sourceGame: string;
-    targetGame: string;
-    correlationFactor: number;
-    migratingNumbers: number[];
-}
-
 export interface SymbioticContext {
     spatialHotZones: number[];
     orchestrationBoosts: Record<number, number>;
     forestVotes: Record<number, number>;
-    dayMetrics?: DayFlowMetrics | null; // Intégration du flux journalier
     spatialDeadZones?: number[];
     spectralVeto?: number[];
     temporalTarget?: any;
@@ -324,7 +309,6 @@ export interface SymbioticContext {
 export interface AdaptiveRules {
     criticalZoneMin: number;
     criticalZoneMax: number;
-    dayEchoBoost?: number;
 }
 
 export interface TicketAnalysisResult {

@@ -48,8 +48,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
 
 export const getDefaultRules = (): AdaptiveRules => ({
     criticalZoneMin: 12,
-    criticalZoneMax: 28,
-    dayEchoBoost: 1.1
+    criticalZoneMax: 28
 });
 
 export const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
@@ -383,9 +382,6 @@ export const generateMasterPrediction = async (
         if (num >= rules.criticalZoneMin && num <= rules.criticalZoneMax) {
             finalScore *= 1.1; 
         }
-        if (symbioticContext?.dayMetrics?.echoNumbers.includes(num)) {
-            finalScore *= (rules.dayEchoBoost || 1.1);
-        }
         if (nBreakdown.orchestration) finalScore += (nBreakdown.orchestration * 0.15);
         if (nBreakdown.spatial) finalScore += (nBreakdown.spatial * 0.10);
 
@@ -417,9 +413,6 @@ export const generateMasterPrediction = async (
                 // Ré-application des bonus contextuels
                 if (item.num >= rules.criticalZoneMin && item.num <= rules.criticalZoneMax) {
                     newScore *= 1.1; 
-                }
-                if (symbioticContext?.dayMetrics?.echoNumbers.includes(item.num)) {
-                    newScore *= (rules.dayEchoBoost || 1.1);
                 }
                 if (item.breakdown?.orchestration) newScore += (item.breakdown.orchestration * 0.15);
                 if (item.breakdown?.spatial) newScore += (item.breakdown.spatial * 0.10);

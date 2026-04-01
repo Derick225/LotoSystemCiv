@@ -43,7 +43,7 @@ export const ExternalProviderService = {
                     const weeks = resultsData.drawsResultsWeekly || [];
                 for (const week of weeks) {
                     const yearMatch = week.startDate ? week.startDate.match(/\d{4}$/) : null;
-                    const year = yearMatch ? yearMatch[0] : now.getFullYear().toString();
+                    const startYear = yearMatch ? parseInt(yearMatch[0]) : now.getFullYear();
                     
                     if (!week.drawResultsDaily) continue;
 
@@ -52,7 +52,15 @@ export const ExternalProviderService = {
                         const dateMatch = dateStr.match(/(\d{2})\/(\d{2})/);
                         
                         if (!dateMatch) continue;
-                        const formattedDate = `${dateMatch[1]}/${dateMatch[2]}/${year}`;
+                        
+                        let currentYear = startYear;
+                        if (dateMatch[2] === '01' && week.startDate && (week.startDate.includes('/12/') || week.startDate.includes('-12-'))) {
+                            currentYear += 1;
+                        } else if (dateMatch[2] === '12' && week.startDate && (week.startDate.includes('/01/') || week.startDate.includes('-01-'))) {
+                            currentYear -= 1;
+                        }
+                        
+                        const formattedDate = `${dateMatch[1]}/${dateMatch[2]}/${currentYear}`;
 
                         const apiDraws = [
                             ...(daily.drawResults?.standardDraws || []),
@@ -62,6 +70,9 @@ export const ExternalProviderService = {
                         for (const draw of apiDraws) {
                             let rawName = (draw.drawName || "").trim().toUpperCase();
                             rawName = rawName.replace(/^TIRAGE\s+/, "");
+                            
+                            // Normalize accents
+                            rawName = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
                             if (!VALID_DRAW_NAMES.has(rawName)) continue;
 
