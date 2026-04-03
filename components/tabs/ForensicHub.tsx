@@ -5,11 +5,12 @@ import { getPredictionHistoryAsync, linkPredictionToResult } from '../../service
 import { performForensicAnalysis, saveForensicReport, getLocalForensicReports, syncForensicReportsWithCloud, deleteForensicReportLocal } from '../../services/postPredictionAnalysisService';
 import { deleteForensicReportCloud } from '../../services/syncService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
+import { getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
 import { runSelfLearningLoop, LearningResult } from '../../services/selfLearningService';
-import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History } from 'lucide-react';
-import { ForensicReport, PlatinumAudit } from '../../types';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History, Dna, TrendingUp, TrendingDown } from 'lucide-react';
+import { ForensicReport, PlatinumAudit, AlgoWeights } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { useToast } from '../ui/Toast';
 
@@ -17,16 +18,18 @@ import { audioEngine } from '../../utils/audioEngine';
 
 import { PredictionHistory } from '../PredictionHistory';
 
-type ForensicMode = 'prediction' | 'structure' | 'historique';
+type ForensicMode = 'prediction' | 'structure' | 'historique' | 'dna';
 
 export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
     const { showToast } = useToast();
     const [reports, setReports] = useState<ForensicReport[]>([]);
     const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
+    const [currentWeights, setCurrentWeights] = useState<AlgoWeights | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [learning, setLearning] = useState(false);
+    const [learningResult, setLearningResult] = useState<LearningResult | null>(null);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [mode, setMode] = useState<ForensicMode>('prediction');
     const [refreshKey, setRefreshKey] = useState(0);
@@ -37,6 +40,8 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         try {
             const result = await runSelfLearningLoop(drawName, 10);
             if (result) {
+                setLearningResult(result);
+                setCurrentWeights(result.newWeights);
                 audioEngine.play('success');
                 showToast(`Apprentissage terminé. ${result.adjustments.length} algos ajustés après analyse de ${result.reportsAnalyzed} tirages.`, "success");
             } else {
@@ -58,6 +63,9 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
         setLoading(true);
         try {
+            // Fetch current weights
+            const weights = await getAlgoWeights(drawName);
+            setCurrentWeights(weights);
             // 1. Charger les rapports existants (Local First)
             let currentReports = getLocalForensicReports().filter(r => r.drawName === drawName);
             
@@ -274,12 +282,18 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             Autopsie <span className="text-rose-500">Deep-Scan</span>
                         </h2>
                         
-                        <div className="flex gap-2 bg-black/40 p-1.5 rounded-2xl border border-white/5 w-fit">
+                        <div className="flex flex-wrap gap-2 bg-black/40 p-1.5 rounded-2xl border border-white/5 w-fit">
                             <button 
                                 onClick={() => { audioEngine.play('click'); setMode('prediction'); }}
                                 className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'prediction' ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-500 hover:text-white'}`}
                             >
                                 <Target size={14}/> Prédictions
+                            </button>
+                            <button 
+                                onClick={() => { audioEngine.play('click'); setMode('dna'); }}
+                                className={`px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${mode === 'dna' ? 'bg-emerald-500 text-white shadow-xl' : 'text-slate-500 hover:text-white'}`}
+                            >
+                                <Dna size={14}/> Profil ADN
                             </button>
                             <button 
                                 onClick={() => { audioEngine.play('click'); setMode('historique'); }}
@@ -334,6 +348,91 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
             {mode === 'historique' && (
                 <PredictionHistory drawName={drawName} />
+            )}
+
+            {mode === 'dna' && currentWeights && (
+                <div className="space-y-8 animate-slide-up">
+                    <div className="bg-slate-900 p-8 rounded-[3rem] border border-slate-800 shadow-xl">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+                            <div>
+                                <h3 className="text-2xl font-black text-white flex items-center gap-3">
+                                    <Dna className="text-emerald-500" size={28} />
+                                    Profil ADN Actuel
+                                </h3>
+                                <p className="text-slate-400 text-sm mt-2">
+                                    Poids heuristiques spécifiques pour le tirage <span className="text-emerald-400 font-bold">{drawName}</span>.
+                                </p>
+                            </div>
+                            <button 
+                                onClick={handleSelfLearning}
+                                disabled={learning}
+                                className={`px-6 py-4 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center gap-3 transition-all ${learning ? 'bg-emerald-900/50 text-emerald-500 cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-400 text-slate-900 shadow-lg shadow-emerald-500/20'}`}
+                            >
+                                <BrainCircuit size={18} className={learning ? 'animate-spin' : ''} />
+                                {learning ? 'Analyse en cours...' : 'Rééquilibrer via Forensic'}
+                            </button>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                {Object.entries(currentWeights).sort((a, b) => b[1] - a[1]).map(([algo, weight]) => (
+                                    <div key={algo} className="bg-slate-800/50 p-4 rounded-2xl border border-white/5">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-sm font-bold text-slate-300 uppercase tracking-wider">{algo}</span>
+                                            <span className="text-xs font-mono text-emerald-400">{(weight * 100).toFixed(1)}%</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden">
+                                            <div 
+                                                className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full"
+                                                style={{ width: `${weight * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="bg-black/40 rounded-[2rem] p-6 border border-white/5">
+                                <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                    <Activity size={14} /> Dernier Audit d'Apprentissage
+                                </h4>
+                                {learningResult ? (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-3 text-sm text-slate-300 bg-indigo-500/10 p-4 rounded-xl border border-indigo-500/20">
+                                            <Microscope className="text-indigo-400" size={18} />
+                                            <span>Basé sur l'analyse de <strong>{learningResult.reportsAnalyzed}</strong> rapports Forensic récents.</span>
+                                        </div>
+                                        <div className="space-y-2 mt-4">
+                                            {learningResult.adjustments.map((adj, idx) => (
+                                                <div key={idx} className="flex items-start gap-3 p-3 bg-slate-800/30 rounded-xl border border-white/5">
+                                                    <div className={`mt-0.5 p-1 rounded-md ${adj.delta > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                                        {adj.delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-bold text-slate-200 uppercase">{adj.algo}</div>
+                                                        <div className="text-[10px] text-slate-500 mt-1">{adj.reason}</div>
+                                                    </div>
+                                                    <div className={`ml-auto text-xs font-mono font-bold ${adj.delta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {adj.delta > 0 ? '+' : ''}{(adj.delta * 100).toFixed(1)}%
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {learningResult.adjustments.length === 0 && (
+                                                <div className="text-center p-6 text-slate-500 text-sm italic">
+                                                    Aucun ajustement nécessaire. L'ADN est optimal.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-4 py-12">
+                                        <BrainCircuit size={48} />
+                                        <p className="text-sm text-center max-w-[200px]">Lancez le rééquilibrage pour générer un rapport d'audit.</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {mode === 'prediction' && (
