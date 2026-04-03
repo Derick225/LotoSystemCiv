@@ -259,6 +259,7 @@ export interface AlgoWeights {
     fractal_resonance?: number;
     shadow_factor?: number;
     twin?: number; // Nouveau score de tirages jumeaux
+    volatility_index?: number;
 }
 
 export interface ScoreBreakdown {
@@ -277,7 +278,6 @@ export interface ScoreBreakdown {
     wavelet?: number;
     bayes?: number;
     gap_velocity?: number;
-    day_echo?: number; 
     anti_consensus?: number;
     lstm?: number;
     resistance?: number;
@@ -288,6 +288,7 @@ export interface ScoreBreakdown {
     quantum_entanglement?: number;
     fractal_resonance?: number;
     twin?: number; // Nouveau score de tirages jumeaux
+    volatility_index?: number;
 }
 
 export interface ScoreComposition {
@@ -544,13 +545,6 @@ export interface NotebookCell {
     content: string;
 }
 
-export interface RLState {
-    lastCalibration: number;
-    learningRate: number;
-    streak: number;
-    totalCorrection: number;
-}
-
 export interface FusionResult {
     sources: {
         python: number[];
@@ -584,7 +578,6 @@ export interface NexusContextType {
     loading: boolean;
     calibration: any;
     hoveredNumber: number | null;
-    rlState: RLState | null;
     vocalContext: OracleVocalContext | null;
     riskProfile: RiskProfile;
     

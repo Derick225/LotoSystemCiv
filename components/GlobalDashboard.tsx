@@ -4,7 +4,7 @@ import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from 
 import { analyzeIntraDraw } from '../services/intraDrawService';
 import { runAutoLearn } from '../services/predictionEngine';
 import { useNexusStore } from '../store/useNexusStore';
-import { useGlobalMarketHistory, useDailySummary, useGlobalStats, lotteryKeys } from '../hooks/useLottery';
+import { useGlobalStats, useDailySummary, lotteryKeys } from '../hooks/useLottery';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Draw, DrawResult } from '../types';
 import { NumberBall } from './NumberBall';
@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { generateTacticalReport } from '../services/reportService';
 import { useToast } from './ui/Toast';
-import { WatchlistMonitor } from './WatchlistMonitor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../utils/audioEngine';
 import { SLOT_CONFIG } from '../constants';
@@ -254,19 +253,15 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     
     const queryClient = useQueryClient();
     
-    // Hooks React Query
-    const { data: recentGlobalResults, refetch: refetchGlobal } = useGlobalMarketHistory();
-    
     const daysOrder = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
     const [selectedDay, setSelectedDay] = useState<string>(daysOrder[new Date().getDay()]);
-    
     const { data: summary = [], isLoading: loadingSummary } = useDailySummary(selectedDay);
+    
     const { data: globalHotData = [] } = useGlobalStats();
     
     const [nextDraw, setNextDraw] = useState<{name: string, timeLeft: string, isUrgent: boolean, time: string, day: string} | null>(null);
     const [fullSyncing, setFullSyncing] = useState(false);
     
-    const latestResult = recentGlobalResults && recentGlobalResults.length > 0 ? recentGlobalResults[0] : null;
     const globalHot = globalHotData.slice(0, 6);
 
     // Calculs Dynamiques pour le Dashboard (Reflétant les changements de poids/prédiction)
@@ -296,10 +291,10 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     // AUTO-LEARN TRIGGER (Nightly Build Simulation)
     useEffect(() => {
         const triggerAutoLearn = async () => {
-            if (recentGlobalResults && recentGlobalResults.length > 60) {
-                const drawName = recentGlobalResults[0]?.drawName || 'Global';
+            if (history && history.length > 60) {
+                const drawName = history[0]?.drawName || 'Global';
                 // We don't force it here, so it respects the 24h check inside runAutoLearn
-                const result = await runAutoLearn(drawName, recentGlobalResults);
+                const result = await runAutoLearn(drawName, history);
                 if (result.success) {
                     showToast(result.message, "success");
                     refreshData(drawName);
@@ -310,20 +305,20 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         // Delay to let UI settle
         const t = setTimeout(triggerAutoLearn, 5000);
         return () => clearTimeout(t);
-    }, [recentGlobalResults]);
+    }, [history]);
 
     const handleAutoLearn = async () => {
-        if (!recentGlobalResults || recentGlobalResults.length < 60) {
+        if (!history || history.length < 60) {
             showToast("Historique insuffisant (>60 requis).", "error");
             return;
         }
         setFullSyncing(true);
         try {
-            const drawName = recentGlobalResults[0]?.drawName || 'Global';
+            const drawName = history[0]?.drawName || 'Global';
             // Force execution by clearing timestamp
             localStorage.removeItem(`nexus_autolearn_last_${drawName}`);
             
-            const result = await runAutoLearn(drawName, recentGlobalResults);
+            const result = await runAutoLearn(drawName, history);
             if (result.success) {
                 showToast(result.message, "success");
                 refreshData(drawName);
@@ -398,13 +393,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     };
 
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-    const isEmptyState = !latestResult && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
+    const isEmptyState = history.length === 0 && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
 
     // Couleur de l'indicateur de pouls global
     const pulseColor = dynamicVolatility > 60 ? 'text-rose-500' : 'text-emerald-500';
 
     const handleExportReport = () => {
-        if (!latestResult) return;
         // Simulation de données de prédiction pour le rapport (à connecter au vrai moteur si dispo)
         const mockPrediction: any = {
             confidence: 87,
@@ -420,7 +414,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         };
 
         generateTacticalReport({
-            drawName: latestResult.drawName,
+            drawName: "Global",
             prediction: mockPrediction,
             weights: {
                 frequency: 0.2,
@@ -495,8 +489,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 </div>
             </div>
 
-            <WatchlistMonitor />
-
             {isEmptyState ? (
                 <div className="bg-slate-900 border border-slate-800 p-8 md:p-12 rounded-[2.5rem] md:rounded-[4rem] text-center shadow-2xl relative overflow-hidden mx-auto w-full">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] -mr-32 -mt-32"></div>
@@ -518,9 +510,8 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                         </button>
                     </div>
                 </div>
-            ) : latestResult && (
+            ) : (
                 <>
-                    <LatestResultHero result={latestResult} onAnalyze={() => onSelectDraw({ name: latestResult.drawName || 'Recent', day: 'Today', time: 'Now' })} />
                     <MetaLearningIndicator />
                 </>
             )}

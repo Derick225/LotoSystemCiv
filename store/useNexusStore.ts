@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AlgoWeights, Prediction, SmartInsight, RLState, OracleVocalContext, RiskProfile, DrawResult } from '../types';
+import { AlgoWeights, Prediction, SmartInsight, OracleVocalContext, RiskProfile, DrawResult } from '../types';
 import { getNextScheduledDraw } from '../services/lotteryService';
 
 interface NexusState {
@@ -14,7 +14,6 @@ interface NexusState {
   // Settings & Config
   riskProfile: RiskProfile;
   globalWeights: AlgoWeights;
-  rlState: RLState | null;
   vocalContext: OracleVocalContext | null;
   
   // Data State
@@ -45,7 +44,6 @@ interface NexusState {
   toggleGodMode: () => void;
   setRiskProfile: (profile: RiskProfile) => void;
   setGlobalWeights: (weights: AlgoWeights) => void;
-  setRlState: (state: RLState | null) => void;
   setVocalContext: (ctx: OracleVocalContext | null) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
@@ -71,7 +69,6 @@ export const useNexusStore = create<NexusState>()(
       
       riskProfile: 'BALANCED',
       globalWeights: {} as AlgoWeights,
-      rlState: null,
       vocalContext: null,
       
       history: [],
@@ -98,7 +95,6 @@ export const useNexusStore = create<NexusState>()(
       toggleGodMode: () => set((state) => ({ isGodMode: !state.isGodMode })),
       setRiskProfile: (profile) => set({ riskProfile: profile }),
       setGlobalWeights: (weights) => set({ globalWeights: weights }),
-      setRlState: (state) => set({ rlState: state }),
       setVocalContext: (ctx) => set({ vocalContext: ctx }),
       setLastPrediction: (pred) => set({ lastPrediction: pred }),
       setSmartInsights: (insights) => set({ smartInsights: insights }),
@@ -135,8 +131,7 @@ export const useNexusStore = create<NexusState>()(
       name: 'nexus-storage',
       partialize: (state) => ({ 
         isGodMode: state.isGodMode, 
-        riskProfile: state.riskProfile,
-        rlState: state.rlState 
+        riskProfile: state.riskProfile
       }),
     }
   )

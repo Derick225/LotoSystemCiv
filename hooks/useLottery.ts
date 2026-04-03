@@ -2,7 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult, SpectralMetric, FractalMetric, NumberRegularity } from '../types';
-import { normalizeDate, fetchResults, getDailySummary, fetchGlobalStats, fetchRecentStats } from '../services/lotteryService';
+import { normalizeDate, fetchResults, fetchGlobalStats, fetchRecentStats, getDailySummary } from '../services/lotteryService';
 import { 
     calculateSpectralMetricsAsync, 
     calculateWaveletMetricsAsync, 
@@ -51,34 +51,6 @@ const fetchHistory = async (drawName: string): Promise<DrawResult[]> => {
   return data.sort(sortDrawsDesc);
 };
 
-const fetchGlobalMarketHistory = async (): Promise<DrawResult[]> => {
-    if (!isSupabaseConfigured()) return [];
-    
-    try {
-        const { data, error } = await supabase
-            .from('draw_results')
-            .select('*')
-            .order('date', { ascending: false })
-            .limit(500);
-
-        if (error) throw new Error(error.message);
-
-        const mapped = (data || []).map(row => ({
-            id: row.id,
-            date: normalizeDate(row.date),
-            gagnants: row.gagnants,
-            machine: row.machine || [],
-            version: row.version || 1,
-            drawName: row.draw_name
-        }));
-
-        return mapped.sort(sortDrawsDesc);
-    } catch (e) {
-        console.warn("Global market history fetch failed (Offline/Error):", e);
-        return [];
-    }
-};
-
 export const useDrawHistory = (drawName: string) => {
   const queryClient = useQueryClient();
 
@@ -93,7 +65,6 @@ export const useDrawHistory = (drawName: string) => {
         { event: 'INSERT', schema: 'public', table: 'draw_results', filter }, 
         () => {
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
-          queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); 
         }
       )
@@ -108,14 +79,6 @@ export const useDrawHistory = (drawName: string) => {
     enabled: !!drawName,
     staleTime: 1000 * 60 * 5, 
   });
-};
-
-export const useGlobalMarketHistory = () => {
-    return useQuery({
-        queryKey: lotteryKeys.globalMarket(),
-        queryFn: fetchGlobalMarketHistory,
-        staleTime: 1000 * 60 * 5,
-    });
 };
 
 export const useDailySummary = (day: string) => {
@@ -160,7 +123,6 @@ export const useDrawMutation = (drawName: string) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
       queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
     },
   });

@@ -1,6 +1,6 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown, SymbioticContext, AdaptiveRules, TicketAnalysisResult, ForensicReport, RiskProfile } from '../types';
-import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression } from './mathService';
+import { calculateACValue, denoiseFeaturesPCA, trainRidgeRegression, calculateVolatility } from './mathService';
 import { 
     calculateSpatialHotSpots, 
     calculateDigitalRootAnalysis, 
@@ -43,6 +43,7 @@ export const getDefaultWeights = (): AlgoWeights => ({
     twin: 0.10,
     quantum_entanglement: 0.05,
     fractal_resonance: 0.05,
+    volatility_index: 0.05,
     shadow_factor: 0.0 // Protocole Shadow (+/- 1)
 });
 
@@ -320,6 +321,11 @@ export const generateMasterPrediction = async (
         twinScores = PatternMatcherService.predictFromTwins(twinMatches);
     }
 
+    // --- VOLATILITY ANALYSIS ---
+    const volatilityInfo = calculateVolatility(history);
+    const isHighVolatility = volatilityInfo.score > 60;
+    const isLowVolatility = volatilityInfo.score < 40;
+
     const masterScores = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
         const nBreakdown: ScoreBreakdown = {};
@@ -366,6 +372,18 @@ export const generateMasterPrediction = async (
         nBreakdown.quantum_entanglement = coOccurrenceScores[num] || 0;
         nBreakdown.fractal_resonance = fractalResonanceScores[num] || 0;
         nBreakdown.twin = twinScores[num] || 0;
+
+        // Volatility Index Scoring
+        if (isHighVolatility) {
+            // Boost extremes (1-20, 70-90)
+            nBreakdown.volatility_index = (num <= 20 || num >= 70) ? 100 : 0;
+        } else if (isLowVolatility) {
+            // Boost center (35-55)
+            nBreakdown.volatility_index = (num >= 35 && num <= 55) ? 100 : 0;
+        } else {
+            // Neutral
+            nBreakdown.volatility_index = 50;
+        }
 
         let finalScore = 0;
         let totalW = 0;

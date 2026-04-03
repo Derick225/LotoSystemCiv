@@ -5,6 +5,7 @@ import { getAlgoWeights, saveAlgoWeights, generateMasterPrediction } from '../se
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance, linkPredictionToResult } from '../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, syncForensicReportsWithCloud } from '../services/postPredictionAnalysisService';
+import { runSelfLearningLoop } from '../services/selfLearningService';
 import { getSettings, saveSettings } from '../services/userPreferencesService';
 import { AppError, logError } from '../utils/AppError';
 
@@ -12,7 +13,6 @@ export const NexusEngine: React.FC = () => {
     const drawName = useNexusStore(s => s.drawName);
     const globalWeights = useNexusStore(s => s.globalWeights);
     const setGlobalWeights = useNexusStore(s => s.setGlobalWeights);
-    const setRlState = useNexusStore(s => s.setRlState);
     const toggleGodMode = useNexusStore(s => s.toggleGodMode);
     const setHistoryData = useNexusStore(s => s.setHistoryData);
     const setAnalyticsData = useNexusStore(s => s.setAnalyticsData);
@@ -48,11 +48,6 @@ export const NexusEngine: React.FC = () => {
             const weights = await getAlgoWeights(drawName);
             if(mounted) setGlobalWeights(weights);
             
-            try {
-                const rawRL = localStorage.getItem(`rl_state_${drawName}`);
-                if (rawRL && mounted) setRlState(JSON.parse(rawRL));
-            } catch {}
-            
             // Check for persisted God Mode
             const god = localStorage.getItem('nexus_god_mode');
             if (god === 'true' && mounted && !isGodMode) {
@@ -61,7 +56,7 @@ export const NexusEngine: React.FC = () => {
         };
         initConfig();
         return () => { mounted = false; };
-    }, [drawName, setGlobalWeights, setRlState, toggleGodMode, isGodMode]);
+    }, [drawName, setGlobalWeights, toggleGodMode, isGodMode]);
 
     // 2. Calcul des Stats basiques (Rapide, synchrone)
     useEffect(() => {
@@ -154,6 +149,13 @@ export const NexusEngine: React.FC = () => {
                                     );
                                     saveForensicReport(report);
                                     forensicGenerated = true;
+
+                                    // AUTO-TUNING: Self-Learning based on Forensic Reports
+                                    const learningResult = await runSelfLearningLoop(drawName, 3); // Lookback 3 recent reports
+                                    if (learningResult) {
+                                        console.log(`[Auto-Tuner] Weights adjusted for ${drawName}:`, learningResult.adjustments);
+                                    }
+
                                 } catch (error) {
                                     console.error("Failed to automate forensic analysis for prediction", item.id, error);
                                 }

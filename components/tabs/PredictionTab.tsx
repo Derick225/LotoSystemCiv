@@ -12,7 +12,6 @@ import { ReliabilityMeter } from '../ReliabilityMeter';
 import { RiskProfile } from '../../types';
 import { QuantumTensionField } from '../QuantumTensionField';
 import { AlgoRadar } from '../AlgoRadar';
-import { AutoTuner } from '../AutoTuner';
 import { ChaosAttractor3D } from '../ChaosAttractor3D';
 import { StrategyBattle } from '../StrategyBattle';
 import { QuantumFractalAnalysis } from '../QuantumFractalAnalysis';
@@ -215,6 +214,15 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             score += (breakdown[k] || 0) * (weights[k] || 0);
         });
         return Math.round(score);
+    };
+
+    const getTopContributors = (breakdown: any, weights: any) => {
+        if (!breakdown || !weights) return [];
+        const contributions = Object.keys(weights).map(k => ({
+            name: k,
+            value: (breakdown[k] || 0) * (weights[k] || 0)
+        })).filter(c => c.value > 0);
+        return contributions.sort((a, b) => b.value - a.value).slice(0, 3);
     };
 
     const getProbBarColor = (score: number) => {
@@ -453,20 +461,29 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     </span>
                                 </div>
                             </div>
-                            <div className="flex flex-col items-end">
-                                <span className="text-6xl font-black text-white tracking-tighter leading-none">{lastPrediction?.confidence}%</span>
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Indice de Confiance</span>
+                            <div className="flex flex-col items-end relative">
+                                <div className="relative flex items-center justify-center w-24 h-24">
+                                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                                        <circle cx="50" cy="50" r="40" fill="transparent" stroke="currentColor" strokeWidth="8" className="text-slate-800" />
+                                        <circle cx="50" cy="50" r="40" fill="transparent" stroke="currentColor" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * (lastPrediction?.confidence || 0)) / 100} className={quantumMode ? 'text-fuchsia-500' : 'text-indigo-500'} strokeLinecap="round" />
+                                    </svg>
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-2xl font-black text-white tracking-tighter leading-none">{lastPrediction?.confidence}%</span>
+                                    </div>
+                                </div>
+                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-2">Indice de Confiance</span>
                             </div>
                         </div>
 
                         {/* Les Boules avec Badge Symbiotique et Probabilité */}
-                        <div className="flex flex-wrap justify-center gap-4 md:gap-8 mb-12">
+                        <div className="flex flex-wrap justify-center gap-6 md:gap-10 mb-12">
                             {lastPrediction?.suggestedNumbers.map((n, i) => {
                                 const bd = lastPrediction.breakdown?.[n];
                                 const isSpatialHot = symbioticContext?.spatialHotZones.includes(n);
                                 const isOrchestrated = symbioticContext?.orchestrationBoosts[n] !== undefined;
                                 const algoScore = getAlgoScore(bd, globalWeights);
                                 const prob = Math.min(99, Math.max(1, algoScore)); // Clamp
+                                const topContributors = getTopContributors(bd, globalWeights);
                                 
                                 return (
                                     <motion.div 
@@ -474,24 +491,39 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         initial={{ scale: 0, y: 30 }} 
                                         animate={{ scale: 1, y: 0 }} 
                                         transition={{ delay: i * 0.1, type: 'spring' }}
-                                        className="flex flex-col items-center gap-4 group/ball"
+                                        className="flex flex-col items-center gap-4 group/ball relative"
                                     >
-                                        <div className="relative">
+                                        <div className="relative z-10">
+                                            <div className="absolute inset-0 bg-indigo-500/20 rounded-full blur-xl scale-150 opacity-0 group-hover/ball:opacity-100 transition-opacity duration-500"></div>
                                             <NumberBall number={n} size="xl" isAttractor={i < 2} />
                                             {/* Badges d'enrichissement */}
-                                            <div className="absolute -top-3 -right-3 flex flex-col gap-1">
+                                            <div className="absolute -top-3 -right-3 flex flex-col gap-1 z-20">
                                                 {isSpatialHot && <div className="bg-emerald-500 text-white rounded-full p-1.5 border-2 border-slate-950 shadow-md transform scale-0 group-hover/ball:scale-100 transition-transform" title="Zone Chaude Spatiale"><MapPin size={10} fill="currentColor"/></div>}
                                                 {isOrchestrated && <div className="bg-indigo-500 text-white rounded-full p-1.5 border-2 border-slate-950 shadow-md transform scale-0 group-hover/ball:scale-100 transition-transform delay-75" title="Boost Orchestration"><Binary size={10}/></div>}
                                             </div>
                                         </div>
                                         
-                                        <div className="flex flex-col items-center opacity-80 group-hover/ball:opacity-100 transition-opacity">
-                                            <div className="flex gap-0.5 h-1.5 w-12 bg-slate-800 rounded-full overflow-hidden mb-1.5">
+                                        <div className="flex flex-col items-center opacity-80 group-hover/ball:opacity-100 transition-opacity z-10">
+                                            <div className="flex gap-0.5 h-1.5 w-16 bg-slate-800 rounded-full overflow-hidden mb-1.5 shadow-inner">
                                                 <div className={`h-full ${getProbBarColor(prob)}`} style={{ width: `${prob}%` }}></div>
                                             </div>
                                             <span className={`text-[10px] font-mono font-black uppercase tracking-tight ${getProbColor(prob)}`}>
                                                 PROB: {prob}%
                                             </span>
+                                        </div>
+
+                                        {/* Tooltip Breakdown */}
+                                        <div className="absolute top-full mt-4 bg-slate-900 border border-slate-700 p-4 rounded-2xl shadow-2xl opacity-0 group-hover/ball:opacity-100 pointer-events-none transition-all duration-300 transform translate-y-2 group-hover/ball:translate-y-0 z-50 w-48 left-1/2 -translate-x-1/2">
+                                            <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-800 pb-2 text-center">Facteurs Clés</div>
+                                            <div className="space-y-2">
+                                                {topContributors.map((c, idx) => (
+                                                    <div key={idx} className="flex justify-between items-center">
+                                                        <span className="text-[10px] text-slate-300 capitalize truncate max-w-[80px]">{c.name.replace('_', ' ')}</span>
+                                                        <span className="text-[10px] font-mono text-emerald-400">+{Math.round(c.value)}%</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-slate-900 border-t border-l border-slate-700 rotate-45"></div>
                                         </div>
                                     </motion.div>
                                 );
@@ -511,6 +543,31 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             >
                                 <RefreshCw size={16} /> Nouvelle Stratégie
                             </button>
+                        </div>
+
+                        {/* Metrics Overview Bar */}
+                        <div className="flex flex-wrap justify-center gap-4 md:gap-8 mb-8">
+                            <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800">
+                                <Activity size={14} className="text-emerald-400" />
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 uppercase font-black tracking-widest">Entropie</span>
+                                    <span className="text-xs font-mono text-white">{(currentEntropy * 100).toFixed(1)}%</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800">
+                                <TrendingUp size={14} className="text-orange-400" />
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 uppercase font-black tracking-widest">Volatilité</span>
+                                    <span className="text-xs font-mono text-white">{volatility?.score || 0}%</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800">
+                                <Wind size={14} className="text-blue-400" />
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 uppercase font-black tracking-widest">Régime</span>
+                                    <span className="text-xs font-mono text-white">{regime?.regime || 'IDLE'}</span>
+                                </div>
+                            </div>
                         </div>
 
                         {/* View Toggles */}
@@ -536,14 +593,20 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </button>
                         </div>
 
-                        <div className="mt-10 bg-black/40 p-8 rounded-[2.5rem] border border-white/5 backdrop-blur-md">
-                            <div className="flex items-start gap-4">
-                                <div className="p-3 bg-indigo-500/20 rounded-2xl text-indigo-400 shrink-0">
-                                    <Info size={20} />
+                        <div className="mt-10 bg-gradient-to-br from-slate-900 to-black p-8 rounded-[2.5rem] border border-indigo-500/10 shadow-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
+                            <div className="flex items-start gap-5 relative z-10">
+                                <div className="p-4 bg-indigo-500/10 rounded-2xl text-indigo-400 shrink-0 border border-indigo-500/20 shadow-inner">
+                                    <BrainCircuit size={24} />
                                 </div>
-                                <div>
-                                    <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Thèse d'Investissement</h5>
-                                    <p className="text-slate-300 text-sm leading-relaxed font-medium">
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                                            <Sparkles size={12} /> Synthèse IA
+                                        </h5>
+                                        <span className="text-[8px] font-mono text-slate-500 bg-slate-800 px-2 py-1 rounded-md">NEXUS CORE v3</span>
+                                    </div>
+                                    <p className="text-slate-300 text-sm leading-relaxed font-medium italic border-l-2 border-slate-800 pl-4 py-1">
                                         "{lastPrediction?.analysis}"
                                     </p>
                                 </div>

@@ -4,7 +4,6 @@ import { useNexusStore } from '../../store/useNexusStore';
 import { runSurvivalSimulation, BacktestReport } from '../../services/backtestingEngine';
 import { Play, RefreshCw, Trophy, PiggyBank, ThumbsUp, ThumbsDown, Activity, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
 import { ParallelSimulationTab } from './ParallelSimulationTab';
-import { NeuralEvolutionDashboard } from '../NeuralEvolutionDashboard';
 import { ResponsiveContainer, AreaChart, Area, Tooltip, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { audioEngine } from '../../utils/audioEngine';
 
@@ -12,7 +11,6 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
     const globalWeights = useNexusStore(state => state.globalWeights);
     const nexusLoading = useNexusStore(state => state.loading);
-    const rlState = useNexusStore(state => state.rlState);
     const [mode, setMode] = useState<'single' | 'comparative'>('single');
     const [simulating, setSimulating] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -61,8 +59,6 @@ export const SimulationTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     return (
         <div className="space-y-8 animate-fade-in pb-16 w-full">
-            <NeuralEvolutionDashboard rlState={rlState} drawName={drawName} />
-
             {/* Mode Switcher */}
             <div className="flex justify-center mb-4">
                 <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 shadow-inner">
