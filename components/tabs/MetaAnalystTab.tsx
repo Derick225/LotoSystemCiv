@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { generatePlatinumPrediction, savePlatinumHistory, getPlatinumHistory } from '../../services/metaAnalystService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { saveTicket } from '../../services/userPreferencesService';
 import { useNexusStore } from '../../store/useNexusStore';
-import type { PlatinumResult, PlatinumScenario } from '../../types';
+import type { PlatinumResult, PlatinumScenario, Prediction } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
@@ -143,8 +144,23 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             drawName,
             strategy: `Platinum ${scenario.name}`
         });
+
+        if (result) {
+            const predictionObj: Prediction = {
+                suggestedNumbers: scenario.numbers,
+                candidates: scenario.numbers,
+                confidence: scenario.probability,
+                analysis: scenario.description,
+                breakdown: {},
+                timestamp: Date.now()
+            };
+            await savePredictionToHistory(drawName, predictionObj, undefined, {
+                spectral, fractal, volatility, regularity
+            });
+        }
+
         audioEngine.play('success');
-        showToast("Vecteur sécurisé.", "success");
+        showToast("Vecteur sécurisé et autopsié.", "success");
     };
 
     // Data for the Spectrum Chart

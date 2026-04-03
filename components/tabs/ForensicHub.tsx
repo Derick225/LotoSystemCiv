@@ -9,8 +9,8 @@ import { getAlgoWeights, normalizeWeights } from '../../services/predictionEngin
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
 import { runSelfLearningLoop, LearningResult } from '../../services/selfLearningService';
-import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History, Dna, TrendingUp, TrendingDown } from 'lucide-react';
-import { ForensicReport, PlatinumAudit, AlgoWeights } from '../../types';
+import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History, Dna, TrendingUp, TrendingDown, Clock } from 'lucide-react';
+import { ForensicReport, PlatinumAudit, AlgoWeights, PredictionHistoryItem } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { useToast } from '../ui/Toast';
 
@@ -24,6 +24,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
     const { showToast } = useToast();
     const [reports, setReports] = useState<ForensicReport[]>([]);
+    const [pendingPredictions, setPendingPredictions] = useState<PredictionHistoryItem[]>([]);
     const [platinumAudits, setPlatinumAudits] = useState<PlatinumAudit[]>([]);
     const [currentWeights, setCurrentWeights] = useState<AlgoWeights | null>(null);
     const [loading, setLoading] = useState(true);
@@ -72,6 +73,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             // 2. Identifier les prédictions sans rapport
             const preds = await getPredictionHistoryAsync(drawName);
             let newReportsCount = 0;
+            const pending: PredictionHistoryItem[] = [];
 
             // O(1) Lookups
             const historyById = new Map();
@@ -129,12 +131,15 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     if (!pred.drawResultId) {
                         await linkPredictionToResult(pred.id, actual.id);
                     }
+                } else {
+                    pending.push(pred);
                 }
             }
             
             // Trier par date décroissante
             currentReports.sort((a, b) => new Date(b.date.split('/').reverse().join('-')).getTime() - new Date(a.date.split('/').reverse().join('-')).getTime());
             setReports(currentReports);
+            setPendingPredictions(pending);
 
             if (newReportsCount > 0) {
                 audioEngine.play('success');
@@ -547,6 +552,38 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                             </div>
                                         );
                                     })}
+                                </div>
+                            )}
+
+                            {pendingPredictions.length > 0 && (
+                                <div className="mt-8 space-y-6">
+                                    <h4 className="px-4 text-xs font-black text-amber-500 uppercase tracking-widest flex items-center gap-2">
+                                        <Clock size={14}/> Prédictions en attente de tirage ({pendingPredictions.length})
+                                    </h4>
+                                    <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                        {pendingPredictions.map((pred, idx) => (
+                                            <div 
+                                                key={idx} 
+                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-amber-100 dark:border-amber-900/30 opacity-80"
+                                            >
+                                                <div className="flex justify-between items-center">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="p-3 rounded-2xl bg-amber-50 text-amber-500 dark:bg-amber-900/20">
+                                                            <Clock size={18}/>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-sm font-black text-slate-800 dark:text-white leading-none">
+                                                                {new Date(pred.timestamp).toLocaleString('fr-FR')}
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">
+                                                                En attente du résultat
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>

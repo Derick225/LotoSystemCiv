@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { calculateRegularity, performKMeansClusteringAsync, calculateACValue } from '../../services/mathService';
 import { addToWatchlist, removeFromWatchlist, isInWatchlist, saveTicket } from '../../services/userPreferencesService';
-import type { ClusterPoint, ClusterSummary, NumberRegularity } from '../../types';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import type { ClusterPoint, ClusterSummary, NumberRegularity, Prediction } from '../../types';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceArea } from 'recharts';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
@@ -162,8 +163,19 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 drawName,
                 strategy: `Cluster ${clusterType}`
             });
+
+            const predictionObj: Prediction = {
+                suggestedNumbers: bestTicket,
+                candidates: bestTicket,
+                confidence: 80, // Arbitrary confidence
+                analysis: `Cluster Generation (${clusterType})`,
+                breakdown: {},
+                timestamp: Date.now()
+            };
+            await savePredictionToHistory(drawName, predictionObj);
+
             audioEngine.play('success');
-            showToast(`Ticket ${clusterType} généré et sauvegardé (AC:${bestAC}).`, "success");
+            showToast(`Ticket ${clusterType} généré et autopsié (AC:${bestAC}).`, "success");
         }
     };
 

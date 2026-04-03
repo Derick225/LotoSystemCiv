@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { calculateFusion } from '../../services/fusionService';
-import { FusionResult } from '../../types';
+import { FusionResult, Prediction } from '../../types';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { NumberBall } from '../NumberBall';
 import { TicketXRay } from '../TicketXRay';
 import { saveTicket } from '../../services/userPreferencesService';
@@ -57,8 +58,21 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
             drawName,
             strategy: `Hyper-Convergence (${fusionResult.confidence}%)`
         });
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: fusionResult.finalTicket,
+            candidates: fusionResult.finalTicket,
+            confidence: fusionResult.confidence,
+            analysis: "Hyper-Convergence Fusion",
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj, undefined, {
+            spectral
+        });
+
         audioEngine.play('success');
-        showToast("Ticket Fusion sauvegardé.", "success");
+        showToast("Ticket Fusion sauvegardé et autopsié.", "success");
     };
 
     const getSourceIcon = (source: string) => {

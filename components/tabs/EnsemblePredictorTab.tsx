@@ -12,6 +12,8 @@ import { useToast } from '../ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { runNeuralEnsemble, EnsembleAgent, EnsembleResult, backtestNeuralEnsemble, BacktestResult } from '../../services/neuralEnsembleService';
 import { saveTicket } from '../../services/userPreferencesService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import type { Prediction } from '../../types';
 
 import { audioEngine } from '../../utils/audioEngine';
 
@@ -112,7 +114,18 @@ export const EnsemblePredictorTab: React.FC = () => {
             drawName,
             strategy: `Ensemble: ${strategy}`
         });
-        showToast("Ticket sauvegardé.", "success");
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: numbers,
+            candidates: numbers,
+            confidence: 80, // Arbitrary confidence
+            analysis: `Ensemble Predictor: ${strategy}`,
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj);
+
+        showToast("Ticket sauvegardé et autopsié.", "success");
         audioEngine.play('success');
     };
 

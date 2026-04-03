@@ -5,6 +5,8 @@ import { calculateACValue } from '../../services/mathService';
 import { runAntColonyOptimization } from '../../services/acoService';
 import { getUniqueSortedNumbers } from '../../utils/arrayUtils';
 import { saveTicket } from '../../services/userPreferencesService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import type { Prediction } from '../../types';
 import { useToast } from '../ui/Toast';
 import { useNexusStore } from '../../store/useNexusStore';
 import { Calculator, Zap, Ghost, Terminal, Network, Edit3, Cpu, Save, Lock, Unlock, Layers, ShieldCheck, AlertOctagon, RefreshCw } from 'lucide-react';
@@ -210,8 +212,19 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
             drawName: drawName,
             strategy: `Architecte v3 (Score ${t.nexusScore})`
         });
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: t.numbers,
+            candidates: t.numbers,
+            confidence: t.nexusScore,
+            analysis: `Architecte v3 (Score ${t.nexusScore})`,
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj);
+
         audioEngine.play('success');
-        showToast("Ticket sauvegardé.", "success");
+        showToast("Ticket sauvegardé et autopsié.", "success");
     };
 
     const handleApplyAco = (numbers: number[]) => {

@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getFullOrchestrationAnalysis, analyzeShortTermMimicry } from '../../services/orchestrationService';
 import { useNexusStore } from '../../store/useNexusStore';
-import type { OrchestrationMetrics, DrawResult, MimicryMetric, ScoreComposition } from '../../types';
+import type { OrchestrationMetrics, DrawResult, MimicryMetric, ScoreComposition, Prediction } from '../../types';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { NumberBall } from '../NumberBall';
 import { OrchestrationRadar } from '../OrchestrationRadar';
 import { Activity, Layers, Zap, Target, Binary, Copy, Wand2, Save, ArrowRight, Share2, Workflow, GitMerge, GitBranch } from 'lucide-react';
@@ -280,8 +281,19 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             drawName,
             strategy: 'Orchestration Elite'
         });
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: generatedTicket,
+            candidates: generatedTicket,
+            confidence: 85, // Arbitrary high confidence for Orchestration
+            analysis: "Orchestration Elite Synthesis",
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj);
+
         audioEngine.play('success');
-        showToast("Ticket sauvegardé.", "success");
+        showToast("Ticket sauvegardé et autopsié.", "success");
     };
 
     if (nexusLoading || loading) return (

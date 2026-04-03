@@ -12,6 +12,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { runNeuralEnsemble, EnsembleResult } from '../../services/neuralEnsembleService';
 import { generatePlatinumPrediction } from '../../services/metaAnalystService';
 import { saveTicket } from '../../services/userPreferencesService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import type { Prediction } from '../../types';
 import { audioEngine } from '../../utils/audioEngine';
 import { DRAW_SCHEDULE } from '../../constants';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -78,7 +80,18 @@ export const PredictiveAnalyticsTab: React.FC = () => {
             drawName,
             strategy: `SuperPredictor: ${strategy}`
         });
-        showToast("Ticket sauvegardé.", "success");
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: numbers,
+            candidates: numbers,
+            confidence: 85, // Arbitrary confidence
+            analysis: `SuperPredictor: ${strategy}`,
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj);
+
+        showToast("Ticket sauvegardé et autopsié.", "success");
         audioEngine.play('success');
     };
 

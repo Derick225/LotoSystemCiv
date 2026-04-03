@@ -3,6 +3,8 @@ import { useNexusStore } from '../../store/useNexusStore';
 import { Network, Activity, Cpu, Zap, Layers, Grid, Share2, RefreshCw } from 'lucide-react';
 import { NumberBall } from '../NumberBall';
 import { saveTicket } from '../../services/userPreferencesService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
+import type { Prediction } from '../../types';
 import { useToast } from '../ui/Toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
@@ -162,8 +164,19 @@ export const NeuralArchitectureTab: React.FC = () => {
             drawName,
             strategy: `Architecture (Source #${selectedNodeId})`
         });
+
+        const predictionObj: Prediction = {
+            suggestedNumbers: sortedPath,
+            candidates: sortedPath,
+            confidence: 80, // Arbitrary confidence
+            analysis: `Architecture Neural Path (Source #${selectedNodeId})`,
+            breakdown: {},
+            timestamp: Date.now()
+        };
+        await savePredictionToHistory(drawName, predictionObj);
+
         audioEngine.play('success');
-        showToast("Chemin sauvegardé dans le Wallet.", "success");
+        showToast("Chemin sauvegardé et autopsié.", "success");
     };
 
     // Normalisation pour l'affichage visuel (Opacité/Taille)
