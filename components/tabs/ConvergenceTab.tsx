@@ -59,12 +59,21 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({ drawName }) => 
             strategy: `Hyper-Convergence (${fusionResult.confidence}%)`
         });
 
+        const breakdown: Record<number, any> = {};
+        fusionResult.finalTicket.forEach(num => {
+            breakdown[num] = {
+                orchestration: fusionResult.confidence,
+                spectral: spectral.find(s => s.number === num)?.energy || 50,
+                ai_intuition: 85
+            };
+        });
+
         const predictionObj: Prediction = {
             suggestedNumbers: fusionResult.finalTicket,
             candidates: fusionResult.finalTicket,
             confidence: fusionResult.confidence,
             analysis: "Hyper-Convergence Fusion",
-            breakdown: {},
+            breakdown: breakdown,
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj, undefined, {

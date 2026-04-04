@@ -213,12 +213,21 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
             strategy: `Architecte v3 (Score ${t.nexusScore})`
         });
 
+        const breakdown: Record<number, any> = {};
+        t.numbers.forEach(num => {
+            breakdown[num] = {
+                orchestration: t.nexusScore,
+                fractal: t.ac * 10,
+                spectral: t.sum / 5
+            };
+        });
+
         const predictionObj: Prediction = {
             suggestedNumbers: t.numbers,
             candidates: t.numbers,
             confidence: t.nexusScore,
             analysis: `Architecte v3 (Score ${t.nexusScore})`,
-            breakdown: {},
+            breakdown: breakdown,
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj);

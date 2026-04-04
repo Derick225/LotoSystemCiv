@@ -165,12 +165,22 @@ export const NeuralArchitectureTab: React.FC = () => {
             strategy: `Architecture (Source #${selectedNodeId})`
         });
 
+        const breakdown: Record<number, any> = {};
+        sortedPath.forEach(num => {
+            const node = nodes.find(n => n.id === num);
+            breakdown[num] = {
+                spatial: node ? Math.min(100, node.centrality * 10) : 50,
+                markov: node ? node.community * 15 : 50,
+                network: node ? node.links.length * 5 : 20
+            };
+        });
+
         const predictionObj: Prediction = {
             suggestedNumbers: sortedPath,
             candidates: sortedPath,
             confidence: 80, // Arbitrary confidence
             analysis: `Architecture Neural Path (Source #${selectedNodeId})`,
-            breakdown: {},
+            breakdown: breakdown,
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj);

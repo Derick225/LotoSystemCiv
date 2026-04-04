@@ -156,12 +156,48 @@ serve(async (req: Request) => {
 
             if (batchUpsert.length > 0) {
                 // Batch insert pour la performance
-                const { error } = await supabase
+                const { data: upsertedData, error } = await supabase
                     .from('draw_results')
-                    .upsert(batchUpsert, { onConflict: 'draw_name, date' });
+                    .upsert(batchUpsert, { onConflict: 'draw_name, date' })
+                    .select();
 
-                if (error) console.error(`DB Error:`, error);
-                else totalInserted += batchUpsert.length;
+                if (error) {
+                    console.error(`DB Error:`, error);
+                } else {
+                    totalInserted += batchUpsert.length;
+                    
+                    // AUTOMATISATION (4) : Déclenchement de l'autopsie et de l'apprentissage
+                    if (upsertedData && upsertedData.length > 0) {
+                        for (const result of upsertedData) {
+                            // Chercher les prédictions en attente pour ce tirage
+                            const { data: pendingSnapshots } = await supabase
+                                .from('prediction_snapshots')
+                                .select('id')
+                                .eq('draw_name', result.draw_name)
+                                .eq('status', 'PENDING');
+                                
+                            if (pendingSnapshots && pendingSnapshots.length > 0) {
+                                let autopsyCount = 0;
+                                for (const snap of pendingSnapshots) {
+                                    console.log(`Triggering autopsy for snapshot ${snap.id} and result ${result.id}`);
+                                    // Appeler la fonction d'autopsie
+                                    await supabase.functions.invoke('forensic-autopsy', {
+                                        body: { snapshotId: snap.id, drawResultId: result.id }
+                                    }).catch((e: any) => console.error("Forensic autopsy trigger error:", e));
+                                    autopsyCount++;
+                                }
+                                
+                                // Si on a fait au moins une autopsie, on déclenche le self-learning pour ce tirage
+                                if (autopsyCount > 0) {
+                                    console.log(`Triggering self-learning for ${result.draw_name}`);
+                                    await supabase.functions.invoke('self-learn', {
+                                        body: { drawName: result.draw_name }
+                                    }).catch((e: any) => console.error("Self-learn trigger error:", e));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } catch (e) {
             console.error(`Error processing month ${monthParam}:`, e);

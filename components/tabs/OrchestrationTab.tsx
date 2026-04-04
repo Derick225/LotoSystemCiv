@@ -282,12 +282,23 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             strategy: 'Orchestration Elite'
         });
 
+        const breakdown: Record<number, any> = {};
+        generatedTicket.forEach(num => {
+            const candidate = metrics?.topCandidates.find(c => c.number === num);
+            breakdown[num] = {
+                orchestration: candidate ? candidate.score : 50,
+                fractal: candidate ? candidate.fractal : 50,
+                spectral: candidate ? candidate.spectral : 50,
+                momentum: candidate ? candidate.momentum : 50
+            };
+        });
+
         const predictionObj: Prediction = {
             suggestedNumbers: generatedTicket,
             candidates: generatedTicket,
             confidence: 85, // Arbitrary high confidence for Orchestration
             analysis: "Orchestration Elite Synthesis",
-            breakdown: {},
+            breakdown: breakdown,
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj);

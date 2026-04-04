@@ -289,6 +289,7 @@ export interface ScoreBreakdown {
     fractal_resonance?: number;
     twin?: number; // Nouveau score de tirages jumeaux
     volatility_index?: number;
+    network?: number;
 }
 
 export interface ScoreComposition {

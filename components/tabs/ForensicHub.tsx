@@ -564,7 +564,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         {pendingPredictions.map((pred, idx) => (
                                             <div 
                                                 key={idx} 
-                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-amber-100 dark:border-amber-900/30 opacity-80"
+                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-amber-100 dark:border-amber-900/30 opacity-80 flex flex-col gap-4"
                                             >
                                                 <div className="flex justify-between items-center">
                                                     <div className="flex items-center gap-4">
@@ -580,6 +580,21 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    <div className="text-right">
+                                                        <div className="text-xs font-bold text-indigo-500">{pred.prediction.confidence}%</div>
+                                                        <div className="text-[8px] text-slate-400 uppercase tracking-widest">Confiance</div>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                                                    <div className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-2">Source</div>
+                                                    <div className="text-xs font-medium text-slate-800 dark:text-slate-300">{pred.prediction.analysis}</div>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {pred.prediction.suggestedNumbers.map((n, i) => (
+                                                        <div key={i} className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                                                            {n}
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         ))}

@@ -73,7 +73,7 @@ export const PredictiveAnalyticsTab: React.FC = () => {
         }
     };
 
-    const handleSave = async (numbers: number[], strategy: string) => {
+    const handleSave = async (numbers: number[], strategy: string, breakdown?: Record<number, any>) => {
         audioEngine.play('click');
         await saveTicket({
             numbers,
@@ -86,7 +86,7 @@ export const PredictiveAnalyticsTab: React.FC = () => {
             candidates: numbers,
             confidence: 85, // Arbitrary confidence
             analysis: `SuperPredictor: ${strategy}`,
-            breakdown: {},
+            breakdown: breakdown || {},
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj);
@@ -189,7 +189,16 @@ export const PredictiveAnalyticsTab: React.FC = () => {
                         ))}
                     </div>
                     <button 
-                        onClick={() => handleSave(ensembleResult.consensus, 'Consensus Neural')}
+                        onClick={() => {
+                            const combinedBreakdown: Record<number, any> = {};
+                            ensembleResult.consensus.forEach(num => {
+                                combinedBreakdown[num] = {
+                                    orchestration: ensembleResult.confidence,
+                                    ai_intuition: 90
+                                };
+                            });
+                            handleSave(ensembleResult.consensus, 'Consensus Neural', combinedBreakdown);
+                        }}
                         className="w-full py-3 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 rounded-xl font-black text-xs uppercase tracking-widest border border-indigo-500/30 transition-all flex items-center justify-center gap-2"
                     >
                         <Save size={16} /> Sauvegarder ce ticket

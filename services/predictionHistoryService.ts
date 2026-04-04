@@ -72,6 +72,11 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
         const weights = await getAlgoWeights(drawName);
         
         // Calculate target date (usually today or tomorrow depending on the draw)
+        // For simplicity, we assume the prediction is for the next occurrence of this draw.
+        // If the draw is today and hasn't happened yet, it's today. Otherwise, it's the next day it occurs.
+        // To avoid complex logic here, we'll just use the current date. 
+        // BUT to be safe with automation, we should match by draw_name and status='PENDING' 
+        // regardless of the exact target_date, or just use today's date.
         const targetDate = new Date().toISOString().split('T')[0];
 
         await supabase.from('prediction_snapshots').insert({

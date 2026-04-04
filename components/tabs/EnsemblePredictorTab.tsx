@@ -107,7 +107,7 @@ export const EnsemblePredictorTab: React.FC = () => {
         }
     };
 
-    const handleSave = async (numbers: number[], strategy: string) => {
+    const handleSave = async (numbers: number[], strategy: string, breakdown?: Record<number, any>) => {
         audioEngine.play('click');
         await saveTicket({
             numbers,
@@ -120,7 +120,7 @@ export const EnsemblePredictorTab: React.FC = () => {
             candidates: numbers,
             confidence: 80, // Arbitrary confidence
             analysis: `Ensemble Predictor: ${strategy}`,
-            breakdown: {},
+            breakdown: breakdown || {},
             timestamp: Date.now()
         };
         await savePredictionToHistory(drawName, predictionObj);
@@ -356,7 +356,7 @@ export const EnsemblePredictorTab: React.FC = () => {
                                         </div>
 
                                         <button 
-                                            onClick={() => handleSave(selectedAgent.prediction.suggestedNumbers, selectedAgent.name)}
+                                            onClick={() => handleSave(selectedAgent.prediction.suggestedNumbers, selectedAgent.name, selectedAgent.prediction.breakdown)}
                                             className="w-full mt-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95"
                                         >
                                             <Save size={16}/> Sauvegarder ce Vecteur
@@ -407,7 +407,16 @@ export const EnsemblePredictorTab: React.FC = () => {
                                 </div>
 
                                 <button 
-                                    onClick={() => handleSave(result.consensus, "Consensus Ensemble")}
+                                    onClick={() => {
+                                        const combinedBreakdown: Record<number, any> = {};
+                                        result.consensus.forEach(num => {
+                                            combinedBreakdown[num] = {
+                                                orchestration: result.confidence,
+                                                ai_intuition: 85
+                                            };
+                                        });
+                                        handleSave(result.consensus, "Consensus Ensemble", combinedBreakdown);
+                                    }}
                                     className="mt-12 px-12 py-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-sm uppercase tracking-[0.2em] shadow-2xl shadow-emerald-600/30 transition-all active:scale-95 flex items-center gap-4 mx-auto"
                                 >
                                     <Save size={20}/> Valider le Consensus

@@ -146,12 +146,22 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         });
 
         if (result) {
+            const breakdown: Record<number, any> = {};
+            scenario.numbers.forEach(num => {
+                breakdown[num] = {
+                    orchestration: scenario.probability,
+                    fractal: scenario.metrics.fractalResonance * 100,
+                    spectral: scenario.metrics.spectralAlignment * 100,
+                    momentum: scenario.metrics.momentum * 100
+                };
+            });
+
             const predictionObj: Prediction = {
                 suggestedNumbers: scenario.numbers,
                 candidates: scenario.numbers,
                 confidence: scenario.probability,
                 analysis: scenario.description,
-                breakdown: {},
+                breakdown: breakdown,
                 timestamp: Date.now()
             };
             await savePredictionToHistory(drawName, predictionObj, undefined, {

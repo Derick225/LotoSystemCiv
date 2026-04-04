@@ -252,6 +252,49 @@ export const fetchGlobalStats = async () => {
   }
 };
 
+export const triggerAutomationForNewResults = async (drawName: string, date: string, resultId?: string) => {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const { data: pendingSnapshots } = await supabase
+      .from('prediction_snapshots')
+      .select('id')
+      .eq('draw_name', normalizeDrawName(drawName))
+      .eq('status', 'PENDING');
+
+    if (pendingSnapshots && pendingSnapshots.length > 0) {
+      let autopsyCount = 0;
+      for (const snap of pendingSnapshots) {
+        // We need the result ID to trigger autopsy. If not provided, fetch it.
+        let targetResultId = resultId;
+        if (!targetResultId) {
+            const { data: resultData } = await supabase
+                .from('draw_results')
+                .select('id')
+                .eq('draw_name', normalizeDrawName(drawName))
+                .eq('date', normalizeDate(date))
+                .single();
+            if (resultData) targetResultId = resultData.id;
+        }
+
+        if (targetResultId) {
+            await supabase.functions.invoke('forensic-autopsy', {
+                body: { snapshotId: snap.id, drawResultId: targetResultId }
+            }).catch(e => console.error("Forensic autopsy trigger error:", e));
+            autopsyCount++;
+        }
+      }
+
+      if (autopsyCount > 0) {
+        await supabase.functions.invoke('self-learn', {
+            body: { drawName: normalizeDrawName(drawName) }
+        }).catch(e => console.error("Self-learn trigger error:", e));
+      }
+    }
+  } catch (e) {
+    console.error("Error triggering automation:", e);
+  }
+};
+
 export const bulkAddResults = async (drawName: string, results: any[]) => {
   if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const mapped = results.map(r => ({
@@ -261,31 +304,46 @@ export const bulkAddResults = async (drawName: string, results: any[]) => {
     machine: r.machine || [],
     version: 1
   }));
-  const { error } = await supabase.from('draw_results').upsert(mapped, { onConflict: 'draw_name, date' });
+  const { data, error } = await supabase.from('draw_results').upsert(mapped, { onConflict: 'draw_name, date' }).select();
   if (error) throw error;
+  
+  // Trigger automation for all inserted/updated results
+  if (data && data.length > 0) {
+      for (const res of data) {
+          await triggerAutomationForNewResults(res.draw_name, res.date, res.id);
+      }
+  }
 };
 
 export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>) => {
   if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
-  const { error } = await supabase.from('draw_results').insert({
+  const { data, error } = await supabase.from('draw_results').insert({
     draw_name: normalizeDrawName(drawName),
     date: normalizeDate(result.date),
     gagnants: result.gagnants,
     machine: result.machine || [],
     version: 1
-  });
+  }).select().single();
   if (error) throw error;
+  
+  if (data) {
+      await triggerAutomationForNewResults(data.draw_name, data.date, data.id);
+  }
 };
 
 export const updateResult = async (drawName: string, result: DrawResult) => {
   if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
-  const { error } = await supabase.from('draw_results').update({
+  const { data, error } = await supabase.from('draw_results').update({
     date: normalizeDate(result.date),
     gagnants: result.gagnants,
     machine: result.machine || [],
     version: result.version || 1
-  }).eq('id', result.id);
+  }).eq('id', result.id).select().single();
   if (error) throw error;
+  
+  if (data) {
+      await triggerAutomationForNewResults(data.draw_name, data.date, data.id);
+  }
 };
 
 export const deleteResult = async (drawName: string, id: string) => {

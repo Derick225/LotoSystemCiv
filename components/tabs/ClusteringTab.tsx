@@ -164,12 +164,21 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 strategy: `Cluster ${clusterType}`
             });
 
+            const breakdown: Record<number, any> = {};
+            bestTicket.forEach(num => {
+                breakdown[num] = {
+                    ai_intuition: bestAC * 10,
+                    spatial: clusterType === 'Sprinter' ? 90 : clusterType === 'Marathonien' ? 70 : clusterType === 'Dormeur' ? 80 : 50,
+                    frequency: clusterType === 'Sprinter' ? 85 : clusterType === 'Dormeur' ? 10 : 50
+                };
+            });
+
             const predictionObj: Prediction = {
                 suggestedNumbers: bestTicket,
                 candidates: bestTicket,
                 confidence: 80, // Arbitrary confidence
                 analysis: `Cluster Generation (${clusterType})`,
-                breakdown: {},
+                breakdown: breakdown,
                 timestamp: Date.now()
             };
             await savePredictionToHistory(drawName, predictionObj);
