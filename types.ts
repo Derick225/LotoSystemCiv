@@ -260,6 +260,7 @@ export interface AlgoWeights {
     shadow_factor?: number;
     twin?: number; // Nouveau score de tirages jumeaux
     volatility_index?: number;
+    machine_transfer?: number; // Nouveau score pour les transferts Machine -> Gagnant
 }
 
 export interface ScoreBreakdown {
@@ -290,6 +291,7 @@ export interface ScoreBreakdown {
     twin?: number; // Nouveau score de tirages jumeaux
     volatility_index?: number;
     network?: number;
+    machine_transfer?: number;
 }
 
 export interface ScoreComposition {

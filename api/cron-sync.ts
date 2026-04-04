@@ -36,6 +36,32 @@ export default async function handler(req: Request) {
     if (!supabaseUrl || !supabaseKey) throw new Error("Configuration Supabase manquante (SERVICE_ROLE_KEY).");
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // Sécurisation de l'endpoint
+    const authHeader = req.headers.get('Authorization');
+    let isAuthorized = false;
+
+    if (authHeader) {
+        const token = authHeader.replace('Bearer ', '');
+        // 1. Vérifier si c'est la clé Service Role (utilisée par le Cron Job)
+        if (token === supabaseKey) {
+            isAuthorized = true;
+        } else {
+            // 2. Vérifier si c'est un JWT utilisateur valide (déclenchement manuel)
+            const { data: { user }, error } = await supabase.auth.getUser(token);
+            if (user && !error) {
+                isAuthorized = true;
+            }
+        }
+    }
+
+    if (!isAuthorized) {
+        return new Response(JSON.stringify({ error: "Non autorisé. Jeton manquant ou invalide." }), { 
+            status: 401, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
     const body = await req.json().catch(() => ({}));
     
     const targetDrawName = body.drawName;

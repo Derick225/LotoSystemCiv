@@ -14,13 +14,14 @@ const corsHeaders = {
 // Poids optimisables par l'algorithme
 const GENOME_KEYS = [
     'frequency', 'gap', 'spectral', 'markov', 'wavelet', 
-    'momentum', 'equilibrium', 'orchestration', 'anti_consensus'
+    'momentum', 'equilibrium', 'orchestration', 'anti_consensus',
+    'machine_transfer'
 ];
 
 /**
- * FITNESS FUNCTION v16.0
+ * FITNESS FUNCTION v16.1
  * Évalue la performance d'un jeu de poids sur l'historique récent.
- * Récompense: Précision (Hits).
+ * Récompense: Précision (Hits) et Near Misses (+/- 1).
  * Pénalité: Bruit (Faux positifs).
  */
 const evaluateGenome = (weights: any, signalMatrix: Record<number, any>, targets: number[]) => {
@@ -36,7 +37,8 @@ const evaluateGenome = (weights: any, signalMatrix: Record<number, any>, targets
             (sig.freq * (weights.frequency || 0.1)) +
             (sig.isGapMatch ? (weights.gap || 0.2) * 50 : 0) +
             (sig.markov * (weights.markov || 0.1) * 20) +
-            (sig.momentum * (weights.momentum || 0.05) * 10);
+            (sig.momentum * (weights.momentum || 0.05) * 10) +
+            (sig.machineTransfer ? (weights.machine_transfer || 0.1) * 30 : 0);
             
         candidates.push({ n: i, v: val });
     }
@@ -45,11 +47,20 @@ const evaluateGenome = (weights: any, signalMatrix: Record<number, any>, targets
     candidates.sort((a,b) => b.v - a.v);
     const top10 = candidates.slice(0, 10).map(c => c.n);
     
-    // Calcul des hits
-    const hits = top10.filter(n => targets.includes(n)).length;
+    // Calcul des hits et near misses
+    let exactHits = 0;
+    let nearMisses = 0;
     
-    // Score non-linéaire (récompense exponentiellement les hits)
-    score += Math.pow(hits, 2) * 100;
+    top10.forEach(n => {
+        if (targets.includes(n)) {
+            exactHits++;
+        } else if (targets.includes(n - 1) || targets.includes(n + 1)) {
+            nearMisses++;
+        }
+    });
+    
+    // Score non-linéaire (récompense exponentiellement les hits, bonus pour near misses)
+    score += Math.pow(exactHits, 2) * 100 + (nearMisses * 25);
     
     return score;
 };
@@ -71,12 +82,12 @@ export default async function handler(req: Request) {
     // Récupération Historique
     const { data: rawHistory } = await supabase
         .from('draw_results')
-        .select('gagnants')
+        .select('gagnants, machine')
         .eq('draw_name', drawName)
         .order('date', { ascending: false })
         .limit(60);
 
-    const history = rawHistory as { gagnants: number[] }[] | null;
+    const history = rawHistory as { gagnants: number[], machine: number[] }[] | null;
 
     if (!history || history.length < 30) throw new Error("Historique insuffisant pour l'apprentissage.");
 
@@ -96,11 +107,16 @@ export default async function handler(req: Request) {
         // Momentum court terme
         const momentum = trainingContext.slice(0, 5).filter(d => d.gagnants.includes(i)).length;
 
+        // Machine Transfer: Était-il dans la machine au tirage précédent ?
+        // trainingContext[0] est le tirage le plus récent du contexte d'entrainement
+        const wasInLastMachine = trainingContext[0]?.machine?.includes(i) || false;
+
         signalMatrix[i] = {
             freq: freq / 50, // Normalisé
             isGapMatch: gap >= 8 && gap <= 22,
             markov: 0.1, // Simplifié pour perf Edge
-            momentum: momentum
+            momentum: momentum,
+            machineTransfer: wasInLastMachine
         };
     }
     

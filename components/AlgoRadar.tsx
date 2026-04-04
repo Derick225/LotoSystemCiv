@@ -20,7 +20,8 @@ const LABELS: Record<string, string> = {
     spatial: 'Spatial',
     quantum_entanglement: 'Intrication',
     fractal_resonance: 'Fractale',
-    volatility_index: 'Volatilité'
+    volatility_index: 'Volatilité',
+    machine_transfer: 'Transfert Machine'
 };
 
 export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {

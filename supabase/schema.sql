@@ -161,6 +161,9 @@ CREATE POLICY "Users can insert their own snapshots" ON public.prediction_snapsh
 CREATE POLICY "Users can view their own snapshots" ON public.prediction_snapshots FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
 
+-- Activer le temps réel pour les snapshots (pour les notifications d'autopsie)
+ALTER PUBLICATION supabase_realtime ADD TABLE public.prediction_snapshots;
+
 -- ==========================================
 -- 7. TRIGGERS
 -- ==========================================
@@ -171,15 +174,15 @@ CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public
 
 -- 7. CRON JOBS (Automatisation des données historiques)
 -- Exécute la fonction cron-sync toutes les heures pour récupérer les nouveaux résultats
--- Note: Pour que cela fonctionne sur Supabase, il faut configurer l'URL du projet.
--- Remplacer PROJECT_REF par l'ID de votre projet Supabase.
+-- Note: Pour que cela fonctionne sur Supabase, il faut configurer l'URL du projet et la clé.
+-- Remplacer VOTRE_SERVICE_ROLE_KEY par votre clé secrète Supabase (Service Role Key).
 SELECT cron.schedule(
   'sync-draw-results-hourly',
   '0 * * * *',
   $$
   SELECT net.http_post(
       url:='https://ais-pre-iexwhv27jnwut37iq2ksdr-108345727073.europe-west2.run.app/api/cron-sync',
-      headers:='{"Content-Type": "application/json"}'::jsonb,
+      headers:='{"Content-Type": "application/json", "Authorization": "Bearer VOTRE_SERVICE_ROLE_KEY"}'::jsonb,
       body:='{"manualTrigger": false}'::jsonb
   );
   $$

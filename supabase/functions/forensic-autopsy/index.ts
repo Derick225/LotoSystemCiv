@@ -108,7 +108,7 @@ serve(async (req) => {
     Correspondances exactes : ${exactMatches}
     Near Misses (+/- 1) : ${nearMisses.join(', ') || 'Aucun'}
 
-    ADN de la décision (Poids des algorithmes) :
+    ADN de la décision (Poids des algorithmes, incluant potentiellement le transfert machine) :
     ${JSON.stringify(snapshot.decision_dna, null, 2)}
 
     Génère un rapport post-mortem structuré en JSON avec les clés suivantes :

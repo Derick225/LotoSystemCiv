@@ -44,7 +44,8 @@ export const getDefaultWeights = (): AlgoWeights => ({
     quantum_entanglement: 0.05,
     fractal_resonance: 0.05,
     volatility_index: 0.05,
-    shadow_factor: 0.0 // Protocole Shadow (+/- 1)
+    shadow_factor: 0.0, // Protocole Shadow (+/- 1)
+    machine_transfer: 0.05
 });
 
 export const getDefaultRules = (): AdaptiveRules => ({
@@ -236,6 +237,7 @@ export const generateMasterPrediction = async (
     const markovMap = new Map<number, number>();
     const momentumMap = new Map<number, number>();
     const affinityMap = new Map<number, Map<number, number>>();
+    const machineTransferMap = new Map<number, number>();
     
     // --- LSTM PREDICTION (Experimental) ---
     let lstmProbs: number[] = new Array(90).fill(0);
@@ -253,6 +255,15 @@ export const generateMasterPrediction = async (
         for (const n of draw.gagnants) {
             freqMap.set(n, (freqMap.get(n) || 0) + 1);
             if (!gapsMap.has(n)) gapsMap.set(n, i);
+        }
+        // Machine Transfer: Did a machine number move to gagnants in the next draw?
+        if (i < recentHistory.length - 1 && draw.machine && recentHistory[i+1].gagnants) {
+             const nextGagnants = recentHistory[i+1].gagnants;
+             draw.machine.forEach(mNum => {
+                 if(nextGagnants.includes(mNum)) {
+                     machineTransferMap.set(mNum, (machineTransferMap.get(mNum) || 0) + 1);
+                 }
+             });
         }
     }
     for (let i = 1; i <= N; i++) { if (!gapsMap.has(i)) gapsMap.set(i, sampleSize); }
@@ -372,6 +383,9 @@ export const generateMasterPrediction = async (
         nBreakdown.quantum_entanglement = coOccurrenceScores[num] || 0;
         nBreakdown.fractal_resonance = fractalResonanceScores[num] || 0;
         nBreakdown.twin = twinScores[num] || 0;
+        
+        const maxMachineTransfer = Math.max(...machineTransferMap.values()) || 1;
+        nBreakdown.machine_transfer = ((machineTransferMap.get(num) || 0) / maxMachineTransfer) * 100;
 
         // Volatility Index Scoring
         if (isHighVolatility) {
@@ -621,7 +635,8 @@ export const getStrategyName = (weights: AlgoWeights): string => {
         momentum: 'Vélocité',
         equilibrium: 'Retour Moyenne',
         fractal: 'Fractal Pulse',
-        twin: 'Miroir Temporel'
+        twin: 'Miroir Temporel',
+        machine_transfer: 'Transfert Machine'
     };
     
     return strategies[topAlgo] || `Hybride (${topAlgo})`;

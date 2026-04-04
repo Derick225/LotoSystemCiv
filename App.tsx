@@ -99,6 +99,40 @@ const AppContent: React.FC = () => {
     }
   }, [showToast]);
 
+  // Écouteur Temps Réel (WebSockets) pour les notifications d'autopsie
+  useEffect(() => {
+    if (!session?.user) return;
+
+    const channel = supabase
+      .channel('public:prediction_snapshots')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'prediction_snapshots',
+          filter: `user_id=eq.${session.user.id}`
+        },
+        (payload) => {
+          const oldRecord = payload.old;
+          const newRecord = payload.new;
+          
+          // Si le statut passe de PENDING à ANALYZED, on notifie l'utilisateur
+          if (oldRecord.status === 'PENDING' && newRecord.status === 'ANALYZED') {
+            audioEngine.play('success');
+            showToast(`🧬 Autopsie terminée pour le tirage ${newRecord.draw_name}. Nouvelles données disponibles.`, 'success');
+            // Rafraîchir les données globales si nécessaire
+            refreshData(newRecord.draw_name, true);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, showToast, refreshData]);
+
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
