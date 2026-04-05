@@ -92,50 +92,72 @@ serve(async (req) => {
       }
     }
 
-    // 4. Generate Report via Gemini
-    const apiKey = Deno.env.get('API_KEY');
-    if (!apiKey) {
-      throw new Error("Missing API_KEY for Gemini");
+    // 3.5 CACHE CHECK: Did we already analyze this exact prediction for this draw?
+    const { data: cachedReports } = await supabase
+      .from('forensic_reports')
+      .select('report_data, prediction_snapshots!inner(predicted_numbers)')
+      .eq('draw_result_id', drawResultId);
+
+    let reportContent = null;
+    let usedCache = false;
+
+    if (cachedReports && cachedReports.length > 0) {
+      const match = cachedReports.find((r: any) => 
+        JSON.stringify(r.prediction_snapshots.predicted_numbers) === JSON.stringify(predicted)
+      );
+      if (match) {
+        console.log("Cache HIT: Reusing identical prediction report.");
+        reportContent = match.report_data;
+        usedCache = true;
+      }
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-
-    const prompt = `
-    En tant qu'expert en analyse de données de loterie et en algorithmes prédictifs, réalise une autopsie de cette prédiction.
-
-    Prédiction : ${predicted.join(', ')}
-    Résultat réel : ${actual.join(', ')}
-    Correspondances exactes : ${exactMatches}
-    Near Misses (+/- 1) : ${nearMisses.join(', ') || 'Aucun'}
-
-    ADN de la décision (Poids des algorithmes, incluant potentiellement le transfert machine) :
-    ${JSON.stringify(snapshot.decision_dna, null, 2)}
-
-    Génère un rapport post-mortem structuré en JSON avec les clés suivantes :
-    - "analysis": Une analyse textuelle de ce qui a fonctionné ou échoué.
-    - "recommendations": Des recommandations pour ajuster les poids algorithmiques.
-    - "score": Une note sur 100 évaluant la qualité de la prédiction (même si elle n'a pas gagné, la structure était-elle bonne ?).
-    - "bias_detected": Un biais potentiel détecté dans l'ADN de la décision (ex: "Trop de poids sur la fréquence").
-    `;
-
-    const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            analysis: { type: Type.STRING },
-            recommendations: { type: Type.STRING },
-            score: { type: Type.NUMBER },
-            bias_detected: { type: Type.STRING }
-          },
-          required: ["analysis", "recommendations", "score", "bias_detected"]
-        }
+    // 4. Generate Report via Gemini (Only if no cache)
+    if (!reportContent) {
+      const apiKey = Deno.env.get('API_KEY');
+      if (!apiKey) {
+        throw new Error("Missing API_KEY for Gemini");
       }
-    });
 
-    const reportContent = JSON.parse(response.text || "{}");
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `
+      En tant qu'expert en analyse de données de loterie et en algorithmes prédictifs, réalise une autopsie de cette prédiction.
+
+      Prédiction : ${predicted.join(', ')}
+      Résultat réel : ${actual.join(', ')}
+      Correspondances exactes : ${exactMatches}
+      Near Misses (+/- 1) : ${nearMisses.join(', ') || 'Aucun'}
+
+      ADN de la décision (Poids des algorithmes, incluant potentiellement le transfert machine) :
+      ${JSON.stringify(snapshot.decision_dna, null, 2)}
+
+      Génère un rapport post-mortem structuré en JSON avec les clés suivantes :
+      - "analysis": Une analyse textuelle de ce qui a fonctionné ou échoué.
+      - "recommendations": Des recommandations pour ajuster les poids algorithmiques.
+      - "score": Une note sur 100 évaluant la qualité de la prédiction (même si elle n'a pas gagné, la structure était-elle bonne ?).
+      - "bias_detected": Un biais potentiel détecté dans l'ADN de la décision (ex: "Trop de poids sur la fréquence").
+      `;
+
+      const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              analysis: { type: Type.STRING },
+              recommendations: { type: Type.STRING },
+              score: { type: Type.NUMBER },
+              bias_detected: { type: Type.STRING }
+            },
+            required: ["analysis", "recommendations", "score", "bias_detected"]
+          }
+        }
+      });
+
+      reportContent = JSON.parse(response.text || "{}");
+    }
 
     // 5. Save Report
     const { data: report, error: reportError } = await supabase
@@ -145,7 +167,7 @@ serve(async (req) => {
         draw_result_id: drawResult.id,
         user_id: snapshot.user_id,
         report_data: reportContent,
-        ai_model_used: 'gemini-3.1-pro-preview'
+        ai_model_used: usedCache ? 'cache-hit' : 'gemini-3.1-pro-preview'
       })
       .select()
       .single();

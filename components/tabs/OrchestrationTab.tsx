@@ -287,9 +287,9 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
             const candidate = metrics?.topCandidates.find(c => c.number === num);
             breakdown[num] = {
                 orchestration: candidate ? candidate.score : 50,
-                fractal: candidate ? candidate.fractal : 50,
-                spectral: candidate ? candidate.spectral : 50,
-                momentum: candidate ? candidate.momentum : 50
+                fractal: 0,
+                spectral: 0,
+                momentum: 0
             };
         });
 

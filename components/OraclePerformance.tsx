@@ -1,8 +1,9 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { PredictionHistoryItem, DrawResult } from '../types';
 import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Activity } from 'lucide-react';
+import { Activity, BrainCircuit } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 interface OraclePerformanceProps {
     predictions: PredictionHistoryItem[];
@@ -10,6 +11,35 @@ interface OraclePerformanceProps {
 }
 
 export const OraclePerformance: React.FC<OraclePerformanceProps> = ({ predictions, results }) => {
+    const [learningLogs, setLearningLogs] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchLogs = async () => {
+            const { data } = await supabase
+                .from('learning_logs')
+                .select('*')
+                .order('created_at', { ascending: true })
+                .limit(50);
+            if (data) setLearningLogs(data);
+        };
+        fetchLogs();
+
+        const channel = supabase
+            .channel('learning-logs-sync')
+            .on('postgres_changes', 
+                { event: 'INSERT', schema: 'public', table: 'learning_logs' }, 
+                (payload) => {
+                    setLearningLogs(prev => {
+                        const newLogs = [...prev, payload.new];
+                        if (newLogs.length > 50) newLogs.shift();
+                        return newLogs;
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
     
     const data = useMemo(() => {
         // Fusionner les prédictions avec les résultats réels
@@ -101,6 +131,40 @@ export const OraclePerformance: React.FC<OraclePerformanceProps> = ({ prediction
                     <div className="text-lg font-black text-indigo-400">{Math.round(data.reduce((a,b)=>a+b.confidence,0)/data.length)}%</div>
                 </div>
             </div>
+
+            {learningLogs.length > 0 && (
+                <div className="mt-8 pt-6 border-t border-slate-800">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400">
+                            <BrainCircuit size={20} />
+                        </div>
+                        <div>
+                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Évolution Fitness (IA)</h3>
+                            <p className="text-[10px] text-slate-500 font-bold">Apprentissage continu du réseau</p>
+                        </div>
+                    </div>
+                    <div className="h-40 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={learningLogs} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorFitness" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#d946ef" stopOpacity={0.8}/>
+                                        <stop offset="95%" stopColor="#d946ef" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                                <XAxis dataKey="draw_name" tick={{fontSize: 9}} axisLine={false} tickLine={false} />
+                                <YAxis domain={['auto', 'auto']} tick={{fontSize: 9}} axisLine={false} tickLine={false} />
+                                <Tooltip 
+                                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '11px', color: '#fff' }}
+                                />
+                                <Area type="monotone" dataKey="new_fitness" name="Nouveau Fitness" fill="url(#colorFitness)" stroke="#d946ef" strokeWidth={2} />
+                                <Line type="monotone" dataKey="old_fitness" name="Ancien Fitness" stroke="#64748b" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

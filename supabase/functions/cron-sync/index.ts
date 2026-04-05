@@ -204,13 +204,20 @@ serve(async (req: Request) => {
                                 
                             if (pendingSnapshots && pendingSnapshots.length > 0) {
                                 let autopsyCount = 0;
-                                for (const snap of pendingSnapshots) {
-                                    console.log(`Triggering autopsy for snapshot ${snap.id} and result ${result.id}`);
-                                    // Appeler la fonction d'autopsie
-                                    await supabase.functions.invoke('forensic-autopsy', {
-                                        body: { snapshotId: snap.id, drawResultId: result.id }
-                                    }).catch((e: any) => console.error("Forensic autopsy trigger error:", e));
-                                    autopsyCount++;
+                                
+                                // BATCH PROCESSING: Process autopsies in chunks of 5 to avoid timeout and rate limits
+                                const chunkSize = 5;
+                                for (let i = 0; i < pendingSnapshots.length; i += chunkSize) {
+                                    const chunk = pendingSnapshots.slice(i, i + chunkSize);
+                                    console.log(`Processing autopsy chunk ${i/chunkSize + 1} for ${result.draw_name}`);
+                                    
+                                    await Promise.all(chunk.map(snap => 
+                                        supabase.functions.invoke('forensic-autopsy', {
+                                            body: { snapshotId: snap.id, drawResultId: result.id }
+                                        }).catch((e: any) => console.error(`Forensic autopsy trigger error for ${snap.id}:`, e))
+                                    ));
+                                    
+                                    autopsyCount += chunk.length;
                                 }
                                 
                                 // Si on a fait au moins une autopsie, on déclenche le self-learning pour ce tirage
@@ -239,6 +246,18 @@ serve(async (req: Request) => {
     });
 
   } catch (err: any) {
+    // WEBHOOK ALERTING (Monitoring)
+    const webhookUrl = Deno.env.get('DISCORD_WEBHOOK_URL') || Deno.env.get('SLACK_WEBHOOK_URL');
+    if (webhookUrl) {
+        await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                text: `🚨 **NEXUS CRON SYNC ERROR** 🚨\n\`\`\`${err.message}\`\`\`` 
+            })
+        }).catch((e: any) => console.error("Failed to send webhook alert:", e));
+    }
+
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

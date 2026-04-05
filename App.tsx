@@ -97,6 +97,19 @@ const AppContent: React.FC = () => {
         showToast("Paiement annulé.", "info");
         window.history.replaceState({}, document.title, window.location.pathname);
     }
+
+    const channel = supabase
+        .channel('global-draw-sync')
+        .on('postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'draw_results' }, 
+            (payload) => {
+                audioEngine.play('success');
+                showToast(`Nouveau tirage détecté : ${payload.new.draw_name} (${payload.new.date})`, "success");
+            }
+        )
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [showToast]);
 
   // Écouteur Temps Réel (WebSockets) pour les notifications d'autopsie

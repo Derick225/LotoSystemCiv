@@ -150,9 +150,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             scenario.numbers.forEach(num => {
                 breakdown[num] = {
                     orchestration: scenario.probability,
-                    fractal: scenario.metrics.fractalResonance * 100,
-                    spectral: scenario.metrics.spectralAlignment * 100,
-                    momentum: scenario.metrics.momentum * 100
+                    fractal: 0,
+                    spectral: 0,
+                    momentum: 0,
+                    consensus: result.consensusVector[num] || 0
                 };
             });
 

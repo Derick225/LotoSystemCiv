@@ -140,7 +140,13 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                     <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600"><History size={20}/></div>
                     <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter">Historique Inférence</h3>
                 </div>
-                <button onClick={() => { audioEngine.play('click'); if(confirm("Vider l'historique ?")) { clearPredictionHistory(drawName); setHistory([]); audioEngine.play('success'); }}} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-2 transition-colors"><Trash2 size={14}/> Reset Journal</button>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Hit
+                        <div className="w-2 h-2 rounded-full bg-amber-500 ml-2"></div> Near Miss (+/- 1)
+                    </div>
+                    <button onClick={() => { audioEngine.play('click'); if(confirm("Vider l'historique ?")) { clearPredictionHistory(drawName); setHistory([]); audioEngine.play('success'); }}} className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-2 transition-colors"><Trash2 size={14}/> Reset Journal</button>
+                </div>
             </div>
 
             <div className="grid gap-4">
@@ -180,12 +186,17 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                                         </div>
                                     </div>
                                     <div className="flex gap-2.5">
-                                        {item.prediction.suggestedNumbers.map(n => (
-                                            <div key={n} className="relative">
-                                                {hits.includes(n) && <div className="absolute -inset-1 bg-emerald-500/40 rounded-full blur animate-pulse"></div>}
-                                                <NumberBall number={n} size="sm" selected={hits.includes(n)} />
-                                            </div>
-                                        ))}
+                                        {item.prediction.suggestedNumbers.map(n => {
+                                            const isHit = hits.includes(n);
+                                            const isNearMiss = !isHit && res && res.gagnants.some(gn => Math.abs(gn - n) === 1);
+                                            return (
+                                                <div key={n} className="relative">
+                                                    {isHit && <div className="absolute -inset-1 bg-emerald-500/40 rounded-full blur animate-pulse"></div>}
+                                                    {isNearMiss && <div className="absolute -inset-1 bg-amber-500/40 rounded-full blur animate-pulse"></div>}
+                                                    <NumberBall number={n} size="sm" selected={isHit} />
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 
