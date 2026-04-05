@@ -1,6 +1,7 @@
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 60,
+  runtime: 'nodejs',
 };
 
 const corsHeaders = {

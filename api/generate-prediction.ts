@@ -3,7 +3,8 @@ import { generatePlatinumPredictionCore } from '../services/metaAnalystService';
 import { getFullOrchestrationAnalysisCore } from '../services/orchestrationService';
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 60,
+  runtime: 'nodejs',
 };
 
 const corsHeaders = {

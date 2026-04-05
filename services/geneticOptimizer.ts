@@ -37,6 +37,18 @@ export const runGeneticOptimization = async (
     }));
 
     return new Promise((resolve, reject) => {
+        if (typeof Worker === 'undefined') {
+            // FALLBACK: Return base weights if worker is not available (e.g. on backend)
+            console.warn("Genetic Worker not available, using base weights.");
+            resolve({
+                bestChromosome: { weights: baseWeights, rules: baseRules },
+                generations: 0,
+                timeElapsed: Date.now() - startTime,
+                totalEvaluations: 0
+            } as any);
+            return;
+        }
+
         const worker = new Worker(new URL('./workers/genetic.worker.ts', import.meta.url), { type: 'module' });
 
         worker.onmessage = (e) => {

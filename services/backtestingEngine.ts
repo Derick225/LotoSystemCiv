@@ -1,22 +1,11 @@
 
 import { DrawResult, AlgoWeights } from '../types';
+import { runSimulationCore, BettingStrategy, BacktestReport } from './simulationCore';
 
 const INITIAL_BANKROLL = 50000; 
 const TICKET_COST = 100; 
 
-export type BettingStrategy = 'FLAT' | 'MARTINGALE' | 'KELLY';
-
-export interface BacktestReport {
-    totalDraws: number;
-    netProfit: number;
-    roi: number;
-    maxDrawdown: number;
-    winRate: number;
-    sharpeRatio: number; // Nouvelle métrique de performance ajustée au risque
-    bankruptcyDraw: number | null; 
-    strategy: BettingStrategy;
-    history: { date: string, balance: number, bet: number, hits: number, profit: number }[];
-}
+export type { BettingStrategy, BacktestReport };
 
 /**
  * Prédiction rapide optimisée avec TypedArrays (Float32Array).
@@ -95,6 +84,22 @@ export const runSurvivalSimulation = async (
     
     // Clamp depth to available history
     const safeDepth = Math.min(depth, history.length - 5);
+    const liteHistory = history.map(h => ({ gagnants: h.gagnants, date: h.date }));
+
+    if (typeof Worker === 'undefined') {
+        // FALLBACK: Execute logic directly if worker is not available
+        try {
+            return runSimulationCore({
+                drawName,
+                history: liteHistory,
+                weights,
+                depth: safeDepth,
+                strategy
+            });
+        } catch (e: any) {
+            throw new Error("Simulation Fallback Error: " + e.message);
+        }
+    }
 
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./workers/simulation.worker.ts', import.meta.url), { type: 'module' });
@@ -129,9 +134,6 @@ export const runSurvivalSimulation = async (
             reject(new Error("Worker Critical Error: " + e.message));
         };
 
-        // Données légères pour le transfert (Structured Clone)
-        const liteHistory = history.map(h => ({ gagnants: h.gagnants, date: h.date }));
-        
         worker.postMessage({
             drawName,
             history: liteHistory,

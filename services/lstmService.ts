@@ -1,19 +1,24 @@
 
 import { DrawResult } from '../types';
 import { AppError, logError } from '../utils/AppError';
+import { runMarkovPrediction } from './lstmCore';
 
 export const LSTMService = {
     /**
      * Entraîne le modèle et prédit le prochain tirage via un Web Worker
      */
     runPrediction: async (history: DrawResult[]): Promise<{ probabilities: number[], accuracy: number }> => {
-        return new Promise((resolve, reject) => {
-            if (typeof Worker === 'undefined') {
-                logError(new AppError("Web Workers not supported", "WORKER_NOT_SUPPORTED", "low"), { source: 'LSTMService' });
-                resolve({ probabilities: new Array(90).fill(0), accuracy: 0 });
-                return;
+        if (typeof Worker === 'undefined') {
+            // FALLBACK: Execute logic directly if worker is not available (e.g. on backend)
+            try {
+                return runMarkovPrediction(history);
+            } catch (e: any) {
+                logError(new AppError(e.message || "Markov Fallback Error", "MARKOV_FALLBACK_ERROR", "medium"), { source: 'LSTMService' });
+                return { probabilities: new Array(90).fill(0), accuracy: 0 };
             }
+        }
 
+        return new Promise((resolve, reject) => {
             const worker = new Worker(new URL('./lstm.worker.ts', import.meta.url), { type: 'module' });
             const id = Date.now().toString();
 

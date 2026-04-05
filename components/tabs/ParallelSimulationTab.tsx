@@ -32,7 +32,7 @@ export const ParallelSimulationTab: React.FC = () => {
         return strategies.sort((a, b) => b[1].netProfit - a[1].netProfit)[0];
     }, [reports]);
 
-    const chartData = reports ? (reports.FLAT.history || []).map((h, i) => ({
+    const chartData = reports ? (reports.FLAT.history || []).map((h: any, i: number) => ({
         date: h.date,
         'Prudent (Flat)': h.balance,
         'Risqué (Martingale)': reports.MARTINGALE?.history[i]?.balance || 0,

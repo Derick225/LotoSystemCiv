@@ -1,5 +1,6 @@
 
 import { AppError, logError } from '../utils/AppError';
+import * as mathCore from './mathCore';
 
 /**
  * NEXUS WORKER SERVICE
@@ -32,7 +33,7 @@ class WorkerService {
                     logError(new AppError(e.message || "MathWorker Error", "MATH_WORKER_ERROR", "high", { error: e }), { source: 'WorkerService' });
                 };
             } catch (e: any) {
-                logError(new AppError(e.message || "Impossible d'initialiser le MathWorker", "WORKER_INIT_ERROR", "medium", { error: e }), { source: 'WorkerService' });
+                console.warn("Worker initialization failed, using fallback:", e);
             }
         }
     }
@@ -43,7 +44,42 @@ class WorkerService {
 
     public async runTask<T>(task: string, payload: any = {}, history: any[] = []): Promise<T> {
         if (!this.worker) {
-            throw new AppError("Worker not available", "WORKER_NOT_AVAILABLE", "medium");
+            // FALLBACK: Execute logic directly if worker is not available (e.g. on backend)
+            try {
+                let result: any;
+                switch (task) {
+                    case 'full_analysis':
+                        result = {
+                            spectral: mathCore.runSpectral(history),
+                            wavelet: mathCore.runWavelet(history),
+                            fractal: mathCore.runFractal(history)
+                        };
+                        break;
+                    case 'wavelet_analysis':
+                        result = mathCore.runWavelet(history);
+                        break;
+                    case 'hurst_exponent': 
+                        result = mathCore.runFractal(history);
+                        break;
+                    case 'DENOISE_PCA':
+                        result = mathCore.denoiseFeaturesPCA(payload.matrix, payload.variance);
+                        break;
+                    case 'TRAIN_RIDGE':
+                        result = mathCore.trainRidgeRegression(payload.features, payload.labels, payload.lambda);
+                        break;
+                    case 'GAP_EFFICIENCY':
+                        result = mathCore.runGapEfficiency(history);
+                        break;
+                    case 'SPECTRAL_METRICS':
+                        result = mathCore.runSpectral(history);
+                        break;
+                    default:
+                        result = { status: 'OK' };
+                }
+                return result as T;
+            } catch (e: any) {
+                throw new AppError(e.message || "Fallback Task Error", "WORKER_FALLBACK_ERROR", "medium");
+            }
         }
 
         const requestId = Math.random().toString(36).substring(7);

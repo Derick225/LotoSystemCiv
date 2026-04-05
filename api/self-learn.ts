@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { AppError, logError } from '../utils/AppError';
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 60,
+  runtime: 'nodejs',
 };
 
 const corsHeaders = {

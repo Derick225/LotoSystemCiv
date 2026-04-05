@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const config = {
   maxDuration: 60,
+  runtime: 'nodejs',
 };
 
 const corsHeaders = {
