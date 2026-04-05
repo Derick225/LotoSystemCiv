@@ -112,7 +112,7 @@ const sampleFromVector = (
 // PLATINUM ENGINE
 // ═══════════════════════════════════════════════════════════════
 
-export async function generatePlatinumPrediction(
+export async function generatePlatinumPredictionCore(
   drawName: string,
   history: DrawResult[],
   metrics?: { entropy?: EntropyMetric; volatility?: { score?: number }; [k: string]: unknown },
@@ -323,3 +323,42 @@ export const performPlatinumAudit = (
         verdict: bestHits >= 3 ? "Succès Confirmé" : bestHits >= 1 ? "Signal Partiel" : "Divergence"
     };
 };
+
+export async function generatePlatinumPrediction(
+  drawName: string,
+  history: DrawResult[],
+  metrics?: { entropy?: EntropyMetric; volatility?: { score?: number }; [k: string]: unknown },
+  _userBias?: unknown,
+  symbioticContext?: SymbioticContext | null,
+  _basePrediction?: any,
+): Promise<PlatinumResult> {
+    if (typeof window !== 'undefined') {
+        // We are in the browser, call the backend API
+        try {
+            const response = await fetch('/api/generate-prediction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'platinum',
+                    drawName,
+                    history,
+                    metrics,
+                    symbioticContext,
+                    basePrediction: _basePrediction
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+            return data.result;
+        } catch (e) {
+            console.warn("Backend platinum prediction failed, falling back to local calculation:", e);
+            return generatePlatinumPredictionCore(drawName, history, metrics, _userBias, symbioticContext, _basePrediction);
+        }
+    } else {
+        // We are in the backend, call the core function directly
+        return generatePlatinumPredictionCore(drawName, history, metrics, _userBias, symbioticContext, _basePrediction);
+    }
+}

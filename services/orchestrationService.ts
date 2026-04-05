@@ -202,7 +202,7 @@ const calculateCoherence = (numbers: number[]): number => {
 /**
  * Analyse Orchestrale Complète avec Backtest Dynamique et Markov.
  */
-export const getFullOrchestrationAnalysis = async (
+export const getFullOrchestrationAnalysisCore = async (
     drawName: string, 
     history: DrawResult[], 
     weights?: AlgoWeights // Injection ADN
@@ -330,4 +330,38 @@ export const getFullOrchestrationAnalysis = async (
         narrativeLesson: trend.lessons[0]?.description || `Cohérence harmonique du Top 5 : ${coherence}%.`,
         candidatesDetails
     };
+};
+
+export const getFullOrchestrationAnalysis = async (
+    drawName: string, 
+    history: DrawResult[], 
+    weights?: AlgoWeights // Injection ADN
+): Promise<OrchestrationMetrics & { candidatesDetails: Record<number, ScoreComposition> }> => {
+    if (typeof window !== 'undefined') {
+        // We are in the browser, call the backend API
+        try {
+            const response = await fetch('/api/generate-prediction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'orchestration',
+                    drawName,
+                    history,
+                    weightsToUse: weights
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+            return data.result;
+        } catch (e) {
+            console.warn("Backend orchestration prediction failed, falling back to local calculation:", e);
+            return getFullOrchestrationAnalysisCore(drawName, history, weights);
+        }
+    } else {
+        // We are in the backend, call the core function directly
+        return getFullOrchestrationAnalysisCore(drawName, history, weights);
+    }
 };
