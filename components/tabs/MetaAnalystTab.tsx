@@ -11,7 +11,7 @@ import { TicketXRay } from '../TicketXRay';
 import { 
     Activity, Layers, Zap, Hexagon, 
     BarChart3, RefreshCw, Radio, 
-    Fingerprint, MousePointer2, AlertCircle, Save
+    Fingerprint, MousePointer2, AlertCircle, Save, Share2
 } from 'lucide-react';
 import { 
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, 
@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
+import html2canvas from 'html2canvas';
 
 interface MetaAnalystTabProps {
     drawName: string;
@@ -174,6 +175,33 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         showToast("Vecteur sécurisé et autopsié.", "success");
     };
 
+    const handleExportScenario = async (scenario: PlatinumScenario) => {
+        audioEngine.play('click');
+        const ticketElement = document.getElementById(`scenario-xray-${scenario.id}`);
+        if (!ticketElement) return;
+        
+        try {
+            const canvas = await html2canvas(ticketElement, {
+                backgroundColor: '#0f172a', // slate-900
+                scale: 2,
+                logging: false
+            });
+            
+            const image = canvas.toDataURL("image/png");
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = `NexusPro_Platinum_${scenario.name}_${drawName}_${new Date().toISOString().split('T')[0]}.png`;
+            link.click();
+            
+            showToast("Analyse exportée avec succès !", "success");
+            audioEngine.play('success');
+        } catch (e) {
+            console.error("Export error:", e);
+            showToast("Erreur lors de l'export.", "error");
+            audioEngine.play('error');
+        }
+    };
+
     // Data for the Spectrum Chart
     const spectrumData = useMemo(() => {
         if (!result) return [];
@@ -320,12 +348,21 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         exit={{ opacity: 0, height: 0 }}
                         className="overflow-hidden"
                     >
-                        <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl">
-                            <div className="flex items-center gap-3 mb-6">
-                                <Fingerprint className="text-slate-400" size={20} />
-                                <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">
-                                    Rayon-X : {selectedScenario.name}
-                                </h4>
+                        <div id={`scenario-xray-${selectedScenario.id}`} className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-700 shadow-xl relative">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <Fingerprint className="text-slate-400" size={20} />
+                                    <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">
+                                        Rayon-X : {selectedScenario.name}
+                                    </h4>
+                                </div>
+                                <button 
+                                    onClick={() => handleExportScenario(selectedScenario)}
+                                    data-html2canvas-ignore
+                                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-colors"
+                                >
+                                    <Share2 size={14}/> Exporter
+                                </button>
                             </div>
                             
                             <TicketXRay 

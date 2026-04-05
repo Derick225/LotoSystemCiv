@@ -12,6 +12,7 @@ import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
+import html2canvas from 'html2canvas';
 
 interface OrchestrationTabProps { drawName: string; }
 
@@ -307,6 +308,33 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         showToast("Ticket sauvegardé et autopsié.", "success");
     };
 
+    const handleExportTicket = async () => {
+        audioEngine.play('click');
+        const ticketElement = document.getElementById('generated-ticket-view');
+        if (!ticketElement) return;
+        
+        try {
+            const canvas = await html2canvas(ticketElement, {
+                backgroundColor: '#020617', // nexus-950
+                scale: 2,
+                logging: false
+            });
+            
+            const image = canvas.toDataURL("image/png");
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = `NexusPro_Ticket_${drawName}_${new Date().toISOString().split('T')[0]}.png`;
+            link.click();
+            
+            showToast("Ticket exporté avec succès !", "success");
+            audioEngine.play('success');
+        } catch (e) {
+            console.error("Export error:", e);
+            showToast("Erreur lors de l'export.", "error");
+            audioEngine.play('error');
+        }
+    };
+
     if (nexusLoading || loading) return (
         <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse">
             <Layers className="text-indigo-500 animate-bounce" size={48} />
@@ -469,19 +497,25 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
 
                 {generatedTicket && !isGenerating && (
                     <div className="mt-10 pt-10 border-t border-white/10 animate-slide-up">
-                        <div className="bg-white/5 rounded-3xl p-6 border border-emerald-500/30 flex flex-col items-center gap-8">
+                        <div id="generated-ticket-view" className="bg-white/5 rounded-3xl p-6 border border-emerald-500/30 flex flex-col items-center gap-8">
                             <div className="flex gap-4 scale-110 md:scale-125">
                                 {generatedTicket.map((n, i) => (
                                     <NumberBall key={n} number={n} size="md" isAttractor />
                                 ))}
                             </div>
                             
-                            <div className="flex gap-4">
+                            <div className="flex gap-4" data-html2canvas-ignore>
                                 <button 
                                     onClick={handleSaveTicket}
                                     className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all"
                                 >
                                     <Save size={14}/> Sauvegarder
+                                </button>
+                                <button 
+                                    onClick={handleExportTicket}
+                                    className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all border border-slate-700"
+                                >
+                                    <Share2 size={14}/> Exporter Image
                                 </button>
                             </div>
                             
