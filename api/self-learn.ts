@@ -125,7 +125,36 @@ export default async function handler(req: Request) {
     const targets = [...new Set(validationSet.flatMap(d => d.gagnants))];
 
     // --- PHASE 2: ÉVOLUTION (GENETIC ALGO) ---
-    const { data: current } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
+    const { data: current } = await supabase.from('algo_weights').select('weights, updated_at').eq('draw_name', drawName).single();
+    
+    // "Soft Lock" (OCC) : On met à jour le updated_at tout de suite pour signaler qu'on travaille dessus
+    // Cela empêche d'autres instances lancées en même temps de faire le même calcul lourd.
+    let lockAcquired = false;
+    if (current) {
+        const { data: lockData } = await supabase
+            .from('algo_weights')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('draw_name', drawName)
+            .eq('updated_at', current.updated_at)
+            .select();
+            
+        if (lockData && lockData.length > 0) {
+            lockAcquired = true;
+        }
+    } else {
+        const { error: insertError } = await supabase.from('algo_weights').insert({
+            draw_name: drawName,
+            weights: { frequency: 0.2, gap: 0.2, markov: 0.2, momentum: 0.1 },
+            updated_at: new Date().toISOString()
+        });
+        if (!insertError) lockAcquired = true;
+    }
+
+    if (!lockAcquired) {
+        console.warn(`[LOCK] Un autre processus apprend déjà pour ${drawName}. Abandon pour économiser le CPU.`);
+        return new Response(JSON.stringify({ success: false, message: "Apprentissage déjà en cours (Lock)" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     let bestW = current?.weights || { frequency: 0.2, gap: 0.2, markov: 0.2, momentum: 0.1 };
     let bestScore = evaluateGenome(bestW, signalMatrix, targets);
     let improved = false;
@@ -140,10 +169,13 @@ export default async function handler(req: Request) {
         return mutant;
     });
 
-    const MAX_TIME_MS = 8000; // Watchdog Edge Function
+    const MAX_TIME_MS = 45000; // Watchdog Node.js (Max 60s)
 
-    for (let g = 0; g < 40; g++) {
-        if (Date.now() - startTime > MAX_TIME_MS) break;
+    for (let g = 0; g < 200; g++) {
+        if (Date.now() - startTime > MAX_TIME_MS) {
+            console.log(`Self-learn watchdog triggered at generation ${g}`);
+            break;
+        }
 
         // Évaluation
         const scored = population.map(w => ({ w, s: evaluateGenome(w, signalMatrix, targets) }));

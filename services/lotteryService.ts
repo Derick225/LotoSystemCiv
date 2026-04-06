@@ -277,17 +277,22 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
         }
 
         if (targetResultId) {
-            await supabase.functions.invoke('forensic-autopsy', {
-                body: { snapshotId: snap.id, drawResultId: targetResultId }
+            await fetch('/api/forensic-autopsy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshotId: snap.id, drawResultId: targetResultId })
             }).catch(e => console.error("Forensic autopsy trigger error:", e));
             autopsyCount++;
         }
       }
 
       if (autopsyCount > 0) {
-        await supabase.functions.invoke('self-learn', {
-            body: { drawName: normalizeDrawName(drawName) }
-        }).catch(e => console.error("Self-learn trigger error:", e));
+        try {
+            const { LearningService } = await import('./learningService');
+            await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
+        } catch (e) {
+            console.error("Self-learn trigger error:", e);
+        }
       }
     }
   } catch (e) {

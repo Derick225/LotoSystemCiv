@@ -68,6 +68,9 @@ export default async function handler(req: Request) {
     const targetDrawName = body.drawName;
     const manualTrigger = body.manualTrigger === true;
 
+    const CRON_START = Date.now();
+    const MAX_EXECUTION_TIME = 45000; // 45 seconds max to avoid Vercel 504 Timeout
+
     const now = new Date();
     const months = [formatMonth(now)];
     
@@ -164,6 +167,11 @@ export default async function handler(req: Request) {
                     // AUTOMATISATION (4) : Déclenchement de l'autopsie et de l'apprentissage
                     if (upsertedData && upsertedData.length > 0) {
                         for (const result of upsertedData) {
+                            if (Date.now() - CRON_START > MAX_EXECUTION_TIME) {
+                                console.warn(`[CRON] Timeout imminent (${MAX_EXECUTION_TIME}ms). Skipping remaining autopsies for ${result.draw_name}.`);
+                                break;
+                            }
+
                             // Chercher les prédictions en attente pour ce tirage
                             const { data: pendingSnapshots } = await supabase
                                 .from('prediction_snapshots')
@@ -180,9 +188,15 @@ export default async function handler(req: Request) {
                                     const chunk = pendingSnapshots.slice(i, i + chunkSize);
                                     console.log(`Processing autopsy chunk ${i/chunkSize + 1} for ${result.draw_name}`);
                                     
+                                    const host = req.headers.get('host') || process.env.VERCEL_URL || 'localhost:3000';
+                                    const protocol = host.includes('localhost') ? 'http' : 'https';
+                                    const baseUrl = `${protocol}://${host}`;
+
                                     await Promise.all(chunk.map(snap => 
-                                        supabase.functions.invoke('forensic-autopsy', {
-                                            body: { snapshotId: snap.id, drawResultId: result.id }
+                                        fetch(`${baseUrl}/api/forensic-autopsy`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ snapshotId: snap.id, drawResultId: result.id })
                                         }).catch(e => console.error(`Forensic autopsy trigger error for ${snap.id}:`, e))
                                     ));
                                     
@@ -191,10 +205,22 @@ export default async function handler(req: Request) {
                                 
                                 // Si on a fait au moins une autopsie, on déclenche le self-learning pour ce tirage
                                 if (autopsyCount > 0) {
-                                    console.log(`Triggering self-learning for ${result.draw_name}`);
-                                    await supabase.functions.invoke('self-learn', {
-                                        body: { drawName: result.draw_name }
-                                    }).catch(e => console.error("Self-learn trigger error:", e));
+                                    if (Date.now() - CRON_START > MAX_EXECUTION_TIME) {
+                                        console.warn(`[CRON] Timeout imminent. Skipping self-learn for ${result.draw_name}.`);
+                                    } else {
+                                        console.log(`Triggering self-learning for ${result.draw_name}`);
+                                        
+                                        // Appel de l'API locale (Node.js) au lieu de l'Edge Function Supabase
+                                        const host = req.headers.get('host') || process.env.VERCEL_URL || 'localhost:3000';
+                                        const protocol = host.includes('localhost') ? 'http' : 'https';
+                                        const baseUrl = `${protocol}://${host}`;
+                                        
+                                        await fetch(`${baseUrl}/api/self-learn`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+                                            body: JSON.stringify({ drawName: result.draw_name })
+                                        }).catch(e => console.error("Self-learn trigger error:", e));
+                                    }
                                 }
                             }
                         }

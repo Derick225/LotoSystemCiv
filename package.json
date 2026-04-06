@@ -9,8 +9,6 @@
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "deploy:nexus": "supabase functions deploy --no-verify-jwt",
-    "sync:results": "supabase functions invoke cron-sync",
     "supabase:login": "supabase login",
     "supabase:link": "supabase link"
   },

@@ -34,11 +34,11 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 return;
             }
 
-            // 2. If not, trigger Edge Function
+            // 2. If not, trigger Local API
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) throw new Error("Non authentifié");
 
-            const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/forensic-autopsy`, {
+            const response = await fetch('/api/forensic-autopsy', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

@@ -5,7 +5,7 @@ import { getAlgoWeights, saveAlgoWeights, generateMasterPrediction } from '../se
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance, linkPredictionToResult } from '../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, syncForensicReportsWithCloud } from '../services/postPredictionAnalysisService';
-import { runSelfLearningLoop } from '../services/selfLearningService';
+import { LearningService } from '../services/learningService';
 import { getSettings, saveSettings } from '../services/userPreferencesService';
 import { AppError, logError } from '../utils/AppError';
 
@@ -151,9 +151,9 @@ export const NexusEngine: React.FC = () => {
                                     forensicGenerated = true;
 
                                     // AUTO-TUNING: Self-Learning based on Forensic Reports
-                                    const learningResult = await runSelfLearningLoop(drawName, 3); // Lookback 3 recent reports
-                                    if (learningResult) {
-                                        console.log(`[Auto-Tuner] Weights adjusted for ${drawName}:`, learningResult.adjustments);
+                                    const learningResult = await LearningService.triggerAutoLearning(drawName);
+                                    if (learningResult && learningResult.improvement) {
+                                        console.log(`[Auto-Tuner] Weights adjusted for ${drawName}:`, learningResult.message);
                                     }
 
                                 } catch (error) {

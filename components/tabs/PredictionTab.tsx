@@ -16,7 +16,7 @@ import { ChaosAttractor3D } from '../ChaosAttractor3D';
 import { StrategyBattle } from '../StrategyBattle';
 import { QuantumFractalAnalysis } from '../QuantumFractalAnalysis';
 import { calculateShannonEntropy } from '../../services/mathService';
-import { runSelfLearningLoop } from '../../services/selfLearningService';
+import { LearningService } from '../../services/learningService';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
@@ -267,7 +267,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         showToast("Auto-Tune en cours...", "info");
                         // Artificial delay for UX
                         await new Promise(resolve => setTimeout(resolve, 1500));
-                        await runSelfLearningLoop(drawName);
+                        await LearningService.triggerAutoLearning(drawName);
                         showToast("Poids algorithmiques calibrés avec succès.", "success");
                         audioEngine.play('success');
                         setIsOptimizing(false);

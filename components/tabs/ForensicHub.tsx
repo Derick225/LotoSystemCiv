@@ -8,7 +8,7 @@ import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAna
 import { getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
 import { PredictionForensics } from '../PredictionForensics';
 import { ForensicResultAudit } from '../ForensicResultAudit';
-import { runSelfLearningLoop, LearningResult } from '../../services/selfLearningService';
+import { LearningService, LearningStatus } from '../../services/learningService';
 import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History, Dna, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import { ForensicReport, PlatinumAudit, AlgoWeights, PredictionHistoryItem } from '../../types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
@@ -30,7 +30,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [learning, setLearning] = useState(false);
-    const [learningResult, setLearningResult] = useState<LearningResult | null>(null);
+    const [learningResult, setLearningResult] = useState<LearningStatus | null>(null);
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [mode, setMode] = useState<ForensicMode>('prediction');
     const [refreshKey, setRefreshKey] = useState(0);
@@ -39,15 +39,15 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         audioEngine.play('scan');
         setLearning(true);
         try {
-            const result = await runSelfLearningLoop(drawName, 10);
-            if (result) {
+            const result = await LearningService.triggerAutoLearning(drawName, currentWeights || undefined);
+            if (result && result.improvement) {
                 setLearningResult(result);
-                setCurrentWeights(result.newWeights);
+                if (result.weights) setCurrentWeights(result.weights);
                 audioEngine.play('success');
-                showToast(`Apprentissage terminé. ${result.adjustments.length} algos ajustés après analyse de ${result.reportsAnalyzed} tirages.`, "success");
+                showToast(result.message, "success");
             } else {
                 audioEngine.play('click');
-                showToast("Aucun ajustement nécessaire. Les poids actuels sont optimaux.", "info");
+                showToast(result?.message || "Aucun ajustement nécessaire. Les poids actuels sont optimaux.", "info");
             }
         } catch (e) {
             audioEngine.play('error');
@@ -69,6 +69,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             setCurrentWeights(weights);
             // 1. Charger les rapports existants (Local First)
             let currentReports = getLocalForensicReports().filter(r => r.drawName === drawName);
+            const existingReportIds = new Set(currentReports.map(r => r.predictionId));
             
             // 2. Identifier les prédictions sans rapport
             const preds = await getPredictionHistoryAsync(drawName);
@@ -85,7 +86,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
 
             for (const pred of preds.slice(0, 30)) {
                 // Si rapport existe déjà pour cette prédiction, skip
-                if (currentReports.some(r => r.predictionId === pred.id)) continue;
+                if (existingReportIds.has(pred.id)) continue;
 
                 let actual = null;
                 if (pred.drawResultId) {
@@ -404,29 +405,22 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                     <div className="space-y-4">
                                         <div className="flex items-center gap-3 text-sm text-slate-300 bg-indigo-500/10 p-4 rounded-xl border border-indigo-500/20">
                                             <Microscope className="text-indigo-400" size={18} />
-                                            <span>Basé sur l'analyse de <strong>{learningResult.reportsAnalyzed}</strong> rapports Forensic récents.</span>
+                                            <span>{learningResult.message}</span>
                                         </div>
-                                        <div className="space-y-2 mt-4">
-                                            {learningResult.adjustments.map((adj, idx) => (
-                                                <div key={idx} className="flex items-start gap-3 p-3 bg-slate-800/30 rounded-xl border border-white/5">
-                                                    <div className={`mt-0.5 p-1 rounded-md ${adj.delta > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                                        {adj.delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-xs font-bold text-slate-200 uppercase">{adj.algo}</div>
-                                                        <div className="text-[10px] text-slate-500 mt-1">{adj.reason}</div>
-                                                    </div>
-                                                    <div className={`ml-auto text-xs font-mono font-bold ${adj.delta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                        {adj.delta > 0 ? '+' : ''}{(adj.delta * 100).toFixed(1)}%
-                                                    </div>
+                                        {learningResult.delta && (
+                                            <div className="flex items-start gap-3 p-3 bg-slate-800/30 rounded-xl border border-white/5">
+                                                <div className={`mt-0.5 p-1 rounded-md ${parseFloat(learningResult.delta) > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                                    {parseFloat(learningResult.delta) > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                                                 </div>
-                                            ))}
-                                            {learningResult.adjustments.length === 0 && (
-                                                <div className="text-center p-6 text-slate-500 text-sm italic">
-                                                    Aucun ajustement nécessaire. L'ADN est optimal.
+                                                <div>
+                                                    <div className="text-xs font-bold text-slate-200 uppercase">Amélioration Globale</div>
+                                                    <div className="text-[10px] text-slate-500 mt-1">Gain de performance estimé sur l'historique récent</div>
                                                 </div>
-                                            )}
-                                        </div>
+                                                <div className={`ml-auto text-xs font-mono font-bold ${parseFloat(learningResult.delta) > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    +{learningResult.delta}%
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 space-y-4 py-12">
