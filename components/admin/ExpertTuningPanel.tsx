@@ -4,6 +4,7 @@ import { AlgoRadar } from '../AlgoRadar';
 import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights, saveAlgoWeights, getAlgoWeights, getStrategyName } from '../../services/predictionEngine';
 import { LearningService } from '../../services/learningService'; 
 import type { AlgoWeights, AdaptiveRules } from '../../types';
+import { AlgoKey } from '../../shared/prediction.types';
 import { useToast } from '../ui/Toast';
 import { useNexusStore } from '../../store/useNexusStore';
 import { Sliders, Save, Scale, Gauge, RefreshCw, BrainCircuit, CheckCircle2, AlertTriangle, Dna } from 'lucide-react';
@@ -54,7 +55,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         return vals.reduce((a, b) => a + (Number(b) || 0), 0);
     }, [localWeights]);
 
-    const handleWeightChange = (key: keyof AlgoWeights, value: string) => {
+    const handleWeightChange = (key: AlgoKey, value: string) => {
         audioEngine.play('click');
         const numValue = parseFloat(value);
         setLocalWeights(prev => {
@@ -235,7 +236,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2 max-h-[500px]">
-                            {(Object.keys(localWeights) as Array<keyof AlgoWeights>).map(key => {
+                            {(Object.keys(localWeights) as Array<AlgoKey>).map(key => {
                                 const val = (localWeights[key] as number) ?? 0;
                                 const percent = (val * 100).toFixed(1);
                                 const isActive = val > 0.05;

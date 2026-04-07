@@ -1,6 +1,7 @@
 
 import React, { useMemo } from 'react';
 import type { AlgoWeights } from '../types';
+import { AlgoKey } from '../shared/prediction.types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, Tooltip } from 'recharts';
 
 interface AlgoRadarProps {
@@ -10,24 +11,24 @@ interface AlgoRadarProps {
 }
 
 const LABELS: Record<string, string> = {
-    frequency: 'Fréquence',
-    gap: 'Écart',
-    spectral: 'Spectral',
-    markov: 'Markov',
-    momentum: 'Momentum',
-    equilibrium: 'Équilibre',
-    anti_consensus: 'Chaos',
-    spatial: 'Spatial',
-    quantum_entanglement: 'Intrication',
-    fractal_resonance: 'Fractale',
-    volatility_index: 'Volatilité',
-    machine_transfer: 'Transfert Machine'
+    [AlgoKey.FREQUENCY]: 'Fréquence',
+    [AlgoKey.GAPS]: 'Écart',
+    [AlgoKey.SPECTRAL]: 'Spectral',
+    [AlgoKey.MARKOV]: 'Markov',
+    [AlgoKey.MOMENTUM]: 'Momentum',
+    [AlgoKey.EQUILIBRIUM]: 'Équilibre',
+    [AlgoKey.ANTI_CONSENSUS]: 'Chaos',
+    [AlgoKey.SPATIAL]: 'Spatial',
+    [AlgoKey.QUANTUM_ENTANGLEMENT]: 'Intrication',
+    [AlgoKey.FRACTAL_RESONANCE]: 'Fractale',
+    [AlgoKey.VOLATILITY_INDEX]: 'Volatilité',
+    [AlgoKey.MACHINE]: 'Transfert Machine'
 };
 
 export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {
     const data = useMemo(() => {
         // On normalise les clés pour l'affichage
-        const keys = Object.keys(LABELS) as Array<keyof AlgoWeights>;
+        const keys = Object.keys(LABELS) as Array<AlgoKey>;
         
         return keys.map(key => ({
             subject: LABELS[key],

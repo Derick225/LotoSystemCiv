@@ -69,11 +69,16 @@ const AppContent: React.FC = () => {
   const setDrawName = useNexusStore(state => state.setDrawName);
   const drawName = useNexusStore(state => state.drawName);
   const refreshData = useNexusStore(state => state.refreshData);
+  const initializeStore = useNexusStore(state => state.initialize);
   const { showToast } = useToast();
   
   const { session, isAdmin, loading: authLoading, subscription, refreshSubscription } = useAuth();
   
   const [isBooted, setIsBooted] = useState(false);
+
+  useEffect(() => {
+    initializeStore();
+  }, [initializeStore]);
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
   const [showWallet, setShowWallet] = useState(false);

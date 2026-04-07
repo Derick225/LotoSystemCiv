@@ -175,7 +175,11 @@ export const NexusEngine: React.FC = () => {
                         overallScore: 0.25,
                         reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
                         bias: 'NEUTRAL',
-                        sampleSize: perf.analyzedDrawsCount
+                        sampleSize: perf.analyzedDrawsCount,
+                        baseline: 0.2,
+                        variance: 0.05,
+                        trend: 0,
+                        confidence: 0.8
                     });
                 }
             } catch (e: any) {

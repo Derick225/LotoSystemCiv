@@ -8,6 +8,7 @@ import { motion } from 'framer-motion';
 import { calculateGap, calculateFrequency } from '../../services/mathService';
 import { useToast } from '../ui/Toast';
 import { audioEngine } from '../../utils/audioEngine';
+import { AlgoKey } from '../../shared/prediction.types';
 
 interface MissedNumberAnalysis {
     number: number;
@@ -15,7 +16,7 @@ interface MissedNumberAnalysis {
     frequency: number;
     isRepeat: boolean;
     reason: string;
-    suggestedAdjustment: keyof AlgoWeights;
+    suggestedAdjustment: AlgoKey;
     adjustmentValue: number;
 }
 
@@ -129,28 +130,28 @@ export const FeedbackLoopTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             const isRepeat = pastHistory[0]?.gagnants.includes(num) || false;
 
             let reason = "Raison inconnue";
-            let suggestedAdjustment: keyof AlgoWeights = 'ai_intuition';
+            let suggestedAdjustment: AlgoKey = AlgoKey.AI_INTUITION;
             let adjustmentValue = 0;
 
             if (isRepeat) {
                 reason = "Répétition immédiate (Twin/Markov)";
-                suggestedAdjustment = 'twin';
+                suggestedAdjustment = AlgoKey.TWIN;
                 adjustmentValue = 0.05;
             } else if (gap > 20) {
                 reason = `Écart critique élevé (${gap})`;
-                suggestedAdjustment = 'gap';
+                suggestedAdjustment = AlgoKey.GAPS;
                 adjustmentValue = 0.05;
             } else if (freq > 8) {
                 reason = `Frequence élevée (${freq}/50)`;
-                suggestedAdjustment = 'frequency';
+                suggestedAdjustment = AlgoKey.FREQUENCY;
                 adjustmentValue = 0.05;
             } else if (gap < 3) {
                 reason = "Sortie récente (Hot)";
-                suggestedAdjustment = 'momentum';
+                suggestedAdjustment = AlgoKey.MOMENTUM;
                 adjustmentValue = 0.05;
             } else {
                 reason = "Pattern complexe (Spectral/Chaos)";
-                suggestedAdjustment = 'spectral';
+                suggestedAdjustment = AlgoKey.SPECTRAL;
                 adjustmentValue = 0.05;
             }
 

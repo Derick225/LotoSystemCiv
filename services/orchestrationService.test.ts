@@ -4,15 +4,18 @@ import type { DrawResult } from '../types';
 
 const mockHistory: DrawResult[] = [
     { id: '1', date: '02/01/2025', drawName: 'TEST_DRAW', gagnants: [5, 12, 23, 45, 89], machine: [10, 20, 30, 40, 50], version: 1 },
-    { id: '2', date: '01/01/2025', drawName: 'TEST_DRAW', gagnants: [5, 11, 67, 44, 80], machine: [1, 2, 3, 4, 5], version: 1 }
+    { id: '2', date: '01/01/2025', drawName: 'TEST_DRAW', gagnants: [5, 11, 67, 44, 80], machine: [1, 2, 3, 4, 5], version: 1 },
+    { id: '3', date: '01/01/2025', drawName: 'TEST_DRAW', gagnants: [1, 2, 3, 4, 5], machine: [1, 2, 3, 4, 5], version: 1 },
+    { id: '4', date: '01/01/2025', drawName: 'TEST_DRAW', gagnants: [1, 2, 3, 4, 5], machine: [1, 2, 3, 4, 5], version: 1 },
+    { id: '5', date: '01/01/2025', drawName: 'TEST_DRAW', gagnants: [1, 2, 3, 4, 5], machine: [1, 2, 3, 4, 5], version: 1 }
 ];
 
 describe('Orchestration Service', () => {
-    it('should detect immediate repetition (Echo)', () => {
+    it('should detect machine transfer patterns', () => {
         const trend = analyzeImmediateTrend(mockHistory);
-        const echoPattern = trend.lessons.find(l => l.pattern === 'Répétition');
-        expect(echoPattern).toBeDefined();
-        if(echoPattern) expect(echoPattern.description).toContain('5');
+        const machinePattern = trend.lessons.find(l => l.pattern === 'Transfert Machine');
+        expect(machinePattern).toBeDefined();
+        if(machinePattern) expect(machinePattern.impactScore).toBeGreaterThan(0);
     });
 
     it('should detect neighbor patterns', () => {

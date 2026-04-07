@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { AlgoWeights, Prediction, SmartInsight, OracleVocalContext, RiskProfile, DrawResult } from '../types';
-import { getNextScheduledDraw } from '../services/lotteryService';
+import { AlgoWeights, Prediction, SmartInsight, OracleVocalContext, RiskProfile, DrawResult, AnalyticsData, CalibrationData } from '../types';
+import { getNextScheduledDraw, fetchResults } from '../services/lotteryService';
+import { saveAlgoWeights } from '../services/prediction/weightsManager';
 
 interface NexusState {
   // UI State
@@ -34,7 +35,7 @@ interface NexusState {
   // Engine State
   lastPrediction: Prediction | null;
   smartInsights: SmartInsight[];
-  calibration: any;
+  calibration: CalibrationData | null;
   loading: boolean;
 
   // Actions
@@ -47,22 +48,23 @@ interface NexusState {
   setVocalContext: (ctx: OracleVocalContext | null) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
-  setCalibration: (cal: any) => void;
+  setCalibration: (cal: CalibrationData | null) => void;
   
   // Engine Actions
-  setHistoryData: (history: DrawResult[], stats: any[], gaps: any[]) => void;
-  setAnalyticsData: (analytics: any) => void;
+  setHistoryData: (history: DrawResult[], stats: { number: number; count: number }[], gaps: { number: number; gap: number }[]) => void;
+  setAnalyticsData: (analytics: AnalyticsData) => void;
   setLoading: (loading: boolean) => void;
   refreshData: (name: string, force?: boolean) => Promise<void>;
   updateGlobalWeights: (weights: AlgoWeights) => Promise<void>;
   refresh: () => Promise<void>;
+  initialize: () => void;
 }
 
 export const useNexusStore = create<NexusState>()(
   persist(
     (set, get) => ({
-      drawName: getNextScheduledDraw()?.name || 'Reveil',
-      currentDrawName: getNextScheduledDraw()?.name || 'Reveil',
+      drawName: 'Reveil',
+      currentDrawName: 'Reveil',
       inspectingNumber: null,
       hoveredNumber: null,
       isGodMode: false,
@@ -89,6 +91,13 @@ export const useNexusStore = create<NexusState>()(
       calibration: null,
       loading: true,
 
+      initialize: () => {
+        const nextDraw = getNextScheduledDraw();
+        if (nextDraw) {
+            set({ drawName: nextDraw.name, currentDrawName: nextDraw.name });
+        }
+      },
+
       setDrawName: (name) => set({ drawName: name, currentDrawName: name }),
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
@@ -114,24 +123,38 @@ export const useNexusStore = create<NexusState>()(
       setLoading: (loading) => set({ loading }),
       
       refreshData: async (name, force) => {
-        set({ drawName: name, currentDrawName: name });
-        if (force) {
-          // Will be handled by the engine component listening to drawName changes
+        set({ loading: true, drawName: name, currentDrawName: name });
+        try {
+            const { data } = await fetchResults(name);
+            set({ history: data });
+        } catch (error) {
+            console.error("Failed to refresh data:", error);
+        } finally {
+            set({ loading: false });
         }
       },
       updateGlobalWeights: async (weights) => {
         set({ globalWeights: weights });
-        // The actual saving will be handled by the engine or a side effect
+        const { drawName } = get();
+        try {
+            await saveAlgoWeights(drawName, weights);
+        } catch (error) {
+            console.error("Failed to save algo weights:", error);
+        }
       },
       refresh: async () => {
-        // Handled by engine
+        const { drawName } = get();
+        await get().refreshData(drawName, true);
       }
     }),
     {
       name: 'nexus-storage',
+      version: 1,
       partialize: (state) => ({ 
         isGodMode: state.isGodMode, 
-        riskProfile: state.riskProfile
+        riskProfile: state.riskProfile,
+        globalWeights: state.globalWeights,
+        drawName: state.drawName
       }),
     }
   )

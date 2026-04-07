@@ -1,0 +1,75 @@
+export enum AlgoKey {
+    FREQUENCY = 'frequency',
+    GAPS = 'gap',
+    SPECTRAL = 'spectral',
+    FRACTAL = 'fractal',
+    MARKOV = 'markov',
+    POISSON = 'poisson',
+    MOMENTUM = 'momentum',
+    EQUILIBRIUM = 'equilibrium',
+    AI_INTUITION = 'ai_intuition',
+    DECISION_FOREST = 'decision_forest',
+    WAVELET = 'wavelet',
+    RESISTANCE = 'resistance',
+    SPATIAL = 'spatial',
+    ORCHESTRATION = 'orchestration',
+    DIGITAL_ROOT = 'digital_root',
+    GAP_VELOCITY = 'gap_velocity',
+    ISOLATION_ANOMALY = 'isolation_anomaly',
+    LEADER_SUCCESSION = 'leader_succession',
+    ANTI_CONSENSUS = 'anti_consensus',
+    MONTE_CARLO = 'monte_carlo',
+    LSTM = 'lstm',
+    LSTM_PATTERN = 'lstm_pattern',
+    BAYES = 'bayes',
+    TEMPORAL = 'temporal',
+    TRANSFORMER = 'transformer',
+    QUANTUM_ENTANGLEMENT = 'quantum_entanglement',
+    FRACTAL_RESONANCE = 'fractal_resonance',
+    SHADOW_FACTOR = 'shadow_factor',
+    TWIN = 'twin',
+    VOLATILITY_INDEX = 'volatility_index',
+    MACHINE = 'machine_transfer',
+    STRUCTURAL = 'structural',
+    TREND = 'trend',
+    NETWORK = 'network',
+    AFFINITY = 'affinity'
+}
+
+export type AlgoWeights = Partial<Record<AlgoKey, number>>;
+
+export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = {
+    [AlgoKey.FREQUENCY]: 0.15,
+    [AlgoKey.MARKOV]: 0.15,
+    [AlgoKey.GAPS]: 0.10,
+    [AlgoKey.SPECTRAL]: 0.10,
+    [AlgoKey.POISSON]: 0.05,
+    [AlgoKey.MOMENTUM]: 0.05,
+    [AlgoKey.EQUILIBRIUM]: 0.05,
+    [AlgoKey.AI_INTUITION]: 0.05,
+    [AlgoKey.DECISION_FOREST]: 0.05,
+    [AlgoKey.FRACTAL]: 0.05,
+    [AlgoKey.WAVELET]: 0.05,
+    [AlgoKey.RESISTANCE]: 0.05,
+    [AlgoKey.SPATIAL]: 0.05,
+    [AlgoKey.ORCHESTRATION]: 0.0,
+    [AlgoKey.GAP_VELOCITY]: 0.05,
+    [AlgoKey.ANTI_CONSENSUS]: 0.0,
+    [AlgoKey.LSTM]: 0.05,
+    [AlgoKey.BAYES]: 0.05,
+    [AlgoKey.LEADER_SUCCESSION]: 0.05,
+    [AlgoKey.TWIN]: 0.10,
+    [AlgoKey.QUANTUM_ENTANGLEMENT]: 0.05,
+    [AlgoKey.FRACTAL_RESONANCE]: 0.05,
+    [AlgoKey.VOLATILITY_INDEX]: 0.05,
+    [AlgoKey.SHADOW_FACTOR]: 0.0,
+    [AlgoKey.MACHINE]: 0.05
+};
+
+export type ScoreBreakdown = Partial<Record<AlgoKey, number>>;
+
+export const PREDICTION_CONSTANTS = {
+    MIN_SUM: 100,
+    MAX_SUM: 350,
+    CONFIDENCE_THRESHOLD: 0.95,
+};

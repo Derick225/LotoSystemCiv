@@ -1,4 +1,6 @@
 
+import { AlgoWeights, ScoreBreakdown } from './shared/prediction.types';
+
 export interface GapEfficiency {
     number: number;
     currentGap: number;
@@ -116,7 +118,7 @@ export interface ForensicReport {
     riggedProbability?: number;
     entropyCollapse?: boolean;
     benfordCompliance?: number;
-    evidenceLogs?: string[];
+    evidenceLogs?: any[];
     // New Data
     counterfactuals?: CounterfactualResult[];
     spectralDeviations?: SpectralDeviation[];
@@ -229,70 +231,7 @@ export interface ChiSquareMetric {
     score: number;
 }
 
-export interface AlgoWeights {
-    frequency?: number;
-    gap?: number;
-    spectral?: number;
-    fractal?: number;
-    markov?: number;
-    poisson?: number;
-    momentum?: number;
-    equilibrium?: number;
-    ai_intuition?: number;
-    decision_forest?: number;
-    wavelet?: number;
-    resistance?: number;
-    spatial?: number;
-    orchestration?: number;
-    digital_root?: number;
-    gap_velocity?: number;
-    isolation_anomaly?: number;
-    leader_succession?: number;
-    anti_consensus?: number;
-    monte_carlo?: number;
-    lstm?: number;
-    lstm_pattern?: number;
-    bayes?: number;
-    temporal?: number;
-    transformer?: number;
-    quantum_entanglement?: number;
-    fractal_resonance?: number;
-    shadow_factor?: number;
-    twin?: number; // Nouveau score de tirages jumeaux
-    volatility_index?: number;
-    machine_transfer?: number; // Nouveau score pour les transferts Machine -> Gagnant
-}
-
-export interface ScoreBreakdown {
-    frequency?: number;
-    gap?: number;
-    poisson?: number;
-    markov?: number;
-    spectral?: number;
-    decision_forest?: number;
-    momentum?: number;
-    equilibrium?: number;
-    ai_intuition?: number;
-    fractal?: number;
-    orchestration?: number;
-    spatial?: number;
-    wavelet?: number;
-    bayes?: number;
-    gap_velocity?: number;
-    anti_consensus?: number;
-    lstm?: number;
-    resistance?: number;
-    temporal?: number;
-    transformer?: number;
-    digital_root?: number;
-    leader_succession?: number;
-    quantum_entanglement?: number;
-    fractal_resonance?: number;
-    twin?: number; // Nouveau score de tirages jumeaux
-    volatility_index?: number;
-    network?: number;
-    machine_transfer?: number;
-}
+export * from './shared/prediction.types';
 
 export interface ScoreComposition {
     structural: number;
@@ -498,6 +437,24 @@ export interface OracleVocalContext {
 export interface MonthStats {
     monthIndex: number;
     topNumbers: { number: number; count: number }[];
+}
+
+export interface AnalyticsData {
+    spectral: any[];
+    wavelet: any[];
+    fractal: any[];
+    volatility: any | null;
+    regime: any | null;
+    correlationMatrix: any;
+    regularity: any[];
+    symbioticContext: any | null;
+}
+
+export interface CalibrationData extends BrierCalibration {
+    baseline: number;
+    variance: number;
+    trend: number;
+    confidence: number;
 }
 
 export interface SmartInsight {

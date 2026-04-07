@@ -69,7 +69,7 @@ export const generateTacticalReport = (data: ReportData) => {
             `${Math.round((bd.frequency || 0))}%`,
             `${Math.round((bd.gap || 0))}%`,
             `${Math.round((bd.lstm || 0))}%`, // LSTM Score
-            `${Math.round((Object.values(bd).reduce((a, b) => (a || 0) + (b || 0), 0) / Object.keys(bd).length))}%` // Moyenne approx
+            `${Math.round((Object.values(bd).reduce((a: number, b: any) => a + (b || 0), 0) / Object.keys(bd).length))}%` // Moyenne approx
         ];
     });
 

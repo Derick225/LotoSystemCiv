@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import type { ForensicReport, ForensicEvidence, AlgoWeights, PredictionFeedback } from '../types';
+import { AlgoKey } from '../shared/prediction.types';
 import { NumberBall } from './NumberBall';
 import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from '../services/predictionEngine';
 import { updatePredictionFeedback } from '../services/predictionHistoryService';
@@ -54,16 +55,16 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
             if (bestScenario.action === 'SYNERGY') {
                 const algos = bestScenario.algo.split(' + ');
                 algos.forEach((a: string) => {
-                    const algoKey = a as keyof AlgoWeights;
+                    const algoKey = a as AlgoKey;
                     newWeights[algoKey] = (newWeights[algoKey] || 0) + 0.15;
                 });
                 message = `Synergie ${bestScenario.algo} renforcée`;
             } else if (bestScenario.action === 'REDUCE') {
-                const algoKey = bestScenario.algo as keyof AlgoWeights;
+                const algoKey = bestScenario.algo as AlgoKey;
                 newWeights[algoKey] = Math.max(0, (newWeights[algoKey] || 0) - 0.15);
                 message = `Poids de ${algoKey.toUpperCase()} réduit`;
             } else { // BOOST or ISOLATE
-                const algoKey = bestScenario.algo as keyof AlgoWeights;
+                const algoKey = bestScenario.algo as AlgoKey;
                 newWeights[algoKey] = (newWeights[algoKey] || 0) + 0.15;
                 message = `${algoKey.toUpperCase()} renforcé`;
             }

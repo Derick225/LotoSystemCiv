@@ -8,6 +8,7 @@
     "start": "node server.ts",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "supabase:login": "supabase login",
     "supabase:link": "supabase link"
@@ -50,11 +51,13 @@
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
+    "fast-check": "^4.6.0",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "tsx": "^4.21.0",
     "typescript": "^5.4.5",
-    "vite": "^5.2.11"
+    "vite": "^5.2.11",
+    "vitest": "^4.1.2"
   },
   "overrides": {
     "react": "$react",
