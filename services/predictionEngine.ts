@@ -103,7 +103,8 @@ const calculateSimpleFeatures = (num: number, history: DrawResult[]): number[] =
 
 export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]): Promise<{ success: boolean; message: string; newWeights?: AlgoWeights }> => {
     const LAST_RUN_KEY = `nexus_autolearn_last_${drawName}`;
-    const lastRun = localStorage.getItem(LAST_RUN_KEY);
+    const isBrowser = typeof window !== 'undefined';
+    const lastRun = isBrowser ? localStorage.getItem(LAST_RUN_KEY) : null;
     const now = Date.now();
     
     if (lastRun && (now - Number(lastRun)) < 86400000) {
@@ -163,7 +164,9 @@ export const runAutoLearn = async (drawName: string, fullHistory: DrawResult[]):
         const normalized = normalizeWeights(newWeights);
         await saveAlgoWeights(drawName, normalized);
         
-        localStorage.setItem(LAST_RUN_KEY, now.toString());
+        if (isBrowser) {
+            localStorage.setItem(LAST_RUN_KEY, now.toString());
+        }
         
         return { 
             success: true, 
@@ -184,11 +187,16 @@ export const getDefaultRules = (): AdaptiveRules => ({
 
 export const getAdaptiveRules = (drawName: string): AdaptiveRules => {
     try {
+        const isBrowser = typeof window !== 'undefined';
+        if (!isBrowser) return getDefaultRules();
         const raw = localStorage.getItem(`nexus_rules_${drawName}`);
         return raw ? JSON.parse(raw) : getDefaultRules();
     } catch { return getDefaultRules(); }
 };
 
 export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
-    try { localStorage.setItem(`nexus_rules_${drawName}`, JSON.stringify(rules)); } catch {}
+    try { 
+        const isBrowser = typeof window !== 'undefined';
+        if (isBrowser) localStorage.setItem(`nexus_rules_${drawName}`, JSON.stringify(rules)); 
+    } catch {}
 };

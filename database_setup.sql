@@ -103,11 +103,22 @@ CREATE TABLE IF NOT EXISTS public.learning_logs (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- H. PREDICTION SNAPSHOTS (AUTOPSIE)
+CREATE TABLE IF NOT EXISTS public.prediction_snapshots (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  draw_name TEXT NOT NULL,
+  target_date DATE NOT NULL,
+  predictions JSONB NOT NULL,
+  status TEXT DEFAULT 'PENDING',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- 4. INDEXES
 CREATE INDEX IF NOT EXISTS idx_results_lookup ON public.draw_results(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_lookup ON public.prediction_snapshots(draw_name, target_date DESC);
 
 -- 5. SECURITÉ (RLS)
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
@@ -117,12 +128,14 @@ ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
 
 -- Policies Publiques
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
+CREATE POLICY "Public Read Snapshots" ON public.prediction_snapshots FOR SELECT USING (true);
 
 -- Policies User
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
@@ -135,6 +148,7 @@ CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL T
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service Full Access Snapshots" ON public.prediction_snapshots FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 6. TRIGGERS
 CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);

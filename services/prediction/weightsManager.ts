@@ -118,19 +118,26 @@ export const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): 
 };
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
-    if (isSupabaseConfigured() && navigator.onLine) {
+    const isBrowser = typeof window !== 'undefined';
+    if (isSupabaseConfigured() && (!isBrowser || navigator.onLine)) {
         try {
             const { data } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
             if (data?.weights) return data.weights;
         } catch (e) { }
     }
-    const raw = localStorage.getItem(`nexus_config_${drawName}`);
-    return raw ? JSON.parse(raw).weights : getDefaultWeights();
+    if (isBrowser) {
+        const raw = localStorage.getItem(`nexus_config_${drawName}`);
+        return raw ? JSON.parse(raw).weights : getDefaultWeights();
+    }
+    return getDefaultWeights();
 };
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
     try {
-        localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify({ weights, updatedAt: new Date().toISOString() }));
+        const isBrowser = typeof window !== 'undefined';
+        if (isBrowser) {
+            localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify({ weights, updatedAt: new Date().toISOString() }));
+        }
         if (isSupabaseConfigured()) {
             await supabase.from('algo_weights').upsert({ draw_name: drawName, weights }); 
         }

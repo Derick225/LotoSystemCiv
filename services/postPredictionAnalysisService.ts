@@ -13,7 +13,9 @@ export const getForensicReportByPredictionId = (predictionId: string): ForensicR
 
 export const saveForensicReport = (report: ForensicReport) => {
     try {
-        localStorage.setItem(`${FORENSIC_KEY_PREFIX}${report.id}`, JSON.stringify(report));
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(`${FORENSIC_KEY_PREFIX}${report.id}`, JSON.stringify(report));
+        }
     } catch (e: any) {
         logError(new AppError(e.message || "Failed to save forensic report", "FORENSIC_SAVE_ERROR", "low", { error: e, reportId: report.id }), { source: 'saveForensicReport' });
     }
@@ -21,6 +23,7 @@ export const saveForensicReport = (report: ForensicReport) => {
 
 export const getLocalForensicReports = (): ForensicReport[] => {
     const reports: ForensicReport[] = [];
+    if (typeof window === 'undefined') return reports;
     for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && key.startsWith(FORENSIC_KEY_PREFIX)) {
@@ -48,7 +51,9 @@ export const syncForensicReportsWithCloud = async (): Promise<ForensicReport[]> 
 };
 
 export const deleteForensicReportLocal = (id: string) => {
-    localStorage.removeItem(`${FORENSIC_KEY_PREFIX}${id}`);
+    if (typeof window !== 'undefined') {
+        localStorage.removeItem(`${FORENSIC_KEY_PREFIX}${id}`);
+    }
 };
 
 /**

@@ -273,6 +273,8 @@ const storageKey = (name: string) => `platinum_hyper_${name}`;
 
 export const savePlatinumHistory = (result: PlatinumResult): void => {
   try {
+    const isBrowser = typeof window !== 'undefined';
+    if (!isBrowser) return;
     const key = storageKey(result.drawName);
     const existing = JSON.parse(localStorage.getItem(key) ?? '[]') as PlatinumResult[];
     const updated = [result, ...existing.slice(0, 19)];
@@ -284,6 +286,8 @@ export const savePlatinumHistory = (result: PlatinumResult): void => {
 
 export const getPlatinumHistory = (drawName: string): PlatinumResult[] => {
   try {
+    const isBrowser = typeof window !== 'undefined';
+    if (!isBrowser) return [];
     return JSON.parse(localStorage.getItem(storageKey(drawName)) ?? '[]');
   } catch {
     return [];

@@ -74,6 +74,7 @@ export interface Prediction {
     symbiosisFactor?: number;
     riskProfile?: RiskProfile;
     realityAlignment?: number;
+    strategy?: string;
 }
 
 export interface PredictionFeedback {

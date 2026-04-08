@@ -3,6 +3,7 @@ import { getAlgoWeights, normalizeWeights, applyRiskProfile, applyMetaLearning }
 import { extractFeatures } from './featureExtractor';
 import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { generateCombination } from './combinationGenerator';
+import { getStrategyName } from '../predictionEngine';
 
 export const generateMasterPredictionCore = async (
     drawName: string, 
@@ -38,7 +39,8 @@ export const generateMasterPredictionCore = async (
         timestamp: Date.now(),
         symbiosisFactor: symbioticContext ? 1.5 : 1.0,
         riskProfile,
-        realityAlignment: 0
+        realityAlignment: 0,
+        strategy: getStrategyName(weights)
     };
 };
 
