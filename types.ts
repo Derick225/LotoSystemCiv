@@ -140,7 +140,7 @@ export interface SpectralMetric {
     dominantPeriod?: number;
 }
 
-export type RiskProfile = 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS';
+export type RiskProfile = 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS' | 'DIVERGENCE';
 
 export interface LearningSession {
     id: string;

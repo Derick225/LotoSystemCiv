@@ -20,7 +20,7 @@ import { LearningService } from '../../services/learningService';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
-    Save, Wind, AlertTriangle, TrendingUp,
+    Save, Wind, AlertTriangle, TrendingUp, TrendingDown,
     MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
     Atom, Brain, FlaskConical, Box, Sparkles, BrainCircuit, History, Search
 } from 'lucide-react';
@@ -291,7 +291,8 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         { id: 'PRUDENT', label: 'Prudent', icon: <ShieldCheck size={18} />, color: 'bg-emerald-600', desc: 'Favorise la stabilité de l\'ADN.' },
         { id: 'BALANCED', label: 'Équilibré', icon: <Scale size={18} />, color: 'bg-indigo-600', desc: 'Mix optimal Favoris/Outsiders.' },
         { id: 'AUDACIOUS', label: 'Audacieux', icon: <Target size={18} />, color: 'bg-amber-600', desc: 'Amplifie les poids "Gap" et "Momentum".' },
-        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Inverse la logique (Anti-Consensus).' }
+        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Inverse la logique (Anti-Consensus).' },
+        { id: 'DIVERGENCE', label: 'Divergence', icon: <TrendingDown size={18} />, color: 'bg-fuchsia-600', desc: 'Privilégie les numéros en forte baisse.' }
     ];
 
     if (!lastPrediction && !isComputing) return (

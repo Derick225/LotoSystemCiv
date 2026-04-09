@@ -19,26 +19,42 @@ export const getGeminiClient = () => {
     return new GoogleGenAI({ apiKey });
 };
 
-export async function generateWithFallback(ai: any, primaryModel: string, params: any) {
-    const fallbackModel = "gemini-3.1-flash-preview";
+export async function generateWithFallback(ai: any, primaryModel: string, params: any, retries = 2) {
+    const fallbackModel = "gemini-2.5-flash";
     const config = { ...params.config };
 
-    try {
-        console.log(`Executing task with model: ${primaryModel}`);
-        return await ai.models.generateContent({ ...params, model: primaryModel, config });
-    } catch (e: any) {
-        console.error(`Error with ${primaryModel}:`, e.message);
-        
-        if (primaryModel !== fallbackModel) {
-            console.warn(`Falling back to ${fallbackModel}...`);
-            try {
-                return await ai.models.generateContent({ ...params, model: fallbackModel, config });
-            } catch (e2: any) {
-                console.error(`Error with ${fallbackModel}:`, e2.message);
-                throw e2;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            console.log(`Executing task with model: ${primaryModel} (Attempt ${attempt + 1})`);
+            return await ai.models.generateContent({ ...params, model: primaryModel, config });
+        } catch (e: any) {
+            console.error(`Error with ${primaryModel}:`, e.message);
+            
+            const isRateLimit = e.message?.toLowerCase().includes('429') || 
+                                e.message?.toLowerCase().includes('quota') || 
+                                e.message?.toLowerCase().includes('resource_exhausted') ||
+                                e.message?.toLowerCase().includes('too many requests');
+                                
+            if (isRateLimit && attempt < retries) {
+                const delay = Math.pow(2, attempt) * 1500 + Math.random() * 1000;
+                console.warn(`Rate limit hit. Retrying in ${Math.round(delay)}ms...`);
+                await sleep(delay);
+                continue;
             }
-        } else {
-            throw e;
+
+            if (primaryModel !== fallbackModel) {
+                console.warn(`Falling back to ${fallbackModel}...`);
+                try {
+                    return await ai.models.generateContent({ ...params, model: fallbackModel, config });
+                } catch (e2: any) {
+                    console.error(`Error with ${fallbackModel}:`, e2.message);
+                    throw e2;
+                }
+            } else {
+                throw e;
+            }
         }
     }
 }
@@ -73,7 +89,7 @@ export const getOptimizedWeights = async (drawName: string, history: DrawResult[
         Retourne un objet JSON strict correspondant à l'interface AlgoWeights.
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -240,7 +256,7 @@ export const getNarrativeAnalysis = async (drawName: string, history: DrawResult
         - confidence: Score de confiance (nombre entre 0 et 100).
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -296,7 +312,7 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
         - insight: L'analyse des résultats (string).
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",

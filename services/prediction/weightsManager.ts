@@ -50,6 +50,14 @@ export const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): Al
             modified[AlgoKey.FREQUENCY] = 0;
             modified[AlgoKey.MARKOV] = 0;
             break;
+
+        case 'DIVERGENCE':
+            modified[AlgoKey.FREQUENCY] = (modified[AlgoKey.FREQUENCY] || 0.20) * 0.1;
+            modified[AlgoKey.MARKOV] = (modified[AlgoKey.MARKOV] || 0.20) * 0.1;
+            modified[AlgoKey.GAPS] = (modified[AlgoKey.GAPS] || 0.15) * 3.5;
+            modified[AlgoKey.MOMENTUM] = (modified[AlgoKey.MOMENTUM] || 0.10) * -2.0;
+            modified[AlgoKey.ANTI_CONSENSUS] = (modified[AlgoKey.ANTI_CONSENSUS] || 0.05) * 4.0;
+            break;
     }
     
     return normalizeWeights(modified);

@@ -26,7 +26,7 @@ export const generateMasterPredictionCore = async (
 
     const sortedScores = masterScores.sort((a, b) => b.score - a.score);
     
-    const outsiderCount = riskProfile === 'CHAOS' ? 4 : riskProfile === 'AUDACIOUS' ? 3 : riskProfile === 'PRUDENT' ? 0 : 2;
+    const outsiderCount = riskProfile === 'CHAOS' ? 4 : riskProfile === 'DIVERGENCE' ? 5 : riskProfile === 'AUDACIOUS' ? 3 : riskProfile === 'PRUDENT' ? 0 : 2;
     
     const selection = generateCombination(sortedScores, features.affinityMap, outsiderCount);
 

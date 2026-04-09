@@ -53,7 +53,7 @@ export const StrategyBattle: React.FC = () => {
         }
     };
 
-    const profiles: RiskProfile[] = ['PRUDENT', 'BALANCED', 'AUDACIOUS', 'CHAOS'];
+    const profiles: RiskProfile[] = ['PRUDENT', 'BALANCED', 'AUDACIOUS', 'CHAOS', 'DIVERGENCE'];
 
     return (
         <div className="bg-slate-900/50 p-6 rounded-2xl border border-white/10 backdrop-blur-md w-full">
