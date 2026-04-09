@@ -57,7 +57,7 @@ export const OracleInterface: React.FC = () => {
                 User Query: ${userMsg.content}
             `;
 
-            const result = await generateWithFallback(ai, "gemini-2.5-flash", {
+            const result = await generateWithFallback(ai, "gemini-3-flash-preview", {
                 contents: context
             });
             

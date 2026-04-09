@@ -1,94 +1,46 @@
 
 export const DRAW_SCHEDULE: Record<string, Record<string, string>> = {
   'Lundi': { 
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Reveil', 
     '13:00': 'Etoile', 
     '16:00': 'Akwaba', 
-    '18:15': 'Monday Special',
-    '19:00': 'Afterwork',
-    '20:00': 'Day Off',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Monday Special' 
   },
   'Mardi': { 
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'La Matinale', 
     '13:00': 'Emergence', 
     '16:00': 'Sika', 
-    '18:15': 'Lucky Tuesday',
-    '19:00': 'Afterwork',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Lucky Tuesday' 
   },
   'Mercredi': { 
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Premiere Heure', 
     '13:00': 'Fortune', 
     '16:00': 'Baraka', 
-    '18:15': 'Midweek',
-    '19:00': 'Afterwork',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Midweek' 
   },
   'Jeudi': { 
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Kado', 
     '13:00': 'Privilege', 
     '16:00': 'Monni', 
-    '18:15': 'Fortune Thursday',
-    '19:00': 'Afterwork',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Fortune Thursday' 
   },
   'Vendredi': { 
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Cash', 
     '13:00': 'Solution', 
     '16:00': 'Wari', 
-    '18:15': 'Friday Bonanza',
-    '19:00': 'Afterwork',
-    '20:00': 'Day Off',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Friday Bonanza' 
   },
   'Samedi': { 
-    '01:00': 'Special Weekend 1h',
-    '03:00': 'Special Weekend 3h',
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Soutra', 
     '13:00': 'Diamant', 
     '16:00': 'Moaye', 
-    '18:15': 'National',
-    '19:00': 'Afterwork',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'National' 
   },
   'Dimanche': { 
-    '01:00': 'Special Weekend 1h',
-    '03:00': 'Special Weekend 3h',
-    '07:00': 'Digital Reveil 7h',
-    '08:00': 'Digital Reveil 8h',
     '10:00': 'Benediction', 
     '13:00': 'Prestige', 
     '16:00': 'Awale', 
-    '18:15': 'Espoir',
-    '19:00': 'Afterwork',
-    '21:00': 'Digital 21h',
-    '22:00': 'Digital 22h',
-    '23:00': 'Digital 23h'
+    '18:15': 'Espoir' 
   },
 };
 
@@ -100,13 +52,13 @@ export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: s
     '18:15': { color: 'text-indigo-400', icon: '🌙', label: 'Twilight' }
 };
 
-// Liste plate pour les itérations rapides et les sélecteurs (dédoublonnée par nom)
-export const ALL_DRAWS = Array.from(
-    new Map(
-        Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
-            Object.entries(times).map(([time, name]) => [name, { name, time, day }])
-        )
-    ).values()
+// Liste plate pour les itérations rapides et les sélecteurs
+export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
+    Object.entries(times).map(([time, name]) => ({
+        name,
+        time,
+        day
+    }))
 );
 
 export const LOTO_PAYOUTS = {

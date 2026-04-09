@@ -19,8 +19,6 @@ export interface FusionConfig {
 
 export const getFusionConfig = (): FusionConfig => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (!isBrowser) return { stability: 0.5, chaos: 0.3, harmony: 0.7 };
         const raw = localStorage.getItem(FUSION_CONFIG_KEY);
         return raw ? JSON.parse(raw) : { stability: 0.5, chaos: 0.3, harmony: 0.7 };
     } catch (e) {
@@ -29,17 +27,14 @@ export const getFusionConfig = (): FusionConfig => {
 };
 
 export const saveFusionConfig = (config: FusionConfig) => {
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(FUSION_CONFIG_KEY, JSON.stringify(config));
-    }
+    localStorage.setItem(FUSION_CONFIG_KEY, JSON.stringify(config));
+    // Pas de sync cloud critique pour ça, c'est une préférence UI locale volatile
 };
 
 // --- WATCHLIST ---
 
 export const getWatchlist = (): number[] => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (!isBrowser) return [];
         const raw = localStorage.getItem(WATCHLIST_KEY);
         return raw ? JSON.parse(raw) : [];
     } catch (e) {
@@ -52,9 +47,7 @@ export const addToWatchlist = (number: number): boolean => {
     if (list.includes(number) || list.length >= 10) return false;
     
     const updated = [...list, number].sort((a, b) => a - b);
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
-    }
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
     syncWatchlist(); // Trigger background sync
     return true;
 };
@@ -62,9 +55,7 @@ export const addToWatchlist = (number: number): boolean => {
 export const removeFromWatchlist = (number: number): void => {
     const list = getWatchlist();
     const updated = list.filter(n => n !== number);
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
-    }
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(updated));
     syncWatchlist();
 };
 
@@ -97,8 +88,6 @@ export const syncWatchlist = async () => {
 
 export const getSavedTickets = (): SavedTicket[] => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (!isBrowser) return [];
         const raw = localStorage.getItem(TICKETS_KEY);
         const tickets = raw ? JSON.parse(raw) : [];
         return tickets.sort((a: SavedTicket, b: SavedTicket) => b.createdAt - a.createdAt);
@@ -115,9 +104,7 @@ export const saveTicket = async (ticket: Omit<SavedTicket, 'id' | 'createdAt' | 
     
     const current = getSavedTickets();
     const updated = [newTicket, ...current].slice(0, 50); // Limit to 50 local tickets
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
-    }
+    localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
     
     // Débit automatique du coût du ticket (simulation)
     updateBankroll(-100); 
@@ -141,9 +128,7 @@ export const saveTicket = async (ticket: Omit<SavedTicket, 'id' | 'createdAt' | 
 export const deleteTicket = async (id: string): Promise<void> => {
     const current = getSavedTickets();
     const updated = current.filter(t => t.id !== id);
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
-    }
+    localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
     
     if (isSupabaseConfigured()) {
         try {
@@ -164,9 +149,7 @@ export const deleteTicket = async (id: string): Promise<void> => {
 export const archiveTicket = async (id: string): Promise<void> => {
     const current = getSavedTickets();
     const updated = current.map(t => t.id === id ? { ...t, status: 'archived' as const } : t);
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
-    }
+    localStorage.setItem(TICKETS_KEY, JSON.stringify(updated));
     
     if (isSupabaseConfigured()) {
         try {
@@ -196,8 +179,6 @@ export interface UserSettings {
 
 export const getSettings = (): UserSettings => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (!isBrowser) return { sound: true, haptics: true, highPerf: true, theme: 'dark', riskProfile: 'BALANCED' };
         const raw = localStorage.getItem(SETTINGS_KEY);
         return raw ? { riskProfile: 'BALANCED', ...JSON.parse(raw) } : { sound: true, haptics: true, highPerf: true, theme: 'dark', riskProfile: 'BALANCED' };
     } catch (e) {
@@ -206,9 +187,7 @@ export const getSettings = (): UserSettings => {
 };
 
 export const saveSettings = async (settings: UserSettings): Promise<void> => {
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     
     // Application immédiate des effets
     audioEngine.setEnabled(settings.sound);
@@ -231,8 +210,6 @@ export const saveSettings = async (settings: UserSettings): Promise<void> => {
 
 export const getBankroll = (): number => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (!isBrowser) return 50000;
         const raw = localStorage.getItem(BANKROLL_KEY);
         return raw ? parseFloat(raw) : 50000; // Capital de départ par défaut
     } catch (e) { return 50000; }
@@ -241,9 +218,7 @@ export const getBankroll = (): number => {
 export const updateBankroll = (amount: number): number => {
     const current = getBankroll();
     const newBalance = current + amount;
-    if (typeof window !== 'undefined') {
-        localStorage.setItem(BANKROLL_KEY, newBalance.toString());
-    }
+    localStorage.setItem(BANKROLL_KEY, newBalance.toString());
     return newBalance;
 };
 
@@ -283,7 +258,7 @@ export const hydrateUserData = async (userId: string) => {
         const remoteWatchlist = data.watchlist || [];
         const mergedWatchlist = Array.from(new Set([...localWatchlist, ...remoteWatchlist])).sort((a,b) => a-b);
         
-        if (typeof window !== 'undefined' && mergedWatchlist.length !== localWatchlist.length) {
+        if (mergedWatchlist.length !== localWatchlist.length) {
             localStorage.setItem(WATCHLIST_KEY, JSON.stringify(mergedWatchlist));
         }
 
@@ -303,16 +278,14 @@ export const hydrateUserData = async (userId: string) => {
             }
         });
         
-        if (typeof window !== 'undefined' && (hasChanges || localTickets.length < ticketMap.size)) {
+        if (hasChanges || localTickets.length < ticketMap.size) {
             const mergedTickets = Array.from(ticketMap.values()).sort((a, b) => b.createdAt - a.createdAt).slice(0, 50); // Keep limit
             localStorage.setItem(TICKETS_KEY, JSON.stringify(mergedTickets));
         }
         
         // SETTINGS : Cloud Wins (Source of Truth pour la configuration)
         if (data.settings) {
-            if (typeof window !== 'undefined') {
-                localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings));
-            }
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(data.settings));
             audioEngine.setEnabled(data.settings.sound);
         }
 

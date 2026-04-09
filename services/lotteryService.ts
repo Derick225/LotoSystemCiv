@@ -5,160 +5,98 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
 import { AppError, logError } from '../utils/AppError';
-import { appConfig } from '../config/app.config';
-import { auditLogger, InvalidInputError } from '../utils/auditLogger';
 
 const CACHE_PREFIX = 'nexus_cache_history_';
 
-// 1. Unified Date Parsing
-export const parseAndNormalizeDate = (dateStr: string, isIsoOutput: boolean = false): string => {
-    if (!dateStr) throw new InvalidInputError("Date string is required");
-    
-    let date: Date;
-    
-    // Check DD/MM/YYYY
-    const frFormatMatch = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (frFormatMatch) {
-        const [_, d, m, y] = frFormatMatch;
-        date = new Date(Number(y), Number(m) - 1, Number(d));
-    } else {
-        date = new Date(dateStr);
-    }
-
-    if (isNaN(date.getTime())) {
-        throw new InvalidInputError(`Invalid date format: ${dateStr}`);
-    }
-
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    return isIsoOutput ? `${y}-${m}-${d}` : `${d}/${m}/${y}`;
+const isValidDate = (d: number, m: number, y: number): boolean => {
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
 };
 
 export const formatDate = (dateStr: string, isIsoOutput: boolean = false): string => {
-    try {
-        return parseAndNormalizeDate(dateStr, isIsoOutput);
-    } catch {
+  if (!dateStr) return '';
+  if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      if (!isValidDate(d, m, y)) return 'Invalid Date';
+      if (isIsoOutput) return dateStr;
+      return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+  }
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+        const [d, m, y] = parts.map(Number);
+        if (!isValidDate(d, m, y)) return 'Invalid Date';
+        if (isIsoOutput) return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         return dateStr;
     }
+  }
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  const d = date.getDate().toString().padStart(2, '0');
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear();
+  if (isIsoOutput) return `${y}-${m}-${d}`;
+  return `${d}/${m}/${y}`;
 };
 
 export const normalizeDate = (dateStr: string): string => {
-    try {
-        return parseAndNormalizeDate(dateStr, true);
-    } catch {
-        return new Date().toISOString().split('T')[0];
-    }
+  if (!dateStr) return new Date().toISOString().split('T')[0];
+  if (dateStr.includes('/')) {
+    const [d, m, y] = dateStr.split('/');
+    return `${y}-${m}-${d}`;
+  }
+  return dateStr;
 };
 
 const normalizeDrawName = (name: string): string => {
     return name.trim().charAt(0).toUpperCase() + name.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
 };
 
-// 2. Safe LocalStorage Cache
-const safeCache = {
-    get: <T>(key: string): T | null => {
-        try {
-            const isBrowser = typeof window !== 'undefined';
-            if (!isBrowser) return null;
-            const item = localStorage.getItem(key);
-            if (!item) return null;
-            const parsed = JSON.parse(item);
-            if (parsed.expiry && Date.now() > parsed.expiry) {
-                localStorage.removeItem(key);
-                return null;
-            }
-            return parsed.data as T;
-        } catch {
-            return null;
-        }
-    },
-    set: <T>(key: string, data: T) => {
-        try {
-            const isBrowser = typeof window !== 'undefined';
-            if (!isBrowser) return;
-            const payload = JSON.stringify({
-                data,
-                expiry: Date.now() + appConfig.cache.ttlMs
-            });
-            // Check size limit roughly
-            if (payload.length > appConfig.cache.maxSizeBytes) {
-                auditLogger('warn', 'safeCache', `Payload too large for key ${key}`);
-                return;
-            }
-            localStorage.setItem(key, payload);
-        } catch (e) {
-            auditLogger('warn', 'safeCache', `Failed to set cache for key ${key}`);
-        }
-    }
-};
-
-// 4. Request Deduplication
-const fetchPromises = new Map<string, Promise<DrawResult[]>>();
-
 export const lotteryService = {
   async fetchHistory(drawName: string): Promise<DrawResult[]> {
-    if (!drawName) throw new InvalidInputError("drawName is required");
-
     const cacheKey = `${CACHE_PREFIX}${drawName}`;
-    
-    if (fetchPromises.has(cacheKey)) {
-        return fetchPromises.get(cacheKey)!;
-    }
+    let remoteData: DrawResult[] | null = null;
+    let fetchError: any = null;
 
-    const fetchPromise = (async () => {
-        let remoteData: DrawResult[] | null = null;
-        let fetchError: unknown = null;
+    if (isSupabaseConfigured() && navigator.onLine) {
+        try {
+            let query = supabase
+              .from('draw_results')
+              .select('*')
+              .order('date', { ascending: false });
 
-        if (isSupabaseConfigured() && navigator.onLine) {
-            try {
-                let query = supabase
-                  .from('draw_results')
-                  .select('*')
-                  .order('date', { ascending: false });
-
-                if (drawName !== 'ALL') {
-                    query = query.eq('draw_name', drawName);
-                }
-                
-                query = query.limit(2000);
-                
-                const { data, error } = await query;
-                
-                if (error) throw new AppError(error.message, 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });
-                
-                if (data) {
-                    remoteData = data.map(row => ({
-                      id: row.id,
-                      drawName: row.draw_name,
-                      date: formatDate(row.date),
-                      gagnants: row.gagnants,
-                      machine: row.machine || [],
-                      version: row.version || 1
-                    }));
-                    safeCache.set(cacheKey, remoteData);
-                }
-            } catch (e) {
-                logError(e as Error, { source: 'lotteryService.fetchHistory' });
-                fetchError = e;
+            if (drawName && drawName !== 'ALL') {
+                query = query.eq('draw_name', drawName);
             }
+            
+            query = query.limit(2000);
+            
+            const { data, error } = await query;
+            
+            if (error) throw new AppError(error.message, 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });
+            
+            if (data) {
+                remoteData = data.map(row => ({
+                  id: row.id,
+                  drawName: row.draw_name,
+                  date: formatDate(row.date),
+                  gagnants: row.gagnants,
+                  machine: row.machine || [],
+                  version: row.version || 1
+                }));
+                try { localStorage.setItem(cacheKey, JSON.stringify(remoteData)); } catch (e) {}
+            }
+        } catch (e) {
+            logError(e, { source: 'lotteryService.fetchHistory' });
+            fetchError = e;
         }
-
-        if (remoteData) return remoteData;
-        const cached = safeCache.get<DrawResult[]>(cacheKey);
-        if (cached) return cached;
-        if (fetchError) throw new AppError("Impossible de récupérer l'historique. Vérifiez votre connexion.", "NETWORK_ERR", "high", { error: fetchError });
-        return [];
-    })();
-
-    fetchPromises.set(cacheKey, fetchPromise);
-    try {
-        const result = await fetchPromise;
-        return result;
-    } finally {
-        fetchPromises.delete(cacheKey);
     }
+
+    if (remoteData) return remoteData;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+    if (fetchError) throw new AppError("Impossible de récupérer l'historique. Vérifiez votre connexion.", "NETWORK_ERR", "high", { error: fetchError });
+    return [];
   }
 };
 
@@ -167,9 +105,8 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   try {
     const data = await apiClient.post<{ count: number }>('cron-sync', { drawName, manualTrigger: true });
     return data?.count || 0;
-  } catch (e: unknown) {
-    const err = e as Error;
-    logError(new AppError(err?.message || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal' });
+  } catch (e: any) {
+    logError(new AppError(e?.message || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal' });
     return 0;
   }
 };
@@ -261,8 +198,8 @@ export const getNextScheduledDraw = () => {
 export const fetchRecentStats = async (days: number = 7) => {
   const cacheKey = `nexus_recent_stats_${days}d`;
   if (!isSupabaseConfigured() || !navigator.onLine) {
-      const cached = safeCache.get<any[]>(cacheKey);
-      return cached || [];
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : [];
   }
   try {
     const dateLimit = new Date();
@@ -287,19 +224,19 @@ export const fetchRecentStats = async (days: number = 7) => {
       .map(([n, c]) => ({ number: Number(n), count: c }))
       .sort((a, b) => b.count - a.count);
     
-    safeCache.set(cacheKey, stats);
+    localStorage.setItem(cacheKey, JSON.stringify(stats));
     return stats;
   } catch (e) {
-    const cached = safeCache.get<any[]>(cacheKey);
-    return cached || [];
+    const cached = localStorage.getItem(cacheKey);
+    return cached ? JSON.parse(cached) : [];
   }
 };
 
 export const fetchGlobalStats = async () => {
   const cacheKey = 'nexus_global_stats';
   if (!isSupabaseConfigured() || !navigator.onLine) {
-      const cached = safeCache.get<any[]>(cacheKey);
-      return cached || [];
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : [];
   }
   try {
     const { data, error } = await supabase.from('draw_results').select('gagnants').limit(2000);
@@ -307,35 +244,12 @@ export const fetchGlobalStats = async () => {
     const counts: Record<number, number> = {};
     (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     const stats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
-    safeCache.set(cacheKey, stats);
+    localStorage.setItem(cacheKey, JSON.stringify(stats));
     return stats;
   } catch (e) {
-    const cached = safeCache.get<any[]>(cacheKey);
-    return cached || [];
+    const cached = localStorage.getItem(cacheKey);
+    return cached ? JSON.parse(cached) : [];
   }
-};
-
-// 3. Concurrency with Semaphore
-const runWithSemaphore = async <T>(tasks: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> => {
-    const results: PromiseSettledResult<T>[] = [];
-    const executing = new Set<Promise<void>>();
-
-    for (const task of tasks) {
-        const p = task().then(
-            value => { results.push({ status: 'fulfilled', value }); },
-            reason => { results.push({ status: 'rejected', reason }); }
-        );
-        
-        const e: Promise<void> = p.finally(() => { executing.delete(e); });
-        executing.add(e);
-
-        if (executing.size >= limit) {
-            await Promise.race(executing);
-        }
-    }
-
-    await Promise.all(executing);
-    return results;
 };
 
 export const triggerAutomationForNewResults = async (drawName: string, date: string, resultId?: string) => {
@@ -348,54 +262,46 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
       .eq('status', 'PENDING');
 
     if (pendingSnapshots && pendingSnapshots.length > 0) {
-      let targetResultId = resultId;
-      if (!targetResultId) {
-          const { data: resultData } = await supabase
-              .from('draw_results')
-              .select('id')
-              .eq('draw_name', normalizeDrawName(drawName))
-              .eq('date', normalizeDate(date))
-              .single();
-          if (resultData) targetResultId = resultData.id;
+      let autopsyCount = 0;
+      for (const snap of pendingSnapshots) {
+        // We need the result ID to trigger autopsy. If not provided, fetch it.
+        let targetResultId = resultId;
+        if (!targetResultId) {
+            const { data: resultData } = await supabase
+                .from('draw_results')
+                .select('id')
+                .eq('draw_name', normalizeDrawName(drawName))
+                .eq('date', normalizeDate(date))
+                .single();
+            if (resultData) targetResultId = resultData.id;
+        }
+
+        if (targetResultId) {
+            await fetch('/api/forensic-autopsy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshotId: snap.id, drawResultId: targetResultId })
+            }).catch(e => console.error("Forensic autopsy trigger error:", e));
+            autopsyCount++;
+        }
       }
 
-      if (targetResultId) {
-          const tasks = pendingSnapshots.map(snap => async () => {
-              await fetch('/api/forensic-autopsy', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ snapshotId: snap.id, drawResultId: targetResultId })
-              });
-          });
-
-          await runWithSemaphore(tasks, appConfig.concurrency.semaphoreLimit);
-
-          try {
-              const { LearningService } = await import('./learningService');
-              await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
-          } catch (e) {
-              auditLogger('error', 'triggerAutomationForNewResults', e);
-          }
+      if (autopsyCount > 0) {
+        try {
+            const { LearningService } = await import('./learningService');
+            await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
+        } catch (e) {
+            console.error("Self-learn trigger error:", e);
+        }
       }
     }
   } catch (e) {
-    auditLogger('error', 'triggerAutomationForNewResults', e);
+    console.error("Error triggering automation:", e);
   }
 };
 
-export interface RawDrawResult {
-    draw_name?: string;
-    date: string;
-    gagnants: number[];
-    machine?: number[];
-}
-
-export const bulkAddResults = async (drawName: string, results: RawDrawResult[]) => {
+export const bulkAddResults = async (drawName: string, results: any[]) => {
   if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
-  
-  // Basic validation
-  if (!Array.isArray(results)) throw new InvalidInputError("Results must be an array");
-
   const mapped = results.map(r => ({
     draw_name: r.draw_name || normalizeDrawName(drawName),
     date: normalizeDate(r.date),
@@ -403,15 +309,14 @@ export const bulkAddResults = async (drawName: string, results: RawDrawResult[])
     machine: r.machine || [],
     version: 1
   }));
-  
   const { data, error } = await supabase.from('draw_results').upsert(mapped, { onConflict: 'draw_name, date' }).select();
   if (error) throw error;
   
+  // Trigger automation for all inserted/updated results
   if (data && data.length > 0) {
-      const tasks = data.map(res => async () => {
+      for (const res of data) {
           await triggerAutomationForNewResults(res.draw_name, res.date, res.id);
-      });
-      await runWithSemaphore(tasks, appConfig.concurrency.semaphoreLimit);
+      }
   }
 };
 
@@ -488,6 +393,5 @@ export const injectDemoData = async () => {
             demoData.push({ draw_name: drawName, date: dateStr, gagnants: Array.from(numbers), machine: Array.from(machine) });
         }
     });
-    try { await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' }); } catch (e: unknown) { logError(new AppError((e as Error).message || "Demo injection failed", "DEMO_INJECTION_ERROR", "low", { error: e }), { source: 'injectDemoData' }); }
+    try { await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' }); } catch (e: any) { logError(new AppError(e.message || "Demo injection failed", "DEMO_INJECTION_ERROR", "low", { error: e }), { source: 'injectDemoData' }); }
 };
-

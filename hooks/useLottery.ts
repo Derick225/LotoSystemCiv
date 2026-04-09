@@ -62,7 +62,7 @@ export const useDrawHistory = (drawName: string) => {
     const channel = supabase
       .channel('draw-sync')
       .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'draw_results', filter }, 
+        { event: 'INSERT', schema: 'public', table: 'draw_results', filter }, 
         () => {
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); 

@@ -19,11 +19,7 @@ const DRAW_NAMES_MAP: Record<string, string> = {
   "KADO": "Kado", "PRIVILEGE": "Privilege", "MONNI": "Monni", "FORTUNE THURSDAY": "Fortune Thursday",
   "CASH": "Cash", "SOLUTION": "Solution", "WARI": "Wari", "FRIDAY BONANZA": "Friday Bonanza",
   "SOUTRA": "Soutra", "DIAMANT": "Diamant", "MOAYE": "Moaye", "NATIONAL": "National",
-  "BENEDICTION": "Benediction", "PRESTIGE": "Prestige", "AWALE": "Awale", "ESPOIR": "Espoir",
-  "AFTERWORK": "Afterwork", "DAY OFF": "Day Off",
-  "DIGITAL REVEIL 7H": "Digital Reveil 7h", "DIGITAL REVEIL 8H": "Digital Reveil 8h",
-  "DIGITAL 21H": "Digital 21h", "DIGITAL 22H": "Digital 22h", "DIGITAL 23H": "Digital 23h",
-  "SPECIAL WEEKEND 1H": "Special Weekend 1h", "SPECIAL WEEKEND 3H": "Special Weekend 3h"
+  "BENEDICTION": "Benediction", "PRESTIGE": "Prestige", "AWALE": "Awale", "ESPOIR": "Espoir"
 };
 
 const formatMonth = (date: Date) => {

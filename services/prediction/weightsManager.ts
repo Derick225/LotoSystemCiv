@@ -50,14 +50,6 @@ export const applyRiskProfile = (weights: AlgoWeights, profile: RiskProfile): Al
             modified[AlgoKey.FREQUENCY] = 0;
             modified[AlgoKey.MARKOV] = 0;
             break;
-
-        case 'DIVERGENCE':
-            modified[AlgoKey.FREQUENCY] = (modified[AlgoKey.FREQUENCY] || 0.20) * 0.1;
-            modified[AlgoKey.MARKOV] = (modified[AlgoKey.MARKOV] || 0.20) * 0.1;
-            modified[AlgoKey.GAPS] = (modified[AlgoKey.GAPS] || 0.15) * 3.5;
-            modified[AlgoKey.MOMENTUM] = (modified[AlgoKey.MOMENTUM] || 0.10) * -2.0;
-            modified[AlgoKey.ANTI_CONSENSUS] = (modified[AlgoKey.ANTI_CONSENSUS] || 0.05) * 4.0;
-            break;
     }
     
     return normalizeWeights(modified);
@@ -126,26 +118,19 @@ export const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): 
 };
 
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
-    const isBrowser = typeof window !== 'undefined';
-    if (isSupabaseConfigured() && (!isBrowser || navigator.onLine)) {
+    if (isSupabaseConfigured() && navigator.onLine) {
         try {
             const { data } = await supabase.from('algo_weights').select('weights').eq('draw_name', drawName).single();
             if (data?.weights) return data.weights;
         } catch (e) { }
     }
-    if (isBrowser) {
-        const raw = localStorage.getItem(`nexus_config_${drawName}`);
-        return raw ? JSON.parse(raw).weights : getDefaultWeights();
-    }
-    return getDefaultWeights();
+    const raw = localStorage.getItem(`nexus_config_${drawName}`);
+    return raw ? JSON.parse(raw).weights : getDefaultWeights();
 };
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
     try {
-        const isBrowser = typeof window !== 'undefined';
-        if (isBrowser) {
-            localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify({ weights, updatedAt: new Date().toISOString() }));
-        }
+        localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify({ weights, updatedAt: new Date().toISOString() }));
         if (isSupabaseConfigured()) {
             await supabase.from('algo_weights').upsert({ draw_name: drawName, weights }); 
         }

@@ -48,7 +48,7 @@
   </g>
 
   <!-- Lueur d'activité (Sparkle) -->
-  <path d="M400 100L410 80L420 100L440 110L420 120L410 140L400 120L380 110L400 100Z" fill="#fbbf24"/>
+  <path d="M400 100L410 80L420 100L440 110L420 120L410 140L400 120L380 110L400 100Z" fill="#fbbf24" filter="url(#blur)"/>
   <circle cx="410" cy="110" r="40" fill="url(#gold_glow)"/>
 
   <!-- Reflet Glossy (Effet Vitre) -->

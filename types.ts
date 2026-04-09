@@ -74,7 +74,6 @@ export interface Prediction {
     symbiosisFactor?: number;
     riskProfile?: RiskProfile;
     realityAlignment?: number;
-    strategy?: string;
 }
 
 export interface PredictionFeedback {
@@ -140,7 +139,7 @@ export interface SpectralMetric {
     dominantPeriod?: number;
 }
 
-export type RiskProfile = 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS' | 'DIVERGENCE';
+export type RiskProfile = 'PRUDENT' | 'BALANCED' | 'AUDACIOUS' | 'CHAOS';
 
 export interface LearningSession {
     id: string;

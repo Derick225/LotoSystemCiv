@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
 import { getOptimizedWeights } from '../../services/geminiService';
-import { savePredictionToHistory, getLocalHistory } from '../../services/predictionHistoryService';
+import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { saveTicket } from '../../services/userPreferencesService';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
@@ -20,9 +20,9 @@ import { LearningService } from '../../services/learningService';
 import { 
     Zap, Cpu, Activity, Info, ShieldCheck, 
     Layers, Binary, Target, RefreshCw, Wallet, 
-    Save, Wind, AlertTriangle, TrendingUp, TrendingDown,
+    Save, Wind, AlertTriangle, TrendingUp,
     MapPin, GitMerge, CheckCircle2, Crosshair, Scale, Gauge, Dna,
-    Atom, Brain, FlaskConical, Box, Sparkles, BrainCircuit, History, Search
+    Atom, Brain, FlaskConical, Box, Sparkles, BrainCircuit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
@@ -55,7 +55,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [showDNA, setShowDNA] = useState(false);
     const [quantumMode, setQuantumMode] = useState(false);
-    const [deepScanMode, setDeepScanMode] = useState(false);
     
     // États pour la Calibration IA
     const [isOptimizing, setIsOptimizing] = useState(false);
@@ -67,28 +66,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         if (history.length === 0) return 0;
         return calculateShannonEntropy(history.slice(0, 10)).normalized;
     }, [history]);
-
-    // Historique local pour les stats
-    const localHistory = useMemo(() => getLocalHistory(), []);
-
-    // Performance de la stratégie active
-    const strategyPerformance = useMemo(() => {
-        const strategyPreds = localHistory.filter(p => p.drawName === drawName && p.prediction?.strategy === activeDNA && p.drawResultId);
-        if (strategyPreds.length === 0) return null;
-        
-        let totalHits = 0;
-        strategyPreds.forEach(p => {
-            const result = history.find(r => r.id === p.drawResultId);
-            if (result) {
-                totalHits += p.prediction.suggestedNumbers.filter(n => result.gagnants.includes(n)).length;
-            }
-        });
-        
-        return {
-            avgHits: (totalHits / strategyPreds.length).toFixed(1),
-            samples: strategyPreds.length
-        };
-    }, [localHistory, activeDNA, drawName, history]);
 
     // Mise à jour du nom de l'ADN affiché
     useEffect(() => {
@@ -172,7 +149,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             updateGlobalWeights(specificWeights);
         }
 
-        const baseSteps = [
+        const steps = [
             { msg: `Chargement ADN : ${getStrategyName(specificWeights)}`, delay: 400 },
             { msg: `Stratégie : ${riskProfile}`, delay: 1000 },
             { msg: quantumMode ? "Distorsion Quantique..." : "Injection Métriques Stochastiques...", delay: 1600 },
@@ -180,26 +157,13 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             { msg: "Convergence Vectorielle...", delay: 2800 }
         ];
 
-        const steps = deepScanMode 
-            ? [
-                ...baseSteps.slice(0, 3),
-                { msg: "Analyse Profonde des Fractales...", delay: 2200 },
-                { msg: "Recherche de Corrélations Cachées...", delay: 2800 },
-                { msg: "Calcul de la Résultante...", delay: 3400 },
-                { msg: "Convergence Vectorielle...", delay: 4000 }
-              ]
-            : baseSteps;
-
-        const stepDuration = deepScanMode ? 800 : 600;
-        const totalDuration = deepScanMode ? 5000 : 3500;
-
         let stepIndex = 0;
         const interval = setInterval(() => {
             if (stepIndex < steps.length) {
                 setComputingStep(steps[stepIndex].msg);
                 stepIndex++;
             }
-        }, stepDuration);
+        }, 600);
 
         setTimeout(async () => {
             clearInterval(interval);
@@ -209,11 +173,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     spectral, wavelet, correlationMatrix, regularity, volatility, fractal
                 }, symbioticContext || undefined, riskProfile);
                 
-                // Si Deep Scan, on booste légèrement la confiance pour refléter l'effort
-                if (deepScanMode) {
-                    res.confidence = Math.min(99, res.confidence + 5);
-                }
-
                 setLastPrediction(res);
                 
                 // CRITIQUE : Sauvegarde pour Forensic Hub
@@ -233,8 +192,8 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setIsComputing(false);
                 setComputingStep("");
             }
-        }, totalDuration);
-    }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal, updateGlobalWeights, quantumMode, deepScanMode]);
+        }, 3500);
+    }, [drawName, history, spectral, wavelet, correlationMatrix, regularity, volatility, regime, symbioticContext, setLastPrediction, showToast, riskProfile, fractal, updateGlobalWeights]);
 
     const handleQuickSave = async () => {
         audioEngine.play('click');
@@ -291,8 +250,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         { id: 'PRUDENT', label: 'Prudent', icon: <ShieldCheck size={18} />, color: 'bg-emerald-600', desc: 'Favorise la stabilité de l\'ADN.' },
         { id: 'BALANCED', label: 'Équilibré', icon: <Scale size={18} />, color: 'bg-indigo-600', desc: 'Mix optimal Favoris/Outsiders.' },
         { id: 'AUDACIOUS', label: 'Audacieux', icon: <Target size={18} />, color: 'bg-amber-600', desc: 'Amplifie les poids "Gap" et "Momentum".' },
-        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Inverse la logique (Anti-Consensus).' },
-        { id: 'DIVERGENCE', label: 'Divergence', icon: <TrendingDown size={18} />, color: 'bg-fuchsia-600', desc: 'Privilégie les numéros en forte baisse.' }
+        { id: 'CHAOS', label: 'Chaos', icon: <AlertTriangle size={18} />, color: 'bg-rose-600', desc: 'Inverse la logique (Anti-Consensus).' }
     ];
 
     if (!lastPrediction && !isComputing) return (
@@ -336,15 +294,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${quantumMode ? 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-300 shadow-[0_0_20px_rgba(217,70,239,0.3)]' : 'bg-slate-800/50 border-white/10 text-slate-400 hover:text-white'}`}
                     >
                         <Atom size={14} className={quantumMode ? 'animate-spin-slow' : ''} />
-                        <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">Quantum Mode</span>
-                    </button>
-                    <button 
-                        onClick={() => { audioEngine.play('scan'); setDeepScanMode(!deepScanMode); }}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${deepScanMode ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'bg-slate-800/50 border-white/10 text-slate-400 hover:text-white'}`}
-                        title="Analyse profonde (plus lent mais plus précis)"
-                    >
-                        <Search size={14} className={deepScanMode ? 'animate-pulse' : ''} />
-                        <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">Deep Scan</span>
+                        <span className="text-xs font-black uppercase tracking-widest">Quantum Mode</span>
                     </button>
                 </div>
             </div>
@@ -438,10 +388,9 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             {/* Context HUD */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                     { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/>, action: () => { audioEngine.play('click'); setShowDNA(!showDNA); } },
-                    { label: 'Perf. Historique', val: strategyPerformance ? `${strategyPerformance.avgHits} hits/tirage` : 'N/A', icon: <History className="text-blue-500"/> },
                     { label: 'Volatilité', val: `${volatility?.score || 0}%`, icon: <Wind className="text-amber-500"/> },
                     { label: 'Stratégie', val: riskProfile, icon: <Crosshair className="text-emerald-500"/> },
                     { label: 'Réalité T-1', val: `${lastPrediction?.realityAlignment || 0}%`, icon: <Gauge className="text-purple-500"/> }
@@ -724,11 +673,6 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </p>
                         </div>
                     </div>
-                </div>
-
-                {/* Strategy Battle Section */}
-                <div className="mt-12">
-                    <StrategyBattle />
                 </div>
             </div>
             )}

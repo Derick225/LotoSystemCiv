@@ -3,7 +3,6 @@ import { getAlgoWeights, normalizeWeights, applyRiskProfile, applyMetaLearning }
 import { extractFeatures } from './featureExtractor';
 import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { generateCombination } from './combinationGenerator';
-import { getStrategyName } from '../predictionEngine';
 
 export const generateMasterPredictionCore = async (
     drawName: string, 
@@ -26,7 +25,7 @@ export const generateMasterPredictionCore = async (
 
     const sortedScores = masterScores.sort((a, b) => b.score - a.score);
     
-    const outsiderCount = riskProfile === 'CHAOS' ? 4 : riskProfile === 'DIVERGENCE' ? 5 : riskProfile === 'AUDACIOUS' ? 3 : riskProfile === 'PRUDENT' ? 0 : 2;
+    const outsiderCount = riskProfile === 'CHAOS' ? 4 : riskProfile === 'AUDACIOUS' ? 3 : riskProfile === 'PRUDENT' ? 0 : 2;
     
     const selection = generateCombination(sortedScores, features.affinityMap, outsiderCount);
 
@@ -39,8 +38,7 @@ export const generateMasterPredictionCore = async (
         timestamp: Date.now(),
         symbiosisFactor: symbioticContext ? 1.5 : 1.0,
         riskProfile,
-        realityAlignment: 0,
-        strategy: getStrategyName(weights)
+        realityAlignment: 0
     };
 };
 

@@ -8,7 +8,8 @@ const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
 const HISTORY_KEY_PREFIX = 'pred_';
 
-export const getLocalHistory = (): PredictionHistoryItem[] => {
+// Helper interne pour lire l'historique local (remplace cacheService)
+const getLocalHistory = (): PredictionHistoryItem[] => {
     const items: PredictionHistoryItem[] = [];
     if (typeof localStorage === 'undefined') return [];
     
@@ -36,12 +37,10 @@ export const syncAllHistory = async (drawName: string): Promise<PredictionHistor
         const synced = await syncPredictions(local);
         
         // Mettre à jour le localStorage avec les données fusionnées
-        if (typeof window !== 'undefined') {
-            synced.forEach(item => {
-                const key = `${HISTORY_KEY_PREFIX}${item.id}`;
-                localStorage.setItem(key, JSON.stringify(item));
-            });
-        }
+        synced.forEach(item => {
+            const key = `${HISTORY_KEY_PREFIX}${item.id}`;
+            localStorage.setItem(key, JSON.stringify(item));
+        });
         
         return synced;
     } catch (e) {
@@ -105,9 +104,7 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   };
 
   const key = `${HISTORY_KEY_PREFIX}${newItem.id}`;
-  if (typeof window !== 'undefined') {
-      localStorage.setItem(key, JSON.stringify(newItem));
-  }
+  localStorage.setItem(key, JSON.stringify(newItem));
   
   // Automate sync in background
   syncAllHistory(drawName).catch(e => console.error("Auto-sync prediction history failed", e));
@@ -119,7 +116,6 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
 };
 
 export const updatePredictionFeedback = async (id: string, feedback: PredictionFeedback): Promise<void> => {
-    if (typeof window === 'undefined') return;
     const key = `${HISTORY_KEY_PREFIX}${id}`;
     const raw = localStorage.getItem(key);
     if (raw) {
@@ -132,7 +128,6 @@ export const updatePredictionFeedback = async (id: string, feedback: PredictionF
 };
 
 export const clearPredictionHistory = async (drawName: string) => {
-    if (typeof window === 'undefined') return;
     const all = getLocalHistory();
     const toDelete = all.filter(p => p.drawName === drawName);
     toDelete.forEach(p => localStorage.removeItem(`${HISTORY_KEY_PREFIX}${p.id}`));
@@ -146,10 +141,8 @@ export const saveLearningSession = async (drawName: string, sessionData: any) =>
         ...sessionData
     };
     
-    if (typeof window !== 'undefined') {
-        const key = `${LEARNING_SESSION_KEY_PREFIX}${session.id}`;
-        localStorage.setItem(key, JSON.stringify(session));
-    }
+    const key = `${LEARNING_SESSION_KEY_PREFIX}${session.id}`;
+    localStorage.setItem(key, JSON.stringify(session));
     
     // Sync background
     try {
@@ -183,11 +176,9 @@ export const syncLearningSessionsWithCloud = async (drawName: string) => {
     const local = getLearningSessions(drawName);
     try {
         const synced = await syncLearningSessions(local);
-        if (typeof window !== 'undefined') {
-            synced.forEach(s => {
-                localStorage.setItem(`${LEARNING_SESSION_KEY_PREFIX}${s.id}`, JSON.stringify(s));
-            });
-        }
+        synced.forEach(s => {
+            localStorage.setItem(`${LEARNING_SESSION_KEY_PREFIX}${s.id}`, JSON.stringify(s));
+        });
         return synced;
     } catch (e) {
         return local;
@@ -196,7 +187,6 @@ export const syncLearningSessionsWithCloud = async (drawName: string) => {
 
 export const getOrchestrationPatterns = (drawName: string): OrchestrationPattern[] => {
     try {
-        if (typeof window === 'undefined') return [];
         const raw = localStorage.getItem(`${ORCHESTRATION_PREFIX}${drawName}`);
         return raw ? JSON.parse(raw) : [];
     } catch (e) { return []; }
@@ -214,7 +204,6 @@ export const getPatternIntensity = (drawName: string): { subject: string, A: num
 };
 
 export const linkPredictionToResult = async (predictionId: string, drawResultId: string): Promise<void> => {
-    if (typeof window === 'undefined') return;
     const key = `${HISTORY_KEY_PREFIX}${predictionId}`;
     const raw = localStorage.getItem(key);
     if (raw) {
