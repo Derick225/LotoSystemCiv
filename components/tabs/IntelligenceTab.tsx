@@ -71,14 +71,15 @@ export const IntelligenceTab: React.FC<IntelligenceTabProps> = ({ drawName }) =>
             const safeEntropy = isNaN(ent.normalized) ? 0.95 : ent.normalized;
             const safeHurst = isNaN(hurst) ? 0.5 : hurst;
 
+            const metrics = { volatility: safeVolatility, entropy: safeEntropy, hurst: safeHurst };
             if (isMounted.current) {
-                setContextMetrics({ volatility: safeVolatility, entropy: safeEntropy, hurst: safeHurst });
+                setContextMetrics(metrics);
             }
 
             // 2. Lancement parallèle : Analyse Logique + Rapport Narratif
             // On introduit un léger délai artificiel pour l'effet "Calcul en cours" si la réponse est trop rapide (cache)
             const [reasoning, story] = await Promise.all([
-                analyzeDrawLogic(drawName, history),
+                analyzeDrawLogic(drawName, history, metrics),
                 generateNarrativeReport(drawName, history, ent, chi, safeHurst),
                 new Promise(r => setTimeout(r, 1500))
             ]);

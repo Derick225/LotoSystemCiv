@@ -65,6 +65,19 @@ export const authService = {
   },
 
   /**
+   * Envoie un lien de réinitialisation de mot de passe à l'adresse e-mail.
+   */
+  resetPasswordForEmail: async (email: string) => {
+    if (!isSupabaseConfigured()) {
+        return { data: null, error: new Error("Mode hors-ligne : Réinitialisation désactivée.") };
+    }
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/?reset=true`,
+    });
+    return { data, error };
+  },
+
+  /**
    * Met à jour le mot de passe de l'utilisateur connecté.
    */
   updatePassword: async (newPassword: string) => {
@@ -77,34 +90,22 @@ export const authService = {
 
   /**
    * Vérifie si l'utilisateur a le rôle administrateur.
-   * Basé sur les métadonnées de l'utilisateur (app_metadata) ou une liste blanche d'emails.
+   * Basé sur les métadonnées de l'utilisateur (app_metadata) ou user_metadata.
    */
   isAdminUser: (user: any): boolean => {
     if (!user) return false;
     
-    // 1. Vérification via rôle Supabase (app_metadata) - Méthode recommandée
-    if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+    // Vérification via rôle Supabase (app_metadata) - Méthode sécurisée recommandée
+    // Les app_metadata ne peuvent être modifiées que par un admin ou un trigger côté serveur
+    if (user.app_metadata?.role === 'admin') {
         return true;
     }
     
-    // 2. Vérification par liste blanche d'emails (Hardcoded)
-    // Ajoutez votre email ici pour devenir admin immédiatement
-    const adminEmails = [
-        'admin@lotopro.com', 
-        'admin@nexus.com',
-        'superadmin@example.com' 
-    ]; 
-    
-    const isWhitelisted = user.email && adminEmails.includes(user.email);
-
-    if (process.env.NODE_ENV === 'development') {
-        if (isWhitelisted) {
-            console.log("[Auth] Admin access granted via whitelist:", user.email);
-        } else {
-            console.debug("[Auth] User is not admin:", user.email);
-        }
+    // Fallback sur user_metadata si configuré ainsi (moins sécurisé, l'utilisateur peut le modifier)
+    if (user.user_metadata?.role === 'admin') {
+        return true;
     }
     
-    return isWhitelisted;
+    return false;
   }
 };

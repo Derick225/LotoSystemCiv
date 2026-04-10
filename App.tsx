@@ -11,6 +11,7 @@ import { BootSequence } from './components/intro/BootSequence';
 import { TutorialOverlay } from './components/ui/TutorialOverlay';
 import { InstallPrompt } from './components/InstallPrompt';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { ResetPasswordScreen } from './components/auth/ResetPasswordScreen';
 import { SubscriptionWall } from './components/auth/SubscriptionWall';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/queryClient';
@@ -75,6 +76,7 @@ const AppContent: React.FC = () => {
   const { session, isAdmin, loading: authLoading, subscription, refreshSubscription } = useAuth();
   
   const [isBooted, setIsBooted] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
     initializeStore();
@@ -100,6 +102,13 @@ const AppContent: React.FC = () => {
         window.history.replaceState({}, document.title, window.location.pathname);
     } else if (params.get('payment') === 'cancel') {
         showToast("Paiement annulé.", "info");
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // Check for password reset hash
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    if (hashParams.get('type') === 'recovery' || params.get('reset') === 'true') {
+        setIsResettingPassword(true);
         window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -191,6 +200,10 @@ const AppContent: React.FC = () => {
 
   if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
   
+  if (isResettingPassword) {
+    return <ResetPasswordScreen onSuccess={() => setIsResettingPassword(false)} />;
+  }
+
   if (!session) {
     return <AuthScreen onSuccess={() => {}} />;
   }

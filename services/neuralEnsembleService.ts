@@ -1,7 +1,7 @@
 
 import { DrawResult, Prediction, AlgoWeights, ScoreBreakdown } from '../types';
 import { generateMasterPrediction, getAlgoWeights } from './predictionEngine';
-import { getOptimizedWeights, analyzeDrawLogic } from './geminiService';
+import { analyzeDrawLogic } from './geminiService';
 
 export interface EnsembleAgent {
     id: string;
@@ -85,7 +85,7 @@ export const runNeuralEnsemble = async (
         .sort((a, b) => a - b);
 
     // 5. Meta-Analysis via Gemini
-    const aiAnalysis = await analyzeDrawLogic(drawName, history);
+    const aiAnalysis = await analyzeDrawLogic(drawName, history, metrics);
 
     return {
         agents,

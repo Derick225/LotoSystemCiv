@@ -2,7 +2,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../../services/predictionEngine';
-import { getOptimizedWeights } from '../../services/geminiService';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
 import { saveTicket } from '../../services/userPreferencesService';
 import { NumberBall } from '../NumberBall';
@@ -86,11 +85,11 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
         try {
             audioEngine.play('loading');
-            showToast("Gemini: Analyse du régime stochastique...", "info");
-            const newWeights = await getOptimizedWeights(drawName, history);
+            showToast("Calcul déterministe: Optimisation génétique des poids...", "info");
+            const result = await LearningService.triggerAutoLearning(drawName, globalWeights);
             
-            if (newWeights) {
-                const normalized = normalizeWeights(newWeights);
+            if (result.improvement && result.weights) {
+                const normalized = normalizeWeights(result.weights);
                 setOptimizedWeights(normalized); // Pour la visualisation "Après"
                 
                 // On applique immédiatement pour le calcul
@@ -98,18 +97,18 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setActiveDNA(`IA Calibrée (${getStrategyName(normalized)})`);
                 
                 audioEngine.play('success');
-                showToast("ADN muté par l'IA. Lancement de l'inférence...", "success");
+                showToast(result.message, "success");
                 
                 // Petit délai pour laisser l'utilisateur voir le radar changer
                 setTimeout(() => runInference(normalized), 1500);
             } else {
                 audioEngine.play('error');
-                showToast("Le Cloud n'a pas répondu. Fallback standard.", "error");
+                showToast(result.message || "Aucune amélioration trouvée. Fallback standard.", "error");
                 runInference();
             }
         } catch (e) {
             audioEngine.play('error');
-            showToast("Erreur connexion IA.", "error");
+            showToast("Erreur lors de l'optimisation.", "error");
             runInference();
         } finally {
             setIsOptimizing(false);

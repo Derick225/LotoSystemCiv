@@ -12,6 +12,7 @@ interface AuthScreenProps {
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const { showToast } = useToast();
   const [isLogin, setIsLogin] = useState(true);
+  const [isReset, setIsReset] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +23,29 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       // Met à jour le status au montage (utile pour le HMR)
       setConfigStatus(getSupabaseConfigDiagnostics());
   }, []);
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      showToast("Veuillez entrer votre adresse e-mail", "error");
+      return;
+    }
+    setLoading(true);
+    audioEngine.play('click');
+    try {
+      const { error } = await authService.resetPasswordForEmail(email);
+      if (error) throw error;
+      showToast("Lien de réinitialisation envoyé ! Vérifiez votre boîte mail.", "success");
+      audioEngine.play('success');
+      setIsReset(false);
+    } catch (error: any) {
+      console.error(error);
+      audioEngine.play('error');
+      showToast(error.message || "Erreur lors de la réinitialisation", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +148,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={isReset ? handleResetPassword : handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors">
@@ -139,18 +163,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               />
             </div>
 
-            <div className="relative group">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors">
-                <Lock size={20} />
+            {!isReset && (
+              <div className="relative group">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+                  <Lock size={20} />
+                </div>
+                <input
+                  type="password"
+                  placeholder="Clé de Cryptage (Mot de passe)"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-white font-medium placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
               </div>
-              <input
-                type="password"
-                placeholder="Clé de Cryptage (Mot de passe)"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-white font-medium placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-              />
-            </div>
+            )}
           </div>
 
           <button
@@ -162,19 +188,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               <Cpu className="animate-spin" size={18} />
             ) : (
               <>
-                {isLogin ? "Initialiser Session" : "Créer Identité"}
+                {isReset ? "Envoyer le lien" : (isLogin ? "Initialiser Session" : "Créer Identité")}
                 <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
               </>
             )}
           </button>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-4">
+          {!isReset && isLogin && (
+            <button
+              type="button"
+              onClick={() => { setIsReset(true); audioEngine.play('click'); }}
+              className="text-[10px] text-indigo-400 font-bold hover:text-indigo-300 transition-colors uppercase tracking-widest block mx-auto"
+            >
+              Mot de passe oublié ?
+            </button>
+          )}
+          
           <button
-            onClick={() => { setIsLogin(!isLogin); audioEngine.play('click'); }}
+            onClick={() => { 
+              if (isReset) {
+                setIsReset(false);
+              } else {
+                setIsLogin(!isLogin); 
+              }
+              audioEngine.play('click'); 
+            }}
             className="text-xs text-slate-400 font-bold hover:text-white transition-colors uppercase tracking-wide"
           >
-            {isLogin ? "Pas encore de compte ? S'inscrire" : "Déjà membre ? Se connecter"}
+            {isReset ? "Retour à la connexion" : (isLogin ? "Pas encore de compte ? S'inscrire" : "Déjà membre ? Se connecter")}
           </button>
         </div>
 

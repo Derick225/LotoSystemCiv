@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: {
-        'react-is': 'react-is'
+        '@': '/src'
       }
     },
     build: {

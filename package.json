@@ -14,12 +14,15 @@
     "supabase:link": "supabase link"
   },
   "dependencies": {
+    "@base-ui/react": "^1.3.0",
     "@capacitor/core": "^6.0.0",
+    "@fontsource-variable/geist": "^5.2.8",
     "@google/genai": "^1.34.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@supabase/supabase-js": "^2.43.0",
     "@tanstack/react-query": "^5.32.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "dotenv": "^17.3.1",
@@ -29,14 +32,17 @@
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.473.0",
+    "motion": "^12.38.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.3",
     "react-virtualized-auto-sizer": "^1.0.24",
     "react-window": "^1.8.10",
-    "recharts": "^2.15.0",
-    "tailwind-merge": "^2.3.0",
+    "recharts": "^2.15.4",
+    "shadcn": "^4.2.0",
+    "tailwind-merge": "^2.6.1",
     "three": "^0.183.1",
+    "tw-animate-css": "^1.4.0",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8",
     "zustand": "^5.0.12"
@@ -57,10 +63,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.11",
+    "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.2"
-  },
-  "overrides": {
-    "react": "$react",
-    "react-dom": "$react-dom"
   }
 }

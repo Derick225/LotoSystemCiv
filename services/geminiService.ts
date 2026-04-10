@@ -44,84 +44,10 @@ export async function generateWithFallback(ai: any, primaryModel: string, params
 }
 
 /**
- * Récupère des poids algorithmiques optimisés par l'IA via Gemini Flash.
- */
-export const getOptimizedWeights = async (drawName: string, history: DrawResult[]): Promise<AlgoWeights | null> => {
-    if (!navigator.onLine) {
-        logError(new AppError("Mode hors-ligne : Optimisation IA indisponible.", "OFFLINE_MODE", "low"), { source: 'getOptimizedWeights' });
-        return null;
-    }
-
-    const ai = getGeminiClient();
-    if (!ai) return null;
-
-    try {
-        // On envoie un sous-ensemble de l'historique pour ne pas saturer le prompt
-        const historyPayload = history.slice(0, 20).map(h => ({ 
-            date: h.date, 
-            gagnants: h.gagnants 
-        }));
-
-        const prompt = `
-        Tu es un expert en optimisation stochastique pour les systèmes de loterie.
-        Analyse les 20 derniers tirages suivants pour le jeu "${drawName}" :
-        ${JSON.stringify(historyPayload)}
-
-        Ta tâche est de déterminer les poids optimaux (entre 0.0 et 1.0) pour chaque algorithme de prédiction afin de maximiser la précision pour le prochain tirage.
-        Les algorithmes sont : frequency, gap, spectral, fractal, markov, poisson, momentum, equilibrium, ai_intuition, decision_forest, wavelet, resistance, spatial, orchestration, gap_velocity, anti_consensus, lstm, shadow_factor, quantum_entanglement, fractal_resonance.
-        
-        Retourne un objet JSON strict correspondant à l'interface AlgoWeights.
-        `;
-
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        frequency: { type: Type.NUMBER },
-                        gap: { type: Type.NUMBER },
-                        spectral: { type: Type.NUMBER },
-                        fractal: { type: Type.NUMBER },
-                        markov: { type: Type.NUMBER },
-                        poisson: { type: Type.NUMBER },
-                        momentum: { type: Type.NUMBER },
-                        equilibrium: { type: Type.NUMBER },
-                        ai_intuition: { type: Type.NUMBER },
-                        decision_forest: { type: Type.NUMBER },
-                        wavelet: { type: Type.NUMBER },
-                        resistance: { type: Type.NUMBER },
-                        spatial: { type: Type.NUMBER },
-                        orchestration: { type: Type.NUMBER },
-                        gap_velocity: { type: Type.NUMBER },
-                        anti_consensus: { type: Type.NUMBER },
-                        lstm: { type: Type.NUMBER },
-                        quantum_entanglement: { type: Type.NUMBER },
-                        fractal_resonance: { type: Type.NUMBER },
-                        shadow_factor: { type: Type.NUMBER }
-                    },
-                    required: ["frequency", "gap", "spectral", "fractal", "markov", "poisson", "momentum", "equilibrium", "ai_intuition", "decision_forest", "wavelet", "resistance", "spatial", "orchestration", "gap_velocity", "anti_consensus", "lstm", "quantum_entanglement", "fractal_resonance", "shadow_factor"]
-                }
-            }
-        });
-
-        const jsonText = response.text;
-        if (!jsonText) return null;
-        
-        const data = JSON.parse(jsonText);
-        return data as AlgoWeights;
-
-    } catch (e: any) {
-        logError(new AppError(e.message || "Optimized Weights Error", "GEMINI_OPTIMIZE_ERROR", "medium", { error: e }), { source: 'getOptimizedWeights' });
-        return null;
-    }
-};
-
-/**
  * Analyse logique approfondie du tirage via Gemini Flash.
+ * IMPORTANT: Gemini ne doit PAS prédire de numéros. Il doit uniquement analyser les statistiques.
  */
-export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]): Promise<GeminiReasoning> => {
+export const analyzeDrawLogic = async (drawName: string, history: DrawResult[], metrics: any): Promise<GeminiReasoning> => {
     const cacheKey = `${drawName}_${history[0]?.id}`;
     const cached = analysisCache.get(cacheKey);
     
@@ -158,11 +84,17 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
         const historyPayload = history.slice(0, 15).map(h => ({ date: h.date, gagnants: h.gagnants }));
         
         const prompt = `
-        Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique et fractale pour la loterie (5/90).
+        Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique pour la loterie (5/90).
         Analyse les 15 derniers tirages de "${drawName}" :
         ${JSON.stringify(historyPayload)}
+        
+        Métriques mathématiques calculées par le moteur déterministe :
+        ${JSON.stringify(metrics || {})}
 
-        Fournis une analyse logique détaillée et probabiliste, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), suggère la prochaine séquence probable, liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, suggère des numéros à surveiller (focus), et un score d'intuition (0-100).
+        CRITIQUE : Tu es un LLM, tu es mauvais en mathématiques pures. Tu ne dois SOUS AUCUN PRÉTEXTE essayer de deviner ou de prédire les prochains numéros.
+        Ta seule tâche est de fournir une analyse sémantique et narrative basée sur les métriques qu'on te fournit.
+
+        Fournis une analyse logique détaillée, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, et un score d'intuition (0-100).
         `;
 
         const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
@@ -174,10 +106,10 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
                     properties: {
                         logicalAnalysis: { type: Type.STRING },
                         patternType: { type: Type.STRING },
-                        nextSequence: { type: Type.STRING },
+                        nextSequence: { type: Type.STRING, description: "Description textuelle de la tendance (ex: 'Hausse de la volatilité'), PAS DE NUMÉROS" },
                         anomalies: { type: Type.ARRAY, items: { type: Type.STRING } },
                         strategicAdvice: { type: Type.STRING },
-                        suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                        suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER }, description: "Laisse ce tableau VIDE. C'est le moteur mathématique qui s'en charge." },
                         intuitionScore: { type: Type.NUMBER }
                     },
                     required: ["logicalAnalysis", "patternType", "nextSequence", "anomalies", "strategicAdvice", "suggestedFocus", "intuitionScore"]
@@ -189,6 +121,9 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[]):
         if (!jsonText) throw new Error("Empty response from Gemini");
 
         const result = JSON.parse(jsonText) as GeminiReasoning;
+        
+        // Force empty focus array to prevent AI hallucinations
+        result.suggestedFocus = [];
 
         // Gestion du cache LRU
         if (analysisCache.size >= CACHE_CAPACITY) {
