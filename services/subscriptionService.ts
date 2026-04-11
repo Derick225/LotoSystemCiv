@@ -133,6 +133,18 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
     const siteId = import.meta.env.VITE_CINETPAY_SITE_ID as string;
 
     if (apiKey && siteId) {
+        let customerEmail = 'user@example.com';
+        let customerPhone = '00000000';
+        let customerName = 'Utilisateur';
+
+        if (isSupabaseConfigured()) {
+            const { data: userData } = await supabase.auth.getUser();
+            if (userData?.user?.email) {
+                customerEmail = userData.user.email;
+                customerName = userData.user.email.split('@')[0];
+            }
+        }
+
         const transactionId = `TX-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const result = await initiateRealPayment({
             provider: 'CINETPAY',
@@ -142,10 +154,11 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
             amount: SUBSCRIPTION_COST,
             currency: 'XOF',
             description: 'Abonnement Premium LotoPro',
-            customerName: 'Utilisateur',
-            customerEmail: 'user@example.com', // Should be fetched from user profile
-            customerPhone: '00000000', // Should be fetched
-            transactionId
+            customerName,
+            customerEmail,
+            customerPhone,
+            transactionId,
+            userId
         });
 
         if (result.success) {
@@ -175,8 +188,7 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
         }
     }
 
-    // 3. Final Fallback: Simulation
-    console.warn("Mode simulation (Pas de backend ni de clés API)");
-    await new Promise(r => setTimeout(r, 2000));
-    return true; 
+    // 3. Final Fallback: Error if no config
+    console.error("Configuration de paiement manquante (Pas de backend ni de clés API).");
+    return false;
 };

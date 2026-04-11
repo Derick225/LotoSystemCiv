@@ -249,29 +249,26 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         return () => { isMounted.current = false; };
     }, [drawName, history, globalWeights]); // Recalcul si les poids changent
 
-    const handleGenerateTicket = () => {
+    const handleGenerateTicket = async () => {
         audioEngine.play('click');
         if (!metrics || metrics.topCandidates.length < 5) return;
         
         setIsGenerating(true);
         setGeneratedTicket(null);
         
-        // Simulate complex generation
-        setTimeout(() => {
-            // Algorithme de synthèse intelligente : Coeur solide + Dispersion
-            // 1. Cœur : Les 3 meilleurs vecteurs
-            const core = metrics.topCandidates.slice(0, 3).map(c => c.number);
-            // 2. Dispersion : 2 numéros piochés dans le top 10 (hors top 3) pour la variance
-            const fillers = metrics.topCandidates.slice(3, 10).map(c => c.number);
+        try {
+            const { generateMasterPrediction } = await import('../../services/prediction/predictionFacade');
+            const prediction = await generateMasterPrediction(drawName, history, globalWeights);
             
-            const shuffledFillers = fillers.sort(() => 0.5 - Math.random());
-            const finalTicket = [...core, ...shuffledFillers.slice(0, 2)].sort((a,b) => a-b);
-            
-            setGeneratedTicket(finalTicket);
-            setIsGenerating(false);
+            setGeneratedTicket(prediction.suggestedNumbers);
             audioEngine.play('success');
             showToast("Synthèse Harmonique terminée.", "success");
-        }, 1500);
+        } catch (e) {
+            console.error(e);
+            showToast("Erreur lors de la génération.", "error");
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
     const handleSaveTicket = async () => {

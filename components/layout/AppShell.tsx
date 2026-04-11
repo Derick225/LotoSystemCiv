@@ -28,6 +28,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   children, 
   viewMode, 
   setViewMode, 
+  theme,
+  setTheme,
   onReset,
   showWallet,
   setShowWallet,
@@ -86,6 +88,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </nav>
 
                 <div className="flex items-center gap-1 md:gap-3">
+                    <button onClick={() => { audioEngine.play('click'); setTheme(theme === 'dark' ? 'light' : 'dark'); }} className={`p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border bg-white/5 text-slate-400 hover:text-white border-white/10`}>
+                        {theme === 'dark' ? <span className="text-sm">☀️</span> : <span className="text-sm">🌙</span>}
+                    </button>
                     <button onClick={() => { audioEngine.play('click'); toggleListening(); }} className={`p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border ${isListening ? 'bg-rose-600 text-white border-rose-500 shadow-rose-900/50' : 'bg-white/5 text-slate-400 hover:text-white border-white/10'}`}>
                         {isListening ? <Mic size={14} className="animate-pulse" /> : <MicOff size={14} />}
                     </button>

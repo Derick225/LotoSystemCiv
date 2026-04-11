@@ -50,32 +50,5 @@ export const generateMasterPrediction = async (
     symbioticContext?: SymbioticContext,
     riskProfile: RiskProfile = 'BALANCED'
 ): Promise<Prediction> => {
-    if (typeof window !== 'undefined') {
-        try {
-            const response = await fetch('/api/generate-prediction', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    type: 'master',
-                    drawName,
-                    history,
-                    weightsToUse,
-                    metrics,
-                    symbioticContext,
-                    riskProfile
-                })
-            });
-            if (!response.ok) {
-                throw new Error(`API Error: ${response.statusText}`);
-            }
-            const data = await response.json();
-            if (data.error) throw new Error(data.error);
-            return data.result;
-        } catch (e) {
-            console.warn("Backend prediction failed, falling back to local calculation:", e);
-            return generateMasterPredictionCore(drawName, history, weightsToUse, metrics, symbioticContext, riskProfile);
-        }
-    } else {
-        return generateMasterPredictionCore(drawName, history, weightsToUse, metrics, symbioticContext, riskProfile);
-    }
+    return generateMasterPredictionCore(drawName, history, weightsToUse, metrics, symbioticContext, riskProfile);
 };

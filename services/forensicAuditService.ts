@@ -550,6 +550,18 @@ export const analyzeForManipulation = (rawNumbers: number[], history: DrawResult
 };
 
 export const generateShadowOracleVector = (history: DrawResult[]): number[] => {
-    // Basic implementation to satisfy existing imports
-    return [1, 2, 3, 4, 5];
+    if (!history || history.length === 0) return [];
+    
+    const frequencies: Record<number, number> = {};
+    history.forEach(draw => {
+        draw.gagnants.forEach(num => {
+            frequencies[num] = (frequencies[num] || 0) + 1;
+        });
+    });
+
+    return Object.entries(frequencies)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(entry => parseInt(entry[0], 10))
+        .sort((a, b) => a - b);
 };

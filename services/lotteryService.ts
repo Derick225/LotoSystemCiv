@@ -277,10 +277,9 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
         }
 
         if (targetResultId) {
-            await fetch('/api/forensic-autopsy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ snapshotId: snap.id, drawResultId: targetResultId })
+            await apiClient.post('forensic-autopsy', { 
+                snapshotId: snap.id, 
+                drawResultId: targetResultId 
             }).catch(e => console.error("Forensic autopsy trigger error:", e));
             autopsyCount++;
         }
@@ -378,20 +377,4 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
     return { following: sorted };
 };
 
-export const injectDemoData = async () => {
-    if (!isSupabaseConfigured()) return;
-    const targetDraws = ["Reveil", "Etoile", "Akwaba", "Monday Special"];
-    const demoData: any[] = [];
-    targetDraws.forEach(drawName => {
-        for (let i = 0; i < 5; i++) {
-            const d = new Date(); d.setDate(d.getDate() - i);
-            const dateStr = d.toISOString().split('T')[0];
-            const numbers = new Set<number>();
-            while(numbers.size < 5) numbers.add(Math.floor(Math.random() * 90) + 1);
-            const machine = new Set<number>();
-            while(machine.size < 5) machine.add(Math.floor(Math.random() * 90) + 1);
-            demoData.push({ draw_name: drawName, date: dateStr, gagnants: Array.from(numbers), machine: Array.from(machine) });
-        }
-    });
-    try { await supabase.from('draw_results').upsert(demoData, { onConflict: 'draw_name, date' }); } catch (e: any) { logError(new AppError(e.message || "Demo injection failed", "DEMO_INJECTION_ERROR", "low", { error: e }), { source: 'injectDemoData' }); }
-};
+

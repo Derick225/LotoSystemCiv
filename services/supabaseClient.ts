@@ -13,8 +13,8 @@ const getViteEnv = (key: string): string => {
 
 const cleanEnv = (val: string) => val ? val.replace(/["']/g, '').trim() : '';
 
-const SUPABASE_URL = cleanEnv(getViteEnv('VITE_SUPABASE_URL'));
-const SUPABASE_ANON_KEY = cleanEnv(
+export const SUPABASE_URL = cleanEnv(getViteEnv('VITE_SUPABASE_URL'));
+export const SUPABASE_ANON_KEY = cleanEnv(
   getViteEnv('VITE_SUPABASE_ANON_KEY') || 
   getViteEnv('VITE_SUPABASE_KEY') || 
   getViteEnv('VITE_SUPABASE_PUBLISHABLE_KEY')
@@ -57,7 +57,7 @@ const createSafeClient = (): SupabaseClient => {
                 storage: typeof window !== 'undefined' ? window.localStorage : undefined 
             },
             global: { 
-                headers: { 'x-nexus-client': 'platinum-v12-prod' }
+                headers: {}
             },
         });
     } else {

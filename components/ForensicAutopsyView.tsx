@@ -34,26 +34,19 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 return;
             }
 
-            // 2. If not, trigger Local API
+            // 2. If not, trigger Edge Function
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) throw new Error("Non authentifié");
 
-            const response = await fetch('/api/forensic-autopsy', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({ snapshotId, drawResultId })
+            const { data: result, error: invokeError } = await supabase.functions.invoke('forensic-autopsy', {
+                body: { snapshotId, drawResultId }
             });
 
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || "Erreur lors de la génération de l'autopsie");
+            if (invokeError) {
+                throw new Error(invokeError.message || "Erreur lors de la génération de l'autopsie");
             }
 
-            const result = await response.json();
-            setReport(result.report.report_data);
+            setReport(result.report.report_data || result.report);
             
             // Refresh snapshot to get near misses
             const { data: updatedSnap } = await supabase
@@ -108,7 +101,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 </div>
                 <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
                     <Target className="w-4 h-4 text-cyan-400" />
-                    <span className="text-cyan-400 font-mono font-bold">{report.score}/100</span>
+                    <span className="text-cyan-400 font-mono font-bold">{report.scoreDivergence !== undefined ? 100 - report.scoreDivergence : 'N/A'}/100</span>
                 </div>
             </div>
 
@@ -122,9 +115,9 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                         </h4>
                         <div className="flex flex-wrap gap-2">
                             {snapshot.near_misses && snapshot.near_misses.length > 0 ? (
-                                snapshot.near_misses.map((nm: number, idx: number) => (
+                                snapshot.near_misses.map((nm: any, idx: number) => (
                                     <span key={idx} className="px-2 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded font-mono text-sm">
-                                        {nm}
+                                        {nm.predicted || nm} ({nm.type || '?'})
                                     </span>
                                 ))
                             ) : (
@@ -136,9 +129,9 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                     <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                         <h4 className="text-sm font-semibold text-gray-400 mb-2 flex items-center">
                             <AlertTriangle className="w-4 h-4 mr-2 text-orange-400" />
-                            Biais Détecté
+                            Divergence
                         </h4>
-                        <p className="text-orange-300 text-sm">{report.bias_detected}</p>
+                        <p className="text-orange-300 text-sm">Score de divergence: {report.scoreDivergence}</p>
                     </div>
                 </div>
 
@@ -146,7 +139,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 <div className="space-y-4">
                     <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                         <h4 className="text-sm font-semibold text-gray-400 mb-2">Analyse Post-Mortem</h4>
-                        <p className="text-gray-300 text-sm leading-relaxed">{report.analysis}</p>
+                        <p className="text-gray-300 text-sm leading-relaxed">{report.aiAnalysis || report.analysis}</p>
                     </div>
 
                     <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
@@ -154,7 +147,13 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                             <Lightbulb className="w-4 h-4 mr-2 text-green-400" />
                             Recommandations
                         </h4>
-                        <p className="text-green-300 text-sm leading-relaxed">{report.recommendations}</p>
+                        <ul className="text-green-300 text-sm leading-relaxed list-disc pl-4 space-y-1">
+                            {Array.isArray(report.recommendations) ? (
+                                report.recommendations.map((rec: string, i: number) => <li key={i}>{rec}</li>)
+                            ) : (
+                                <li>{report.recommendations}</li>
+                            )}
+                        </ul>
                     </div>
                 </div>
             </div>

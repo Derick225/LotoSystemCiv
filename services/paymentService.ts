@@ -1,5 +1,5 @@
 
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL } from './supabaseClient';
 
 export interface PaymentConfig {
     provider: 'CINETPAY' | 'STRIPE' | 'WAVE';
@@ -16,6 +16,7 @@ export interface PaymentRequest {
     customerEmail: string;
     customerPhone: string;
     transactionId: string;
+    userId: string;
 }
 
 // CinetPay SDK Loader
@@ -45,7 +46,7 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
                 CinetPay.setConfig({
                     apikey: config.apiKey,
                     site_id: config.siteId,
-                    notify_url: 'https://your-app-url.com/api/payment/webhook', // Placeholder
+                    notify_url: `${SUPABASE_URL}/functions/v1/payment-webhook`,
                     mode: 'PRODUCTION'
                 });
 
@@ -65,6 +66,7 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
                     customer_country: "CI",
                     customer_state: "CI",
                     customer_zip_code: "00225",
+                    cpm_custom: request.userId
                 });
 
                 // @ts-ignore
@@ -89,19 +91,21 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
     }
     
     // Fallback / Simulation for other providers or if config missing
-    console.warn("Provider not implemented or config missing. Simulating...");
-    return new Promise(resolve => setTimeout(() => resolve({ success: true, message: "Simulation Réussie" }), 2000));
+    console.error("Provider not implemented or config missing.");
+    return { success: false, message: "Configuration de paiement manquante ou fournisseur non supporté." };
 };
 
 export const verifyTransaction = async (transactionId: string): Promise<boolean> => {
     // In a real app, this would call your backend to verify the transaction status with the provider
-    // Here we simulate a check
     const { data, error } = await supabase
         .from('transactions')
         .select('status')
         .eq('id', transactionId)
         .single();
         
-    if (error) return true; // Optimistic for demo
+    if (error) {
+        console.error("Erreur lors de la vérification de la transaction:", error);
+        return false;
+    }
     return data?.status === 'COMPLETED';
 };

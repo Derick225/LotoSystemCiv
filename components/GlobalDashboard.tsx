@@ -1,8 +1,8 @@
 
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { getNextScheduledDraw, checkAndSyncRecentResults, injectDemoData } from '../services/lotteryService';
+import { getNextScheduledDraw, checkAndSyncRecentResults } from '../services/lotteryService';
 import { analyzeIntraDraw } from '../services/intraDrawService';
-import { runAutoLearn } from '../services/predictionEngine';
+import { LearningService } from '../services/learningService';
 import { useNexusStore } from '../store/useNexusStore';
 import { useGlobalStats, useDailySummary, lotteryKeys } from '../hooks/useLottery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -293,11 +293,17 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         const triggerAutoLearn = async () => {
             if (history && history.length > 60) {
                 const drawName = history[0]?.drawName || 'Global';
-                // We don't force it here, so it respects the 24h check inside runAutoLearn
-                const result = await runAutoLearn(drawName, history);
-                if (result.success) {
-                    showToast(result.message, "success");
-                    refreshData(drawName);
+                const LAST_RUN_KEY = `nexus_autolearn_last_${drawName}`;
+                const lastRun = localStorage.getItem(LAST_RUN_KEY);
+                const now = Date.now();
+                
+                if (!lastRun || (now - Number(lastRun)) >= 86400000) {
+                    const result = await LearningService.triggerAutoLearning(drawName);
+                    if (result.lastRun) {
+                        localStorage.setItem(LAST_RUN_KEY, now.toString());
+                        showToast(result.message, result.improvement ? "success" : "info");
+                        if (result.improvement) refreshData(drawName);
+                    }
                 }
             }
         };
@@ -318,12 +324,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
             // Force execution by clearing timestamp
             localStorage.removeItem(`nexus_autolearn_last_${drawName}`);
             
-            const result = await runAutoLearn(drawName, history);
-            if (result.success) {
-                showToast(result.message, "success");
-                refreshData(drawName);
+            const result = await LearningService.triggerAutoLearning(drawName);
+            if (result.lastRun) {
+                localStorage.setItem(`nexus_autolearn_last_${drawName}`, Date.now().toString());
+                showToast(result.message, result.improvement ? "success" : "info");
+                if (result.improvement) refreshData(drawName);
             } else {
-                showToast(result.message, "info");
+                showToast(result.message || "Erreur Auto-Learn.", "error");
             }
         } catch (e) {
             showToast("Erreur Auto-Learn.", "error");
@@ -378,19 +385,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         }
     };
 
-    const handleInjectDemo = async () => {
-        setFullSyncing(true);
-        try {
-            await injectDemoData();
-            await queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
-            await refreshData('Reveil', true);
-            showToast("Données de démo injectées.", "success");
-        } catch(e) {
-            showToast("Erreur injection démo.", "error");
-        } finally {
-            setFullSyncing(false);
-        }
-    };
+
 
     const uiDays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     const isEmptyState = history.length === 0 && !loadingSummary && summary.every((s: SummaryItem) => s.result === null);
@@ -398,34 +393,21 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     // Couleur de l'indicateur de pouls global
     const pulseColor = dynamicVolatility > 60 ? 'text-rose-500' : 'text-emerald-500';
 
-    const handleExportReport = () => {
-        // Simulation de données de prédiction pour le rapport (à connecter au vrai moteur si dispo)
-        const mockPrediction: any = {
-            confidence: 87,
-            analysis: "Analyse spectrale confirmant une convergence des cycles de Poisson. Les attracteurs étranges indiquent une forte probabilité de retour à la moyenne pour les décades 30 et 40.",
-            suggestedNumbers: [7, 14, 23, 38, 42],
-            breakdown: {
-                7: { frequency: 85, gap: 12, lstm: 92 },
-                14: { frequency: 78, gap: 45, lstm: 65 },
-                23: { frequency: 60, gap: 88, lstm: 74 },
-                38: { frequency: 91, gap: 5, lstm: 89 },
-                42: { frequency: 72, gap: 30, lstm: 81 }
-            }
-        };
-
-        generateTacticalReport({
-            drawName: "Global",
-            prediction: mockPrediction,
-            weights: {
-                frequency: 0.2,
-                gap: 0.15,
-                markov: 0.15,
-                spectral: 0.1,
-                lstm: 0.05,
-                poisson: 0.05
-            }
-        });
-        showToast("Rapport Tactique généré.", "success");
+    const handleExportReport = async () => {
+        try {
+            const { generateMasterPrediction } = await import('../services/prediction/predictionFacade');
+            const prediction = await generateMasterPrediction("Global", history, globalWeights);
+            
+            generateTacticalReport({
+                drawName: "Global",
+                prediction: prediction,
+                weights: globalWeights
+            });
+            showToast("Rapport Tactique généré.", "success");
+        } catch (e) {
+            console.error(e);
+            showToast("Erreur lors de la génération du rapport.", "error");
+        }
     };
 
     return (
@@ -501,12 +483,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                             Le noyau Nexus ne détecte aucune donnée historique.
                         </p>
                         <button 
-                            onClick={handleInjectDemo}
+                            onClick={handleManualSync}
                             disabled={fullSyncing}
                             className="px-6 md:px-8 py-3 md:py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-3"
                         >
-                            {fullSyncing ? <RefreshCw className="animate-spin" size={16}/> : <Database size={16}/>}
-                            Injecter Démo
+                            {fullSyncing ? <RefreshCw className="animate-spin" size={16}/> : <RefreshCw size={16}/>}
+                            Synchroniser les données
                         </button>
                     </div>
                 </div>
