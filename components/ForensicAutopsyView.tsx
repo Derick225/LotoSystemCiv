@@ -22,7 +22,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
             // 1. Check if report already exists in prediction_snapshots
             const { data: snapData, error: snapError } = await supabase
                 .from('prediction_snapshots')
-                .select('*, forensic_reports(*)')
+                .select('*')
                 .eq('id', snapshotId)
                 .single();
 
@@ -34,8 +34,8 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 return;
             }
 
-            if (snapData.autopsy_report && snapData.forensic_reports && snapData.forensic_reports.length > 0) {
-                setReport(snapData.forensic_reports[0].report_data);
+            if (snapData.autopsy_report) {
+                setReport(snapData.autopsy_report);
                 setLoading(false);
                 return;
             }

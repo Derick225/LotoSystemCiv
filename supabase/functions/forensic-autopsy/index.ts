@@ -162,6 +162,7 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
     // Insérer dans forensic_reports
     await supabase.from('forensic_reports').insert({
         user_id: snapData.user_id,
+        prediction_id: snapshotId,
         draw_name: snapData.draw_name,
         draw_date: resultData.date,
         draw_result_id: resultData.id,
