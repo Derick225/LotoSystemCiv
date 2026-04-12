@@ -3,6 +3,8 @@ import { getAlgoWeights, normalizeWeights, applyRiskProfile, applyMetaLearning }
 import { extractFeatures } from './featureExtractor';
 import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { generateCombination } from './combinationGenerator';
+import { predictWithLSTM } from './neuralEngine';
+import { AlgoKey } from '../../shared/prediction.types';
 
 export const generateMasterPredictionCore = async (
     drawName: string, 
@@ -18,10 +20,25 @@ export const generateMasterPredictionCore = async (
     weights = applyMetaLearning(weights, history);
     weights = applyRiskProfile(weights, riskProfile);
 
+    // Deep Learning (LSTM) Prediction
+    const lstmPredictions = await predictWithLSTM(drawName, history);
+    const enhancedMetrics = { ...metrics, lstm: lstmPredictions };
+
     const features = extractFeatures(history);
     
-    let masterScores = calculateScores(features, weights, metrics);
+    let masterScores = calculateScores(features, weights, enhancedMetrics);
     masterScores = await applyPCADenoising(masterScores, weights);
+
+    // Apply Quantum Noise for CHAOS profile
+    if (riskProfile === 'CHAOS') {
+        const moonPhase = Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 29.53)); // Pseudo moon phase
+        masterScores.forEach(scoreObj => {
+            // Add a random perturbation between -15 and +15, influenced by the "moon phase"
+            const noise = (Math.random() * 30 - 15) * (1 + Math.abs(moonPhase));
+            scoreObj.score += noise;
+            scoreObj.breakdown[AlgoKey.QUANTUM_ENTANGLEMENT] = noise > 0 ? noise : 0;
+        });
+    }
 
     const sortedScores = masterScores.sort((a, b) => b.score - a.score);
     

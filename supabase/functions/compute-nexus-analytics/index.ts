@@ -93,8 +93,8 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error("Analytics Error:", error)
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }

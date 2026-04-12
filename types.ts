@@ -123,6 +123,10 @@ export interface ForensicReport {
     counterfactuals?: CounterfactualResult[];
     spectralDeviations?: SpectralDeviation[];
     rmse?: number; // Root Mean Square Error du modèle
+    // AI Analysis
+    aiAnalysis?: string;
+    recommendations?: string[];
+    modelUsed?: string;
 }
 
 export interface ForensicEvidence {

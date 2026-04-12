@@ -7,16 +7,17 @@ import { audioEngine } from '../utils/audioEngine';
 interface ForensicAutopsyViewProps {
     snapshotId: string;
     drawResultId: string;
+    existingReport?: any;
 }
 
-export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapshotId, drawResultId }) => {
-    const [loading, setLoading] = useState(true);
-    const [report, setReport] = useState<any>(null);
+export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapshotId, drawResultId, existingReport }) => {
+    const [loading, setLoading] = useState(!existingReport);
+    const [report, setReport] = useState<any>(existingReport || null);
     const [snapshot, setSnapshot] = useState<any>(null);
     const { showToast } = useToast();
 
     const fetchOrGenerateReport = async () => {
-        setLoading(true);
+        if (!existingReport) setLoading(true);
         try {
             // 1. Check if report already exists in prediction_snapshots
             const { data: snapData, error: snapError } = await supabase
@@ -27,6 +28,11 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
 
             if (snapError) throw snapError;
             setSnapshot(snapData);
+
+            if (existingReport) {
+                setLoading(false);
+                return;
+            }
 
             if (snapData.autopsy_report && snapData.forensic_reports && snapData.forensic_reports.length > 0) {
                 setReport(snapData.forensic_reports[0].report_data);
@@ -75,7 +81,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
         }
     }, [snapshotId, drawResultId]);
 
-    if (loading) {
+    if (loading || (!snapshot && !existingReport)) {
         return (
             <div className="flex flex-col items-center justify-center p-8 space-y-4 bg-gray-900/50 rounded-xl border border-gray-800">
                 <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
@@ -84,7 +90,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
         );
     }
 
-    if (!report || !snapshot) {
+    if (!report) {
         return (
             <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-xl text-red-400 text-center">
                 Impossible de charger l'autopsie.
@@ -114,7 +120,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                             Near Misses (+/- 1)
                         </h4>
                         <div className="flex flex-wrap gap-2">
-                            {snapshot.near_misses && snapshot.near_misses.length > 0 ? (
+                            {snapshot?.near_misses && snapshot.near_misses.length > 0 ? (
                                 snapshot.near_misses.map((nm: any, idx: number) => (
                                     <span key={idx} className="px-2 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded font-mono text-sm">
                                         {nm.predicted || nm} ({nm.type || '?'})

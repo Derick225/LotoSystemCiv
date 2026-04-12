@@ -66,7 +66,7 @@ export const lotteryService = {
               .order('date', { ascending: false });
 
             if (drawName && drawName !== 'ALL') {
-                query = query.eq('draw_name', drawName);
+                query = query.eq('draw_name', normalizeDrawName(drawName));
             }
             
             query = query.limit(2000);

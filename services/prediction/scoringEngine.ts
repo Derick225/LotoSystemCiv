@@ -42,6 +42,7 @@ export const calculateScores = (
         breakdown[AlgoKey.AFFINITY] = advancedMetrics?.affinity?.[num] || 0;
         breakdown[AlgoKey.STRUCTURAL] = advancedMetrics?.structural?.[num] || 0;
         breakdown[AlgoKey.TREND] = advancedMetrics?.trend?.[num] || 0;
+        breakdown[AlgoKey.LSTM] = advancedMetrics?.lstm?.[num] || 0;
 
         let finalScore = 0;
         (Object.keys(weights) as Array<AlgoKey>).forEach(key => {

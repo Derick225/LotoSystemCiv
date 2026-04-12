@@ -57,7 +57,8 @@ export const useDrawHistory = (drawName: string) => {
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     
-    const filter = drawName === 'ALL' ? undefined : `draw_name=eq.${drawName}`;
+    const normalizedDrawName = drawName === 'ALL' ? 'ALL' : drawName.trim().charAt(0).toUpperCase() + drawName.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
+    const filter = normalizedDrawName === 'ALL' ? undefined : `draw_name=eq.${normalizedDrawName}`;
 
     const channel = supabase
       .channel('draw-sync')

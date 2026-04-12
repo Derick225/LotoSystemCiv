@@ -209,8 +209,8 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
 
   } catch (error: any) {
     console.error("Forensic Autopsy Error:", error)
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+    return new Response(JSON.stringify({ success: false, error: error.message }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }

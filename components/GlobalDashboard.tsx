@@ -365,7 +365,25 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                 });
             }
         }, 1000);
-        return () => clearInterval(timer);
+
+        // Auto-sync every 15 minutes (Soft Automation)
+        const syncTimer = setInterval(async () => {
+            try {
+                const count = await checkAndSyncRecentResults();
+                if (count > 0) {
+                    await queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
+                    showToast(`${count} nouveaux signaux synchronisés automatiquement.`, "success");
+                    audioEngine.play('success');
+                }
+            } catch (e) {
+                console.error("Auto-sync failed", e);
+            }
+        }, 15 * 60 * 1000);
+
+        return () => {
+            clearInterval(timer);
+            clearInterval(syncTimer);
+        };
     }, []);
 
     const handleManualSync = async () => {
@@ -395,11 +413,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
 
     const handleExportReport = async () => {
         try {
+            const currentDrawName = history[0]?.drawName || 'Global';
             const { generateMasterPrediction } = await import('../services/prediction/predictionFacade');
-            const prediction = await generateMasterPrediction("Global", history, globalWeights);
+            const prediction = await generateMasterPrediction(currentDrawName, history, globalWeights);
             
             generateTacticalReport({
-                drawName: "Global",
+                drawName: currentDrawName,
                 prediction: prediction,
                 weights: globalWeights
             });
@@ -463,8 +482,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
                     <button 
                         onClick={handleManualSync}
                         disabled={fullSyncing}
-                        className="group flex-1 md:flex-none px-6 md:px-10 py-4 md:py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50"
+                        className="group flex-1 md:flex-none px-6 md:px-10 py-4 md:py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl transition-all shadow-xl flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 relative"
                     >
+                        <div className="absolute top-2 right-2 flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                            <span className="text-[6px] text-emerald-500/70 font-black uppercase tracking-widest">Auto</span>
+                        </div>
                         <RefreshCw size={16} className={`${fullSyncing ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform duration-700 text-indigo-400`} />
                         <span className="text-[10px] md:text-xs font-black uppercase tracking-widest text-white">Sync Cloud</span>
                     </button>

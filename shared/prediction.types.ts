@@ -55,7 +55,7 @@ export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = {
     [AlgoKey.ORCHESTRATION]: 0.0,
     [AlgoKey.GAP_VELOCITY]: 0.05,
     [AlgoKey.ANTI_CONSENSUS]: 0.0,
-    [AlgoKey.LSTM]: 0.05,
+    [AlgoKey.LSTM]: 0.20,
     [AlgoKey.BAYES]: 0.05,
     [AlgoKey.LEADER_SUCCESSION]: 0.05,
     [AlgoKey.TWIN]: 0.10,

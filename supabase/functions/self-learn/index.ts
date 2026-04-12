@@ -55,7 +55,9 @@ serve(async (req) => {
 
   try {
     const startTime = Date.now()
-    const { drawName } = await req.json()
+    const body = await req.json()
+    const rawDrawName = body.drawName || 'Global'
+    const drawName = rawDrawName.trim().charAt(0).toUpperCase() + rawDrawName.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c: string) => c.toUpperCase());
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -73,7 +75,9 @@ serve(async (req) => {
 
     const history = rawHistory as { gagnants: number[], machine: number[] }[] | null
 
-    if (!history || history.length < 30) throw new Error("Historique insuffisant pour l'apprentissage.")
+    if (!history || history.length < 30) {
+        return new Response(JSON.stringify({ success: false, message: "Historique insuffisant pour l'apprentissage (minimum 30 tirages)." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    }
 
     const validationSet = history.slice(0, 10)
     const trainingContext = history.slice(10, 60)
@@ -99,7 +103,7 @@ serve(async (req) => {
     
     const targets = [...new Set(validationSet.flatMap(d => d.gagnants))]
 
-    const { data: current } = await supabase.from('algo_weights').select('weights, updated_at').eq('draw_name', drawName).single()
+    const { data: current } = await supabase.from('algo_weights').select('weights, updated_at').eq('draw_name', drawName).maybeSingle()
     
     let lockAcquired = false
     if (current) {
@@ -138,9 +142,9 @@ serve(async (req) => {
         return mutant
     })
 
-    const MAX_TIME_MS = 45000
+    const MAX_TIME_MS = 1500
 
-    for (let g = 0; g < 200; g++) {
+    for (let g = 0; g < 100; g++) {
         if (Date.now() - startTime > MAX_TIME_MS) {
             console.log(`Self-learn watchdog triggered at generation ${g}`)
             break
@@ -190,8 +194,9 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error("Self Learn Error:", error)
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    return new Response(JSON.stringify({ success: false, message: errorMessage, error: errorMessage }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }

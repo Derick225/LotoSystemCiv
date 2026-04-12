@@ -67,14 +67,47 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
             // Fetch current weights
             const weights = await getAlgoWeights(drawName);
             setCurrentWeights(weights);
-            // 1. Charger les rapports existants (Local First)
+            
+            // 1. Charger les rapports existants (Local First + Cloud)
             let currentReports = getLocalForensicReports().filter(r => r.drawName === drawName);
+            
+            if (navigator.onLine) {
+                try {
+                    const { supabase } = await import('../../services/supabaseClient');
+                    const { data: { user } } = await supabase.auth.getUser();
+                    if (user) {
+                        const { data: cloudReports } = await supabase
+                            .from('forensic_reports')
+                            .select('*')
+                            .eq('user_id', user.id)
+                            .eq('draw_name', drawName)
+                            .order('created_at', { ascending: false })
+                            .limit(20);
+                            
+                        if (cloudReports) {
+                            cloudReports.forEach(cr => {
+                                // Merge cloud report data
+                                const existingIdx = currentReports.findIndex(r => r.id === cr.id);
+                                const mappedReport = { ...cr.report_data, id: cr.id, date: cr.draw_date };
+                                if (existingIdx >= 0) {
+                                    currentReports[existingIdx] = { ...currentReports[existingIdx], ...mappedReport };
+                                } else {
+                                    currentReports.push(mappedReport);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch cloud forensic reports", e);
+                }
+            }
+
             const existingReportIds = new Set(currentReports.map(r => r.predictionId));
             
             // 2. Identifier les prédictions sans rapport
             const preds = await getPredictionHistoryAsync(drawName);
-            let newReportsCount = 0;
             const pending: PredictionHistoryItem[] = [];
+            const analysisPromises: Promise<ForensicReport | null>[] = [];
 
             // O(1) Lookups
             const historyById = new Map();
@@ -99,52 +132,58 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                     // Fallback date approximative
                     if (!actual) {
                          const predTime = pred.timestamp;
-                         const sortedHistory = [...history].sort((a, b) => new Date(a.date.split('/').reverse().join('-')).getTime() - new Date(b.date.split('/').reverse().join('-')).getTime());
-                         actual = sortedHistory.find(d => {
-                             // Set dTime to the end of the draw day (23:59:59) to ensure it's after the prediction time if on the same day
-                             const dDate = new Date(d.date.split('/').reverse().join('-'));
-                             dDate.setHours(23, 59, 59, 999);
+                         actual = history.find(d => {
+                             const dParts = d.date.split('/');
+                             if (dParts.length !== 3) return false;
+                             const dDate = new Date(`${dParts[2]}-${dParts[1]}-${dParts[0]}T23:59:59`);
                              const dTime = dDate.getTime();
-                             
-                             // The draw must happen after the prediction, or on the same day
-                             // And we allow a window of up to 48 hours after the prediction
                              return dTime >= predTime && (dTime - predTime) < 48 * 3600 * 1000;
                          });
                     }
                 }
 
                 if (actual) {
-                    const rep = await performForensicAnalysis(
-                        drawName, 
-                        actual.date, 
-                        pred.prediction.suggestedNumbers, 
-                        actual.gagnants, 
-                        pred.prediction.breakdown,
-                        pred.id,
-                        actual.id
+                    analysisPromises.push(
+                        performForensicAnalysis(
+                            drawName, 
+                            actual.date, 
+                            pred.prediction.suggestedNumbers, 
+                            actual.gagnants, 
+                            pred.prediction.breakdown,
+                            pred.id,
+                            actual.id
+                        ).then(async rep => {
+                            saveForensicReport(rep);
+                            if (!pred.drawResultId) {
+                                await linkPredictionToResult(pred.id, actual.id);
+                            }
+                            return rep;
+                        }).catch(e => {
+                            console.error("Failed to perform forensic analysis for", pred.id, e);
+                            return null;
+                        })
                     );
-                    // Sauvegarder immédiatement
-                    saveForensicReport(rep);
-                    currentReports.push(rep);
-                    newReportsCount++;
-                    
-                    // Lier la prédiction au résultat si ce n'est pas déjà fait
-                    if (!pred.drawResultId) {
-                        await linkPredictionToResult(pred.id, actual.id);
-                    }
                 } else {
                     pending.push(pred);
                 }
             }
             
+            const newReports = (await Promise.all(analysisPromises)).filter(Boolean) as ForensicReport[];
+            currentReports = [...currentReports, ...newReports];
+            
             // Trier par date décroissante
-            currentReports.sort((a, b) => new Date(b.date.split('/').reverse().join('-')).getTime() - new Date(a.date.split('/').reverse().join('-')).getTime());
+            currentReports.sort((a, b) => {
+                const aParts = a.date.split('/');
+                const bParts = b.date.split('/');
+                return new Date(`${bParts[2]}-${bParts[1]}-${bParts[0]}`).getTime() - new Date(`${aParts[2]}-${aParts[1]}-${aParts[0]}`).getTime();
+            });
+            
             setReports(currentReports);
             setPendingPredictions(pending);
 
-            if (newReportsCount > 0) {
+            if (newReports.length > 0) {
                 audioEngine.play('success');
-                showToast(`${newReportsCount} nouvelles autopsies générées.`, "success");
+                showToast(`${newReports.length} nouvelles autopsies générées.`, "success");
                 // Automate sync in background
                 syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
             }
@@ -224,11 +263,13 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         const aggregates: Record<string, { sum: number, count: number }> = {};
         
         reports.forEach(r => {
-            r.scoreDivergence.forEach(d => {
-                if (!aggregates[d.algo]) aggregates[d.algo] = { sum: 0, count: 0 };
-                aggregates[d.algo].sum += d.impact;
-                aggregates[d.algo].count++;
-            });
+            if (Array.isArray(r.scoreDivergence)) {
+                r.scoreDivergence.forEach(d => {
+                    if (!aggregates[d.algo]) aggregates[d.algo] = { sum: 0, count: 0 };
+                    aggregates[d.algo].sum += d.impact;
+                    aggregates[d.algo].count++;
+                });
+            }
         });
 
         return Object.entries(aggregates).map(([algo, data]) => ({
@@ -257,11 +298,24 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
     }, [platinumAudits]);
 
     const trendData = useMemo(() => {
-        return reports.map(r => ({
-            date: r.date.slice(0, 5),
-            hits: r.matches.filter(m => m.errorType === 'Hit').length,
-            proximity: r.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length
-        })).reverse();
+        return reports.map(r => {
+            let hitsCount = 0;
+            let proximityCount = 0;
+            
+            if (typeof r.matches === 'number') {
+                hitsCount = r.matches;
+                proximityCount = (r as any).nearMisses || 0;
+            } else if (Array.isArray(r.matches)) {
+                hitsCount = r.matches.filter(m => m.errorType === 'Hit').length;
+                proximityCount = r.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length;
+            }
+            
+            return {
+                date: r.date.slice(0, 5),
+                hits: hitsCount,
+                proximity: proximityCount
+            };
+        }).reverse();
     }, [reports]);
 
     if (loading && reports.length === 0) return (
@@ -401,6 +455,23 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
                                     <Activity size={14} /> Dernier Audit d'Apprentissage
                                 </h4>
+                                {reports[0]?.aiAnalysis && (
+                                    <div className="mb-6 p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl">
+                                        <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase mb-2">
+                                            <BrainCircuit size={14} /> Analyse IA (Gemini)
+                                        </div>
+                                        <p className="text-slate-300 text-sm italic mb-3">"{reports[0].aiAnalysis}"</p>
+                                        {reports[0].recommendations && reports[0].recommendations.length > 0 && (
+                                            <ul className="space-y-1">
+                                                {reports[0].recommendations.map((rec, i) => (
+                                                    <li key={i} className="text-[10px] text-cyan-200/70 flex items-start gap-2">
+                                                        <span className="text-cyan-500 mt-0.5">•</span> {rec}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
                                 {learningResult ? (
                                     <div className="space-y-4">
                                         <div className="flex items-center gap-3 text-sm text-slate-300 bg-indigo-500/10 p-4 rounded-xl border border-indigo-500/20">
@@ -510,8 +581,15 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                             ) : (
                                 <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scrollbar pr-2">
                                     {reports.map((rep, idx) => {
-                                        const hits = rep.matches.filter(m => m.errorType === 'Hit').length;
-                                        const proximity = rep.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length;
+                                        let hits = 0;
+                                        let proximity = 0;
+                                        if (typeof rep.matches === 'number') {
+                                            hits = rep.matches;
+                                            proximity = (rep as any).nearMisses || 0;
+                                        } else if (Array.isArray(rep.matches)) {
+                                            hits = rep.matches.filter(m => m.errorType === 'Hit').length;
+                                            proximity = rep.matches.filter(m => ['Voisin', 'Miroir', 'Shadow'].includes(m.errorType)).length;
+                                        }
                                         
                                         return (
                                             <div 
@@ -530,6 +608,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                                                 {hits > 0 && <span className="text-[8px] font-black uppercase bg-emerald-500 text-white px-2 py-0.5 rounded-md shadow-sm">{hits} Hits</span>}
                                                                 {proximity > 0 && <span className="text-[8px] font-black uppercase bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-800">{proximity} Proches</span>}
                                                                 {hits === 0 && proximity === 0 && <span className="text-[8px] font-bold text-slate-400 uppercase">Miss</span>}
+                                                                {rep.aiAnalysis && <span className="text-[8px] font-black uppercase bg-cyan-500 text-white px-2 py-0.5 rounded-md shadow-sm flex items-center gap-1"><BrainCircuit size={8}/> IA</span>}
                                                             </div>
                                                         </div>
                                                     </div>

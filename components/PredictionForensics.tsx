@@ -211,7 +211,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
                                         <span className="text-[9px] font-black text-indigo-500 uppercase bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1 rounded-full">Prédiction IA</span>
                                         <div className="flex flex-wrap md:flex-col gap-3 justify-center">
-                                            {report.matches.map((m, i) => (
+                                            {Array.isArray(report.matches) ? report.matches.map((m, i) => (
                                                 <div key={`pred-${i}`} className="relative group">
                                                     <NumberBall number={m.predicted} size="md" glow={m.errorType === 'Hit'} />
                                                     {m.errorType !== 'Hit' && m.errorType !== 'None' && (
@@ -220,10 +220,14 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                         </div>
                                                     )}
                                                 </div>
-                                            ))}
+                                            )) : (
+                                                <div className="text-center text-slate-400 text-xs font-bold">
+                                                    {report.matches} Hits Exacts
+                                                </div>
+                                            )}
                                             
                                             {/* LES MANQUEMENTS (Empty slots for prediction) */}
-                                            {report.missedOpportunities.length > 0 && (
+                                            {report.missedOpportunities && report.missedOpportunities.length > 0 && (
                                                 <div className="mt-4 pt-4 border-t border-transparent flex flex-col gap-3 items-center">
                                                     <span className="text-[8px] font-black text-transparent uppercase">Manquements</span>
                                                     {report.missedOpportunities.map((_, i) => (
@@ -243,7 +247,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                     <div className="flex flex-col gap-4 items-center z-10 w-full md:w-auto">
                                         <span className="text-[9px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full">Résultat Réel</span>
                                         <div className="flex flex-wrap md:flex-col gap-3 justify-center">
-                                            {report.matches.map((m, i) => (
+                                            {Array.isArray(report.matches) ? report.matches.map((m, i) => (
                                                 <div key={`act-${i}`} className="relative">
                                                     {m.actual !== null ? (
                                                         <div className="relative">
@@ -256,10 +260,14 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                         <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-300 font-bold">?</div>
                                                     )}
                                                 </div>
-                                            ))}
+                                            )) : (
+                                                <div className="text-center text-slate-400 text-xs font-bold">
+                                                    {(report as any).nearMisses || 0} Proches
+                                                </div>
+                                            )}
                                             
                                             {/* LES MANQUEMENTS */}
-                                            {report.missedOpportunities.length > 0 && (
+                                            {report.missedOpportunities && report.missedOpportunities.length > 0 && (
                                                 <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col gap-3 items-center">
                                                     <span className="text-[8px] font-black text-rose-500 uppercase">Manquements</span>
                                                     {report.missedOpportunities.map((miss, i) => (
@@ -279,7 +287,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
                             <div className="grid md:grid-cols-2 gap-6">
                                 {/* Missed Opportunities */}
-                                {report.missedOpportunities.length > 0 && (
+                                {report.missedOpportunities && report.missedOpportunities.length > 0 && (
                                     <section className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-700">
                                         <h4 className="font-black text-slate-700 dark:text-slate-300 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
                                             <AlertOctagon size={14} className="text-amber-500"/> Manquements (Signaux Manqués)
@@ -303,7 +311,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                         <Activity size={14} className="text-indigo-500"/> Dérive Algorithmique
                                     </h4>
                                     <div className="space-y-2">
-                                        {report.scoreDivergence.length > 0 ? report.scoreDivergence.map((div, i) => (
+                                        {Array.isArray(report.scoreDivergence) && report.scoreDivergence.length > 0 ? report.scoreDivergence.map((div, i) => (
                                             <div key={i} className="flex justify-between items-center text-xs">
                                                 <span className="font-bold text-slate-600 dark:text-slate-400 capitalize">{div.algo}</span>
                                                 <div className="flex items-center gap-2">
@@ -313,7 +321,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                                                     <span className="font-mono font-black text-indigo-500">{div.impact}%</span>
                                                 </div>
                                             </div>
-                                        )) : <p className="text-xs text-slate-400 italic">Aucune divergence majeure.</p>}
+                                        )) : <p className="text-xs text-slate-400 italic">Aucune divergence algorithmique détaillée.</p>}
                                     </div>
                                 </section>
                             </div>
@@ -447,7 +455,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                     {activeTab === 'autopsy' && (
                         <div className="animate-slide-up space-y-8">
                             {report.predictionId ? (
-                                <ForensicAutopsyView snapshotId={report.predictionId} drawResultId={report.drawResultId || ''} />
+                                <ForensicAutopsyView snapshotId={report.predictionId} drawResultId={report.drawResultId || ''} existingReport={report.aiAnalysis ? report : undefined} />
                             ) : (
                                 <div className="p-8 text-center text-slate-500">
                                     ID de prédiction manquant pour l'autopsie.
