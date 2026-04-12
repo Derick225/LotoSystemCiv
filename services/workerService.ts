@@ -1,50 +1,40 @@
 
 import { AppError, logError } from '../utils/AppError';
+import { apiClient } from '../core/api/apiClient';
 import * as mathCore from './mathCore';
 
 /**
  * NEXUS WORKER SERVICE
- * Orchestre les calculs lourds en arrière-plan pour garder l'UI fluide.
+ * Orchestre les calculs lourds en arrière-plan.
+ * Modifié pour utiliser les Edge Functions Supabase afin de décharger le client.
  */
 
 class WorkerService {
-    private worker: Worker | null = null;
-    private taskCallbacks = new Map<string, { resolve: Function, reject: Function }>();
-
-    constructor() {
-        if (typeof window !== 'undefined' && window.Worker) {
-            try {
-                // Utilisation de la syntaxe Vite pour les workers
-                this.worker = new Worker(new URL('./math.worker.ts', import.meta.url), {
-                    type: 'module'
-                });
-
-                this.worker.onmessage = (e) => {
-                    const { requestId, result, error } = e.data;
-                    const cb = this.taskCallbacks.get(requestId);
-                    if (cb) {
-                        if (error) cb.reject(new Error(error));
-                        else cb.resolve(result);
-                        this.taskCallbacks.delete(requestId);
-                    }
-                };
-
-                this.worker.onerror = (e) => {
-                    logError(new AppError(e.message || "MathWorker Error", "MATH_WORKER_ERROR", "high", { error: e }), { source: 'WorkerService' });
-                };
-            } catch (e: any) {
-                console.warn("Worker initialization failed, using fallback:", e);
-            }
-        }
-    }
+    constructor() {}
 
     public isAvailable(): boolean {
-        return !!this.worker;
+        // Toujours disponible via l'API
+        return true;
     }
 
     public async runTask<T>(task: string, payload: any = {}, history: any[] = []): Promise<T> {
-        if (!this.worker) {
-            // FALLBACK: Execute logic directly if worker is not available (e.g. on backend)
+        try {
+            // Appel à l'Edge Function Supabase pour les calculs lourds
+            const response = await apiClient.post<any>('compute-nexus-analytics', {
+                task,
+                payload,
+                history
+            });
+
+            if (response && response.success) {
+                return response.result as T;
+            } else {
+                throw new Error(response?.error || "Erreur inconnue de l'Edge Function");
+            }
+        } catch (e: any) {
+            console.warn(`Edge Function failed for task ${task}, falling back to local computation:`, e);
+            
+            // FALLBACK: Execute logic directly locally if Edge Function fails
             try {
                 let result: any;
                 switch (task) {
@@ -77,32 +67,10 @@ class WorkerService {
                         result = { status: 'OK' };
                 }
                 return result as T;
-            } catch (e: any) {
-                throw new AppError(e.message || "Fallback Task Error", "WORKER_FALLBACK_ERROR", "medium");
+            } catch (fallbackError: any) {
+                throw new AppError(fallbackError.message || "Fallback Task Error", "WORKER_FALLBACK_ERROR", "medium");
             }
         }
-
-        const requestId = Math.random().toString(36).substring(7);
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                if (this.taskCallbacks.has(requestId)) {
-                    this.taskCallbacks.delete(requestId);
-                    reject(new AppError(`Task ${task} timed out after 120s`, "WORKER_TIMEOUT", "medium"));
-                }
-            }, 120000);
-
-            this.taskCallbacks.set(requestId, { 
-                resolve: (res: T) => {
-                    clearTimeout(timeout);
-                    resolve(res);
-                }, 
-                reject: (err: Error) => {
-                    clearTimeout(timeout);
-                    reject(err);
-                } 
-            });
-            this.worker!.postMessage({ task, payload, history, requestId });
-        });
     }
 }
 
