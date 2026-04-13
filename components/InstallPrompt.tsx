@@ -1,15 +1,15 @@
 
 import React, { useEffect, useState } from 'react';
-import { Download, Share, PlusSquare, X, Smartphone, ShieldCheck } from 'lucide-react';
+import { Download, Share, PlusSquare, X, Smartphone, ShieldCheck, MoreVertical } from 'lucide-react';
 import { audioEngine } from '../utils/audioEngine';
 
 export const InstallPrompt: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>((window as any).deferredPWAInstallPrompt || null);
   const [isVisible, setIsVisible] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
 
-    useEffect(() => {
+  useEffect(() => {
     // Détection si l'app est déjà installée
     const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
     setIsStandalone(isStandaloneMode);
@@ -27,9 +27,14 @@ export const InstallPrompt: React.FC = () => {
         }
     }
 
+    const handlePromptReady = () => {
+        setDeferredPrompt((window as any).deferredPWAInstallPrompt);
+    };
+
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      (window as any).deferredPWAInstallPrompt = e;
       if (!localStorage.getItem('nexus_install_dismissed')) {
           setIsVisible(true);
       }
@@ -39,10 +44,12 @@ export const InstallPrompt: React.FC = () => {
         setIsVisible(true);
     };
 
+    window.addEventListener('pwa-prompt-ready', handlePromptReady);
     window.addEventListener('beforeinstallprompt', handler);
     window.addEventListener('show-install-prompt', forceShowHandler);
 
     return () => {
+      window.removeEventListener('pwa-prompt-ready', handlePromptReady);
       window.removeEventListener('beforeinstallprompt', handler);
       window.removeEventListener('show-install-prompt', forceShowHandler);
     };
@@ -50,15 +57,22 @@ export const InstallPrompt: React.FC = () => {
 
   const handleInstallClick = async () => {
     audioEngine.play('click');
-    if (!deferredPrompt) return;
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    const promptToUse = deferredPrompt || (window as any).deferredPWAInstallPrompt;
     
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setIsVisible(false);
-      audioEngine.play('success');
+    if (!promptToUse) return;
+
+    try {
+        promptToUse.prompt();
+        const { outcome } = await promptToUse.userChoice;
+        
+        if (outcome === 'accepted') {
+          setDeferredPrompt(null);
+          (window as any).deferredPWAInstallPrompt = null;
+          setIsVisible(false);
+          audioEngine.play('success');
+        }
+    } catch (err) {
+        console.error("Erreur d'installation:", err);
     }
   };
 
@@ -68,6 +82,8 @@ export const InstallPrompt: React.FC = () => {
   };
 
   if (!isVisible || isStandalone) return null;
+
+  const promptToUse = deferredPrompt || (window as any).deferredPWAInstallPrompt;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[100] p-4 md:p-6 animate-slide-up">
@@ -104,6 +120,17 @@ export const InstallPrompt: React.FC = () => {
                         <div className="flex items-center gap-3 text-xs text-slate-300">
                             <span className="w-6 h-6 flex items-center justify-center bg-slate-700 rounded-full font-bold shrink-0">2</span>
                             <span>Sélectionnez <span className="font-bold text-white"><PlusSquare size={12} className="inline mx-1"/> Sur l'écran d'accueil</span></span>
+                        </div>
+                    </div>
+                ) : !promptToUse ? (
+                    <div className="bg-slate-800/50 rounded-2xl p-4 border border-white/5 space-y-3">
+                        <div className="flex items-center gap-3 text-xs text-slate-300">
+                            <span className="w-6 h-6 flex items-center justify-center bg-slate-700 rounded-full font-bold shrink-0">1</span>
+                            <span>Ouvrez le menu du navigateur <span className="font-bold text-white"><MoreVertical size={12} className="inline mx-1"/></span></span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-300">
+                            <span className="w-6 h-6 flex items-center justify-center bg-slate-700 rounded-full font-bold shrink-0">2</span>
+                            <span>Sélectionnez <span className="font-bold text-white">Installer l'application</span> ou <span className="font-bold text-white">Ajouter à l'écran d'accueil</span></span>
                         </div>
                     </div>
                 ) : (

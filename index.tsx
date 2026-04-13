@@ -4,6 +4,14 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
+// Capture globale de l'événement d'installation PWA le plus tôt possible
+(window as any).deferredPWAInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  (window as any).deferredPWAInstallPrompt = e;
+  window.dispatchEvent(new Event('pwa-prompt-ready'));
+});
+
 // Fonction de détection d'environnement ultra-sécurisée
 const getIsDev = () => {
   try {

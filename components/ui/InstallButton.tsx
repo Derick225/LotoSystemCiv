@@ -3,7 +3,7 @@ import { Download } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
 
 export const InstallButton: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>((window as any).deferredPWAInstallPrompt || null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
 
@@ -14,30 +14,48 @@ export const InstallButton: React.FC = () => {
     const checkIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     setIsIOS(checkIOS);
 
+    const handlePromptReady = () => {
+        setDeferredPrompt((window as any).deferredPWAInstallPrompt);
+    };
+
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      (window as any).deferredPWAInstallPrompt = e;
     };
 
+    window.addEventListener('pwa-prompt-ready', handlePromptReady);
     window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    
+    return () => {
+        window.removeEventListener('pwa-prompt-ready', handlePromptReady);
+        window.removeEventListener('beforeinstallprompt', handler);
+    };
   }, []);
 
   const handleInstallClick = async () => {
     audioEngine.play('click');
     
-    if (isIOS || !deferredPrompt) {
+    const promptToUse = deferredPrompt || (window as any).deferredPWAInstallPrompt;
+    
+    if (isIOS || !promptToUse) {
         // Dispatch custom event to show the InstallPrompt modal with instructions
         window.dispatchEvent(new CustomEvent('show-install-prompt'));
         return;
     }
 
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      audioEngine.play('success');
+    try {
+        promptToUse.prompt();
+        const { outcome } = await promptToUse.userChoice;
+        
+        if (outcome === 'accepted') {
+          setDeferredPrompt(null);
+          (window as any).deferredPWAInstallPrompt = null;
+          audioEngine.play('success');
+        }
+    } catch (err) {
+        console.error("Erreur lors de l'installation:", err);
+        window.dispatchEvent(new CustomEvent('show-install-prompt'));
     }
   };
 

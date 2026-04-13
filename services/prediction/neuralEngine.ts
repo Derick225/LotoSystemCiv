@@ -3,6 +3,7 @@ import { DrawResult } from '../../types';
 
 // Cache for models to avoid retraining from scratch every time
 const modelCache: Record<string, tf.Sequential> = {};
+const historyLengthCache: Record<string, number> = {};
 
 /**
  * Prepares the history data for LSTM training.
@@ -53,8 +54,10 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
         const { xs, ys } = prepareData(history, sequenceLength);
 
         let model = modelCache[drawName];
+        const isNewModel = !model;
+        const historyChanged = historyLengthCache[drawName] !== history.length;
 
-        if (!model) {
+        if (isNewModel) {
             model = tf.sequential();
             model.add(tf.layers.lstm({
                 units: 128, // Increased capacity
@@ -73,19 +76,22 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
             modelCache[drawName] = model;
         }
 
-        // Train the model with validation split to monitor overfitting
-        await model.fit(xs, ys, {
-            epochs: 30, // Increased epochs
-            batchSize: 32,
-            validationSplit: 0.15, // Use 15% of data for validation
-            shuffle: true,
-            verbose: 0,
-            callbacks: tf.callbacks.earlyStopping({
-                monitor: 'val_loss',
-                patience: 5, // Stop if validation loss doesn't improve for 5 epochs
-                minDelta: 0.001
-            })
-        });
+        // Train the model only if it's new or history has changed
+        if (isNewModel || historyChanged) {
+            await model.fit(xs, ys, {
+                epochs: isNewModel ? 30 : 5, // Train less if just updating
+                batchSize: 32,
+                validationSplit: 0.15, // Use 15% of data for validation
+                shuffle: true,
+                verbose: 0,
+                callbacks: tf.callbacks.earlyStopping({
+                    monitor: 'val_loss',
+                    patience: 5, // Stop if validation loss doesn't improve for 5 epochs
+                    minDelta: 0.001
+                })
+            });
+            historyLengthCache[drawName] = history.length;
+        }
 
         // Predict the next sequence
         // Get the last `sequenceLength` draws
