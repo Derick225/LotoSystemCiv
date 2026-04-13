@@ -1,9 +1,11 @@
 
-const CACHE_NAME = 'lotopro-v2.1';
+const CACHE_NAME = 'lotopro-v2.2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png',
   '/pwa-icon.svg'
 ];
 
@@ -11,7 +13,9 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return cache.addAll(ASSETS_TO_CACHE).catch(err => {
+          console.warn('SW Install: Some assets failed to cache', err);
+      });
     })
   );
   self.skipWaiting();
@@ -78,6 +82,13 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
       event.respondWith(
           fetch(event.request)
+              .then(response => {
+                  const responseClone = response.clone();
+                  caches.open(CACHE_NAME).then(cache => {
+                      cache.put('/index.html', responseClone);
+                  });
+                  return response;
+              })
               .catch(() => {
                   return caches.match('/index.html');
               })
