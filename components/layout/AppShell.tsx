@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
 import { useVoiceControl } from '../../hooks/useVoiceControl';
 import { QuantumInspector } from '../QuantumInspector';
+import { InstallButton } from '../ui/InstallButton';
 
 export type ViewMode = 'home' | 'admin' | 'backtest' | 'ensemble' | 'predictive';
 
@@ -88,6 +89,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </nav>
 
                 <div className="flex items-center gap-1 md:gap-3">
+                    <InstallButton />
                     <button onClick={() => { audioEngine.play('click'); setTheme(theme === 'dark' ? 'light' : 'dark'); }} className={`p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border bg-white/5 text-slate-400 hover:text-white border-white/10`}>
                         {theme === 'dark' ? <span className="text-sm">☀️</span> : <span className="text-sm">🌙</span>}
                     </button>

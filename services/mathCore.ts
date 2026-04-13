@@ -148,13 +148,27 @@ export function denoiseFeaturesPCA(data: number[][], varianceThreshold: number =
     if (!data || data.length === 0) return [];
     const nSamples = data.length;
     const nFeatures = data[0].length;
-    const m = Array(nFeatures).fill(0);
+    
+    // 1. Standard Scaling (Z-score normalization)
+    const means = Array(nFeatures).fill(0);
+    const stdDevs = Array(nFeatures).fill(0);
+    
     for(let i=0; i<nSamples; i++) {
-        for(let j=0; j<nFeatures; j++) m[j] += data[i][j];
+        for(let j=0; j<nFeatures; j++) means[j] += data[i][j];
     }
-    for(let j=0; j<nFeatures; j++) m[j] /= nSamples;
-    const centered = data.map(row => row.map((val, j) => val - m[j]));
-    const covariance = scalarMul(matMul(transpose(centered), centered), 1 / (nSamples - 1));
+    for(let j=0; j<nFeatures; j++) means[j] /= nSamples;
+    
+    for(let i=0; i<nSamples; i++) {
+        for(let j=0; j<nFeatures; j++) stdDevs[j] += Math.pow(data[i][j] - means[j], 2);
+    }
+    for(let j=0; j<nFeatures; j++) {
+        stdDevs[j] = Math.sqrt(stdDevs[j] / (nSamples - 1)) || 1; // Avoid division by zero
+    }
+    
+    const scaledData = data.map(row => row.map((val, j) => (val - means[j]) / stdDevs[j]));
+
+    // 2. PCA on scaled data
+    const covariance = scalarMul(matMul(transpose(scaledData), scaledData), 1 / (nSamples - 1));
     const { values, vectors } = computeEigenDecomposition(covariance);
     const totalVariance = values.reduce((a, b) => a + Math.abs(b), 0);
     let k = 1;
@@ -164,8 +178,14 @@ export function denoiseFeaturesPCA(data: number[][], varianceThreshold: number =
         if (totalVariance > 0 && currentVar / totalVariance >= varianceThreshold) { k = i + 1; break; }
     }
     const topKVectors = vectors.map(row => row.slice(0, k));
-    const projected = matMul(centered, topKVectors);
-    const reconstructed = matAdd(matMul(projected, transpose(topKVectors)), Array(nSamples).fill(m));
+    const projected = matMul(scaledData, topKVectors);
+    
+    // 3. Reconstruct and inverse transform
+    const reconstructedScaled = matMul(projected, transpose(topKVectors));
+    const reconstructed = reconstructedScaled.map((row, i) => 
+        row.map((val, j) => (val * stdDevs[j]) + means[j])
+    );
+    
     return reconstructed;
 }
 
@@ -174,19 +194,28 @@ export function trainRidgeRegression(features: number[][], labels: number[], lam
     const nFeatures = features[0].length;
     const nSamples = features.length;
     let weights = Array(nFeatures).fill(0);
-    const learningRate = 0.01;
-    for (let iter = 0; iter < 100; iter++) {
+    let learningRate = 0.05; // Start slightly higher
+    
+    for (let iter = 0; iter < 200; iter++) { // Increased max iterations
         const gradients = Array(nFeatures).fill(0);
+        let maxGradient = 0;
+        
         for (let i = 0; i < nSamples; i++) {
             let pred = 0;
             for (let j = 0; j < nFeatures; j++) pred += features[i][j] * weights[j];
             const error = pred - labels[i];
             for (let j = 0; j < nFeatures; j++) gradients[j] += (2 / nSamples) * error * features[i][j];
         }
+        
         for (let j = 0; j < nFeatures; j++) {
             gradients[j] += 2 * lambda * weights[j];
             weights[j] -= learningRate * gradients[j];
+            if (Math.abs(gradients[j]) > maxGradient) maxGradient = Math.abs(gradients[j]);
         }
+        
+        // Early stopping & Learning Rate Decay
+        if (maxGradient < 1e-4) break; 
+        learningRate *= 0.98; // Decay learning rate
     }
     return weights;
 }

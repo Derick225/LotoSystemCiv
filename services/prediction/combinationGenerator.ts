@@ -10,12 +10,18 @@ export const isValidCombination = (combo: number[]): boolean => {
     const evens = combo.filter(n => n % 2 === 0).length;
     if (evens === 0 || evens === 5) return false; 
     
-    let consecutiveCount = 0;
+    let maxConsecutive = 1;
+    let currentConsecutive = 1;
     const sortedCombo = [...combo].sort((a, b) => a - b);
     for (let i = 0; i < sortedCombo.length - 1; i++) {
-        if (sortedCombo[i] + 1 === sortedCombo[i+1]) consecutiveCount++;
+        if (sortedCombo[i] + 1 === sortedCombo[i+1]) {
+            currentConsecutive++;
+            if (currentConsecutive > maxConsecutive) maxConsecutive = currentConsecutive;
+        } else {
+            currentConsecutive = 1;
+        }
     }
-    if (consecutiveCount > 2) return false; 
+    if (maxConsecutive > 3) return false; // Reject 4 or 5 consecutive numbers
     
     return true;
 };
@@ -46,10 +52,11 @@ export const generateCombination = (
                     currentSelection.forEach(selectedNum => {
                         const affinities = affinityMap.get(selectedNum);
                         if (affinities) {
-                            totalAffinity += (affinities.get(s.num) || 0);
+                            totalAffinity += (affinities.get(s.num) || 0); // This is a probability 0.0-1.0
                         }
                     });
-                    return { ...s, tempScore: s.score + (totalAffinity * 3) };
+                    // Multiply by 15 to give it a meaningful impact against base scores (0-100)
+                    return { ...s, tempScore: s.score + (totalAffinity * 15) };
                 })
                 .sort((a, b) => b.tempScore - a.tempScore);
 

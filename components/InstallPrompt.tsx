@@ -9,7 +9,7 @@ export const InstallPrompt: React.FC = () => {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
 
-  useEffect(() => {
+    useEffect(() => {
     // Détection si l'app est déjà installée
     const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
     setIsStandalone(isStandaloneMode);
@@ -35,10 +35,16 @@ export const InstallPrompt: React.FC = () => {
       }
     };
 
+    const forceShowHandler = () => {
+        setIsVisible(true);
+    };
+
     window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('show-install-prompt', forceShowHandler);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('show-install-prompt', forceShowHandler);
     };
   }, []);
 

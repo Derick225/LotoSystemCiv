@@ -8,7 +8,7 @@ const modelCache: Record<string, tf.Sequential> = {};
  * Prepares the history data for LSTM training.
  * We convert each draw into a binary vector of size 90.
  */
-const prepareData = (history: DrawResult[], sequenceLength: number = 5) => {
+const prepareData = (history: DrawResult[], sequenceLength: number = 15) => {
     const N = 90;
     const sequences: number[][][] = [];
     const labels: number[][] = [];
@@ -42,9 +42,9 @@ const prepareData = (history: DrawResult[], sequenceLength: number = 5) => {
  */
 export const predictWithLSTM = async (drawName: string, history: DrawResult[]): Promise<Record<number, number>> => {
     const N = 90;
-    const sequenceLength = 5;
+    const sequenceLength = 15; // Increased sequence length to capture longer dependencies
 
-    if (history.length < sequenceLength + 2) {
+    if (history.length < sequenceLength + 5) {
         console.warn("Not enough history for LSTM. Returning empty predictions.");
         return {};
     }
@@ -57,15 +57,15 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
         if (!model) {
             model = tf.sequential();
             model.add(tf.layers.lstm({
-                units: 64,
+                units: 128, // Increased capacity
                 inputShape: [sequenceLength, N],
                 returnSequences: false
             }));
-            model.add(tf.layers.dropout({ rate: 0.2 }));
+            model.add(tf.layers.dropout({ rate: 0.3 })); // Increased dropout to prevent overfitting
             model.add(tf.layers.dense({ units: N, activation: 'sigmoid' }));
 
             model.compile({
-                optimizer: tf.train.adam(0.01),
+                optimizer: tf.train.adam(0.005), // Slightly lower learning rate for stability
                 loss: 'binaryCrossentropy',
                 metrics: ['accuracy']
             });
@@ -73,12 +73,18 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
             modelCache[drawName] = model;
         }
 
-        // Train the model
+        // Train the model with validation split to monitor overfitting
         await model.fit(xs, ys, {
-            epochs: 20, // Keep it low for fast browser training
-            batchSize: 16,
+            epochs: 30, // Increased epochs
+            batchSize: 32,
+            validationSplit: 0.15, // Use 15% of data for validation
             shuffle: true,
-            verbose: 0
+            verbose: 0,
+            callbacks: tf.callbacks.earlyStopping({
+                monitor: 'val_loss',
+                patience: 5, // Stop if validation loss doesn't improve for 5 epochs
+                minDelta: 0.001
+            })
         });
 
         // Predict the next sequence

@@ -12,40 +12,51 @@ const GENOME_KEYS = [
     'machine_transfer'
 ]
 
-const evaluateGenome = (weights: any, signalMatrix: Record<number, any>, targets: number[]) => {
-    let score = 0
-    let candidates = []
+// Évaluation robuste avec validation croisée (Cross-Validation)
+const evaluateGenome = (weights: any, foldsData: { signalMatrix: Record<number, any>, targets: number[][] }[]) => {
+    let totalScore = 0
     
-    for (let i = 1; i <= 90; i++) {
-        const sig = signalMatrix[i]
-        if (!sig) continue
+    for (const fold of foldsData) {
+        const { signalMatrix, targets } = fold
+        let candidates = []
+        
+        for (let i = 1; i <= 90; i++) {
+            const sig = signalMatrix[i]
+            if (!sig) continue
 
-        const val = 
-            (sig.freq * (weights.frequency || 0.1)) +
-            (sig.isGapMatch ? (weights.gap || 0.2) * 50 : 0) +
-            (sig.markov * (weights.markov || 0.1) * 20) +
-            (sig.momentum * (weights.momentum || 0.05) * 10) +
-            (sig.machineTransfer ? (weights.machine_transfer || 0.1) * 30 : 0)
+            const val = 
+                (sig.freq * (weights.frequency || 0.1)) +
+                (sig.isGapMatch ? (weights.gap || 0.2) * 50 : 0) +
+                (sig.markov * (weights.markov || 0.1) * 20) +
+                (sig.momentum * (weights.momentum || 0.05) * 10) +
+                (sig.machineTransfer ? (weights.machine_transfer || 0.1) * 30 : 0)
+                
+            candidates.push({ n: i, v: val })
+        }
+        
+        candidates.sort((a,b) => b.v - a.v)
+        const top10 = candidates.slice(0, 10).map(c => c.n)
+        
+        let foldScore = 0
+        // Évaluation tirage par tirage pour éviter le "curve-fitting" sur un bloc aplati
+        for (const drawTargets of targets) {
+            let exactHits = 0
+            let nearMisses = 0
             
-        candidates.push({ n: i, v: val })
+            top10.forEach(n => {
+                if (drawTargets.includes(n)) {
+                    exactHits++
+                } else if (drawTargets.includes(n - 1) || drawTargets.includes(n + 1)) {
+                    nearMisses++
+                }
+            })
+            
+            foldScore += Math.pow(exactHits, 2) * 100 + (nearMisses * 25)
+        }
+        totalScore += foldScore / (targets.length || 1)
     }
     
-    candidates.sort((a,b) => b.v - a.v)
-    const top10 = candidates.slice(0, 10).map(c => c.n)
-    
-    let exactHits = 0
-    let nearMisses = 0
-    
-    top10.forEach(n => {
-        if (targets.includes(n)) {
-            exactHits++
-        } else if (targets.includes(n - 1) || targets.includes(n + 1)) {
-            nearMisses++
-        }
-    })
-    
-    score += Math.pow(exactHits, 2) * 100 + (nearMisses * 25)
-    return score
+    return totalScore / (foldsData.length || 1)
 }
 
 serve(async (req) => {
@@ -66,42 +77,57 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    // On récupère plus d'historique pour la validation croisée (Walk-Forward)
     const { data: rawHistory } = await supabase
         .from('draw_results')
         .select('gagnants, machine')
         .eq('draw_name', drawName)
         .order('date', { ascending: false })
-        .limit(60)
+        .limit(100)
 
     const history = rawHistory as { gagnants: number[], machine: number[] }[] | null
 
-    if (!history || history.length < 30) {
-        return new Response(JSON.stringify({ success: false, message: "Historique insuffisant pour l'apprentissage (minimum 30 tirages)." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    if (!history || history.length < 40) {
+        return new Response(JSON.stringify({ success: false, message: "Historique insuffisant pour l'apprentissage (minimum 40 tirages)." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
     }
 
-    const validationSet = history.slice(0, 10)
-    const trainingContext = history.slice(10, 60)
+    // Création des Folds (Plis) pour la validation croisée temporelle
+    const FOLDS = 3;
+    const FOLD_SIZE = 5; // On valide sur 5 tirages par fold
+    const TRAIN_SIZE = 50; // On s'entraîne sur 50 tirages
+    const foldsData = [];
 
-    const signalMatrix: Record<number, any> = {}
-    
-    for (let i = 1; i <= 90; i++) {
-        const freq = trainingContext.filter(d => d.gagnants.includes(i)).length
-        const lastIdx = trainingContext.findIndex(d => d.gagnants.includes(i))
-        const gap = lastIdx === -1 ? 50 : lastIdx
-        
-        const momentum = trainingContext.slice(0, 5).filter(d => d.gagnants.includes(i)).length
-        const wasInLastMachine = trainingContext[0]?.machine?.includes(i) || false
+    for (let k = 0; k < FOLDS; k++) {
+        const startIdx = k * FOLD_SIZE;
+        const validationSet = history.slice(startIdx, startIdx + FOLD_SIZE);
+        const trainingContext = history.slice(startIdx + FOLD_SIZE, startIdx + FOLD_SIZE + TRAIN_SIZE);
 
-        signalMatrix[i] = {
-            freq: freq / 50,
-            isGapMatch: gap >= 8 && gap <= 22,
-            markov: 0.1,
-            momentum: momentum,
-            machineTransfer: wasInLastMachine
+        if (trainingContext.length < 30 || validationSet.length === 0) break;
+
+        const signalMatrix: Record<number, any> = {};
+        for (let i = 1; i <= 90; i++) {
+            const freq = trainingContext.filter(d => d.gagnants.includes(i)).length;
+            const lastIdx = trainingContext.findIndex(d => d.gagnants.includes(i));
+            const gap = lastIdx === -1 ? 50 : lastIdx;
+            const momentum = trainingContext.slice(0, 5).filter(d => d.gagnants.includes(i)).length;
+            const wasInLastMachine = trainingContext[0]?.machine?.includes(i) || false;
+
+            signalMatrix[i] = {
+                freq: freq / trainingContext.length,
+                isGapMatch: gap >= 8 && gap <= 22,
+                markov: 0.1,
+                momentum: momentum,
+                machineTransfer: wasInLastMachine
+            };
         }
+
+        const targets = validationSet.map(d => d.gagnants);
+        foldsData.push({ signalMatrix, targets });
     }
-    
-    const targets = [...new Set(validationSet.flatMap(d => d.gagnants))]
+
+    if (foldsData.length === 0) {
+        return new Response(JSON.stringify({ success: false, message: "Données insuffisantes pour créer les folds de validation." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    }
 
     const { data: current } = await supabase.from('algo_weights').select('weights, updated_at').eq('draw_name', drawName).maybeSingle()
     
@@ -131,7 +157,7 @@ serve(async (req) => {
     }
 
     let bestW = current?.weights || { frequency: 0.2, gap: 0.2, markov: 0.2, momentum: 0.1 }
-    let bestScore = evaluateGenome(bestW, signalMatrix, targets)
+    let bestScore = evaluateGenome(bestW, foldsData)
     let improved = false
     
     let population = Array(25).fill(null).map((_, i) => {
@@ -150,7 +176,7 @@ serve(async (req) => {
             break
         }
 
-        const scored = population.map(w => ({ w, s: evaluateGenome(w, signalMatrix, targets) }))
+        const scored = population.map(w => ({ w, s: evaluateGenome(w, foldsData) }))
         scored.sort((a, b) => b.s - a.s)
         
         if (scored[0].s > bestScore) {
@@ -163,13 +189,24 @@ serve(async (req) => {
         population = [...survivors]
 
         while(population.length < 25) {
-            const parent = survivors[Math.floor(Math.random() * survivors.length)]
-            const child = { ...parent }
+            const parent1 = survivors[Math.floor(Math.random() * survivors.length)]
+            const parent2 = survivors[Math.floor(Math.random() * survivors.length)]
+            const child: any = {}
             
-            const mutationRate = 0.2 * (1 - (g/40))
-            if (Math.random() < 0.7) {
-                const gene = GENOME_KEYS[Math.floor(Math.random() * GENOME_KEYS.length)]
-                child[gene] = Math.max(0.01, Math.min(1.0, (child[gene] || 0.1) + (Math.random() - 0.5) * mutationRate))
+            // Crossover uniforme
+            for (const key of GENOME_KEYS) {
+                child[key] = Math.random() > 0.5 ? (parent1[key] || 0.1) : (parent2[key] || 0.1)
+            }
+            
+            // Mutation adaptative (diminue avec les générations pour affiner)
+            const mutationRate = Math.max(0.02, 0.3 * (1 - (g/100)))
+            if (Math.random() < 0.8) {
+                // Muter 1 à 3 gènes
+                const numMutations = Math.floor(Math.random() * 3) + 1;
+                for (let m = 0; m < numMutations; m++) {
+                    const gene = GENOME_KEYS[Math.floor(Math.random() * GENOME_KEYS.length)]
+                    child[gene] = Math.max(0.01, Math.min(1.0, (child[gene] || 0.1) + (Math.random() - 0.5) * mutationRate))
+                }
             }
             population.push(child)
         }
@@ -187,7 +224,7 @@ serve(async (req) => {
         success: true, 
         improved, 
         weights: bestW,
-        delta: improved ? ((evaluateGenome(bestW, signalMatrix, targets) - evaluateGenome(current?.weights || {}, signalMatrix, targets)) / 10).toFixed(1) : "0"
+        delta: improved ? (bestScore - evaluateGenome(current?.weights || {}, foldsData)).toFixed(2) : "0"
     }), { 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
     })
