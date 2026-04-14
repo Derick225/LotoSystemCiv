@@ -60,7 +60,8 @@ export const runBacktestTraining = async (
             const targetDraw = allResults[realIdx];
             const historyAtThatTime = allResults.slice(realIdx + 1); 
             
-            const prediction = await generateMasterPrediction(drawName, historyAtThatTime, weightsToUse);
+            // skipTraining = true pour éviter de réentraîner le LSTM à chaque itération du backtest
+            const prediction = await generateMasterPrediction(drawName, historyAtThatTime, weightsToUse, undefined, undefined, 'BALANCED', true);
             const predicted = prediction.suggestedNumbers;
             const actual = targetDraw.gagnants;
             const hits = predicted.filter(n => actual.includes(n));

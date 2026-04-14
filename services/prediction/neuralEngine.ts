@@ -1,15 +1,14 @@
-import * as tf from '@tensorflow/tfjs';
 import { DrawResult } from '../../types';
 
 // Cache for models to avoid retraining from scratch every time
-const modelCache: Record<string, tf.LayersModel> = {};
+const modelCache: Record<string, any> = {};
 const historyLengthCache: Record<string, number> = {};
 
 /**
  * Prepares the history data for LSTM training.
  * We convert each draw into a binary vector of size 90.
  */
-const prepareData = (history: DrawResult[], sequenceLength: number = 15) => {
+const prepareData = (tf: any, history: DrawResult[], sequenceLength: number = 15) => {
     const N = 90;
     const sequences: number[][][] = [];
     const labels: number[][] = [];
@@ -41,7 +40,7 @@ const prepareData = (history: DrawResult[], sequenceLength: number = 15) => {
  * Builds and trains an LSTM model on the draw history.
  * Returns a probability vector for the next draw (1 to 90).
  */
-export const predictWithLSTM = async (drawName: string, history: DrawResult[]): Promise<Record<number, number>> => {
+export const predictWithLSTM = async (drawName: string, history: DrawResult[], skipTraining: boolean = false): Promise<Record<number, number>> => {
     const N = 90;
     const sequenceLength = 15; // Increased sequence length to capture longer dependencies
 
@@ -51,7 +50,10 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
     }
 
     try {
-        const { xs, ys } = prepareData(history, sequenceLength);
+        // Dynamic import of TensorFlow.js to split code and reduce main bundle size
+        const tf = await import('@tensorflow/tfjs');
+
+        const { xs, ys } = prepareData(tf, history, sequenceLength);
 
         let model = modelCache[drawName];
         const isNewModel = !model;
@@ -67,41 +69,45 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
                 kernelSize: 3,
                 activation: 'relu',
                 padding: 'same'
-            }).apply(input) as tf.SymbolicTensor;
+            }).apply(input) as any;
             
-            const dropout1 = tf.layers.dropout({ rate: 0.2 }).apply(conv1) as tf.SymbolicTensor;
+            const dropout1 = tf.layers.dropout({ rate: 0.2 }).apply(conv1) as any;
 
             // --- DEBUT : MECANISME DE SELF-ATTENTION (TRANSFORMER) ---
             const attentionDim = 128;
             
             // Projections Query, Key, Value
-            const q = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
-            const k = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
-            const v = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
+            const q = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as any;
+            const k = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as any;
+            const v = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as any;
 
             // Scores d'attention = Q * K^T
-            const attentionScores = tf.layers.dot({ axes: [2, 2] }).apply([q, k]) as tf.SymbolicTensor;
+            const attentionScores = tf.layers.dot({ axes: [2, 2] }).apply([q, k]) as any;
             
             // Poids d'attention (Softmax)
-            const attentionWeights = tf.layers.activation({ activation: 'softmax' }).apply(attentionScores) as tf.SymbolicTensor;
+            const attentionWeights = tf.layers.activation({ activation: 'softmax' }).apply(attentionScores) as any;
 
             // Contexte = Poids * V
-            const attentionOutput = tf.layers.dot({ axes: [2, 1] }).apply([attentionWeights, v]) as tf.SymbolicTensor;
+            const attentionOutput = tf.layers.dot({ axes: [2, 1] }).apply([attentionWeights, v]) as any;
 
             // Connexion Résiduelle (Add) + Normalisation (Batch Norm)
-            const residual = tf.layers.add().apply([dropout1, attentionOutput]) as tf.SymbolicTensor;
-            const normalized = tf.layers.batchNormalization().apply(residual) as tf.SymbolicTensor;
+            const residual = tf.layers.add().apply([dropout1, attentionOutput]) as any;
+            const normalized = tf.layers.batchNormalization().apply(residual) as any;
             // --- FIN : MECANISME DE SELF-ATTENTION ---
 
             // 2. Bidirectional LSTM pour comprendre le contexte passé ET futur (dans la fenêtre)
             const biLstm = tf.layers.bidirectional({
-                layer: tf.layers.lstm({ units: 128, returnSequences: false })
-            }).apply(normalized) as tf.SymbolicTensor;
+                layer: tf.layers.lstm({ 
+                    units: 128, 
+                    returnSequences: false,
+                    recurrentInitializer: 'glorotUniform' // Évite le warning de lenteur sur les grandes matrices
+                })
+            }).apply(normalized) as any;
 
             // 3. Couches denses pour la classification multi-labels
-            const dense1 = tf.layers.dense({ units: 256, activation: 'relu' }).apply(biLstm) as tf.SymbolicTensor;
-            const dropout2 = tf.layers.dropout({ rate: 0.3 }).apply(dense1) as tf.SymbolicTensor;
-            const output = tf.layers.dense({ units: N, activation: 'sigmoid' }).apply(dropout2) as tf.SymbolicTensor;
+            const dense1 = tf.layers.dense({ units: 256, activation: 'relu' }).apply(biLstm) as any;
+            const dropout2 = tf.layers.dropout({ rate: 0.3 }).apply(dense1) as any;
+            const output = tf.layers.dense({ units: N, activation: 'sigmoid' }).apply(dropout2) as any;
 
             model = tf.model({ inputs: input, outputs: output });
 
@@ -114,8 +120,8 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
             modelCache[drawName] = model;
         }
 
-        // Train the model only if it's new or history has changed
-        if (isNewModel || historyChanged) {
+        // Train the model only if it's new or history has changed, and we are not skipping training
+        if ((isNewModel || historyChanged) && !skipTraining) {
             await model.fit(xs, ys, {
                 epochs: isNewModel ? 40 : 5, // Plus d'époques initiales pour le modèle profond
                 batchSize: 32,
@@ -145,7 +151,7 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
         });
 
         const inputTensor = tf.tensor3d([lastSequence]);
-        const predictionTensor = model.predict(inputTensor) as tf.Tensor;
+        const predictionTensor = model.predict(inputTensor) as any;
         const predictionArray = await predictionTensor.data();
 
         // Cleanup tensors to avoid memory leaks

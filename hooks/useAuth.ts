@@ -21,28 +21,21 @@ export const useAuth = () => {
         let unsubscribeSub: (() => void) | null = null;
 
         const checkAuth = async () => {
-            console.log("[useAuth] checkAuth started");
             setLoading(true);
             try {
-                console.log("[useAuth] calling getSession");
                 const currentSession = await authService.getSession();
-                console.log("[useAuth] getSession returned", currentSession);
                 if (!isMounted) return;
                 setSession(currentSession);
 
                 if (currentSession?.user) {
-                    console.log("[useAuth] User found, hydrating data");
                     await hydrateUserData(currentSession.user.id);
-                    console.log("[useAuth] Data hydrated");
                     const adminStatus = authService.isAdminUser(currentSession.user);
                     setIsAdmin(adminStatus);
 
                     if (adminStatus) {
                         setSubscription({ status: 'active', daysLeft: 999, expiresAt: '', plan: 'premium' });
                     } else {
-                        console.log("[useAuth] Checking subscription status");
                         const subState = await checkSubscriptionStatus(currentSession.user.id);
-                        console.log("[useAuth] Subscription status:", subState);
                         setSubscription(subState);
 
                         unsubscribeSub = subscribeToSubscriptionUpdates(currentSession.user.id, (newSub) => {
@@ -57,7 +50,6 @@ export const useAuth = () => {
             } catch (e) {
                 console.error("Auth Hook Error", e);
             } finally {
-                console.log("[useAuth] checkAuth finally block, isMounted:", isMounted);
                 if (isMounted) setLoading(false);
             }
         };

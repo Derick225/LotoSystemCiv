@@ -153,7 +153,7 @@ export const NexusEngine: React.FC = () => {
                                     // AUTO-TUNING: Self-Learning based on Forensic Reports
                                     const learningResult = await LearningService.triggerAutoLearning(drawName);
                                     if (learningResult && learningResult.improvement) {
-                                        console.log(`[Auto-Tuner] Weights adjusted for ${drawName}:`, learningResult.message);
+                                        // console.log(`[Auto-Tuner] Weights adjusted for ${drawName}:`, learningResult.message);
                                     }
 
                                 } catch (error) {

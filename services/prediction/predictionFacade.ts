@@ -12,7 +12,8 @@ export const generateMasterPredictionCore = async (
     weightsToUse?: AlgoWeights,
     metrics?: any,
     symbioticContext?: SymbioticContext,
-    riskProfile: RiskProfile = 'BALANCED'
+    riskProfile: RiskProfile = 'BALANCED',
+    skipTraining: boolean = false
 ): Promise<Prediction> => {
     if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
 
@@ -21,7 +22,7 @@ export const generateMasterPredictionCore = async (
     weights = applyRiskProfile(weights, riskProfile);
 
     // Deep Learning (LSTM) Prediction
-    const lstmPredictions = await predictWithLSTM(drawName, history);
+    const lstmPredictions = await predictWithLSTM(drawName, history, skipTraining);
     const enhancedMetrics = { ...metrics, lstm: lstmPredictions };
 
     const features = extractFeatures(history);
@@ -65,7 +66,8 @@ export const generateMasterPrediction = async (
     weightsToUse?: AlgoWeights,
     metrics?: any,
     symbioticContext?: SymbioticContext,
-    riskProfile: RiskProfile = 'BALANCED'
+    riskProfile: RiskProfile = 'BALANCED',
+    skipTraining: boolean = false
 ): Promise<Prediction> => {
-    return generateMasterPredictionCore(drawName, history, weightsToUse, metrics, symbioticContext, riskProfile);
+    return generateMasterPredictionCore(drawName, history, weightsToUse, metrics, symbioticContext, riskProfile, skipTraining);
 };

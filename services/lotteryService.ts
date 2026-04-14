@@ -111,7 +111,9 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   }
 };
 
-export const checkAndSyncRecentResults = syncDrawExternal;
+export const checkAndSyncRecentResults = async (drawName?: string): Promise<number> => {
+    return syncDrawExternal(drawName);
+};
 
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
   if (!isSupabaseConfigured()) return false;

@@ -25,7 +25,7 @@ export async function generateWithFallback(ai: any, primaryModel: string, params
 
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            console.log(`Executing task with model: ${primaryModel} (Attempt ${attempt + 1})`);
+            // console.log(`Executing task with model: ${primaryModel} (Attempt ${attempt + 1})`);
             return await ai.models.generateContent({ ...params, model: primaryModel, config });
         } catch (e: any) {
             console.error(`Error with ${primaryModel}:`, e.message);

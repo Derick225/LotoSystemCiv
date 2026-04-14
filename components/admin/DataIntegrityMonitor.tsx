@@ -84,11 +84,11 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
         try {
             // Delete Duplicates (Keep 1)
             for (const dup of report.duplicates) {
-                await deleteMutation.mutateAsync(dup.id);
+                try { await deleteMutation.mutateAsync(dup.id); } catch(e) { console.error("Failed to delete dup", e); }
             }
             // Delete Corrupt
             for (const corrupt of report.corruptData) {
-                await deleteMutation.mutateAsync(corrupt.id);
+                try { await deleteMutation.mutateAsync(corrupt.id); } catch(e) { console.error("Failed to delete corrupt", e); }
             }
             audioEngine.play('success');
             showToast("Nettoyage terminé.", "success");
