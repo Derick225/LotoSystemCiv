@@ -3,6 +3,7 @@ import { supabase } from '../services/supabaseClient';
 import { BrainCircuit, Target, AlertTriangle, Lightbulb, Activity, RefreshCw } from 'lucide-react';
 import { useToast } from './ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
+import { generateAutopsyAnalysis } from '../services/geminiService';
 
 interface ForensicAutopsyViewProps {
     snapshotId: string;
@@ -40,21 +41,88 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 return;
             }
 
-            // 2. If not, trigger Edge Function
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) throw new Error("Non authentifié");
+            // 2. Fetch actual result
+            const { data: resultData, error: resError } = await supabase
+                .from('draw_results')
+                .select('*')
+                .eq('id', drawResultId)
+                .single();
 
-            const { data: result, error: invokeError } = await supabase.functions.invoke('forensic-autopsy', {
-                body: { snapshotId, drawResultId }
+            if (resError || !resultData) throw new Error("Résultat introuvable");
+
+            // 3. Calculate deterministic metrics
+            const predicted = snapData.predicted_numbers || [];
+            const actual = resultData.gagnants || [];
+            const machine = resultData.machine || [];
+
+            let exactHits = 0;
+            let nearMissesCount = 0;
+            let machineHits = 0;
+            const nearMissesDetails: any[] = [];
+
+            predicted.forEach((p: number) => {
+                if (actual.includes(p)) {
+                    exactHits++;
+                } else {
+                    if (actual.includes(p - 1)) { nearMissesCount++; nearMissesDetails.push({ predicted: p, actual: p - 1, type: '-1' }); }
+                    if (actual.includes(p + 1)) { nearMissesCount++; nearMissesDetails.push({ predicted: p, actual: p + 1, type: '+1' }); }
+                }
+                if (machine.includes(p)) machineHits++;
             });
 
-            if (invokeError) {
-                throw new Error(invokeError.message || "Erreur lors de la génération de l'autopsie");
+            const scoreDivergence = Math.abs(5 - exactHits) * 20;
+
+            // 4. Call Gemini for analysis
+            let aiAnalysis = "Analyse non disponible.";
+            let recommendations: string[] = ["Maintenir les paramètres actuels."];
+            let modelUsed = "deterministic-fallback";
+
+            const geminiResult = await generateAutopsyAnalysis(predicted, actual, machine, exactHits, nearMissesCount, machineHits);
+            
+            if (geminiResult) {
+                aiAnalysis = geminiResult.analysis;
+                recommendations = geminiResult.recommendations;
+                modelUsed = "gemini-2.5-flash";
+            } else {
+                // Fallback
+                if (exactHits >= 3) aiAnalysis = "Excellente convergence des signaux. Le modèle a parfaitement capté la tendance.";
+                else if (exactHits === 2 && nearMissesCount >= 2) aiAnalysis = "Forte proximité. Léger décalage de phase détecté.";
+                else if (nearMissesCount >= 3) aiAnalysis = "Décalage spectral important. Les numéros étaient adjacents.";
+                else aiAnalysis = "Divergence totale. Le cycle a probablement subi une rupture brutale.";
+                
+                if (scoreDivergence > 30) recommendations = ["Réduire le poids de l'historique long terme."];
             }
 
-            setReport(result.report.report_data || result.report);
+            const finalReport = {
+                matches: exactHits,
+                nearMisses: nearMissesCount,
+                scoreDivergence,
+                aiAnalysis,
+                recommendations,
+                modelUsed
+            };
+
+            // 5. Save to database
+            await supabase.from('forensic_reports').insert({
+                user_id: snapData.user_id,
+                prediction_id: snapshotId,
+                draw_name: snapData.draw_name,
+                draw_date: resultData.date,
+                draw_result_id: resultData.id,
+                report_data: finalReport,
+                ai_model_used: modelUsed
+            });
+
+            await supabase.from('prediction_snapshots').update({
+                status: 'COMPLETED',
+                actual_numbers: actual,
+                near_misses: nearMissesDetails,
+                autopsy_report: finalReport,
+                updated_at: new Date().toISOString()
+            }).eq('id', snapshotId);
+
+            setReport(finalReport);
             
-            // Refresh snapshot to get near misses
             const { data: updatedSnap } = await supabase
                 .from('prediction_snapshots')
                 .select('*')
@@ -85,7 +153,7 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
         return (
             <div className="flex flex-col items-center justify-center p-8 space-y-4 bg-gray-900/50 rounded-xl border border-gray-800">
                 <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
-                <p className="text-cyan-400 font-mono text-sm animate-pulse">Analyse Forensic en cours via Gemini 3.1 Pro...</p>
+                <p className="text-cyan-400 font-mono text-sm animate-pulse">Analyse Forensic en cours via Gemini 2.5 Flash...</p>
             </div>
         );
     }

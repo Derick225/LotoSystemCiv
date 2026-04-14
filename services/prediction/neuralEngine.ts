@@ -2,7 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 import { DrawResult } from '../../types';
 
 // Cache for models to avoid retraining from scratch every time
-const modelCache: Record<string, tf.Sequential> = {};
+const modelCache: Record<string, tf.LayersModel> = {};
 const historyLengthCache: Record<string, number> = {};
 
 /**
@@ -58,17 +58,55 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
         const historyChanged = historyLengthCache[drawName] !== history.length;
 
         if (isNewModel) {
-            model = tf.sequential();
-            model.add(tf.layers.lstm({
-                units: 128, // Increased capacity
-                inputShape: [sequenceLength, N],
-                returnSequences: false
-            }));
-            model.add(tf.layers.dropout({ rate: 0.3 })); // Increased dropout to prevent overfitting
-            model.add(tf.layers.dense({ units: N, activation: 'sigmoid' }));
+            // Architecture Hybride Avancée : Conv1D (Extraction locale) + Bi-LSTM (Dépendances temporelles)
+            const input = tf.input({ shape: [sequenceLength, N] });
+            
+            // 1. Convolution 1D pour extraire les motifs locaux (ex: suites de nombres)
+            const conv1 = tf.layers.conv1d({
+                filters: 128,
+                kernelSize: 3,
+                activation: 'relu',
+                padding: 'same'
+            }).apply(input) as tf.SymbolicTensor;
+            
+            const dropout1 = tf.layers.dropout({ rate: 0.2 }).apply(conv1) as tf.SymbolicTensor;
+
+            // --- DEBUT : MECANISME DE SELF-ATTENTION (TRANSFORMER) ---
+            const attentionDim = 128;
+            
+            // Projections Query, Key, Value
+            const q = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
+            const k = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
+            const v = tf.layers.dense({ units: attentionDim, useBias: false }).apply(dropout1) as tf.SymbolicTensor;
+
+            // Scores d'attention = Q * K^T
+            const attentionScores = tf.layers.dot({ axes: [2, 2] }).apply([q, k]) as tf.SymbolicTensor;
+            
+            // Poids d'attention (Softmax)
+            const attentionWeights = tf.layers.activation({ activation: 'softmax' }).apply(attentionScores) as tf.SymbolicTensor;
+
+            // Contexte = Poids * V
+            const attentionOutput = tf.layers.dot({ axes: [2, 1] }).apply([attentionWeights, v]) as tf.SymbolicTensor;
+
+            // Connexion Résiduelle (Add) + Normalisation (Batch Norm)
+            const residual = tf.layers.add().apply([dropout1, attentionOutput]) as tf.SymbolicTensor;
+            const normalized = tf.layers.batchNormalization().apply(residual) as tf.SymbolicTensor;
+            // --- FIN : MECANISME DE SELF-ATTENTION ---
+
+            // 2. Bidirectional LSTM pour comprendre le contexte passé ET futur (dans la fenêtre)
+            const biLstm = tf.layers.bidirectional({
+                layer: tf.layers.lstm({ units: 128, returnSequences: false })
+            }).apply(normalized) as tf.SymbolicTensor;
+
+            // 3. Couches denses pour la classification multi-labels
+            const dense1 = tf.layers.dense({ units: 256, activation: 'relu' }).apply(biLstm) as tf.SymbolicTensor;
+            const dropout2 = tf.layers.dropout({ rate: 0.3 }).apply(dense1) as tf.SymbolicTensor;
+            const output = tf.layers.dense({ units: N, activation: 'sigmoid' }).apply(dropout2) as tf.SymbolicTensor;
+
+            model = tf.model({ inputs: input, outputs: output });
 
             model.compile({
-                optimizer: tf.train.adam(0.005), // Slightly lower learning rate for stability
+                optimizer: tf.train.adam(0.002), // Taux d'apprentissage optimisé pour cette architecture
                 loss: 'binaryCrossentropy',
                 metrics: ['accuracy']
             });
@@ -79,14 +117,14 @@ export const predictWithLSTM = async (drawName: string, history: DrawResult[]): 
         // Train the model only if it's new or history has changed
         if (isNewModel || historyChanged) {
             await model.fit(xs, ys, {
-                epochs: isNewModel ? 30 : 5, // Train less if just updating
+                epochs: isNewModel ? 40 : 5, // Plus d'époques initiales pour le modèle profond
                 batchSize: 32,
-                validationSplit: 0.15, // Use 15% of data for validation
+                validationSplit: 0.15,
                 shuffle: true,
                 verbose: 0,
                 callbacks: tf.callbacks.earlyStopping({
                     monitor: 'val_loss',
-                    patience: 5, // Stop if validation loss doesn't improve for 5 epochs
+                    patience: 6,
                     minDelta: 0.001
                 })
             });

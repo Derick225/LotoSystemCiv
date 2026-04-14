@@ -19,26 +19,39 @@ export const getGeminiClient = () => {
     return new GoogleGenAI({ apiKey });
 };
 
-export async function generateWithFallback(ai: any, primaryModel: string, params: any) {
-    const fallbackModel = "gemini-3.1-flash-preview";
+export async function generateWithFallback(ai: any, primaryModel: string, params: any, retries = 2) {
+    const fallbackModel = "gemini-2.5-flash";
     const config = { ...params.config };
 
-    try {
-        console.log(`Executing task with model: ${primaryModel}`);
-        return await ai.models.generateContent({ ...params, model: primaryModel, config });
-    } catch (e: any) {
-        console.error(`Error with ${primaryModel}:`, e.message);
-        
-        if (primaryModel !== fallbackModel) {
-            console.warn(`Falling back to ${fallbackModel}...`);
-            try {
-                return await ai.models.generateContent({ ...params, model: fallbackModel, config });
-            } catch (e2: any) {
-                console.error(`Error with ${fallbackModel}:`, e2.message);
-                throw e2;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            console.log(`Executing task with model: ${primaryModel} (Attempt ${attempt + 1})`);
+            return await ai.models.generateContent({ ...params, model: primaryModel, config });
+        } catch (e: any) {
+            console.error(`Error with ${primaryModel}:`, e.message);
+            
+            // If it's a rate limit error (429), wait and retry
+            if (e.message && e.message.includes('429') && attempt < retries) {
+                console.warn(`Rate limit hit. Retrying in ${2000 * (attempt + 1)}ms...`);
+                await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+                continue;
             }
-        } else {
-            throw e;
+            
+            if (primaryModel !== fallbackModel) {
+                console.warn(`Falling back to ${fallbackModel}...`);
+                try {
+                    return await ai.models.generateContent({ ...params, model: fallbackModel, config });
+                } catch (e2: any) {
+                    console.error(`Error with ${fallbackModel}:`, e2.message);
+                    if (e2.message && e2.message.includes('429') && attempt < retries) {
+                        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+                        continue;
+                    }
+                    throw e2;
+                }
+            } else if (attempt === retries) {
+                throw e;
+            }
         }
     }
 }
@@ -97,7 +110,7 @@ export const analyzeDrawLogic = async (drawName: string, history: DrawResult[], 
         Fournis une analyse logique détaillée, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, et un score d'intuition (0-100).
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3.1-pro-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -175,7 +188,7 @@ export const getNarrativeAnalysis = async (drawName: string, history: DrawResult
         - confidence: Score de confiance (nombre entre 0 et 100).
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -231,7 +244,7 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
         - insight: L'analyse des résultats (string).
         `;
 
-        const response = await generateWithFallback(ai, "gemini-3-flash-preview", {
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
@@ -258,8 +271,51 @@ export const getPythonKernelAnalysis = async (drawName: string, history: DrawRes
 };
 
 /**
- * Analyse OCR d'un ticket de loterie via Gemini Flash Image.
+ * Génère une analyse d'autopsie (Forensic) via Gemini Flash.
  */
+export const generateAutopsyAnalysis = async (predicted: number[], actual: number[], machine: number[], exactHits: number, nearMissesCount: number, machineHits: number): Promise<any | null> => {
+    if (!navigator.onLine) return null;
+
+    const ai = getGeminiClient();
+    if (!ai) return null;
+
+    try {
+        const prompt = `Agis comme un expert en data science et analyse de loterie.
+Analyse cette prédiction par rapport au résultat réel.
+Prédiction: ${predicted.join(', ')}
+Résultat: ${actual.join(', ')}
+Machine: ${machine.join(', ')}
+Hits exacts: ${exactHits}
+Near Misses (+/- 1): ${nearMissesCount}
+Numéros tombés en machine: ${machineHits}
+
+Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la prédiction a réussi ou échoué, et donne 1 à 2 recommandations d'ajustement algorithmique.`;
+
+        const response = await generateWithFallback(ai, "gemini-2.5-flash", {
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        analysis: { type: Type.STRING, description: "Analyse technique courte" },
+                        recommendations: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Recommandations d'ajustement" },
+                        confidence: { type: Type.NUMBER, description: "Niveau de confiance dans l'analyse (0.0 à 1.0)" }
+                    },
+                    required: ["analysis", "recommendations", "confidence"]
+                }
+            }
+        });
+
+        const jsonText = response.text;
+        if (!jsonText) return null;
+
+        return JSON.parse(jsonText);
+    } catch (e: any) {
+        logError(new AppError(e.message || "Gemini Autopsy Error", "GEMINI_AUTOPSY_ERROR", "medium", { error: e }), { source: 'generateAutopsyAnalysis' });
+        return null;
+    }
+};
 export const scanTicket = async (imageBase64: string): Promise<any | null> => {
     if (!navigator.onLine) throw new AppError("Mode hors-ligne : Scanner indisponible.", "OFFLINE_MODE", "low");
 
@@ -267,7 +323,7 @@ export const scanTicket = async (imageBase64: string): Promise<any | null> => {
     if (!ai) throw new AppError("Clé API Gemini manquante.", "GEMINI_KEY_MISSING", "high");
 
     try {
-        const response = await generateWithFallback(ai, 'gemini-2.5-flash-image', {
+        const response = await generateWithFallback(ai, 'gemini-2.5-flash', {
             contents: {
                 parts: [
                     { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
