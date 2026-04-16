@@ -5,6 +5,18 @@ import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { generateCombination } from './combinationGenerator';
 import { predictWithLSTM } from './neuralEngine';
 import { AlgoKey } from '../../shared/prediction.types';
+import { 
+    calculatePoissonScores, 
+    calculateBayesianScore, 
+    calculateTemporalScores,
+    calculateDigitalRootAnalysis,
+    calculateResistanceScores,
+    calculateGapVelocityScores,
+    calculateLeaderSuccession,
+    calculateAiIntuition,
+    calculateFractalResonance,
+    calculateSpatialHotSpots
+} from '../advancedMathService';
 
 export const generateMasterPredictionCore = async (
     drawName: string, 
@@ -23,7 +35,34 @@ export const generateMasterPredictionCore = async (
 
     // Deep Learning (LSTM) Prediction
     const lstmPredictions = await predictWithLSTM(drawName, history, skipTraining);
-    const enhancedMetrics = { ...metrics, lstm: lstmPredictions };
+    
+    // Calculate Advanced Metrics
+    const poissonScores = calculatePoissonScores(history);
+    const bayesScores = calculateBayesianScore(history);
+    const temporalScores = calculateTemporalScores(history);
+    const digitalRootScores = calculateDigitalRootAnalysis(history);
+    const resistanceScores = calculateResistanceScores(history);
+    const gapVelocityScores = calculateGapVelocityScores(history);
+    const leaderSuccessionScores = calculateLeaderSuccession(history);
+    const aiIntuitionScores = calculateAiIntuition(history, metrics);
+    const fractalResonanceScores = calculateFractalResonance(history);
+    const spatialHotSpots = calculateSpatialHotSpots(history);
+
+    const enhancedMetrics = { 
+        ...metrics, 
+        lstm: lstmPredictions,
+        poisson: poissonScores,
+        bayes: bayesScores,
+        temporal: temporalScores,
+        digitalRoot: digitalRootScores,
+        resistance: resistanceScores,
+        gapVelocity: gapVelocityScores,
+        leaderSuccession: leaderSuccessionScores,
+        aiIntuition: aiIntuitionScores,
+        fractalResonance: fractalResonanceScores,
+        spatial: spatialHotSpots,
+        symbioticContext
+    };
 
     const features = extractFeatures(history);
     

@@ -6,6 +6,9 @@ export interface ExtractedFeatures {
     markovMap: Map<number, number>;
     affinityMap: Map<number, Map<number, number>>;
     machineTransferMap: Map<number, number>;
+    momentumMap: Map<number, number>;
+    antiConsensusMap: Map<number, number>;
+    equilibriumMap: Map<number, number>;
 }
 
 export const extractFeatures = (history: DrawResult[], sampleSize: number = 100): ExtractedFeatures => {
@@ -17,15 +20,39 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
     const markovMap = new Map<number, number>();
     const affinityMap = new Map<number, Map<number, number>>();
     const machineTransferMap = new Map<number, number>();
+    const momentumMap = new Map<number, number>();
+    const antiConsensusMap = new Map<number, number>();
+    const equilibriumMap = new Map<number, number>();
     
     const machineFreqMap = new Map<number, number>(); // To normalize machine transfers
 
-    // 1. Frequencies, Gaps, Machine Transfer
+    // 1. Frequencies, Gaps, Machine Transfer, Momentum, Anti-Consensus, Equilibrium
+    let oddCount = 0;
+    let lowCount = 0;
+    let totalNums10 = 0;
+
     for (let i = 0; i < recentHistory.length; i++) {
         const draw = recentHistory[i];
         for (const n of draw.gagnants) {
             freqMap.set(n, (freqMap.get(n) || 0) + 1);
             if (!gapsMap.has(n)) gapsMap.set(n, i);
+
+            // Momentum (last 8 draws)
+            if (i < 8) {
+                momentumMap.set(n, (momentumMap.get(n) || 0) + 1);
+            }
+
+            // Anti-Consensus (last 40 draws)
+            if (i < 40) {
+                antiConsensusMap.set(n, (antiConsensusMap.get(n) || 0) + 1);
+            }
+
+            // Equilibrium (last 10 draws)
+            if (i < 10) {
+                if (n % 2 !== 0) oddCount++;
+                if (n <= 45) lowCount++;
+                totalNums10++;
+            }
         }
         
         if (draw.machine) {
@@ -55,6 +82,24 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
         const mFreq = machineFreqMap.get(mNum) || 1;
         machineTransferMap.set(mNum, count / mFreq);
     });
+
+    // Calculate Equilibrium Scores
+    const oddRatio = totalNums10 > 0 ? oddCount / totalNums10 : 0.5;
+    const lowRatio = totalNums10 > 0 ? lowCount / totalNums10 : 0.5;
+
+    for (let n = 1; n <= 90; n++) {
+        let eqScore = 50;
+        const isOdd = n % 2 !== 0;
+        const isLow = n <= 45;
+        
+        if (oddRatio < 0.45 && isOdd) eqScore += 25;
+        else if (oddRatio > 0.55 && !isOdd) eqScore += 25;
+        
+        if (lowRatio < 0.45 && isLow) eqScore += 25;
+        else if (lowRatio > 0.55 && !isLow) eqScore += 25;
+        
+        equilibriumMap.set(n, eqScore);
+    }
 
     // 2. Markov & Affinity
     const markovTransitionMap = new Map<number, Map<number, number>>();
@@ -121,6 +166,9 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
         gapsMap,
         markovMap,
         affinityMap,
-        machineTransferMap
+        machineTransferMap,
+        momentumMap,
+        antiConsensusMap,
+        equilibriumMap
     };
 };
