@@ -387,7 +387,7 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return (
         <div className="space-y-8 animate-fade-in pb-20">
             {/* Context HUD */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 {[
                     { label: 'ADN Source', val: activeDNA, icon: <Dna className="text-indigo-500"/>, action: () => { audioEngine.play('click'); setShowDNA(!showDNA); } },
                     { label: 'Volatilité', val: `${volatility?.score || 0}%`, icon: <Wind className="text-amber-500"/> },
@@ -406,6 +406,27 @@ export const PredictionTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </div>
                     </div>
                 ))}
+                
+                {/* Cloud Edge Toggle */}
+                <div 
+                    onClick={() => {
+                        audioEngine.play('click');
+                        const useCloudEngine = useNexusStore.getState().useCloudEngine;
+                        useNexusStore.getState().setUseCloudEngine(!useCloudEngine);
+                        showToast(!useCloudEngine ? "Mode Cloud / Edge Functions activé." : "Calcul local (Navigateur) réactivé.", "info");
+                    }}
+                    className={`bg-slate-900 p-4 rounded-[2rem] border cursor-pointer hover:bg-slate-800 transition-all flex items-center gap-4 shadow-lg ${useNexusStore.getState().useCloudEngine ? 'border-cyan-500/50 shadow-cyan-500/20' : 'border-slate-800'}`}
+                >
+                    <div className={`p-3 rounded-2xl transition-colors ${useNexusStore.getState().useCloudEngine ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/><path d="m14 15-2 2-2-2"/><path d="M12 17V9"/></svg>
+                    </div>
+                    <div>
+                        <div className="text-[8px] font-black uppercase tracking-widest text-slate-500">Moteur de Calcul</div>
+                        <div className={`font-bold text-xs ${useNexusStore.getState().useCloudEngine ? 'text-cyan-400' : 'text-slate-400'}`}>
+                            {useNexusStore.getState().useCloudEngine ? 'SUPABASE EDGE' : 'LOCAL DEVICE'}
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <AnimatePresence>

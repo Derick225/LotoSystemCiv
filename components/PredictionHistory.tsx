@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getPredictionHistoryAsync, clearPredictionHistory, linkPredictionToResult } from '../services/predictionHistoryService';
+import { getPredictionHistoryAsync, clearPredictionHistory, linkPredictionToResult, deletePrediction } from '../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, syncForensicReportsWithCloud } from '../services/postPredictionAnalysisService';
 import type { PredictionHistoryItem, DrawResult, ForensicReport } from '../types';
 import { NumberBall } from './NumberBall';
@@ -31,6 +31,17 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
     }, [drawName]);
 
     useEffect(() => { loadData(); }, [loadData]);
+
+    const handleDelete = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        audioEngine.play('click');
+        if (confirm("Supprimer cette prédiction en attente ?")) {
+            await deletePrediction(id);
+            setHistory(prev => prev.filter(h => h.id !== id));
+            audioEngine.play('success');
+            showToast("Prédiction supprimée.", "info");
+        }
+    };
 
     // O(1) Lookups for performance
     const resultsById = React.useMemo(() => {
@@ -230,9 +241,17 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                                             {hits.length >= 3 && <div className="flex items-center gap-2 text-[9px] font-black text-emerald-600 bg-emerald-50 p-1.5 rounded-lg animate-bounce-subtle"><CheckCircle2 size={12}/> PRÉCISION ÉLITE DÉTECTÉE</div>}
                                         </div>
                                     ) : (
-                                        <div className="flex flex-col items-center justify-center gap-2 opacity-30 text-slate-400">
-                                            <AlertCircle size={24}/>
-                                            <span className="text-[9px] font-black uppercase tracking-[0.2em]">En attente de tirage</span>
+                                        <div className="flex flex-col items-center justify-center h-full relative group">
+                                            <div className="flex flex-col items-center justify-center gap-2 opacity-30 text-slate-400 transition-opacity group-hover:opacity-100">
+                                                <AlertCircle size={24}/>
+                                                <span className="text-[9px] font-black uppercase tracking-[0.2em]">En attente de tirage</span>
+                                            </div>
+                                            <button 
+                                                onClick={(e) => handleDelete(e, item.id)}
+                                                className="absolute inset-0 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest text-[10px] opacity-0 group-hover:opacity-100 transition-all z-10"
+                                            >
+                                                <Trash2 size={14} /> Supprimer
+                                            </button>
                                         </div>
                                     )}
                                 </div>

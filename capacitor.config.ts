@@ -2,7 +2,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.nexus.lotopro',
-  appName: 'LotoPro Nexus',
+  appName: 'LotoPro Platinum Elite',
   webDir: 'dist',
   server: {
     androidScheme: 'https'

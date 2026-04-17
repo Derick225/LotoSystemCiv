@@ -46,8 +46,8 @@ export default defineConfig(({ mode }) => {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
         },
         manifest: {
-          name: 'NexusPro Loto',
-          short_name: 'NexusPro',
+          name: 'LotoPro Platinum Elite',
+          short_name: 'LotoPro',
           description: 'Intelligence Cognitive pour Loterie',
           theme_color: '#0f172a',
           background_color: '#0f172a',

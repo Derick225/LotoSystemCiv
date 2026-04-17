@@ -5,6 +5,8 @@ import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { generateCombination } from './combinationGenerator';
 import { predictWithLSTM } from './neuralEngine';
 import { AlgoKey } from '../../shared/prediction.types';
+import { supabase } from '../supabaseClient';
+import { useNexusStore } from '../../store/useNexusStore';
 import { 
     calculatePoissonScores, 
     calculateBayesianScore, 
@@ -32,6 +34,35 @@ export const generateMasterPredictionCore = async (
     let weights = normalizeWeights(weightsToUse || await getAlgoWeights(drawName));
     weights = applyMetaLearning(weights, history);
     weights = applyRiskProfile(weights, riskProfile);
+
+    // Try Cloud Edge Function if enabled
+    const useCloudEngine = useNexusStore.getState().useCloudEngine;
+    if (useCloudEngine) {
+        try {
+            console.log("Tentative de calcul via Supabase Edge Functions (Deno)...");
+            const { data, error } = await supabase.functions.invoke('predict-elite', {
+                body: { 
+                    drawName,
+                    history: history.slice(0, 100), // Envoi que du pertinent
+                    weights,
+                    riskProfile,
+                    symbioticContext,
+                    metrics
+                }
+            });
+
+            if (!error && data) {
+                console.log("Succès Edge Function", data);
+                return data as Prediction;
+            } else {
+                console.warn("Échec Edge Function (Non déployée ou offline). Fallback sur le moteur local.");
+            }
+        } catch (e) {
+            console.warn("Exception Edge Function, exécution locale continue.", e);
+        }
+    }
+
+    // --- FALLBACK LOCAL (Le moteur existant) ---
 
     // Deep Learning (LSTM) Prediction
     const lstmPredictions = await predictWithLSTM(drawName, history, skipTraining);

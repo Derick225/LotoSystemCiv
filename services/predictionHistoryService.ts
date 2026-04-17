@@ -133,6 +133,21 @@ export const clearPredictionHistory = async (drawName: string) => {
     toDelete.forEach(p => localStorage.removeItem(`${HISTORY_KEY_PREFIX}${p.id}`));
 };
 
+export const deletePrediction = async (id: string): Promise<void> => {
+    localStorage.removeItem(`${HISTORY_KEY_PREFIX}${id}`);
+    
+    // Attempt to delete from cloud if syncing is enabled
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            await supabase.from('predictions').delete().eq('id', id);
+            await supabase.from('prediction_snapshots').delete().eq('id', id);
+        }
+    } catch(e) {
+        // ignore cloud delete error silently
+    }
+};
+
 export const saveLearningSession = async (drawName: string, sessionData: any) => {
     const session: LearningSession = {
         id: crypto.randomUUID(),

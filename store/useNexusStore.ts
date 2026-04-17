@@ -16,6 +16,7 @@ interface NexusState {
   riskProfile: RiskProfile;
   globalWeights: AlgoWeights;
   vocalContext: OracleVocalContext | null;
+  useCloudEngine: boolean;
   
   // Data State
   history: DrawResult[];
@@ -46,6 +47,7 @@ interface NexusState {
   setRiskProfile: (profile: RiskProfile) => void;
   setGlobalWeights: (weights: AlgoWeights) => void;
   setVocalContext: (ctx: OracleVocalContext | null) => void;
+  setUseCloudEngine: (useCloud: boolean) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
   setCalibration: (cal: CalibrationData | null) => void;
@@ -72,6 +74,7 @@ export const useNexusStore = create<NexusState>()(
       riskProfile: 'BALANCED',
       globalWeights: {} as AlgoWeights,
       vocalContext: null,
+      useCloudEngine: false,
       
       history: [],
       stats: [],
@@ -105,6 +108,7 @@ export const useNexusStore = create<NexusState>()(
       setRiskProfile: (profile) => set({ riskProfile: profile }),
       setGlobalWeights: (weights) => set({ globalWeights: weights }),
       setVocalContext: (ctx) => set({ vocalContext: ctx }),
+      setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
       setLastPrediction: (pred) => set({ lastPrediction: pred }),
       setSmartInsights: (insights) => set({ smartInsights: insights }),
       setCalibration: (cal) => set({ calibration: cal }),
@@ -149,12 +153,13 @@ export const useNexusStore = create<NexusState>()(
     }),
     {
       name: 'nexus-storage',
-      version: 1,
+      version: 2,
       partialize: (state) => ({ 
         isGodMode: state.isGodMode, 
         riskProfile: state.riskProfile,
         globalWeights: state.globalWeights,
-        drawName: state.drawName
+        drawName: state.drawName,
+        useCloudEngine: state.useCloudEngine
       }),
     }
   )

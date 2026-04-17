@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
-import { getPredictionHistoryAsync, linkPredictionToResult } from '../../services/predictionHistoryService';
+import { getPredictionHistoryAsync, linkPredictionToResult, deletePrediction } from '../../services/predictionHistoryService';
 import { performForensicAnalysis, saveForensicReport, getLocalForensicReports, syncForensicReportsWithCloud, deleteForensicReportLocal } from '../../services/postPredictionAnalysisService';
 import { deleteForensicReportCloud } from '../../services/syncService';
 import { getPlatinumHistory, performPlatinumAudit } from '../../services/metaAnalystService';
@@ -252,6 +252,22 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         } catch (e) {
             audioEngine.play('error');
             showToast("Erreur suppression.", "error");
+        }
+    };
+
+    const handleDeletePending = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        audioEngine.play('click');
+        if (!confirm("Supprimer cette prédiction en attente ?")) return;
+
+        try {
+            await deletePrediction(id);
+            setPendingPredictions(prev => prev.filter(p => p.id !== id));
+            audioEngine.play('success');
+            showToast("Prédiction supprimée.", "info");
+        } catch (e) {
+            audioEngine.play('error');
+            showToast("Erreur lors de la suppression.", "error");
         }
     };
 
@@ -637,9 +653,9 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         {pendingPredictions.map((pred, idx) => (
                                             <div 
                                                 key={idx} 
-                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-amber-100 dark:border-amber-900/30 opacity-80 flex flex-col gap-4"
+                                                className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] shadow-sm border border-amber-100 dark:border-amber-900/30 flex flex-col gap-4 relative group overflow-hidden"
                                             >
-                                                <div className="flex justify-between items-center">
+                                                <div className="flex justify-between items-center relative z-10">
                                                     <div className="flex items-center gap-4">
                                                         <div className="p-3 rounded-2xl bg-amber-50 text-amber-500 dark:bg-amber-900/20">
                                                             <Clock size={18}/>
@@ -658,17 +674,25 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                                         <div className="text-[8px] text-slate-400 uppercase tracking-widest">Confiance</div>
                                                     </div>
                                                 </div>
-                                                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                                                <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 relative z-10">
                                                     <div className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-2">Source</div>
                                                     <div className="text-xs font-medium text-slate-800 dark:text-slate-300">{pred.prediction.analysis}</div>
                                                 </div>
-                                                <div className="flex flex-wrap gap-2">
+                                                <div className="flex flex-wrap gap-2 relative z-10">
                                                     {pred.prediction.suggestedNumbers.map((n, i) => (
                                                         <div key={i} className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-slate-300">
                                                             {n}
                                                         </div>
                                                     ))}
                                                 </div>
+                                                
+                                                <button 
+                                                    onClick={(e) => handleDeletePending(pred.id, e)}
+                                                    className="absolute top-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all z-20"
+                                                    title="Supprimer cette prédiction"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
                                             </div>
                                         ))}
                                     </div>
