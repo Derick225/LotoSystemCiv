@@ -455,7 +455,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                     {activeTab === 'autopsy' && (
                         <div className="animate-slide-up space-y-8">
                             {report.predictionId ? (
-                                <ForensicAutopsyView snapshotId={report.predictionId} drawResultId={report.drawResultId || ''} existingReport={report.aiAnalysis ? report : undefined} />
+                                <ForensicAutopsyView snapshotId={report.predictionId} drawResultId={report.drawResultId || ''} existingReport={report.aiAnalysis ? report : undefined} localReport={report} />
                             ) : (
                                 <div className="p-8 text-center text-slate-500">
                                     ID de prédiction manquant pour l'autopsie.

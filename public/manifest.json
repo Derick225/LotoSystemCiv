@@ -30,5 +30,12 @@
       "purpose": "maskable"
     }
   ],
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://ais-dev-iexwhv27jnwut37iq2ksdr-108345727073.europe-west2.run.app/manifest.json"
+    }
+  ],
+  "prefer_related_applications": false
 }

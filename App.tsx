@@ -30,9 +30,9 @@ const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m
 const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
 const BacktestTab = lazy(() => import('./components/tabs/BacktestTab').then(m => ({ default: m.BacktestTab })));
-const EnsemblePredictorTab = lazy(() => import('./components/tabs/EnsemblePredictorTab').then(m => ({ default: m.EnsemblePredictorTab })));
 const PredictiveAnalyticsTab = lazy(() => import('./components/tabs/PredictiveAnalyticsTab').then(m => ({ default: m.PredictiveAnalyticsTab })));
 const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
+const SuperPrediction = lazy(() => import('./components/SuperPrediction').then(m => ({ default: m.SuperPrediction })));
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -223,8 +223,8 @@ const AppContent: React.FC = () => {
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+          case 'super': content = <SuperPrediction />; break;
           case 'predictive': content = <PredictiveAnalyticsTab />; break;
-          case 'ensemble': content = <EnsemblePredictorTab />; break;
           case 'backtest': content = <BacktestTab drawName={drawName} />; break;
           case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;
           default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;

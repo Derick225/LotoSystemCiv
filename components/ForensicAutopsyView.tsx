@@ -9,66 +9,107 @@ interface ForensicAutopsyViewProps {
     snapshotId: string;
     drawResultId: string;
     existingReport?: any;
+    localReport?: any;
 }
 
-export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapshotId, drawResultId, existingReport }) => {
+export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapshotId, drawResultId, existingReport, localReport }) => {
     const [loading, setLoading] = useState(!existingReport);
     const [report, setReport] = useState<any>(existingReport || null);
     const [snapshot, setSnapshot] = useState<any>(null);
+    const [error, setError] = useState<string | null>(null);
     const { showToast } = useToast();
 
     const fetchOrGenerateReport = async () => {
         if (!existingReport) setLoading(true);
+        setError(null);
         try {
-            // 1. Check if report already exists in prediction_snapshots
-            const { data: snapData, error: snapError } = await supabase
-                .from('prediction_snapshots')
-                .select('*')
-                .eq('id', snapshotId)
-                .single();
+            let predicted: number[] = [];
+            let actual: number[] = [];
+            let machine: number[] = [];
+            let userId: string | null = null;
+            let targetDrawName: string | null = null;
+            let targetDate: string | null = null;
+            let targetResultId: string | null = null;
+            let nearMissesDetails: any[] = [];
 
-            if (snapError) throw snapError;
-            setSnapshot(snapData);
+            // 1. Essayer de récupérer depuis Supabase
+            try {
+                const { data: snapData } = await supabase
+                    .from('prediction_snapshots')
+                    .select('*')
+                    .eq('id', snapshotId)
+                    .single();
 
-            if (existingReport) {
-                setLoading(false);
-                return;
+                if (snapData) {
+                    setSnapshot(snapData);
+                    if (existingReport) {
+                        setLoading(false);
+                        return;
+                    }
+                    if (snapData.autopsy_report) {
+                        setReport(snapData.autopsy_report);
+                        setLoading(false);
+                        return;
+                    }
+                    predicted = snapData.predicted_numbers || [];
+                    userId = snapData.user_id;
+                    targetDrawName = snapData.draw_name;
+                }
+            } catch (err) {
+                console.warn("Could not fetch prediction_snapshot from Supabase. Falling back to localReport.");
             }
 
-            if (snapData.autopsy_report) {
-                setReport(snapData.autopsy_report);
-                setLoading(false);
-                return;
+            try {
+                const { data: resultData } = await supabase
+                    .from('draw_results')
+                    .select('*')
+                    .eq('id', drawResultId)
+                    .single();
+
+                if (resultData) {
+                    actual = resultData.gagnants || [];
+                    machine = resultData.machine || [];
+                    targetDate = resultData.date;
+                    targetResultId = resultData.id;
+                }
+            } catch (err) {
+               console.warn("Could not fetch draw_results from Supabase. Falling back to localReport.");
             }
 
-            // 2. Fetch actual result
-            const { data: resultData, error: resError } = await supabase
-                .from('draw_results')
-                .select('*')
-                .eq('id', drawResultId)
-                .single();
-
-            if (resError || !resultData) throw new Error("Résultat introuvable");
+            // 2. Fallback complet sur localReport (PredictionHistoryItem -> ForensicReport)
+            if (predicted.length === 0 && localReport && localReport.matches) {
+                predicted = localReport.matches.map((m: any) => m.predicted).filter((v: any, i: number, a: any) => a.indexOf(v) === i);
+            }
+            if (actual.length === 0 && localReport && localReport.matches) {
+                actual = localReport.matches.filter((m: any) => m.errorType === 'Hit').map((m: any) => m.actual);
+                // Impossible de déduire tous les gagnants exacts depuis les matchs uniquement,
+                // mais si on en a besoin on va devoir utiliser ce qu'on a.
+            }
+            
+            if (predicted.length === 0) {
+                 throw new Error("Données de prédiction introuvables. Le tirage n'est peut-être pas correctement lié.");
+            }
 
             // 3. Calculate deterministic metrics
-            const predicted = snapData.predicted_numbers || [];
-            const actual = resultData.gagnants || [];
-            const machine = resultData.machine || [];
-
             let exactHits = 0;
             let nearMissesCount = 0;
             let machineHits = 0;
-            const nearMissesDetails: any[] = [];
 
             predicted.forEach((p: number) => {
-                if (actual.includes(p)) {
+                if (actual && actual.length > 0 && actual.includes(p)) {
                     exactHits++;
-                } else {
+                } else if (actual && actual.length > 0) {
                     if (actual.includes(p - 1)) { nearMissesCount++; nearMissesDetails.push({ predicted: p, actual: p - 1, type: '-1' }); }
                     if (actual.includes(p + 1)) { nearMissesCount++; nearMissesDetails.push({ predicted: p, actual: p + 1, type: '+1' }); }
                 }
-                if (machine.includes(p)) machineHits++;
+                if (machine && machine.length > 0 && machine.includes(p)) machineHits++;
             });
+
+            // Fallback si "actual" était vide mais que le localReport avait l'info
+            if (exactHits === 0 && localReport && localReport.matches) {
+                 exactHits = localReport.matches.filter((m: any) => m.errorType === 'Hit').length;
+                 nearMissesCount = localReport.matches.filter((m: any) => m.errorType === 'Voisin').length;
+            }
 
             const scoreDivergence = Math.abs(5 - exactHits) * 20;
 
@@ -102,42 +143,40 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 modelUsed
             };
 
-            // 5. Save to database
-            await supabase.from('forensic_reports').insert({
-                user_id: snapData.user_id,
-                prediction_id: snapshotId,
-                draw_name: snapData.draw_name,
-                draw_date: resultData.date,
-                draw_result_id: resultData.id,
-                report_data: finalReport,
-                ai_model_used: modelUsed
-            });
+            // 5. Save to database (only if user is authenticated and snapshot exists in Supabase)
+            if (userId && snapshotId && targetDrawName && targetDate && targetResultId) {
+                try {
+                    await supabase.from('forensic_reports').insert({
+                        user_id: userId,
+                        prediction_id: snapshotId,
+                        draw_name: targetDrawName,
+                        draw_date: targetDate,
+                        draw_result_id: targetResultId,
+                        report_data: finalReport,
+                        ai_model_used: modelUsed
+                    });
 
-            await supabase.from('prediction_snapshots').update({
-                status: 'COMPLETED',
-                actual_numbers: actual,
-                near_misses: nearMissesDetails,
-                autopsy_report: finalReport,
-                updated_at: new Date().toISOString()
-            }).eq('id', snapshotId);
+                    await supabase.from('prediction_snapshots').update({
+                        status: 'COMPLETED',
+                        actual_numbers: actual,
+                        near_misses: nearMissesDetails,
+                        autopsy_report: finalReport,
+                        updated_at: new Date().toISOString()
+                    }).eq('id', snapshotId);
+                } catch(e) {
+                    console.warn("Could not save to Supabase.");
+                }
+            }
 
             setReport(finalReport);
-            
-            const { data: updatedSnap } = await supabase
-                .from('prediction_snapshots')
-                .select('*')
-                .eq('id', snapshotId)
-                .single();
-            
-            if (updatedSnap) setSnapshot(updatedSnap);
-
             audioEngine.play('success');
             showToast("Autopsie générée avec succès", "success");
 
-        } catch (error: any) {
-            console.error("Autopsy Error:", error);
+        } catch (err: any) {
+            console.error("Autopsy Error:", err);
+            setError(err.message || "Erreur lors de l'autopsie");
             audioEngine.play('error');
-            showToast(error.message || "Erreur lors de l'autopsie", "error");
+            // Toast removed to avoid spam, error will be visible
         } finally {
             setLoading(false);
         }
@@ -149,11 +188,21 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
         }
     }, [snapshotId, drawResultId]);
 
-    if (loading || (!snapshot && !existingReport)) {
+    if (loading) {
         return (
             <div className="flex flex-col items-center justify-center p-8 space-y-4 bg-gray-900/50 rounded-xl border border-gray-800">
                 <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
                 <p className="text-cyan-400 font-mono text-sm animate-pulse">Analyse Forensic en cours via Gemini 2.5 Flash...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col items-center justify-center p-8 space-y-4 bg-red-900/20 rounded-xl border border-red-800/30">
+                <AlertTriangle className="w-8 h-8 text-red-400" />
+                <p className="text-red-400 font-mono text-sm">{error}</p>
+                <button onClick={() => fetchOrGenerateReport()} className="px-4 py-2 bg-red-800/50 hover:bg-red-700/50 text-white rounded text-xs font-bold transition-colors">Réessayer l'Analyse</button>
             </div>
         );
     }
