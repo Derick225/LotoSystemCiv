@@ -1,6 +1,7 @@
 import { AlgoWeights, RiskProfile, DrawResult } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
+import { getLocalForensicReports } from '../postPredictionAnalysisService';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
 
@@ -75,6 +76,38 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
 };
 
 export const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): AlgoWeights => {
+    const dynamicWeights = { ...weights };
+    const learningRate = 0.15; // Soft updates
+
+    try {
+        const forensicReports = getLocalForensicReports();
+        // Ne prendre que les rapports récents (max 10) pour s'adapter au contexte immédiat
+        const recentReports = forensicReports.slice(0, 10);
+        
+        if (recentReports.length > 0) {
+            recentReports.forEach(report => {
+                if (report.counterfactuals && report.counterfactuals.length > 0) {
+                    report.counterfactuals.forEach(cf => {
+                        // Impact direct du Counterfactual d'Autopsie
+                        const algo = cf.algo as AlgoKey;
+                        const w = dynamicWeights[algo];
+                        if (w !== undefined) {
+                            if (cf.action === 'BOOST' || cf.action === 'ISOLATE') {
+                                dynamicWeights[algo] = w * (1 + learningRate * (cf.rankImprovement / 10)); 
+                            } else if (cf.action === 'REDUCE') {
+                                dynamicWeights[algo] = w * (1 - learningRate * (cf.rankImprovement / 10));
+                            }
+                        }
+                    });
+                }
+            });
+            return normalizeWeights(dynamicWeights);
+        }
+    } catch (e) {
+        console.warn("Erreur Meta-Learning, utilisation du fallback classique.", e);
+    }
+
+    // Fallback: Si pas de rapport forensic, on fait la vérification grossière
     if (history.length < 20) return weights;
     
     const recentDraws = history.slice(0, 5);
@@ -103,15 +136,14 @@ export const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): 
         });
     });
     
-    const dynamicWeights = { ...weights };
-    const learningRate = 0.25; 
+    const baseLearningRate = 0.25; 
     
     if (freqScore > gapScore * 1.5) {
-        dynamicWeights[AlgoKey.FREQUENCY] = (dynamicWeights[AlgoKey.FREQUENCY] || 0) * (1 + learningRate);
-        dynamicWeights[AlgoKey.GAPS] = (dynamicWeights[AlgoKey.GAPS] || 0) * (1 - learningRate * 0.5);
+        dynamicWeights[AlgoKey.FREQUENCY] = (dynamicWeights[AlgoKey.FREQUENCY] || 0) * (1 + baseLearningRate);
+        dynamicWeights[AlgoKey.GAPS] = (dynamicWeights[AlgoKey.GAPS] || 0) * (1 - baseLearningRate * 0.5);
     } else if (gapScore > freqScore * 1.5) {
-        dynamicWeights[AlgoKey.GAPS] = (dynamicWeights[AlgoKey.GAPS] || 0) * (1 + learningRate);
-        dynamicWeights[AlgoKey.FREQUENCY] = (dynamicWeights[AlgoKey.FREQUENCY] || 0) * (1 - learningRate * 0.5);
+        dynamicWeights[AlgoKey.GAPS] = (dynamicWeights[AlgoKey.GAPS] || 0) * (1 + baseLearningRate);
+        dynamicWeights[AlgoKey.FREQUENCY] = (dynamicWeights[AlgoKey.FREQUENCY] || 0) * (1 - baseLearningRate * 0.5);
     }
     
     return normalizeWeights(dynamicWeights);
