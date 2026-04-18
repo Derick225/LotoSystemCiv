@@ -1,3 +1,5 @@
+import { secureRandom } from '../../utils/secureRandom';
+
 // ------------------ aco.worker.ts ------------------
 
 export {};
@@ -86,7 +88,7 @@ ctx.onmessage = (e: MessageEvent) => {
             const visited = new Set<number>();
             
             // Démarrage aléatoire (ou basé sur fréquence simple pour optimiser)
-            let current = Math.floor(Math.random() * 90) + 1;
+            let current = Math.floor(secureRandom() * 90) + 1;
             path.push(current);
             visited.add(current);
 
@@ -125,12 +127,12 @@ ctx.onmessage = (e: MessageEvent) => {
                 if (candidates.length === 0) break; // Should not happen
 
                 // Décision : Exploitation ou Exploration ?
-                const q = Math.random();
+                const q = secureRandom();
                 if (q <= C.q0 && bestArgNode !== -1) {
                     nextNode = bestArgNode;
                 } else {
                     // Roulette Wheel
-                    let r = Math.random() * sumScores;
+                    let r = secureRandom() * sumScores;
                     for (const c of candidates) {
                         r -= c.score;
                         if (r <= 0) {

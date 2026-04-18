@@ -3,6 +3,8 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { apiClient } from '../core/api/apiClient';
 import { initiateRealPayment, PaymentConfig } from './paymentService';
 import type { SubscriptionState } from '../types';
+import { secureRandom } from '../utils/secureRandom';
+
 
 const TRIAL_DURATION_DAYS = 30;
 const SUBSCRIPTION_COST = 3000; // FCFA
@@ -145,7 +147,7 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
             }
         }
 
-        const transactionId = `TX-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const transactionId = `TX-${Date.now()}-${Math.floor(secureRandom() * 1000)}`;
         const result = await initiateRealPayment({
             provider: 'CINETPAY',
             apiKey,

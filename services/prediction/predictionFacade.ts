@@ -7,6 +7,7 @@ import { predictWithLSTM } from './neuralEngine';
 import { AlgoKey } from '../../shared/prediction.types';
 import { supabase } from '../supabaseClient';
 import { useNexusStore } from '../../store/useNexusStore';
+import { secureRandom } from '../../utils/secureRandom';
 import { 
     calculatePoissonScores, 
     calculateBayesianScore, 
@@ -106,12 +107,17 @@ export const generateMasterPredictionCore = async (
     let masterScores = calculateScores(features, weights, enhancedMetrics);
     masterScores = await applyPCADenoising(masterScores, weights);
 
-    // Apply Quantum Noise for CHAOS profile
+    // Apply Thermodynamic Laplace Noise for CHAOS profile
     if (riskProfile === 'CHAOS') {
-        const moonPhase = Math.sin(Date.now() / (1000 * 60 * 60 * 24 * 29.53)); // Pseudo moon phase
+        // Temperature of the system models the chaos level
+        const temperature = 12.0; 
         masterScores.forEach(scoreObj => {
-            // Add a random perturbation between -15 and +15, influenced by the "moon phase"
-            const noise = (Math.random() * 30 - 15) * (1 + Math.abs(moonPhase));
+            // Generate Laplace distributed noise: Laplace(mu=0, b=temperature)
+            // U is uniform in (-0.5, 0.5]
+            const u = secureRandom() - 0.5;
+            // Inverse cumulative distribution function for Laplace
+            const noise = -temperature * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+            
             scoreObj.score += noise;
             scoreObj.breakdown[AlgoKey.QUANTUM_ENTANGLEMENT] = noise > 0 ? noise : 0;
         });

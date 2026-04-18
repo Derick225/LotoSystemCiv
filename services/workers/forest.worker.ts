@@ -1,3 +1,5 @@
+import { secureRandom } from '../../utils/secureRandom';
+
 export {};
 
 /**
@@ -70,7 +72,7 @@ function getSplit(dataset: Example[], nFeatures: number): { featureIdx: number, 
     
     // Sélection aléatoire de features (Feature Subsampling)
     while (featuresToCheck.length < nFeatures) {
-        const idx = Math.floor(Math.random() * totalFeatures);
+        const idx = Math.floor(secureRandom() * totalFeatures);
         if (!featuresToCheck.includes(idx)) featuresToCheck.push(idx);
     }
 
@@ -198,7 +200,7 @@ ctx.onmessage = (e) => {
         const sample: Example[] = [];
         const sampleSize = Math.round(dataset.length * 0.8); // 80% du dataset pour variété
         for (let j = 0; j < sampleSize; j++) {
-            sample.push(dataset[Math.floor(Math.random() * dataset.length)]);
+            sample.push(dataset[Math.floor(secureRandom() * dataset.length)]);
         }
 
         const rootSplit = getSplit(sample, nFeatures);

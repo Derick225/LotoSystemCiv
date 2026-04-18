@@ -1,3 +1,5 @@
+import { secureRandom } from '../utils/secureRandom';
+
 /**
  * Core Mathematical Algorithms for Nexus
  * Shared between Web Workers and Main Thread (Backend fallback)
@@ -118,7 +120,7 @@ export function computeEigenDecomposition(matrix: number[][]): { values: number[
     const eigenValues: number[] = [];
     const eigenVectors: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
     for (let i = 0; i < n; i++) {
-        let v = Array(n).fill(0).map(() => [Math.random() - 0.5]);
+        let v = Array(n).fill(0).map(() => [secureRandom() - 0.5]);
         let norm = vecNorm(v);
         if (norm === 0) { v[0][0] = 1; norm = 1; }
         v = scalarMul(v, 1/norm);

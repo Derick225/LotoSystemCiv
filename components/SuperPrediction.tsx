@@ -9,6 +9,7 @@ import { generatePlatinumPrediction } from '../services/metaAnalystService';
 import { saveTicket } from '../services/userPreferencesService';
 import { savePredictionToHistory } from '../services/predictionHistoryService';
 import { audioEngine } from '../utils/audioEngine';
+import { hapticEngine } from '../utils/haptics';
 import type { Prediction } from '../types';
 
 export const SuperPrediction: React.FC = () => {
@@ -24,13 +25,18 @@ export const SuperPrediction: React.FC = () => {
 
     const runAnalysis = async () => {
         audioEngine.play('click');
+        hapticEngine.tap();
+        
         if (history.length < 15) {
             showToast("Dataset insuffisant. 15 tirages minimum requis.", "error");
             audioEngine.play('error');
+            hapticEngine.heavy();
             return;
         }
         setLoading(true);
         audioEngine.play('scan');
+        hapticEngine.processing();
+        
         try {
             // Run both in parallel
             const [ensembleData, platinumData] = await Promise.all([
@@ -45,9 +51,11 @@ export const SuperPrediction: React.FC = () => {
             
             showToast("Analyse combinée terminée.", "success");
             audioEngine.play('success');
+            hapticEngine.successImpact();
         } catch (e: any) {
             showToast("Erreur lors de la génération : " + e.message, "error");
             audioEngine.play('error');
+            hapticEngine.heavy();
         } finally {
             setLoading(false);
         }
@@ -73,7 +81,10 @@ export const SuperPrediction: React.FC = () => {
         // Fallback if we still don't have 5 numbers
         let i = 1;
         while (finalNums.size < 5 && i <= 90) {
-            if (history[0]?.machine.includes(i)) {
+            if (history && history.length > 0 && history[0].machine && history[0].machine.includes(i)) {
+               finalNums.add(i);
+            } else if (!history || history.length === 0) {
+               // Fallback of fallback
                finalNums.add(i);
             }
             i++;

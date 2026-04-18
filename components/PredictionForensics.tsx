@@ -12,7 +12,7 @@ import { useNexusStore } from '../store/useNexusStore';
 import { audioEngine } from '../utils/audioEngine';
 import { 
     ThumbsUp, ThumbsDown, Meh, CheckCircle2, MessageSquare, BrainCircuit, X as XIcon, 
-    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, RefreshCw, Dna
+    AlertOctagon, ScanLine, GitMerge, Microscope, ArrowRight, Activity, Zap, PlayCircle, RefreshCw, Dna, LayoutGrid
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
@@ -27,7 +27,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
     const { showToast } = useToast();
     const { updateGlobalWeights, refreshData } = useNexusStore();
     
-    const [activeTab, setActiveTab] = useState<'ballistic' | 'spectral' | 'simulation' | 'autopsy'>('ballistic');
+    const [activeTab, setActiveTab] = useState<'spatial' | 'ballistic' | 'spectral' | 'simulation' | 'autopsy'>('spatial');
     const [applying, setApplying] = useState(false);
     const [successApply, setSuccessApply] = useState(false);
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
@@ -149,6 +149,37 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
         })) || [];
     }, [report]);
 
+    const spatialGridData = useMemo(() => {
+        const predicted = new Set<number>();
+        const actualSet = new Set<number>();
+        const misses = new Set<number>();
+        
+        if (Array.isArray(report.matches)) {
+            report.matches.forEach(m => {
+                if (m.predicted) predicted.add(m.predicted);
+                if (m.errorType === 'Hit' && m.actual) actualSet.add(m.actual);
+            });
+        }
+        
+        if (report.missedOpportunities) {
+            report.missedOpportunities.forEach(m => {
+                actualSet.add(m.number);
+                misses.add(m.number);
+            });
+        }
+
+        const grid = [];
+        for (let i = 1; i <= 90; i++) {
+            grid.push({
+                num: i,
+                isPredicted: predicted.has(i),
+                isActual: actualSet.has(i),
+                isMissed: misses.has(i)
+            });
+        }
+        return grid;
+    }, [report]);
+
     const getBadgeColor = (type: ForensicEvidence['errorType']) => {
         switch(type) {
             case 'Hit': return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700';
@@ -185,7 +216,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
                         </div>
                     </div>
                     
-                    <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl">
+                    <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl flex-wrap justify-center gap-1">
+                        <button onClick={() => { audioEngine.play('click'); setActiveTab('spatial'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spatial' ? 'bg-white dark:bg-slate-700 shadow text-amber-500 dark:text-amber-400' : 'text-slate-500'}`}>Spatial Heatmap</button>
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('ballistic'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'ballistic' ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500'}`}>Balistique</button>
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('spectral'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'spectral' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-white' : 'text-slate-500'}`}>Spectral</button>
                         <button onClick={() => { audioEngine.play('click'); setActiveTab('simulation'); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'simulation' ? 'bg-white dark:bg-slate-700 shadow text-emerald-600 dark:text-white' : 'text-slate-500'}`}>Simulation</button>
@@ -199,6 +231,49 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({ report
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-10 bg-slate-50/50 dark:bg-slate-900/50">
                     
+                    {activeTab === 'spatial' && (
+                        <div className="animate-slide-up space-y-6">
+                            <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden relative">
+                                <div className="absolute top-0 right-0 p-8 opacity-5"><LayoutGrid size={150} /></div>
+                                <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-6 relative z-10">
+                                    <LayoutGrid size={18} className="text-amber-500" /> Cartographie des Impacts (Spatial Analysis)
+                                </h4>
+                                
+                                <div className="grid grid-cols-10 gap-2 relative z-10">
+                                    {spatialGridData.map((cell) => {
+                                        let bgClass = "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600 border border-slate-200 dark:border-slate-700/50";
+                                        
+                                        if (cell.isPredicted && cell.isActual) {
+                                            bgClass = "bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 scale-110 z-10 font-black border-2 border-emerald-300 dark:border-emerald-400";
+                                        } else if (cell.isPredicted && !cell.isActual) {
+                                            bgClass = "bg-indigo-500 text-white shadow-md font-bold opacity-80 border border-indigo-400";
+                                        } else if (!cell.isPredicted && cell.isMissed) {
+                                            bgClass = "bg-rose-500 text-white shadow-lg shadow-rose-500/30 font-black border border-rose-400 scale-105";
+                                        }
+                                        
+                                        return (
+                                            <div key={cell.num} className={`aspect-square rounded-lg md:rounded-xl flex items-center justify-center text-xs md:text-sm transition-all duration-300 ${bgClass}`}>
+                                                {cell.num}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-4 mt-8 justify-center p-4 bg-slate-50 dark:bg-black/20 rounded-2xl border border-slate-100 dark:border-white/5 relative z-10">
+                                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                                        <div className="w-3 h-3 bg-emerald-500 rounded-sm"></div> Impact Direct (Hit)
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                                        <div className="w-3 h-3 bg-indigo-500 rounded-sm"></div> Zone Prédite (Vide)
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                                        <div className="w-3 h-3 bg-rose-500 rounded-sm"></div> Anomalie Non-Détectée (Miss)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {activeTab === 'ballistic' && (
                         <div className="animate-slide-up space-y-8">
                             {/* Balistique */}

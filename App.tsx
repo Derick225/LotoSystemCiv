@@ -21,9 +21,10 @@ import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from './servi
 import { hydrateUserData, getSettings, saveSettings } from './services/userPreferencesService';
 import { supabase } from './services/supabaseClient';
 import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
-import { OracleInterface } from './components/GodMode/OracleInterface';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
+
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Lazy loading des composants lourds pour optimiser le TTI (Time To Interactive)
 const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m => ({ default: m.GlobalDashboard })));
@@ -216,25 +217,36 @@ const AppContent: React.FC = () => {
     return <BootSequence onComplete={() => setIsBooted(true)} />;
   }
 
-  const renderContent = () => {
+    const renderContent = () => {
     let content;
-    if (showWallet) content = <UserWallet />;
-    else if (selectedDraw) content = <DrawDetails />;
+    let key;
+    if (showWallet) { content = <UserWallet />; key = 'wallet'; }
+    else if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
     else {
         switch (viewMode) {
-          case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
-          case 'super': content = <SuperPrediction />; break;
-          case 'predictive': content = <PredictiveAnalyticsTab />; break;
-          case 'backtest': content = <BacktestTab drawName={drawName} />; break;
-          case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; break;
-          default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; break;
+          case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
+          case 'super': content = <SuperPrediction />; key = 'super'; break;
+          case 'predictive': content = <PredictiveAnalyticsTab />; key = 'predict'; break;
+          case 'backtest': content = <BacktestTab drawName={drawName} />; key = 'backtest'; break;
+          case 'admin': content = isAdmin ? <AdminPanel /> : <AccessDenied onBack={() => setViewMode('home')} />; key = 'admin'; break;
+          default: content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
         }
     }
     
     return (
-        <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
-            {content}
-        </Suspense>
+        <AnimatePresence mode="wait">
+            <motion.div
+                key={key}
+                initial={{ opacity: 0, x: -20, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
+                transition={{ duration: 0.3, ease: 'easeOut' }}
+            >
+                <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                    {content}
+                </Suspense>
+            </motion.div>
+        </AnimatePresence>
     );
   };
 
@@ -268,7 +280,6 @@ const AppContent: React.FC = () => {
       <GlobalNumberHUD />
       <TutorialOverlay />
       <InstallPrompt />
-      <OracleInterface />
     </>
   );
 };

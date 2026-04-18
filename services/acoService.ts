@@ -1,5 +1,7 @@
 
 import { DrawResult, AntColonyPath, OracleVocalContext } from '../types';
+import { secureRandom } from '../utils/secureRandom';
+
 
 /**
  * Service ACO (Ant Colony Optimization) - Interface Client v2.0
@@ -120,21 +122,21 @@ const generateVariations = (
         const variant = [...base];
         
         // Décision : Combien de mutations ? (1 ou 2 gènes)
-        const mutationsCount = Math.random() > 0.7 ? 2 : 1;
+        const mutationsCount = secureRandom() > 0.7 ? 2 : 1;
         const indicesToChange = Array.from({length: 5}, (_, i) => i)
-                                     .sort(() => 0.5 - Math.random())
+                                     .sort(() => 0.5 - secureRandom())
                                      .slice(0, mutationsCount);
 
         for (const idx of indicesToChange) {
             const originalVal = variant[idx];
             let newVal = originalVal;
-            const mutationType = Math.random();
+            const mutationType = secureRandom();
 
             // A. Injection Oracle (Priorité Absolue)
             // Si le contexte vocal contient des cibles non utilisées, on les force avec une forte probabilité
             const unusedOracle = oracleTargets.filter(t => !variant.includes(t));
-            if (unusedOracle.length > 0 && Math.random() < 0.6) {
-                newVal = unusedOracle[Math.floor(Math.random() * unusedOracle.length)];
+            if (unusedOracle.length > 0 && secureRandom() < 0.6) {
+                newVal = unusedOracle[Math.floor(secureRandom() * unusedOracle.length)];
             } 
             
             // B. Mutation "Gap Balancing" (Écart)
@@ -147,13 +149,13 @@ const generateVariations = (
                     .map(e => e[0]);
                 
                 if (gapCandidates.length > 0) {
-                    newVal = gapCandidates[Math.floor(Math.random() * gapCandidates.length)];
+                    newVal = gapCandidates[Math.floor(secureRandom() * gapCandidates.length)];
                 }
             }
 
             // C. Mutation Voisinage (±1, ±2)
             else if (mutationType < 0.7) {
-                const shift = (Math.random() > 0.5 ? 1 : -1) * (Math.random() > 0.8 ? 2 : 1);
+                const shift = (secureRandom() > 0.5 ? 1 : -1) * (secureRandom() > 0.8 ? 2 : 1);
                 newVal = originalVal + shift;
             } 
             

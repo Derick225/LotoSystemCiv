@@ -1,30 +1,37 @@
 import { DrawResult } from '../../types';
 
 export interface ExtractedFeatures {
-    freqMap: Map<number, number>;
-    gapsMap: Map<number, number>;
-    markovMap: Map<number, number>;
-    affinityMap: Map<number, Map<number, number>>;
-    machineTransferMap: Map<number, number>;
-    momentumMap: Map<number, number>;
-    antiConsensusMap: Map<number, number>;
-    equilibriumMap: Map<number, number>;
+    freqMap: Float32Array;
+    gapsMap: Int32Array;
+    markovMap: Float32Array;
+    affinityMap: Float32Array[]; // 2D array of Float32Array
+    machineTransferMap: Float32Array;
+    momentumMap: Float32Array;
+    antiConsensusMap: Float32Array;
+    equilibriumMap: Float32Array;
 }
 
 export const extractFeatures = (history: DrawResult[], sampleSize: number = 100): ExtractedFeatures => {
     const recentHistory = history.slice(0, sampleSize);
     const lastDraw = history[0]?.gagnants || [];
 
-    const freqMap = new Map<number, number>();
-    const gapsMap = new Map<number, number>();
-    const markovMap = new Map<number, number>();
-    const affinityMap = new Map<number, Map<number, number>>();
-    const machineTransferMap = new Map<number, number>();
-    const momentumMap = new Map<number, number>();
-    const antiConsensusMap = new Map<number, number>();
-    const equilibriumMap = new Map<number, number>();
+    const MAX_NUM = 91; // 1 to 90 directly indexed
+    const freqMap = new Float32Array(MAX_NUM);
+    const gapsMap = new Int32Array(MAX_NUM).fill(-1); // -1 signifies not found yet
+    const markovMap = new Float32Array(MAX_NUM);
     
-    const machineFreqMap = new Map<number, number>(); // To normalize machine transfers
+    // Instead of Map of Maps, use Array of Float32Arrays for cache locality
+    const affinityMap: Float32Array[] = Array(MAX_NUM);
+    for (let i = 0; i < MAX_NUM; i++) {
+        affinityMap[i] = new Float32Array(MAX_NUM);
+    }
+    
+    const machineTransferMap = new Float32Array(MAX_NUM);
+    const momentumMap = new Float32Array(MAX_NUM);
+    const antiConsensusMap = new Float32Array(MAX_NUM);
+    const equilibriumMap = new Float32Array(MAX_NUM);
+    
+    const machineFreqMap = new Float32Array(MAX_NUM);
 
     // 1. Frequencies, Gaps, Machine Transfer, Momentum, Anti-Consensus, Equilibrium
     let oddCount = 0;
@@ -34,30 +41,34 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
     for (let i = 0; i < recentHistory.length; i++) {
         const draw = recentHistory[i];
         for (const n of draw.gagnants) {
-            freqMap.set(n, (freqMap.get(n) || 0) + 1);
-            if (!gapsMap.has(n)) gapsMap.set(n, i);
+            if (n >= 1 && n <= 90) {
+                freqMap[n] += 1;
+                if (gapsMap[n] === -1) gapsMap[n] = i;
 
-            // Momentum (last 8 draws)
-            if (i < 8) {
-                momentumMap.set(n, (momentumMap.get(n) || 0) + 1);
-            }
+                // Momentum (last 8 draws)
+                if (i < 8) {
+                    momentumMap[n] += 1;
+                }
 
-            // Anti-Consensus (last 40 draws)
-            if (i < 40) {
-                antiConsensusMap.set(n, (antiConsensusMap.get(n) || 0) + 1);
-            }
+                // Anti-Consensus (last 40 draws)
+                if (i < 40) {
+                    antiConsensusMap[n] += 1;
+                }
 
-            // Equilibrium (last 10 draws)
-            if (i < 10) {
-                if (n % 2 !== 0) oddCount++;
-                if (n <= 45) lowCount++;
-                totalNums10++;
+                // Equilibrium (last 10 draws)
+                if (i < 10) {
+                    if (n % 2 !== 0) oddCount++;
+                    if (n <= 45) lowCount++;
+                    totalNums10++;
+                }
             }
         }
         
         if (draw.machine) {
             draw.machine.forEach(mNum => {
-                machineFreqMap.set(mNum, (machineFreqMap.get(mNum) || 0) + 1);
+                if (mNum >= 1 && mNum <= 90) {
+                    machineFreqMap[mNum] += 1;
+                }
             });
         }
         
@@ -66,22 +77,22 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
              const prevMachine = recentHistory[i+1].machine;
              const currentGagnants = draw.gagnants;
              prevMachine?.forEach(mNum => {
-                 if(currentGagnants.includes(mNum)) {
-                     machineTransferMap.set(mNum, (machineTransferMap.get(mNum) || 0) + 1);
+                 if(mNum >= 1 && mNum <= 90 && currentGagnants.includes(mNum)) {
+                     machineTransferMap[mNum] += 1;
                  }
              });
         }
     }
     
     for (let i = 1; i <= 90; i++) { 
-        if (!gapsMap.has(i)) gapsMap.set(i, sampleSize); 
+        if (gapsMap[i] === -1) gapsMap[i] = sampleSize; 
     }
 
     // Normalize Machine Transfers to Probabilities
-    machineTransferMap.forEach((count, mNum) => {
-        const mFreq = machineFreqMap.get(mNum) || 1;
-        machineTransferMap.set(mNum, count / mFreq);
-    });
+    for (let i = 1; i <= 90; i++) {
+        const mFreq = machineFreqMap[i] || 1;
+        machineTransferMap[i] = machineTransferMap[i] / mFreq;
+    }
 
     // Calculate Equilibrium Scores
     const oddRatio = totalNums10 > 0 ? oddCount / totalNums10 : 0.5;
@@ -98,67 +109,76 @@ export const extractFeatures = (history: DrawResult[], sampleSize: number = 100)
         if (lowRatio < 0.45 && isLow) eqScore += 25;
         else if (lowRatio > 0.55 && !isLow) eqScore += 25;
         
-        equilibriumMap.set(n, eqScore);
+        equilibriumMap[n] = eqScore;
     }
 
     // 2. Markov & Affinity
-    const markovTransitionMap = new Map<number, Map<number, number>>();
+    // We already have Float32Array[] for affinityMap
+    // Let's use Float32Array[] for markov transitions too
+    const markovTransitionMap: Float32Array[] = Array(91);
+    for (let i=0; i<=90; i++) {
+        markovTransitionMap[i] = new Float32Array(91);
+    }
 
     for (let i = 0; i < recentHistory.length - 1; i++) {
         const current = recentHistory[i].gagnants;
         const prev = recentHistory[i+1].gagnants;
         
-        prev.forEach(p => {
-            if (!markovTransitionMap.has(p)) markovTransitionMap.set(p, new Map());
-            const transitions = markovTransitionMap.get(p)!;
-            current.forEach(c => {
-                transitions.set(c, (transitions.get(c) || 0) + 1);
-            });
-        });
+        for (const p of prev) {
+            if (p >= 1 && p <= 90) {
+                 for (const c of current) {
+                     if (c >= 1 && c <= 90) {
+                         markovTransitionMap[p][c] += 1;
+                     }
+                 }
+            }
+        }
 
-        current.forEach(c1 => {
-            if (!affinityMap.has(c1)) affinityMap.set(c1, new Map());
-            const affinities = affinityMap.get(c1)!;
-            current.forEach(c2 => {
-                if (c1 !== c2) affinities.set(c2, (affinities.get(c2) || 0) + 1);
-            });
-        });
+        for (const c1 of current) {
+            if (c1 >= 1 && c1 <= 90) {
+                for (const c2 of current) {
+                    if (c2 >= 1 && c2 <= 90 && c1 !== c2) {
+                        affinityMap[c1][c2] += 1;
+                    }
+                }
+            }
+        }
     }
 
     // Normalize Markov Transitions to Probabilities (0.0 to 1.0)
-    markovTransitionMap.forEach((transitions, p) => {
+    for (let p = 1; p <= 90; p++) {
         let total = 0;
-        transitions.forEach(count => total += count);
+        for (let c = 1; c <= 90; c++) total += markovTransitionMap[p][c];
+        
         if (total > 0) {
-            transitions.forEach((count, c) => {
-                transitions.set(c, count / total);
-            });
+            for (let c = 1; c <= 90; c++) {
+                markovTransitionMap[p][c] = markovTransitionMap[p][c] / total;
+            }
         }
-    });
+    }
 
     // Normalize Affinity to Conditional Probabilities P(c2 | c1)
-    affinityMap.forEach((affinities, c1) => {
-        const freqC1 = freqMap.get(c1) || 1;
-        affinities.forEach((count, c2) => {
-            affinities.set(c2, count / freqC1);
-        });
-    });
+    for (let c1 = 1; c1 <= 90; c1++) {
+        const freqC1 = freqMap[c1] || 1;
+        for (let c2 = 1; c2 <= 90; c2++) {
+            affinityMap[c1][c2] = affinityMap[c1][c2] / freqC1;
+        }
+    }
 
     // Calculate Markov probabilities for the next draw
     lastDraw.forEach(lastNum => {
-        const transitions = markovTransitionMap.get(lastNum);
-        if (transitions) {
-            transitions.forEach((prob, nextNum) => {
-                markovMap.set(nextNum, (markovMap.get(nextNum) || 0) + prob);
-            });
+        if (lastNum >= 1 && lastNum <= 90) {
+            for (let nextNum = 1; nextNum <= 90; nextNum++) {
+                markovMap[nextNum] += markovTransitionMap[lastNum][nextNum];
+            }
         }
     });
 
     // Average Markov probabilities across the last draw's numbers
     if (lastDraw.length > 0) {
-        markovMap.forEach((val, key) => {
-            markovMap.set(key, val / lastDraw.length);
-        });
+        for (let nextNum = 1; nextNum <= 90; nextNum++) {
+            markovMap[nextNum] = markovMap[nextNum] / lastDraw.length;
+        }
     }
 
     return {

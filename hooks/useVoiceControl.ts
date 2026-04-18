@@ -11,7 +11,7 @@ export interface VoiceCommandState {
 }
 
 export const useVoiceControl = (
-    navigate: (view: 'home' | 'backtest' | 'admin' | 'ensemble' | 'predictive') => void,
+    navigate: (view: 'home' | 'backtest' | 'admin' | 'super' | 'predictive') => void,
     toggleWallet: (show: boolean) => void,
     triggerGeneration?: () => void
 ) => {

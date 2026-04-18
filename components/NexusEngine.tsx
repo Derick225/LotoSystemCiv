@@ -13,14 +13,12 @@ export const NexusEngine: React.FC = () => {
     const drawName = useNexusStore(s => s.drawName);
     const globalWeights = useNexusStore(s => s.globalWeights);
     const setGlobalWeights = useNexusStore(s => s.setGlobalWeights);
-    const toggleGodMode = useNexusStore(s => s.toggleGodMode);
     const setHistoryData = useNexusStore(s => s.setHistoryData);
     const setAnalyticsData = useNexusStore(s => s.setAnalyticsData);
     const setLoading = useNexusStore(s => s.setLoading);
     const setLastPrediction = useNexusStore(s => s.setLastPrediction);
     const setSmartInsights = useNexusStore(s => s.setSmartInsights);
     const setCalibration = useNexusStore(s => s.setCalibration);
-    const isGodMode = useNexusStore(s => s.isGodMode);
 
     // --- DATA FETCHING VIA REACT QUERY ---
     const { 
@@ -47,16 +45,10 @@ export const NexusEngine: React.FC = () => {
         const initConfig = async () => {
             const weights = await getAlgoWeights(drawName);
             if(mounted) setGlobalWeights(weights);
-            
-            // Check for persisted God Mode
-            const god = localStorage.getItem('nexus_god_mode');
-            if (god === 'true' && mounted && !isGodMode) {
-                toggleGodMode();
-            }
         };
         initConfig();
         return () => { mounted = false; };
-    }, [drawName, setGlobalWeights, toggleGodMode, isGodMode]);
+    }, [drawName, setGlobalWeights]);
 
     // 2. Calcul des Stats basiques (Rapide, synchrone)
     useEffect(() => {

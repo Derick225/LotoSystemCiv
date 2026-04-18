@@ -1,5 +1,7 @@
 import { ScoredNumber } from './scoringEngine';
 import { PREDICTION_CONSTANTS } from '../../shared/prediction.types';
+import { secureRandom } from '../../utils/secureRandom';
+
 
 export const isValidCombination = (combo: number[]): boolean => {
     if (combo.length !== 5) return false;
@@ -28,7 +30,7 @@ export const isValidCombination = (combo: number[]): boolean => {
 
 export const generateCombination = (
     sortedScores: ScoredNumber[],
-    affinityMap: Map<number, Map<number, number>>,
+    affinityMap: Float32Array[],
     outsiderCount: number = 2
 ): number[] => {
     let selection: number[] = [];
@@ -50,10 +52,7 @@ export const generateCombination = (
                 .map(s => {
                     let totalAffinity = 0;
                     currentSelection.forEach(selectedNum => {
-                        const affinities = affinityMap.get(selectedNum);
-                        if (affinities) {
-                            totalAffinity += (affinities.get(s.num) || 0); // This is a probability 0.0-1.0
-                        }
+                         totalAffinity += (affinityMap[selectedNum][s.num] || 0); // This is a probability 0.0-1.0
                     });
                     // Multiply by 15 to give it a meaningful impact against base scores (0-100)
                     return { ...s, tempScore: s.score + (totalAffinity * 15) };
@@ -64,7 +63,7 @@ export const generateCombination = (
 
             if (isOutsiderSlot) {
                 const pool = adjustedSorted.slice(10, 35);
-                const picked = pool[Math.floor(Math.random() * pool.length)] || adjustedSorted[0];
+                const picked = pool[Math.floor(secureRandom() * pool.length)] || adjustedSorted[0];
                 currentSelection.push(picked.num);
             } else {
                 currentSelection.push(adjustedSorted[0].num);
@@ -85,7 +84,7 @@ export const generateCombination = (
         const topPicks = sortedScores.slice(0, topPickCount).map(s => s.num);
         const outsiderPoolStart = Math.max(topPickCount + 2, 10);
         const outsiderPool = sortedScores.slice(outsiderPoolStart, outsiderPoolStart + 25);
-        const outsiders = outsiderPool.sort(() => 0.5 - Math.random()).slice(0, outsiderCount).map(s => s.num);
+        const outsiders = outsiderPool.sort(() => 0.5 - secureRandom()).slice(0, outsiderCount).map(s => s.num);
         selection = [...topPicks, ...outsiders].sort((a,b) => a-b);
     }
 

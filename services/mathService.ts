@@ -1,6 +1,8 @@
 
 import { workerService } from './workerService';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
+import { secureRandom } from '../utils/secureRandom';
+
 
 // --- HELPERS SIMPLES ---
 
@@ -93,7 +95,7 @@ const computeEigenDecomposition = (matrix: number[][]): { values: number[], vect
     const eigenVectors: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
     
     for (let i = 0; i < n; i++) {
-        let v = Array(n).fill(0).map(() => [Math.random() - 0.5]);
+        let v = Array(n).fill(0).map(() => [secureRandom() - 0.5]);
         let norm = vecNorm(v);
         if (norm === 0) {
             v[0][0] = 1;
@@ -326,7 +328,7 @@ export const runMonteCarloSimulation = (weights: Record<number, number>, iterati
     if (totalWeight === 0) return {};
 
     for (let i = 0; i < iterations; i++) {
-        const r = Math.random() * totalWeight;
+        const r = secureRandom() * totalWeight;
         // Recherche dichotomique pour performance O(log N)
         let lo = 0, hi = items.length - 1;
         while (lo < hi) {

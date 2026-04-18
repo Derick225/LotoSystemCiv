@@ -1,5 +1,7 @@
 
+import { secureRandom } from '../utils/secureRandom';
 import {
+
   PlatinumResult,
   DrawResult,
   ScoreBreakdown,
@@ -90,7 +92,7 @@ const sampleFromVector = (
         let totalWeight = 0;
         pool.forEach(c => totalWeight += c.score);
         
-        let r = Math.random() * totalWeight;
+        let r = secureRandom() * totalWeight;
         let idx = 0;
         
         for(let i=0; i<pool.length; i++) {

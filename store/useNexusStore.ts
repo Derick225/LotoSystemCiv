@@ -10,7 +10,6 @@ interface NexusState {
   currentDrawName: string;
   inspectingNumber: number | null;
   hoveredNumber: number | null;
-  isGodMode: boolean;
   
   // Settings & Config
   riskProfile: RiskProfile;
@@ -43,7 +42,6 @@ interface NexusState {
   setDrawName: (name: string) => void;
   setInspectingNumber: (num: number | null) => void;
   setHoveredNumber: (num: number | null) => void;
-  toggleGodMode: () => void;
   setRiskProfile: (profile: RiskProfile) => void;
   setGlobalWeights: (weights: AlgoWeights) => void;
   setVocalContext: (ctx: OracleVocalContext | null) => void;
@@ -69,7 +67,6 @@ export const useNexusStore = create<NexusState>()(
       currentDrawName: 'Reveil',
       inspectingNumber: null,
       hoveredNumber: null,
-      isGodMode: false,
       
       riskProfile: 'BALANCED',
       globalWeights: {} as AlgoWeights,
@@ -104,7 +101,6 @@ export const useNexusStore = create<NexusState>()(
       setDrawName: (name) => set({ drawName: name, currentDrawName: name }),
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
-      toggleGodMode: () => set((state) => ({ isGodMode: !state.isGodMode })),
       setRiskProfile: (profile) => set({ riskProfile: profile }),
       setGlobalWeights: (weights) => set({ globalWeights: weights }),
       setVocalContext: (ctx) => set({ vocalContext: ctx }),
@@ -155,7 +151,6 @@ export const useNexusStore = create<NexusState>()(
       name: 'nexus-storage',
       version: 2,
       partialize: (state) => ({ 
-        isGodMode: state.isGodMode, 
         riskProfile: state.riskProfile,
         globalWeights: state.globalWeights,
         drawName: state.drawName,

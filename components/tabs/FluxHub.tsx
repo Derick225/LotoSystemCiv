@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { DrawResult } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { formatDate, syncDrawExternal } from '../../services/lotteryService';
@@ -11,13 +11,11 @@ import { ListSkeleton } from '../skeletons/ListSkeleton';
 import { SimilarityFinder } from '../SimilarityFinder';
 import { DrawExamine } from '../DrawExamine';
 import { HeatmapCalendar } from '../HeatmapCalendar';
-import { FixedSizeList as List } from 'react-window';
-import AutoSizer from 'react-virtualized-auto-sizer';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { audioEngine } from '../../utils/audioEngine';
 
-// Row Component for Virtualization
-const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProperties, data: { items: DrawResult[], onSimilarity: (d: DrawResult) => void, onExamine: (d: DrawResult) => void } }) => {
-    const draw = data.items[index];
+// Row Component extracted logic
+const renderDrawRow = (draw: DrawResult, onSimilarity: (d: DrawResult) => void, onExamine: (d: DrawResult) => void) => {
     if (!draw) return null;
 
     // Détection rapide si Machine a des numéros
@@ -28,10 +26,10 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
     const sumColor = sum > 250 ? 'text-rose-400' : sum < 180 ? 'text-blue-400' : 'text-slate-400';
 
     return (
-        <div style={{ ...style, paddingBottom: '12px' }} className="px-1">
+        <div className="px-1 h-full pb-3">
             <div 
                 className="bg-white dark:bg-slate-800/80 p-4 rounded-[2rem] border border-slate-100 dark:border-slate-700 shadow-sm hover:border-indigo-400 dark:hover:border-indigo-500 transition-all group relative overflow-hidden h-full flex flex-col justify-center cursor-default"
-                onClick={() => { audioEngine.play('click'); data.onExamine(draw); }}
+                onClick={() => { audioEngine.play('click'); onExamine(draw); }}
             >
                 <div className="flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 w-full">
                     {/* Meta Info */}
@@ -52,7 +50,7 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
                         </div>
                         <div className="md:hidden flex gap-2">
                              {/* Mobile Actions */}
-                             <button onClick={(e) => { e.stopPropagation(); data.onSimilarity(draw); }} className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 rounded-lg"><GitCompare size={14}/></button>
+                             <button onClick={(e) => { e.stopPropagation(); onSimilarity(draw); }} className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 rounded-lg"><GitCompare size={14}/></button>
                         </div>
                     </div>
                     
@@ -82,10 +80,10 @@ const DrawRow = ({ index, style, data }: { index: number, style: React.CSSProper
                             <div className={`text-xs font-bold ${sumColor}`}>{sum}</div>
                         </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={(e) => { e.stopPropagation(); data.onSimilarity(draw); }} className="p-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:scale-110 transition" title="Trouver Similitudes">
+                            <button onClick={(e) => { e.stopPropagation(); onSimilarity(draw); }} className="p-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:scale-110 transition" title="Trouver Similitudes">
                                 <GitCompare size={16} />
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); data.onExamine(draw); }} className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:scale-110 transition" title="Audit Complet">
+                            <button onClick={(e) => { e.stopPropagation(); onExamine(draw); }} className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl hover:scale-110 transition" title="Audit Complet">
                                 <SearchCode size={16} />
                             </button>
                         </div>
@@ -131,6 +129,15 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   }, [history, searchTerm]);
 
   if (loading && history.length === 0) return <ListSkeleton />;
+
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const rowVirtualizer = useVirtualizer({
+      count: filteredHistory.length,
+      getScrollElement: () => parentRef.current,
+      estimateSize: () => window.innerWidth < 768 ? 200 : 130, // Responsive height estimation
+      overscan: 5,
+  });
 
   return (
     <div className="space-y-6 animate-fade-in pb-4 w-full max-w-7xl mx-auto px-1 md:px-0 h-[calc(100vh-200px)] flex flex-col">
@@ -196,25 +203,33 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
 
         {/* VIRTUALIZED LIST VIEW */}
         {viewMode === 'list' && (
-            <div className="flex-1 w-full min-h-0 bg-transparent">
-                <AutoSizer>
-                    {({ height, width }: { height: number, width: number }) => (
-                        <List
-                            height={height}
-                            itemCount={filteredHistory.length}
-                            // Hauteur conditionnelle : Plus grande sur mobile pour afficher les éléments empilés
-                            itemSize={width < 768 ? 200 : 130}
-                            width={width}
-                            itemData={{ 
-                                items: filteredHistory, 
-                                onSimilarity: setSimilarityTarget, 
-                                onExamine: setExaminingDraw 
-                            }}
-                        >
-                            {DrawRow}
-                        </List>
-                    )}
-                </AutoSizer>
+            <div ref={parentRef} className="flex-1 w-full overflow-y-auto overflow-x-hidden min-h-0 bg-transparent scrollbar-hide py-2">
+                <div
+                  style={{
+                    height: `${rowVirtualizer.getTotalSize()}px`,
+                    width: '100%',
+                    position: 'relative',
+                  }}
+                >
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const draw = filteredHistory[virtualRow.index];
+                        return (
+                            <div
+                                key={virtualRow.key}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    height: `${virtualRow.size}px`,
+                                    transform: `translateY(${virtualRow.start}px)`,
+                                }}
+                            >
+                                {renderDrawRow(draw, setSimilarityTarget, setExaminingDraw)}
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
         )}
 

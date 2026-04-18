@@ -1,6 +1,8 @@
 
 import { DrawResult } from '../types';
 import { calculateShannonEntropy, calculateBenfordCompliance } from './mathService';
+import { secureRandom } from '../utils/secureRandom';
+
 
 export class InvalidInputError extends Error {
     constructor(message: string) {
@@ -115,7 +117,7 @@ const detectClusteredFraud = (numbers: Uint8Array): boolean => {
     if (n < 4) return false;
 
     // K-Means++ Initialization
-    let c1 = numbers[Math.floor(Math.random() * n)];
+    let c1 = numbers[Math.floor(secureRandom() * n)];
     let maxDist = -1;
     let c2 = c1;
     

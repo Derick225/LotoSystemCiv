@@ -11,7 +11,7 @@ import { ForensicResultAudit } from '../ForensicResultAudit';
 import { LearningService, LearningStatus } from '../../services/learningService';
 import { Microscope, Calendar, ChevronRight, Activity, Target, SearchX, Crown, ScanBarcode, Radar as RadarIcon, Network, RefreshCw, Cloud, Trash2, BrainCircuit, History, Dna, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import { ForensicReport, PlatinumAudit, AlgoWeights, PredictionHistoryItem } from '../../types';
-import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, BarChart, Bar, Cell, LineChart, Line } from 'recharts';
 import { useToast } from '../ui/Toast';
 
 import { audioEngine } from '../../utils/audioEngine';
@@ -334,6 +334,60 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
         }).reverse();
     }, [reports]);
 
+    const dnaEvolutionData = useMemo(() => {
+        if (!currentWeights || reports.length === 0) return [];
+        
+        let simulatedWeights: Record<string, number> = { ...currentWeights };
+        const timeline = [];
+        
+        // On remonte le temps depuis aujourd'hui
+        timeline.push({
+            date: 'Actuel',
+            structural: Math.round((simulatedWeights['structural'] || 0) * 100),
+            markov: Math.round((simulatedWeights['markov'] || 0) * 100),
+            machine: Math.round((simulatedWeights['machine_transfer'] || 0) * 100),
+            trend: Math.round((simulatedWeights['trend'] || 0) * 100)
+        });
+
+        // Simuler les poids précédents en dé-appliquant ("undrift") les impacts Forensic
+        for (let i = 0; i < Math.min(reports.length, 10); i++) {
+            const report = reports[i];
+            
+            if (report.counterfactuals && report.counterfactuals.length > 0) {
+                // Reverse engineering the weight drift
+                report.counterfactuals.forEach(cf => {
+                    const algo = cf.algo;
+                    if (simulatedWeights[algo] !== undefined) {
+                        const shiftRate = 0.15 * (1 + (cf.rankImprovement || 0) / 10);
+                        // Reverse the mathematical operator
+                        if (cf.action === 'BOOST' || cf.action === 'SYNERGY' || cf.action === 'ISOLATE') {
+                            simulatedWeights[algo] = Math.max(0, simulatedWeights[algo] - shiftRate);
+                        } else if (cf.action === 'REDUCE') {
+                            simulatedWeights[algo] = simulatedWeights[algo] + shiftRate;
+                        }
+                    }
+                });
+                // Renormalize for the past state
+                const sum = Object.values(simulatedWeights).reduce((a, b) => a + b, 0);
+                if (sum > 0) {
+                    Object.keys(simulatedWeights).forEach(k => {
+                        simulatedWeights[k] /= sum;
+                    });
+                }
+            }
+            
+            timeline.push({
+                date: report.date.slice(0, 5),
+                structural: Math.round((simulatedWeights['structural'] || 0) * 100),
+                markov: Math.round((simulatedWeights['markov'] || 0) * 100),
+                machine: Math.round((simulatedWeights['machine_transfer'] || 0) * 100),
+                trend: Math.round((simulatedWeights['trend'] || 0) * 100)
+            });
+        }
+
+        return timeline.reverse(); // De gauche (passé) à droite (présent)
+    }, [currentWeights, reports]);
+
     if (loading && reports.length === 0) return (
         <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse">
             <Microscope className="text-indigo-500 animate-bounce" size={48} />
@@ -517,6 +571,34 @@ export const ForensicHub: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 )}
                             </div>
                         </div>
+
+                        {dnaEvolutionData.length > 1 && (
+                            <div className="mt-8 bg-black/40 rounded-[2rem] p-6 border border-white/5">
+                                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                                    <TrendingUp size={14} /> Traçabilité de l'Évolution de l'ADN (Drift Tracker)
+                                </h4>
+                                <div className="h-64 w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={dnaEvolutionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.3} />
+                                            <XAxis dataKey="date" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                                            <YAxis tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} domain={[0, 100]} />
+                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '11px', color: '#fff' }} />
+                                            <Line type="monotone" dataKey="structural" stroke="#f43f5e" strokeWidth={2} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} name="Structural (%)" isAnimationActive={true} animationDuration={2000} animationEasing="ease-out" />
+                                            <Line type="monotone" dataKey="markov" stroke="#6366f1" strokeWidth={2} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} name="Markov (%)" isAnimationActive={true} animationDuration={2500} animationEasing="ease-out" />
+                                            <Line type="monotone" dataKey="machine" stroke="#10b981" strokeWidth={2} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} name="Machine (%)" isAnimationActive={true} animationDuration={3000} animationEasing="ease-out" />
+                                            <Line type="monotone" dataKey="trend" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} name="Trend (%)" isAnimationActive={true} animationDuration={3500} animationEasing="ease-out" />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="flex flex-wrap justify-center gap-4 mt-6 text-[9px] font-bold text-slate-400 uppercase">
+                                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Structural</span>
+                                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> Markov</span>
+                                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Machine</span>
+                                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-amber-500"></div> Trend</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

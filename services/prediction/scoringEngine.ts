@@ -17,17 +17,18 @@ export const calculateScores = (
     const N = 90;
     const { freqMap, gapsMap, markovMap, machineTransferMap, momentumMap, antiConsensusMap, equilibriumMap } = features;
     
-    const maxFreq = Math.max(...freqMap.values()) || 1;
-    const maxMarkov = Math.max(...markovMap.values()) || 1;
-    const maxMachineTransfer = Math.max(...machineTransferMap.values()) || 1;
+    // Arrays instead of Maps -> use standard array operations to find max
+    const maxFreq = Math.max(...Array.from(freqMap).slice(1)) || 1;
+    const maxMarkov = Math.max(...Array.from(markovMap).slice(1)) || 1;
+    const maxMachineTransfer = Math.max(...Array.from(machineTransferMap).slice(1)) || 1;
 
     const masterScores: ScoredNumber[] = Array.from({ length: N }, (_, i) => {
         const num = i + 1;
         const breakdown: ScoreBreakdown = {};
         
-        breakdown[AlgoKey.FREQUENCY] = ((freqMap.get(num) || 0) / maxFreq) * 100;
+        breakdown[AlgoKey.FREQUENCY] = (freqMap[num] / maxFreq) * 100;
 
-        const currentGap = gapsMap.get(num) || 0;
+        const currentGap = gapsMap[num] || 0;
         const theoreticalGap = 17; 
         let gapScore = 0;
         if (currentGap < theoreticalGap) gapScore = (currentGap / theoreticalGap) * 40; 
@@ -35,14 +36,14 @@ export const calculateScores = (
         else gapScore = 90; 
         breakdown[AlgoKey.GAPS] = gapScore;
 
-        breakdown[AlgoKey.MARKOV] = ((markovMap.get(num) || 0) / maxMarkov) * 100;
-        breakdown[AlgoKey.MACHINE] = ((machineTransferMap.get(num) || 0) / maxMachineTransfer) * 100;
+        breakdown[AlgoKey.MARKOV] = (markovMap[num] / maxMarkov) * 100;
+        breakdown[AlgoKey.MACHINE] = (machineTransferMap[num] / maxMachineTransfer) * 100;
         
         // Momentum
-        breakdown[AlgoKey.MOMENTUM] = Math.min(100, (momentumMap.get(num) || 0) * 30);
+        breakdown[AlgoKey.MOMENTUM] = Math.min(100, momentumMap[num] * 30);
 
         // Anti-Consensus
-        const acFreq = antiConsensusMap.get(num) || 0;
+        const acFreq = antiConsensusMap[num] || 0;
         let acScore = 0;
         if (acFreq === 0) acScore = 80;
         else if (acFreq === 1) acScore = 100;
@@ -51,15 +52,15 @@ export const calculateScores = (
         breakdown[AlgoKey.ANTI_CONSENSUS] = acScore;
 
         // Equilibrium
-        breakdown[AlgoKey.EQUILIBRIUM] = equilibriumMap.get(num) || 50;
+        breakdown[AlgoKey.EQUILIBRIUM] = equilibriumMap[num] || 50;
         
         // Calculate Affinity Score based on Markov probabilities
         let affinityScore = 0;
-        features.affinityMap.forEach((affinities, c1) => {
-            const markovProb = features.markovMap.get(c1) || 0;
-            const affinityProb = affinities.get(num) || 0;
-            affinityScore += markovProb * affinityProb;
-        });
+        for (let c1 = 1; c1 <= 90; c1++) {
+             const markovProb = markovMap[c1] || 0;
+             const affinityProb = features.affinityMap[c1][num] || 0;
+             affinityScore += markovProb * affinityProb;
+        }
         // Normalize roughly (max possible is around maxMarkov, but we'll scale it)
         breakdown[AlgoKey.AFFINITY] = (affinityScore / maxMarkov) * 100;
 

@@ -93,9 +93,9 @@ export const applyMetaLearning = (weights: AlgoWeights, history: DrawResult[]): 
                         const w = dynamicWeights[algo];
                         if (w !== undefined) {
                             if (cf.action === 'BOOST' || cf.action === 'ISOLATE') {
-                                dynamicWeights[algo] = w * (1 + learningRate * (cf.rankImprovement / 10)); 
+                                dynamicWeights[algo] = w * (1 + learningRate * ((cf.rankImprovement || 0) / 10)); 
                             } else if (cf.action === 'REDUCE') {
-                                dynamicWeights[algo] = w * (1 - learningRate * (cf.rankImprovement / 10));
+                                dynamicWeights[algo] = w * (1 - learningRate * ((cf.rankImprovement || 0) / 10));
                             }
                         }
                     });

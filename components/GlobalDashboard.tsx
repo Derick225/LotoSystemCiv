@@ -249,7 +249,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
     const history = useNexusStore(state => state.history);
     const lastPrediction = useNexusStore(state => state.lastPrediction);
     const globalWeights = useNexusStore(state => state.globalWeights);
-    const isGodMode = useNexusStore(state => state.isGodMode);
     
     const queryClient = useQueryClient();
     
@@ -433,12 +432,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = ({ onSelectDraw }
         <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
             
             {/* Core Status Monitoring Bar */}
-            <div className={`p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border flex flex-col md:flex-row justify-between items-center gap-6 md:gap-10 mx-auto w-full relative overflow-hidden transition-all duration-1000 ${isGodMode ? 'bg-black border-yellow-500/50 shadow-[0_0_50px_rgba(234,179,8,0.2)]' : 'bg-slate-900/50 backdrop-blur-xl border-white/5'}`}>
-                {isGodMode && (
-                    <div className="absolute top-4 right-4 px-3 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded-full animate-pulse z-10">
-                        <span className="text-[10px] font-black text-yellow-400 tracking-[0.3em]">GOD MODE</span>
-                    </div>
-                )}
+            <div className={`p-6 md:p-8 rounded-[2.5rem] md:rounded-[3.5rem] border flex flex-col md:flex-row justify-between items-center gap-6 md:gap-10 mx-auto w-full relative overflow-hidden transition-all duration-1000 bg-slate-900/50 backdrop-blur-xl border-white/5`}>
                 {/* Background pulse effect */}
                 <div className="absolute left-0 bottom-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-600/20 to-transparent"></div>
 

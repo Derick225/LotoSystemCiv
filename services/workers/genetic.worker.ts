@@ -1,3 +1,5 @@
+import { secureRandom } from '../../utils/secureRandom';
+
 
 export {};
 
@@ -31,8 +33,8 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
 
 // Box-Muller transform for Gaussian distribution
 const randomGaussian = (mean: number = 0, stdev: number = 1): number => {
-    const u = 1 - Math.random(); // Converting [0,1) to (0,1]
-    const v = Math.random();
+    const u = 1 - secureRandom(); // Converting [0,1) to (0,1]
+    const v = secureRandom();
     const z = Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
     return z * stdev + mean;
 };
@@ -67,7 +69,7 @@ const uniformCrossover = (p1: AlgoWeights, p2: AlgoWeights): AlgoWeights => {
     const keys = Array.from(new Set([...Object.keys(p1), ...Object.keys(p2)]));
     
     keys.forEach(k => {
-        child[k] = Math.random() > 0.5 ? (p1[k] || 0) : (p2[k] || 0);
+        child[k] = secureRandom() > 0.5 ? (p1[k] || 0) : (p2[k] || 0);
     });
     return normalizeWeights(child);
 };
@@ -78,7 +80,7 @@ const mutateGaussian = (w: AlgoWeights, sigma: number, rate: number): AlgoWeight
     const keys = Object.keys(mutant);
     
     keys.forEach(k => {
-        if (Math.random() < rate) {
+        if (secureRandom() < rate) {
             // Mutation : valeur actuelle + bruit gaussien centré sur 0
             const noise = randomGaussian(0, sigma);
             const currentVal = mutant[k] || 0;
@@ -391,9 +393,9 @@ ctx.onmessage = (e) => {
                 // Tournoi Selection
                 const tournamentSize = 3;
                 const selectParent = () => {
-                    let best = population[Math.floor(Math.random() * POPSIZE)];
+                    let best = population[Math.floor(secureRandom() * POPSIZE)];
                     for(let k=1; k<tournamentSize; k++) {
-                        const contender = population[Math.floor(Math.random() * POPSIZE)];
+                        const contender = population[Math.floor(secureRandom() * POPSIZE)];
                         if (contender.fitness > best.fitness) best = contender;
                     }
                     return best;

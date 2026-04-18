@@ -1,5 +1,7 @@
 
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
+import { secureRandom } from '../utils/secureRandom';
+
 
 export const FEATURES_LABELS = [
     'Critical Gap', 'Frequency', 'Shadow', 
@@ -153,7 +155,7 @@ export const runDecisionForest = async (
         // On choisit aléatoirement des numéros perdants pour éviter le biais
         let negativesCount = 0;
         while (negativesCount < winners.length) {
-            const rnd = Math.floor(Math.random() * 90) + 1;
+            const rnd = Math.floor(secureRandom() * 90) + 1;
             if (!winnerSet.has(rnd)) {
                 dataset.push({ 
                     features: extractNumericFeatures(rnd, context, consensusMap, activeIndices), 
