@@ -53,7 +53,13 @@ export const generateMasterPredictionCore = async (
 
             if (!error && data) {
                 console.log("Succès Edge Function", data);
-                return data as Prediction;
+                const pred = data as Prediction;
+                // Protection contre le bug typique Edge où la liste renvoyée est 1, 2, 3, 4, 5 par défaut d'ex-aequo
+                if (pred.suggestedNumbers && pred.suggestedNumbers.join(',') === '1,2,3,4,5' && riskProfile === 'PRUDENT') {
+                    console.warn("Bug Edge Function (1,2,3,4,5 successifs) détecté. Activation du fallback local pour une vraie prédiction.");
+                } else {
+                    return pred;
+                }
             } else {
                 console.warn("Échec Edge Function (Non déployée ou offline). Fallback sur le moteur local.");
             }

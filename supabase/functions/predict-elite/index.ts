@@ -75,7 +75,7 @@ serve(async (req) => {
     const masterScores: any[] = [];
     
     // Tuning des paramètres selon Profil
-    const noiseMultiplier = riskProfile === 'CHAOS' ? 1.5 : riskProfile === 'PRUDENT' ? 0 : 0.5;
+    const noiseMultiplier = riskProfile === 'CHAOS' ? 1.5 : riskProfile === 'PRUDENT' ? 0.05 : 0.5;
 
     for (let num = 1; num <= maxNum; num++) {
         const breakdown: Record<string, number> = {};
@@ -99,7 +99,8 @@ serve(async (req) => {
         breakdown['markov'] = Math.min(100, markovScore * 5); // Normalisation arbitraire
 
         // --- ALGO 3: GAP VELOCITY (Momentum) ---
-        const avgGap = (totalDraws / (freq.get(num) || 1));
+        const fGet = freq.get(num);
+        const avgGap = fGet && fGet > 0 ? (totalDraws / fGet) : totalDraws;
         const gapVelocity = currentGap / avgGap; 
         breakdown['gap_velocity'] = Math.min(100, gapVelocity * 20);
 
@@ -116,8 +117,9 @@ serve(async (req) => {
         finalScore = (breakdown['poisson'] * wPoisson) + 
                      (breakdown['markov'] * wMarkov) + 
                      (breakdown['gap_velocity'] * wGap) + 
-                     (breakdown['fractal'] * wFractal);
-
+                     (breakdown['fractal'] * wFractal) + 
+                     breakdown['fractal']; // Addition to ensure variance
+        
         // Boost spatial (Symbiose)
         if (symbioticContext?.spatialHotZones?.includes(num)) {
             finalScore *= 1.15; // 15% boost
@@ -126,8 +128,8 @@ serve(async (req) => {
         masterScores.push({ num, score: finalScore, breakdown });
     }
 
-    // 3. Tri et Combinaison
-    const sortedScores = masterScores.sort((a, b) => b.score - a.score);
+    // 3. Tri et Combinaison (avec anti-ex-aequo)
+    const sortedScores = masterScores.sort((a, b) => b.score - a.score || Math.random() - 0.5);
     const outsiderCount = riskProfile === 'CHAOS' ? 4 : riskProfile === 'AUDACIOUS' ? 3 : riskProfile === 'PRUDENT' ? 0 : 2;
     
     // Sélection (Favoris + Outsiders en fonction du profil)
