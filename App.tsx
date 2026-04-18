@@ -23,6 +23,7 @@ import { supabase } from './services/supabaseClient';
 import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw, SubscriptionState } from './types';
+import { Analytics } from '@vercel/analytics/react';
 
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -148,7 +149,7 @@ const AppContent: React.FC = () => {
           // Si le statut passe de PENDING à ANALYZED, on notifie l'utilisateur
           if (oldRecord.status === 'PENDING' && newRecord.status === 'ANALYZED') {
             audioEngine.play('success');
-            showToast(`🧬 Autopsie terminée pour le tirage ${newRecord.draw_name}. Nouvelles données disponibles.`, 'success');
+            showToast(`���� Autopsie terminée pour le tirage ${newRecord.draw_name}. Nouvelles données disponibles.`, 'success');
             // Rafraîchir les données globales si nécessaire
             refreshData(newRecord.draw_name, true);
           }
@@ -294,6 +295,7 @@ export default function App() {
           </NexusProvider>
         </ToastProvider>
       </GlobalErrorBoundary>
+      <Analytics />
     </QueryClientProvider>
   );
 }
