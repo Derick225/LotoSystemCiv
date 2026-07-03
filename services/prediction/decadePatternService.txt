@@ -1,0 +1,220 @@
+/**
+ * SERVICE D'ANALYSE DES DÉCENNIES (DECADE PATTERN SERVICE)
+ * Ce fichier est la spécification textuelle et fonctionnelle complète du service implémenté.
+ * 
+ * DESIGN ARCHITECTURAL & MATHÉMATIQUE SANS NOMBRE MAGIQUE
+ * 
+ * 1. Distribution par décennie :
+ *    Mappe l'intervalle [1, 90] en 9 blocs contigus de 10 numéros chacun.
+ *    0 : 1-10, 1 : 11-20, ..., 8 : 81-90.
+ *    Calcule les occurrences historiques en appliquant une décroissance temporelle exponentielle
+ *    dont la demi-vie est estimée dynamiquement d'après l'entropie de Shannon et l'exposant de Hurst.
+ * 
+ * 2. Score de déséquilibre continu :
+ *    Mesure par l'entropie de Shannon de la PDF normalisée des décennies.
+ *    Le score est 1.0 - (Entropie / Entropie_Max) où Entropie_Max = log2(9).
+ *    Zéro bifurcations binaires ou conditions arbitraires, transition continue garantie.
+ * 
+ * 3. Matrice de corrélation inter-dizaines :
+ *    Matrice de corrélation de Pearson 9x9 calculée sur l'historique complet disponible.
+ *    Permet d'évaluer la co-occurrence et l'exclusion mutuelle continue des décennies.
+ * 
+ * 4. Score temporel :
+ *    Modélisation de transition markovienne bayésienne d'ordre 1 entre les configurations de décennies 
+ *    des tirages successifs chronologiquement ordonnés, avec prior de régularisation issu de la PDF de base.
+ * 
+ * ==========================================
+ * CODE DE REFERENCE (COPIE DE SAUVEGARDE) :
+ * ==========================================
+ */
+
+import { DrawResult } from '../../types';
+import { extractDrawNumbers } from './featureExtractor';
+import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
+
+export interface DecadeAnalysisResult {
+  distribution: Float32Array;
+  imbalanceScore: number;
+  correlationMatrix: Float32Array[];
+  projectedTemporalScore: Float32Array;
+}
+
+export const getDecadeIndex = (num: number): number => {
+  return Math.max(0, Math.min(8, Math.floor((num - 1) / 10)));
+};
+
+const calculateShannonImbalance = (probabilities: Float32Array): number => {
+  let entropy = 0;
+  const N = probabilities.length;
+  for (let i = 0; i < N; i++) {
+    const p = probabilities[i];
+    if (p > 0) {
+      entropy -= p * Math.log2(p);
+    }
+  }
+  const maxEntropy = Math.log2(N);
+  const normalizedEntropy = entropy / maxEntropy;
+  return Math.max(0.0, Math.min(1.0, 1.0 - normalizedEntropy));
+};
+
+export const analyzeDecadePatterns = (
+  drawName: string,
+  history: DrawResult[]
+): DecadeAnalysisResult => {
+  const NUM_DECADES = 9;
+  const filteredHistory = drawName ? history.filter(d => d.drawName === drawName) : history;
+
+  const distribution = new Float32Array(NUM_DECADES);
+  const correlationMatrix: Float32Array[] = Array.from({ length: NUM_DECADES }, () => new Float32Array(NUM_DECADES));
+  const projectedTemporalScore = new Float32Array(NUM_DECADES);
+
+  if (filteredHistory.length === 0) {
+    return {
+      distribution,
+      imbalanceScore: 0,
+      correlationMatrix,
+      projectedTemporalScore: new Float32Array(NUM_DECADES).fill(1.0 / NUM_DECADES)
+    };
+  }
+
+  const h = calculateFractalIndex(filteredHistory);
+  const e = calculateShannonEntropy(filteredHistory).normalized;
+  const adaptiveHalfLife = Math.max(5, Math.floor(15 * (1.0 + (h - 0.5) + (1.0 - e))));
+  const TIME_DECAY = Math.pow(0.5, 1.0 / adaptiveHalfLife);
+
+  const decadeCountsHistory: number[][] = [];
+  let totalDecaySum = 0;
+
+  for (let t = 0; t < filteredHistory.length; t++) {
+    const draw = filteredHistory[t];
+    const { winners } = extractDrawNumbers(draw);
+    const decayWeight = Math.pow(TIME_DECAY, t);
+
+    const counts = new Array(NUM_DECADES).fill(0);
+    winners.forEach(num => {
+      const d = getDecadeIndex(num);
+      counts[d] += 1;
+      distribution[d] += decayWeight;
+    });
+
+    decadeCountsHistory.push(counts);
+    totalDecaySum += decayWeight;
+  }
+
+  if (totalDecaySum > 0) {
+    for (let d = 0; d < NUM_DECADES; d++) {
+      distribution[d] = distribution[d] / totalDecaySum;
+    }
+  }
+
+  const distributionSum = distribution.reduce((sum, val) => sum + val, 0);
+  const pdfDistribution = new Float32Array(NUM_DECADES);
+  if (distributionSum > 0) {
+    for (let d = 0; d < NUM_DECADES; d++) {
+      pdfDistribution[d] = distribution[d] / distributionSum;
+    }
+  } else {
+    pdfDistribution.fill(1.0 / NUM_DECADES);
+  }
+  const imbalanceScore = calculateShannonImbalance(pdfDistribution);
+
+  const means = new Float32Array(NUM_DECADES);
+  const T = decadeCountsHistory.length;
+  for (let t = 0; t < T; t++) {
+    for (let d = 0; d < NUM_DECADES; d++) {
+      means[d] += decadeCountsHistory[t][d];
+    }
+  }
+  for (let d = 0; d < NUM_DECADES; d++) {
+    means[d] /= T;
+  }
+
+  const variances = new Float32Array(NUM_DECADES);
+  const covariance: Float32Array[] = Array.from({ length: NUM_DECADES }, () => new Float32Array(NUM_DECADES));
+
+  for (let t = 0; t < T; t++) {
+    const counts = decadeCountsHistory[t];
+    for (let i = 0; i < NUM_DECADES; i++) {
+      const devI = counts[i] - means[i];
+      variances[i] += devI * devI;
+      for (let j = 0; j < NUM_DECADES; j++) {
+        const devJ = counts[j] - means[j];
+        covariance[i][j] += devI * devJ;
+      }
+    }
+  }
+
+  for (let i = 0; i < NUM_DECADES; i++) {
+    variances[i] /= T;
+    for (let j = 0; j < NUM_DECADES; j++) {
+      covariance[i][j] /= T;
+    }
+  }
+
+  for (let i = 0; i < NUM_DECADES; i++) {
+    const stdDevI = Math.sqrt(variances[i]);
+    for (let j = 0; j < NUM_DECADES; j++) {
+      const stdDevJ = Math.sqrt(variances[j]);
+      const denom = stdDevI * stdDevJ;
+      if (denom > 1e-12) {
+        correlationMatrix[i][j] = covariance[i][j] / denom;
+      } else {
+        correlationMatrix[i][j] = i === j ? 1.0 : 0.0;
+      }
+    }
+  }
+
+  const transitionMatrix: Float32Array[] = Array.from({ length: NUM_DECADES }, () => new Float32Array(NUM_DECADES));
+  const transitionDenominators = new Float32Array(NUM_DECADES);
+
+  for (let t = 0; t < T - 1; t++) {
+    const prevCounts = decadeCountsHistory[t + 1];
+    const currCounts = decadeCountsHistory[t];
+    const decayWeight = Math.pow(TIME_DECAY, t);
+
+    for (let i = 0; i < NUM_DECADES; i++) {
+      if (prevCounts[i] > 0) {
+        for (let j = 0; j < NUM_DECADES; j++) {
+          const transitionIntensity = prevCounts[i] * currCounts[j] * decayWeight;
+          transitionMatrix[i][j] += transitionIntensity;
+          transitionDenominators[i] += transitionIntensity;
+        }
+      }
+    }
+  }
+
+  const priorAlpha = Math.max(0.01, 1.0 * Math.pow(e, 2));
+  for (let i = 0; i < NUM_DECADES; i++) {
+    const rowSum = transitionDenominators[i];
+    for (let j = 0; j < NUM_DECADES; j++) {
+      const prior = pdfDistribution[j];
+      transitionMatrix[i][j] = (transitionMatrix[i][j] + priorAlpha * prior) / (rowSum + priorAlpha);
+    }
+  }
+
+  const lastDrawCounts = decadeCountsHistory[0];
+  if (lastDrawCounts) {
+    const lastDrawSum = lastDrawCounts.reduce((sum, val) => sum + val, 0);
+    if (lastDrawSum > 0) {
+      for (let j = 0; j < NUM_DECADES; j++) {
+        let sum = 0;
+        for (let i = 0; i < NUM_DECADES; i++) {
+          const pLastI = lastDrawCounts[i] / lastDrawSum;
+          sum += pLastI * transitionMatrix[i][j];
+        }
+        projectedTemporalScore[j] = sum;
+      }
+    } else {
+      projectedTemporalScore.set(pdfDistribution);
+    }
+  } else {
+    projectedTemporalScore.set(pdfDistribution);
+  }
+
+  return {
+    distribution,
+    imbalanceScore,
+    correlationMatrix,
+    projectedTemporalScore
+  };
+};

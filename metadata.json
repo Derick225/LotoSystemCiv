@@ -1,0 +1,11 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "name": "LotoPro Platinum Elite",
+  "description": "Système de prédiction stochastique industriel pour Loto 5/90 avec moteur neural et analyse forensic.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,143 @@
+
+/**
+ * NEXUS AUDIO ENGINE v2.1
+ * Générateur de sons synthétiques via Web Audio API pour éviter les assets lourds.
+ * Sécurisé contre les erreurs de contexte (Autoplay Policy, Context suspended).
+ */
+
+class AudioEngine {
+    private ctx: AudioContext | null = null;
+    private enabled: boolean = true;
+    private masterGain: GainNode | null = null;
+
+    constructor() {
+        // We will initialize lazily.
+    }
+
+    private initCtx() {
+        if (!this.ctx) {
+            try {
+                const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+                if (AudioContextClass) {
+                    this.ctx = new AudioContextClass();
+                    this.masterGain = this.ctx.createGain();
+                    this.masterGain.connect(this.ctx.destination);
+                    this.masterGain.gain.value = 0.3; // Volume global modéré
+                }
+            } catch (e) {
+                console.warn("AudioContext non supporté ou erreur d'initialisation:", e);
+            }
+        }
+    }
+
+    private async resumeCtx() {
+        if (this.ctx && this.ctx.state === 'suspended') {
+            try {
+                await this.ctx.resume();
+            } catch (e) {
+                console.warn("Impossible de démarrer l'AudioContext:", e);
+            }
+        }
+    }
+
+    public setEnabled(val: boolean) {
+        this.enabled = val;
+    }
+
+    public play(type: 'click' | 'success' | 'error' | 'scan' | 'boot' | 'loading') {
+        if (!this.enabled) return;
+        
+        // Haptic feedback if supported (Capacitor or Chrome Android)
+        try {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                switch(type) {
+                    case 'click': navigator.vibrate(10); break;
+                    case 'success': navigator.vibrate([20, 50, 20]); break;
+                    case 'error': navigator.vibrate([50, 50, 50, 50, 50]); break;
+                    case 'scan': navigator.vibrate(5); break;
+                    case 'boot': navigator.vibrate([50, 100, 150, 200]); break;
+                    case 'loading': navigator.vibrate([10, 50, 10]); break;
+                }
+            }
+        } catch (e) {
+            // ignore haptic errors
+        }
+
+        this.initCtx();
+        if (!this.ctx || !this.masterGain) return;
+        
+        // Exécution sécurisée
+        this.resumeCtx().catch((e) => console.warn('Promise rejection silenced', e));
+
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+
+            const now = this.ctx.currentTime;
+
+            switch (type) {
+                case 'click':
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(800, now);
+                    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.05);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                    osc.start(now);
+                    osc.stop(now + 0.05);
+                    break;
+
+                case 'success':
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(440, now);
+                    osc.frequency.setValueAtTime(554, now + 0.1); // C#
+                    osc.frequency.setValueAtTime(659, now + 0.2); // E
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                    osc.start(now);
+                    osc.stop(now + 0.6);
+                    break;
+
+                case 'error':
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                    break;
+
+                case 'scan':
+                case 'loading':
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(2000, now);
+                    osc.frequency.linearRampToValueAtTime(500, now + 0.2);
+                    gain.gain.setValueAtTime(0.05, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                    break;
+                    
+                case 'boot':
+                    // Son de montée en puissance
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(50, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 1.5);
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(0.3, now + 1.0);
+                    gain.gain.linearRampToValueAtTime(0, now + 1.5);
+                    osc.start(now);
+                    osc.stop(now + 1.5);
+                    break;
+            }
+        } catch (e) {
+            console.warn("Erreur de lecture audio:", e);
+        }
+    }
+}
+
+export const audioEngine = new AudioEngine();

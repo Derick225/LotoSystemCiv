@@ -1,0 +1,1984 @@
+import {
+  DrawResult,
+  SeverityLevel,
+  IndicatorType,
+  ForensicLog,
+  ForensicIndicator,
+  ForensicReport,
+  AlgorithmicAdjustment,
+} from "../types";
+import {
+  calculateShannonEntropy,
+  calculateBenfordCompliance,
+  calculateKolmogorovSmirnov,
+  calculateLjungBoxTest,
+  calculateACValue,
+} from "./mathCore";
+import {
+  AlgoKey,
+  ScoreBreakdown,
+  DEFAULT_ALGO_WEIGHTS,
+  EmpiricalCalibration,
+  FALLBACK_CALIBRATION,
+} from "../shared/prediction.types";
+
+export class InvalidInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidInputError";
+  }
+}
+
+export interface ConfidenceInterval {
+  lower: number;
+  upper: number;
+  confidenceLevel: number;
+}
+
+export interface ForensicAuditResult {
+  auditId: string;
+  version: string;
+  timestamp: string;
+  suspicionScore: number;
+  riggedProbability: number;
+  unifiedIntegrityIndex: number; // UFI (0 = Corrompu à 100 = Parfaitement Aléatoire)
+  idealAlgorithmicDriftTolerance: number; // Marge de tolérance idéale calculée
+  confidenceIntervals: {
+    suspicionScore: ConfidenceInterval;
+    riggedProbability: ConfidenceInterval;
+    unifiedIntegrityIndex: ConfidenceInterval;
+  };
+  indicators: ForensicIndicator[];
+  entropyCollapse: boolean;
+  benfordCompliance: number;
+  benfordData?: number[];
+  evidenceLogs: ForensicLog[];
+  executionMs: number;
+  topologicalTensionIndex?: number;
+  catastropheControlParams?: {
+    a: number;
+    b: number;
+    discriminant: number;
+    regime: string;
+  };
+}
+
+export interface AuditConfig {
+  minHistorySize: number;
+  benfordMinSample: number;
+  criticalVariance: number;
+  avgTheoreticalSum: number;
+  baseRiggedProbability: number;
+}
+
+const DOMAIN_SIZE = 90;
+
+export const DEFAULT_AUDIT_CONFIG: AuditConfig = {
+  minHistorySize: 5,
+  benfordMinSample: 500,
+  criticalVariance: Math.pow(90 / (2 * 5), 2) * 0.5,
+  avgTheoreticalSum: FALLBACK_CALIBRATION.meanSum,
+  baseRiggedProbability: 1.0 / Math.pow(DOMAIN_SIZE / 5, 2),
+};
+
+// --- Registry and Global States ---
+
+const INDICATOR_REGISTRY = new Map<
+  IndicatorType,
+  { baseLikelihood: number; severityMultipliers: Record<SeverityLevel, number> }
+>([
+  [
+    "BENFORD",
+    {
+      baseLikelihood: 2.5,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "SIGMA",
+    {
+      baseLikelihood: 2.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "ENTROPY",
+    {
+      baseLikelihood: 4.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "HARMONY",
+    {
+      baseLikelihood: 6.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "CYCLE",
+    {
+      baseLikelihood: 12.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "CLUSTER",
+    {
+      baseLikelihood: 3.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "KS_TEST",
+    {
+      baseLikelihood: 3.5,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "LJUNG_BOX",
+    {
+      baseLikelihood: 4.5,
+      severityMultipliers: { low: 1.2, medium: 1.6, high: 2.5, critical: 4.0 },
+    },
+  ],
+  [
+    "ECHO",
+    {
+      baseLikelihood: 5.0,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "SURVIVAL",
+    {
+      baseLikelihood: 4.5,
+      severityMultipliers: { low: 1.1, medium: 1.4, high: 1.8, critical: 2.5 },
+    },
+  ],
+  [
+    "SPECTRAL",
+    {
+      baseLikelihood: 3.8,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "CORRELATION",
+    {
+      baseLikelihood: 4.2,
+      severityMultipliers: { low: 1.3, medium: 1.6, high: 2.2, critical: 3.5 },
+    },
+  ],
+  [
+    "MARKOV_CHAIN",
+    {
+      baseLikelihood: 8.0,
+      severityMultipliers: { low: 1.1, medium: 1.4, high: 2.0, critical: 3.0 },
+    },
+  ],
+  [
+    "RUNS_TEST",
+    {
+      baseLikelihood: 5.2,
+      severityMultipliers: { low: 1.2, medium: 1.6, high: 2.2, critical: 3.2 },
+    },
+  ],
+  [
+    "HURST_EXPONENT",
+    {
+      baseLikelihood: 6.5,
+      severityMultipliers: { low: 1.3, medium: 1.8, high: 2.6, critical: 3.8 },
+    },
+  ],
+  [
+    "CLIQUE_TRIPLET",
+    {
+      baseLikelihood: 9.0,
+      severityMultipliers: { low: 1.4, medium: 2.0, high: 3.0, critical: 4.5 },
+    },
+  ],
+  [
+    "CATASTROPHE_RUPTURE",
+    {
+      baseLikelihood: 4.8,
+      severityMultipliers: { low: 1.2, medium: 1.5, high: 2.2, critical: 3.5 },
+    },
+  ],
+]);
+
+let dynamicThresholds = { ...DEFAULT_AUDIT_CONFIG };
+
+export const updateThresholds = (configUpdates: Partial<AuditConfig>) => {
+  dynamicThresholds = { ...dynamicThresholds, ...configUpdates };
+};
+
+// --- Input Validation & Global Sanity ---
+
+export const sanitizeNumber = (n: unknown): number => {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num < 1 || num > 90 || !Number.isInteger(num)) {
+    throw new InvalidInputError(
+      `Invalid number: ${n}. Must be an integer between 1 and 90.`,
+    );
+  }
+  return num;
+};
+
+const validateInputs = (numbers: number[], history: DrawResult[]) => {
+  if (!Array.isArray(numbers))
+    throw new InvalidInputError("Numbers must be an array.");
+  if (numbers.length === 0)
+    throw new InvalidInputError("Numbers array cannot be empty.");
+
+  const uniqueNumbers = new Set<number>();
+  for (const n of numbers) {
+    const sanitized = sanitizeNumber(n);
+    if (uniqueNumbers.has(sanitized)) {
+      throw new InvalidInputError(`Duplicate number detected: ${sanitized}`);
+    }
+    uniqueNumbers.add(sanitized);
+  }
+
+  if (!Array.isArray(history))
+    throw new InvalidInputError("History must be an array.");
+};
+
+// --- K-Means++ Clustering Utility ---
+
+const detectClusteredFraud = (numbers: Uint8Array): number => {
+  const n = numbers.length;
+  if (n < 4) return 0;
+
+  const sorted = [...numbers].sort((a, b) => a - b);
+  let c1 = sorted[Math.floor(n * 0.25)];
+  let c2 = sorted[Math.floor(n * 0.75)];
+
+  let centroids = [c1, c2];
+  let clusters: number[][] = [[], []];
+  let converged = false;
+  let iterations = 0;
+
+  while (!converged && iterations < 10) {
+    clusters = [[], []];
+    for (let i = 0; i < n; i++) {
+      const num = numbers[i];
+      const d0 = Math.abs(num - centroids[0]);
+      const d1 = Math.abs(num - centroids[1]);
+      clusters[d0 < d1 ? 0 : 1].push(num);
+    }
+
+    const newCentroids = clusters.map((c, idx) =>
+      c.length ? c.reduce((a, b) => a + b, 0) / c.length : centroids[idx],
+    );
+
+    converged =
+      Math.abs(newCentroids[0] - centroids[0]) < 0.001 &&
+      Math.abs(newCentroids[1] - centroids[1]) < 0.001;
+
+    centroids = newCentroids;
+    iterations++;
+  }
+
+  let maxAnomaly = 0;
+  for (const c of clusters) {
+    if (c.length >= 4) {
+      let min = 100,
+        max = -1;
+      for (const val of c) {
+        if (val < min) min = val;
+        if (val > max) max = val;
+      }
+      const spread = max - min;
+      const meanSpread = 30;
+      const stdSpread = 8;
+      const zSpread = (spread - meanSpread) / stdSpread;
+      const anomalyScore = 1 / (1 + Math.exp(zSpread));
+      if (anomalyScore > maxAnomaly) maxAnomaly = anomalyScore;
+    }
+  }
+  return maxAnomaly;
+};
+
+// ============================================================================
+// PURE & TESTABLE FORENSIC ANALYSIS FUNCTIONS
+// ============================================================================
+
+export interface AnalysisResponse {
+  indicators: ForensicIndicator[];
+  logs: ForensicLog[];
+  points: number;
+}
+
+/**
+ * 1. Analyse de la Variance des Gaps (Harmonie Linéaire)
+ */
+export const analyzeHarmonyLinear = (
+  numbers: Uint8Array,
+  criticalVariance: number,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const sorted = new Uint8Array(numbers).sort();
+  if (sorted.length > 1) {
+    let gapSum = 0;
+    const gaps = new Uint8Array(sorted.length - 1);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const gap = sorted[i + 1] - sorted[i];
+      gaps[i] = gap;
+      gapSum += gap;
+    }
+
+    const avgGap = gapSum / gaps.length;
+    let gapVarianceSum = 0;
+    for (let i = 0; i < gaps.length; i++) {
+      gapVarianceSum += (gaps[i] - avgGap) * (gaps[i] - avgGap);
+    }
+    const gapVariance = gapVarianceSum / gaps.length;
+
+    const varianceAnomaly =
+      1 / (1 + Math.exp(1.5 * (gapVariance - criticalVariance)));
+
+    if (varianceAnomaly > 0.1) {
+      const impact = varianceAnomaly * 50;
+      const severity: SeverityLevel =
+        impact >= 40 ? "critical" : impact >= 30 ? "high" : "medium";
+      indicators.push({
+        type: "HARMONY",
+        label: "Harmonie Linéaire",
+        value: `σ²=${gapVariance.toFixed(2)}`,
+        severity,
+        description:
+          "Régularité des écarts lissée en continu (Linéarité artificielle).",
+        impact,
+      });
+      logs.push({
+        timestamp: new Date().toISOString(),
+        level: severity === "critical" ? "critical" : "error",
+        indicator: "HARMONY",
+        message: `Variance gaps ${gapVariance.toFixed(2)} vs seuil ${criticalVariance} (Anomalie=${(varianceAnomaly * 100).toFixed(1)}%)`,
+      });
+      points += impact;
+    }
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 2. Test Benford - Évaluation Continue
+ */
+export const analyzeBenfordContinuous = (
+  benfordScore: number,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const stdBenford = 10;
+  const zBenford = (benfordScore - 50) / stdBenford;
+  const benfordAnomaly = 1 / (1 + Math.exp(-zBenford));
+  if (benfordAnomaly > 0.1) {
+    const impact = benfordAnomaly * 50;
+    const severity: SeverityLevel =
+      impact >= 40 ? "critical" : impact >= 30 ? "high" : "medium";
+    indicators.push({
+      type: "BENFORD",
+      label: "Divergence Benford Continue",
+      value: `${Math.round(benfordScore)}%`,
+      severity,
+      description:
+        "Non-conformité continue à la loi des nombres (Score pondéré lissé).",
+      impact,
+    });
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: severity === "critical" ? "error" : "warn",
+      indicator: "BENFORD",
+      message: `Benford compliance at ${Math.round(benfordScore)}% (Anomalie=${(benfordAnomaly * 100).toFixed(1)}%)`,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 3. Test Kolmogorov-Smirnov (KS) - Évaluation Continue
+ */
+export const analyzeKolmogorovSmirnovContinuous = (
+  numbers: Uint8Array,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const ksNumbers = Array.from(numbers);
+  const ksResult = calculateKolmogorovSmirnov(ksNumbers);
+  const ksAnomalyProb = 1 / (1 + Math.exp(-15 * (ksResult.dStatistic - 0.4)));
+
+  if (ksAnomalyProb > 0.2) {
+    const impact = ksAnomalyProb * 45;
+    const severity: SeverityLevel = ksAnomalyProb > 0.8 ? "high" : "medium";
+    indicators.push({
+      type: "KS_TEST",
+      label: "Divergence KS Continue",
+      value: `D=${ksResult.dStatistic.toFixed(4)}`,
+      severity,
+      description:
+        "La distribution des numéros dévie continuellement d'une distribution uniforme (Kolmogorov-Smirnov).",
+      impact,
+    });
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: ksAnomalyProb > 0.8 ? "error" : "warn",
+      indicator: "KS_TEST",
+      message: `KS-Test evaluation D=${ksResult.dStatistic.toFixed(4)}, Probabilité d'Anomalie=${(ksAnomalyProb * 100).toFixed(1)}%`,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 3b. Test Ljung-Box (Autocorrélations Sérielles Chronologiques)
+ */
+export const analyzeLjungBoxContinuous = (
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  if (history.length >= 20) {
+    const lastDecades = history.slice(0, 20).flatMap((h) => h.gagnants);
+    const lbTest = calculateLjungBoxTest(lastDecades, 5);
+    if (lbTest.hasAutocorrelation) {
+      const impact = 35;
+      indicators.push({
+        type: "LJUNG_BOX",
+        label: "Autocorrélation Chronologique",
+        value: `Q=${lbTest.qStatistic.toFixed(2)}`,
+        severity: "high",
+        description:
+          "Le test de Ljung-Box révèle des dépendances temporelles artificielles dans la séquence des résultats.",
+        impact,
+      });
+      logs.push({
+        timestamp: new Date().toISOString(),
+        level: "error",
+        indicator: "LJUNG_BOX",
+        message: `Ljung-Box Q=${lbTest.qStatistic.toFixed(2)} - Sérielle detectée.`,
+      });
+      points += impact;
+    }
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 4. Clustering Artificiel (K-Means++) - Densité Continue
+ */
+export const analyzeClusteringAnomalies = (
+  numbers: Uint8Array,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const clusterAnomaly = detectClusteredFraud(numbers);
+  if (clusterAnomaly > 0.1) {
+    const impact = clusterAnomaly * 30;
+    const severity: SeverityLevel = clusterAnomaly > 0.8 ? "high" : "medium";
+    indicators.push({
+      type: "CLUSTER",
+      label: "Clustering Suspect (Continu)",
+      value: `Densité=${(clusterAnomaly * 100).toFixed(1)}%`,
+      severity,
+      description:
+        "Regroupement anormal de numéros détecté via K-Means++ continu.",
+      impact,
+    });
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: clusterAnomaly > 0.8 ? "warn" : "info",
+      indicator: "CLUSTER",
+      message: `Cluster dense détecté avec probabilité ${(clusterAnomaly * 100).toFixed(1)}%`,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 5. Echo de Registre T-1 (Optimisation Set $O(1)$)
+ */
+export const analyzeRegistryEcho = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  if (history.length > 0) {
+    const lastWinners = history[0].gagnants;
+    const lastWinnersSet = new Set(lastWinners);
+    let repeats = 0;
+    for (let i = 0; i < numbers.length; i++) {
+      if (lastWinnersSet.has(numbers[i])) {
+        repeats++;
+      }
+    }
+
+    const echoAnomaly = 1 / (1 + Math.exp(-2.5 * (repeats - 2.5)));
+
+    if (echoAnomaly > 0.1) {
+      const impact = echoAnomaly * 70;
+      const severity: SeverityLevel =
+        repeats >= 5 ? "critical" : repeats >= 3 ? "high" : "medium";
+      indicators.push({
+        type: "ECHO",
+        label: "Echo de Registre",
+        value: `${repeats} répétitions`,
+        severity,
+        description:
+          "Réplication anormale continue du tirage précédent (Loi Hypergéométrique).",
+        impact,
+      });
+      logs.push({
+        timestamp: new Date().toISOString(),
+        level:
+          severity === "critical"
+            ? "critical"
+            : severity === "high"
+              ? "error"
+              : "warn",
+        indicator: "ECHO",
+        message: `${repeats} répétitions J-1 (Anomalie ${(echoAnomaly * 100).toFixed(1)}%)`,
+      });
+      points += impact;
+    }
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 6. Test Dérive Sigma & Anomalies Z-Scores (Norme L2)
+ */
+export const analyzeSigmaDrift = (
+  numbers: Uint8Array,
+  config: AuditConfig,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const n = numbers.length;
+  const popVar = (Math.pow(DOMAIN_SIZE, 2) - 1) / 12;
+  const sumStdDev = Math.sqrt(
+    n * ((DOMAIN_SIZE - n) / (DOMAIN_SIZE - 1)) * popVar,
+  );
+
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += numbers[i];
+
+  const zS = (sum - config.avgTheoreticalSum) / (sumStdDev || 1);
+
+  const expectedGap = DOMAIN_SIZE / (n + 1);
+  const gapStdDev = expectedGap / 3;
+
+  const sorted = new Uint8Array(numbers).sort();
+  let avgG = 0;
+  if (sorted.length > 1) {
+    let gapSum = 0;
+    for (let i = 0; i < sorted.length - 1; i++)
+      gapSum += sorted[i + 1] - sorted[i];
+    avgG = gapSum / (sorted.length - 1);
+  }
+  const zG = (avgG - expectedGap) / (gapStdDev || 1);
+
+  const magnitudeL2 = Math.sqrt(zS * zS + zG * zG);
+  const continuousAnomalyProb = 1 - Math.exp(-0.5 * magnitudeL2 * magnitudeL2);
+
+  const anomalyThreshold = 1.0 - 1.0 / (1.0 + Math.exp(-1.702 * 1.5));
+  const severityThreshold = 1.0 - 1.0 / (1.0 + Math.exp(-1.702 * 2.0));
+
+  if (continuousAnomalyProb > anomalyThreshold) {
+    const impact = Math.round(continuousAnomalyProb * 40);
+    const severity: SeverityLevel =
+      continuousAnomalyProb > severityThreshold ? "high" : "medium";
+    indicators.push({
+      type: "SIGMA",
+      label: "Anomalie Combinée (Norme L2)",
+      value: `Magn=${magnitudeL2.toFixed(2)}`,
+      severity,
+      description:
+        "La norme L2 des déviations standardisées révèle un tirage hautement improbable.",
+      impact,
+    });
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: severity === "high" ? "error" : "warn",
+      indicator: "SIGMA",
+      message: `Dérive continue (L2): Magnitude ${magnitudeL2.toFixed(2)}, Prob Anormale ${(continuousAnomalyProb * 100).toFixed(1)}%`,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 7. Collapsus Entropique
+ */
+export const analyzeEntropyCollapse = (
+  normalizedEntropy: number,
+  historyLength: number,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const zEntropy = (normalizedEntropy - 0.5) / 0.2;
+  const entropyAnomaly = 1 / (1 + Math.exp(zEntropy));
+  const noiseFloor = 1.0 / Math.sqrt(historyLength > 5 ? historyLength : 5);
+  if (entropyAnomaly > noiseFloor) {
+    const impact = entropyAnomaly * 45;
+    const severity: SeverityLevel =
+      impact >= 30 ? "high" : impact >= 20 ? "medium" : "low";
+    indicators.push({
+      type: "ENTROPY",
+      label: "Collapsus Entropique",
+      value: `${Math.round(normalizedEntropy * 100)}%`,
+      severity,
+      description:
+        "Perte de désordre dans le système (Lissage logistique continu).",
+      impact,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 8. Cycles Temporels (Autocorrélation Chronologique)
+ */
+export const analyzeTemporalCycles = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let temporalPoints = 0;
+
+  const maxHistory = Math.min(50, history.length);
+  const lastSeen = new Int32Array(91).fill(-1);
+  const gapsMap = new Map<number, number[]>();
+  const numbersSet = new Set(numbers);
+
+  for (let i = 0; i < maxHistory; i++) {
+    const draw = history[i];
+    for (let j = 0; j < draw.gagnants.length; j++) {
+      const n = draw.gagnants[j];
+      if (numbersSet.has(n)) {
+        if (lastSeen[n] !== -1) {
+          const gap = i - lastSeen[n];
+          let gaps = gapsMap.get(n);
+          if (!gaps) {
+            gaps = [];
+            gapsMap.set(n, gaps);
+          }
+          gaps.push(gap);
+        }
+        lastSeen[n] = i;
+      }
+    }
+  }
+
+  gapsMap.forEach((gaps, num) => {
+    if (gaps.length >= 2) {
+      const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      const variance =
+        gaps.reduce((a, b) => a + Math.pow(b - meanGap, 2), 0) / gaps.length;
+
+      const meanVariance = 1.0;
+      const stdVariance = 0.25;
+      const zVar = (variance - meanVariance) / stdVariance;
+      const periodicAnomaly = 1 / (1 + Math.exp(zVar));
+
+      if (periodicAnomaly > 0.2 && meanGap > 1) {
+        const consistency = gaps.length;
+        const impact = periodicAnomaly * Math.min(60, 15 + consistency * 5);
+        const severity: SeverityLevel =
+          impact >= 40 ? "critical" : impact >= 25 ? "high" : "medium";
+
+        indicators.push({
+          type: "CYCLE",
+          label: `Cycle Mécanique N°${num}`,
+          value: `μ=${meanGap.toFixed(1)} (${consistency}x)`,
+          severity,
+          description: `Périodicité mécanique détectée via variance continue (σ²=${variance.toFixed(2)}).`,
+          impact,
+        });
+        logs.push({
+          timestamp: new Date().toISOString(),
+          level:
+            severity === "critical" || severity === "high" ? "warn" : "info",
+          indicator: "CYCLE",
+          message: `Périodicité détectée sur ${num} (μ=${meanGap.toFixed(1)}, σ²=${variance.toFixed(2)}, ${consistency} occurrences).`,
+        });
+        temporalPoints += impact;
+      }
+    }
+  });
+
+  return { indicators, logs, points: temporalPoints };
+};
+
+/**
+ * 9. Analyse de Survie (Kaplan-Meier stochastique)
+ */
+export const analyzeSurvivalAnomalies = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  for (let i = 0; i < numbers.length; i++) {
+    const num = numbers[i];
+    let gap = 0;
+    for (let j = 0; j < history.length; j++) {
+      if (history[j].gagnants.includes(num)) break;
+      gap++;
+    }
+
+    const p = 5 / 90;
+    const survivalProb = Math.pow(1 - p, gap);
+    const anomalyScore = 1 / (1 + Math.exp(10 * (survivalProb - 0.05)));
+
+    if (anomalyScore > 0.1) {
+      const impact = anomalyScore * 25;
+      indicators.push({
+        type: "SURVIVAL",
+        label: `Survie Extrême N°${num}`,
+        value: `Gap=${gap} (p=${(survivalProb * 100).toFixed(2)}%)`,
+        severity: anomalyScore > 0.8 ? "high" : "medium",
+        description: `Le numéro ${num} a brisé une période de dormance statistiquement improbable.`,
+        impact,
+      });
+      points += impact;
+    }
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 10. Anomalies Spectrales modulo 3
+ */
+export const analyzeSpectralAnomalies = (
+  numbers: Uint8Array,
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const distanceToHarmonic3 = Array.from(numbers).reduce((sum, n) => {
+    const dist = Math.min(n % 3, 3 - (n % 3));
+    return sum + dist;
+  }, 0);
+
+  const zHarmonic = distanceToHarmonic3 / 0.5;
+  const harmonicAnomaly = 1 / (1 + Math.exp(zHarmonic));
+
+  if (harmonicAnomaly > 0.1) {
+    const impact = harmonicAnomaly * 30;
+    indicators.push({
+      type: "SPECTRAL",
+      label: "Résonance Harmonique",
+      value: `Align=${(harmonicAnomaly * 100).toFixed(1)}%`,
+      severity: harmonicAnomaly > 0.8 ? "high" : "medium",
+      description:
+        "Les numéros tirés vibrent sur des fréquences harmoniques de manière non-stochastique (Analyse continue).",
+      impact,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 11. Co-sorties & Corrélations Croisées (Optimisation des ensembles de Gagnants)
+ */
+export const analyzeCorrelationAnomalies = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+
+  const scanDepth = Math.min(50, history.length);
+  const winnerSets = Array.from(
+    { length: scanDepth },
+    (_, k) => new Set(history[k].gagnants),
+  );
+
+  for (let i = 0; i < numbers.length; i++) {
+    for (let j = i + 1; j < numbers.length; j++) {
+      const n1 = numbers[i];
+      const n2 = numbers[j];
+
+      let coCount = 0;
+      for (let k = 0; k < scanDepth; k++) {
+        if (winnerSets[k].has(n1) && winnerSets[k].has(n2)) {
+          coCount++;
+        }
+      }
+
+      const expectedCoCount = scanDepth * (5 / 90) * (4 / 89);
+      const correlationAnomaly =
+        1 / (1 + Math.exp(-2 * (coCount - expectedCoCount - 2)));
+
+      if (correlationAnomaly > 0.2) {
+        const impact = correlationAnomaly * 20;
+        indicators.push({
+          type: "CORRELATION",
+          label: `Lien Symbiotique ${n1}-${n2}`,
+          value: `${coCount} co-sorties`,
+          severity: correlationAnomaly > 0.8 ? "high" : "medium",
+          description: `Paire à corrélation excessive détectée. Probabilité de co-occurrence fortuite très faible.`,
+          impact,
+        });
+        points += impact;
+      }
+    }
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 12. Ruptures de chaîne de Markov (État parité)
+ */
+export const analyzeMarkovAnomalies = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+  if (history.length < 10) return { indicators, logs, points };
+
+  const lastWinners = history[0].gagnants;
+  const lastEvens = lastWinners.filter((n) => n % 2 === 0).length;
+  const currEvens = Array.from(numbers).filter((n) => n % 2 === 0).length;
+
+  const stateJump = Math.abs(lastEvens - currEvens);
+  const jumpAnomaly = 1 / (1 + Math.exp(-2.5 * (stateJump - 3.5)));
+
+  if (jumpAnomaly > 0.2) {
+    const impact = jumpAnomaly * 35;
+    indicators.push({
+      type: "MARKOV_CHAIN",
+      label: "Rupture de Chaîne de Markov",
+      value: `Saut |ΔE|=${stateJump}`,
+      severity: jumpAnomaly > 0.8 ? "high" : "medium",
+      description:
+        "Transition d'états (Pair/Impair) déviant fortement des probabilités stochastiques continues.",
+      impact,
+    });
+    points += impact;
+  }
+  return { indicators, logs, points };
+};
+
+/**
+ * 13. Test des suites de Wald-Wolfowitz "Runs Test"
+ */
+export const analyzeRunsTestAnomalies = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+  if (history.length < 15) return { indicators, logs, points };
+
+  const values: number[] = [];
+  for (let i = 0; i < numbers.length; i++) {
+    values.push(numbers[i]);
+  }
+  const subHistory = history.slice(0, 15).reverse();
+  for (let i = 0; i < subHistory.length; i++) {
+    const draw = subHistory[i];
+    for (let j = 0; j < draw.gagnants.length; j++) {
+      values.push(draw.gagnants[j]);
+    }
+  }
+
+  const nTotal = values.length;
+  const sortedValues = [...values].sort((a, b) => a - b);
+  const median = sortedValues[Math.floor(nTotal / 2)];
+
+  let n1 = 0;
+  let n2 = 0;
+  const signs: boolean[] = [];
+
+  for (let i = 0; i < nTotal; i++) {
+    const val = values[i];
+    if (val > median) {
+      n1++;
+      signs.push(true);
+    } else {
+      n2++;
+      signs.push(false);
+    }
+  }
+
+  if (n1 === 0 || n2 === 0) return { indicators, logs, points };
+
+  let runs = 1;
+  for (let i = 1; i < signs.length; i++) {
+    if (signs[i] !== signs[i - 1]) {
+      runs++;
+    }
+  }
+
+  const expectedRuns = (2 * n1 * n2) / nTotal + 1;
+  const varianceRuns =
+    (2 * n1 * n2 * (2 * n1 * n2 - nTotal)) /
+    (Math.pow(nTotal, 2) * (nTotal - 1));
+
+  if (varianceRuns <= 0) return { indicators, logs, points };
+
+  const z = (runs - expectedRuns) / Math.sqrt(varianceRuns);
+  const absZ = Math.abs(z);
+
+  if (absZ > 1.96) {
+    const isClustered = z < 0;
+    const impact = Math.min(55, Math.round(20 + (absZ - 1.96) * 15));
+    const severity: SeverityLevel = absZ > 2.58 ? "critical" : "high";
+
+    indicators.push({
+      type: "RUNS_TEST",
+      label: "Instabilité Séquentielle (Wald-Wolfowitz)",
+      value: `Z-Score=${z.toFixed(2)} (R=${runs})`,
+      severity,
+      description: isClustered
+        ? "Déficit de transitions (runs) indiquant une sédimentation répétitive anormale des numéros."
+        : "Excès d'alternance artificielle indiquant des oscillations de tirage forcées.",
+      impact,
+    });
+
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: severity === "critical" ? "critical" : "warn",
+      indicator: "RUNS_TEST",
+      message: `Test de Wald-Wolfowitz rejeté. Z-Score=${z.toFixed(2)}, attendu=${expectedRuns.toFixed(1)}, observé=${runs}`,
+    });
+
+    points += impact;
+  }
+
+  return { indicators, logs, points };
+};
+
+/**
+ * 14. Recherche de triplets d'ADN ultra-couplés (Clique Triplet stochastique récurrente)
+ */
+export const analyzeCliqueTripletAnomalies = (
+  numbers: Uint8Array,
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+  const maxHistory = Math.min(250, history.length);
+  if (maxHistory < 10) return { indicators, logs, points };
+
+  const current = Array.from(numbers).sort((a, b) => a - b);
+  const triplets: [number, number, number][] = [];
+  for (let i = 0; i < current.length; i++) {
+    for (let j = i + 1; j < current.length; j++) {
+      for (let k = j + 1; k < current.length; k++) {
+        triplets.push([current[i], current[j], current[k]]);
+      }
+    }
+  }
+
+  const historyWinnerSets = Array.from(
+    { length: maxHistory },
+    (_, h) => new Set(history[h].gagnants),
+  );
+
+  for (let t = 0; t < triplets.length; t++) {
+    const [t1, t2, t3] = triplets[t];
+    let occurrences = 0;
+
+    for (let h = 0; h < maxHistory; h++) {
+      const winnersSet = historyWinnerSets[h];
+      if (winnersSet.has(t1) && winnersSet.has(t2) && winnersSet.has(t3)) {
+        occurrences++;
+      }
+    }
+
+    if (occurrences >= 2) {
+      const impact = occurrences >= 3 ? 60 : 35;
+      const severity: SeverityLevel = occurrences >= 3 ? "critical" : "high";
+
+      indicators.push({
+        type: "CLIQUE_TRIPLET",
+        label: `Clique Triplet d'ADN [${t1}-${t2}-${t3}]`,
+        value: `${occurrences} occurrences`,
+        severity,
+        description: `Surgissement hautement anormal d'un triplet fixe. Risque critique de biais mécanique ou structurel.`,
+        impact,
+      });
+
+      logs.push({
+        timestamp: new Date().toISOString(),
+        level: "error",
+        indicator: "CLIQUE_TRIPLET",
+        message: `Triplet répétitif détecté: [${t1}, ${t2}, ${t3}] est apparu ${occurrences} fois sur les derniers ${maxHistory} tirages.`,
+      });
+
+      points += impact;
+      break;
+    }
+  }
+
+  return { indicators, logs, points };
+};
+
+/**
+ * 15. Exposant de Hurst (Détection de mémoire fractale artificielle)
+ */
+export const analyzeHurstExponentAnomalies = (
+  history: DrawResult[],
+): AnalysisResponse => {
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let points = 0;
+  const historyLength = Math.min(100, history.length);
+  if (historyLength < 30) return { indicators, logs, points };
+
+  const totals: number[] = [];
+  for (let i = 0; i < historyLength; i++) {
+    totals.push(history[i].gagnants.reduce((a, b) => a + b, 0));
+  }
+
+  const n = totals.length;
+  const mean = totals.reduce((a, b) => a + b, 0) / n;
+
+  const devAccum: number[] = Array(n).fill(0);
+  let cumSum = 0;
+  for (let i = 0; i < n; i++) {
+    cumSum += totals[i] - mean;
+    devAccum[i] = cumSum;
+  }
+
+  let sumSquares = 0;
+  for (let i = 0; i < n; i++) {
+    sumSquares += Math.pow(totals[i] - mean, 2);
+  }
+  const stdDev = Math.sqrt(sumSquares / n);
+
+  if (stdDev === 0) return { indicators, logs, points };
+
+  let maxAccum = devAccum[0];
+  let minAccum = devAccum[0];
+  for (let i = 1; i < n; i++) {
+    if (devAccum[i] > maxAccum) maxAccum = devAccum[i];
+    if (devAccum[i] < minAccum) minAccum = devAccum[i];
+  }
+  const range = maxAccum - minAccum;
+  const rescaledRange = range / stdDev;
+  const H = Math.log(rescaledRange) / Math.log(n);
+
+  if (H > 0.7 || H < 0.3) {
+    const isPersistent = H > 0.7;
+    const delta = isPersistent ? H - 0.7 : 0.3 - H;
+    const impact = Math.min(50, Math.round(15 + delta * 90));
+    const severity: SeverityLevel = delta > 0.12 ? "high" : "medium";
+
+    indicators.push({
+      type: "HURST_EXPONENT",
+      label: "Mémoire Fractale (Hurst)",
+      value: `H=${H.toFixed(3)}`,
+      severity,
+      description: isPersistent
+        ? "Mémoire à long terme détectée. Les écarts d'énergie tendent à s'auto-entretenir de manière non-stochastique."
+        : "Hyper-correction ou oscillation artificielle (Anti-persistance excessive).",
+      impact,
+    });
+
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      indicator: "HURST_EXPONENT",
+      message: `Exposant de Hurst anormal déviant de la zone de bruit blanc: H=${H.toFixed(3)} (Delta=${delta.toFixed(3)})`,
+    });
+
+    points += impact;
+  }
+
+  return { indicators, logs, points };
+};
+
+/**
+ * 16. Analyse Topologique René Thom Cusp Catastrophe
+ */
+export const analyzeCatastropheRupture = (
+  numbers: Uint8Array,
+): {
+  topologicalTensionIndex: number;
+  catastropheControlParams: {
+    a: number;
+    b: number;
+    discriminant: number;
+    regime: string;
+  };
+  indicators: ForensicIndicator[];
+  logs: ForensicLog[];
+  points: number;
+} => {
+  let suspicionPoints = 0;
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+
+  const current = Array.from(numbers).sort((a, b) => a - b);
+
+  const xCoords = current.map((n) => (n - 1) % 9);
+  const yCoords = current.map((n) => Math.floor((n - 1) / 9));
+
+  const meanX = xCoords.reduce((sum, val) => sum + val, 0) / 5;
+  const meanY = yCoords.reduce((sum, val) => sum + val, 0) / 5;
+
+  const pairsDist: number[] = [];
+  for (let i = 0; i < current.length; i++) {
+    for (let j = i + 1; j < current.length; j++) {
+      const dx = xCoords[i] - xCoords[j];
+      const dy = yCoords[i] - yCoords[j];
+      pairsDist.push(Math.sqrt(dx * dx + dy * dy));
+    }
+  }
+
+  const avgDist =
+    pairsDist.reduce((sum, val) => sum + val, 0) / pairsDist.length;
+
+  const a = (avgDist - 4.2) * 2.2;
+  const b = (meanX - 4.0) * 0.75;
+  const discriminant = 4 * Math.pow(a, 3) + 27 * Math.pow(b, 2);
+
+  let regime = "STABLE_MONOSTABLE";
+  let feedback = "Nominal";
+  let impact = 0;
+  let severity: SeverityLevel = "low";
+
+  if (discriminant <= 0) {
+    regime = "BIFURCATION_ACTIVE";
+    feedback =
+      "Rupture topologique active. Distribution spatiale bimodalitaire hautement asymétrique.";
+    severity = discriminant < -15 ? "critical" : "high";
+    impact = Math.min(65, Math.round(25 + Math.abs(discriminant) * 1.5));
+  } else {
+    if (discriminant < 5) {
+      regime = "CRITICAL_TENSION";
+      feedback =
+        "Proximité de point critique. Risque imminent de glissement de phase topologique.";
+      severity = "medium";
+      impact = 15;
+    } else {
+      regime = "STABLE_MONOSTABLE";
+      feedback =
+        "Régime stable monostable. Tensions spatiales régies par une entropie saine.";
+      severity = "low";
+      impact = 0;
+    }
+  }
+
+  const compressionFactor = Math.abs(avgDist - 4.2) / 2.0;
+  const centerDrift =
+    Math.sqrt(Math.pow(meanX - 4, 2) + Math.pow(meanY - 4.5, 2)) / 3.8;
+  const rawTension = (compressionFactor * 0.65 + centerDrift * 0.35) * 100;
+  const topologicalTensionIndex = Math.min(
+    100,
+    Math.max(8, Math.round(rawTension)),
+  );
+
+  if (impact > 0) {
+    indicators.push({
+      type: "CATASTROPHE_RUPTURE",
+      label: "Topologie de Rupture Spatiale",
+      value: `Δ = ${discriminant.toFixed(2)} (${regime})`,
+      severity,
+      description: `${feedback} Tension topologique mesurée à ${topologicalTensionIndex}%.`,
+      impact,
+    });
+
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: severity === "critical" ? "critical" : "warn",
+      indicator: "CATASTROPHE_RUPTURE",
+      message: `René Thom Cusp Catastrophe détectée: Discriminant=${discriminant.toFixed(2)} (${regime}). Tensions spatiales compressées/asymétriques.`,
+    });
+
+    suspicionPoints += impact;
+  }
+
+  return {
+    topologicalTensionIndex,
+    catastropheControlParams: {
+      a,
+      b,
+      discriminant,
+      regime,
+    },
+    indicators,
+    logs,
+    points: suspicionPoints,
+  };
+};
+
+// ============================================================================
+// PRIMARY ANALYSIS FACADE
+// ============================================================================
+
+export const analyzeForManipulation = (
+  rawNumbers: number[],
+  history: DrawResult[],
+  config: AuditConfig = dynamicThresholds,
+): ForensicAuditResult => {
+  const startTime = performance.now();
+
+  validateInputs(rawNumbers, history);
+  const numbers = new Uint8Array(rawNumbers.map((n) => Number(n)));
+
+  // Generate a deterministic audit ID
+  let dataStr = "";
+  for (let i = 0; i < numbers.length; i++) dataStr += numbers[i] + "-";
+  dataStr += history.length;
+  let hash = 0;
+  for (let i = 0; i < dataStr.length; i++) {
+    hash = (hash << 5) - hash + dataStr.charCodeAt(i);
+    hash |= 0;
+  }
+  const safeAuditId = `audit_${Math.abs(hash)}_${history.length}`;
+
+  if (history.length < config.minHistorySize) {
+    return {
+      auditId: safeAuditId,
+      version: "2.1.0",
+      timestamp: new Date().toISOString(),
+      suspicionScore: 0,
+      indicators: [],
+      riggedProbability: 0,
+      unifiedIntegrityIndex: 50,
+      idealAlgorithmicDriftTolerance: 0.5,
+      confidenceIntervals: {
+        suspicionScore: { lower: 0, upper: 0, confidenceLevel: 0.95 },
+        riggedProbability: { lower: 0, upper: 0, confidenceLevel: 0.95 },
+        unifiedIntegrityIndex: { lower: 50, upper: 50, confidenceLevel: 0.95 },
+      },
+      entropyCollapse: false,
+      benfordCompliance: 100,
+      evidenceLogs: [
+        {
+          timestamp: new Date().toISOString(),
+          level: "info",
+          indicator: "SYSTEM",
+          message: "Historique insuffisant pour l'audit.",
+        },
+      ],
+      executionMs: performance.now() - startTime,
+    };
+  }
+
+  const benfordSampleLength = Math.min(history.length, config.benfordMinSample);
+  const benfordSample: number[] = [];
+  for (let i = 0; i < benfordSampleLength; i++) {
+    const g = history[i].gagnants;
+    for (let j = 0; j < g.length; j++) benfordSample.push(g[j]);
+  }
+  for (let i = 0; i < numbers.length; i++) benfordSample.push(numbers[i]);
+
+  const benford = calculateBenfordCompliance(benfordSample);
+  const entropy = calculateShannonEntropy(history.slice(0, 100)) || {
+    normalized: 1.0,
+  };
+
+  const indicators: ForensicIndicator[] = [];
+  const logs: ForensicLog[] = [];
+  let suspicionPoints = 0;
+
+  // --- Execute Pure Analyses (Statically Composed Framework) ---
+  const subAnalyses = [
+    analyzeHarmonyLinear(numbers, config.criticalVariance),
+    analyzeBenfordContinuous(benford.score),
+    analyzeKolmogorovSmirnovContinuous(numbers),
+    analyzeLjungBoxContinuous(history),
+    analyzeClusteringAnomalies(numbers),
+    analyzeRegistryEcho(numbers, history),
+    analyzeSigmaDrift(numbers, config),
+    analyzeEntropyCollapse(entropy.normalized, history.length),
+    analyzeTemporalCycles(numbers, history),
+    analyzeSurvivalAnomalies(numbers, history),
+    analyzeSpectralAnomalies(numbers),
+    analyzeCorrelationAnomalies(numbers, history),
+    analyzeMarkovAnomalies(numbers, history),
+    analyzeRunsTestAnomalies(numbers, history),
+    analyzeCliqueTripletAnomalies(numbers, history),
+    analyzeHurstExponentAnomalies(history),
+  ];
+
+  subAnalyses.forEach((res) => {
+    indicators.push(...res.indicators);
+    logs.push(...res.logs);
+    suspicionPoints += res.points;
+  });
+
+  const catastropheRes = analyzeCatastropheRupture(numbers);
+  indicators.push(...catastropheRes.indicators);
+  logs.push(...catastropheRes.logs);
+  suspicionPoints += catastropheRes.points;
+
+  const riggedProb = calculateBayesianRigging(
+    config.baseRiggedProbability,
+    indicators,
+  );
+  const finalSuspicionScore =
+    100 / (1 + Math.exp(-(suspicionPoints - 30) / 10));
+
+  const entropyHealth = Math.min(100, entropy.normalized * 100);
+  const bayesHealth = 100 * (1 - riggedProb);
+  const suspicionHealth = 100 - finalSuspicionScore;
+
+  // Calcul de Hurst pour hurstHealth (évaluation continue de la dérive de mémoire stochastique)
+  let H_val = 0.5;
+  const historyLengthForH = Math.min(100, history.length);
+  if (historyLengthForH >= 30) {
+    const totals: number[] = [];
+    for (let i = 0; i < historyLengthForH; i++) {
+      totals.push(
+        history[i].gagnants.reduce((sumVal, item) => sumVal + item, 0),
+      );
+    }
+    const nH = totals.length;
+    const meanH = totals.reduce((sumVal, item) => sumVal + item, 0) / nH;
+    const devAccum: number[] = Array(nH).fill(0);
+    let cumSum = 0;
+    for (let i = 0; i < nH; i++) {
+      cumSum += totals[i] - meanH;
+      devAccum[i] = cumSum;
+    }
+    let sumSquares = 0;
+    for (let i = 0; i < nH; i++) {
+      sumSquares += Math.pow(totals[i] - meanH, 2);
+    }
+    const stdDevH = Math.sqrt(sumSquares / nH);
+    if (stdDevH > 0) {
+      let maxAccum = devAccum[0];
+      let minAccum = devAccum[0];
+      for (let i = 1; i < nH; i++) {
+        if (devAccum[i] > maxAccum) maxAccum = devAccum[i];
+        if (devAccum[i] < minAccum) minAccum = devAccum[i];
+      }
+      const range = maxAccum - minAccum;
+      const rescaledRange = range / stdDevH;
+      H_val = Math.log(rescaledRange) / Math.log(nH);
+    }
+  }
+  const hurstHealth = 100 * Math.exp(-Math.abs(H_val - 0.5) / 0.15);
+  const tensionHealth =
+    100 * Math.exp(-catastropheRes.topologicalTensionIndex / 0.5);
+
+  // Expansion du Diagnostic d'Intégrité Cybernétique (UFI)
+  // Combinaison pondérée continue (30% suspicion, 30% bayésien, 10% entropie, 10% benford, 10% mémoire Hurst, 10% tension)
+  const UFI = Math.max(
+    0,
+    Math.min(
+      100,
+      suspicionHealth * 0.3 +
+        bayesHealth * 0.3 +
+        entropyHealth * 0.1 +
+        benford.score * 0.1 +
+        hurstHealth * 0.1 +
+        tensionHealth * 0.1,
+    ),
+  );
+
+  // Enregistrement des diagnostics cybernétiques détaillés sans bruit d'infrastructure
+  if (Math.abs(H_val - 0.5) > 0.2) {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      indicator: "HURST_EXPONENT",
+      message: `Déviation Hurst critique détectée (${H_val.toFixed(3)}). Susceptibilité de mémoire à long terme induisant une asymétrie d'apprentissage.`,
+    });
+  } else {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      indicator: "HURST_EXPONENT",
+      message: `Coefficient de Hurst stable (${H_val.toFixed(3)}). Dynamique brownienne canonique.`,
+    });
+  }
+
+  if (catastropheRes.topologicalTensionIndex > 0.6) {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      indicator: "CATASTROPHE_RUPTURE",
+      message: `Tension topologique élevée (${catastropheRes.topologicalTensionIndex.toFixed(3)}). Risque de transition de phase spatiale ou rupture géométrique.`,
+    });
+  } else {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      indicator: "CATASTROPHE_RUPTURE",
+      message: `Tension topologique nominale (${catastropheRes.topologicalTensionIndex.toFixed(3)}). Intégrité structurelle de la grille préservée.`,
+    });
+  }
+
+  // ========================================================================
+  // COURBE D’OUBLI FONCTIONNELLE (Ebbinghaus Forgetting Curve Temporelle)
+  // Remplacement du seuil arbitraire (1 - UFI/100) par une fonction continue.
+  // ========================================================================
+
+  // Temps t = profondeur de l'historique considéré comme 'Age' des connaissances
+  const t_age = history.length > 0 ? history.length : 1;
+
+  // Force de la mémoire S (Memory Strength) fortement corrélée à l'UFI
+  // UFI (0-100) -> S (0.1 - 1.0)
+  // Si UFI est bas (système chaotique), S est faible, l'oublie est rapide.
+  // Si UFI est haut (système déterministe), S est fort, l'oublie est très lent.
+  const memoryStrength = Math.max(0.1, UFI / 100.0);
+
+  // La persistance de la mémoire du modèle (R) selon Ebbinghaus : R = e^(-t / S)
+  // On ajoute une constante de temps T_half = 30 tirages
+  const timeConstant = 30.0;
+  const memoryRetention = Math.exp(-t_age / (memoryStrength * timeConstant));
+
+  // La Tolérance à la Dérive Algorithmique devient la fonction Inverse de la Rétention
+  // Plus on "oublie", plus on laisse le système dériver et s'adapter
+  const idealDriftTolerance = Math.max(0.01, 1.0 - memoryRetention);
+
+  const nSample = history.length > 0 ? history.length : 1;
+  const confidenceThreshold =
+    1 / (1 + Math.exp(-(entropy.normalized - 0.5) * 10));
+  const zConf = Math.min(
+    3.0,
+    Math.max(
+      1.0,
+      Math.sqrt(Math.abs(-2 * Math.log(1 - confidenceThreshold * 0.99))),
+    ),
+  );
+
+  const pRigged = riggedProb;
+  const wilsonDenom = 1 + (zConf * zConf) / nSample;
+  const wilsonCenter =
+    (pRigged + (zConf * zConf) / (2 * nSample)) / wilsonDenom;
+  const wilsonSpread =
+    (zConf *
+      Math.sqrt(
+        (pRigged * (1 - pRigged)) / nSample +
+          (zConf * zConf) / (4 * Math.pow(nSample, 2)),
+      )) /
+    wilsonDenom;
+
+  const riggedProbLower = Math.max(0, wilsonCenter - wilsonSpread);
+  const riggedProbUpper = Math.min(1, wilsonCenter + wilsonSpread);
+
+  const empiricalStdErrScore =
+    (100 * (1 - entropy.normalized)) / Math.sqrt(nSample);
+  const empiricalStdErrUFI =
+    (100 * (1 - Math.pow(entropy.normalized, 2))) / Math.sqrt(nSample);
+
+  const df = nSample > 1 ? nSample - 1 : 1;
+  const tVal = zConf * (1 + (Math.pow(zConf, 2) + 1) / (4 * df));
+
+  const scoreMargin = tVal * empiricalStdErrScore;
+  const ufiMargin = tVal * empiricalStdErrUFI;
+
+  return {
+    auditId: safeAuditId,
+    version: "2.1.0",
+    timestamp: new Date().toISOString(),
+    suspicionScore: finalSuspicionScore,
+    riggedProbability: riggedProb,
+    unifiedIntegrityIndex: UFI,
+    idealAlgorithmicDriftTolerance: idealDriftTolerance,
+    topologicalTensionIndex: catastropheRes.topologicalTensionIndex,
+    catastropheControlParams: catastropheRes.catastropheControlParams,
+    confidenceIntervals: {
+      suspicionScore: {
+        lower: Math.max(0, finalSuspicionScore - scoreMargin),
+        upper: Math.min(100, finalSuspicionScore + scoreMargin),
+        confidenceLevel: confidenceThreshold,
+      },
+      riggedProbability: {
+        lower: riggedProbLower,
+        upper: riggedProbUpper,
+        confidenceLevel: confidenceThreshold,
+      },
+      unifiedIntegrityIndex: {
+        lower: Math.max(0, UFI - ufiMargin),
+        upper: Math.min(100, UFI + ufiMargin),
+        confidenceLevel: confidenceThreshold,
+      },
+    },
+    indicators: indicators.sort((a, b) => b.impact - a.impact),
+    entropyCollapse: entropy.normalized < 0.85,
+    benfordCompliance: benford.score,
+    evidenceLogs: logs,
+    executionMs: performance.now() - startTime,
+  };
+};
+
+export const generateShadowOracleVector = (history: DrawResult[]): number[] => {
+  if (!history || history.length === 0) return [];
+
+  const frequencies: Record<number, number> = {};
+  history.forEach((draw) => {
+    draw.gagnants.forEach((num) => {
+      frequencies[num] = (frequencies[num] || 0) + 1;
+    });
+  });
+
+  return Object.entries(frequencies)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map((entry) => parseInt(entry[0], 10))
+    .sort((a, b) => a - b);
+};
+
+// ============================================================================
+// STATISTICAL MATHEMATICAL FORMULAS (ZERO MAGIC NUMBER)
+// ============================================================================
+
+const normalCDF = (x: number, mean: number, std: number): number => {
+  const z = (x - mean) / Math.max(Number.EPSILON, std);
+  const t = 1.0 / (1.0 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp((-z * z) / 2.0);
+  const p =
+    d *
+    t *
+    (0.3193815 +
+      t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1.0 - p : p;
+};
+
+const poissonSurvivalFunction = (k: number, lambda: number): number => {
+  if (k <= 0) return 1.0;
+  let cdf = 0;
+  for (let i = 0; i < k; i++) {
+    cdf += (Math.pow(lambda, i) * Math.exp(-lambda)) / factorial(i);
+  }
+  return 1.0 - cdf;
+};
+
+const factorial = (n: number): number => {
+  if (n === 0 || n === 1) return 1;
+  let res = 1;
+  for (let i = 2; i <= n; i++) res *= i;
+  return res;
+};
+
+const calculateBayesianRigging = (
+  baseProb: number,
+  indicators: ForensicIndicator[],
+): number => {
+  let odds = baseProb / (1 - baseProb);
+
+  for (const ind of indicators) {
+    const registryEntry = INDICATOR_REGISTRY.get(ind.type);
+    if (registryEntry) {
+      let likelihoodRatio = registryEntry.baseLikelihood;
+      likelihoodRatio *= registryEntry.severityMultipliers[ind.severity] || 1.0;
+      odds *= likelihoodRatio;
+    }
+  }
+
+  if (!Number.isFinite(odds)) return 1.0;
+  return odds / (1 + odds);
+};
+
+// ============================================================================
+// FORENSIC REPORT GENERATION MOTOR (with KL & Cross-Entropy)
+// ============================================================================
+
+export const generateForensicReport = (
+  combo: number[],
+  history: DrawResult[],
+  calibration: EmpiricalCalibration = FALLBACK_CALIBRATION,
+  algoWeights: Record<AlgoKey, number> = DEFAULT_ALGO_WEIGHTS,
+  predictionMatrix?: Record<number, ScoreBreakdown>,
+): ForensicReport => {
+  const sortedCombo = [...combo].sort((a, b) => a - b);
+  const n = sortedCombo.length;
+
+  const sum = sortedCombo.reduce((a, b) => a + b, 0);
+  const amplitude = sortedCombo[n - 1] - sortedCombo[0];
+  const ac = calculateACValue(sortedCombo);
+
+  let consecutives = 0;
+  for (let i = 0; i < n - 1; i++) {
+    if (sortedCombo[i + 1] - sortedCombo[i] === 1) consecutives++;
+  }
+
+  const odds = sortedCombo.filter((x) => x % 2 !== 0).length;
+
+  const sumZ =
+    (sum - calibration.meanSum) / Math.max(Number.EPSILON, calibration.stdSum);
+  const sumProb = 2 * (1 - normalCDF(Math.abs(sumZ), 0, 1));
+
+  const ampZ =
+    (amplitude - calibration.meanAmplitude) /
+    Math.max(Number.EPSILON, calibration.stdAmplitude);
+  const ampProb = 2 * (1 - normalCDF(Math.abs(ampZ), 0, 1));
+
+  const acZ =
+    (ac - calibration.meanAC) / Math.max(Number.EPSILON, calibration.stdAC);
+  const acProb = 2 * (1 - normalCDF(Math.abs(acZ), 0, 1));
+
+  const consecProb = poissonSurvivalFunction(
+    consecutives,
+    calibration.lambdaConsecutives || 0.5,
+  );
+
+  const parityProbExact =
+    (factorial(n) / (factorial(odds) * factorial(n - odds))) * Math.pow(0.5, n);
+  const parityExtremeProb =
+    parityProbExact + (odds === 0 || odds === 5 ? 0 : parityProbExact);
+
+  // --- KL / CROSS-ENTROPY FORENSIC DECOMPOSITION ---
+  const pPred = new Float64Array(DOMAIN_SIZE + 1);
+  let sumExp = 0;
+
+  const shannonResult = calculateShannonEntropy(history.slice(0, 50));
+  const historyEntropy =
+    shannonResult && typeof shannonResult.normalized === "number"
+      ? shannonResult.normalized
+      : 0.95;
+  const temp = Math.max(0.1, historyEntropy * 1.5);
+
+  for (let i = 1; i <= DOMAIN_SIZE; i++) {
+    let score = 0;
+    if (predictionMatrix && predictionMatrix[i]) {
+      const bd = predictionMatrix[i];
+      Object.keys(algoWeights).forEach((kKey) => {
+        const k = kKey as AlgoKey;
+        score += (algoWeights[k] || 0) * (bd[k] || 0);
+      });
+    }
+    pPred[i] = Math.exp(score / temp);
+    sumExp += pPred[i];
+  }
+  for (let i = 1; i <= DOMAIN_SIZE; i++) {
+    pPred[i] = pPred[i] / (sumExp || Number.EPSILON);
+  }
+
+  const epsilonSmooth = 1e-4;
+  const pActual = new Float64Array(DOMAIN_SIZE + 1);
+  const actualWinners = new Set(combo);
+  for (let i = 1; i <= DOMAIN_SIZE; i++) {
+    pActual[i] = actualWinners.has(i)
+      ? (1.0 - epsilonSmooth) / Math.max(1, actualWinners.size)
+      : epsilonSmooth / Math.max(1, DOMAIN_SIZE - actualWinners.size);
+  }
+
+  let kl_divergence = 0;
+  let crossEntropy = 0;
+  for (let i = 1; i <= DOMAIN_SIZE; i++) {
+    kl_divergence +=
+      pActual[i] * Math.log(pActual[i] / (pPred[i] + Number.EPSILON));
+    crossEntropy -= pActual[i] * Math.log(pPred[i] + Number.EPSILON);
+  }
+
+  const errorGradients: Record<AlgoKey, number> = {} as any;
+  Object.keys(algoWeights).forEach((kKey) => {
+    const k = kKey as AlgoKey;
+    let grad = 0;
+    for (let i = 1; i <= DOMAIN_SIZE; i++) {
+      const score_i_k = predictionMatrix?.[i]?.[k] || 0;
+      grad += (pPred[i] - pActual[i]) * score_i_k;
+    }
+    errorGradients[k] = grad;
+  });
+
+  const cvSum = calibration.stdSum / (calibration.meanSum || 1.1);
+  const cvAmp = calibration.stdAmplitude / (calibration.meanAmplitude || 1.1);
+  const cvAC = calibration.stdAC / (calibration.meanAC || 1.1);
+  const parityStdError = Math.sqrt(0.25 / n);
+  const lambda = calibration.lambdaConsecutives || 0.5;
+
+  const logProbSum =
+    Math.log(Math.max(Number.EPSILON, sumProb)) +
+    Math.log(Math.max(Number.EPSILON, ampProb)) +
+    Math.log(Math.max(Number.EPSILON, acProb)) +
+    Math.log(Math.max(Number.EPSILON, consecProb)) +
+    Math.log(Math.max(Number.EPSILON, parityExtremeProb));
+
+  const maxExpectedLogDeviation =
+    5.0 * Math.log(DOMAIN_SIZE) * (1.0 + historyEntropy);
+  const rawAnomalyScore = Math.max(
+    0,
+    100 * (1.0 + logProbSum / maxExpectedLogDeviation),
+  );
+  const forensicScore = Math.min(100, Math.round(rawAnomalyScore));
+
+  const proposedAdjustments: AlgorithmicAdjustment[] = [];
+  const smoothGating = (val: number) =>
+    val / (1.0 + Math.exp(-50.0 * (Math.abs(val) - 0.01)));
+
+  // A. SPECTRAL Adjustments
+  const sigma95 = 1.95996;
+  const slopeAC = 2.0 / Math.max(0.1, historyEntropy);
+  const acDivergenceFactor =
+    1.0 / (1.0 + Math.exp(-slopeAC * (Math.abs(acZ) - sigma95)));
+  const gradStructural = errorGradients[AlgoKey.SPECTRAL] || 0;
+  const rawChangeAC = -cvAC * (0.7 * acDivergenceFactor + 0.3 * gradStructural);
+  const proposedChangeAC = smoothGating(rawChangeAC);
+
+  if (Math.abs(proposedChangeAC) > 0.001) {
+    proposedAdjustments.push({
+      algo: AlgoKey.SPECTRAL,
+      proposedWeightChange: proposedChangeAC,
+      reason: `Asservissement d'isomorphisme arithmétique continu : AC dévie de ${acZ.toFixed(2)}σ. Gradient d'erreur: ${gradStructural.toFixed(4)}. Ajustement de ${(proposedChangeAC * 100).toFixed(2)}%.`,
+    });
+  }
+
+  // B. GAPS Adjustments
+  const gradGaps = errorGradients[AlgoKey.GAPS] || 0;
+  const rawChangeGaps =
+    -cvAmp * (0.6 * (ampZ / (1.0 + Math.abs(ampZ))) + 0.4 * gradGaps);
+  const proposedChangeGaps = smoothGating(rawChangeGaps);
+
+  if (Math.abs(proposedChangeGaps) > 0.001) {
+    proposedAdjustments.push({
+      algo: AlgoKey.GAPS,
+      proposedWeightChange: proposedChangeGaps,
+      reason: `Régulateur continu d'amplitude spatiale (CV: ${cvAmp.toFixed(3)}) : déviance amplitude de ${ampZ.toFixed(2)}σ.Gradient: ${gradGaps.toFixed(4)}. Ajustement de ${(proposedChangeGaps * 100).toFixed(2)}%.`,
+    });
+  }
+
+  // C. FREQUENCY Adjustments
+  const consecDivergence = 1.0 - consecProb;
+  const gradFreq = errorGradients[AlgoKey.FREQUENCY] || 0;
+  const rawChangeFreq =
+    -lambda * (0.6 * Math.pow(consecDivergence, 3) + 0.4 * gradFreq);
+  const proposedChangeFreq = smoothGating(rawChangeFreq);
+
+  if (Math.abs(proposedChangeFreq) > 0.001) {
+    proposedAdjustments.push({
+      algo: AlgoKey.FREQUENCY,
+      proposedWeightChange: proposedChangeFreq,
+      reason: `Filtre anti-grappes de Poisson : déviance séquentielle de ${(consecDivergence * 100).toFixed(1)}%. Gradient: ${gradFreq.toFixed(4)}. Ajustement de ${(proposedChangeFreq * 100).toFixed(2)}%.`,
+    });
+  }
+
+  // D. FRACTAL Adjustments (Gaussian Centering Force)
+  const gradSum = errorGradients[AlgoKey.FRACTAL] || 0;
+  const rawChangeSum =
+    cvSum * (0.7 * (1.0 - Math.exp(-0.5 * sumZ * sumZ)) - 0.3 * gradSum);
+  const sumCenteringForce = smoothGating(rawChangeSum);
+
+  if (Math.abs(sumCenteringForce) > 0.001) {
+    proposedAdjustments.push({
+      algo: AlgoKey.FRACTAL,
+      proposedWeightChange: sumCenteringForce,
+      reason: `Rappel de centrage gaussien : somme distante de ${sumZ.toFixed(2)}σ. Gradient: ${gradSum.toFixed(4)}. Activation FRACTAL de ${(sumCenteringForce * 100).toFixed(2)}%.`,
+    });
+  }
+
+  // E. SPATIAL Adjustments (Binomial Harmonization)
+  const parityAnomaly = 1.0 - parityExtremeProb;
+  const gradEquil = errorGradients[AlgoKey.SPATIAL] || 0;
+  const rawChangeEquil =
+    parityStdError * (0.7 * Math.pow(parityAnomaly, 2) - 0.3 * gradEquil);
+  const proposedChangeEquil = smoothGating(rawChangeEquil);
+
+  if (Math.abs(proposedChangeEquil) > 0.001) {
+    proposedAdjustments.push({
+      algo: AlgoKey.SPATIAL,
+      proposedWeightChange: proposedChangeEquil,
+      reason: `Stabilisateur harmonique binomial de parité : rareté de parité à ${(parityAnomaly * 100).toFixed(1)}%. Gradient: ${gradEquil.toFixed(4)}. Alignement de SPATIAL de ${(proposedChangeEquil * 100).toFixed(2)}%.`,
+    });
+  }
+
+  // F. OTHER GENERAL ALGO DIRECT GRADIENTS
+  Object.keys(algoWeights).forEach((kKey) => {
+    const k = kKey as AlgoKey;
+    if (
+      k !== AlgoKey.SPECTRAL &&
+      k !== AlgoKey.GAPS &&
+      k !== AlgoKey.FREQUENCY &&
+      k !== AlgoKey.FRACTAL &&
+      k !== AlgoKey.SPATIAL
+    ) {
+      const grad = errorGradients[k] || 0;
+      const lr_general =
+        0.05 / Math.sqrt(history.length > 0 ? history.length : 1);
+      const rawGeneralChange = -lr_general * grad;
+      const proposedGeneralChange = smoothGating(rawGeneralChange);
+
+      if (Math.abs(proposedGeneralChange) > 0.001) {
+        proposedAdjustments.push({
+          algo: k,
+          proposedWeightChange: proposedGeneralChange,
+          reason: `Rétroaction de gradient continu direct pour l'algo '${k}' : Gradient: ${grad.toFixed(4)}. Ajustement de ${(proposedGeneralChange * 100).toFixed(2)}%.`,
+        });
+      }
+    }
+  });
+
+  // Black Swan & Thermal Noise Threshold
+  const systemicThermalNoiseFloor =
+    1.0 / Math.sqrt(history.length > 0 ? history.length : 1);
+  let jointPredProbModel = 1.0;
+  combo.forEach((nVal) => {
+    if (nVal >= 1 && nVal <= DOMAIN_SIZE) {
+      jointPredProbModel *= pPred[nVal];
+    } else {
+      jointPredProbModel *= 1.0 / DOMAIN_SIZE;
+    }
+  });
+  const isBlackSwan = jointPredProbModel < systemicThermalNoiseFloor * 1e-12;
+
+  const uniqueDecades = new Set(sortedCombo.map((x) => Math.floor(x / 10)))
+    .size;
+  const maxDecades = Math.min(n, 9);
+  const decadeEntropy = uniqueDecades / maxDecades;
+  const klDivergenceProxy = 1.0 - decadeEntropy;
+
+  const comboHash = sortedCombo.reduce(
+    (acc, val, idx) => acc + val * Math.pow(DOMAIN_SIZE, idx),
+    0,
+  );
+  const id = `rep_${comboHash}_${history.length}`;
+
+  return {
+    id,
+    drawName: history[0]?.drawName || "Loto",
+    date: history[0]?.date || new Date().toISOString(),
+    matches: [],
+    missedOpportunities: [],
+    scoreDivergence: [],
+    timestamp: new Date().toISOString(),
+    combo,
+    forensicScore,
+    metrics: {
+      sum,
+      amplitude,
+      ac,
+      consecutives,
+      odds,
+    },
+    statisticalDeviations: {
+      sumZScore: sumZ,
+      amplitudeZScore: ampZ,
+      acZScore: acZ,
+      consecutivesPValue: consecProb,
+      parityPValue: parityExtremeProb,
+    },
+    proposedAdjustments,
+    kl_divergence,
+    klDivergenceProxy,
+    isBlackSwan,
+  };
+};
+
+// ============================================================================
+// CONTINUOUS DNA CO-CALIBRATION MOTOR
+// ============================================================================
+
+export const calibrateAlgorithmicDNA = (
+  currentWeights: Record<AlgoKey, number>,
+  forensicReport: ForensicReport,
+  learningRate?: number,
+): Record<AlgoKey, number> => {
+  const adjusted = { ...currentWeights };
+  const historySize = 50;
+
+  const lr =
+    learningRate !== undefined
+      ? learningRate
+      : (0.1 / Math.sqrt(historySize)) *
+        (1.0 -
+          (forensicReport.shannon_entropy
+            ? (forensicReport.shannon_entropy / Math.log2(90)) * 0.5
+            : 0.25));
+
+  if (
+    forensicReport.proposedAdjustments &&
+    forensicReport.proposedAdjustments.length > 0
+  ) {
+    forensicReport.proposedAdjustments.forEach((adj) => {
+      const key = adj.algo as AlgoKey;
+      if (adjusted[key] !== undefined) {
+        adjusted[key] = adjusted[key] + lr * adj.proposedWeightChange;
+      }
+    });
+  }
+
+  if (forensicReport.isBlackSwan) {
+    const keysAll = Object.keys(adjusted) as AlgoKey[];
+    keysAll.forEach((k) => {
+      if (
+        k === AlgoKey.GAPS ||
+        k === AlgoKey.SPECTRAL ||
+        k === AlgoKey.FRACTAL ||
+        k === AlgoKey.SPATIAL ||
+        k === AlgoKey.BAYES
+      ) {
+        adjusted[k] += 0.3;
+      } else {
+        adjusted[k] = Math.max(0.01, adjusted[k] * 0.4);
+      }
+    });
+  }
+
+  let total = 0;
+  Object.keys(adjusted).forEach((k) => {
+    adjusted[k as AlgoKey] = Math.max(0.01, adjusted[k as AlgoKey]);
+    total += adjusted[k as AlgoKey];
+  });
+  if (total > 0) {
+    Object.keys(adjusted).forEach((k) => {
+      adjusted[k as AlgoKey] = adjusted[k as AlgoKey] / total;
+    });
+  }
+
+  return adjusted;
+};
+
+export const aggregateForensicDrift = (
+  reports: ForensicReport[],
+): Record<string, { mean: number; std: number }> => {
+  if (reports.length === 0) return {};
+
+  const algoDeviations: Record<string, number[]> = {};
+
+  reports.forEach((report) => {
+    report.proposedAdjustments?.forEach((adj) => {
+      if (!algoDeviations[adj.algo]) algoDeviations[adj.algo] = [];
+      algoDeviations[adj.algo].push(adj.proposedWeightChange);
+    });
+  });
+
+  const stats: Record<string, { mean: number; std: number }> = {};
+
+  Object.keys(algoDeviations).forEach((algo) => {
+    const vals = algoDeviations[algo];
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const variance =
+      vals.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / vals.length;
+    stats[algo] = { mean, std: Math.sqrt(variance) };
+  });
+
+  return stats;
+};
+
+export * from "./forensicTrainingBridge";

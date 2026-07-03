@@ -1,0 +1,301 @@
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { idbStorage } from "./idbStorage";
+import {
+  AlgoWeights,
+  Prediction,
+  SmartInsight,
+  OracleVocalContext,
+  DrawResult,
+  AnalyticsData,
+  CalibrationData,
+  SpectralMetric,
+  FractalMetric,
+  VolatilityMetric,
+  GameRegime,
+  NumberRegularity,
+  SymbioticContext,
+} from "../types";
+import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
+import {
+  getAlgoWeights,
+  saveAlgoWeights,
+} from "../services/prediction/weightsManager";
+import { EmpiricalCalibration } from "../shared/prediction.types";
+
+interface NexusState {
+  // UI State
+  drawName: string;
+  currentDrawName: string;
+  inspectingNumber: number | null;
+  hoveredNumber: number | null;
+  activeMainTab: string;
+  activeSubTab: string | null;
+  isFocusMode: boolean;
+
+  // Settings & Config
+  globalWeights: AlgoWeights;
+  isForensicOptimized: boolean;
+  isAutonomousAgentActive: boolean;
+  agentLogs: {
+    id: string;
+    timestamp: Date;
+    action: string;
+    type: "SCAN" | "AUTOTUNE" | "WARNING" | "OVERRIDE" | "META";
+    impact?: string;
+  }[];
+  vocalContext: OracleVocalContext | null;
+  useCloudEngine: boolean;
+  temporalDepth: number;
+
+  // Data State
+  history: DrawResult[];
+  stats: { number: number; count: number }[];
+  gaps: { number: number; gap: number }[];
+
+  // Analytics State
+  spectral: SpectralMetric[];
+  wavelet: SpectralMetric[];
+  fractal: FractalMetric[];
+  volatility: VolatilityMetric | null;
+  regime: GameRegime | null;
+  correlationMatrix: Record<number, { affinities: Record<number, number> }>;
+  regularity: NumberRegularity[];
+  symbioticContext: SymbioticContext | null;
+
+  // Engine State
+  lastPrediction: Prediction | null;
+  smartInsights: SmartInsight[];
+  calibration: CalibrationData | null;
+  empiricalCalibration: EmpiricalCalibration | null;
+  loading: boolean;
+
+  // Actions
+  setDrawName: (name: string) => void;
+  setInspectingNumber: (num: number | null) => void;
+  setHoveredNumber: (num: number | null) => void;
+  setFocusMode: (focus: boolean) => void;
+  navigateToModule: (mainTab: string, subTab?: string | null) => void;
+  setGlobalWeights: (weights: AlgoWeights) => void;
+  setForensicOptimized: (opt: boolean) => void;
+  setAutonomousAgentActive: (active: boolean) => void;
+  addAgentLog: (log: {
+    id: string;
+    timestamp: Date;
+    action: string;
+    type: "SCAN" | "AUTOTUNE" | "WARNING" | "OVERRIDE" | "META";
+    impact?: string;
+  }) => void;
+  setVocalContext: (ctx: OracleVocalContext | null) => void;
+  setUseCloudEngine: (useCloud: boolean) => void;
+  setTemporalDepth: (depth: number) => void;
+  setLastPrediction: (pred: Prediction | null) => void;
+  setSmartInsights: (insights: SmartInsight[]) => void;
+  setCalibration: (cal: CalibrationData | null) => void;
+  setEmpiricalCalibration: (cal: EmpiricalCalibration) => void;
+
+  // Engine Actions
+  setHistoryData: (
+    history: DrawResult[],
+    stats: { number: number; count: number }[],
+    gaps: { number: number; gap: number }[],
+  ) => void;
+  setAnalyticsData: (analytics: AnalyticsData) => void;
+  setLoading: (loading: boolean) => void;
+  refreshData: (name: string, force?: boolean) => Promise<void>;
+  updateGlobalWeights: (
+    weights: AlgoWeights,
+    targetDrawName?: string,
+  ) => Promise<void>;
+  refresh: () => Promise<void>;
+  resetInfrastructure: () => void;
+  initialize: () => void;
+}
+
+export const useNexusStore = create<NexusState>()(
+  persist(
+    (set, get) => ({
+      drawName: "Reveil",
+      currentDrawName: "Reveil",
+      inspectingNumber: null,
+      hoveredNumber: null,
+      activeMainTab: "Flux",
+      activeSubTab: null,
+      isFocusMode: false,
+
+      globalWeights: {} as AlgoWeights, // Will be initialized by initialize or getAlgoWeights
+      isForensicOptimized: false,
+      isAutonomousAgentActive: false,
+      agentLogs: [],
+      vocalContext: null,
+      useCloudEngine: true,
+      temporalDepth: 100,
+
+      history: [],
+      stats: [],
+      gaps: [],
+
+      spectral: [],
+      wavelet: [],
+      fractal: [],
+      volatility: null,
+      regime: null,
+      correlationMatrix: {},
+      regularity: [],
+      symbioticContext: null,
+
+      lastPrediction: null,
+      smartInsights: [],
+      calibration: null,
+      empiricalCalibration: null,
+      loading: true,
+
+      initialize: async () => {
+        // Safety boot check
+        if (
+          typeof window !== "undefined" &&
+          window.localStorage.getItem("nexus_safety_boot") === "true"
+        ) {
+          window.localStorage.removeItem("nexus_safety_boot");
+          console.warn(
+            "Nexus s'est réinitialisé en mode de sécurité pour contourner une corruption de cache.",
+          );
+        }
+
+        // Run Cache Garbage Collection to free up IndexedDB memory
+        try {
+          const { globalCache } =
+            await import("../services/cache/CacheService");
+          await globalCache.runGarbageCollection();
+        } catch (e) {
+          console.warn("Garbage collection skipped:", e);
+        }
+
+        // Écouter l'hydratation cloud pour forcer le store à se recharger depuis IndexedDB
+        if (
+          typeof window !== "undefined" &&
+          !(window as any).__NEXUS_SYNC_REGISTERED__
+        ) {
+          (window as any).__NEXUS_SYNC_REGISTERED__ = true;
+          window.addEventListener("PREFERENCES_HYDRATED", async () => {
+            try {
+              await useNexusStore.persist.rehydrate();
+              const currentDraw = useNexusStore.getState().drawName;
+              if (currentDraw) {
+                const weights = await getAlgoWeights(currentDraw);
+                set({ globalWeights: weights });
+              }
+            } catch (e) {
+              console.error(
+                "Failed to rehydrate NexusStore on cloud hydration:",
+                e,
+              );
+            }
+          });
+        }
+
+        const nextDraw = getNextScheduledDraw();
+        if (nextDraw) {
+          set({ drawName: nextDraw.name, currentDrawName: nextDraw.name });
+
+          // On initialise aussi les poids si le store est vide
+          const { globalWeights } = get();
+          if (Object.keys(globalWeights).length === 0) {
+            const weights = await getAlgoWeights(nextDraw.name);
+            set({ globalWeights: weights });
+          }
+        }
+      },
+
+      setDrawName: (name) => set({ drawName: name, currentDrawName: name }),
+      setInspectingNumber: (num) => set({ inspectingNumber: num }),
+      setHoveredNumber: (num) => set({ hoveredNumber: num }),
+      setFocusMode: (focus) => set({ isFocusMode: focus }),
+      navigateToModule: (mainTab, subTab = null) =>
+        set({ activeMainTab: mainTab, activeSubTab: subTab }),
+      setGlobalWeights: (weights) => set({ globalWeights: weights }),
+      setForensicOptimized: (opt) => set({ isForensicOptimized: opt }),
+      setAutonomousAgentActive: (active) =>
+        set({ isAutonomousAgentActive: active }),
+      addAgentLog: (log) =>
+        set((s) => ({ agentLogs: [log, ...s.agentLogs].slice(0, 15) })),
+      setVocalContext: (ctx) => set({ vocalContext: ctx }),
+      setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
+      setTemporalDepth: (depth) => set({ temporalDepth: depth }),
+      setLastPrediction: (pred) => set({ lastPrediction: pred }),
+      setSmartInsights: (insights) => set({ smartInsights: insights }),
+      setCalibration: (cal) => set({ calibration: cal }),
+      setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),
+
+      setHistoryData: (history, stats, gaps) => set({ history, stats, gaps }),
+      setAnalyticsData: (analytics) =>
+        set({
+          spectral: analytics?.spectral || [],
+          wavelet: analytics?.wavelet || [],
+          fractal: analytics?.fractal || [],
+          volatility: analytics?.volatility || null,
+          regime: analytics?.regime || null,
+          correlationMatrix: analytics?.correlationMatrix || {},
+          regularity: analytics?.regularity || [],
+          symbioticContext: analytics?.symbioticContext || null,
+        }),
+      setLoading: (loading) => set({ loading }),
+
+      refreshData: async (name, force) => {
+        set({ loading: true, drawName: name, currentDrawName: name });
+        try {
+          const { data } = await fetchResults(name, force);
+          set({ history: data });
+        } catch (error) {
+          console.error("Failed to refresh data:", error);
+        } finally {
+          set({ loading: false });
+        }
+      },
+      updateGlobalWeights: async (weights, targetDrawName) => {
+        const nameToSave = targetDrawName || get().drawName;
+        if (nameToSave === get().drawName) {
+          set({ globalWeights: weights });
+        }
+        try {
+          await saveAlgoWeights(nameToSave, weights);
+        } catch (error) {
+          console.error("Failed to save algo weights:", error);
+        }
+      },
+      refresh: async () => {
+        const { drawName } = get();
+        await get().refreshData(drawName, true);
+      },
+      resetInfrastructure: () => {
+        if (typeof window !== "undefined") {
+          import("idb-keyval").then(({ clear }) => {
+            clear();
+            window.localStorage.removeItem("nexus_safety_boot");
+            window.localStorage.removeItem("nexus-storage"); // Keep this just in case old data exists
+            window.localStorage.setItem("nexus-cloud-disabled", "true");
+            window.location.reload();
+          });
+        }
+      },
+    }),
+    {
+      name: "nexus-storage",
+      version: 2,
+      partialize: (state) => ({
+        globalWeights: state.globalWeights,
+        drawName: state.drawName,
+        useCloudEngine: state.useCloudEngine,
+        temporalDepth: state.temporalDepth,
+      }),
+      storage:
+        typeof window !== "undefined"
+          ? createJSONStorage(() => idbStorage)
+          : createJSONStorage(() => ({
+              getItem: () => null,
+              setItem: () => {},
+              removeItem: () => {},
+            })),
+    },
+  ),
+);
