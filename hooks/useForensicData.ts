@@ -158,7 +158,17 @@ export const useForensicData = (drawName: string) => {
                 const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
                 return tB - tA;
             });
-            setReports(sortedReports);
+
+            // Safeguard against duplicate forensic report IDs in React render key
+            const uniqueSortedMap = new Map<string, ForensicReport>();
+            sortedReports.forEach((r) => {
+                if (r && r.id) {
+                    uniqueSortedMap.set(r.id, r);
+                }
+            });
+            const uniqueSortedList = Array.from(uniqueSortedMap.values());
+
+            setReports(uniqueSortedList);
             setPendingPredictions(pending);
             setPlatinumAudits(audits);
         } catch (error) {

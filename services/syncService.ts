@@ -123,7 +123,10 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 
         return mergedList;
     } catch (err: unknown) {
-        logError(new AppError((err instanceof Error ? err.message : String(err)) || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", "medium", { error: err }), { source: 'syncPredictions' });
+        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
+            ? (err as any).message
+            : String(err);
+        logError(new AppError(errorMsg || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", "medium", { error: err }), { source: 'syncPredictions' });
         return localItems;
     }
 };
@@ -140,7 +143,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
         // 1. PULL METADATA: Évite de charger les lourds journaux de preuves (Phase 3)
         const { data: cloudMetaList, error } = await supabase
             .from('forensic_reports')
-            .select('id, draw_date, draw_name, prediction_id, draw_result_id')
+            .select('id, draw_date, draw_name, prediction_id')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -168,7 +171,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 
         const mergedMap = new Map<string, ForensicReport>();
 
-        cloudMetaList?.forEach((meta: { id: string; draw_date: string; draw_name: string; prediction_id?: string; draw_result_id?: string }) => {
+        cloudMetaList?.forEach((meta: { id: string; draw_date: string; draw_name: string; prediction_id?: string }) => {
             const hasFull = loadedFullMap.has(meta.id);
             const localMatch = localReports.find(l => l.id === meta.id);
 
@@ -179,7 +182,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
                     drawName: meta.draw_name,
                     date: meta.draw_date,
                     predictionId: meta.prediction_id,
-                    drawResultId: meta.draw_result_id,
+                    drawResultId: undefined,
                     matches: [],
                     missedOpportunities: [],
                     scoreDivergence: []
@@ -221,7 +224,10 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 
         return mergedList;
     } catch (err: unknown) {
-        logError(new AppError((err instanceof Error ? err.message : String(err)) || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", "medium", { error: err }), { source: 'syncForensicReports' });
+        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
+            ? (err as any).message
+            : String(err);
+        logError(new AppError(errorMsg || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", "medium", { error: err }), { source: 'syncForensicReports' });
         return localReports;
     }
 };
@@ -309,7 +315,10 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
 
         return mergedList;
     } catch (err: unknown) {
-        logError(new AppError((err instanceof Error ? err.message : String(err)) || "Sync Learning Error", "SYNC_LEARNING_ERROR", "medium", { error: err }), { source: 'syncLearningSessions' });
+        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
+            ? (err as any).message
+            : String(err);
+        logError(new AppError(errorMsg || "Sync Learning Error", "SYNC_LEARNING_ERROR", "medium", { error: err }), { source: 'syncLearningSessions' });
         return localSessions;
     }
 };

@@ -105,15 +105,20 @@ export const getLocalForensicReports = async (): Promise<ForensicReport[]> => {
       }
     }
 
+    const uniqueReportsMap = new Map<string, ForensicReport>();
     for (const parsed of fetched) {
       const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
       const validated = ForensicReportSchema.safeParse(unwrapped);
       if (validated.success) {
-        reports.push(validated.data as ForensicReport);
+        const rep = validated.data as ForensicReport;
+        if (rep.id) {
+          uniqueReportsMap.set(rep.id, rep);
+        }
       } else {
         console.warn(`Dropped invalid forensic report:`, validated.error);
       }
     }
+    reports.push(...uniqueReportsMap.values());
   } catch (e) {
     console.error("IDB load error", e);
   }

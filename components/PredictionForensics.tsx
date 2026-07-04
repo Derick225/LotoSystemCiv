@@ -810,9 +810,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 {/* Missed Opportunities (Manquements spectrauxe) */}
                 {report.missedOpportunities &&
                   report.missedOpportunities.length > 0 && (
-                    <section className="glass-card neural-border p-6 rounded-[2rem] shadow-xl relative overflow-hidden group">
+                    <section className="bg-slate-50 dark:bg-slate-950/45 border border-slate-200 dark:border-slate-800/80 p-6 rounded-[2rem] shadow-xl relative overflow-hidden group">
                       <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(245,158,11,0.03)_50%,transparent_75%,transparent_100%)] bg-[length:20px_20px] pointer-events-none"></div>
-                      <h4 className="font-black text-white mb-5 uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
+                      <h4 className="font-black text-slate-800 dark:text-slate-200 mb-5 uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
                         <AlertOctagon
                           size={14}
                           className="text-amber-500 animate-pulse"
@@ -825,7 +825,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                           return (
                             <div
                               key={idx}
-                              className={`relative overflow-hidden p-4 rounded-2xl flex flex-col gap-3 transition-colors ${isStrong ? "bg-amber-500/10 border border-amber-500/20" : "bg-white/5 border border-white/5"}`}
+                              className={`relative overflow-hidden p-4 rounded-2xl flex flex-col gap-3 transition-colors ${isStrong ? "bg-amber-500/10 border border-amber-500/20" : "bg-white/5 border border-slate-200 dark:border-white/5"}`}
                             >
                               {isStrong && (
                                 <div className="absolute top-0 right-0 w-16 h-16 bg-amber-500/20 blur-2xl rounded-full mix-blend-screen pointer-events-none"></div>
@@ -835,15 +835,15 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                                   <NumberBall number={miss.number} size="sm" />
                                 </div>
                                 <div className="flex-1">
-                                  <div className="text-xs font-mono font-bold text-amber-400 mb-1">
+                                  <div className="text-xs font-mono font-bold text-amber-500 dark:text-amber-400 mb-1">
                                     Numéro {miss.number}{" "}
                                     {isStrong && (
-                                      <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-widest">
+                                      <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 uppercase tracking-widest font-black">
                                         Anomalie Signal
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
                                     {miss.reason}
                                   </div>
                                 </div>
@@ -856,9 +856,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                   )}
 
                 {/* Algorithm Drift */}
-                <section className="glass-card neural-border p-6 rounded-[2rem] shadow-xl relative overflow-hidden">
-                  <h4 className="font-black text-white mb-5 uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
-                    <Activity size={14} className="text-indigo-400" /> Flux de
+                <section className="bg-slate-50 dark:bg-slate-950/45 border border-slate-200 dark:border-slate-800/80 p-6 rounded-[2rem] shadow-xl relative overflow-hidden">
+                  <h4 className="font-black text-slate-800 dark:text-slate-200 mb-5 uppercase text-[10px] tracking-[0.2em] flex items-center gap-2">
+                    <Activity size={14} className="text-indigo-500 dark:text-indigo-400" /> Flux de
                     Dérive Algorithmique
                   </h4>
                   <div className="space-y-5">
@@ -869,14 +869,14 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                         return (
                           <div key={i} className="flex flex-col gap-2">
                             <div className="flex justify-between items-center">
-                              <span className="text-[10px] uppercase tracking-widest font-bold text-slate-300">
+                              <span className="text-[10px] uppercase tracking-widest font-bold text-slate-700 dark:text-slate-300">
                                 {drift.algo.replace(/_/g, " ")}
                               </span>
                               <span
                                 className={`text-[9px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border ${
                                   drift.direction === "overestimating"
-                                    ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                    ? "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/20"
+                                    : "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/20"
                                 }`}
                               >
                                 {drift.direction === "overestimating"
@@ -885,7 +885,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                               </span>
                             </div>
                             <div className="flex items-center gap-3">
-                              <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden flex relative">
+                              <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-850 rounded-full overflow-hidden flex relative">
                                 {drift.direction === "overestimating" ? (
                                   <div
                                     className="absolute right-0 h-full bg-gradient-to-l from-rose-500 to-transparent"
@@ -901,8 +901,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                               <span
                                 className={`font-mono text-xs font-black ${
                                   drift.direction === "overestimating"
-                                    ? "text-rose-400"
-                                    : "text-emerald-400"
+                                    ? "text-rose-500 dark:text-rose-400"
+                                    : "text-emerald-500 dark:text-emerald-400"
                                 }`}
                               >
                                 {Math.round(driftVal)}%

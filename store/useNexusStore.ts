@@ -46,6 +46,7 @@ interface NexusState {
   }[];
   vocalContext: OracleVocalContext | null;
   useCloudEngine: boolean;
+  useSpatioTemporalHawkes: boolean;
   temporalDepth: number;
 
   // Data State
@@ -88,6 +89,7 @@ interface NexusState {
   }) => void;
   setVocalContext: (ctx: OracleVocalContext | null) => void;
   setUseCloudEngine: (useCloud: boolean) => void;
+  setUseSpatioTemporalHawkes: (enabled: boolean) => void;
   setTemporalDepth: (depth: number) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
@@ -129,6 +131,7 @@ export const useNexusStore = create<NexusState>()(
       agentLogs: [],
       vocalContext: null,
       useCloudEngine: true,
+      useSpatioTemporalHawkes: true,
       temporalDepth: 100,
 
       history: [],
@@ -221,6 +224,7 @@ export const useNexusStore = create<NexusState>()(
         set((s) => ({ agentLogs: [log, ...s.agentLogs].slice(0, 15) })),
       setVocalContext: (ctx) => set({ vocalContext: ctx }),
       setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
+      setUseSpatioTemporalHawkes: (enabled) => set({ useSpatioTemporalHawkes: enabled }),
       setTemporalDepth: (depth) => set({ temporalDepth: depth }),
       setLastPrediction: (pred) => set({ lastPrediction: pred }),
       setSmartInsights: (insights) => set({ smartInsights: insights }),
@@ -286,6 +290,7 @@ export const useNexusStore = create<NexusState>()(
         globalWeights: state.globalWeights,
         drawName: state.drawName,
         useCloudEngine: state.useCloudEngine,
+        useSpatioTemporalHawkes: state.useSpatioTemporalHawkes,
         temporalDepth: state.temporalDepth,
       }),
       storage:

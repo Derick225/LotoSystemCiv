@@ -16,6 +16,8 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
   const { flags, toggleFlag } = useFeatureFlags();
   const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
   const setForensicOptimized = useNexusStore((state) => state.setForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
+  const setUseSpatioTemporalHawkes = useNexusStore((state) => state.setUseSpatioTemporalHawkes);
 
   return (
     <>
@@ -160,6 +162,23 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
                 <button
                   onClick={() => toggleFlag("bayesianShrinkage")}
                   className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${flags.bayesianShrinkage ? "bg-pink-500 justify-end" : "bg-slate-300 dark:bg-slate-750 justify-start"}`}
+                >
+                  <span className="w-4 h-4 bg-white rounded-full shadow" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800">
+                <div className="flex flex-col pr-2">
+                  <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">
+                    Hawkes Spatio-Temporel
+                  </span>
+                  <span className="text-[8px] text-slate-550 dark:text-slate-400 font-medium">
+                    Décroissance d'après-coups géométrique
+                  </span>
+                </div>
+                <button
+                  onClick={() => setUseSpatioTemporalHawkes(!useSpatioTemporalHawkes)}
+                  className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${useSpatioTemporalHawkes ? "bg-cyan-500 justify-end" : "bg-slate-300 dark:bg-slate-750 justify-start"}`}
                 >
                   <span className="w-4 h-4 bg-white rounded-full shadow" />
                 </button>

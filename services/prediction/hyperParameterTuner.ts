@@ -1,4 +1,6 @@
 import { DrawResult, AlgoWeights } from "../../types";
+import { useNexusStore } from "../../store/useNexusStore";
+import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures } from "./featureExtractor";
 import {
@@ -125,7 +127,11 @@ const simulateInferenceWithHyperparameters = async (
   const anomalyScores = calculateAnomalyScores(localHistoryContext);
   
   // Utilisation directe du paramètre hawkesDecay
-  const hawkesExcitationScores = calculateHawkesExcitation(localHistoryContext);
+  const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
+  const activeDrawName = useNexusStore.getState().drawName;
+  const hawkesExcitationScores = useSpatioTemporalHawkes
+    ? calculateSpatioTemporalHawkes(localHistoryContext, activeDrawName)
+    : calculateHawkesExcitation(localHistoryContext);
   for (const k in hawkesExcitationScores) {
     hawkesExcitationScores[k] *= (params.hawkesDecay / 0.15);
   }

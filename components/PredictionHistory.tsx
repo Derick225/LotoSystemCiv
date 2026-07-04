@@ -272,16 +272,38 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                                                             {hits.length >= 3 && <div className="flex items-center gap-2 text-xs font-black text-emerald-600 bg-emerald-50 p-1.5 rounded-lg animate-bounce-subtle"><CheckCircle2 size={12}/> PRÉCISION ÉLITE DÉTECTÉE</div>}
                                                         </div>
                                                     ) : (
-                                                        <div className="flex flex-col items-center justify-center h-full relative group">
-                                                            <div className="flex flex-col items-center justify-center gap-2 opacity-30 text-slate-400 transition-opacity group-hover:opacity-100">
-                                                                <AlertCircle size={24}/>
-                                                                <span className="text-xs font-black uppercase tracking-[0.2em]">En attente de tirage</span>
+                                                        <div className="flex flex-col items-center justify-center p-6 bg-slate-50/50 dark:bg-slate-900/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center gap-3 relative group">
+                                                            <div className="flex flex-col items-center justify-center gap-1 text-slate-400">
+                                                                <AlertCircle size={20} className="text-indigo-400 animate-pulse" />
+                                                                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">En attente de tirage</span>
+                                                            </div>
+                                                            <div className="w-full max-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                                                                <select 
+                                                                    onChange={async (e) => {
+                                                                        const targetResultId = e.target.value;
+                                                                        if (targetResultId) {
+                                                                            audioEngine.play('click');
+                                                                            await linkPredictionToResult(item.id, targetResultId);
+                                                                            showToast("Prédiction liée avec succès !", "success");
+                                                                            audioEngine.play('success');
+                                                                            loadData();
+                                                                        }
+                                                                    }}
+                                                                    className="w-full text-[10px] font-bold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl px-2 py-1.5 border border-slate-200 dark:border-slate-700 outline-none cursor-pointer shadow-sm transition-all"
+                                                                >
+                                                                    <option value="">Associer manuellement...</option>
+                                                                    {results.slice(0, 15).map(r => (
+                                                                        <option key={r.id} value={r.id}>
+                                                                            {new Date(r.date).toLocaleDateString('fr-FR')} - {r.gagnants.join(', ')}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
                                                             </div>
                                                             <button 
                                                                 onClick={(e) => handleDelete(e, item.id)}
-                                                                className="absolute inset-0 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest text-[10px] opacity-0 group-hover:opacity-100 transition-all z-10"
+                                                                className="text-[9px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-600 flex items-center gap-1 transition-colors mt-1"
                                                             >
-                                                                <Trash2 size={14} /> Supprimer
+                                                                <Trash2 size={10} /> Supprimer
                                                             </button>
                                                         </div>
                                                     )}
@@ -289,19 +311,78 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
                                             </div>
                                             
                                             {isExpanded && (
-                                                <div className="border-t border-slate-100 dark:border-slate-700 p-2 cursor-default" onClick={(e) => e.stopPropagation()}>
-                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-4 py-2">
+                                                <div className="border-t border-slate-100 dark:border-slate-800 p-4 cursor-default bg-slate-50/30 dark:bg-slate-950/20" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-1 pb-4 border-b border-slate-100 dark:border-slate-800">
                                                         <div className="flex items-center gap-2">
                                                             <Activity size={14} className="text-indigo-500"/>
-                                                            <span className="text-[10px] font-black text-slate-500 uppercase">Analyse Structurelle Prédiction</span>
+                                                            <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Analyse Structurelle Prédiction</span>
                                                         </div>
                                                         {item.prediction.diversityMetrics && (
-                                                            <div className="text-[9px] font-black tracking-wider uppercase px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400">
+                                                            <div className="text-[9px] font-black tracking-wider uppercase px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                                                 Orthogonalité ADN : {(item.prediction.diversityMetrics.diversityScore * 100).toFixed(0)}%
                                                             </div>
                                                         )}
                                                     </div>
-                                                    <TicketXRay numbers={item.prediction.suggestedNumbers} score={item.prediction.confidence} />
+                                                    
+                                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+                                                        <div>
+                                                            <TicketXRay numbers={item.prediction.suggestedNumbers} score={item.prediction.confidence} showTitle={false} />
+                                                        </div>
+                                                        {res ? (
+                                                            <div className="p-4 md:p-6 bg-slate-900 rounded-2xl md:rounded-[2rem] border border-indigo-500/30">
+                                                                <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-3">
+                                                                    <h5 className="text-[10px] md:text-xs font-black text-indigo-400 uppercase tracking-widest">
+                                                                        Distribution Spatiale
+                                                                    </h5>
+                                                                    <span className="text-[9px] font-black text-emerald-400 uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                                                                        {hits.length} HITS / 5
+                                                                    </span>
+                                                                </div>
+                                                                <div className="grid grid-cols-10 gap-1">
+                                                                    {Array.from({ length: 90 }, (_, index) => {
+                                                                        const num = index + 1;
+                                                                        const isPred = item.prediction.suggestedNumbers.includes(num);
+                                                                        const isAct = res.gagnants.includes(num);
+                                                                        const isHit = isPred && isAct;
+                                                                        const isNearMiss = !isHit && isPred && res.gagnants.some(gn => Math.abs(gn - num) === 1);
+                                                                        
+                                                                        let bg = "bg-slate-800/40 text-[7px] text-slate-600 border border-transparent";
+                                                                        if (isHit) {
+                                                                            bg = "bg-emerald-500 text-white font-black scale-105 z-10 border border-emerald-300";
+                                                                        } else if (isPred) {
+                                                                            bg = "bg-indigo-500 text-white font-semibold border border-indigo-400";
+                                                                        } else if (isAct) {
+                                                                            bg = "bg-rose-500/20 text-rose-300 border border-rose-500/30";
+                                                                        } else if (isNearMiss) {
+                                                                            bg = "bg-amber-500/25 text-amber-300 border border-amber-500/30 animate-pulse";
+                                                                        }
+                                                                        
+                                                                        return (
+                                                                            <div 
+                                                                                key={num} 
+                                                                                title={`Numéro ${num}${isHit ? ' - HIT!' : isPred ? ' - Prédit' : isAct ? ' - Gagnant' : isNearMiss ? ' - Proche' : ''}`}
+                                                                                className={`aspect-square rounded flex items-center justify-center text-[7px] md:text-[8px] transition-all duration-300 ${bg}`}
+                                                                            >
+                                                                                {num}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4 justify-center text-[8px] font-bold text-slate-400 uppercase">
+                                                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-emerald-500 rounded-sm"></div> Hit</div>
+                                                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-indigo-500 rounded-sm"></div> Prédit</div>
+                                                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-rose-500/20 border border-rose-500/30 rounded-sm"></div> Gagnant</div>
+                                                                    <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-amber-500/20 border border-amber-500/30 rounded-sm"></div> Near Miss</div>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-6 bg-slate-900 rounded-2xl md:rounded-[2rem] border border-dashed border-indigo-500/20 flex flex-col items-center justify-center text-center text-slate-500 min-h-[180px]">
+                                                                <Clock size={32} className="text-indigo-500/40 mb-3 animate-pulse" />
+                                                                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Tirage en attente d'association</span>
+                                                                <p className="text-[9px] text-slate-500 max-w-[200px] mt-1">Dès que ce tirage aura lieu ou sera associé manuellement, sa cartographie spatiale s'affichera ici.</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>

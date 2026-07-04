@@ -24,6 +24,7 @@ import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
 import { useNexusStore } from "../../store/useNexusStore";
+import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 
 const TICKET_SIZE = 5;
 
@@ -114,7 +115,10 @@ export const applyDeterministicMicroSgd = async (
       const subSpatial = calculateSpatialHotSpots(subHistory);
       const subCo = calculateCoOccurrenceScores(subHistory);
       const subAnomaly = calculateAnomalyScores(subHistory);
-      const subHawkes = calculateHawkesExcitation(subHistory);
+      const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
+      const subHawkes = useSpatioTemporalHawkes
+        ? calculateSpatioTemporalHawkes(subHistory, drawName)
+        : calculateHawkesExcitation(subHistory);
       const subLyapunov = calculateTopologicalLyapunov(subHistory);
 
       const subMetrics: EnhancedMetrics = {
@@ -259,7 +263,11 @@ export const generateMasterPredictionCore = async (
   const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext);
   const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
   const anomalyScores = calculateAnomalyScores(localHistoryContext);
-  const hawkesExcitationScores = calculateHawkesExcitation(localHistoryContext);
+  
+  const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
+  const hawkesExcitationScores = useSpatioTemporalHawkes
+    ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
+    : calculateHawkesExcitation(localHistoryContext);
 
   // Appliquer l'échelle continue du taux de processus de Hawkes
   for (const k in hawkesExcitationScores) {
