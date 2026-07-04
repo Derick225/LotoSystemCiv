@@ -7,8 +7,25 @@
     @apply bg-nexus-950 text-slate-200 antialiased overflow-x-hidden;
     overscroll-behavior-y: none; /* Empêche le pull-to-refresh natif du navigateur */
     -webkit-tap-highlight-color: transparent; /* Retire le rectangle bleu au click sur iOS */
+
+    /* Micro-typographie mobile de précision */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01"; /* Caractères alternatifs Inter optimisés pour la lecture rapide */
   }
   
+  /* Ajustement de la tension d'affichage pour les titres */
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight font-medium;
+    text-rendering: optimizeLegibility;
+  }
+
+  @media (max-width: 640px) {
+    h1 { @apply tracking-tighter leading-tight; }
+    h2, h3 { @apply tracking-tight leading-snug; }
+  }
+
   /* Platinum Selection Color */
   ::selection {
     @apply bg-indigo-500/40 text-white;
@@ -88,6 +105,36 @@
   .break-words-custom {
     word-break: break-word;
     overflow-wrap: break-word;
+  }
+
+  /* Typographie Fluide & Responsive Adaptative */
+  .text-fluid-xs { font-size: clamp(0.675rem, 0.65rem + 0.15vw, 0.75rem); }
+  .text-fluid-sm { font-size: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem); }
+  .text-fluid-base { font-size: clamp(0.875rem, 0.825rem + 0.35vw, 1rem); }
+  .text-fluid-lg { font-size: clamp(1rem, 0.95rem + 0.5vw, 1.125rem); }
+  .text-fluid-xl { font-size: clamp(1.125rem, 1.05rem + 0.65vw, 1.25rem); }
+  .text-fluid-2xl { font-size: clamp(1.25rem, 1.15rem + 0.85vw, 1.5rem); }
+  .text-fluid-3xl { font-size: clamp(1.5rem, 1.35rem + 1vw, 1.875rem); }
+  .text-fluid-4xl { font-size: clamp(1.875rem, 1.7rem + 1.3vw, 2.5rem); }
+
+  /* Interligne optimal et aéré pour la lecture longue sur petits écrans */
+  .mobile-optimal-leading {
+    line-height: 1.45;
+    @media (max-width: 640px) {
+      line-height: 1.55;
+    }
+  }
+
+  /* Alignement déterministe pour les tables et badges de numéros */
+  .num-spacing-tabular {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* Micro-espacement pour petits labels en majuscules (Mono) */
+  .micro-caps-tracking {
+    letter-spacing: 0.08em;
+    @apply uppercase;
   }
 }
 

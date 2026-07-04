@@ -941,6 +941,57 @@ export const generateMasterPrediction = async (
         }
       }
 
+      // 2. Try offloading to Web Worker to keep main thread fluid (60fps UI)
+      if (typeof Worker !== 'undefined') {
+        try {
+          return await new Promise<Prediction>((resolve, reject) => {
+            const worker = new Worker(
+              new URL('../workers/prediction.worker.ts?worker', import.meta.url),
+              { type: 'module' }
+            );
+
+            const timeoutId = setTimeout(() => {
+              worker.terminate();
+              reject(new Error("Timeout du Web Worker de prédiction locale"));
+            }, 60000);
+
+            worker.onmessage = (e: MessageEvent) => {
+              clearTimeout(timeoutId);
+              const { success, result, error } = e.data;
+              if (success) {
+                resolve(result);
+              } else {
+                reject(new Error(error || "Erreur inconnue du worker de prédiction"));
+              }
+              worker.terminate();
+            };
+
+            worker.onerror = (err) => {
+              clearTimeout(timeoutId);
+              reject(err);
+              worker.terminate();
+            };
+
+            worker.postMessage({
+              taskId: `PREDICT_${Date.now()}`,
+              drawName,
+              history,
+              temporalDepth,
+              weightsToUse,
+              metrics,
+              symbioticContext,
+              skipTraining,
+              adversarialMode,
+              forcedOutsiderCount,
+              isForensicOptimized,
+              useSpatioTemporalHawkes: useNexusStore.getState().useSpatioTemporalHawkes
+            });
+          });
+        } catch (workerError) {
+          console.warn("[WORKER] Échec d'instanciation ou d'exécution du worker de prédiction. Fallback sur thread principal.", workerError);
+        }
+      }
+
       return generateMasterPredictionCore(drawName, history, temporalDepth, weightsToUse, metrics, symbioticContext, skipTraining, adversarialMode, forcedOutsiderCount, isForensicOptimized);
     },
     CACHE_TTL.MEDIUM,
