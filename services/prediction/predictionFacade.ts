@@ -952,12 +952,26 @@ export const generateMasterPrediction = async (
       if (useCloudEngine && isSupabaseConfigured() && drawName !== "ALL_COMBINED" && drawName !== "ALL") {
         try {
           console.log(`[CLOUD COMPUTING] Délégation de la prédiction ${drawName} vers Supabase Edge Function (predict-elite)...`);
+          // Format the fractal metric array into a record structure matching what the Edge Function expects (z.record(z.number()))
+          const formattedFractal: Record<number, number> = {};
+          if (metrics && Array.isArray(metrics.fractal)) {
+            metrics.fractal.forEach((f) => {
+              if (f && typeof f.number === 'number' && typeof f.hurst === 'number') {
+                formattedFractal[f.number] = f.hurst;
+              }
+            });
+          }
+
           const result = await apiClient.post<Prediction>('predict-elite', {
             drawName,
             history,
             weights: weightsToUse,
-            symbioticContext,
-            metrics
+            symbioticContext: symbioticContext ? {
+              spatialHotZones: symbioticContext.spatialHotZones || []
+            } : undefined,
+            metrics: metrics ? {
+              fractal: formattedFractal
+            } : undefined
           });
           if (result && result.suggestedNumbers && result.suggestedNumbers.length > 0) {
             console.log(`[CLOUD COMPUTING] Prédiction ${drawName} obtenue avec succès depuis le Cloud !`);
