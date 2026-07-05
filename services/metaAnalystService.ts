@@ -84,9 +84,15 @@ export async function generatePlatinumPredictionCore(
   userOptions?: PlatinumUserOptions | null,
   symbioticContext?: SymbioticContext | null,
   _basePrediction?: Prediction,
+  onProgress?: (progress: number, message: string) => void,
+  temporalDepth?: number,
+  _useSpatioTemporalHawkes: boolean = true,
+  preloadedForensicReports?: any[]
 ): Promise<PlatinumResult> {
   
   if (history.length < 10) throw new Error("Dataset insuffisant.");
+
+  onProgress?.(5, "Calibrage du réseau de neurones artificiels...");
 
   // Configuration des options utilisateur par défaut (zéro valeurs arbitraires, entièrement continues et paramétrables)
   const opts: PlatinumUserOptions = {
@@ -98,8 +104,22 @@ export async function generatePlatinumPredictionCore(
 
   // 1. ACQUISITION DES SIGNAUX BRUTS (Base Prediction)
   const weights = await getAlgoWeights(drawName);
-  const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
-  const masterPred = await generateMasterPrediction(drawName, history, temporalDepth, weights, metrics, symbioticContext || undefined);
+  const finalTemporalDepth = temporalDepth ?? useNexusStore?.getState()?.temporalDepth ?? 100;
+  const masterPred = await generateMasterPrediction(
+    drawName,
+    history,
+    finalTemporalDepth,
+    weights,
+    metrics,
+    symbioticContext || undefined,
+    false,
+    false,
+    undefined,
+    false,
+    (p, msg) => {
+      onProgress?.(Math.round(p * 0.7), msg);
+    }
+  );
   let breakdowns = masterPred.breakdown || {};
 
   // EXTRACTION LOCALE IMMEDIATE POUR GARANTIR LA DUALITÉ DES SCENARIOS
@@ -154,6 +174,7 @@ export async function generatePlatinumPredictionCore(
   }
 
   // Seconde passe d'agrégation non-linéaire (Zéro Nombre Magique)
+  onProgress?.(75, "Agrégation non-linéaire tensorielle...");
   for (let i = 1; i <= MAX_NUM; i++) {
         // Transformée de Cauchy pour gérer l'étalement pondéré par le max
         const activation = 1.0 - (1.0 / (1.0 + Math.pow(rawSums[i] / maxRawSum, 2)));
@@ -216,6 +237,7 @@ export async function generatePlatinumPredictionCore(
   const normalizedSpectral = normalizeVector(spectralVector);
 
   // 3. ANALYSE DU RÉGIME
+  onProgress?.(80, "Analyse d'entropie du régime...");
   const entropyScore = computeVectorEntropy(normalizedVector);
   
   // Transition continue (Modélisée par des probabilités d'état basées sur le pivot utilisateur)
@@ -230,6 +252,7 @@ export async function generatePlatinumPredictionCore(
   if (pChaotic > 0.5) regime = 'CHAOTIC';
 
   // 4. GÉNÉRATION DES SCÉNARIOS STRATÉGIQUES (Sélection Gloutonne avec Décalage de Phase Continu)
+  onProgress?.(85, "Génération des scénarios stratégiques...");
   const scenarios: PlatinumScenario[] = [];
   const freqPhase = opts.phaseFrequency;
 
@@ -286,19 +309,20 @@ export async function generatePlatinumPredictionCore(
   for(let i=1; i<=MAX_NUM; i++) epsilonVector[i] = normalizedVector[i] * 0.4;
   
   try {
-      const forensicReports = await getLocalForensicReports() || [];
+      onProgress?.(90, "Calcul des corrections agentiques (Epsilon)...");
+      const forensicReports = preloadedForensicReports || await getLocalForensicReports() || [];
       const recentReports = forensicReports.slice(0, 10); // Augmenté à 10 pour plus de précision
       const gain = opts.forensicGain;
       
       // Amortissement exponentiel continu basé sur l'âge du rapport (index)
-      recentReports.forEach((report, index) => {
+      recentReports.forEach((report: any, index: number) => {
           const recencyWeight = Math.exp(-0.25 * index); 
           
-          report.missedOpportunities?.forEach(miss => {
+          report.missedOpportunities?.forEach((miss: any) => {
               if (miss.number >= 1 && miss.number <= MAX_NUM) epsilonVector[miss.number] += 45 * recencyWeight * gain; 
           });
           
-          report.nearMisses?.forEach(nm => {
+          report.nearMisses?.forEach((nm: any) => {
               if (nm.actual >= 1 && nm.actual <= MAX_NUM) {
                   epsilonVector[nm.actual] += 35 * recencyWeight * gain;
                   const left = nm.actual > 1 ? nm.actual - 1 : MAX_NUM;
@@ -309,7 +333,7 @@ export async function generatePlatinumPredictionCore(
               }
           });
           
-          report.algorithmicDrift?.forEach(drift => {
+          report.algorithmicDrift?.forEach((drift: any) => {
               // Transformation continue de driftScore pour remplacer if (driftScore > 20)
               const driftActivation = 1.0 / (1.0 + Math.exp(-0.5 * (drift.driftScore - 20))); 
               for(let i=1; i<=MAX_NUM; i++) {
@@ -364,6 +388,7 @@ export async function generatePlatinumPredictionCore(
   });
 
   // 5. CALCUL DE LA COHÉRENCE GLOBALE
+  onProgress?.(95, "Calcul de la cohérence et finalisation...");
   const coherence = Math.round((1 - entropyScore) * 100);
 
   // Sécurité : S'assurer que chaque scénario a au moins les numéros par défaut (Deterministic Fallback)
@@ -390,6 +415,8 @@ export async function generatePlatinumPredictionCore(
     hashVal |= 0;
   }
   const deterministicId = `platinum_pred_${Math.abs(hashVal)}_${Date.now()}`;
+
+  onProgress?.(100, "Analyse Platinum complétée !");
 
   return {
       id: deterministicId,
@@ -471,6 +498,72 @@ export async function generatePlatinumPrediction(
   userOptions?: PlatinumUserOptions | null,
   symbioticContext?: SymbioticContext | null,
   _basePrediction?: Prediction,
+  onProgress?: (progress: number, message: string) => void,
 ): Promise<PlatinumResult> {
-    return generatePlatinumPredictionCore(drawName, history, metrics, userOptions, symbioticContext, _basePrediction);
+  if (typeof Worker !== 'undefined') {
+    try {
+      const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
+      const useSpatioTemporalHawkes = useNexusStore?.getState()?.useSpatioTemporalHawkes ?? true;
+      const forensicReports = await getLocalForensicReports() || [];
+
+      return await new Promise<PlatinumResult>((resolve, reject) => {
+        const worker = new Worker(
+          new URL('./workers/prediction.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+
+        const timeoutId = setTimeout(() => {
+          worker.terminate();
+          reject(new Error("Timeout du Web Worker de prédiction locale Platinum"));
+        }, 90000); // 90 seconds timeout for Platinum since it's heavier
+
+        worker.onmessage = (e: MessageEvent) => {
+          const { success, result, error, isProgress, progress, message } = e.data;
+          if (isProgress) {
+            onProgress?.(progress, message);
+            return;
+          }
+          clearTimeout(timeoutId);
+          if (success) {
+            resolve(result);
+          } else {
+            reject(new Error(error || "Erreur inconnue du worker de prédiction Platinum"));
+          }
+          worker.terminate();
+        };
+
+        worker.onerror = (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+          worker.terminate();
+        };
+
+        worker.postMessage({
+          taskId: `PLATINUM_${Date.now()}`,
+          type: 'platinum',
+          drawName,
+          history,
+          metrics,
+          userOptions,
+          symbioticContext,
+          _basePrediction,
+          temporalDepth,
+          useSpatioTemporalHawkes,
+          preloadedForensicReports: forensicReports
+        });
+      });
+    } catch (workerError) {
+      console.warn("[WORKER PLATINUM] Échec du worker Platinum. Fallback sur le thread principal.", workerError);
+    }
+  }
+
+  return generatePlatinumPredictionCore(
+    drawName,
+    history,
+    metrics,
+    userOptions,
+    symbioticContext,
+    _basePrediction,
+    onProgress
+  );
 }

@@ -1,5 +1,4 @@
 import { DrawResult, AlgoWeights } from "../../types";
-import { useNexusStore } from "../../store/useNexusStore";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures } from "./featureExtractor";
@@ -99,7 +98,8 @@ const simulateInferenceWithHyperparameters = async (
   drawName: string,
   history: DrawResult[],
   weights: AlgoWeights,
-  params: PredictiveHyperparameters
+  params: PredictiveHyperparameters,
+  useSpatioTemporalHawkes: boolean = true
 ): Promise<{ num: number; score: number }[]> => {
   const localHistoryContext = history.slice(0, 30); // Limite le contexte pour des performances de calcul optimales
 
@@ -127,10 +127,8 @@ const simulateInferenceWithHyperparameters = async (
   const anomalyScores = calculateAnomalyScores(localHistoryContext);
   
   // Utilisation directe du paramètre hawkesDecay
-  const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
-  const activeDrawName = useNexusStore.getState().drawName;
   const hawkesExcitationScores = useSpatioTemporalHawkes
-    ? calculateSpatioTemporalHawkes(localHistoryContext, activeDrawName)
+    ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
     : calculateHawkesExcitation(localHistoryContext);
   for (const k in hawkesExcitationScores) {
     hawkesExcitationScores[k] *= (params.hawkesDecay / 0.15);
@@ -167,7 +165,8 @@ const backtestHyperparameterSet = async (
   drawName: string,
   history: DrawResult[],
   weights: AlgoWeights,
-  params: PredictiveHyperparameters
+  params: PredictiveHyperparameters,
+  useSpatioTemporalHawkes: boolean = true
 ): Promise<number> => {
   const kValidation = Math.min(5, history.length - 11);
   if (kValidation <= 0) return 45.5;
@@ -185,7 +184,7 @@ const backtestHyperparameterSet = async (
     if (!winners || winners.length === 0) continue;
 
     try {
-      const scored = await simulateInferenceWithHyperparameters(drawName, subHistory, weights, params);
+      const scored = await simulateInferenceWithHyperparameters(drawName, subHistory, weights, params, useSpatioTemporalHawkes);
       totalRankSum += evaluateSoftRankingLoss(scored, winners);
       count++;
     } catch (e) {
@@ -204,10 +203,17 @@ const backtestHyperparameterSet = async (
 export const tunePredictiveHyperparameters = async (
   drawName: string,
   history: DrawResult[],
-  weights: AlgoWeights
+  weights: AlgoWeights,
+  useSpatioTemporalHawkes: boolean = true,
+  onProgress?: (progress: number, message: string) => void
 ): Promise<{ tunedParams: PredictiveHyperparameters; accuracyGain: number; log: string[] }> => {
   const log: string[] = [];
   const currentParams = { ...DEFAULT_HYPERPARAMETERS };
+  
+  if (typeof window !== 'undefined') {
+    log.push("Exécution sur le thread principal : optimisation lourde bypassée pour préserver la fluidité (60 FPS). Moteur cybernétique sécurisé.");
+    return { tunedParams: currentParams, accuracyGain: 0, log };
+  }
   
   if (history.length < 15) {
     log.push("Historique insuffisant pour optimiser les hyper-paramètres. Retour aux valeurs de sécurité.");
@@ -215,18 +221,20 @@ export const tunePredictiveHyperparameters = async (
   }
 
   log.push("Début de l'optimisation déterministe par descente de coordonnées...");
+  onProgress?.(12, "Début de l'optimisation déterministe des coordonnées...");
   
   // Évaluer l'exactitude initiale de base
-  const baseRank = await backtestHyperparameterSet(drawName, history, weights, currentParams);
+  const baseRank = await backtestHyperparameterSet(drawName, history, weights, currentParams, useSpatioTemporalHawkes);
   log.push(`Rang de départ moyen des gagnants : ${baseRank.toFixed(3)} (un rang plus bas est meilleur).`);
 
   // 1. Optimisation de hawkesDecay [0.05, 0.15, 0.30, 0.45]
+  onProgress?.(18, "Optimisation cybernétique : Calibrage résonance Hawkes...");
   let bestHawkes = currentParams.hawkesDecay;
   let bestHawkesRank = baseRank;
   for (const hVal of [0.05, 0.15, 0.30, 0.45]) {
     await new Promise(r => setTimeout(r, 0));
     const testParams = { ...currentParams, hawkesDecay: hVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams);
+    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
     if (rank < bestHawkesRank) {
       bestHawkesRank = rank;
       bestHawkes = hVal;
@@ -236,12 +244,13 @@ export const tunePredictiveHyperparameters = async (
   log.push(`Optimisation hawkesDecay -> ${bestHawkes} (Rang: ${bestHawkesRank.toFixed(3)})`);
 
   // 2. Optimisation de spatialSigma [0.8, 1.5, 2.2, 3.0]
+  onProgress?.(24, "Optimisation cybernétique : Calibrage de la dispersion gaussienne...");
   let bestSigma = currentParams.spatialSigma;
   let bestSigmaRank = bestHawkesRank;
   for (const sVal of [0.8, 1.5, 2.2, 3.0]) {
     await new Promise(r => setTimeout(r, 0));
     const testParams = { ...currentParams, spatialSigma: sVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams);
+    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
     if (rank < bestSigmaRank) {
       bestSigmaRank = rank;
       bestSigma = sVal;
@@ -251,12 +260,13 @@ export const tunePredictiveHyperparameters = async (
   log.push(`Optimisation spatialSigma -> ${bestSigma} (Rang: ${bestSigmaRank.toFixed(3)})`);
 
   // 3. Optimisation de gapVelocityWeight [0.5, 1.0, 1.5, 2.0]
+  onProgress?.(30, "Optimisation cybernétique : Calibrage des vitesses de transition gap...");
   let bestVelocity = currentParams.gapVelocityWeight;
   let bestVelocityRank = bestSigmaRank;
   for (const vVal of [0.5, 1.0, 1.5, 2.0]) {
     await new Promise(r => setTimeout(r, 0));
     const testParams = { ...currentParams, gapVelocityWeight: vVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams);
+    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
     if (rank < bestVelocityRank) {
       bestVelocityRank = rank;
       bestVelocity = vVal;
@@ -266,12 +276,13 @@ export const tunePredictiveHyperparameters = async (
   log.push(`Optimisation gapVelocityWeight -> ${bestVelocity} (Rang: ${bestVelocityRank.toFixed(3)})`);
 
   // 4. Optimisation de bayesWindowRatio [0.05, 0.10, 0.18, 0.25]
+  onProgress?.(36, "Optimisation cybernétique : Calibrage des probabilités de transition bayésiennes...");
   let bestBayes = currentParams.bayesWindowRatio;
   let bestBayesRank = bestVelocityRank;
   for (const bVal of [0.05, 0.10, 0.18, 0.25]) {
     await new Promise(r => setTimeout(r, 0));
     const testParams = { ...currentParams, bayesWindowRatio: bVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams);
+    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
     if (rank < bestBayesRank) {
       bestBayesRank = rank;
       bestBayes = bVal;
@@ -281,12 +292,13 @@ export const tunePredictiveHyperparameters = async (
   log.push(`Optimisation bayesWindowRatio -> ${bestBayes} (Rang: ${bestBayesRank.toFixed(3)})`);
 
   // 5. Optimisation de sgdLearningRate [0.005, 0.015, 0.030, 0.050]
+  onProgress?.(42, "Optimisation cybernétique : Calibrage du micro-SGD learning rate...");
   let bestSgd = currentParams.sgdLearningRate;
   let bestSgdRank = bestBayesRank;
   for (const sVal of [0.005, 0.015, 0.030, 0.050]) {
     await new Promise(r => setTimeout(r, 0));
     const testParams = { ...currentParams, sgdLearningRate: sVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams);
+    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
     if (rank < bestSgdRank) {
       bestSgdRank = rank;
       bestSgd = sVal;
@@ -297,6 +309,7 @@ export const tunePredictiveHyperparameters = async (
 
   const accuracyGain = baseRank - bestSgdRank;
   log.push(`Optimisation terminée. Gain net d'alignement : ${accuracyGain.toFixed(3)} rangs.`);
+  onProgress?.(45, "Calibrage cybernétique achevé.");
 
   return {
     tunedParams: currentParams,

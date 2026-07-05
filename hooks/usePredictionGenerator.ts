@@ -32,6 +32,7 @@ export const usePredictionGenerator = (drawName: string) => {
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
+    const [computingProgress, setComputingProgress] = useState<number>(0);
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [quantumMode, setQuantumMode] = useState(false);
     const { flags } = useFeatureFlags();
@@ -139,7 +140,22 @@ export const usePredictionGenerator = (drawName: string) => {
         try {
             await new Promise(r => setTimeout(r, 150)); 
             const metrics = { spectral, correlationMatrix, regularity, volatility, fractal };
-            const res = await generateMasterPrediction(drawName, history, temporalDepth, specificWeights!, metrics, symbioticContext || undefined, false, flags.adversarialMode, undefined, isForensicOptimized);
+            const res = await generateMasterPrediction(
+                drawName,
+                history,
+                temporalDepth,
+                specificWeights!,
+                metrics,
+                symbioticContext || undefined,
+                false,
+                flags.adversarialMode,
+                undefined,
+                isForensicOptimized,
+                (progress, step) => {
+                    setComputingProgress(progress);
+                    setComputingStep(step);
+                }
+            );
             
             setLastPrediction(res);
             
@@ -379,6 +395,7 @@ export const usePredictionGenerator = (drawName: string) => {
     return {
         isComputing,
         computingStep,
+        computingProgress,
         activeDNA,
         quantumMode,
         setQuantumMode,

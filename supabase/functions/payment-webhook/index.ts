@@ -66,15 +66,12 @@ Deno.serve(async (req) => {
             const expiry = new Date(now);
             expiry.setDate(expiry.getDate() + 30);
             
-            await supabaseClient.from('user_preferences').upsert({
+            await supabaseClient.from('subscriptions').upsert({
                 user_id: userId,
-                subscription: {
-                    status: 'paid',
-                    start_date: now.toISOString(),
-                    expires_at: expiry.toISOString(),
-                    plan: 'premium',
-                    last_transaction_id: cpm_trans_id
-                },
+                status: 'paid',
+                plan: 'premium',
+                start_date: now.toISOString(),
+                expires_at: expiry.toISOString(),
                 updated_at: now.toISOString()
             });
 

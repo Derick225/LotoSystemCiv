@@ -39,13 +39,7 @@ Deno.serve(async (req) => {
     }
 
     // Check if user is admin
-    const { data: adminCheck } = await supabaseClient
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (!adminCheck || adminCheck.role !== 'admin') {
+    if (user.app_metadata?.role !== 'admin') {
       return new Response(JSON.stringify({ error: 'Forbidden' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 403,
@@ -74,22 +68,22 @@ Deno.serve(async (req) => {
 
       const paginatedUsersList = users.users;
 
-      const { data: profiles, error: profilesError } = await supabaseClient
-        .from('users')
-        .select('id, role, subscription');
-      if (profilesError) throw profilesError;
+      const { data: subs, error: subsError } = await supabaseClient
+        .from('subscriptions')
+        .select('*');
+      if (subsError) throw subsError;
 
-      const profileMap = new Map(profiles.map(p => [p.id, p]));
+      const subMap = new Map(subs.map(s => [s.user_id, s]));
 
       const combinedUsers = paginatedUsersList.map(u => {
-        const profile = profileMap.get(u.id);
+        const sub = subMap.get(u.id);
         return {
           id: u.id,
           email: u.email,
           last_sign_in: u.last_sign_in_at,
           created_at: u.created_at,
-          role: profile?.role || 'user',
-          subscription: profile?.subscription || null
+          role: u.app_metadata?.role || 'user',
+          subscription: sub || null
         };
       });
 
@@ -105,10 +99,9 @@ Deno.serve(async (req) => {
     }
 
     if (params.action === 'updateRole') {
-      const { error: updateError } = await supabaseClient
-        .from('users')
-        .update({ role: params.role })
-        .eq('id', params.userId);
+      const { error: updateError } = await supabaseClient.auth.admin.updateUserById(params.userId, {
+        app_metadata: { role: params.role }
+      });
         
       if (updateError) throw updateError;
 

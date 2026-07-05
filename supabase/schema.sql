@@ -65,7 +65,16 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
   watchlist INTEGER[],
   saved_tickets JSONB,
   settings JSONB,
-  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium", "daysLeft": 30}'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- D2. ABONNEMENTS
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'trial',
+  plan TEXT DEFAULT 'premium',
+  expires_at TIMESTAMPTZ,
+  start_date TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -194,6 +203,7 @@ ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_regimes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
 -- Policies Publiques
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
@@ -206,6 +216,7 @@ CREATE POLICY "Public Read Regimes" ON public.draw_regimes FOR SELECT USING (tru
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can view their own predictions" ON public.predictions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert their own predictions" ON public.predictions FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -232,6 +243,7 @@ CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL T
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
 
 -- 6. REALTIME
@@ -258,6 +270,7 @@ CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public
 CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_prediction_snapshots BEFORE UPDATE ON public.prediction_snapshots FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
 -- Fonction pour assigner automatiquement le rôle admin au premier utilisateur ou à un email spécifique
@@ -266,6 +279,9 @@ RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.user_preferences (user_id, settings)
   VALUES (NEW.id, '{"theme": "dark", "sound": true}'::jsonb);
+  
+  INSERT INTO public.subscriptions (user_id, status, plan, start_date, expires_at)
+  VALUES (NEW.id, 'trial', 'premium', now(), now() + interval '30 days');
   
   -- Remplacer par votre email pour vous donner les droits admin automatiquement à l'inscription
   IF NEW.email = 'dieudonnekeric@gmail.com' THEN

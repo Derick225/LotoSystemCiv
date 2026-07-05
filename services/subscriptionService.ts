@@ -17,30 +17,18 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
 
     try {
         const queryPromise = supabase
-            .from('user_preferences')
-            .select('subscription')
+            .from('subscriptions')
+            .select('*')
             .eq('user_id', userId)
             .single();
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("checkSubscriptionStatus timeout")), 15000));
-        const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as { data: { subscription?: { status: string, expires_at: string, plan: string } }, error?: Error };
+        const { data: subData, error } = await Promise.race([queryPromise, timeoutPromise]) as { data: any, error?: Error };
 
     const now = new Date();
     
-    if (error || !data || !data.subscription) {
+    if (error || !subData) {
         const trialEnd = new Date(now);
         trialEnd.setDate(trialEnd.getDate() + TRIAL_DURATION_DAYS);
-        const subData = {
-            status: 'trial',
-            start_date: now.toISOString(),
-            expires_at: trialEnd.toISOString(),
-            plan: 'premium'
-        };
-
-        await supabase.from('user_preferences').upsert({
-            user_id: userId,
-            subscription: subData,
-            updated_at: now.toISOString()
-        });
 
         return {
             status: 'trial',
@@ -50,8 +38,7 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
         };
     }
 
-    const sub = data.subscription;
-    const expiryDate = new Date(sub.expires_at);
+    const expiryDate = new Date(subData.expires_at);
     const diffTime = expiryDate.getTime() - now.getTime();
     const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -59,15 +46,15 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
         return {
             status: 'expired',
             daysLeft: 0,
-            expiresAt: sub.expires_at,
+            expiresAt: subData.expires_at,
             plan: 'free'
         };
     }
 
     return {
-        status: sub.status === 'paid' ? 'active' : 'trial',
+        status: subData.status === 'paid' ? 'active' : 'trial',
         daysLeft,
-        expiresAt: sub.expires_at,
+        expiresAt: subData.expires_at,
         plan: 'premium'
     };
     } catch (e) {
@@ -84,13 +71,13 @@ export const subscribeToSubscriptionUpdates = (userId: string, onUpdate: (sub: S
         .on(
             'postgres_changes',
             {
-                event: 'UPDATE',
+                event: '*',
                 schema: 'public',
-                table: 'user_preferences',
+                table: 'subscriptions',
                 filter: `user_id=eq.${userId}`
             },
-            (payload) => {
-                const newSub = payload.new.subscription;
+            (payload: any) => {
+                const newSub = payload.new;
                 if (newSub) {
                     const now = new Date();
                     const expiryDate = new Date(newSub.expires_at);
@@ -172,17 +159,9 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
                 const expiry = new Date(now);
                 expiry.setDate(expiry.getDate() + 30);
                 
-                await supabase.from('user_preferences').upsert({
-                    user_id: userId,
-                    subscription: {
-                        status: 'paid',
-                        start_date: now.toISOString(),
-                        expires_at: expiry.toISOString(),
-                        plan: 'premium',
-                        last_transaction_id: transactionId
-                    },
-                    updated_at: now.toISOString()
-                });
+                // This will fail due to RLS if done from client, so we do nothing here, the webhook will handle it.
+                // Or if we allow user to upsert, we would do it. But we want only service_role to update it!
+                // So optimistic update only in local state maybe? Let the webhook do its job.
             }
             return true;
         } else {

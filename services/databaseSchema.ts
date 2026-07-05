@@ -96,7 +96,16 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
   watchlist INTEGER[],
   saved_tickets JSONB,
   settings JSONB,
-  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium"}'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- D2. ABONNEMENTS
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'trial',
+  plan TEXT DEFAULT 'premium',
+  expires_at TIMESTAMPTZ,
+  start_date TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -219,6 +228,7 @@ ALTER TABLE public.predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
 -- Nettoyage préventif des politiques
 DO $$ 
@@ -242,11 +252,13 @@ CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL T
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- --- POLITIQUES UTILISATEUR (ISOLATION) ---
 -- Les utilisateurs ne voient et ne modifient que leurs propres données
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
 
 -- Feedback : Insertion ouverte aux authentifiés, Lecture publique
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
@@ -280,4 +292,5 @@ CREATE OR REPLACE TRIGGER handle_updated_at_analytics BEFORE UPDATE ON public.dr
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 `;

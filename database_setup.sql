@@ -64,7 +64,16 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
   watchlist INTEGER[],
   saved_tickets JSONB,
   settings JSONB,
-  subscription JSONB DEFAULT '{"status": "trial", "plan": "premium", "daysLeft": 30}'::JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- D2. ABONNEMENTS
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'trial',
+  plan TEXT DEFAULT 'premium',
+  expires_at TIMESTAMPTZ,
+  start_date TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -118,6 +127,8 @@ ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+
 -- Policies Publiques
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
@@ -129,12 +140,16 @@ CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
 
+CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
+
 -- Policies Service Role
 CREATE POLICY "Service Full Access Results" ON public.draw_results FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 6. TRIGGERS
 CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);

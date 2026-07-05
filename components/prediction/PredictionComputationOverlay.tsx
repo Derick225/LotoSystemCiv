@@ -6,11 +6,12 @@ interface PredictionComputationOverlayProps {
   isComputing: boolean;
   computingStep: string;
   historyLength: number;
+  progress?: number;
 }
 
 export const PredictionComputationOverlay: React.FC<
   PredictionComputationOverlayProps
-> = ({ isComputing, computingStep, historyLength }) => {
+> = ({ isComputing, computingStep, historyLength, progress }) => {
   if (!isComputing) return null;
 
   return (
@@ -52,6 +53,24 @@ export const PredictionComputationOverlay: React.FC<
             Étape : {computingStep}
           </div>
         </div>
+
+        {/* Real-time Progress Bar */}
+        {progress !== undefined && (
+          <div className="w-full max-w-sm mb-8 space-y-1.5 px-4">
+            <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
+              <span>Progression de l'Inférence</span>
+              <span className="font-mono text-indigo-500 dark:text-indigo-400">{progress}%</span>
+            </div>
+            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 0.3 }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Real-time Telemetry Dashboard */}
         <div className="w-full bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-2xl p-5 text-left space-y-3 shadow-md max-h-[170px] overflow-y-auto font-mono text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm">

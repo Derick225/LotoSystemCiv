@@ -92,11 +92,25 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     const nextStartTime = useRef<number>(0);
     const analyzerNode = useRef<AnalyserNode | null>(null);
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_API_KEY;
+    const [dynamicApiKey, setDynamicApiKey] = useState<string | null>(null);
 
     useEffect(() => {
         return () => { stopAssistant(); };
     }, []);
+
+    const fetchApiKey = async () => {
+        try {
+            const res = await fetch('/api/gemini-token');
+            if (res.ok) {
+                const data = await res.json();
+                setDynamicApiKey(data.token);
+                return data.token;
+            }
+        } catch (e) {
+            console.warn("Could not fetch token", e);
+        }
+        return null;
+    };
 
     const stopAssistant = useCallback(async () => {
         if (sessionRef.current) {
@@ -299,7 +313,11 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
     };
 
     const startAssistant = async () => {
-        if (!apiKey) { showToast("Clé API manquante.", "error"); return; }
+        let currentKey = dynamicApiKey;
+        if (!currentKey) {
+            currentKey = await fetchApiKey();
+        }
+        if (!currentKey) { showToast("Clé API indisponible.", "error"); return; }
         if (isConnecting || isActive) return;
         
         setIsConnecting(true);
@@ -308,7 +326,7 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             mediaStreamRef.current = stream;
             await initAudioContexts();
             
-            const ai = new GoogleGenAI({ apiKey: String(apiKey) });
+            const ai = new GoogleGenAI({ apiKey: String(currentKey) });
             
             // Context Prompt Enrichi
             const dna = globalWeights ? Object.entries(globalWeights).sort((a,b)=>(Number(b[1])||0)-(Number(a[1])||0)).slice(0,3).map(k=>k[0]).join(',') : 'Standard';
@@ -399,16 +417,15 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             {/* BOUTON FLOTTANT */}
             <button
                 onClick={isActive ? stopAssistant : startAssistant}
-                disabled={isConnecting || !apiKey}
+                disabled={isConnecting}
                 className={`
                     pointer-events-auto w-16 h-16 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(79,70,229,0.4)] transition-all border-4 border-slate-950 z-50 relative group
-                    ${!apiKey ? 'bg-slate-800 border-rose-500/30' : 
-                      isConnecting ? 'bg-slate-800 animate-pulse' : 
+                    ${isConnecting ? 'bg-slate-800 animate-pulse' : 
                       isActive ? 'bg-rose-600 shadow-rose-900/50 animate-pulse-slow' : 'bg-indigo-600 hover:scale-110 hover:bg-indigo-500'}
                 `}
             >
                 {/* Effet d'onde au repos */}
-                {!isActive && !isConnecting && apiKey && (
+                {!isActive && !isConnecting && (
                     <div className="absolute inset-0 rounded-full border border-indigo-400 opacity-0 group-hover:opacity-100 group-hover:animate-ping"></div>
                 )}
                 
