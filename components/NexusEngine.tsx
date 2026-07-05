@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { useDrawHistory, useNexusAnalytics } from '../hooks/useLottery';
 import { getAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
@@ -9,6 +9,7 @@ import { performForensicAnalysis, saveForensicReport, getForensicReportByPredict
 import { LearningService } from '../services/learningService';
 import { AppError, logError } from '../utils/AppError';
 import { useAutonomousAgent } from '../hooks/useAutonomousAgent';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 export const NexusEngine: React.FC = () => {
     useAutonomousAgent(); // Initialize the autonomous agent daemon
@@ -26,10 +27,15 @@ export const NexusEngine: React.FC = () => {
 
     // --- DATA FETCHING VIA REACT QUERY ---
     const { 
-        data: history, 
+        data: rawHistory, 
         isLoading: historyLoading,
         refetch: refetchHistory 
     } = useDrawHistory(drawName);
+
+    // Assurer l'isolation hermétique et la convergence (TIRAGE ISOLATION RULE)
+    const history = useMemo(() => {
+        return purifyHistoryForDraw(drawName, rawHistory || []);
+    }, [drawName, rawHistory]);
 
     const {
         data: analytics,

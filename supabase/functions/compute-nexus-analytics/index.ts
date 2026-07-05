@@ -9,13 +9,7 @@ const AnalyticsRequestSchema = z.object({
     task: z.string().optional(),
     drawName: z.string().optional(),
     history: z.array(z.record(z.unknown())).optional(),
-    payload: z.object({
-        matrix: z.array(z.array(z.number())).optional(),
-        variance: z.number().optional(),
-        features: z.array(z.array(z.number())).optional(),
-        labels: z.array(z.number()).optional(),
-        lambda: z.number().optional()
-    }).optional()
+    payload: z.record(z.unknown()).optional()
 });
 
 // --- Specialized Math Core Functions ---

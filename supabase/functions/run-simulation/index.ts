@@ -8,7 +8,7 @@ const SimulationRequestSchema = z.object({
   history: z.array(z.record(z.unknown())),
   weights: z.record(z.number()),
   depth: z.number().max(500),
-  strategy: z.enum(["FLAT", "MARTINGALE", "KELLY"]).default("FLAT"),
+  strategy: z.enum(["FLAT", "MARTINGALE", "KELLY", "CONFIDENCE_SMART"]).default("FLAT"),
 });
 
 const executeSimulation = (

@@ -30,8 +30,9 @@ export const purifyHistoryForDraw = <T extends { drawName?: string }>(drawName: 
         return history;
     }
     const purified = history.filter(d => {
-        if (!d.drawName) return true; // Sécurité fallback si l'enregistrement ne possède pas de champ drawName
-        return d.drawName.trim().toLowerCase() === normalizedTarget;
+        const name = d.drawName || (d as any).draw_name;
+        if (!name) return true; // Sécurité fallback si l'enregistrement ne possède pas de champ drawName ou draw_name
+        return name.trim().toLowerCase() === normalizedTarget;
     });
 
     if (purified.length >= 250) {

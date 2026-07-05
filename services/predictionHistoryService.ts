@@ -55,6 +55,10 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
 
   return sortedHistory.find(d => {
     if (!d.date) return false;
+    const resultDrawName = d.drawName || (d as any).draw_name;
+    if (resultDrawName && prediction.drawName && resultDrawName.trim().toLowerCase() !== prediction.drawName.trim().toLowerCase()) {
+      return false;
+    }
     const [day, month, year] = d.date.split('/').map(Number);
     const drawOccurrence = new Date(year, month - 1, day, drawHour, drawMinute, 0).getTime();
     const diff = drawOccurrence - predTime;

@@ -15,6 +15,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { audioEngine } from '../../utils/audioEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFluxMath } from '../../hooks/useFluxMath';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 // Row Component extracted logic
 const renderDrawRow = (draw: DrawResult, onSimilarity: (d: DrawResult) => void, onExamine: (d: DrawResult) => void) => {
@@ -123,9 +124,14 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
       audioEngine.play('success');
   };
 
+  // Assurer l'isolation hermétique et la convergence (TIRAGE ISOLATION RULE)
+  const purifiedHistory = useMemo(() => {
+      return purifyHistoryForDraw(currentDrawName, history);
+  }, [currentDrawName, history]);
+
   // Filtrage cybernétique multicouche déterministe
   const filteredHistory = useMemo(() => {
-      let result = history;
+      let result = purifiedHistory;
 
       // 1. Recherche plein texte / numéros
       if (searchTerm) {
@@ -526,7 +532,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
         {similarityTarget && (
             <div className="relative animate-slide-up mx-auto w-full mb-4 shrink-0 z-20">
                 <button onClick={() => setSimilarityTarget(null)} className="absolute top-4 right-4 z-10 p-2 bg-slate-100 dark:bg-slate-900 rounded-full text-slate-500 hover:text-rose-500 transition font-bold text-xs shadow-sm">Fermer</button>
-                <SimilarityFinder currentDraw={similarityTarget} history={history} />
+                <SimilarityFinder currentDraw={similarityTarget} history={purifiedHistory} />
             </div>
         )}
 
@@ -534,7 +540,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
         {viewMode === 'calendar' && (
             <div className="animate-fade-in mx-auto w-full overflow-x-auto pb-4 shrink-0">
                 <div className="min-w-max flex justify-center p-4">
-                    <HeatmapCalendar history={history} />
+                    <HeatmapCalendar history={purifiedHistory} />
                 </div>
             </div>
         )}
@@ -552,26 +558,26 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
                     {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                         const draw = filteredHistory[virtualRow.index];
                         return (
-                            <div
-                                key={draw ? `${draw.id}_${virtualRow.key}` : virtualRow.key}
-                                style={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    width: '100%',
-                                    height: `${virtualRow.size}px`,
-                                    transform: `translateY(${virtualRow.start}px)`,
-                                }}
-                            >
-                                {renderDrawRow(draw, setSimilarityTarget, setExaminingDraw)}
-                            </div>
+                             <div
+                                 key={draw ? `${draw.id}_${virtualRow.key}` : virtualRow.key}
+                                 style={{
+                                     position: 'absolute',
+                                     top: 0,
+                                     left: 0,
+                                     width: '100%',
+                                     height: `${virtualRow.size}px`,
+                                     transform: `translateY(${virtualRow.start}px)`,
+                                 }}
+                             >
+                                 {renderDrawRow(draw, setSimilarityTarget, setExaminingDraw)}
+                             </div>
                         );
                     })}
                 </div>
             </div>
         )}
 
-        {examiningDraw && <DrawExamine result={examiningDraw} history={history} onClose={() => setExaminingDraw(null)} />}
+        {examiningDraw && <DrawExamine result={examiningDraw} history={purifiedHistory} onClose={() => setExaminingDraw(null)} />}
     </div>
   );
 };
