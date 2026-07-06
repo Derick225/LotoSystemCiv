@@ -126,7 +126,8 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
             ? (err as any).message
             : String(err);
-        logError(new AppError(errorMsg || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", "medium", { error: err }), { source: 'syncPredictions' });
+        const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
+        logError(new AppError(errorMsg || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", severity, { error: err }), { source: 'syncPredictions' });
         return localItems;
     }
 };
@@ -227,7 +228,8 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
         const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
             ? (err as any).message
             : String(err);
-        logError(new AppError(errorMsg || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", "medium", { error: err }), { source: 'syncForensicReports' });
+        const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
+        logError(new AppError(errorMsg || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", severity, { error: err }), { source: 'syncForensicReports' });
         return localReports;
     }
 };
@@ -318,7 +320,8 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
         const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
             ? (err as any).message
             : String(err);
-        logError(new AppError(errorMsg || "Sync Learning Error", "SYNC_LEARNING_ERROR", "medium", { error: err }), { source: 'syncLearningSessions' });
+        const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
+        logError(new AppError(errorMsg || "Sync Learning Error", "SYNC_LEARNING_ERROR", severity, { error: err }), { source: 'syncLearningSessions' });
         return localSessions;
     }
 };

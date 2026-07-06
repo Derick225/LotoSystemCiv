@@ -2,6 +2,7 @@ import { AlgoWeights } from "../types";
 import { DrawResult } from "../types";
 import { generateMasterPrediction } from "./predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
+import { useNexusStore } from "../store/useNexusStore";
 
 export type BettingStrategy = "FLAT" | "MARTINGALE" | "KELLY" | "CONFIDENCE_SMART";
 
