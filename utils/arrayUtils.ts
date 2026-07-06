@@ -29,11 +29,16 @@ export const purifyHistoryForDraw = <T extends { drawName?: string }>(drawName: 
     if (normalizedTarget === "all_combined" || normalizedTarget === "all") {
         return history;
     }
-    const purified = history.filter(d => {
-        const name = d.drawName || (d as any).draw_name;
-        if (!name) return true; // Sécurité fallback si l'enregistrement ne possède pas de champ drawName ou draw_name
-        return name.trim().toLowerCase() === normalizedTarget;
-    });
+    const purified = history.reduce((acc: T[], d: any) => {
+        const name = d.drawName || d.draw_name;
+        if (!name) {
+            // Fix corrupted items from cache by forcing the correct drawName
+            acc.push({ ...d, drawName } as T);
+        } else if (name.trim().toLowerCase() === normalizedTarget) {
+            acc.push(d as T);
+        }
+        return acc;
+    }, []);
 
     if (purified.length >= 250) {
         return purified;

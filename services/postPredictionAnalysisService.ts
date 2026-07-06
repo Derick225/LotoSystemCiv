@@ -17,6 +17,7 @@ import { globalCache, CACHE_TTL } from "./cache/CacheService";
 import { analyzeForManipulation } from "./forensicAuditService";
 import { z } from "zod";
 import { parseDateSafely } from "../utils/dateUtils";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 
 // ============================================================================
 // SCHÉMAS DE VALIDATION (Inchangés, déjà robustes)
@@ -180,7 +181,7 @@ export const performForensicAnalysis = async (
 
   if (!fullHistory) {
       const { data } = await fetchResults(drawName);
-      fullHistory = data;
+      fullHistory = purifyHistoryForDraw(drawName, data);
   }
 
   const resultRef = fullHistory.find((d) => d.date === date);

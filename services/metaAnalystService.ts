@@ -1,6 +1,7 @@
 
 import { PlatinumResult, DrawResult, SymbioticContext, PlatinumScenario, PlatinumAudit, Prediction, PlatinumUserOptions } from '../types';
 import { get, set } from 'idb-keyval';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { getAlgoWeights, generateMasterPrediction } from './predictionEngine';
 import { useNexusStore } from '../store/useNexusStore';
 import { extractFeatures } from './prediction/featureExtractor';
@@ -79,7 +80,7 @@ const greedyDeterministicSelection = (
 
 export async function generatePlatinumPredictionCore(
   drawName: string,
-  history: DrawResult[],
+  rawHistory: DrawResult[],
   metrics?: EnhancedMetrics,
   userOptions?: PlatinumUserOptions | null,
   symbioticContext?: SymbioticContext | null,
@@ -90,6 +91,8 @@ export async function generatePlatinumPredictionCore(
   preloadedForensicReports?: any[]
 ): Promise<PlatinumResult> {
   
+  const history = purifyHistoryForDraw(drawName, rawHistory);
+
   if (history.length < 10) throw new Error("Dataset insuffisant.");
 
   onProgress?.(5, "Calibrage du réseau de neurones artificiels...");

@@ -1,7 +1,7 @@
-import type { AlgoWeights } from "../types";
+import { AlgoWeights } from "../types";
 import { DrawResult } from "../types";
 import { generateMasterPrediction } from "./predictionEngine";
-import { useNexusStore } from "../store/useNexusStore";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 
 export type BettingStrategy = "FLAT" | "MARTINGALE" | "KELLY" | "CONFIDENCE_SMART";
 
@@ -48,7 +48,9 @@ const calculateStandardDeviation = (data: number[], mean: number): number => {
 };
 
 export async function runSimulationCore(config: SimulationConfig) {
-  const { history, weights, depth, strategy, initialBankroll, unitBet } = config;
+  const { drawName, weights, depth, strategy, initialBankroll, unitBet } = config;
+  
+  const history = purifyHistoryForDraw(drawName, config.history);
 
   if (!history || history.length < depth) {
     throw new Error("Historique insuffisant pour la profondeur demandée.");

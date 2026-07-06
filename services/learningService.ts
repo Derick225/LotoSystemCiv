@@ -8,6 +8,7 @@ import {
 import { WeightVersionManager } from "./prediction/WeightVersionManager";
 import { getLocalForensicReports } from "./postPredictionAnalysisService";
 import { fetchResults } from "./lotteryService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { runBacktestTraining } from "./backtestService";
 import { logger } from "../utils/logger";
 import { driftDetector } from "./prediction/conceptDriftDetector";
@@ -240,7 +241,8 @@ export const LearningService = {
     const now = new Date().toISOString();
 
     try {
-      const { data: history } = await fetchResults(drawName);
+      const { data: rawHistory } = await fetchResults(drawName);
+      const history = purifyHistoryForDraw(drawName, rawHistory);
       
       this.config = getDynamicConfig(history.length);
       if (!history || history.length < this.config.minHistorySize) {

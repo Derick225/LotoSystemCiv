@@ -196,7 +196,7 @@ export const applyDeterministicMicroSgd = async (
 
 export const generateMasterPredictionCore = async (
   drawName: string,
-  history: DrawResult[],
+  rawHistory: DrawResult[],
   temporalDepth: number,
   weightsToUse?: AlgoWeights,
   metrics?: EnhancedMetrics,
@@ -209,6 +209,7 @@ export const generateMasterPredictionCore = async (
   onProgress?: (progress: number, message: string) => void,
   preloadedForensicReports?: ForensicReport[],
 ): Promise<Prediction> => {
+  const history = purifyHistoryForDraw(drawName, rawHistory);
   initializeLcgForDraw(drawName);
   if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
   onProgress?.(5, "Initialisation de l'ADN algorithmique...");

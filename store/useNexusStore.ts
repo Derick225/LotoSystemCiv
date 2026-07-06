@@ -17,6 +17,7 @@ import {
   SymbioticContext,
 } from "../types";
 import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import {
   getAlgoWeights,
   saveAlgoWeights,
@@ -249,7 +250,8 @@ export const useNexusStore = create<NexusState>()(
         set({ loading: true, drawName: name, currentDrawName: name });
         try {
           const { data } = await fetchResults(name, force);
-          set({ history: data });
+          const purifiedData = purifyHistoryForDraw(name, data);
+          set({ history: purifiedData });
         } catch (error) {
           console.error("Failed to refresh data:", error);
         } finally {

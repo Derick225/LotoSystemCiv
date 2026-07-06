@@ -8,6 +8,7 @@ import {
 import { useNexusStore } from "../store/useNexusStore";
 import { apiClient } from "../core/api/apiClient";
 import { calculateFractalIndex } from "./mathService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 
 // ============================================================================
 // CONFIGURATION DE SIMULATION PAR DÉFAUT (Zéro Nombre Magique)
@@ -38,7 +39,7 @@ const calculateDynamicDepth = (history: DrawResult[], defaultMultiplier: number 
  */
 export const runSurvivalSimulation = async (
   drawName: string,
-  history: DrawResult[],
+  rawHistory: DrawResult[],
   weights: AlgoWeights,
   depth?: number,
   strategy: BettingStrategy = "FLAT",
@@ -46,6 +47,8 @@ export const runSurvivalSimulation = async (
   initialBankroll?: number,
   unitBet?: number,
 ): Promise<BacktestReport> => {
+  const history = purifyHistoryForDraw(drawName, rawHistory);
+
   // 1. Validation robuste en amont
   if (!history || history.length < DEFAULT_SIMULATION_CONFIG.minHistoryBuffer) {
     throw new Error(
