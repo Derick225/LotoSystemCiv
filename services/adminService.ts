@@ -1,6 +1,7 @@
 
-import {  isSupabaseConfigured } from './supabaseClient';
+import { isSupabaseConfigured } from './supabaseClient';
 import { apiClient } from '../core/api/apiClient';
+import { get, set } from 'idb-keyval';
 
 export interface AdminUser {
     id: string;
@@ -15,7 +16,9 @@ export interface AdminUser {
     } | null;
 }
 
-const getMockAdminUsers = (): AdminUser[] => [
+const LOCAL_USERS_KEY = 'nexus_local_users';
+
+const getInitialLocalUsers = (): AdminUser[] => [
     {
         id: "7efb2938-1a5c-42b7-bdc1-aa45a89fbcd0",
         email: "dieudonnekeric@gmail.com",
@@ -50,41 +53,88 @@ const getMockAdminUsers = (): AdminUser[] => [
     }
 ];
 
+const fetchLocalUsers = async (): Promise<AdminUser[]> => {
+    try {
+        const stored = await get<AdminUser[]>(LOCAL_USERS_KEY);
+        if (stored && Array.isArray(stored)) {
+            return stored;
+        }
+        const initial = getInitialLocalUsers();
+        await set(LOCAL_USERS_KEY, initial);
+        return initial;
+    } catch {
+        return getInitialLocalUsers();
+    }
+};
+
 export const adminService = {
     fetchUsers: async (): Promise<AdminUser[]> => {
-        if (!isSupabaseConfigured()) return getMockAdminUsers();
+        if (!isSupabaseConfigured()) {
+            return await fetchLocalUsers();
+        }
 
         try {
             const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' });
             return data.users;
         } catch (error) {
-            console.warn("Using mock admin users due to network, API or permission error:", error);
-            // Fallback for developers or if Edge function database permissions are restricted (Forbidden / status 403)
-            return getMockAdminUsers();
+            console.warn("Using local database due to network, API or permission error:", error);
+            return await fetchLocalUsers();
         }
     },
 
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
-        if (!isSupabaseConfigured()) return true;
+        if (!isSupabaseConfigured()) {
+            try {
+                const users = await fetchLocalUsers();
+                const updated = users.map(u => u.id === userId ? { ...u, role } : u);
+                await set(LOCAL_USERS_KEY, updated);
+                return true;
+            } catch {
+                return false;
+            }
+        }
 
         try {
             const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role });
             return data.success;
         } catch (error) {
             console.warn("Simulating roll update offline/bypass:", error);
-            return true;
+            try {
+                const users = await fetchLocalUsers();
+                const updated = users.map(u => u.id === userId ? { ...u, role } : u);
+                await set(LOCAL_USERS_KEY, updated);
+                return true;
+            } catch {
+                return false;
+            }
         }
     },
 
     deleteUser: async (userId: string): Promise<boolean> => {
-        if (!isSupabaseConfigured()) return true;
+        if (!isSupabaseConfigured()) {
+            try {
+                const users = await fetchLocalUsers();
+                const updated = users.filter(u => u.id !== userId);
+                await set(LOCAL_USERS_KEY, updated);
+                return true;
+            } catch {
+                return false;
+            }
+        }
 
         try {
             const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId });
             return data.success;
         } catch (error) {
             console.warn("Simulating deleteUser offline/bypass:", error);
-            return true;
+            try {
+                const users = await fetchLocalUsers();
+                const updated = users.filter(u => u.id !== userId);
+                await set(LOCAL_USERS_KEY, updated);
+                return true;
+            } catch {
+                return false;
+            }
         }
     }
 };
