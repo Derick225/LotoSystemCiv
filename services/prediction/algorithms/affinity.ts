@@ -55,8 +55,7 @@ export const affinityPlugin: AlgorithmPlugin = {
     const iqr = cache.iqrs[num] || 1.0;
     
     const zScore = (rawAffinityScore - median) / iqr;
-    const slope = 1.0 / iqr;
-    const normAffinity = 100.0 / (1.0 + Math.exp(-slope * zScore));
+    const normAffinity = 100.0 / (1.0 + Math.exp(-zScore));
 
     const score = Math.max(0.0, Math.min(100.0, normAffinity));
     return {

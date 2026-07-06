@@ -107,8 +107,7 @@ export const fractalPlugin: AlgorithmPlugin = {
     const resVal = (ctx.advancedMetrics?.fractalResonance as Record<number, number>)?.[num] || 0.0;
     const { median: medRes, iqr: iqrRes } = cache.resStats;
     const zScoreRes = (resVal - medRes) / iqrRes;
-    const slopeRes = 1.0 / iqrRes;
-    const normFractalRes = 100.0 / (1.0 + Math.exp(-slopeRes * zScoreRes));
+    const normFractalRes = 100.0 / (1.0 + Math.exp(-zScoreRes));
 
     // 4. Modulateur de Lyapunov (Stabilité de l'attracteur géométrique)
     const lyapunov = (ctx.advancedMetrics?.topologicalLyapunov as Record<number, number>)?.[num] || 0.0;
