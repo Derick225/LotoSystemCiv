@@ -1,6 +1,7 @@
+
 -- ==============================================================================
 -- SCHEMA NEXUS PLATINUM v12.0 (OPTIMIZED & SECURE)
--- Optimisé pour PostgreSQL 15+ sur Supabase
+-- Unified Schema
 -- ==============================================================================
 
 -- 1. EXTENSIONS
@@ -112,11 +113,82 @@ CREATE TABLE IF NOT EXISTS public.learning_logs (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- H. PREDICTIONS (Sync History)
+CREATE TABLE IF NOT EXISTS public.predictions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    draw_name TEXT NOT NULL,
+    timestamp BIGINT NOT NULL,
+    prediction JSONB NOT NULL,
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE SET NULL,
+    feedback JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- I. PREDICTION SNAPSHOTS (Forensic)
+CREATE TABLE IF NOT EXISTS public.prediction_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    draw_name TEXT NOT NULL,
+    target_date DATE,
+    predicted_numbers INTEGER[] NOT NULL,
+    decision_dna JSONB,
+    metrics_snapshot JSONB,
+    status TEXT DEFAULT 'PENDING',
+    actual_numbers INTEGER[],
+    near_misses JSONB,
+    autopsy_report JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- J. FORENSIC REPORTS
+CREATE TABLE IF NOT EXISTS public.forensic_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    prediction_id UUID,
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    draw_name TEXT,
+    draw_date TEXT,
+    report_data JSONB NOT NULL,
+    ai_model_used TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- K. LEARNING SESSIONS
+CREATE TABLE IF NOT EXISTS public.learning_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    draw_name TEXT NOT NULL,
+    session_data JSONB NOT NULL,
+    timestamp BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- L. DRAW REGIMES
+CREATE TABLE IF NOT EXISTS public.draw_regimes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL,
+    regime_type TEXT NOT NULL,
+    confidence NUMERIC,
+    metrics JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_draw_regime UNIQUE (draw_name)
+);
+
 -- 4. INDEXES
 CREATE INDEX IF NOT EXISTS idx_results_lookup ON public.draw_results(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_user_draw ON public.predictions(user_id, draw_name);
+CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON public.predictions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_forensic_user_draw ON public.forensic_reports(user_id, draw_name);
+CREATE INDEX IF NOT EXISTS idx_learning_user_draw ON public.learning_sessions(user_id, draw_name);
+CREATE INDEX IF NOT EXISTS idx_feedback_draw ON public.prediction_feedback(draw_name);
+CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_target_date ON public.prediction_snapshots(target_date);
+CREATE INDEX IF NOT EXISTS idx_draw_regimes_lookup ON public.draw_regimes(draw_name);
 
 -- 5. SECURITÉ (RLS)
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
@@ -126,7 +198,11 @@ ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
-
+ALTER TABLE public.predictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.draw_regimes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
 -- Policies Publiques
@@ -134,13 +210,31 @@ CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (tru
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
+CREATE POLICY "Public Read Regimes" ON public.draw_regimes FOR SELECT USING (true);
 
 -- Policies User
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
-
 CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own predictions" ON public.predictions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own predictions" ON public.predictions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own predictions" ON public.predictions FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own predictions" ON public.predictions FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own snapshots" ON public.prediction_snapshots FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can view their own snapshots" ON public.prediction_snapshots FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can update their own snapshots" ON public.prediction_snapshots FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own forensic reports" ON public.forensic_reports FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own forensic reports" ON public.forensic_reports FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own forensic reports" ON public.forensic_reports FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own forensic reports" ON public.forensic_reports FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own learning sessions" ON public.learning_sessions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own learning sessions" ON public.learning_sessions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own learning sessions" ON public.learning_sessions FOR UPDATE USING (auth.uid() = user_id);
 
 -- Policies Service Role
 CREATE POLICY "Service Full Access Results" ON public.draw_results FOR ALL TO service_role USING (true) WITH CHECK (true);
@@ -148,16 +242,10 @@ CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL T
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
-
 CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
 
--- 6. TRIGGERS
-CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
-CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
-CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
-CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
-
--- 7. REALTIME
+-- 6. REALTIME
 DO $$
 BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.prediction_snapshots;
@@ -173,3 +261,58 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END
 $$;
+
+-- ==========================================
+-- 7. TRIGGERS & FUNCTIONS
+-- ==========================================
+CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_prediction_snapshots BEFORE UPDATE ON public.prediction_snapshots FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+
+-- Fonction pour assigner automatiquement le rôle admin au premier utilisateur ou à un email spécifique
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.user_preferences (user_id, settings)
+  VALUES (NEW.id, '{"theme": "dark", "sound": true}'::jsonb);
+  
+  INSERT INTO public.subscriptions (user_id, status, plan, start_date, expires_at)
+  VALUES (NEW.id, 'trial', 'premium', now(), now() + interval '30 days');
+  
+  -- Remplacer par votre email pour vous donner les droits admin automatiquement à l'inscription
+  IF NEW.email = 'dieudonnekeric@gmail.com' THEN
+    UPDATE auth.users SET app_metadata = jsonb_set(app_metadata, '{role}', '"admin"') WHERE id = NEW.id;
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger pour exécuter la fonction à chaque nouvel utilisateur
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- 8. CRON JOBS (Automatisation des données historiques)
+-- On supprime l'ancien job s'il existe
+SELECT cron.unschedule('sync-draw-results-hourly');
+
+-- On recrée le job avec l'en-tête d'autorisation (Sécurité)
+-- Le Cron appelle désormais la Supabase Edge Function 'cron-sync'
+-- REMPLACEZ 'VOTRE_PROJECT_REF' par la référence de votre projet Supabase (ex: iexwhv27jnwut37iq2ksdr)
+-- REMPLACEZ 'VOTRE_ANON_KEY' par votre clé publique (anon key)
+SELECT cron.schedule(
+  'sync-draw-results-hourly',
+  '0 * * * *',
+  $$
+  SELECT net.http_post(
+      url:='https://VOTRE_PROJECT_REF.supabase.co/functions/v1/cron-sync',
+      headers:='{"Content-Type": "application/json", "Authorization": "Bearer VOTRE_ANON_KEY"}'::jsonb,
+      body:='{"manualTrigger": false}'::jsonb
+  );
+  $$
+);
