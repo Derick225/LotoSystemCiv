@@ -34,10 +34,11 @@ export const apiClient = {
             }
         }
 
+        const isNetworkError = (errorMessage || '').toLowerCase().includes('fetch') || (errorMessage || '').toLowerCase().includes('network') || (errorMessage || '').toLowerCase().includes('failed to fetch');
         throw new AppError(
           errorMessage || `Erreur lors de l'appel à la fonction ${endpoint}`,
           'NETWORK_ERR',
-          'high',
+          isNetworkError ? 'medium' : 'high',
           details
         );
       }
@@ -59,7 +60,8 @@ export const apiClient = {
         }
         throw error;
       }
-      const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', 'high', { error });
+      const isNetworkError = String(error).toLowerCase().includes('fetch') || String(error).toLowerCase().includes('network');
+      const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', isNetworkError ? 'medium' : 'high', { error });
       if (!options.suppressErrorLogging) {
           logError(unknownError, { endpoint });
       }

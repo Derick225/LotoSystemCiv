@@ -40,6 +40,7 @@ export interface SubscriptionState {
 export interface DrawResult {
   id: string;
   drawName: string;
+  draw_name?: string;
   date: string;
   gagnants: number[];
   machine?: number[];

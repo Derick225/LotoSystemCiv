@@ -80,7 +80,8 @@ export const lotteryService = {
             
             if (error) {
                 const errorMessage = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
-                throw new AppError(errorMessage, 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });
+                const isNetworkError = errorMessage.toLowerCase().includes('fetch') || errorMessage.toLowerCase().includes('network');
+                throw new AppError(errorMessage, 'SUPABASE_FETCH_ERROR', isNetworkError ? 'medium' : 'high', { drawName, error });
             }
             
             if (data) {

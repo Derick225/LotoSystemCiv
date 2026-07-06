@@ -20,19 +20,54 @@ export class AppError extends Error {
 }
 
 export const logError = (error: unknown, context?: Record<string, unknown>) => {
+  const isNetworkOrFetchError = (err: unknown): boolean => {
+    if (!err) return false;
+    const msg = String((err as any).message || '').toLowerCase();
+    const code = String((err as any).code || '').toLowerCase();
+    return (
+      msg.includes('failed to fetch') ||
+      msg.includes('fetch') ||
+      msg.includes('network') ||
+      msg.includes('connection') ||
+      msg.includes('contact’') ||
+      msg.includes('contacter le serveur') ||
+      code.includes('network') ||
+      code.includes('fetch')
+    );
+  };
+
+  const isNetwork = isNetworkOrFetchError(error) || (context && isNetworkOrFetchError(context.error));
+
   if (error instanceof AppError) {
-    console.error(`[${error.severity.toUpperCase()}] ${error.code}: ${error.message}`, {
-      ...error.context,
-      ...context,
-      stack: error.stack
-    });
-    // Here we could send to Sentry, Datadog, or Supabase logs
+    const severity = isNetwork ? 'medium' : error.severity;
+    if (severity === 'high' || severity === 'critical') {
+      console.error(`[${severity.toUpperCase()}] ${error.code}: ${error.message}`, {
+        ...error.context,
+        ...context,
+        stack: error.stack
+      });
+    } else {
+      console.warn(`[${severity.toUpperCase()}] ${error.code}: ${error.message}`, {
+        ...error.context,
+        ...context
+      });
+    }
   } else if (error instanceof Error) {
-    console.error(`[UNHANDLED] ${error.name}: ${error.message}`, {
-      ...context,
-      stack: error.stack
-    });
+    if (isNetwork) {
+      console.warn(`[NETWORK_WARN] ${error.name}: ${error.message}`, {
+        ...context
+      });
+    } else {
+      console.error(`[UNHANDLED] ${error.name}: ${error.message}`, {
+        ...context,
+        stack: error.stack
+      });
+    }
   } else {
-    console.error(`[UNKNOWN]`, error, context);
+    if (isNetwork) {
+      console.warn(`[NETWORK_WARN]`, error, context);
+    } else {
+      console.error(`[UNKNOWN]`, error, context);
+    }
   }
 };

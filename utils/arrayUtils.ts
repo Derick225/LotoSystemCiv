@@ -23,7 +23,7 @@ export const getUniqueSortedNumbers = (numbers: (string | number | null | undefi
  * Assure une isolation hermétique totale en éliminant tout tirage
  * ne correspondant pas au nom de tirage spécifié (TIRAGE ISOLATION RULE).
  */
-export const purifyHistoryForDraw = <T extends { drawName?: string }>(drawName: string, history: T[]): T[] => {
+export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string }>(drawName: string, history: T[]): T[] => {
     if (!history || !Array.isArray(history)) return [];
     const normalizedTarget = drawName.trim().toLowerCase();
     if (normalizedTarget === "all_combined" || normalizedTarget === "all") {
@@ -33,11 +33,11 @@ export const purifyHistoryForDraw = <T extends { drawName?: string }>(drawName: 
         const name = d.drawName || d.draw_name;
         if (!name) {
             // Fix corrupted items from cache by forcing the correct drawName
-            acc.push({ ...d, drawName } as T);
+            acc.push({ ...d, drawName, draw_name: drawName } as T);
         } else {
             const nameStr = String(name).trim().toLowerCase();
             if (nameStr === normalizedTarget || normalizedTarget.includes(nameStr) || nameStr.includes(normalizedTarget)) {
-                acc.push(d as T);
+                acc.push({ ...d, drawName: name, draw_name: name } as T);
             }
         }
         return acc;
