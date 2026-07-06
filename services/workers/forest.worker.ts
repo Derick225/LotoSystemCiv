@@ -2,14 +2,15 @@ import { LCG } from '../../utils/mathUtils';
 export {};
 
 /**
- * Nexus Decision Forest Worker v4.6 (Strictement Déterministe)
- * Implémentation Random Forest : Bagging + Feature Randomness + CART
- * ZÉRO HASARD : Utilise exclusivement lcgGlobalRandom() seedé de manière déterministe.
+ * Nexus Soft Decision Forest Worker v5.0 (Strictement Déterministe)
+ * Implémentation Fuzzy Random Forest : Bagging + Feature Randomness + Soft Routing (Sigmoïde continue)
+ * ZÉRO HASARD : Utilise exclusivement le LCG seedé de manière déterministe.
  */
 interface Example { features: number[]; label: 0 | 1; }
 interface TreeNode {
   featureIdx?: number;
   threshold?: number;
+  stdDev?: number; // Écart-type local pour l'activation sigmoïde continue
   left?: TreeNode;
   right?: TreeNode;
   value?: number;
@@ -21,6 +22,24 @@ interface Candidate {
 }
 
 const ctx = self as unknown as Worker;
+
+/**
+ * Calcule l'écart-type d'un ensemble de valeurs de features pour un index donné.
+ * Protection contre les divisions par zéro.
+ */
+function getFeatureStdDev(dataset: Example[], featureIdx: number): number {
+  if (dataset.length === 0) return 0.0;
+  let sum = 0;
+  for (let i = 0; i < dataset.length; i++) {
+    sum += dataset[i].features[featureIdx];
+  }
+  const mean = sum / dataset.length;
+  let sumSq = 0;
+  for (let i = 0; i < dataset.length; i++) {
+    sumSq += Math.pow(dataset[i].features[featureIdx] - mean, 2);
+  }
+  return Math.sqrt(sumSq / dataset.length);
+}
 
 /**
  * Calcule l'indice de Gini pondéré pour un split donné.
@@ -66,11 +85,12 @@ function testSplit(index: number, value: number, dataset: Example[]): Example[][
 /**
  * Sélectionne le meilleur split pour un dataset donné.
  * Optimisation Random Forest : ne teste qu'un sous-ensemble aléatoire de features.
+ * Optimisation supplémentaire : ne teste que les valeurs uniques de chaque feature.
  */
-function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureIdx: number, threshold: number, groups: Example[][] } | undefined {
+function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureIdx: number, threshold: number, stdDev: number, groups: Example[][] } | undefined {
   const classValues = [0, 1];
-  let b_index = 999;
-  let b_value = 999;
+  let b_index = -1;
+  let b_value = -1;
   let b_score = 999;
   let b_groups: Example[][] | undefined = undefined;
   
@@ -84,23 +104,30 @@ function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureId
   }
 
   for (const index of featuresToCheck) {
-    for (let i = 0; i < dataset.length; i++) {
-      const row = dataset[i];
-      const groups = testSplit(index, row.features[index], dataset);
+    // Collecte des valeurs uniques pour éviter les tests de splits redondants
+    const uniqueValues = new Float64Array(dataset.map(row => row.features[index])).filter((val, i, arr) => arr.indexOf(val) === i);
+    
+    for (let i = 0; i < uniqueValues.length; i++) {
+      const val = uniqueValues[i];
+      const groups = testSplit(index, val, dataset);
       const gini = calculateGini(groups, classValues);
       
       // Utilisation de <= pour garantir un comportement déterministe en cas d'égalité de Gini
       if (gini <= b_score) {
         b_index = index;
-        b_value = row.features[index];
+        b_value = val;
         b_score = gini;
         b_groups = groups;
       }
     }
   }
   
-  if (!b_groups) return undefined;
-  return { featureIdx: b_index, threshold: b_value, groups: b_groups };
+  if (b_index === -1 || !b_groups) return undefined;
+  
+  // Calcul de l'écart-type local pour l'index choisi
+  const stdDev = getFeatureStdDev(dataset, b_index);
+  
+  return { featureIdx: b_index, threshold: b_value, stdDev, groups: b_groups };
 }
 
 /**
@@ -145,7 +172,7 @@ function split(prng: LCG, node: TreeNode, maxDepth: number, minSize: number, nFe
     if (!res) {
       node.left = { value: toTerminal(left) };
     } else {
-      node.left = { featureIdx: res.featureIdx, threshold: res.threshold, groups: res.groups };
+      node.left = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups };
       split(prng, node.left, maxDepth, minSize, nFeatures, depth + 1);
     }
   }
@@ -158,14 +185,16 @@ function split(prng: LCG, node: TreeNode, maxDepth: number, minSize: number, nFe
     if (!res) {
       node.right = { value: toTerminal(right) };
     } else {
-      node.right = { featureIdx: res.featureIdx, threshold: res.threshold, groups: res.groups };
+      node.right = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups };
       split(prng, node.right, maxDepth, minSize, nFeatures, depth + 1);
     }
   }
 }
 
 /**
- * Prédit une valeur pour une ligne donnée en parcourant l'arbre.
+ * Prédit une valeur pour une ligne donnée en parcourant l'arbre de manière douce (Soft/Fuzzy Routing).
+ * ZÉRO BIFURCATION SÈCHE : Évite les sauts brusques en acheminant continûment l'exemple vers
+ * les deux sous-arbres selon une probabilité logistique continue (Sigmoïde).
  */
 function predict(node: TreeNode, row: number[]): number {
   if (node.value !== undefined) return node.value;
@@ -175,11 +204,19 @@ function predict(node: TreeNode, row: number[]): number {
     return 0.5;
   }
   
-  if (row[node.featureIdx] < node.threshold) {
-    return predict(node.left, row);
-  } else {
-    return predict(node.right, row);
-  }
+  const x = row[node.featureIdx];
+  const theta = node.threshold;
+  const sigma = node.stdDev || 1.0;
+  
+  // Différence normalisée par l'écart-type local (Z-score)
+  // Prévient les divisions par zéro via epsilon
+  const z = (x - theta) / (sigma + 1e-6);
+  
+  // Fonction de transition sigmoïde continue (Soft routing probability to right child)
+  const p = 1.0 / (1.0 + Math.exp(-z));
+  
+  // Inférence continue : somme pondérée des prédictions des deux branches
+  return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
 
 ctx.onmessage = (e) => {
@@ -218,6 +255,7 @@ ctx.onmessage = (e) => {
       const root: TreeNode = { 
         featureIdx: rootSplit.featureIdx, 
         threshold: rootSplit.threshold, 
+        stdDev: rootSplit.stdDev,
         groups: rootSplit.groups 
       };
       split(prng, root, maxDepth, minSize, nFeatures, 1);

@@ -90,13 +90,16 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                 
                 <div className="relative z-10 flex flex-col xl:flex-row justify-between gap-8 items-center">
                     <div className="flex-1 text-center xl:text-left">
-                        <div className="flex items-center justify-center xl:justify-start gap-3 mb-4">
+                        <div className="flex flex-wrap items-center justify-center xl:justify-start gap-3 mb-4">
                             <div className={`p-3 rounded-2xl bg-white/5 border border-white/10 ${theme.text}`}>
                                 {filterMode === 'shadow' ? <Ghost size={24}/> : filterMode === 'average' ? <Scale size={24}/> : <Users size={24}/>}
                             </div>
-                            <h3 className="text-xs font-black uppercase tracking-[0.4em] opacity-70">
-                                {filterMode === 'shadow' ? 'Mode Dissidents' : filterMode === 'average' ? 'Mode Équilibre' : 'Vote Consensus'}
-                            </h3>
+                            <div>
+                                <h3 className="text-xs font-black uppercase tracking-[0.4em] opacity-70">
+                                    {filterMode === 'shadow' ? 'Mode Dissidents' : filterMode === 'average' ? 'Mode Équilibre' : 'Vote Consensus'}
+                                </h3>
+                                <span className="text-[9px] font-black tracking-widest text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full mt-1 inline-block">Fuzzy Soft Forest v5.0</span>
+                            </div>
                         </div>
                         <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none mb-4">
                             L'Avis des <span className={theme.text}>{filterMode === 'shadow' ? 'Outsiders' : filterMode === 'average' ? 'Médians' : 'Experts'}</span>
