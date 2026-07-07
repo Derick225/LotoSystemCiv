@@ -2,6 +2,7 @@ import { DrawResult } from '../../types';
 import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { analyzeDecadePatterns, getDecadeIndex } from './decadePatternService';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export interface ExtractedFeatures {
   freqMap: Float32Array;
@@ -62,17 +63,8 @@ export const extractFeatures = async (
   history: DrawResult[], 
   sampleSize: number = history.length
 ): Promise<ExtractedFeatures> => {
-  // filtrage strict par drawName (TIRAGE ISOLATION RULE), sauf pour les pseudo-tirages
-  // agrégés "ALL" / "ALL_COMBINED" utilisés par le prior macro de shrinkage James-Stein
-  // (voir predictionFacade.ts). Sans ce cas spécial, le filtre exact sur drawName ne
-  // trouve jamais aucune ligne nommée littéralement "ALL_COMBINED" et le prior macro
-  // tourne silencieusement sur un historique vide (0 tirage), ce qui désactive de fait
-  // la régularisation bayésienne sans jamais lever d'erreur.
-  const normalizedDrawName = drawName ? drawName.trim().toLowerCase() : "";
-  const isAggregatePseudoDraw = normalizedDrawName === "all" || normalizedDrawName === "all_combined";
-  const filteredHistory = (drawName && !isAggregatePseudoDraw)
-    ? history.filter(d => d.drawName === drawName)
-    : history;
+  // Filtrage robuste selon la règle d'isolation (TIRAGE ISOLATION RULE)
+  const filteredHistory = purifyHistoryForDraw(drawName, history);
   const cacheKey = globalCache.generateKey('features', drawName, `${filteredHistory.length}_${filteredHistory[0]?.date || 'nodate'}`);
 
   return globalCache.getOrCompute(

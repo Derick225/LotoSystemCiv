@@ -1,5 +1,6 @@
 import { DrawResult } from '../types';
 import { get, set } from 'idb-keyval';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 export interface NumberFrequencyStat {
   number: number;
@@ -66,11 +67,9 @@ export const advancedStatsService = {
     }
 
     // Filter history to handle isolation and ensure order is chronological for transitions (oldest to newest)
-    const filteredHistory = history
-      .filter(d => !drawName || drawName === 'ALL' || d.drawName === drawName)
-      // Sort oldest to newest (index history.length - 1 down to 0, or check dates)
-      // Let's assume the input history is sorted newest to oldest. We reverse a copy for sequential transitions.
-      .slice();
+    const filteredHistory = !drawName
+      ? history.slice()
+      : purifyHistoryForDraw(drawName, history);
     
     // Total draws for this specific game
     const n = filteredHistory.length;

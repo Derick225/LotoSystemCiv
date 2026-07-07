@@ -1,5 +1,6 @@
 import { DrawResult } from '../../types';
 import { DeterministicSeededGenerator, softmax, gaussianPDF } from './deterministicCore';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export interface NumberMicroDNA {
     numberData: number;
@@ -20,7 +21,7 @@ export const calculateMicroDNAPerNumber = (
 ): NumberMicroDNA => {
     
     // Règle 2: Isolation Absolue - Filtrer l'historique au tirage cible
-    const drawHistory = history.filter(h => h.drawName === drawName);
+    const drawHistory = purifyHistoryForDraw(drawName, history);
     
     const algoKeys = Object.keys(globalDnaContext);
     const behavioralDna: Record<string, number> = {};

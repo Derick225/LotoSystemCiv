@@ -31,6 +31,7 @@ import {
 import { AlgoWeights, DrawResult } from "../types";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import {
   generateMasterPrediction,
   normalizeWeights,
@@ -76,7 +77,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
   
   // Filter draws specific to this game
   const drawHistory = useMemo(() => {
-    return history.filter((h) => h.drawName === drawName);
+    return purifyHistoryForDraw(drawName, history);
   }, [history, drawName]);
 
   const [historicalIndex, setHistoricalIndex] = useState<number>(0);

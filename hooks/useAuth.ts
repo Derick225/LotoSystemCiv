@@ -29,7 +29,9 @@ export const useAuth = () => {
 
                 if (currentSession?.user) {
                     const userId = currentSession.user.id;
-                    await hydrateUserData(userId);
+                    hydrateUserData(userId).catch(err => {
+                        console.warn("[AlmostInstantSync] Non-blocking hydration issue:", err);
+                    });
                     const adminStatus = authService.isAdminUser(currentSession?.user);
                     setIsAdmin(adminStatus);
 
@@ -61,7 +63,9 @@ export const useAuth = () => {
             if (!isMounted) return;
             setSession(newSession);
             if (newSession?.user) {
-                await hydrateUserData(newSession.user.id);
+                hydrateUserData(newSession.user.id).catch(err => {
+                    console.warn("[AlmostInstantSync] Non-blocking hydration issue:", err);
+                });
                 const adminStatus = authService.isAdminUser(newSession.user);
                 setIsAdmin(adminStatus);
 

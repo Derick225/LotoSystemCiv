@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { detectGameRegime } from "../mathService";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures } from "./featureExtractor";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 /**
  * Catégories de dérives arithmétiques détectées par le module de vérification
@@ -210,7 +211,7 @@ export const runHistoricalShrinkageBacktest = async (
   const now = Date.now();
   
   // Isolement strict par nom de tirage
-  const purifiedHistory = drawName ? history.filter(d => d.drawName === drawName) : history;
+  const purifiedHistory = purifyHistoryForDraw(drawName, history);
   
   // Échantillon de validation historique (par exemple, les 8 derniers tirages disponibles possédant au moins 10 antécédents)
   const validationDepth = Math.min(8, purifiedHistory.length - 11);

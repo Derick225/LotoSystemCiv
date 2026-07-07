@@ -1,6 +1,7 @@
 import { DrawResult } from '../../types';
 import { extractDrawNumbers } from './featureExtractor';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export interface DecadeAnalysisResult {
   // Distribution par décennie (9 décennies : 0=1-10, 1=11-20, ..., 8=81-90)
@@ -58,12 +59,8 @@ export const analyzeDecadePatterns = (
 ): DecadeAnalysisResult => {
   const NUM_DECADES = 9;
   
-  // Filtrage strict selon la règle d'isolation (TIRAGE ISOLATION RULE), sauf pseudo-tirage agrégé
-  const normalizedDrawName = drawName ? drawName.trim().toLowerCase() : "";
-  const isAggregatePseudoDraw = normalizedDrawName === "all" || normalizedDrawName === "all_combined";
-  const filteredHistory = (drawName && !isAggregatePseudoDraw)
-    ? history.filter(d => d.drawName === drawName)
-    : history;
+  // Filtrage robuste selon la règle d'isolation (TIRAGE ISOLATION RULE)
+  const filteredHistory = purifyHistoryForDraw(drawName, history);
 
   const distribution = new Float32Array(NUM_DECADES);
   const correlationMatrix: Float32Array[] = Array.from({ length: NUM_DECADES }, () => new Float32Array(NUM_DECADES));

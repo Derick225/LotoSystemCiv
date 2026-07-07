@@ -160,10 +160,16 @@ export const UserWallet: React.FC = () => {
         audioEngine.play('click');
         const sess = sessionData?.session;
         if ((sess?.user)) {
-            await hydrateUserData((sess?.user?.id));
-            queryClient.invalidateQueries({ queryKey: ['tickets'] });
-            audioEngine.play('success');
-            showToast("Sync Cloud OK.", "success");
+            try {
+                await hydrateUserData((sess?.user?.id));
+                queryClient.invalidateQueries({ queryKey: ['tickets'] });
+                audioEngine.play('success');
+                showToast("Sync Cloud OK.", "success");
+            } catch (err) {
+                console.warn("[AlmostInstantSync] Erreur lors de la synchronisation manuelle :", err);
+                showToast("Échec de synchronisation Cloud (temps d'attente dépassé ou réseau isolé).", "error");
+                audioEngine.play('error');
+            }
         } else {
             audioEngine.play('error');
             showToast("Connexion requise.", "error");
