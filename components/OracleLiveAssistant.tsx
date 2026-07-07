@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { supabase } from '../services/supabaseClient';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
@@ -100,7 +101,12 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
 
     const fetchApiKey = async () => {
         try {
-            const res = await fetch('/api/gemini-token');
+            const { data: { session } } = await supabase.auth.getSession();
+            const headers: Record<string, string> = {};
+            if (session?.access_token) {
+                headers['Authorization'] = `Bearer ${session.access_token}`;
+            }
+            const res = await fetch('/api/gemini-token', { headers });
             if (res.ok) {
                 const data = await res.json();
                 setDynamicApiKey(data.token);

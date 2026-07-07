@@ -133,11 +133,18 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
         const preview: PreviewRow[] = [];
 
-        // Détection du séparateur sur la première ligne
+        // Détection intelligente du séparateur sur la première ligne
         const firstLine = lines[0] || '';
-        let separator = ',';
-        if ((firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length) separator = ';';
-        else if ((firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length) separator = '\t';
+        let separator: string | RegExp = ',';
+        if ((firstLine.match(/;/g) || []).length > 0) {
+            separator = ';';
+        } else if ((firstLine.match(/\t/g) || []).length > 0) {
+            separator = '\t';
+        } else if ((firstLine.match(/,/g) || []).length > 0) {
+            separator = ',';
+        } else if ((firstLine.match(/\s+/g) || []).length > 0) {
+            separator = /\s+/;
+        }
 
         const seenDatesInBatch = new Set<string>();
 
@@ -159,7 +166,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             const dateRegex = /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})|(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/;
 
             // On scanne les parties pour trouver la date
-            for(let i=0; i<parts.length; i++) {
+            for (let i = 0; i < parts.length; i++) {
                 if (parts[i].match(dateRegex)) {
                     dateIndex = i;
                     dateStr = parts[i];
@@ -185,12 +192,23 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                 return;
             }
 
-            // On cherche les numéros (valeurs numériques entre 1 et 90)
-            // On exclut l'index de la date
-            const potentialNumbers = parts
-                .filter((p, i) => i !== dateIndex && !isNaN(parseInt(p)) && parseInt(p) >= 1 && parseInt(p) <= 90)
-                .map(Number);
-            
+            // On extrait les numéros (valeurs purement numériques de 1 à 90) de façon intelligente
+            // pour éviter d'attraper des identifiants (IDs) ou numéros de tirage placés à gauche/droite.
+            const isPureInteger = (str: string) => /^\d+$/.test(str.trim());
+
+            const rightNums = parts.slice(dateIndex + 1)
+                .filter(isPureInteger)
+                .map(p => parseInt(p, 10))
+                .filter(n => n >= 1 && n <= 90);
+
+            const leftNums = parts.slice(0, dateIndex)
+                .filter(isPureInteger)
+                .map(p => parseInt(p, 10))
+                .filter(n => n >= 1 && n <= 90);
+
+            // On favorise la portion de droite si elle a au moins 5 numéros, sinon celle de gauche
+            const potentialNumbers = (rightNums.length >= 5) ? rightNums : (leftNums.length >= 5 ? leftNums : [...leftNums, ...rightNums]);
+
             // On prend les 5 premiers comme gagnants
             const winners = potentialNumbers.slice(0, 5);
             
@@ -205,17 +223,30 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             let isValid = true;
             let error = '';
 
-            // Validation Date stricte & Conversion
-            const ddmmyyyy = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-            let finalDate = dateStr;
+            // Validation Date robuste & Normalisation
+            let parsedDay = 0;
+            let parsedMonth = 0;
+            let parsedYear = 0;
 
-            if (!ddmmyyyy) {
-                 if(!dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                     isValid = false; 
-                     error = 'Format Date invalide (requis: JJ/MM/AAAA ou AAAA-MM-JJ)';
-                 }
+            const matchYMD = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+            const matchDMY = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+
+            if (matchYMD) {
+                parsedYear = parseInt(matchYMD[1], 10);
+                parsedMonth = parseInt(matchYMD[2], 10);
+                parsedDay = parseInt(matchYMD[3], 10);
+            } else if (matchDMY) {
+                parsedDay = parseInt(matchDMY[1], 10);
+                parsedMonth = parseInt(matchDMY[2], 10);
+                parsedYear = parseInt(matchDMY[3], 10);
+            }
+
+            let finalDate = dateStr;
+            if (parsedDay > 0 && parsedDay <= 31 && parsedMonth > 0 && parsedMonth <= 12 && parsedYear >= 1900 && parsedYear <= 2100) {
+                finalDate = `${String(parsedDay).padStart(2, '0')}/${String(parsedMonth).padStart(2, '0')}/${parsedYear}`;
             } else {
-                 finalDate = `${ddmmyyyy[1].padStart(2,'0')}/${ddmmyyyy[2].padStart(2,'0')}/${ddmmyyyy[3]}`;
+                isValid = false;
+                error = 'Format Date invalide ou inconnu (requis: JJ/MM/AAAA ou AAAA-MM-JJ)';
             }
 
             // Validation Numéros
@@ -235,7 +266,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             // Validation Machine optionnelle
             if (isValid && machine.length > 0) {
                 if (machine.length !== 5 && machine.length !== 0) {
-                    // Si des numéros machine sont fournis, ils doivent être complets (5) ou vides
                     machine = []; 
                 } else if (new Set(machine).size !== machine.length) {
                     isValid = false;
@@ -369,11 +399,19 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
         showToast("Script Python généré.", "success");
     };
 
+    const parseHTMLInputDate = (dateStr: string): Date => {
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        }
+        return new Date(dateStr);
+    };
+
     const rangeMatchCount = useMemo(() => {
         if (!deleteStartDate || !deleteEndDate) return 0;
-        const start = new Date(deleteStartDate);
+        const start = parseHTMLInputDate(deleteStartDate);
         start.setHours(0,0,0,0);
-        const end = new Date(deleteEndDate);
+        const end = parseHTMLInputDate(deleteEndDate);
         end.setHours(23,59,59,999);
 
         const parseLocalDrawDate = (dateStr: string): Date | null => {
@@ -434,9 +472,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     const handleDeleteDateRange = async () => {
         if (!deleteStartDate || !deleteEndDate) return;
         
-        const start = new Date(deleteStartDate);
+        const start = parseHTMLInputDate(deleteStartDate);
         start.setHours(0,0,0,0);
-        const end = new Date(deleteEndDate);
+        const end = parseHTMLInputDate(deleteEndDate);
         end.setHours(23,59,59,999);
 
         const parseLocalDrawDate = (dateStr: string): Date | null => {

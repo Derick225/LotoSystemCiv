@@ -44,6 +44,16 @@ Deno.serve(async (req) => {
         throw new Error("Missing CinetPay config")
     }
 
+    if (rawData.cpm_site_id !== site_id) {
+        return new Response(JSON.stringify({ error: "Invalid site id" }), { status: 400, headers: corsHeaders });
+    }
+
+    // Optional: HMAC Signature Verification (if provided)
+    if (rawData.cpm_token || rawData.signature) {
+       // We log but proceed to API check which is the ultimate source of truth
+       console.log("Webhook signature/token received, proceeding with API verification.");
+    }
+
     const verifyResponse = await fetch('https://api-checkout.cinetpay.com/v2/payment/check', {
         method: 'POST',
         headers: {
@@ -60,7 +70,7 @@ Deno.serve(async (req) => {
 
     if (verifyData.code === '00' && verifyData.data.status === 'ACCEPTED') {
         const userId = cpm_custom
-
+ 
         if (userId) {
             const now = new Date();
             const expiry = new Date(now);
@@ -74,29 +84,27 @@ Deno.serve(async (req) => {
                 expires_at: expiry.toISOString(),
                 updated_at: now.toISOString()
             });
-
+ 
             await supabaseClient.from('transactions').upsert({
-                id: cpm_trans_id,
+                transaction_id: cpm_trans_id,
                 user_id: userId,
-                amount: cpm_amount,
-                currency: cpm_currency,
+                amount: parseInt(cpm_amount) || 0,
                 status: 'COMPLETED',
                 provider: 'CINETPAY',
                 created_at: now.toISOString()
-            });
+            }, { onConflict: 'transaction_id' });
         }
     } else {
         const userId = cpm_custom
         if (userId) {
              await supabaseClient.from('transactions').upsert({
-                id: cpm_trans_id,
+                transaction_id: cpm_trans_id,
                 user_id: userId,
-                amount: cpm_amount,
-                currency: cpm_currency,
+                amount: parseInt(cpm_amount) || 0,
                 status: 'FAILED',
                 provider: 'CINETPAY',
                 created_at: new Date().toISOString()
-            });
+            }, { onConflict: 'transaction_id' });
         }
     }
 

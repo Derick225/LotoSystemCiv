@@ -1,9 +1,7 @@
 
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { apiClient } from '../core/api/apiClient';
-import { initiateRealPayment } from './paymentService';
 import type { SubscriptionState } from '../types';
-import { lcgGlobalRandom } from '../utils/mathUtils';
 
 
 
@@ -116,61 +114,6 @@ export const processMobileMoneyPayment = async (userId: string, provider: 'ORANG
             console.warn("Backend payment init failed, falling back to Client SDK:", e);
         }
     }
-
-    // 2. Fallback to Client-Side SDK (CinetPay)
-    // This requires a CinetPay API Key in env vars
-    const apiKey = import.meta.env.VITE_CINETPAY_API_KEY as string;
-    const siteId = import.meta.env.VITE_CINETPAY_SITE_ID as string;
-
-    if (apiKey && siteId) {
-        let customerEmail = 'user@example.com';
-        let customerPhone = '00000000';
-        let customerName = 'Utilisateur';
-
-        if (isSupabaseConfigured()) {
-            const { data: userData } = await supabase.auth.getUser();
-            if (userData?.user?.email) {
-                customerEmail = userData.user.email;
-                customerName = userData.user.email.split('@')[0];
-            }
-        }
-
-        const transactionId = `TX-${Date.now()}-${Math.floor(lcgGlobalRandom() * 1000)}`;
-        const result = await initiateRealPayment({
-            provider: 'CINETPAY',
-            apiKey,
-            siteId
-        }, {
-            amount: SUBSCRIPTION_COST,
-            currency: 'XOF',
-            description: 'Abonnement Premium LotoPro',
-            customerName,
-            customerEmail,
-            customerPhone,
-            transactionId,
-            userId
-        });
-
-        if (result.success) {
-            // Optimistic Update
-            // In real app, we should verify transaction via backend before updating
-            if (isSupabaseConfigured()) {
-                const now = new Date();
-                const expiry = new Date(now);
-                expiry.setDate(expiry.getDate() + 30);
-                
-                // This will fail due to RLS if done from client, so we do nothing here, the webhook will handle it.
-                // Or if we allow user to upsert, we would do it. But we want only service_role to update it!
-                // So optimistic update only in local state maybe? Let the webhook do its job.
-            }
-            return true;
-        } else {
-            console.error("Payment Failed:", result.message);
-            return false;
-        }
-    }
-
-    // 3. Final Fallback: Error if no config
     console.error("Configuration de paiement manquante (Pas de backend ni de clés API).");
     return false;
 };

@@ -22,15 +22,6 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/gemini-token", (_req, res) => {
-    // In a real app, verify user session via Supabase Auth here
-    const key = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    if (!key) {
-      return res.status(500).json({ error: "No API key configured on server." });
-    }
-    res.json({ token: key });
-  });
-
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

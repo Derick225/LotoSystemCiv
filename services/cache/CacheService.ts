@@ -194,6 +194,17 @@ class CacheService {
     }
   }
 
+  public async delete(key: string): Promise<void> {
+    this.memoryCache.delete(key);
+    if (CACHE_FLAGS.ENABLE_IDB) {
+      try {
+        await del(key);
+      } catch (e) {
+        console.warn(`[CacheService] Failed to delete IDB key ${key}`, e);
+      }
+    }
+  }
+
   public async runGarbageCollection(): Promise<number> {
     let clearedCount = 0;
 
