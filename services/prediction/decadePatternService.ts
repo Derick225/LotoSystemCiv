@@ -58,8 +58,12 @@ export const analyzeDecadePatterns = (
 ): DecadeAnalysisResult => {
   const NUM_DECADES = 9;
   
-  // Filtrage strict selon la règle d'isolation (TIRAGE ISOLATION RULE)
-  const filteredHistory = drawName ? history.filter(d => d.drawName === drawName) : history;
+  // Filtrage strict selon la règle d'isolation (TIRAGE ISOLATION RULE), sauf pseudo-tirage agrégé
+  const normalizedDrawName = drawName ? drawName.trim().toLowerCase() : "";
+  const isAggregatePseudoDraw = normalizedDrawName === "all" || normalizedDrawName === "all_combined";
+  const filteredHistory = (drawName && !isAggregatePseudoDraw)
+    ? history.filter(d => d.drawName === drawName)
+    : history;
 
   const distribution = new Float32Array(NUM_DECADES);
   const correlationMatrix: Float32Array[] = Array.from({ length: NUM_DECADES }, () => new Float32Array(NUM_DECADES));

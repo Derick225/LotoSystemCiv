@@ -23,6 +23,7 @@ import { DNAOptimizer } from '../training/DNAOptimizer';
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
+import { useNexusStore } from "../../store/useNexusStore";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 
 const TICKET_SIZE = 5;
@@ -81,8 +82,7 @@ export const applyDeterministicMicroSgd = async (
   weights: AlgoWeights,
   history: DrawResult[],
   entropyValue: number,
-  learningRateOverride?: number,
-  useSpatioTemporalHawkes: boolean = true
+  learningRateOverride?: number
 ): Promise<AlgoWeights> => {
   let adjustedWeights = { ...weights };
   const K = Math.min(5, history.length - 1);
@@ -115,6 +115,7 @@ export const applyDeterministicMicroSgd = async (
       const subSpatial = calculateSpatialHotSpots(subHistory);
       const subCo = calculateCoOccurrenceScores(subHistory);
       const subAnomaly = calculateAnomalyScores(subHistory);
+      const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
       const subHawkes = useSpatioTemporalHawkes
         ? calculateSpatioTemporalHawkes(subHistory, drawName)
         : calculateHawkesExcitation(subHistory);
@@ -196,7 +197,7 @@ export const applyDeterministicMicroSgd = async (
 
 export const generateMasterPredictionCore = async (
   drawName: string,
-  rawHistory: DrawResult[],
+  history: DrawResult[],
   temporalDepth: number,
   weightsToUse?: AlgoWeights,
   metrics?: EnhancedMetrics,
@@ -205,14 +206,9 @@ export const generateMasterPredictionCore = async (
   adversarialMode: boolean = false,
   forcedOutsiderCount?: number,
   isForensicOptimized: boolean = false,
-  useSpatioTemporalHawkes: boolean = true,
-  onProgress?: (progress: number, message: string) => void,
-  preloadedForensicReports?: ForensicReport[],
 ): Promise<Prediction> => {
-  const history = purifyHistoryForDraw(drawName, rawHistory);
   initializeLcgForDraw(drawName);
   if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
-  onProgress?.(5, "Initialisation de l'ADN algorithmique...");
   
   let weights = normalizeWeights(weightsToUse || (await getAlgoWeights(drawName)));
   const gameRegimeInfo = detectGameRegime(history);
@@ -232,9 +228,7 @@ export const generateMasterPredictionCore = async (
   if (!skipTraining) {
     try {
       const { tunePredictiveHyperparameters } = await import("./hyperParameterTuner");
-      const tunerResult = await tunePredictiveHyperparameters(drawName, history, weights, useSpatioTemporalHawkes, (p, msg) => {
-        onProgress?.(Math.round(5 + p * 0.8), msg);
-      });
+      const tunerResult = await tunePredictiveHyperparameters(drawName, history, weights);
       hyperparameters = tunerResult.tunedParams;
       hyperAccuracyGain = tunerResult.accuracyGain;
       hyperTuningLog = tunerResult.log;
@@ -242,19 +236,16 @@ export const generateMasterPredictionCore = async (
       logger.warn({ err }, "[predictionFacade] Hyper-parameter tuning failed, using defaults");
     }
 
-    onProgress?.(45, "Micro-ajustement des poids par descente de gradient stochastique...");
     weights = await applyMetaLearning(weights, history, drawName);
     
     // MICRO-AJUSTEMENT CONTINU DES POIDS PAR DESCENTE DE GRADIENT STOCHASTIQUE DÉTERMINISTE (SGD)
-    weights = await applyDeterministicMicroSgd(drawName, weights, history, gameRegimeInfo.entropy, hyperparameters.sgdLearningRate, useSpatioTemporalHawkes);
+    weights = await applyDeterministicMicroSgd(drawName, weights, history, gameRegimeInfo.entropy, hyperparameters.sgdLearningRate);
     await saveAlgoWeights(drawName, weights);
   }
   
   const localHistoryContext = history.slice(0, temporalDepth);
-  onProgress?.(50, "Extraction des distributions de Poisson...");
   
   const poissonScores = calculatePoissonScores(localHistoryContext);
-  onProgress?.(55, "Analyse des probabilités de transition bayésiennes...");
   const bayesScores = calculateBayesianScore(localHistoryContext);
   const temporalScores = calculateTemporalScores(localHistoryContext);
   const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
@@ -266,16 +257,14 @@ export const generateMasterPredictionCore = async (
     gapVelocityScores[k] *= hyperparameters.gapVelocityWeight;
   }
 
-  onProgress?.(65, "Synthèse des résonances fractales et processus Hawkes...");
   const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
   const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
   const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-  
-  onProgress?.(75, "Analyse des affinités symbiotiques et anomalies d'entropie...");
   const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext);
   const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
   const anomalyScores = calculateAnomalyScores(localHistoryContext);
   
+  const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
   const hawkesExcitationScores = useSpatioTemporalHawkes
     ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
     : calculateHawkesExcitation(localHistoryContext);
@@ -303,15 +292,10 @@ export const generateMasterPredictionCore = async (
   
   let recentReports: ForensicReport[] = [];
   if (!skipTraining || isForensicOptimized) {
-    onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
-    if (preloadedForensicReports) {
-      recentReports = preloadedForensicReports;
-    } else {
-      const forensicReports = await getLocalForensicReports();
-      // Double Aveugle : On filtre les rapports d'autopsie pour n'utiliser que ceux correspondant aux tirages présents dans l'historique actif
-      const historyDates = new Set(history.map(h => h.date).filter(d => d !== 'Invalid Date' && d !== null && d !== undefined));
-      recentReports = forensicReports.filter((r) => r.drawName === drawName && r.date !== 'Invalid Date' && r.date !== null && r.date !== undefined && historyDates.has(r.date)).slice(0, 5);
-    }
+    const forensicReports = await getLocalForensicReports();
+    // Double Aveugle : On filtre les rapports d'autopsie pour n'utiliser que ceux correspondant aux tirages présents dans l'historique actif
+    const historyDates = new Set(history.map(h => h.date).filter(d => d !== 'Invalid Date' && d !== null && d !== undefined));
+    recentReports = forensicReports.filter((r) => r.drawName === drawName && r.date !== 'Invalid Date' && r.date !== null && r.date !== undefined && historyDates.has(r.date)).slice(0, 5);
   }
   
   const intermediateMetrics: EnhancedMetrics = {
@@ -804,16 +788,21 @@ export const generateMasterPredictionCore = async (
     });
   }
   
-  onProgress?.(95, "Formulation finale et sélection des combinaisons...");
   masterScores = await applyPCADenoising(masterScores, weights, enhancedMetrics);
   const sortedScores = masterScores.sort((a, b) => b.score - a.score);  
   const outsiderCount = forcedOutsiderCount !== undefined ? forcedOutsiderCount : 2;
   const empiricalCalibration = generateEmpiricalCalibration(history);
-  const selection = generateCombination(sortedScores, features.affinityMap, empiricalCalibration, outsiderCount, history[0]?.gagnants, regimeState);
+  // CORRECTIF CRITIQUE : `regimeState` est calculé sur une échelle [0, 100] (voir plus haut :
+  // (volatilityScore + entropyScore) / 2, chacun borné à [0, 100]). `generateCombination`
+  // utilise ce paramètre comme exposant de Math.exp() pour moduler la température et le
+  // nombre d'itérations du recuit simulé : Math.exp(100) ≈ 2.7e43, ce qui rendait la boucle
+  // d'optimisation combinatoire pratiquement infinie (blocage total de l'application à chaque
+  // génération de prédiction). On normalise donc explicitement sur [0, 1] avant l'appel.
+  const regimeStateNormalized = regimeState / 100.0;
+  const selection = generateCombination(sortedScores, features.affinityMap, empiricalCalibration, outsiderCount, history[0]?.gagnants, regimeStateNormalized);
   
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
   if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
-  onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
   
   let analysisText = adversarialApplied
     ? `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus (cibles hyper-consensuelles [${challengedNumbers.join(", ")}] modérées pour briser le cercle algorithmique de sédimentation d'ADN).`
@@ -930,7 +919,6 @@ export const generateMasterPrediction = async (
   adversarialMode: boolean = false,
   forcedOutsiderCount?: number,
   isForensicOptimized: boolean = false,
-  onProgress?: (progress: number, message: string) => void,
 ): Promise<Prediction> => {
   const history = purifyHistoryForDraw(drawName, rawHistory);
   const keyParams = `${history.length}_${history[0]?.date}_${weightsToUse ? JSON.stringify(weightsToUse) : "def"}_adv_${adversarialMode}_forcedOutsider_${forcedOutsiderCount !== undefined ? forcedOutsiderCount : "none"}_depth_${temporalDepth}_forensic_${isForensicOptimized}`;
@@ -939,40 +927,17 @@ export const generateMasterPrediction = async (
   return globalCache.getOrCompute(
     cacheKey,
     async () => {
-      let useCloudEngine = true;
-      let useSpatioTemporalHawkes = true;
-      try {
-        const { useNexusStore } = await import("../../store/useNexusStore");
-        useCloudEngine = useNexusStore.getState().useCloudEngine;
-        useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
-      } catch (err) {
-        // Fallback safe outside main-thread
-      }
-
       // 1. Try cloud delegation first if enabled & configured
+      const useCloudEngine = useNexusStore.getState().useCloudEngine;
       if (useCloudEngine && isSupabaseConfigured() && drawName !== "ALL_COMBINED" && drawName !== "ALL") {
         try {
           console.log(`[CLOUD COMPUTING] Délégation de la prédiction ${drawName} vers Supabase Edge Function (predict-elite)...`);
-          // Format the fractal metric array into a record structure matching what the Edge Function expects (z.record(z.number()))
-          const formattedFractal: Record<number, number> = {};
-          if (metrics && Array.isArray(metrics.fractal)) {
-            metrics.fractal.forEach((f) => {
-              if (f && typeof f.number === 'number' && typeof f.hurst === 'number') {
-                formattedFractal[f.number] = f.hurst;
-              }
-            });
-          }
-
           const result = await apiClient.post<Prediction>('predict-elite', {
             drawName,
             history,
             weights: weightsToUse,
-            symbioticContext: symbioticContext ? {
-              spatialHotZones: symbioticContext.spatialHotZones || []
-            } : undefined,
-            metrics: metrics ? {
-              fractal: formattedFractal
-            } : undefined
+            symbioticContext,
+            metrics
           });
           if (result && result.suggestedNumbers && result.suggestedNumbers.length > 0) {
             console.log(`[CLOUD COMPUTING] Prédiction ${drawName} obtenue avec succès depuis le Cloud !`);
@@ -986,10 +951,9 @@ export const generateMasterPrediction = async (
       // 2. Try offloading to Web Worker to keep main thread fluid (60fps UI)
       if (typeof Worker !== 'undefined') {
         try {
-          const preloadedForensicReports = await getLocalForensicReports();
           return await new Promise<Prediction>((resolve, reject) => {
             const worker = new Worker(
-              new URL('../workers/prediction.worker.ts', import.meta.url),
+              new URL('../workers/prediction.worker.ts?worker', import.meta.url),
               { type: 'module' }
             );
 
@@ -999,12 +963,8 @@ export const generateMasterPrediction = async (
             }, 60000);
 
             worker.onmessage = (e: MessageEvent) => {
-              const { success, result, error, isProgress, progress, message } = e.data;
-              if (isProgress) {
-                onProgress?.(progress, message);
-                return;
-              }
               clearTimeout(timeoutId);
+              const { success, result, error } = e.data;
               if (success) {
                 resolve(result);
               } else {
@@ -1031,8 +991,7 @@ export const generateMasterPrediction = async (
               adversarialMode,
               forcedOutsiderCount,
               isForensicOptimized,
-              useSpatioTemporalHawkes,
-              preloadedForensicReports
+              useSpatioTemporalHawkes: useNexusStore.getState().useSpatioTemporalHawkes
             });
           });
         } catch (workerError) {
@@ -1040,7 +999,7 @@ export const generateMasterPrediction = async (
         }
       }
 
-      return generateMasterPredictionCore(drawName, history, temporalDepth, weightsToUse, metrics, symbioticContext, skipTraining, adversarialMode, forcedOutsiderCount, isForensicOptimized, useSpatioTemporalHawkes, onProgress);
+      return generateMasterPredictionCore(drawName, history, temporalDepth, weightsToUse, metrics, symbioticContext, skipTraining, adversarialMode, forcedOutsiderCount, isForensicOptimized);
     },
     CACHE_TTL.MEDIUM,
     drawName
