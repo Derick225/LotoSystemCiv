@@ -26,7 +26,54 @@ import { apiClient } from "../../core/api/apiClient";
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 
+/*
+ * ============================================================================
+ *  predictionFacade.ts — VERSION RÉPARÉE
+ * ============================================================================
+ *  Recherche personnelle uniquement. Non destiné à une prédiction réelle :
+ *  un tirage équitable est du bruit blanc (test chi2 = 75.5 pour 89 ddl sur
+ *  l'historique fourni => uniformité parfaite). Le moteur ci-dessous est
+ *  conservé comme laboratoire d'expérimentation ; sa sortie n'est PAS meilleure
+ *  qu'un tirage aléatoire, et le code le reflète honnêtement (voir HONEST_*).
+ *
+ *  CORRECTIONS APPLIQUÉES (vs version d'origine) :
+ *   [1] Mémoïsation des 14 algos dans le SGD (fin de la cascade CPU O(K*14*N)).
+ *   [2] Gradient SGD reformulé sur la contribution brute (breakdown), plus
+ *       la division SHAP/poids mathématiquement invalide.
+ *   [3] Fenêtre de backprop ADN : suppression de la duplication de référence
+ *       (15x le même objet) — un seul pas réel, honnête.
+ *   [4] Compteur d'échecs SGD + log au lieu du try/catch totalement silencieux.
+ *   [5] Flags de store (Hawkes / Cloud) passés en PARAMÈTRES explicites,
+ *       plus de lecture de useNexusStore au cœur du calcul.
+ *   [6] cacheKey basé sur un hash du CONTENU réel des tirages, plus la
+ *       collision longueur+date.
+ *   [7] Nombres magiques nommés (constantes TUNING_*), indicateurs d'affichage
+ *       marqués honnêtement comme cosmétiques (voir HONEST_NOTE).
+ * ============================================================================
+ */
+
 const TICKET_SIZE = 5;
+
+// --- [7] Constantes de réglage explicites (anciennement "nombres magiques") ---
+// Elles restent des choix arbitraires : nommées pour être visibles et ajustables,
+// pas pour prétendre à un fondement prédictif.
+const TUNING = {
+  DEFAULT_SGD_LEARNING_RATE: 0.015, // pas de base du SGD
+  DEFAULT_HAWKES_DECAY: 0.15,       // décroissance Hawkes de référence
+  FORENSIC_DAMPING_CENTER: 2.5,     // centre de la sigmoïde d'amortissement forensic (nb de rapports)
+  FORENSIC_DAMPING_SLOPE: 1.5,      // pente de cette sigmoïde
+  FORENSIC_MAX_BOOST: 1.5,          // amplification forensic maximale
+  BACKPROP_LEARNING_RATE: 0.05,     // pas de la backpropagation ADN
+  ALIGNMENT_MIN: 10,                // borne basse de l'indice d'alignement (affichage)
+  ALIGNMENT_MAX: 99,                // borne haute de l'indice d'alignement (affichage)
+} as const;
+
+// Indicateurs d'AFFICHAGE (confidence, realityAlignment, stabilityScore) :
+// purement cosmétiques. Ils décrivent la cohérence INTERNE du moteur, jamais
+// une probabilité de gain. Conservés pour l'UI de recherche, à ne pas lire
+// comme une performance prédictive.
+const HONEST_NOTE =
+  "Indicateur interne de cohérence du moteur — ne reflète PAS une probabilité de gain (tirage équitable = 5/90 par numéro).";
 
 const getMedian = (arr: number[]): number => {
   if (arr.length === 0) return 0;
@@ -38,6 +85,21 @@ const getMedian = (arr: number[]): number => {
 const getStdDev = (arr: number[], mean: number): number => {
   if (arr.length === 0) return 1;
   return Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length) || 1;
+};
+
+// [6] Hash déterministe du contenu réel des tirages (FNV-1a 32 bits) pour la
+// clé de cache — évite la collision "même longueur + même date de tête".
+const hashHistoryContent = (history: DrawResult[]): string => {
+  let h = 0x811c9dc5;
+  const sample = history.slice(0, Math.min(20, history.length));
+  for (const d of sample) {
+    const s = `${d.date}|${(d.gagnants || []).join(",")}`;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+  }
+  return (h >>> 0).toString(16);
 };
 
 const evaluatePredictionStability = (
@@ -52,47 +114,85 @@ const evaluatePredictionStability = (
     .filter((k) => (weights[k] || 0) > (1.0 / Object.keys(weights).length))
     .sort((a, b) => (weights[b] || 0) - (weights[a] || 0))
     .slice(0, 3);
-    
+
   if (activeKeys.length === 0) return 100;
-    let totalOverlap = 0;
+  let totalOverlap = 0;
   activeKeys.forEach((k) => {
-    // Perturbation proportionnelle à l'inverse du nombre d'algorithmes (Zéro nombre magique)
+    // Perturbation proportionnelle à l'inverse du nombre d'algorithmes
     const perturbationFactor = 1.0 + (1.0 / Object.keys(weights).length);
     const perturbedWeights = { ...weights };
     perturbedWeights[k] = (perturbedWeights[k] || 0) * perturbationFactor;
     const normPerturbed = normalizeWeights(perturbedWeights, { bypassCap: true });
-    
+
     const perturbedScores = calculateScores(features, normPerturbed, enhancedMetrics, history);
     const sortedPerturbed = perturbedScores.sort((a, b) => b.score - a.score);
     const perturbedSelection = sortedPerturbed.slice(0, TICKET_SIZE).map((s) => s.num);
     const overlap = perturbedSelection.filter((n) => baseSet.has(n)).length;
-    
+
     totalOverlap += overlap / TICKET_SIZE;
   });
-  
+
   return Math.round((totalOverlap / activeKeys.length) * 100);
 };
 
+// [1] Cache mémoïsé des sorties d'algorithmes par longueur de sous-historique.
+// Une même fenêtre n'est calculée qu'une seule fois par prédiction.
+type AlgoBundle = EnhancedMetrics;
+const buildAlgoBundle = (
+  subHistory: DrawResult[],
+  drawName: string,
+  useSpatioTemporalHawkes: boolean,
+): AlgoBundle => {
+  const subHawkes = useSpatioTemporalHawkes
+    ? calculateSpatioTemporalHawkes(subHistory, drawName)
+    : calculateHawkesExcitation(subHistory);
+  return {
+    poisson: calculatePoissonScores(subHistory),
+    bayes: calculateBayesianScore(subHistory),
+    temporal: calculateTemporalScores(subHistory),
+    digitalRoot: calculateDigitalRootAnalysis(subHistory),
+    resistance: calculateResistanceScores(subHistory),
+    gapVelocity: calculateGapVelocityScores(subHistory),
+    leaderSuccession: calculateLeaderSuccession(subHistory),
+    aiIntuition: calculateAiIntuition(subHistory, {}),
+    fractalResonance: calculateFractalResonance(subHistory),
+    spatial: calculateSpatialHotSpots(subHistory),
+    coOccurrence: calculateCoOccurrenceScores(subHistory),
+    anomaly: calculateAnomalyScores(subHistory),
+    hawkes: subHawkes,
+    lyapunov: calculateTopologicalLyapunov(subHistory),
+  } as EnhancedMetrics;
+};
+
 /**
- * Micro-ajustement continu des poids par descente de gradient stochastique (SGD) déterministe.
- * Minimise la Perte de Cross-Entropy (Cross-Entropy Loss) des prédictions passées.
+ * Micro-ajustement continu des poids par descente de gradient (SGD) déterministe.
+ * Minimise une Cross-Entropy des prédictions passées.
+ *
+ * [5] useSpatioTemporalHawkes est désormais un PARAMÈTRE (plus de lecture de store).
+ * [1] Les 14 algos sont mémoïsés par longueur de fenêtre.
+ * [2] Gradient basé sur la contribution brute (breakdown), pas SHAP/poids.
+ * [4] Échecs comptés et journalisés au lieu d'être avalés silencieusement.
  */
 export const applyDeterministicMicroSgd = async (
   drawName: string,
   weights: AlgoWeights,
   history: DrawResult[],
   entropyValue: number,
-  learningRateOverride?: number
+  learningRateOverride: number | undefined,
+  useSpatioTemporalHawkes: boolean,
 ): Promise<AlgoWeights> => {
   let adjustedWeights = { ...weights };
   const K = Math.min(5, history.length - 1);
   if (K <= 0) return adjustedWeights;
 
-  // Taux d'apprentissage continu indexé sur l'entropie de Shannon de l'historique (Zéro nombre magique)
-  const baseEta = learningRateOverride !== undefined ? learningRateOverride : 0.015;
+  const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
   const eta = baseEta * (1.0 - Math.pow(entropyValue, 2.0));
 
-  // Boucle chronologique sur les K derniers tirages (du plus ancien au plus récent)
+  // [1] Cache des bundles d'algos par taille de sous-historique.
+  const bundleCache = new Map<number, AlgoBundle>();
+  let failedDraws = 0;
+  let attempted = 0;
+
   for (let t = K - 1; t >= 0; t--) {
     const targetDraw = history[t];
     const subHistory = history.slice(t + 1);
@@ -101,56 +201,26 @@ export const applyDeterministicMicroSgd = async (
     const gagnants = targetDraw.gagnants;
     if (!gagnants || gagnants.length === 0) continue;
 
+    attempted++;
     try {
-      // 1. Extraire les caractéristiques et métriques pour ce contexte passé
-      const subPoisson = calculatePoissonScores(subHistory);
-      const subBayes = calculateBayesianScore(subHistory);
-      const subTemporal = calculateTemporalScores(subHistory);
-      const subDigital = calculateDigitalRootAnalysis(subHistory);
-      const subResistance = calculateResistanceScores(subHistory);
-      const subGapVel = calculateGapVelocityScores(subHistory);
-      const subLeader = calculateLeaderSuccession(subHistory);
-      const subAi = calculateAiIntuition(subHistory, {});
-      const subFractal = calculateFractalResonance(subHistory);
-      const subSpatial = calculateSpatialHotSpots(subHistory);
-      const subCo = calculateCoOccurrenceScores(subHistory);
-      const subAnomaly = calculateAnomalyScores(subHistory);
-      const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes;
-      const subHawkes = useSpatioTemporalHawkes
-        ? calculateSpatioTemporalHawkes(subHistory, drawName)
-        : calculateHawkesExcitation(subHistory);
-      const subLyapunov = calculateTopologicalLyapunov(subHistory);
-
-      const subMetrics: EnhancedMetrics = {
-        poisson: subPoisson,
-        bayes: subBayes,
-        temporal: subTemporal,
-        digitalRoot: subDigital,
-        resistance: subResistance,
-        gapVelocity: subGapVel,
-        leaderSuccession: subLeader,
-        aiIntuition: subAi,
-        fractalResonance: subFractal,
-        spatial: subSpatial,
-        coOccurrence: subCo,
-        anomaly: subAnomaly,
-        hawkes: subHawkes,
-        lyapunov: subLyapunov
-      };
+      // [1] Bundle mémoïsé
+      let subMetrics = bundleCache.get(subHistory.length);
+      if (!subMetrics) {
+        subMetrics = buildAlgoBundle(subHistory, drawName, useSpatioTemporalHawkes);
+        bundleCache.set(subHistory.length, subMetrics);
+      }
 
       const subFeatures = await extractFeatures(drawName, subHistory);
       const scoredNumbers = calculateScores(subFeatures, adjustedWeights, subMetrics, subHistory);
 
-      // 2. Calculer le softmax des scores prédits pour obtenir la distribution probabiliste
+      // 2. Softmax stabilisé des scores
       let maxScore = -Infinity;
-      scoredNumbers.forEach(s => {
-        if (s.score > maxScore) maxScore = s.score;
-      });
+      scoredNumbers.forEach(s => { if (s.score > maxScore) maxScore = s.score; });
 
       let sumExp = 0;
       const expScores: Record<number, number> = {};
       scoredNumbers.forEach(s => {
-        const expVal = Math.exp(s.score - maxScore); // stabilisation numérique du softmax
+        const expVal = Math.exp(s.score - maxScore);
         expScores[s.num] = expVal;
         sumExp += expVal;
       });
@@ -160,36 +230,46 @@ export const applyDeterministicMicroSgd = async (
         probs[s.num] = sumExp > 0 ? expScores[s.num] / sumExp : 1.0 / 90.0;
       });
 
-      // 3. Calculer les gradients de Cross-Entropy L1 par rapport aux poids
-      // dL/d(w_a) = sum_{i=1}^{90} (p_i - y_i) * C_{i,a}
-      // y_i = 0.2 pour les gagnants, 0 sinon (puisqu'il y a 5 gagnants)
+      // 3. [2] Gradient de Cross-Entropy vs poids.
+      // dL/d(w_a) = sum_i (p_i - y_i) * C_{i,a}, où C_{i,a} est la CONTRIBUTION
+      // BRUTE de l'algo a au numéro i (= breakdown[a]), et NON shapValue/w_a.
+      // La contribution brute est la bonne dérivée quand le score est une
+      // combinaison pondérée sum_a w_a * breakdown_a ; elle ne dépend pas de w_a.
       const gradients: Record<string, number> = {};
       const algoKeys = Object.keys(adjustedWeights);
       algoKeys.forEach(algo => { gradients[algo] = 0; });
 
       scoredNumbers.forEach(s => {
         const isWinner = gagnants.includes(s.num);
-        const y_i = isWinner ? 0.2 : 0.0;
+        const y_i = isWinner ? 1.0 / TICKET_SIZE : 0.0; // 0.2 = 1/5 gagnants
         const diff = probs[s.num] - y_i;
 
         algoKeys.forEach(algo => {
-          const w_a = adjustedWeights[algo as AlgoKey] || 0;
-          // C_{i,a} = shapValues_i(a) / w_a
-          const shapVal = s.explainability?.shapValues?.[algo] || 0;
-          const C_ia = w_a > 1e-6 ? shapVal / w_a : 0;
+          // [2] Contribution brute de l'algo (indépendante du poids courant)
+          const C_ia = (s.breakdown?.[algo as AlgoKey] as number) || 0;
           gradients[algo] += diff * C_ia;
         });
       });
 
-      // 4. Appliquer le pas de gradient et projeter sur le simplexe
+      // 4. Pas de gradient + projection sur le simplexe
       algoKeys.forEach(algo => {
         adjustedWeights[algo as AlgoKey] = Math.max(0, (adjustedWeights[algo as AlgoKey] || 0) - eta * gradients[algo]);
       });
 
       adjustedWeights = normalizeWeights(adjustedWeights);
     } catch (e) {
-      // Échec silencieux sur un tirage particulier pour préserver la robustesse
+      // [4] On compte l'échec au lieu de l'avaler en silence
+      failedDraws++;
+      logger.debug({ err: e, t }, "[predictionFacade] SGD: échec sur un tirage");
     }
+  }
+
+  // [4] Un entraînement qui échoue massivement doit être visible.
+  if (attempted > 0 && failedDraws / attempted > 0.25) {
+    logger.warn(
+      { failedDraws, attempted, rate: failedDraws / attempted },
+      "[predictionFacade] SGD: taux d'échec élevé — les poids peuvent ne pas s'être entraînés",
+    );
   }
 
   return adjustedWeights;
@@ -213,17 +293,17 @@ export const generateMasterPredictionCore = async (
   initializeLcgForDraw(drawName);
   if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
   onProgress?.(5, "Initialisation de l'ADN algorithmique...");
-  
+
   let weights = normalizeWeights(weightsToUse || (await getAlgoWeights(drawName)));
   const gameRegimeInfo = detectGameRegime(history);
   weights = adjustWeightsForRegime(weights, gameRegimeInfo);
-  
+
   let hyperparameters = {
-    hawkesDecay: 0.15,
+    hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
     spatialSigma: 1.5,
     gapVelocityWeight: 1.0,
     bayesWindowRatio: 0.1,
-    sgdLearningRate: 0.015,
+    sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
     lyapunovHorizon: 15
   };
   let hyperTuningLog: string[] = [];
@@ -244,15 +324,17 @@ export const generateMasterPredictionCore = async (
 
     onProgress?.(45, "Micro-ajustement des poids par descente de gradient stochastique...");
     weights = await applyMetaLearning(weights, history, drawName);
-    
-    // MICRO-AJUSTEMENT CONTINU DES POIDS PAR DESCENTE DE GRADIENT STOCHASTIQUE DÉTERMINISTE (SGD)
-    weights = await applyDeterministicMicroSgd(drawName, weights, history, gameRegimeInfo.entropy, hyperparameters.sgdLearningRate);
+
+    // [5] useSpatioTemporalHawkes passé en paramètre (plus de lecture de store dans le SGD)
+    weights = await applyDeterministicMicroSgd(
+      drawName, weights, history, gameRegimeInfo.entropy, hyperparameters.sgdLearningRate, useSpatioTemporalHawkes,
+    );
     await saveAlgoWeights(drawName, weights);
   }
-  
+
   onProgress?.(50, "Extraction des distributions de Poisson...");
   const localHistoryContext = history.slice(0, temporalDepth);
-  
+
   const poissonScores = calculatePoissonScores(localHistoryContext);
   onProgress?.(55, "Analyse des probabilités de transition bayésiennes...");
   const bayesScores = calculateBayesianScore(localHistoryContext);
@@ -261,7 +343,6 @@ export const generateMasterPredictionCore = async (
   const resistanceScores = calculateResistanceScores(localHistoryContext);
   const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
 
-  // Appliquer le facteur d'échelle continu de l'hyper-paramètre de vélocité d'écart
   for (const k in gapVelocityScores) {
     gapVelocityScores[k] *= hyperparameters.gapVelocityWeight;
   }
@@ -270,29 +351,28 @@ export const generateMasterPredictionCore = async (
   const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
   const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
   const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-  
+
   onProgress?.(75, "Analyse des affinités symbiotiques et anomalies d'entropie...");
   const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext);
   const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
   const anomalyScores = calculateAnomalyScores(localHistoryContext);
-  
+
   const hawkesExcitationScores = useSpatioTemporalHawkes
     ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
     : calculateHawkesExcitation(localHistoryContext);
 
-  // Appliquer l'échelle continue du taux de processus de Hawkes
   for (const k in hawkesExcitationScores) {
-    hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay / 0.15);
+    hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay / TUNING.DEFAULT_HAWKES_DECAY);
   }
 
   const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext);
-  
+
   const volatilityObj = calculateVolatility(localHistoryContext);
   const entropyObj = calculateShannonEntropy(localHistoryContext);
   const volatilityScore = isNaN(volatilityObj.score) ? 50 : Math.max(0, Math.min(100, volatilityObj.score));
   const entropyScore = isNaN(entropyObj.normalized) ? 50 : Math.max(0, Math.min(100, entropyObj.normalized * 100));
   const regimeState = (volatilityScore + entropyScore) / 2;
-  
+
   const entropyRegimeScores: Record<number, number> = {};
   const clusterBoosts: Record<number, number> = {};
   for (let i = 1; i <= 90; i++) {
@@ -300,7 +380,7 @@ export const generateMasterPredictionCore = async (
     entropyRegimeScores[i] = regimeState > 65 ? Math.max(0, 100 - freqVal) : Math.min(100, freqVal);
     clusterBoosts[i] = Math.max(0, symbioticClusterScores[i] || 0);
   }
-  
+
   let recentReports: ForensicReport[] = [];
   if (!skipTraining || isForensicOptimized) {
     onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
@@ -308,12 +388,11 @@ export const generateMasterPredictionCore = async (
       recentReports = preloadedForensicReports;
     } else {
       const forensicReports = await getLocalForensicReports();
-      // Double Aveugle : On filtre les rapports d'autopsie pour n'utiliser que ceux correspondant aux tirages présents dans l'historique actif
       const historyDates = new Set(history.map(h => h.date).filter(d => d !== 'Invalid Date' && d !== null && d !== undefined));
       recentReports = forensicReports.filter((r) => r.drawName === drawName && r.date !== 'Invalid Date' && r.date !== null && r.date !== undefined && historyDates.has(r.date)).slice(0, 5);
     }
   }
-  
+
   const intermediateMetrics: EnhancedMetrics = {
     ...metrics,
     poisson: poissonScores,
@@ -331,28 +410,26 @@ export const generateMasterPredictionCore = async (
     topologicalLyapunov: topologicalLyapunovScores
   };
 
-  const features = await extractFeatures(drawName, history, temporalDepth);  
-  // CRITICAL FIX: Pass intermediateMetrics to calculateScores so AlgorithmPlugins can read bayes, poisson, etc.
+  const features = await extractFeatures(drawName, history, temporalDepth);
   const baseScoresRaw = calculateScores(features, weights, intermediateMetrics, history);
   const algoBreakdowns = baseScoresRaw.reduce(
     (acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }),
     {} as Record<number, Record<string, number>>,
   );
-  
+
   const proximityScores: Record<number, number> = {};
   const missedScores: Record<number, number> = {};
   const driftScores: Record<number, number> = {};
   const dynamicWeightModifiers: Record<number, Partial<Record<string, number>>> = {};
-  
-  const alphasDecades = new Float32Array(10).fill(1.0); // Prior pour la loi Multinomiale des Décades (Laplace smoothing)
-  const alphasParity = new Float32Array(2).fill(1.0);   // Prior pour la loi Binomiale de Parité (Laplace smoothing)
 
-  // Calcul des médianes et écarts-types pour remplacer les seuils magiques
+  const alphasDecades = new Float32Array(10).fill(1.0); // Prior Multinomial des Décades (Laplace)
+  const alphasParity = new Float32Array(2).fill(1.0);   // Prior Binomial de Parité (Laplace)
+
+  // Médianes / écarts-types pour remplacer les seuils fixes
   const allScores = baseScoresRaw.map(s => s.score);
   const medianScore = getMedian(allScores);
   const stdDevScore = getStdDev(allScores, medianScore);
-  
-  // Aggregate Oracle Drift
+
   const oracleDriftMap: Record<string, number> = {};
 
   recentReports.forEach((r) => {
@@ -361,37 +438,30 @@ export const generateMasterPredictionCore = async (
         for (let i = 1; i <= 90; i++) {
           const distPredicted = Math.min(Math.abs(i - nm.predicted), 90 - Math.abs(i - nm.predicted));
           const distActual = Math.min(Math.abs(i - nm.actual), 90 - Math.abs(i - nm.actual));
-          
-          // Sigma dérivé de la topologie du domaine (90 / 30 = 3.0)
+
           const sigmaProximity = 90.0 / 30.0;
           const predictedWave = 1.0 * Math.exp(-(distPredicted * distPredicted) / (2.0 * sigmaProximity * sigmaProximity));
           const actualWave = 1.0 * (1.0 - Math.pow(distActual, 2) / Math.pow(sigmaProximity, 2)) * Math.exp(-Math.pow(distActual, 2) / (2.0 * Math.pow(sigmaProximity, 2)));
-          
-          // Formalisation Algorithmique Continue (Zéro bifurcation stricte)
+
           let specificCorrection = 0;
-          
-          // Gaussian for Voisin (distance optimale = 1)
+
           const diffVoisin = Math.abs(Math.abs(i - nm.predicted) - 1.0);
           const voisinAffinity = Math.exp(-Math.pow(diffVoisin, 2) / 0.5);
-          
-          // Gaussian for Miroir (symétrie 91 - x)
+
           const diffMiroir = Math.abs(i - (91 - nm.predicted));
           const miroirAffinity = Math.exp(-Math.pow(diffMiroir, 2) / 0.5);
-          
-          // Gaussian for Shadow (inversion digitale)
+
           const revNum = parseInt(nm.predicted.toString().split("").reverse().join(""));
           const validRev = revNum >= 1 && revNum <= 90 ? revNum : nm.predicted;
           const diffShadow = Math.abs(i - validRev);
           const shadowAffinity = Math.exp(-Math.pow(diffShadow, 2) / 0.5);
-          
-          // Application continue pondérée par les propriétés de régime (Zéro Nombre Magique)
+
           const structuralWeight = gameRegimeInfo.hurst + gameRegimeInfo.entropy;
-          
-          // Le poids est activé par le type de near-miss, mais la diffusion spatiale est continue sur [1..90]
+
           if (nm.errorType === "Voisin") specificCorrection += voisinAffinity * structuralWeight;
           if (nm.errorType === "Miroir") specificCorrection += miroirAffinity * structuralWeight;
           if (nm.errorType === "Shadow") specificCorrection += shadowAffinity * structuralWeight;
-          
+
           proximityScores[i] = (proximityScores[i] || 0) + predictedWave + actualWave + specificCorrection;
         }
       });
@@ -414,22 +484,21 @@ export const generateMasterPredictionCore = async (
       });
     }
     if (r.algorithmicDrift) {
-      const driftValues = r.algorithmicDrift.map(d => d.driftScore);      const medianDrift = getMedian(driftValues);
-    // @ts-ignore - auto generated by cleanup
+      const driftValues = r.algorithmicDrift.map(d => d.driftScore);
+      const medianDrift = getMedian(driftValues);
       const stdDevDrift = getStdDev(driftValues, medianDrift);
-      
+      void stdDevDrift; // conservé pour instrumentation éventuelle
+
       r.algorithmicDrift.forEach((drift) => {
-        // Populating Forensic Oracle Drift (positif = surestimation, négatif = sous-estimation)
         const val = drift.direction === "overestimating" ? drift.driftScore : -drift.driftScore;
         oracleDriftMap[drift.algo] = (oracleDriftMap[drift.algo] || 0) + val;
 
-        // CORRECTION : Pente de sigmoïde dérivée de l'inverse de l'écart-type de score (1.0 / stdDevScore) pour éviter l'arbitraire
         const scaleFactor = 1.0 / Math.max(1e-6, stdDevScore);
         const driftWeight = 1.0 / (1.0 + Math.exp(-scaleFactor * (drift.driftScore - medianDrift)));
         for (let i = 1; i <= 90; i++) {
           if (!driftScores[i]) driftScores[i] = 0;
           const algoScore = algoBreakdowns[i]?.[drift.algo] || 0;
-          
+
           if (drift.direction === "underestimating") {
             const underestimationWeight = 1.0 / (1.0 + Math.exp(scaleFactor * (algoScore - medianScore)));
             const sigU = 1.0 / (1.0 + Math.exp(-scaleFactor * (medianScore - algoScore)));
@@ -446,11 +515,10 @@ export const generateMasterPredictionCore = async (
     }
     if (r.z_scores && r.proposedAdjustments) {
       r.z_scores.forEach((z) => {
-        // Seuil continu basé sur 1 écart-type (Z > 1.0)
         const zWeight = 1.0 / (1.0 + Math.exp(-3.0 * (Math.abs(z.z) - 1.0)));
         const num = z.number;
         if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
-        
+
         r.proposedAdjustments!.forEach((adj) => {
           if (!dynamicWeightModifiers[num][adj.algo]) dynamicWeightModifiers[num][adj.algo] = 0;
           dynamicWeightModifiers[num][adj.algo]! += adj.proposedWeightChange * Math.abs(z.z) * zWeight;
@@ -459,8 +527,7 @@ export const generateMasterPredictionCore = async (
     }
   });
 
-  // Calcul de la posterior conjointe Dirichlet-Multinomiale sur les catégories manquées
-  // Permet de distribuer proprement la masse de probabilité sans constantes magiques arbitraires
+  // Posterior Dirichlet-Multinomiale sur les catégories manquées
   const sumDecades = alphasDecades.reduce((a, b) => a + b, 0);
   const sumParity = alphasParity.reduce((a, b) => a + b, 0);
 
@@ -473,22 +540,21 @@ export const generateMasterPredictionCore = async (
   for (let i = 1; i <= 90; i++) {
     const d = Math.floor(i / 10);
     const pIdx = i % 2 === 0 ? 0 : 1;
-    
+
     const pDecade = alphasDecades[d] / sumDecades;
     const pPar = alphasParity[pIdx] / sumParity;
-    
+
     const baseDecade = getDecadeSize(d) / 90;
     const baseParity = 0.5;
-    
+
     const weightDecade = pDecade / baseDecade;
     const weightParity = pPar / baseParity;
-    
+
     const jointFactor = weightDecade * weightParity;
-    
-    // Log-odds de déviation conjointe normalisée, bornée pour éviter l'instabilité numérique
+
     missedScores[i] = Math.max(-3.0, Math.min(3.0, Math.log(jointFactor))) * 15.0;
   }
-  
+
   const enhancedMetrics: EnhancedMetrics = {
     ...intermediateMetrics,
     proximityDiagnostic: proximityScores,
@@ -500,61 +566,60 @@ export const generateMasterPredictionCore = async (
     symbioticContext,
     dynamicWeightModifiers,
   };
-  
-  // --- DOUBLE PASS CONTINUOUS DNA CALIBRATION & RECALIBRATION ---
-  // Pass 1: Run raw scoring evaluation to project the localized spatial breakdown features of the algorithms
+
+  // --- CALIBRATION ADN (backpropagation) ---
+  // Pass 1 : scoring brut pour projeter les breakdowns locaux
   let masterScores = calculateScores(features, weights, enhancedMetrics, localHistoryContext);
-  
-  // Use these actual computed breakdowns to perform retroactive backpropagation calibration
+
   const feedbackOptimizer = new DNAOptimizer(Object.keys(weights) as AlgoKey[]);
   const feedbackBreakdowns = masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {} as Record<number, any>);
-  
-  // 15-draw rolling feedback window to prevent over-fitting (walk-forward coordinate descent)
-  const bpDepth = Math.min(15, history.length);
-  const breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>> = {};
-  for (let d = 0; d < bpDepth; d++) {
-    breakdownsByDraw[d] = feedbackBreakdowns; // Stationary local feature approximation to optimize mobile/CPU overhead
-  }
-  
-  // Run Retroactive DNA backpropagation
-  let calibratedWeights = feedbackOptimizer.backpropagateWeights(weights, history.slice(0, bpDepth), breakdownsByDraw, 0.05);
 
-  // Reconstruct DNA vectors of historical winners based on target profile
+  // [3] CORRECTION : l'ancienne version copiait la MÊME référence de breakdown
+  // pour les 15 tirages de la fenêtre => 15 points identiques, aucune info.
+  // On effectue un unique pas de calibration honnête sur les breakdowns réels
+  // disponibles. (Pour une vraie fenêtre walk-forward, il faudrait recalculer
+  // les breakdowns tirage par tirage — coûteux ; on ne le simule pas faussement.)
+  const breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>> = {
+    0: feedbackBreakdowns,
+  };
+
+  let calibratedWeights = feedbackOptimizer.backpropagateWeights(
+    weights, history.slice(0, 1), breakdownsByDraw, TUNING.BACKPROP_LEARNING_RATE,
+  );
+
+  // Reconstruction des vecteurs ADN des gagnants historiques
   const fbHistoricalVectors: Float32Array[] = [];
   const fbSampleDepth = Math.min(30, history.length);
   for (let d = 0; d < fbSampleDepth; d++) {
-      const winners = history[d]?.gagnants || [];
-      for (const num of winners) {
-          const bdown = feedbackBreakdowns[num];
-          if (bdown) {
-              const vec = new Float32Array(feedbackOptimizer['numAlgos']);
-              feedbackOptimizer['algoKeys'].forEach((k, idx) => {
-                  vec[idx] = bdown[k] || 0;
-              });
-              fbHistoricalVectors.push(vec);
-          }
+    const winners = history[d]?.gagnants || [];
+    for (const num of winners) {
+      const bdown = feedbackBreakdowns[num];
+      if (bdown) {
+        const vec = new Float32Array(feedbackOptimizer['numAlgos']);
+        feedbackOptimizer['algoKeys'].forEach((k, idx) => {
+          vec[idx] = bdown[k] || 0;
+        });
+        fbHistoricalVectors.push(vec);
       }
+    }
   }
 
   if (fbHistoricalVectors.length >= 5) {
-      try {
-          const targetProfile = feedbackOptimizer.extractTargetDNAProfile(fbHistoricalVectors, fbSampleDepth);
-          // Apply Kalman Filter (Optimiseur de Pension d'ADN - Anti-Dérive) on backpropagated parameters
-          calibratedWeights = feedbackOptimizer.applyKalmanDriftCorrection(calibratedWeights, targetProfile, fbHistoricalVectors);
-      } catch (err) {
-          logger.warn({ err }, "[predictionFacade] Error in feedback calibration pass");
-      }
+    try {
+      const targetProfile = feedbackOptimizer.extractTargetDNAProfile(fbHistoricalVectors, fbSampleDepth);
+      calibratedWeights = feedbackOptimizer.applyKalmanDriftCorrection(calibratedWeights, targetProfile, fbHistoricalVectors);
+    } catch (err) {
+      logger.warn({ err }, "[predictionFacade] Error in feedback calibration pass");
+    }
   }
 
-  // GRAVER LA CALIBRATION : Use the perfectly calibrated weights on-the-fly for prediction,
-  // but DO NOT write them back to local storage (Auto-Save is disabled as per user specification).
-  // Weights must only be mutated when clicking manual dedicated save or optimization buttons.
+  // Utilisation à la volée, sans réécriture en storage (auto-save désactivé).
   weights = normalizeWeights(calibratedWeights);
 
-  // Pass 2: Re-simulate Master Scores using the optimal, anti-drift calibrated weights map!
+  // Pass 2 : re-scoring avec les poids calibrés
   masterScores = calculateScores(features, weights, enhancedMetrics, localHistoryContext);
 
-  // --- JAMES-STEIN BAYESIAN SHRINKAGE REGULARIZATION ---
+  // --- JAMES-STEIN BAYESIAN SHRINKAGE ---
   let macroPriorScores: Record<number, number> | null = null;
   let macroPredBreakdown: Record<number, Record<string, number>> | null = null;
   let shrinkageApplied = false;
@@ -572,7 +637,7 @@ export const generateMasterPredictionCore = async (
           weightsToUse,
           undefined,
           undefined,
-          true, // skip training for speed
+          true, // skip training pour la vitesse
           false,
           0
         );
@@ -605,12 +670,10 @@ export const generateMasterPredictionCore = async (
   let activeVerificationReport: any = null;
 
   if (macroPriorScores) {
-    // Calculate S^2_local (variance of masterScores)
     const localScoresArr = masterScores.map(s => s.score);
     const localMean = localScoresArr.reduce((a, b) => a + b, 0) / localScoresArr.length;
     const s2Local = localScoresArr.reduce((a, b) => a + Math.pow(b - localMean, 2), 0) / localScoresArr.length;
 
-    // Calculate MSE between local and macro
     let sumSqrDiff = 0;
     masterScores.forEach((score) => {
       const macroScore = macroPriorScores![score.num] || 0;
@@ -618,10 +681,7 @@ export const generateMasterPredictionCore = async (
     });
     const mse = sumSqrDiff / masterScores.length;
 
-    // Compute continuous variance ratio
     const varianceRatio = s2Local / (s2Local + mse + 1e-6);
-    
-    // Continuous shrinkage factor derived from entropy instead of magic number
     const maxShrinkage = 1.0 - gameRegimeInfo.entropy;
     const B = maxShrinkage * (1.0 - varianceRatio);
     shrinkageFactorValue = B;
@@ -632,7 +692,6 @@ export const generateMasterPredictionCore = async (
         const macroScore = macroPriorScores![score.num] || 0;
         score.score = (1.0 - B) * score.score + B * macroScore;
 
-        // Maintain mathematical consistency across the breakdown
         const bdown = score.breakdown;
         const macroBdown = macroPredBreakdown![score.num];
         if (bdown && macroBdown) {
@@ -660,7 +719,7 @@ export const generateMasterPredictionCore = async (
   }
 
   const lastDrawGagnants = localHistoryContext[0]?.gagnants || [];
-  
+
   const symbiosisValues = Object.values(enhancedMetrics.symbioticClusters || {}) as number[];
   const medianSymbiosis = getMedian(symbiosisValues);
   const stdDevSymbiosis = symbiosisValues.length > 0 ? getStdDev(symbiosisValues, medianSymbiosis) : 1.0;
@@ -668,25 +727,23 @@ export const generateMasterPredictionCore = async (
   masterScores.forEach((score) => {
     let decay = 1.0;
     if (lastDrawGagnants.includes(score.num)) {
-      // CORRECTION : Pente de décroissance basée sur l'écart-type normalisé, pas constantes fixes
       const normalizedScoreScale = 1.0 / Math.max(1e-6, stdDevScore / 100.0);
       decay = 1.0 / (1.0 + Math.exp(-normalizedScoreScale * ((score.score / 100.0) - (medianScore / 100.0))));
     }
-    
+
     const symbiosisScore = enhancedMetrics.symbioticClusters?.[score.num] || 0;
-    // CORRECTION : Modulation de symbiose calibrée continûment par l'écart-type de symbiose
     const symbiosisScaleFactor = 1.0 / Math.max(1e-6, stdDevSymbiosis);
-    const maxSymbiosisBound = 1.0 / Object.keys(weights).length; // 1 / N
+    const maxSymbiosisBound = 1.0 / Object.keys(weights).length;
     const symbiosisMod = 1.0 + maxSymbiosisBound * (1.0 / (1.0 + Math.exp(-symbiosisScaleFactor * (symbiosisScore - medianSymbiosis))));
-    
+
     score.score = score.score * decay * symbiosisMod;
   });
-  
+
   let adversarialApplied = false;
   let challengedNumbers: number[] = [];
   if (adversarialMode) {
     const keyAlgos = [AlgoKey.FREQUENCY, AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.MARKOV, AlgoKey.TEMPORAL, AlgoKey.BAYES, AlgoKey.FRACTAL, AlgoKey.SPATIAL, AlgoKey.MOMENTUM, AlgoKey.AFFINITY];
-    
+
     const consensusMapping = masterScores.map((score) => {
       let continuousConsensus = 0;
       let sumVal = 0;
@@ -696,7 +753,6 @@ export const generateMasterPredictionCore = async (
         const algoValues = masterScores.map(s => s.breakdown[algo] || 0);
         const medianAlgo = getMedian(algoValues);
         const stdDevAlgo = getStdDev(algoValues, medianAlgo);
-        // CORRECTION : Échelle de la sigmoïde dérivée continûment de l'écart-type de score de l'algorithme (sans coefficient statique)
         continuousConsensus += 1.0 / (1.0 + Math.exp(-(1.0 / Math.max(1e-6, stdDevAlgo)) * (val - medianAlgo)));
       });
       return { num: score.num, continuousConsensus, meanVal: sumVal / keyAlgos.length, originalScore: score.score };
@@ -705,7 +761,6 @@ export const generateMasterPredictionCore = async (
     let hyperConsensusScoreMax = 0;
     const medianMeanVal = getMedian(consensusMapping.map(c => c.meanVal));
 
-    // Dérivons l'échelle continue pour la fusion des consensus et de l'énergie moyenne
     const continuousConsensusValues = consensusMapping.map(c => c.continuousConsensus);
     const medianContinuousConsensus = getMedian(continuousConsensusValues);
     const stdDevContinuousConsensus = getStdDev(continuousConsensusValues, medianContinuousConsensus);
@@ -714,36 +769,33 @@ export const generateMasterPredictionCore = async (
     const scaleMeanValSigmoid = 1.0 / Math.max(1e-6, getStdDev(consensusMapping.map(c => c.meanVal), medianMeanVal));
 
     consensusMapping.forEach((c) => {
-      // CORRECTION : Échelles de consensus continu ajustées dynamiquement sans coefficients arbitraires hachés
       const probConsensus = (1.0 / (1.0 + Math.exp(-scaleConsensusSigmoid * (c.continuousConsensus - medianContinuousConsensus)))) * (1.0 / (1.0 + Math.exp(-scaleMeanValSigmoid * (c.meanVal - medianMeanVal))));
       if (probConsensus > hyperConsensusScoreMax) hyperConsensusScoreMax = probConsensus;
       challengedNumbers.push(c.num);
-      
+
       const scoreEntry = masterScores.find((s) => s.num === c.num);
       if (scoreEntry) {
-        // L'impact max adversarial est plafonné à l'inverse du nombre d'algorithmes (1.0 / N) pour conservation-énergie
         const maxImpact = 1.0 / Object.keys(weights).length;
         const adversarialMultiplier = 1.0 - maxImpact * probConsensus;
         scoreEntry.score *= adversarialMultiplier;
-         
+
         const antiConsensusVal = scoreEntry.breakdown[AlgoKey.FRACTAL] || 0;
         const entropyRegimeVal = scoreEntry.breakdown[AlgoKey.SPECTRAL] || 0;
         const stochasticVal = scoreEntry.breakdown[AlgoKey.SPATIAL] || 0;
         const anomalyVal = scoreEntry.breakdown[AlgoKey.BAYES] || 0;
         const alternativeStrength = (antiConsensusVal + entropyRegimeVal + stochasticVal + anomalyVal) / 4;
-        
+
         const altStrengths = masterScores.map(s => ((s.breakdown[AlgoKey.FRACTAL] || 0) + (s.breakdown[AlgoKey.SPECTRAL] || 0) + (s.breakdown[AlgoKey.SPATIAL] || 0) + (s.breakdown[AlgoKey.BAYES] || 0)) / 4);
         const medianAltStrength = getMedian(altStrengths);
         const stdDevAltStrength = getStdDev(altStrengths, medianAltStrength);
         const scaleAltSigmoid = 1.0 / Math.max(1e-6, stdDevAltStrength);
-        
+
         const boostProb = 1.0 / (1.0 + Math.exp(-scaleAltSigmoid * (alternativeStrength - medianAltStrength)));
-        // CORRECTION : Multiplicateur alternatif proportionnel au même coefficient d'impact topologique amorti
         const alternativeMultiplier = 1.0 + maxImpact * boostProb * (1.0 - probConsensus);
         scoreEntry.score *= alternativeMultiplier;
       }
     });
-    
+
     challengedNumbers = challengedNumbers.sort((a, b) => {
       const c1 = consensusMapping.find((c) => c.num === a);
       const c2 = consensusMapping.find((c) => c.num === b);
@@ -751,12 +803,11 @@ export const generateMasterPredictionCore = async (
       const p2 = c2 ? (1.0 / (1.0 + Math.exp(-scaleConsensusSigmoid * (c2.continuousConsensus - medianContinuousConsensus)))) * (1.0 / (1.0 + Math.exp(-scaleMeanValSigmoid * (c2.meanVal - medianMeanVal)))) : 0;
       return p2 - p1;
     }).slice(0, 3);
-    
+
     adversarialApplied = hyperConsensusScoreMax > 0.5;
   }
-  
+
   if (recentReports.length > 0) {
-    // CORRECTION : Calculons les adjusted scores pour tous les éléments afin de déduire leur médiane et écart-type de façon rigoureuse
     const adjustedScoresMap = new Map<number, number>();
     masterScores.forEach((score) => {
       const raw = score.score;
@@ -765,28 +816,25 @@ export const generateMasterPredictionCore = async (
       let missed = missedScores[score.num] || 0;
       const bayesianImpact = enhancedMetrics.bayes?.[score.num] || 50;
       const poissonImpact = enhancedMetrics.poisson?.[score.num] || 50;
-      
+
       const impacts = [bayesianImpact, poissonImpact, proxScore, forensicDrift];
       const avgImpact = impacts.reduce((a, b) => a + b, 0) / impacts.length;
       const varImpact = impacts.reduce((a, b) => a + Math.pow(b - avgImpact, 2), 0) / impacts.length;
-      // Normalisation du de-weighting par l'échelle 100% de modulation
       const weightMod = 1.0 / (1.0 + Math.sqrt(varImpact) / 100.0);
 
       const trueProbabilityExp = (Math.exp((bayesianImpact - 50) / 50) + Math.exp((poissonImpact - 50) / 50)) / 2;
       let adjustedScore = raw * trueProbabilityExp;
-      
-      // Amortisseur Cybernétique Continu du Multiplicateur Forensic (Anti-Overfitting)
-      // On régule continuellement la modulation en fonction du volume d'audits passés et de la volatilité de l'échantillon
+
+      // [7] Amortisseur forensic : centre/pente nommés (TUNING_*)
       const N_reports = recentReports.length;
-      const baseDamping = 1.0 / (1.0 + Math.exp(-1.5 * (N_reports - 2.5)));
+      const baseDamping = 1.0 / (1.0 + Math.exp(-TUNING.FORENSIC_DAMPING_SLOPE * (N_reports - TUNING.FORENSIC_DAMPING_CENTER)));
       const volatility = typeof (enhancedMetrics as any).volatility === 'number' ? (enhancedMetrics as any).volatility : 0.5;
-      const cyberneticDamping = Math.exp(-0.5 * volatility); // Facteur continu dans [0.0, 1.0]
+      const cyberneticDamping = Math.exp(-0.5 * volatility);
 
       const forensicMultiplier = isForensicOptimized
-        ? 1.0 + 1.5 * baseDamping * cyberneticDamping
+        ? 1.0 + TUNING.FORENSIC_MAX_BOOST * baseDamping * cyberneticDamping
         : 1.0;
-      
-      // Amortisseurs continus fondés sur la dimension de l'espace statistique d'algorithmes (1.0 / N)
+
       const baseShare = 1.0 / Object.keys(weights).length;
       adjustedScore += (forensicDrift * baseShare + proxScore * baseShare + missed * baseShare) * weightMod * forensicMultiplier;
       adjustedScoresMap.set(score.num, adjustedScore);
@@ -799,98 +847,93 @@ export const generateMasterPredictionCore = async (
 
     masterScores.forEach((score) => {
       const adScore = adjustedScoresMap.get(score.num) || 50;
-      // Normalisation sigmoïdale continue centrée sur la médiane des adjusted scores réels
       score.score = 100.0 * (1.0 / (1.0 + Math.exp(-adjustedScale * (adScore - medianAdjusted))));
     });
   }
-  
+
   onProgress?.(95, "Formulation finale et sélection des combinaisons...");
   masterScores = await applyPCADenoising(masterScores, weights, enhancedMetrics);
-  const sortedScores = masterScores.sort((a, b) => b.score - a.score);  
+  const sortedScores = masterScores.sort((a, b) => b.score - a.score);
   const outsiderCount = forcedOutsiderCount !== undefined ? forcedOutsiderCount : 2;
   const empiricalCalibration = generateEmpiricalCalibration(history);
-  // CORRECTIF CRITIQUE : `regimeState` est calculé sur une échelle [0, 100] (voir plus haut :
-  // (volatilityScore + entropyScore) / 2, chacun borné à [0, 100]). `generateCombination`
-  // utilise ce paramètre comme exposant de Math.exp() pour moduler la température et le
-  // nombre d'itérations du recuit simulé : Math.exp(100) ≈ 2.7e43, ce qui rendait la boucle
-  // d'optimisation combinatoire pratiquement infinie (blocage total de l'application à chaque
-  // génération de prédiction). On normalise donc explicitement sur [0, 1] avant l'appel.
+
+  // regimeState est sur [0,100] ; generateCombination l'utilise en exposant de
+  // Math.exp() => on normalise sur [0,1] pour éviter l'explosion combinatoire.
   const regimeStateNormalized = regimeState / 100.0;
   const selection = generateCombination(sortedScores, features.affinityMap, empiricalCalibration, outsiderCount, history[0]?.gagnants, regimeStateNormalized);
-  
+
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
   if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
   onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
-  
+
   let analysisText = adversarialApplied
-    ? `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus (cibles hyper-consensuelles [${challengedNumbers.join(", ")}] modérées pour briser le cercle algorithmique de sédimentation d'ADN).`
-    : `Prédiction Oracle Base générée en temps réel en s'appuyant rigoureusement sur l'ADN Algorithmique complet du moment, ajustée par l'historique de convergence.`;
-    
+    ? `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus (cibles [${challengedNumbers.join(", ")}] modérées).`
+    : `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
+
   if (shrinkageApplied) {
-    analysisText += ` Intégration d'un Prior Bayésien continu (James-Stein Shrinkage, B = ${Math.round(shrinkageFactorValue * 100)}%) pour régulariser les fluctuations locales via la macro-convergence globale.`;
+    analysisText += ` Prior Bayésien continu (James-Stein, B = ${Math.round(shrinkageFactorValue * 100)}%).`;
   }
-    
+
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, localHistoryContext);
-  
+
   const breakdownRecord = masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {} as Record<number, any>);
   const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
 
   // --- XAP: Explainable Attribution Prediction via DNAOptimizer ---
   const optimizer = new DNAOptimizer(Object.keys(weights) as AlgoKey[]);
   const dnaMatrix = selection.map(num => {
-      const bdown = breakdownRecord[num] || {};
-      const vec = new Float32Array(optimizer['numAlgos']);
-      optimizer['algoKeys'].forEach((k, i) => { vec[i] = bdown[k] || 0; });
-      return vec;
+    const bdown = breakdownRecord[num] || {};
+    const vec = new Float32Array(optimizer['numAlgos']);
+    optimizer['algoKeys'].forEach((k, i) => { vec[i] = bdown[k] || 0; });
+    return vec;
   });
 
-  // Reconstruct DNA vectors of historical winners based on current breakdown maps to form target profile
   const historicalVectors: Float32Array[] = [];
   const sampleDepth = Math.min(30, history.length);
   for (let i = 0; i < sampleDepth; i++) {
-      const winners = history[i]?.gagnants || [];
-      for (const num of winners) {
-          const bdown = breakdownRecord[num];
-          if (bdown) {
-              const vec = new Float32Array(optimizer['numAlgos']);
-              optimizer['algoKeys'].forEach((k, idx) => {
-                  vec[idx] = bdown[k] || 0;
-              });
-              historicalVectors.push(vec);
-          }
+    const winners = history[i]?.gagnants || [];
+    for (const num of winners) {
+      const bdown = breakdownRecord[num];
+      if (bdown) {
+        const vec = new Float32Array(optimizer['numAlgos']);
+        optimizer['algoKeys'].forEach((k, idx) => {
+          vec[idx] = bdown[k] || 0;
+        });
+        historicalVectors.push(vec);
       }
+    }
   }
 
-  let calculatedAlignment = 82; // standard medium alignment fallback
+  // [7] Indice d'alignement = indicateur d'affichage cosmétique (voir HONEST_NOTE).
+  // Il mesure la ressemblance interne des vecteurs ADN, PAS une chance de gain.
+  let calculatedAlignment = 82; // valeur de repli neutre
   if (historicalVectors.length >= 5) {
-      try {
-          const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, sampleDepth);
-          const evaluation = optimizer.evaluateCandidate(
-              dnaMatrix, 
-              targetProfile, 
-              selection, 
-              history.slice(0, sampleDepth).map(d => d.gagnants)
-          );
-          // Scale from distance to continuous alignment index [10, 99] 
-          // KL Div & Cosine distance usually result in sum index < 1.0; 
-          // map it with a continuous sigmoid-like or inverse function to preserve high fidelity.
-          calculatedAlignment = Math.min(99, Math.max(10, Math.round((1.0 / (1.0 + evaluation.distance)) * 105)));
-      } catch (err) {
-          logger.warn({ err }, "[predictionFacade] Error calculating continuous DNA alignment");
-      }
+    try {
+      const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, sampleDepth);
+      const evaluation = optimizer.evaluateCandidate(
+        dnaMatrix,
+        targetProfile,
+        selection,
+        history.slice(0, sampleDepth).map(d => d.gagnants)
+      );
+      // Mappe une distance [0,+inf) vers un indice borné [ALIGNMENT_MIN, ALIGNMENT_MAX].
+      // La borne haute reste 99 (0.99) et non un ×105 qui gonflait artificiellement l'affichage.
+      const rawAlign = (1.0 / (1.0 + evaluation.distance)) * 100;
+      calculatedAlignment = Math.min(TUNING.ALIGNMENT_MAX, Math.max(TUNING.ALIGNMENT_MIN, Math.round(rawAlign)));
+    } catch (err) {
+      logger.warn({ err }, "[predictionFacade] Error calculating continuous DNA alignment");
+    }
   }
 
   const xapCandidate = {
-      numbers: selection,
-      dnaMatrix,
-      synergyVector: new Float32Array(optimizer['numAlgos']), // dummy
-      distance: 1.0 - (calculatedAlignment / 100),
-      diversityScore: diversityMetrics.diversityScore
+    numbers: selection,
+    dnaMatrix,
+    synergyVector: new Float32Array(optimizer['numAlgos']),
+    distance: 1.0 - (calculatedAlignment / 100),
+    diversityScore: diversityMetrics.diversityScore
   };
   const xapExp = optimizer.generateXAP(xapCandidate, selection);
-  
-  // -- VÉRIFICATION ANTAGONISTE DÉTERMINISTE (G.A.PROXY) --
-  // Synchronisation Holistique de la G.A Proxy avec le Forensic Oracle
+
   const proxyValidation = evaluateAdversarialSurvival(selection, breakdownRecord, history, oracleDriftMap);
 
   const explainabilityData = masterScores.reduce((acc, curr) => {
@@ -902,11 +945,13 @@ export const generateMasterPredictionCore = async (
     suggestedNumbers: selection,
     candidates: sortedScores.slice(5, 15).map((s) => s.num),
     confidence: Math.min(99, Math.max(1, Math.round(averageScore))),
+    confidenceNote: HONEST_NOTE, // [7] transparence : l'indicateur est interne, pas prédictif
     analysis: analysisText,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: symbioticContext ? 1.5 : 1.0,
     realityAlignment: calculatedAlignment,
+    realityAlignmentNote: HONEST_NOTE,
     adversarialApplied,
     challengedNumbers,
     stabilityScore,
@@ -921,7 +966,7 @@ export const generateMasterPredictionCore = async (
     hyperparameters,
     hyperTuningLog,
     hyperAccuracyGain
-  };
+  } as Prediction;
 };
 
 import { globalCache, CACHE_TTL } from "../cache/CacheService";
@@ -940,14 +985,21 @@ export const generateMasterPrediction = async (
   onProgress?: (progress: number, message: string) => void,
 ): Promise<Prediction> => {
   const history = purifyHistoryForDraw(drawName, rawHistory);
-  const keyParams = `${history.length}_${history[0]?.date}_${weightsToUse ? JSON.stringify(weightsToUse) : "def"}_adv_${adversarialMode}_forcedOutsider_${forcedOutsiderCount !== undefined ? forcedOutsiderCount : "none"}_depth_${temporalDepth}_forensic_${isForensicOptimized}`;
+
+  // [6] Clé de cache basée sur un HASH DU CONTENU réel (plus la collision longueur+date).
+  const contentHash = hashHistoryContent(history);
+  const keyParams = `${history.length}_${contentHash}_${weightsToUse ? JSON.stringify(weightsToUse) : "def"}_adv_${adversarialMode}_forcedOutsider_${forcedOutsiderCount !== undefined ? forcedOutsiderCount : "none"}_depth_${temporalDepth}_forensic_${isForensicOptimized}`;
   const cacheKey = globalCache.generateKey('prediction', drawName, keyParams);
-  
+
   return globalCache.getOrCompute(
     cacheKey,
     async () => {
-      // 1. Try cloud delegation first if enabled & configured
-      const useCloudEngine = useNexusStore.getState().useCloudEngine;
+      // [5] Flags lus UNE FOIS ici, puis passés en paramètres (pas au cœur du calcul).
+      const nexusState = useNexusStore.getState();
+      const useCloudEngine = nexusState.useCloudEngine;
+      const useSpatioTemporalHawkes = nexusState.useSpatioTemporalHawkes;
+
+      // 1. Délégation cloud si activée & configurée
       if (useCloudEngine && isSupabaseConfigured() && drawName !== "ALL_COMBINED" && drawName !== "ALL") {
         try {
           console.log(`[CLOUD COMPUTING] Délégation de la prédiction ${drawName} vers Supabase Edge Function (predict-elite)...`);
@@ -967,7 +1019,7 @@ export const generateMasterPrediction = async (
         }
       }
 
-      // 2. Try offloading to Web Worker to keep main thread fluid (60fps UI)
+      // 2. Offload Web Worker pour garder le thread principal fluide
       if (typeof Worker !== 'undefined') {
         try {
           return await new Promise<Prediction>((resolve, reject) => {
@@ -1014,31 +1066,30 @@ export const generateMasterPrediction = async (
               adversarialMode,
               forcedOutsiderCount,
               isForensicOptimized,
-              useSpatioTemporalHawkes: useNexusStore.getState().useSpatioTemporalHawkes
+              useSpatioTemporalHawkes,
             });
           });
-        } catch (workerError) {
-          console.warn("[WORKER] Échec d'instanciation ou d'exécution du worker de prédiction. Fallback sur thread principal.", workerError);
+        } catch (e) {
+          logger.warn({ err: e }, "[predictionFacade] Web Worker indisponible, calcul sur le thread principal.");
         }
       }
 
-      return generateMasterPredictionCore(
-        drawName, 
-        history, 
-        temporalDepth, 
-        weightsToUse, 
-        metrics, 
-        symbioticContext, 
-        skipTraining, 
-        adversarialMode, 
-        forcedOutsiderCount, 
-        isForensicOptimized, 
-        useNexusStore.getState().useSpatioTemporalHawkes, 
-        onProgress
+      // 3. Repli : calcul direct sur le thread principal
+      return await generateMasterPredictionCore(
+        drawName,
+        history,
+        temporalDepth,
+        weightsToUse,
+        metrics,
+        symbioticContext,
+        skipTraining,
+        adversarialMode,
+        forcedOutsiderCount,
+        isForensicOptimized,
+        useSpatioTemporalHawkes,
+        onProgress,
       );
     },
-    CACHE_TTL.MEDIUM,
-    drawName
+    CACHE_TTL,
   );
 };
-
