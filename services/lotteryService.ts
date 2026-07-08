@@ -130,6 +130,15 @@ const getDrawTimestamp = (dateStr: string): number => {
 };
 
 const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] => {
+  if (drawName === 'ALL') {
+    const activeDraws = Array.from(new Set(Object.values(DRAW_SCHEDULE).flatMap(day => Object.values(day))));
+    let allResults: DrawResult[] = [];
+    for (const name of activeDraws) {
+      allResults = allResults.concat(generateDeterministicFallbackHistory(name));
+    }
+    return allResults.sort((a, b) => getDrawTimestamp(b.date) - getDrawTimestamp(a.date));
+  }
+
   let hash = 0;
   for (let i = 0; i < drawName.length; i++) {
     hash = (hash << 5) - hash + drawName.charCodeAt(i);
@@ -341,6 +350,9 @@ export const getDailySummary = async (day: string) => {
                       machine: data[0].machine || [],
                       version: data[0].version || 1
                   };
+              } else {
+                  const history = await lotteryService.fetchHistory(name);
+                  if (history.length > 0) lastDraw = history[0];
               }
           } else {
               const history = await lotteryService.fetchHistory(name);

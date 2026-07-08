@@ -25,7 +25,7 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   }, [wavelet]);
 
   const resonantWaveletsCount = useMemo(() => {
-      return wavelet.filter(w => w.resonance).length;
+      return wavelet.filter((w: any) => w.resonance).length;
   }, [wavelet]);
 
   const dominantPeriod = useMemo(() => {
