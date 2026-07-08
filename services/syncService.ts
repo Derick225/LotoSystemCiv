@@ -2,7 +2,8 @@
 import { supabase } from './supabaseClient';
 import { PredictionHistoryItem, ForensicReport, LearningSession, Prediction, PredictionFeedback } from '../types';
 import { AppError, logError } from '../utils/AppError';
-import { set } from 'idb-keyval';
+import { set, del } from 'idb-keyval';
+import { getDeterministicUUID } from '../utils/mathUtils';
 
 const BATCH_SIZE = 50;
 
@@ -13,13 +14,87 @@ const BATCH_SIZE = 50;
 
 // --- PREDICTIONS ---
 
+/**
+ * Assainit et mappe un objet PredictionHistoryItem client-side vers le schéma Postgres attendu.
+ * Garantit que les identifiants de prédiction et de résultat de tirage sont convertis en UUID RFC 4122 valides.
+ */
+export const sanitizeAndMapPrediction = (item: PredictionHistoryItem): PredictionHistoryItem => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    let sanitizedId = item.id;
+    if (!uuidRegex.test(sanitizedId)) {
+        const newUuid = getDeterministicUUID(sanitizedId);
+        console.warn(`[SYNC SANITIZATION] Conversion de l'ID non-UUID "${sanitizedId}" vers "${newUuid}"`);
+        
+        // Suppression asynchrone de l'ancienne clé IndexedDB pour éviter les doublons polluants
+        del(`pred_${sanitizedId}`).catch(err => 
+            console.error(`[SYNC SANITIZATION] Échec du nettoyage de la clé obsolète pred_${sanitizedId}:`, err)
+        );
+        sanitizedId = newUuid;
+    }
+
+    let sanitizedDrawResultId: string | null = null;
+    if (item.drawResultId) {
+        if (uuidRegex.test(item.drawResultId)) {
+            sanitizedDrawResultId = item.drawResultId.toLowerCase();
+        } else {
+            const newResultUuid = getDeterministicUUID(item.drawResultId);
+            console.warn(`[SYNC SANITIZATION] Conversion du drawResultId non-UUID "${item.drawResultId}" vers "${newResultUuid}"`);
+            sanitizedDrawResultId = newResultUuid;
+        }
+    }
+
+    return {
+        ...item,
+        id: sanitizedId,
+        drawResultId: sanitizedDrawResultId
+    };
+};
+
+/**
+ * Exécute une fonction asynchrone avec un mécanisme de retry et exponential backoff déterministe
+ * (conforme aux exigences d'AGENTS.md : sans utilisation de Math.random() ou hasard).
+ */
+const retryWithBackoff = async <T>(
+    fn: () => Promise<T>,
+    retries = 3,
+    delay = 1000,
+    backoffFactor = 2
+): Promise<T> => {
+    try {
+        return await fn();
+    } catch (err: any) {
+        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+            ? err.message
+            : String(err);
+
+        // Détection des erreurs réseau intermittentes (comme "Failed to fetch", "network", "timeout")
+        const isNetworkError = 
+            err instanceof TypeError || 
+            errorMsg.toLowerCase().includes('failed to fetch') ||
+            errorMsg.toLowerCase().includes('network') ||
+            errorMsg.toLowerCase().includes('timeout') ||
+            errorMsg.toLowerCase().includes('fetch');
+
+        if (retries > 0 && isNetworkError) {
+            console.warn(`[SYNC RETRY] Échec temporaire détecté ("${errorMsg}"). Tentatives restantes : ${retries}. Nouvelle tentative dans ${delay}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            return retryWithBackoff(fn, retries - 1, delay * backoffFactor, backoffFactor);
+        }
+        throw err;
+    }
+};
+
 export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
     if (!navigator.onLine) return localItems; // Mode hors ligne
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localItems; // Mode hors ligne
 
-    try {
+    // Assainissement préalable de toutes les prédictions locales pour garantir des UUID conformes
+    const sanitizedLocalItems = localItems.map(item => sanitizeAndMapPrediction(item));
+
+    const executeSync = async (): Promise<PredictionHistoryItem[]> => {
         // 1. PULL METADATA ONLY: Solution différentielle hautement optimisée pour minimiser la consommation réseau (Phase 3)
         // En sélectionnant uniquement les clés d'identification, nous évitons de télécharger les lourds tableaux de breakdown/candidates/analytics.
         const { data: cloudMetaList, error } = await supabase
@@ -33,7 +108,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 
         // Identifier les prédictions entièrement manquantes en local pour ne charger le plein JSON que pour elles
         const missingIds = cloudMetaList
-            ? cloudMetaList.filter(c => !localItems.some(l => l.id === c.id)).map(c => c.id)
+            ? cloudMetaList.filter(c => !sanitizedLocalItems.some(l => l.id === c.id)).map(c => c.id)
             : [];
 
         const loadedFullMap = new Map<string, any>();
@@ -57,7 +132,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         // Intégration du Cloud (en utilisant l'objet complet s'il vient d'être chargé, ou en fusionnant les caractéristiques)
         cloudMetaList?.forEach((meta: { id: string; timestamp: number; draw_name: string; draw_result_id?: string; feedback?: unknown }) => {
             const hasFull = loadedFullMap.has(meta.id);
-            const localMatch = localItems.find(l => l.id === meta.id);
+            const localMatch = sanitizedLocalItems.find(l => l.id === meta.id);
 
             const predictionObject = hasFull 
                 ? (loadedFullMap.get(meta.id).prediction as unknown as Prediction)
@@ -76,7 +151,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         });
 
         // Ajouter les items locaux restants (qui n'existent pas encore sur le Cloud)
-        localItems.forEach(item => {
+        sanitizedLocalItems.forEach(item => {
             if (!mergedMap.has(item.id)) {
                 mergedMap.set(item.id, item);
             } else {
@@ -94,7 +169,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         const mergedList = Array.from(mergedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
 
         // 3. DIFF-PUSH: N'envoyer vers le Cloud que les items locaux réellement absents ou modifiés
-        const toPush = localItems.filter(l => {
+        const toPush = sanitizedLocalItems.filter(l => {
             const cloudMatch = cloudMetaList?.find((c: { id: string }) => c.id === l.id);
             if (!cloudMatch) return true; // Complètement absent du Cloud
             
@@ -105,30 +180,52 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         });
         
         if (toPush.length > 0) {
+            // Optionnel mais extrêmement robuste : valider que les draw_result_id référencés existent réellement
+            const referencedResultIds = Array.from(new Set(
+                toPush.map(p => p.drawResultId).filter((id): id is string => !!id)
+            ));
+
+            const validResultIds = new Set<string>();
+            if (referencedResultIds.length > 0) {
+                const { data: existingResults, error: resultsErr } = await supabase
+                    .from('draw_results')
+                    .select('id')
+                    .in('id', referencedResultIds);
+                
+                if (!resultsErr && existingResults) {
+                    existingResults.forEach(r => validResultIds.add(r.id));
+                }
+            }
+
             const payload = toPush.map(p => ({
                 id: p.id,
                 user_id: user.id,
                 draw_name: p.drawName,
                 timestamp: p.timestamp,
                 prediction: p.prediction,
-                draw_result_id: p.drawResultId,
+                draw_result_id: (p.drawResultId && validResultIds.has(p.drawResultId)) ? p.drawResultId : null,
                 feedback: p.feedback
             }));
 
             for (let i = 0; i < payload.length; i += BATCH_SIZE) {
                 const batch = payload.slice(i, i + BATCH_SIZE);
-                await supabase.from('predictions').upsert(batch);
+                const { error: pushErr } = await supabase.from('predictions').upsert(batch);
+                if (pushErr) throw pushErr;
             }
         }
 
         return mergedList;
+    };
+
+    try {
+        return await retryWithBackoff(executeSync, 3, 1000, 2);
     } catch (err: unknown) {
         const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
             ? (err as any).message
             : String(err);
         const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
         logError(new AppError(errorMsg || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", severity, { error: err }), { source: 'syncPredictions' });
-        return localItems;
+        return sanitizedLocalItems;
     }
 };
 

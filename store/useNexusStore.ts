@@ -189,6 +189,7 @@ export const useNexusStore = create<NexusState>()(
                 const weights = await getAlgoWeights(currentDraw);
                 set({ globalWeights: weights });
               }
+              window.dispatchEvent(new CustomEvent('NEXUS_STORE_REHYDRATED'));
             } catch (e) {
               console.error(
                 "Failed to rehydrate NexusStore on cloud hydration:",
@@ -227,7 +228,70 @@ export const useNexusStore = create<NexusState>()(
       setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
       setUseSpatioTemporalHawkes: (enabled) => set({ useSpatioTemporalHawkes: enabled }),
       setTemporalDepth: (depth) => set({ temporalDepth: depth }),
-      setLastPrediction: (pred) => set({ lastPrediction: pred }),
+      setLastPrediction: (pred) => {
+        if (pred !== null) {
+          try {
+            // Validation d'intégrité de la prédiction du moteur neural
+            if (typeof pred !== "object") {
+              throw new Error("La prédiction n'est pas un objet valide.");
+            }
+            if (!Array.isArray(pred.suggestedNumbers) || pred.suggestedNumbers.length === 0) {
+              throw new Error("La liste des numéros suggérés (suggestedNumbers) est manquante ou vide.");
+            }
+            const hasInvalidSuggested = pred.suggestedNumbers.some(
+              (n) => typeof n !== "number" || isNaN(n) || !isFinite(n) || n <= 0
+            );
+            if (hasInvalidSuggested) {
+              throw new Error("La prédiction contient des numéros suggérés non numériques ou invalides (NaN/infinités).");
+            }
+            if (!Array.isArray(pred.candidates)) {
+              throw new Error("La liste des numéros candidats (candidates) est absente ou corrompue.");
+            }
+            if (typeof pred.confidence !== "number" || isNaN(pred.confidence) || !isFinite(pred.confidence)) {
+              throw new Error("La valeur de confiance (confidence) est invalide ou NaN.");
+            }
+            if (pred.confidence < 0 || pred.confidence > 100) {
+              throw new Error(`L'indice de confiance (${pred.confidence}) est hors de l'intervalle légal [0, 100].`);
+            }
+            if (typeof pred.breakdown !== "object" || pred.breakdown === null) {
+              throw new Error("La structure de répartition des scores (breakdown) est invalide.");
+            }
+            if (typeof pred.timestamp !== "number" || isNaN(pred.timestamp) || pred.timestamp <= 0) {
+              throw new Error("L'horodatage de la prédiction (timestamp) est absent ou invalide.");
+            }
+
+            // Si l'intégrité est parfaite, on applique la mise à jour
+            set({ lastPrediction: pred });
+
+            // Notification d'agent de type SCAN confirmant la validation réussie
+            const currentDraw = get().drawName;
+            get().addAgentLog({
+              id: `verify-${Date.now()}`,
+              timestamp: new Date(),
+              action: `Intégrité de la prédiction validée avec succès pour le tirage [${currentDraw}].`,
+              type: "SCAN",
+              impact: `${pred.suggestedNumbers.length} numéros, Confiance: ${pred.confidence.toFixed(1)}%`
+            });
+
+          } catch (error: any) {
+            console.error("[NEXUS INTEGRITY CHECK] Erreur d'intégrité détectée sur la prédiction :", error.message);
+            
+            // Enregistrement d'un log d'avertissement d'intégrité bloquant pour l'agent
+            get().addAgentLog({
+              id: `warning-${Date.now()}`,
+              timestamp: new Date(),
+              action: `Corruption de prédiction interceptée ! ${error.message}`,
+              type: "WARNING",
+              impact: "Mise à jour de l'interface bloquée pour protéger la stabilité de l'UI."
+            });
+
+            // On lève l'erreur pour que l'appelant asynchrone reçoive l'information de l'échec d'intégrité
+            throw error;
+          }
+        } else {
+          set({ lastPrediction: null });
+        }
+      },
       setSmartInsights: (insights) => set({ smartInsights: insights }),
       setCalibration: (cal) => set({ calibration: cal }),
       setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),

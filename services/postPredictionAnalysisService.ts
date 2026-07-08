@@ -18,6 +18,7 @@ import { analyzeForManipulation } from "./forensicAuditService";
 import { z } from "zod";
 import { parseDateSafely } from "../utils/dateUtils";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
+import { getDeterministicUUID } from "../utils/mathUtils";
 
 // ============================================================================
 // SCHÉMAS DE VALIDATION (Inchangés, déjà robustes)
@@ -832,7 +833,7 @@ export const performForensicAnalysis = async (
     hashVal = (hashVal << 5) - hashVal + seed.charCodeAt(i);
     hashVal |= 0;
   }
-  const deterministicId = `forensic_${Math.abs(hashVal)}`;
+  const deterministicId = getDeterministicUUID(`forensic_${Math.abs(hashVal)}`);
 
   return {
     id: deterministicId,

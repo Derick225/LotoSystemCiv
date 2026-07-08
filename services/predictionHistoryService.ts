@@ -6,6 +6,7 @@ import { getAlgoWeights } from './predictionEngine';
 import { ALL_DRAWS } from '../constants';
 import { get, set, del, keys } from "idb-keyval";
 import { EnhancedMetrics } from './prediction/metrics.types';
+import { getDeterministicUUID } from '../utils/mathUtils';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
@@ -146,7 +147,7 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
     hashVal = (hashVal << 5) - hashVal + seed.charCodeAt(i);
     hashVal |= 0;
   }
-  const deterministicId = `pred_${Math.abs(hashVal)}_${Date.now()}`;
+  const deterministicId = getDeterministicUUID(`pred_${Math.abs(hashVal)}_${Date.now()}`);
 
   const newItem: PredictionHistoryItem = {
     id: deterministicId,
@@ -236,7 +237,7 @@ export const saveLearningSession = async (drawName: string, sessionData: Omit<Le
         hashVal = (hashVal << 5) - hashVal + seed.charCodeAt(i);
         hashVal |= 0;
     }
-    const deterministicId = `sess_${Math.abs(hashVal)}_${Date.now()}`;
+    const deterministicId = getDeterministicUUID(`sess_${Math.abs(hashVal)}_${Date.now()}`);
 
     const session: LearningSession = {
         id: deterministicId,

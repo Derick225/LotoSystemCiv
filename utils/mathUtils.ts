@@ -88,3 +88,52 @@ export const shuffleArray = <T>(array: T[]): T[] => {
     }
     return arr;
 };
+
+/**
+ * Génère un UUID RFC 4122 v4 valide de manière 100% déterministe à partir d'une chaîne arbitraire.
+ * Respecte l'exigence ZÉRO HASARD de AGENTS.md (sans Math.random ou crypto.getRandomValues non seedés).
+ */
+export const getDeterministicUUID = (str: string): string => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(str)) {
+        return str.toLowerCase();
+    }
+
+    // Hachage FNV-1a déterministe sur 4 slots de 32 bits
+    let h1 = 0x811c9dc5;
+    let h2 = 0x12345678;
+    let h3 = 0xabcdef01;
+    let h4 = 0x76543210;
+
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ char, 16777619);
+        h2 = Math.imul(h2 ^ char, 10995116);
+        h3 = Math.imul(h3 ^ char, 16777619) + h1;
+        h4 = Math.imul(h4 ^ char, 10995116) + h2;
+    }
+
+    const toHex8 = (num: number) => {
+        return (num >>> 0).toString(16).padStart(8, '0');
+    };
+
+    const hex1 = toHex8(h1);
+    const hex2 = toHex8(h2);
+    const hex3 = toHex8(h3);
+    const hex4 = toHex8(h4);
+
+    const rawHex = (hex1 + hex2 + hex3 + hex4).toLowerCase();
+
+    // Formatage sous forme de UUID RFC 4122 standard : 8-4-4-4-12
+    // Version 4 (4xxx) et Variant (8, 9, a ou b) forcés
+    const part1 = rawHex.substring(0, 8);
+    const part2 = rawHex.substring(8, 12);
+    const part3 = '4' + rawHex.substring(13, 16);
+    
+    const variantChar = ['8', '9', 'a', 'b'][Math.abs(h1) % 4];
+    const part4 = variantChar + rawHex.substring(17, 20);
+    const part5 = rawHex.substring(20, 32);
+
+    return `${part1}-${part2}-${part3}-${part4}-${part5}`;
+};
+

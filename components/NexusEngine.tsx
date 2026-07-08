@@ -25,6 +25,8 @@ export const NexusEngine: React.FC = () => {
     const setCalibration = useNexusStore(s => s.setCalibration);
     const setEmpiricalCalibration = useNexusStore(s => s.setEmpiricalCalibration);
 
+    // Direct length store selectors are replaced with content-aware logic below to prevent stale state on identical draw sizes
+
     // --- DATA FETCHING VIA REACT QUERY ---
     const { 
         data: rawHistory, 
@@ -49,6 +51,16 @@ export const NexusEngine: React.FC = () => {
         setLoading(loading);
     }, [loading, setLoading]);
 
+    // Force refetch on store rehydration
+    useEffect(() => {
+        const handleRehydrated = () => {
+            console.log("[NexusEngine] Store rehydration detected, forcing full state synchronization...");
+            refetchHistory();
+        };
+        window.addEventListener('NEXUS_STORE_REHYDRATED', handleRehydrated);
+        return () => window.removeEventListener('NEXUS_STORE_REHYDRATED', handleRehydrated);
+    }, [refetchHistory]);
+
     // 1. Initialisation Configuration (Weights & RL)
     useEffect(() => {
         let mounted = true;
@@ -63,25 +75,34 @@ export const NexusEngine: React.FC = () => {
     // 2. Calcul des Stats basiques (Rapide, synchrone)
     useEffect(() => {
         if (!history || history.length === 0) {
-            setHistoryData([], [], []);
+            const currentStoreHistory = useNexusStore.getState().history;
+            if (currentStoreHistory.length > 0) {
+                setHistoryData([], [], []);
+            }
             return;
         }
         
-        const counts: Record<number, number> = {};
-        history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
-        const computedStats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
+        const storeHistory = useNexusStore.getState().history;
+        const hasDrawNameMismatch = history.length > 0 && storeHistory.length > 0 && 
+            (history[0].drawName !== storeHistory[0].drawName || history[0].draw_name !== storeHistory[0].draw_name);
 
-        const computedGaps: { number: number; gap: number }[] = [];
-        for (let i = 1; i <= 90; i++) {
-            let gap = 0;
-            for (const draw of history) { if (draw.gagnants.includes(i)) break; gap++; }
-            computedGaps.push({ number: i, gap });
+        if (storeHistory.length !== history.length || hasDrawNameMismatch || storeHistory.length === 0) {
+            const counts: Record<number, number> = {};
+            history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
+            const computedStats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
+
+            const computedGaps: { number: number; gap: number }[] = [];
+            for (let i = 1; i <= 90; i++) {
+                let gap = 0;
+                for (const draw of history) { if (draw.gagnants.includes(i)) break; gap++; }
+                computedGaps.push({ number: i, gap });
+            }
+            
+            const empCal = generateEmpiricalCalibration(history);
+            setEmpiricalCalibration(empCal);
+            
+            setHistoryData(history, computedStats, computedGaps);
         }
-        
-        const empCal = generateEmpiricalCalibration(history);
-        setEmpiricalCalibration(empCal);
-        
-        setHistoryData(history, computedStats, computedGaps);
     }, [history, setHistoryData, setEmpiricalCalibration]);
 
     // Sync Analytics

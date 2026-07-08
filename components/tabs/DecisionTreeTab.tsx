@@ -26,7 +26,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
     const [selectedFeatures, setSelectedFeatures] = useState<string[]>(FEATURES_LABELS);
 
     const load = useCallback(async () => {
-        if (history.length < 30) return;
+        if (history.length < 40) return;
         setLocalLoading(true);
         try {
             // Lancement du Worker Forest avec le mode sélectionné
@@ -55,7 +55,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
     }, [history, filterMode, selectedFeatures, showToast]);
 
     useEffect(() => { 
-        if (history.length > 30) {
+        if (history.length >= 40) {
             load(); 
         } else {
             setLocalLoading(false);
@@ -70,7 +70,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
 
     const theme = getTheme();
 
-    if (nexusLoading || (localLoading && candidates.length === 0)) return (
+    if (nexusLoading || (localLoading && candidates.length === 0 && history.length >= 40)) return (
         <div className="flex flex-col items-center justify-center p-20 gap-6 bg-slate-900/30 rounded-3xl border border-slate-800 border-dashed">
             <div className="relative">
                 <div className="w-28 h-28 border-4 border-slate-800 border-t-emerald-500 rounded-full animate-spin"></div>
@@ -79,6 +79,21 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
             <p className="font-black text-emerald-600 uppercase tracking-[0.3em] text-sm">Consultation des Sages...</p>
         </div>
     );
+
+    if (history.length < 40) {
+        return (
+            <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-900/30 rounded-3xl border border-slate-800 border-dashed gap-4">
+                <BrainCircuit className="text-amber-500 w-16 h-16 animate-pulse mb-2" />
+                <h3 className="text-xl font-bold text-white">Historique insuffisant pour Decision Forest</h3>
+                <p className="text-slate-400 text-sm max-w-md">
+                    L'algorithme Decision Forest (Random Forest) nécessite au moins <span className="text-amber-500 font-bold">40 tirages historiques</span> pour calibrer ses bifurcations et voter de façon fiable.
+                </p>
+                <div className="px-4 py-2 bg-slate-800/50 rounded-2xl border border-slate-700/50 text-xs text-slate-300 mt-2">
+                    Historique actuel pour <span className="text-indigo-400 font-bold">{drawName}</span> : {history.length} / 40 tirages.
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8 animate-fade-in pb-20">

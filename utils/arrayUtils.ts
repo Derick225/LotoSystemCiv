@@ -25,7 +25,7 @@ export const getUniqueSortedNumbers = (numbers: (string | number | null | undefi
  */
 export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string }>(drawName: string, history: T[]): T[] => {
     if (!history || !Array.isArray(history)) return [];
-    const normalizedTarget = drawName.trim().toLowerCase();
+    const normalizedTarget = drawName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (normalizedTarget === "all_combined" || normalizedTarget === "all") {
         return history;
     }
@@ -35,7 +35,7 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
             // Fix corrupted items from cache by forcing the correct drawName
             acc.push({ ...d, drawName, draw_name: drawName } as T);
         } else {
-            const nameStr = String(name).trim().toLowerCase();
+            const nameStr = String(name).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             if (nameStr === normalizedTarget || normalizedTarget.includes(nameStr) || nameStr.includes(normalizedTarget)) {
                 acc.push({ ...d, drawName: name, draw_name: name } as T);
             }
