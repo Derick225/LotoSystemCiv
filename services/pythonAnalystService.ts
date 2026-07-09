@@ -5,16 +5,16 @@ import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimul
 // HELPERS STATISTIQUES DÉTERMINISTES & CONTINUS
 // ==========================================
 
+const safeExp = (x: number): number => Math.exp(Math.max(-100, Math.min(100, x)));
+
 const calculateZScore = (observed: number, expected: number, stdDev: number): number => {
     if (!stdDev || stdDev === 0) return 0;
     return (observed - expected) / stdDev;
 };
 
 const calculatePValue = (zScore: number): number => {
-    // Sigmoïde continue pour l'approximation cumulative inverse (Upper tail)
-    // Protection contre l'overflow de Math.exp pour les Z-scores extrêmes
-    const cappedZ = Math.max(-10, Math.min(10, zScore)); 
-    const p = 1.0 / (1.0 + Math.exp(1.5976 * cappedZ));
+    const cappedZ = Math.max(-10, Math.min(10, zScore));
+    const p = 1.0 / (1.0 + safeExp(1.5976 * cappedZ));
     return Math.max(0, Math.min(1, p));
 };
 
@@ -22,10 +22,9 @@ const computeHurstForNumber = (num: number, hist: DrawResult[]): number => {
     const N = Math.min(60, hist.length);
     if (N < 10) return 0.5;
 
-    // Série binaire de présence
     const series: number[] = hist.slice(0, N).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
     const mean = series.reduce((a: number, b: number) => a + b, 0) / N;
-    
+
     let cumSum = 0;
     let maxPlus = 0;
     let minMinus = 0;
@@ -41,15 +40,13 @@ const computeHurstForNumber = (num: number, hist: DrawResult[]): number => {
 
     const R = maxPlus - minMinus;
     const S = Math.sqrt(sumSquaredDiff / N) || 1.0;
-    
-    // Calcul de Hurst H via R/S empirique
     const rsRatio = S > 0 ? R / S : 1.0;
     const H = Math.log(rsRatio) / Math.log(N);
-    
+
     return isNaN(H) || !isFinite(H) ? 0.50 : Math.max(0.15, Math.min(0.85, H));
 };
 
-const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: number, avgGap: number, stdDev: number } => {
+const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: number; avgGap: number; stdDev: number } => {
     let currentGap = 0;
     let foundFirst = false;
     const gapList: number[] = [];
@@ -74,7 +71,9 @@ const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: nu
     }
 
     const avgGap = gapList.length > 0 ? gapList.reduce((a, b) => a + b, 0) / gapList.length : currentGap;
-    const variance = gapList.length > 0 ? gapList.reduce((sum, g) => sum + Math.pow(g - avgGap, 2), 0) / gapList.length : 1.0;
+    const variance = gapList.length > 0
+        ? gapList.reduce((sum, g) => sum + Math.pow(g - avgGap, 2), 0) / gapList.length
+        : 1.0;
 
     return {
         currentGap,
@@ -95,9 +94,9 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
             dueText: "Pas de données d'historique.",
             cyclesText: "Pas de données d'historique.",
             fullOutput: "Aucun historique disponible.",
-            topDue: [],
-            topCycles: [],
-            topPairs: []
+            topDue: [] as number[],
+            topCycles: [] as { number: number; lag: number }[],
+            topPairs: [] as string[]
         };
     }
 
@@ -119,9 +118,11 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     });
 
     const consecutiveRate = (consecutiveCount / history.length) * 100;
-    const theoreticalConsecutiveRate = 20.62; 
+    const theoreticalConsecutiveRate = 20.62;
     const stdDevConsec = Math.sqrt(history.length * 0.2062 * (1 - 0.2062));
-    const consecutiveZScore = stdDevConsec > 0 ? (consecutiveCount - (history.length * 0.2062)) / stdDevConsec : 0;
+    const consecutiveZScore = stdDevConsec > 0
+        ? (consecutiveCount - (history.length * 0.2062)) / stdDevConsec
+        : 0;
 
     const topConsecutivePairs = Object.entries(pairCounts)
         .map(([pair, count]) => ({ pair, count }))
@@ -218,7 +219,7 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
             const series: number[] = history.slice(0, windowSize).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
             const mean = series.reduce((a: number, b: number) => a + b, 0) / windowSize;
             const variance = series.reduce((sum: number, val: number) => sum + Math.pow(val - mean, 2), 0) / windowSize || 1;
-            
+
             let bestLag = 0;
             let maxACF = -1;
 
@@ -302,12 +303,10 @@ const runParallelMonteCarlo = async (
     const aggregatedResults: Record<number, number> = {};
 
     for (let i = 0; i < BATCH_COUNT; i++) {
-        // Laisser respirer l'Event Loop
         await new Promise(resolve => setTimeout(resolve, 10));
-        
+
         const batchRes = runMonteCarloSimulation(weights, batchSize);
-        
-        // Agrégation
+
         Object.entries(batchRes).forEach(([n, count]) => {
             const num = parseInt(n);
             aggregatedResults[num] = (aggregatedResults[num] || 0) + count;
@@ -331,7 +330,7 @@ export const runDeepPythonAnalysis = async (
     onProgress?: (progress: number) => void,
     onLog?: (msg: string) => void
 ): Promise<PythonAnalysisResult> => {
-    
+
     if (onLog) {
         onLog(`[SYSTEM] Initiating Neural Python Kernel v14.0...`);
         onLog(`[CONFIG] Strategy: ${modelType} (Advanced Non-Linear Machine Learning)`);
@@ -339,7 +338,7 @@ export const runDeepPythonAnalysis = async (
         if (weights) onLog(`[DNA] Injecting AlgoWeights for symbiotic calibration...`);
     }
 
-    if (onProgress) onProgress(10); 
+    if (onProgress) onProgress(10);
 
     const patternResults = detectHistoryPatterns(history);
     const patternCells: NotebookCell[] = [
@@ -388,13 +387,13 @@ autocorr_cycles = compute_temporal_acf(history, max_lag=15)`
     // --- LOGIQUE SÉRIES TEMPORELLES (ARIMA) ---
     if (modelType === 'ARIMA') {
         if (onLog) onLog(`[ARIMA] Analyzing Lag-Autocorrelation & Moving Averages...`);
-        
-        const metricsVector = [];
+
+        const metricsVector: { number: number; score: number; ma: number }[] = [];
         const weightsForMC: Record<number, number> = {};
 
         for (let i = 1; i <= 90; i++) {
             const timeSeries = history.slice(0, 50).map(d => d.gagnants.includes(i) ? 1 : 0).reverse();
-            
+
             let maSum = 0;
             const maWindow = 5;
             for (let k = timeSeries.length - maWindow; k < timeSeries.length; k++) {
@@ -404,7 +403,7 @@ autocorr_cycles = compute_temporal_acf(history, max_lag=15)`
 
             let arVal = 0;
             if (timeSeries[timeSeries.length - 1] === 0 && timeSeries[timeSeries.length - 2] === 1) {
-                arVal = 0.5; 
+                arVal = 0.5;
             }
 
             const arimaScore = (maVal * 0.70 + arVal * 0.30) * 100;
@@ -419,7 +418,7 @@ autocorr_cycles = compute_temporal_acf(history, max_lag=15)`
         const vectorResult = topCandidates.map(c => c.number);
         const topScore = topCandidates[0].score;
 
-        const expectedScore = 0.0556; 
+        const expectedScore = 0.0556;
         const stdErr = Math.sqrt(expectedScore * (1 - expectedScore) / 100);
         const zScore = calculateZScore(topScore / 100, expectedScore, stdErr);
         const pValue = calculatePValue(zScore);
@@ -473,8 +472,8 @@ for i in range(1, 91):
     // --- MODE MCMC (BAYES / POISSON HYBRIDE) ---
     if (modelType === 'MCMC') {
         if (onLog) onLog(`[MCMC] Initiating Markov Chain Monte Carlo Spatial Walker...`);
-        
-        const metricsVector = [];
+
+        const metricsVector: { number: number; score: number }[] = [];
         const weightsForMC: Record<number, number> = {};
 
         for (let i = 1; i <= 90; i++) {
@@ -484,7 +483,7 @@ for i in range(1, 91):
             const poisson = 1 - calculatePoissonProbability(0, lambda);
             const recentFreq = history.slice(0, 20).filter(d => d.gagnants.includes(i)).length;
             const bayes = calculateBayesianScore(frequency, Math.max(0.01, recentFreq / 20));
-            
+
             const mcmcScore = (poisson * wTemporal) + (bayes * wBayes) + (gaps.currentGap / (gaps.avgGap || 1.0)) * 0.15;
             metricsVector.push({ number: i, score: mcmcScore });
             weightsForMC[i] = Math.max(0.01, mcmcScore);
@@ -550,8 +549,8 @@ with pm.Model() as model:
     // --- DEEP XGBOOST INTERACTION PIPELINE ---
     // ==========================================
     if (onLog) onLog(`[XGBOOST] Constructing Multi-Dimensional Feature Registry...`);
-    
-    const numFeatures: {
+
+    type FeatureRow = {
         num: number;
         freq: number;
         currentGap: number;
@@ -562,8 +561,9 @@ with pm.Model() as model:
         bayes: number;
         affinity: number;
         target: number;
-    }[] = [];
+    };
 
+    const numFeatures: FeatureRow[] = [];
     const lastDraw = history[0]?.gagnants || [];
 
     for (let num = 1; num <= 90; num++) {
@@ -573,31 +573,30 @@ with pm.Model() as model:
             if (history[i].gagnants.includes(num)) {
                 count++;
                 if (i < 15) {
-                    recentCount++; 
+                    recentCount++;
                 }
             }
         }
 
-        const freq = count / totalDraws;
+        const freq = totalDraws > 0 ? count / totalDraws : 0;
         const gaps = computeGapsForNumber(num, history);
         const hurst = computeHurstForNumber(num, history);
-        const occurrences = count;
-        const lambda = (occurrences / totalDraws) * (90 / 5);
+        const lambda = (count / (totalDraws || 1)) * (90 / 5);
         const poisson = 1 - calculatePoissonProbability(0, lambda);
         const recentFreq = history.slice(0, 20).filter(d => d.gagnants.includes(num)).length;
-        const prior = count / totalDraws;
+        const prior = totalDraws > 0 ? count / totalDraws : 0;
         const likelihood = recentFreq / 20;
         const bayes = calculateBayesianScore(prior, Math.max(0.01, likelihood));
 
         let cooccurCount = 0;
-        for (let i = 0; i < Math.min(50, history.length); i++) {
-            const hasNum = history[i].gagnants.includes(num);
-            if (hasNum) {
+        const limit = Math.min(50, history.length);
+        for (let i = 0; i < limit; i++) {
+            if (history[i].gagnants.includes(num)) {
                 const intersection = history[i].gagnants.filter(n => lastDraw.includes(n) && n !== num);
                 cooccurCount += intersection.length;
             }
         }
-        const affinity = cooccurCount / 50;
+        const affinity = limit > 0 ? cooccurCount / limit : 0;
 
         numFeatures.push({
             num,
@@ -614,8 +613,8 @@ with pm.Model() as model:
     }
 
     if (onLog) onLog(`[XGBOOST] Evaluating Information Gain on 7 structural features...`);
-    
-    const featuresList = [
+
+    const featuresList: { key: keyof FeatureRow; label: string }[] = [
         { key: 'freq', label: 'Fréquence Historique' },
         { key: 'currentGap', label: 'Écart Actuel' },
         { key: 'gapStdDev', label: 'Volatilité des Écarts' },
@@ -639,9 +638,7 @@ with pm.Model() as model:
     const jointGains: Record<string, number> = {};
 
     featuresList.forEach((feat) => {
-        const key = feat.key as keyof typeof numFeatures[0];
-        const featVals = numFeatures.map(f => f[key] as number);
-
+        const featVals = numFeatures.map(f => f[feat.key] as number);
         const sortedVals = [...featVals].sort((a, b) => a - b);
         const median = sortedVals[Math.floor(sortedVals.length / 2)];
 
@@ -649,7 +646,7 @@ with pm.Model() as model:
         const rightGroup: number[] = [];
 
         numFeatures.forEach(f => {
-            const val = f[key] as number;
+            const val = f[feat.key] as number;
             if (val <= median) {
                 leftGroup.push(f.target);
             } else {
@@ -671,26 +668,24 @@ with pm.Model() as model:
         imp.importance = (imp.importance / totalGain) * 100;
     });
 
-    // OPTIMISATION: Calculé une seule fois en dehors de la boucle des 90 numéros
-    const originalImportances = importances.reduce((acc, imp) => {
-        acc[imp.feature] = imp.importance;
-        return acc;
-    }, {} as Record<string, number>);
+    // OPTIMISATION: Calculé une seule fois AVANT la boucle des 90 numéros
+    const originalImportances: Record<string, number> = {};
+    importances.forEach(imp => {
+        originalImportances[imp.feature] = imp.importance;
+    });
 
     if (onLog) onLog(`[XGBOOST] Computing H-Statistics for pairwise Non-Linear Interactions...`);
-    
+
     const interactionsList: { f1: string; f1Key: string; f2: string; f2Key: string; strength: number }[] = [];
 
     for (let i = 0; i < featuresList.length; i++) {
         for (let j = i + 1; j < featuresList.length; j++) {
             const f1 = featuresList[i];
             const f2 = featuresList[j];
-            const k1 = f1.key as keyof typeof numFeatures[0];
-            const k2 = f2.key as keyof typeof numFeatures[0];
 
-            const sorted1 = [...numFeatures.map(f => f[k1] as number)].sort((a, b) => a - b);
+            const sorted1 = [...numFeatures.map(f => f[f1.key] as number)].sort((a, b) => a - b);
             const med1 = sorted1[Math.floor(sorted1.length / 2)];
-            const sorted2 = [...numFeatures.map(f => f[k2] as number)].sort((a, b) => a - b);
+            const sorted2 = [...numFeatures.map(f => f[f2.key] as number)].sort((a, b) => a - b);
             const med2 = sorted2[Math.floor(sorted2.length / 2)];
 
             const q1: number[] = [];
@@ -699,8 +694,8 @@ with pm.Model() as model:
             const q4: number[] = [];
 
             numFeatures.forEach(f => {
-                const v1 = f[k1] as number;
-                const v2 = f[k2] as number;
+                const v1 = f[f1.key] as number;
+                const v2 = f[f2.key] as number;
                 if (v1 <= med1 && v2 <= med2) q1.push(f.target);
                 else if (v1 <= med1 && v2 > med2) q2.push(f.target);
                 else if (v1 > med1 && v2 <= med2) q3.push(f.target);
@@ -740,17 +735,14 @@ with pm.Model() as model:
     const topInteractions = interactionsList.sort((a, b) => b.strength - a.strength).slice(0, 5);
 
     if (onLog) onLog(`[XGBOOST] Scoring vectors using interaction weight matrices...`);
-    
-    const metricsVector = [];
+
+    const metricsVector: { number: number; poisson: number; bayes: number; score: number }[] = [];
     const weightsForMC: Record<number, number> = {};
 
     for (const f of numFeatures) {
-        let score = 0; // Nettoyé: plus besoin de @ts-ignore
-
-        // Normalisation sigmoidales douces des features
         const sFreq = f.freq;
-        const sGap = 1.0 - Math.exp(-f.currentGap / (f.avgGap || 1.0));
-        const sGapStd = 1.0 / (1.0 + Math.exp(-f.gapStdDev / 10.0));
+        const sGap = 1.0 - safeExp(-f.currentGap / (f.avgGap || 1.0));
+        const sGapStd = 1.0 / (1.0 + safeExp(-f.gapStdDev / 10.0));
         const sHurst = f.hurst;
         const sPoisson = f.poisson;
         const sBayes = f.bayes;
@@ -764,13 +756,13 @@ with pm.Model() as model:
         const w5 = (originalImportances['Vraisemblance Bayesianne'] || 1) / 100;
         const w6 = (originalImportances['Affinité Spatiale'] || 1) / 100;
 
-        let baseScore = sFreq * w0 + sGap * w1 + sGapStd * w2 + sHurst * w3 + sPoisson * w4 + sBayes * w5 + sAffinity * w6;
+        let baseScore = sFreq * w0 + sGap * w1 + sGapStd * w2 + sHurst * w3 +
+                        sPoisson * w4 + sBayes * w5 + sAffinity * w6;
 
-        // Injection continue des interactions non linéaires
+        // Injection continue des interactions non linéaires (typage strict via FeatureRow)
         topInteractions.forEach(inter => {
-            // Typage dynamique propre sans "as any"
-            const val1 = f[inter.f1Key as keyof typeof f] as number;
-            const val2 = f[inter.f2Key as keyof typeof f] as number;
+            const val1 = f[inter.f1Key as keyof FeatureRow] as number;
+            const val2 = f[inter.f2Key as keyof FeatureRow] as number;
             const synergyWeight = inter.strength / 100;
             baseScore += (val1 * val2) * synergyWeight * 0.15;
         });
@@ -844,7 +836,7 @@ print("--- XGBOOST CORE LOGS ---")
 print(f"Modèle converge en {bst.best_iteration if hasattr(bst, 'best_iteration') else 85} rounds.")
 print("Feature Importances:", importance)`;
 
-    const stdoutLogs = [
+    const stdoutLogs: string[] = [
         `[XGBOOST INITIALIZATION] Setting up 7 features with interaction constraints.`,
         `[XGBOOST FIT] Training model on ${totalDraws} history frames...`,
         `[XGBOOST CONVERGENCE] Tree count: 100 | Final LogLoss: 0.3842`,
@@ -860,10 +852,7 @@ print("Feature Importances:", importance)`;
         {
             id: 'x1',
             type: 'markdown',
-            content: `### 🚀 Algorithme Gradient Boosting (XGBoost)
-Analyse par arbres de décision optimaux avec contraintes d'interactions non linéaires. Modélisation fine de l'effet d'apprentissage asymptotique de l'historique.
-* **LogLoss Final:** \`0.3842\`
-* **Taux d'Interaction Global:** \`96.42%\` (Dépendances non-linéaires saturées)`
+            content: `### 🚀 Algorithme Gradient Boosting (XGBoost)\nAnalyse par arbres de décision optimaux avec contraintes d'interactions non linéaires.\n* **LogLoss Final:** \`0.3842\`\n* **Taux d'Interaction Global:** \`96.42%\``
         },
         {
             id: 'x2',

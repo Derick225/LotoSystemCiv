@@ -298,7 +298,7 @@ export const generateMasterPredictionCore = async (
   const gameRegimeInfo = detectGameRegime(history);
   weights = adjustWeightsForRegime(weights, gameRegimeInfo);
 
-  let hyperparameters = {
+  let hyperparameters: import("./hyperParameterTuner").PredictiveHyperparameters = {
     hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
     spatialSigma: 1.5,
     gapVelocityWeight: 1.0,
@@ -1090,6 +1090,6 @@ export const generateMasterPrediction = async (
         onProgress,
       );
     },
-    CACHE_TTL,
+    CACHE_TTL.SHORT,
   );
 };

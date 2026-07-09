@@ -9,6 +9,7 @@ import { Trash2, History, CheckCircle2, Microscope, Link as LinkIcon, AlertCircl
 import { useToast } from './ui/Toast';
 import { PredictionForensics } from './PredictionForensics';
 import { useNexusStore } from '../store/useNexusStore';
+import { useDrawHistory } from "../hooks/useLottery";
 import { TicketXRay } from './TicketXRay';
 import { audioEngine } from '../utils/audioEngine';
 import { logError, AppError } from '../utils/AppError';
@@ -17,7 +18,7 @@ interface PredictionHistoryProps { drawName: string; }
 
 export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }) => {
     const { showToast } = useToast();
-    const results = useNexusStore(state => state.history);
+    const { data: results = [] } = useDrawHistory(drawName);
     const nexusLoading = useNexusStore(state => state.loading);
     const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);

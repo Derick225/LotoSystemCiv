@@ -519,4 +519,3 @@ export async function generatePlatinumPrediction(
         onProgress
     );
 }
-```
