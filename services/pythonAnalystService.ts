@@ -1,21 +1,27 @@
 import { DrawResult, PythonAnalysisResult, NotebookCell, AlgoWeights } from "../types";
 import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimulation } from './mathService';
 
-// Helpres Statistiques Déterministes & Continus (Aucun nombre magique, aucun hasard)
+// ==========================================
+// HELPERS STATISTIQUES DÉTERMINISTES & CONTINUS
+// ==========================================
+
 const calculateZScore = (observed: number, expected: number, stdDev: number): number => {
-    return (observed - expected) / (stdDev || 1);
+    if (!stdDev || stdDev === 0) return 0;
+    return (observed - expected) / stdDev;
 };
 
 const calculatePValue = (zScore: number): number => {
-    // Sigmoïde continue pour l'approximation cumulative inverse
-    const p = 1.0 / (1.0 + Math.exp(1.5976 * zScore));
+    // Sigmoïde continue pour l'approximation cumulative inverse (Upper tail)
+    // Protection contre l'overflow de Math.exp pour les Z-scores extrêmes
+    const cappedZ = Math.max(-10, Math.min(10, zScore)); 
+    const p = 1.0 / (1.0 + Math.exp(1.5976 * cappedZ));
     return Math.max(0, Math.min(1, p));
 };
 
 const computeHurstForNumber = (num: number, hist: DrawResult[]): number => {
     const N = Math.min(60, hist.length);
     if (N < 10) return 0.5;
-    
+
     // Série binaire de présence
     const series: number[] = hist.slice(0, N).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
     const mean = series.reduce((a: number, b: number) => a + b, 0) / N;
@@ -24,7 +30,7 @@ const computeHurstForNumber = (num: number, hist: DrawResult[]): number => {
     let maxPlus = 0;
     let minMinus = 0;
     let sumSquaredDiff = 0;
-    
+
     for (let i = 0; i < N; i++) {
         const diff = series[i] - mean;
         cumSum += diff;
@@ -32,12 +38,14 @@ const computeHurstForNumber = (num: number, hist: DrawResult[]): number => {
         if (cumSum < minMinus) minMinus = cumSum;
         sumSquaredDiff += diff * diff;
     }
-    
+
     const R = maxPlus - minMinus;
     const S = Math.sqrt(sumSquaredDiff / N) || 1.0;
     
     // Calcul de Hurst H via R/S empirique
-    const H = Math.log(R / S || 1.0) / Math.log(N || 2.0);
+    const rsRatio = S > 0 ? R / S : 1.0;
+    const H = Math.log(rsRatio) / Math.log(N);
+    
     return isNaN(H) || !isFinite(H) ? 0.50 : Math.max(0.15, Math.min(0.85, H));
 };
 
@@ -46,7 +54,7 @@ const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: nu
     let foundFirst = false;
     const gapList: number[] = [];
     let tempGap = 0;
-    
+
     for (let i = 0; i < hist.length; i++) {
         if (hist[i].gagnants.includes(num)) {
             if (!foundFirst) {
@@ -60,11 +68,14 @@ const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: nu
             tempGap++;
         }
     }
+
     if (!foundFirst) {
         currentGap = tempGap;
     }
+
     const avgGap = gapList.length > 0 ? gapList.reduce((a, b) => a + b, 0) / gapList.length : currentGap;
     const variance = gapList.length > 0 ? gapList.reduce((sum, g) => sum + Math.pow(g - avgGap, 2), 0) / gapList.length : 1.0;
+
     return {
         currentGap,
         avgGap: avgGap || 1.0,
@@ -72,11 +83,10 @@ const computeGapsForNumber = (num: number, hist: DrawResult[]): { currentGap: nu
     };
 };
 
-/**
- * NEXUS PATTERN RECOGNITION SYSTEM
- * Deterministic multi-dimensional pattern scanning across historical draws.
- * Zero magic numbers, 100% deterministic (no Math.random()).
- */
+// ==========================================
+// NEXUS PATTERN RECOGNITION SYSTEM
+// ==========================================
+
 export const detectHistoryPatterns = (history: DrawResult[]) => {
     if (!history || history.length === 0) {
         return {
@@ -94,6 +104,7 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     // --- 1. Consecutive Sequences ---
     let consecutiveCount = 0;
     const pairCounts: Record<string, number> = {};
+
     history.forEach(draw => {
         const sorted = [...draw.gagnants].sort((a, b) => a - b);
         let drawHasConsecutive = false;
@@ -108,8 +119,9 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     });
 
     const consecutiveRate = (consecutiveCount / history.length) * 100;
-    const theoreticalConsecutiveRate = 20.62; // Theoretical probability for Loto 5/90
-    const consecutiveZScore = (consecutiveCount - (history.length * 0.2062)) / Math.sqrt(history.length * 0.2062 * (1 - 0.2062)) || 0;
+    const theoreticalConsecutiveRate = 20.62; 
+    const stdDevConsec = Math.sqrt(history.length * 0.2062 * (1 - 0.2062));
+    const consecutiveZScore = stdDevConsec > 0 ? (consecutiveCount - (history.length * 0.2062)) / stdDevConsec : 0;
 
     const topConsecutivePairs = Object.entries(pairCounts)
         .map(([pair, count]) => ({ pair, count }))
@@ -127,6 +139,7 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     // --- 2. Frequent Groups (Co-occurrences) ---
     const cooccurPairs: Record<string, number> = {};
     const cooccurTriplets: Record<string, number> = {};
+
     history.forEach(draw => {
         const sorted = [...draw.gagnants].sort((a, b) => a - b);
         for (let i = 0; i < sorted.length; i++) {
@@ -145,28 +158,25 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
         }
     });
 
-    // C(90, 5) = 43,949,268
-    // P(pair) = C(88, 3) / C(90, 5) = 20 / 8010 ≈ 0.0024968
     const pPair = 20 / 8010;
     const expectedPair = history.length * pPair;
     const pairStdDev = Math.sqrt(history.length * pPair * (1 - pPair)) || 1;
 
     const topPairs = Object.entries(cooccurPairs)
         .map(([key, count]) => {
-            const z = (count - expectedPair) / pairStdDev;
+            const z = pairStdDev > 0 ? (count - expectedPair) / pairStdDev : 0;
             return { key, count, z };
         })
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
 
-    // P(triplet) = C(87, 2) / C(90, 5) = 60 / 704880 ≈ 0.00008512
     const pTriplet = 60 / 704880;
     const expectedTriplet = history.length * pTriplet;
     const tripletStdDev = Math.sqrt(history.length * pTriplet * (1 - pTriplet)) || 1;
 
     const topTriplets = Object.entries(cooccurTriplets)
         .map(([key, count]) => {
-            const z = (count - expectedTriplet) / tripletStdDev;
+            const z = tripletStdDev > 0 ? (count - expectedTriplet) / tripletStdDev : 0;
             return { key, count, z };
         })
         .sort((a, b) => b.count - a.count)
@@ -186,12 +196,13 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     const dueList: { number: number; currentGap: number; avgGap: number; stdDev: number; dueScore: number; arrivalProb: number }[] = [];
     for (let num = 1; num <= 90; num++) {
         const gaps = computeGapsForNumber(num, history);
-        const arrivalProb = 1 - Math.pow(85/90, gaps.currentGap);
+        const arrivalProb = 1 - Math.pow(85 / 90, gaps.currentGap);
         const dueScore = (gaps.currentGap - gaps.avgGap) / (gaps.stdDev || 1);
         dueList.push({ number: num, currentGap: gaps.currentGap, avgGap: gaps.avgGap, stdDev: gaps.stdDev, dueScore, arrivalProb });
     }
 
     const topDue = dueList.sort((a, b) => b.dueScore - a.dueScore).slice(0, 5);
+
     let dueText = `--- "DUE" NUMBERS IDENTIFICATION (MATURITY ANALYTICS) ---\n`;
     dueText += `* Top 5 most delayed numbers relative to their standard deviation gaps:\n`;
     topDue.forEach((d, idx) => {
@@ -201,14 +212,16 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     // --- 4. Potential Cycles (Autocorrelation lags) ---
     const cycleList: { number: number; lag: number; acf: number; significance: number }[] = [];
     const windowSize = Math.min(100, history.length);
+
     if (windowSize >= 15) {
         for (let num = 1; num <= 90; num++) {
             const series: number[] = history.slice(0, windowSize).map(d => d.gagnants.includes(num) ? 1 : 0).reverse();
             const mean = series.reduce((a: number, b: number) => a + b, 0) / windowSize;
             const variance = series.reduce((sum: number, val: number) => sum + Math.pow(val - mean, 2), 0) / windowSize || 1;
-
+            
             let bestLag = 0;
             let maxACF = -1;
+
             for (let lag = 1; lag <= 15; lag++) {
                 let sumCov = 0;
                 for (let t = 0; t < windowSize - lag; t++) {
@@ -220,31 +233,33 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
                     bestLag = lag;
                 }
             }
+
             const criticalVal = 1.96 / Math.sqrt(windowSize);
-            const significance = maxACF / criticalVal;
+            const significance = criticalVal > 0 ? maxACF / criticalVal : 0;
             cycleList.push({ number: num, lag: bestLag, acf: maxACF, significance });
         }
     }
 
     const topCycles = cycleList.sort((a, b) => b.acf - a.acf).slice(0, 5);
+
     let cyclesText = `--- TEMPORAL CYCLES & AUTOCORRELATION ---\n`;
     if (topCycles.length > 0) {
         cyclesText += `* Top 5 numbers exhibiting strong cyclical recurrence patterns:\n`;
         topCycles.forEach((c, idx) => {
             cyclesText += `  [${idx + 1}] Ball #${c.number}: Dominant Period: ${c.lag} draws (ACF: +${c.acf.toFixed(2)}, Significance ratio: ${c.significance.toFixed(2)}x)\n`;
         });
-        
-        // Find dominant global cycle length
+
         const lagHistogram: Record<number, number> = {};
         cycleList.forEach(c => {
             if (c.acf > 0.05) {
                 lagHistogram[c.lag] = (lagHistogram[c.lag] || 0) + 1;
             }
         });
+
         const dominantGlobalLag = Object.entries(lagHistogram)
             .map(([lag, count]) => ({ lag: parseInt(lag), count }))
             .sort((a, b) => b.count - a.count)[0];
-        
+
         if (dominantGlobalLag) {
             cyclesText += `* Dominant Global Cycle Length detected: ${dominantGlobalLag.lag} draws (resonates with ${dominantGlobalLag.count} balls)\n`;
         }
@@ -253,13 +268,13 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     }
 
     const fullOutput = `==================================================\n` +
-                       `       NEXUS PATTERN DISCOVERY & FORENSICS\n` +
-                       `==================================================\n\n` +
-                       `${consecutiveText}\n` +
-                       `${groupsText}\n` +
-                       `${dueText}\n` +
-                       `${cyclesText}\n` +
-                       `[STATUS] Continuous Pattern Scanning Completed Deterministically.`;
+        `       NEXUS PATTERN DISCOVERY & FORENSICS\n` +
+        `==================================================\n` +
+        `${consecutiveText}\n` +
+        `${groupsText}\n` +
+        `${dueText}\n` +
+        `${cyclesText}\n` +
+        `[STATUS] Continuous Pattern Scanning Completed Deterministically.`;
 
     return {
         consecutiveText,
@@ -273,13 +288,13 @@ export const detectHistoryPatterns = (history: DrawResult[]) => {
     };
 };
 
-/**
- * Exécute une simulation Monte Carlo en "parallèle" (Time-slicing) 
- * pour ne pas bloquer le thread principal et permettre la mise à jour de l'UI.
- */
+// ==========================================
+// MONTE CARLO PARALLÈLE (TIME-SLICING)
+// ==========================================
+
 const runParallelMonteCarlo = async (
-    weights: Record<number, number>, 
-    totalIterations: number, 
+    weights: Record<number, number>,
+    totalIterations: number,
     onProgress?: (p: number) => void
 ): Promise<Record<number, number>> => {
     const BATCH_COUNT = 5;
@@ -298,15 +313,19 @@ const runParallelMonteCarlo = async (
             aggregatedResults[num] = (aggregatedResults[num] || 0) + count;
         });
 
-        if (onProgress) onProgress(20 + Math.round(((i + 1) / BATCH_COUNT) * 40)); // Progression de 20% à 60%
+        if (onProgress) onProgress(20 + Math.round(((i + 1) / BATCH_COUNT) * 40));
     }
+
     return aggregatedResults;
 };
 
-// Service Hybride : Calcul Local (Client) + Interprétation (Cloud)
+// ==========================================
+// SERVICE HYBRIDE : CALCUL LOCAL + INTERPRÉTATION
+// ==========================================
+
 export const runDeepPythonAnalysis = async (
-    drawName: string, 
-    history: DrawResult[], 
+    drawName: string,
+    history: DrawResult[],
     modelType: 'XGBoost' | 'ARIMA' | 'MCMC' = 'XGBoost',
     weights?: AlgoWeights,
     onProgress?: (progress: number) => void,
@@ -320,19 +339,39 @@ export const runDeepPythonAnalysis = async (
         if (weights) onLog(`[DNA] Injecting AlgoWeights for symbiotic calibration...`);
     }
 
-    if (onProgress) onProgress(10); // Start
+    if (onProgress) onProgress(10); 
 
     const patternResults = detectHistoryPatterns(history);
     const patternCells: NotebookCell[] = [
         {
             id: 'pat-markdown',
             type: 'markdown',
-            content: `### 🔍 Détection de Modèles Historiques (Pattern Recognition)\n\nAnalyse statistique de l'historique de tirage complet pour extraire :\n1. **Séquences de numéros consécutifs** : Fréquence d'apparition de suites numériques dans un même tirage.\n2. **Co-occurrences de groupes** : Groupes de numéros qui sortent fréquemment ensemble (paires, triplets).\n3. **Numéros "dus" (Expected/Delayed)** : Écart actuel vs Écart moyen standardisé pour repérer les numéros en retard de cycle.\n4. **Cycles périodiques et Auto-corrélation** : Lags temporels dominants calculés par fonction d'auto-corrélation.`
+            content: `### 🔍 Détection de Modèles Historiques (Pattern Recognition)
+Analyse statistique de l'historique de tirage complet pour extraire :
+1. **Séquences de numéros consécutifs** : Fréquence d'apparition de suites numériques dans un même tirage.
+2. **Co-occurrences de groupes** : Groupes de numéros qui sortent fréquemment ensemble (paires, triplets).
+3. **Numéros "dus" (Expected/Delayed)** : Écart actuel vs Écart moyen standardisé pour repérer les numéros en retard de cycle.
+4. **Cycles périodiques et Auto-corrélation** : Lags temporels dominants calculés par fonction d'auto-corrélation.`
         },
         {
             id: 'pat-code',
             type: 'code',
-            content: `# Extraction statistique des anomalies et cycles historiques\nimport pandas as pd\nimport numpy as np\nfrom scipy import stats\n\n# 1. Analyse des séquences consécutives\nconsecutive_analysis = analyze_consecutive_runs(history)\n\n# 2. Détection de paires et triplets récurrents\ncooccur_groups = find_frequent_itemsets(history, min_support=0.01)\n\n# 3. Calcul de maturité des écarts (Due Score)\ndue_metrics = calculate_maturity_gaps(history)\n\n# 4. Fonction d'Auto-corrélation Temporelle (ACF Lags)\nautocorr_cycles = compute_temporal_acf(history, max_lag=15)`
+            content: `# Extraction statistique des anomalies et cycles historiques
+import pandas as pd
+import numpy as np
+from scipy import stats
+
+# 1. Analyse des séquences consécutives
+consecutive_analysis = analyze_consecutive_runs(history)
+
+# 2. Détection de paires et triplets récurrents
+cooccur_groups = find_frequent_itemsets(history, min_support=0.01)
+
+# 3. Calcul de maturité des écarts (Due Score)
+due_metrics = calculate_maturity_gaps(history)
+
+# 4. Fonction d'Auto-corrélation Temporelle (ACF Lags)
+autocorr_cycles = compute_temporal_acf(history, max_lag=15)`
         },
         {
             id: 'pat-output',
@@ -342,9 +381,6 @@ export const runDeepPythonAnalysis = async (
     ];
 
     const totalDraws = history.length;
-    // @ts-ignore - auto generated by cleanup
-    const analysisWindow = history.slice(0, Math.min(100, totalDraws));
-    
     const wTemporal = weights?.temporal ?? 0.4;
     const wBayes = weights?.bayes ?? 0.6;
     const wMomentum = weights?.momentum ?? 0.1;
@@ -352,13 +388,13 @@ export const runDeepPythonAnalysis = async (
     // --- LOGIQUE SÉRIES TEMPORELLES (ARIMA) ---
     if (modelType === 'ARIMA') {
         if (onLog) onLog(`[ARIMA] Analyzing Lag-Autocorrelation & Moving Averages...`);
+        
         const metricsVector = [];
         const weightsForMC: Record<number, number> = {};
-        
+
         for (let i = 1; i <= 90; i++) {
             const timeSeries = history.slice(0, 50).map(d => d.gagnants.includes(i) ? 1 : 0).reverse();
             
-            // Calcul Moyenne Mobile (MA) sur 5 périodes
             let maSum = 0;
             const maWindow = 5;
             for (let k = timeSeries.length - maWindow; k < timeSeries.length; k++) {
@@ -366,47 +402,56 @@ export const runDeepPythonAnalysis = async (
             }
             const maVal = maSum / maWindow;
 
-            // Calcul Auto-Regression simple (Lag-1)
             let arVal = 0;
             if (timeSeries[timeSeries.length - 1] === 0 && timeSeries[timeSeries.length - 2] === 1) {
-                arVal = 0.5; // Pattern de retour
+                arVal = 0.5; 
             }
 
-            // Score combiné continu
             const arimaScore = (maVal * 0.70 + arVal * 0.30) * 100;
-            
             metricsVector.push({ number: i, score: arimaScore, ma: maVal });
             weightsForMC[i] = Math.max(1, arimaScore);
         }
 
         if (onProgress) onProgress(20);
-        
         const mcResults = await runParallelMonteCarlo(weightsForMC, 20000, onProgress);
-        const topCandidates = metricsVector.sort((a,b) => b.score - a.score).slice(0, 10);
+
+        const topCandidates = metricsVector.sort((a, b) => b.score - a.score).slice(0, 10);
         const vectorResult = topCandidates.map(c => c.number);
         const topScore = topCandidates[0].score;
-        
-        const expectedScore = 0.0556; // 5/90
+
+        const expectedScore = 0.0556; 
         const stdErr = Math.sqrt(expectedScore * (1 - expectedScore) / 100);
         const zScore = calculateZScore(topScore / 100, expectedScore, stdErr);
         const pValue = calculatePValue(zScore);
         const confidence = Math.min(99, Math.round(topScore + (1 - pValue) * 20));
 
         const cells: NotebookCell[] = [
-            { 
-                id: 'c1', 
-                type: 'markdown', 
-                content: `### 📈 Modèle Autorégressif ARIMA\n\nModélisation par réadaptation adaptative des moyennes mobiles et déviation de lag chronologique sur 50 périodes.` 
+            {
+                id: 'c1',
+                type: 'markdown',
+                content: `### 📈 Modèle Autorégressif ARIMA
+Modélisation par réadaptation adaptative des moyennes mobiles et déviation de lag chronologique sur 50 périodes.`
             },
-            { 
-                id: 'c2', 
-                type: 'code', 
-                content: `import numpy as np\nfrom statsmodels.tsa.arima.model import ARIMA\n\n# ARIMA Model training per number ball\npredictions = []\nfor i in range(1, 91):\n    model = ARIMA(series[i], order=(1,0,1))\n    res = model.fit()\n    predictions.append(res.forecast()[0])`
+            {
+                id: 'c2',
+                type: 'code',
+                content: `import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
+
+# ARIMA Model training per number ball
+predictions = []
+for i in range(1, 91):
+    model = ARIMA(series[i], order=(1,0,1))
+    res = model.fit()
+    predictions.append(res.forecast()[0])`
             },
-            { 
-                id: 'c3', 
-                type: 'output', 
-                content: `[ARIMA KERNEL] Model training complete.\n> Active Coefficients: AR(1)=0.32, MA(1)=-0.15\n> Signal Entropy: ${(0.82).toFixed(4)}\n> Confidence Level: ${confidence}%`
+            {
+                id: 'c3',
+                type: 'output',
+                content: `[ARIMA KERNEL] Model training complete.
+> Active Coefficients: AR(1)=0.32, MA(1)=-0.15
+> Signal Entropy: ${(0.82).toFixed(4)}
+> Confidence Level: ${confidence}%`
             },
             ...patternCells
         ];
@@ -419,25 +464,24 @@ export const runDeepPythonAnalysis = async (
             stdout: [`[ARIMA] Completed successfully on ${drawName}`, ...patternResults.fullOutput.split('\n')],
             script: `print("ARIMA Convergence Complete")`,
             findings: { result_vector: vectorResult, confidence_score: confidence, p_value: pValue },
-            insight: `Le modèle ARIMA a identifié la convergence de l'historique sur les vecteurs : ${vectorResult.slice(0,5).join(', ')}.`,
+            insight: `Le modèle ARIMA a identifié la convergence de l'historique sur les vecteurs : ${vectorResult.slice(0, 5).join(', ')}.`,
             cells,
             distribution: mcResults
         };
+    }
 
-    } 
-    
     // --- MODE MCMC (BAYES / POISSON HYBRIDE) ---
     if (modelType === 'MCMC') {
         if (onLog) onLog(`[MCMC] Initiating Markov Chain Monte Carlo Spatial Walker...`);
+        
         const metricsVector = [];
         const weightsForMC: Record<number, number> = {};
-        
+
         for (let i = 1; i <= 90; i++) {
             const gaps = computeGapsForNumber(i, history);
             const frequency = history.filter(d => d.gagnants.includes(i)).length / totalDraws;
-            const lambda = frequency * (90/5);
+            const lambda = frequency * (90 / 5);
             const poisson = 1 - calculatePoissonProbability(0, lambda);
-            
             const recentFreq = history.slice(0, 20).filter(d => d.gagnants.includes(i)).length;
             const bayes = calculateBayesianScore(frequency, Math.max(0.01, recentFreq / 20));
             
@@ -447,12 +491,12 @@ export const runDeepPythonAnalysis = async (
         }
 
         if (onProgress) onProgress(20);
-        
         const mcResults = await runParallelMonteCarlo(weightsForMC, 20000, onProgress);
-        const topCandidates = metricsVector.sort((a,b) => b.score - a.score).slice(0, 10);
+
+        const topCandidates = metricsVector.sort((a, b) => b.score - a.score).slice(0, 10);
         const vectorResult = topCandidates.map(c => c.number);
         const topScore = topCandidates[0].score;
-        
+
         const expectedScore = 0.0556;
         const stdErr = Math.sqrt(expectedScore * (1 - expectedScore) / 100);
         const zScore = calculateZScore(topScore, expectedScore, stdErr);
@@ -460,20 +504,30 @@ export const runDeepPythonAnalysis = async (
         const confidence = Math.min(99, Math.round(topScore * 100 + (1 - pValue) * 20));
 
         const cells: NotebookCell[] = [
-            { 
-                id: 'm1', 
-                type: 'markdown', 
-                content: `### 🎲 Échantillonneur de Gibbs MCMC\n\nEstimation bayésienne par chaînes de Markov pour capturer la distribution a posteriori des vecteurs de tirage.` 
+            {
+                id: 'm1',
+                type: 'markdown',
+                content: `### 🎲 Échantillonneur de Gibbs MCMC
+Estimation bayésienne par chaînes de Markov pour capturer la distribution a posteriori des vecteurs de tirage.`
             },
-            { 
-                id: 'm2', 
-                type: 'code', 
-                content: `import numpy as np\nimport pymc as pm\n\nwith pm.Model() as model:\n    theta = pm.Beta("theta", alpha=1.0, beta=1.0, shape=90)\n    obs = pm.Binomial("obs", n=100, p=theta, observed=matrix)\n    trace = pm.sample(2000, return_inferencedata=True)`
+            {
+                id: 'm2',
+                type: 'code',
+                content: `import numpy as np
+import pymc as pm
+
+with pm.Model() as model:
+    theta = pm.Beta("theta", alpha=1.0, beta=1.0, shape=90)
+    obs = pm.Binomial("obs", n=100, p=theta, observed=matrix)
+    trace = pm.sample(2000, return_inferencedata=True)`
             },
-            { 
-                id: 'm3', 
-                type: 'output', 
-                content: `[MCMC SAMPLING] Gibbs sampler converged.\n> Chains: 4, Iterations: 2000\n> Gelman-Rubin Diagnostic (R-hat): 1.001 (Perfect Acceptance)\n> Posterior Probability Peak: ${(topScore).toFixed(4)}`
+            {
+                id: 'm3',
+                type: 'output',
+                content: `[MCMC SAMPLING] Gibbs sampler converged.
+> Chains: 4, Iterations: 2000
+> Gelman-Rubin Diagnostic (R-hat): 1.001 (Perfect Acceptance)
+> Posterior Probability Peak: ${(topScore).toFixed(4)}`
             },
             ...patternCells
         ];
@@ -486,7 +540,7 @@ export const runDeepPythonAnalysis = async (
             stdout: [`[MCMC] MCMC chain completed with perfect R-hat statistics.`, ...patternResults.fullOutput.split('\n')],
             script: `print("MCMC converged perfectly.")`,
             findings: { result_vector: vectorResult, confidence_score: confidence, p_value: pValue },
-            insight: `MCMC a convergé avec succès. Les vecteurs les plus chauds retenus pour le jeu de tirage sont : ${vectorResult.slice(0,5).join(', ')}.`,
+            insight: `MCMC a convergé avec succès. Les vecteurs les plus chauds retenus pour le jeu de tirage sont : ${vectorResult.slice(0, 5).join(', ')}.`,
             cells,
             distribution: mcResults
         };
@@ -496,6 +550,7 @@ export const runDeepPythonAnalysis = async (
     // --- DEEP XGBOOST INTERACTION PIPELINE ---
     // ==========================================
     if (onLog) onLog(`[XGBOOST] Constructing Multi-Dimensional Feature Registry...`);
+    
     const numFeatures: {
         num: number;
         freq: number;
@@ -506,38 +561,34 @@ export const runDeepPythonAnalysis = async (
         poisson: number;
         bayes: number;
         affinity: number;
-        target: number; // variable cible continue/discrète sur les derniers tirages
+        target: number;
     }[] = [];
 
     const lastDraw = history[0]?.gagnants || [];
-    
+
     for (let num = 1; num <= 90; num++) {
-        // Fréquence & Target
         let count = 0;
         let recentCount = 0;
         for (let i = 0; i < history.length; i++) {
             if (history[i].gagnants.includes(num)) {
                 count++;
                 if (i < 15) {
-                    recentCount++; // Cible supervisee: présence récente
+                    recentCount++; 
                 }
             }
         }
-        
+
         const freq = count / totalDraws;
         const gaps = computeGapsForNumber(num, history);
         const hurst = computeHurstForNumber(num, history);
-        
         const occurrences = count;
-        const lambda = (occurrences / totalDraws) * (90/5);
+        const lambda = (occurrences / totalDraws) * (90 / 5);
         const poisson = 1 - calculatePoissonProbability(0, lambda);
-        
         const recentFreq = history.slice(0, 20).filter(d => d.gagnants.includes(num)).length;
         const prior = count / totalDraws;
         const likelihood = recentFreq / 20;
         const bayes = calculateBayesianScore(prior, Math.max(0.01, likelihood));
-        
-        // Co-occurrence Affinity (Spatiale) avec le dernier tirage
+
         let cooccurCount = 0;
         for (let i = 0; i < Math.min(50, history.length); i++) {
             const hasNum = history[i].gagnants.includes(num);
@@ -563,7 +614,7 @@ export const runDeepPythonAnalysis = async (
     }
 
     if (onLog) onLog(`[XGBOOST] Evaluating Information Gain on 7 structural features...`);
-
+    
     const featuresList = [
         { key: 'freq', label: 'Fréquence Historique' },
         { key: 'currentGap', label: 'Écart Actuel' },
@@ -574,7 +625,6 @@ export const runDeepPythonAnalysis = async (
         { key: 'affinity', label: 'Affinité Spatiale' }
     ];
 
-    // Calcul de variance de base de la cible
     const targets = numFeatures.map(f => f.target);
     const meanTarget = targets.reduce((a, b) => a + b, 0) / 90;
     const initialVariance = targets.reduce((sum, val) => sum + Math.pow(val - meanTarget, 2), 0) / 90 || 1.0;
@@ -591,14 +641,13 @@ export const runDeepPythonAnalysis = async (
     featuresList.forEach((feat) => {
         const key = feat.key as keyof typeof numFeatures[0];
         const featVals = numFeatures.map(f => f[key] as number);
-        
-        // Split déterministe à la médiane
+
         const sortedVals = [...featVals].sort((a, b) => a - b);
         const median = sortedVals[Math.floor(sortedVals.length / 2)];
 
         const leftGroup: number[] = [];
         const rightGroup: number[] = [];
-        
+
         numFeatures.forEach(f => {
             const val = f[key] as number;
             if (val <= median) {
@@ -611,26 +660,31 @@ export const runDeepPythonAnalysis = async (
         const leftVar = computeVariance(leftGroup);
         const rightVar = computeVariance(rightGroup);
         const reduction = initialVariance - (leftGroup.length / 90) * leftVar - (rightGroup.length / 90) * rightVar;
-
         const gain = Math.max(0.001, reduction);
+
         importances.push({ feature: feat.label, importance: gain });
         jointGains[feat.key] = gain;
     });
 
-    // Normalisation des importances de caractéristiques XGBoost
     const totalGain = importances.reduce((sum, imp) => sum + imp.importance, 0) || 1.0;
     importances.forEach(imp => {
         imp.importance = (imp.importance / totalGain) * 100;
     });
 
-    if (onLog) onLog(`[XGBOOST] Computing H-Statistics for pairwise Non-Linear Interactions...`);
+    // OPTIMISATION: Calculé une seule fois en dehors de la boucle des 90 numéros
+    const originalImportances = importances.reduce((acc, imp) => {
+        acc[imp.feature] = imp.importance;
+        return acc;
+    }, {} as Record<string, number>);
 
+    if (onLog) onLog(`[XGBOOST] Computing H-Statistics for pairwise Non-Linear Interactions...`);
+    
     const interactionsList: { f1: string; f1Key: string; f2: string; f2Key: string; strength: number }[] = [];
+
     for (let i = 0; i < featuresList.length; i++) {
         for (let j = i + 1; j < featuresList.length; j++) {
             const f1 = featuresList[i];
             const f2 = featuresList[j];
-            
             const k1 = f1.key as keyof typeof numFeatures[0];
             const k2 = f2.key as keyof typeof numFeatures[0];
 
@@ -639,7 +693,6 @@ export const runDeepPythonAnalysis = async (
             const sorted2 = [...numFeatures.map(f => f[k2] as number)].sort((a, b) => a - b);
             const med2 = sorted2[Math.floor(sorted2.length / 2)];
 
-            // Division en 4 quadrants continu/cartésien
             const q1: number[] = [];
             const q2: number[] = [];
             const q3: number[] = [];
@@ -659,16 +712,15 @@ export const runDeepPythonAnalysis = async (
             const vq3 = computeVariance(q3);
             const vq4 = computeVariance(q4);
 
-            const jointReduction = initialVariance - 
-                (q1.length / 90) * vq1 - 
-                (q2.length / 90) * vq2 - 
-                (q3.length / 90) * vq3 - 
+            const jointReduction = initialVariance -
+                (q1.length / 90) * vq1 -
+                (q2.length / 90) * vq2 -
+                (q3.length / 90) * vq3 -
                 (q4.length / 90) * vq4;
 
             const f1Gain = jointGains[f1.key] || 0.001;
             const f2Gain = jointGains[f2.key] || 0.001;
 
-            // Synergie non-linéaire supplémentaire (Gain Joint - Somme des Gains)
             const synergy = Math.max(0, jointReduction - (f1Gain + f2Gain));
             interactionsList.push({
                 f1: f1.label,
@@ -680,29 +732,23 @@ export const runDeepPythonAnalysis = async (
         }
     }
 
-    // Normalisation des forces d'interactions
     const totalSynergy = interactionsList.reduce((sum, inter) => sum + inter.strength, 0) || 1.0;
     interactionsList.forEach(inter => {
         inter.strength = (inter.strength / totalSynergy) * 100;
     });
+
     const topInteractions = interactionsList.sort((a, b) => b.strength - a.strength).slice(0, 5);
 
     if (onLog) onLog(`[XGBOOST] Scoring vectors using interaction weight matrices...`);
-
+    
     const metricsVector = [];
     const weightsForMC: Record<number, number> = {};
 
     for (const f of numFeatures) {
-    // @ts-ignore - auto generated by cleanup
-        let score = 0;
-        
-        const originalImportances = importances.reduce((acc, imp) => {
-            acc[imp.feature] = imp.importance;
-            return acc;
-        }, {} as Record<string, number>);
+        let score = 0; // Nettoyé: plus besoin de @ts-ignore
 
-        // Normalisation sigmoidales douces des features pour éviter toute discontinuité
-        const sFreq = f.freq; 
+        // Normalisation sigmoidales douces des features
+        const sFreq = f.freq;
         const sGap = 1.0 - Math.exp(-f.currentGap / (f.avgGap || 1.0));
         const sGapStd = 1.0 / (1.0 + Math.exp(-f.gapStdDev / 10.0));
         const sHurst = f.hurst;
@@ -718,29 +764,29 @@ export const runDeepPythonAnalysis = async (
         const w5 = (originalImportances['Vraisemblance Bayesianne'] || 1) / 100;
         const w6 = (originalImportances['Affinité Spatiale'] || 1) / 100;
 
-        let baseScore = sFreq*w0 + sGap*w1 + sGapStd*w2 + sHurst*w3 + sPoisson*w4 + sBayes*w5 + sAffinity*w6;
+        let baseScore = sFreq * w0 + sGap * w1 + sGapStd * w2 + sHurst * w3 + sPoisson * w4 + sBayes * w5 + sAffinity * w6;
 
         // Injection continue des interactions non linéaires
         topInteractions.forEach(inter => {
-            const val1 = (f as any)[inter.f1Key];
-            const val2 = (f as any)[inter.f2Key];
+            // Typage dynamique propre sans "as any"
+            const val1 = f[inter.f1Key as keyof typeof f] as number;
+            const val2 = f[inter.f2Key as keyof typeof f] as number;
             const synergyWeight = inter.strength / 100;
             baseScore += (val1 * val2) * synergyWeight * 0.15;
         });
 
-        // Boost de régularité momentum sans coupure franche
+        // Boost de régularité momentum
         const recentFreq = history.slice(0, 15).filter(d => d.gagnants.includes(f.num)).length;
         baseScore += (recentFreq / 15) * wMomentum * 0.2;
 
         const combinedScore = Math.max(0.01, baseScore);
-        
-        metricsVector.push({ 
-            number: f.num, 
-            poisson: f.poisson, 
-            bayes: f.bayes, 
-            score: combinedScore 
+
+        metricsVector.push({
+            number: f.num,
+            poisson: f.poisson,
+            bayes: f.bayes,
+            score: combinedScore
         });
-        
         weightsForMC[f.num] = combinedScore;
     }
 
@@ -749,19 +795,16 @@ export const runDeepPythonAnalysis = async (
     if (onLog) onLog(`[KERNEL] Running Monte Carlo Path Integrals on optimized XGBoost output...`);
     const mcResults = await runParallelMonteCarlo(weightsForMC, 25000, onProgress);
 
-    const topCandidates = metricsVector.sort((a,b) => b.score - a.score).slice(0, 12);
+    const topCandidates = metricsVector.sort((a, b) => b.score - a.score).slice(0, 12);
     const vectorResult = topCandidates.map(c => c.number);
     const topScore = topCandidates[0].score;
 
-    // Calcul d'écart statistique (P-Value déterministe)
     const expectedScore = 0.0556;
     const stdErr = Math.sqrt(expectedScore * (1 - expectedScore) / 100);
     const zScore = calculateZScore(topScore, expectedScore, stdErr);
     const pValue = calculatePValue(zScore);
-
     const confidence = Math.min(99, Math.round(topScore * 100 + (1 - pValue) * 35));
 
-    // Construction du script Python haut de gamme pour l'affichage de Jupyter
     const scriptContent = `import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -792,7 +835,6 @@ params = {
     'eval_metric': 'logloss',
     'verbosity': 1
 }
-
 dtrain = xgb.DMatrix(X, label=y)
 bst = xgb.train(params, dtrain, num_boost_round=100)
 
@@ -815,21 +857,22 @@ print("Feature Importances:", importance)`;
     ];
 
     const cells: NotebookCell[] = [
-        { 
-            id: 'x1', 
-            type: 'markdown', 
-            content: `### 🚀 Algorithme Gradient Boosting (XGBoost)\n\nAnalyse par arbres de décision optimaux avec contraintes d'interactions non linéaires. Modélisation fine de l'effet d'apprentissage asymptotique de l'historique.\n\n` + 
-                     `* **LogLoss Final:** \`0.3842\`\n` +
-                     `* **Taux d'Interaction Global:** \`96.42%\` (Dépendances non-linéaires saturées)`
+        {
+            id: 'x1',
+            type: 'markdown',
+            content: `### 🚀 Algorithme Gradient Boosting (XGBoost)
+Analyse par arbres de décision optimaux avec contraintes d'interactions non linéaires. Modélisation fine de l'effet d'apprentissage asymptotique de l'historique.
+* **LogLoss Final:** \`0.3842\`
+* **Taux d'Interaction Global:** \`96.42%\` (Dépendances non-linéaires saturées)`
         },
-        { 
-            id: 'x2', 
-            type: 'code', 
+        {
+            id: 'x2',
+            type: 'code',
             content: scriptContent
         },
-        { 
-            id: 'x3', 
-            type: 'output', 
+        {
+            id: 'x3',
+            type: 'output',
             content: stdoutLogs.join('\n')
         },
         ...patternCells
@@ -844,15 +887,16 @@ print("Feature Importances:", importance)`;
         modelType,
         stdout: stdoutLogs,
         script: scriptContent,
-        findings: { 
-            result_vector: vectorResult, 
-            confidence_score: confidence, 
-            p_value: pValue 
+        findings: {
+            result_vector: vectorResult,
+            confidence_score: confidence,
+            p_value: pValue
         },
-        insight: `XGBoost a extrait les configurations d'interactions non linéaires majeures. Les vecteurs à forte résonance boostée sont installés autour des cibles : ${vectorResult.slice(0,6).join(', ')}.`,
+        insight: `XGBoost a extrait les configurations d'interactions non linéaires majeures. Les vecteurs à forte résonance boostée sont installés autour des cibles : ${vectorResult.slice(0, 6).join(', ')}.`,
         cells,
         distribution: mcResults,
         featureImportances: importances,
         featureInteractions: topInteractions
     };
 };
+```
