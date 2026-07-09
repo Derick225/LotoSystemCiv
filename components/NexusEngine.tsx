@@ -83,14 +83,10 @@ export const NexusEngine: React.FC = () => {
         }
         
         const storeHistory = useNexusStore.getState().history;
-        // On vérifie de façon robuste si on doit mettre à jour le store
-        const needsUpdate = 
-            storeHistory.length !== history.length || 
-            (history.length > 0 && storeHistory.length > 0 && history[0].id !== storeHistory[0].id) ||
-            storeHistory.length === 0 ||
-            useNexusStore.getState().drawName !== (history[0]?.drawName || history[0]?.draw_name);
+        const hasDrawNameMismatch = history.length > 0 && storeHistory.length > 0 && 
+            (history[0].drawName !== storeHistory[0].drawName || history[0].draw_name !== storeHistory[0].draw_name);
 
-        if (needsUpdate) {
+        if (storeHistory.length !== history.length || hasDrawNameMismatch || storeHistory.length === 0) {
             const counts: Record<number, number> = {};
             history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
             const computedStats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);

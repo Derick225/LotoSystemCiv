@@ -298,12 +298,12 @@ export const generateMasterPredictionCore = async (
   const gameRegimeInfo = detectGameRegime(history);
   weights = adjustWeightsForRegime(weights, gameRegimeInfo);
 
-  let hyperparameters: import("./hyperParameterTuner").PredictiveHyperparameters = {
-    hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
+  let hyperparameters = {
+    hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY as number,
     spatialSigma: 1.5,
     gapVelocityWeight: 1.0,
     bayesWindowRatio: 0.1,
-    sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
+    sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE as number,
     lyapunovHorizon: 15
   };
   let hyperTuningLog: string[] = [];
@@ -1090,6 +1090,6 @@ export const generateMasterPrediction = async (
         onProgress,
       );
     },
-    CACHE_TTL.SHORT,
+    CACHE_TTL.LONG,
   );
 };
