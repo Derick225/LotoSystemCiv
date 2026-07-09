@@ -147,7 +147,21 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({ drawName 
                             <h4 className="text-sm font-black uppercase mb-4 tracking-widest">Maintenance Directe</h4>
                             <div className="space-y-2 w-full">
                                 <button 
-                                    onClick={async () => { audioEngine.play('click'); setFixing(true); await checkAndSyncRecentResults(); analyzeIntegrity(); setFixing(false); }}
+                                    onClick={async () => {
+                                        audioEngine.play('click');
+                                        setFixing(true);
+                                        try {
+                                            await checkAndSyncRecentResults();
+                                        } catch (e: any) {
+                                            if (e?.code === 'SYNC_REQUIRES_BACKEND') {
+                                                showToast("Mode démo : aucun backend configuré, synchronisation indisponible.", "info");
+                                            } else {
+                                                showToast("Échec de la synchronisation.", "error");
+                                            }
+                                        }
+                                        analyzeIntegrity();
+                                        setFixing(false);
+                                    }}
                                     disabled={fixing}
                                     className="w-full py-3 bg-white text-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:scale-105 transition-all active:scale-95 disabled:opacity-50"
                                 >

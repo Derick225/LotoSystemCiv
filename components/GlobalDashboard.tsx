@@ -670,9 +670,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                   );
                   audioEngine.play("success");
                 }
-              } catch (e) {
-                localStorage.removeItem(storageKey); // Release lock on failure
-                console.error("Auto-sync failed", e);
+              } catch (e: any) {
+                if (e?.code !== 'SYNC_REQUIRES_BACKEND') {
+                  localStorage.removeItem(storageKey); // Release lock on failure to allow retry
+                  console.error("Auto-sync failed", e);
+                }
+                // SYNC_REQUIRES_BACKEND (mode démo sans backend) : on garde le verrou pour ne pas
+                // retenter inutilement chaque minute, puisque le résultat ne changera pas.
               }
             }
           }
@@ -697,8 +701,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           "success",
         );
         if (count > 0) audioEngine.play("success");
-      } catch (e) {
-        showToast("Sync cloud interrompue.", "error");
+      } catch (e: any) {
+        if (e?.code === 'SYNC_REQUIRES_BACKEND') {
+          showToast("Mode démo : aucun backend configuré, synchronisation indisponible.", "info");
+        } else {
+          showToast("Sync cloud interrompue.", "error");
+        }
         audioEngine.play("error");
       } finally {
         setFullSyncing(false);

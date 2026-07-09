@@ -255,7 +255,14 @@ export class BacktestingFramework {
               s.weights,
               undefined,
               undefined,
-              false, // Skip training = false to allow meta-learning context updating!
+              // CORRECTIF CRITIQUE : true (au lieu de false). Avec skipTraining=false, le pipeline
+              // interne appelait saveAlgoWeights(drawName, ...) à CHAQUE itération du walk-forward,
+              // ce qui écrasait silencieusement les poids d'algorithme RÉELS de production
+              // (IndexedDB + localStorage + Supabase) pour ce tirage, simplement en lançant une
+              // comparaison de stratégies dans l'onglet Simulation. Une simulation/backtest doit
+              // rester strictement en lecture seule, comme le font déjà backtestService.ts et
+              // simulationCore.ts (qui utilisent tous deux skipTraining=true).
+              true,
               s.adversarial || false
             );
             selection = predictRes.suggestedNumbers;
@@ -441,17 +448,15 @@ export class BacktestingFramework {
 
         let winAmount = 0;
         if (roll < p5) {
-          winAmount = bet * 15000;
+          winAmount = bet * 15000; // 5 numéros corrects
         } else if (roll < p5 + p4) {
-          winAmount = bet * 15000; // Rang 4 / 5
+          winAmount = bet * 1500; // 4 numéros corrects
         } else if (roll < p5 + p4 + p3) {
-          winAmount = bet * 1500;
+          winAmount = bet * 100; // 3 numéros corrects
         } else if (roll < p5 + p4 + p3 + p2) {
-          winAmount = bet * 100;
-        } else if (roll < 0.22) { // 1 hit has no cash payout but tracks form
-          winAmount = 0;
-        } else if (roll < 0.22 + 0.02) { // Ring 2-hits
-          winAmount = bet * 15;
+          winAmount = bet * 15; // 2 numéros corrects
+        } else {
+          winAmount = 0; // 0 ou 1 numéro correct : aucun gain
         }
 
         balance += (winAmount - bet);

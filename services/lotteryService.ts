@@ -130,15 +130,6 @@ const getDrawTimestamp = (dateStr: string): number => {
 };
 
 const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] => {
-  if (drawName === 'ALL') {
-    const activeDraws = Array.from(new Set(Object.values(DRAW_SCHEDULE).flatMap(day => Object.values(day))));
-    let allResults: DrawResult[] = [];
-    for (const name of activeDraws) {
-      allResults = allResults.concat(generateDeterministicFallbackHistory(name));
-    }
-    return allResults.sort((a, b) => getDrawTimestamp(b.date) - getDrawTimestamp(a.date));
-  }
-
   let hash = 0;
   for (let i = 0; i < drawName.length; i++) {
     hash = (hash << 5) - hash + drawName.charCodeAt(i);
@@ -192,109 +183,28 @@ const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] =>
 
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   if (!isSupabaseConfigured()) {
-    // Mode local/offline : On simule l'arrivée de nouveaux tirages jusqu'à aujourd'hui
-    try {
-      const activeDraws = drawName && drawName !== 'ALL'
-        ? [drawName]
-        : Array.from(new Set(Object.values(DRAW_SCHEDULE).flatMap(day => Object.values(day))));
-
-      let totalAdded = 0;
-
-      for (const dName of activeDraws) {
-        const cacheKey = globalCache.generateKey('history', dName);
-        let history = await globalCache.get<DrawResult[]>(cacheKey, dName);
-        if (!history || history.length === 0) {
-          history = generateDeterministicFallbackHistory(dName);
-        }
-
-        let maxDateMs = 0;
-        for (const item of history) {
-          const timestamp = getDrawTimestamp(item.date);
-          if (timestamp > maxDateMs) {
-            maxDateMs = timestamp;
-          }
-        }
-
-        const now = new Date();
-        const todayStartMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-        let addedCount = 0;
-        let currentDateMs = maxDateMs + 24 * 60 * 60 * 1000;
-
-        // LCG déterministe basé sur le nom du tirage et maxDateMs pour la cohésion
-        let hash = 0;
-        for (let i = 0; i < dName.length; i++) {
-          hash = (hash << 5) - hash + dName.charCodeAt(i);
-          hash |= 0;
-        }
-        let seed = Math.abs(hash || 99991) + maxDateMs;
-        const lcg = () => {
-          seed = (seed * 1664525 + 1013904223) >>> 0;
-          return seed / 4294967296;
-        };
-
-        const newItems: DrawResult[] = [];
-
-        while (currentDateMs <= todayStartMs) {
-          const date = new Date(currentDateMs);
-          const dayStr = String(date.getDate()).padStart(2, '0');
-          const monthStr = String(date.getMonth() + 1).padStart(2, '0');
-          const yearStr = date.getFullYear();
-          const formattedDate = `${dayStr}/${monthStr}/${yearStr}`;
-
-          const gagnantsPool = new Set<number>();
-          while (gagnantsPool.size < 5) {
-            const val = Math.floor(lcg() * 90) + 1;
-            gagnantsPool.add(val);
-          }
-          const gagnants = Array.from(gagnantsPool).sort((a, b) => a - b);
-
-          const machinePool = new Set<number>();
-          while (machinePool.size < 5) {
-            const val = Math.floor(lcg() * 90) + 1;
-            if (!gagnantsPool.has(val)) {
-              machinePool.add(val);
-            }
-          }
-          const machine = Array.from(machinePool).sort((a, b) => a - b);
-
-          newItems.push({
-            id: `mock-${dName.replace(/\s+/g, '-')}-sync-${date.getTime()}`,
-            drawName: dName,
-            date: formattedDate,
-            gagnants,
-            machine,
-            version: 1
-          });
-
-          addedCount++;
-          currentDateMs += 24 * 60 * 60 * 1000;
-        }
-
-        if (addedCount > 0) {
-          newItems.sort((a, b) => getDrawTimestamp(b.date) - getDrawTimestamp(a.date));
-          const updatedHistory = [...newItems, ...history];
-          await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, dName);
-          await globalCache.registerNewDraw(dName, updatedHistory.length);
-          totalAdded += addedCount;
-
-          // Déclenchement automatique d'études médico-légales après chaque tirage officiel simulé (Phase 4)
-          for (const item of newItems) {
-            triggerAutomationForNewResults(dName, item.date, item.id, true).catch(err => {
-              console.error("[Autonomous Forensic Trigger] Error:", err);
-            });
-          }
-
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: dName } }));
-          }
-        }
-      }
-      return totalAdded;
-    } catch (e: unknown) {
-      logError(new AppError(getErrorMessage(e) || 'Local sync simulation failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal-local' });
-      return 0;
-    }
+    // CORRECTIF CRITIQUE (contamination de données) : ce bloc générait auparavant de FAUX
+    // tirages via un LCG déterministe, les persistait dans le cache comme s'ils venaient d'être
+    // synchronisés depuis une vraie source officielle, déclenchait une analyse forensique
+    // automatique dessus, PUIS un auto-apprentissage qui ajustait les poids RÉELS de
+    // l'algorithme de prédiction — le tout de façon silencieuse et automatique (via le minuteur
+    // d'auto-sync de GlobalDashboard.tsx), sans qu'aucun utilisateur n'ait rien demandé.
+    //
+    // Une "synchronisation" est par nature un aller chercher de vraies données externes. Sans
+    // backend configuré, il n'y a rien de réel à synchroniser : on le dit clairement plutôt que
+    // d'inventer des résultats. Les données de démonstration (générées par
+    // generateDeterministicFallbackHistory) restent disponibles pour la simple consultation via
+    // fetchHistory, mais ne sont jamais présentées comme un "nouveau tirage synchronisé" et ne
+    // déclenchent jamais d'autopsie forensique ni d'auto-apprentissage.
+    const err = new AppError(
+      "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
+      "Aucune donnée n'est inventée ; configurez Supabase pour synchroniser de vrais résultats.",
+      'SYNC_REQUIRES_BACKEND',
+      'low',
+      { drawName }
+    );
+    logError(err, { source: 'syncDrawExternal-offline' });
+    throw err;
   }
 
   try {
@@ -350,9 +260,6 @@ export const getDailySummary = async (day: string) => {
                       machine: data[0].machine || [],
                       version: data[0].version || 1
                   };
-              } else {
-                  const history = await lotteryService.fetchHistory(name);
-                  if (history.length > 0) lastDraw = history[0];
               }
           } else {
               const history = await lotteryService.fetchHistory(name);

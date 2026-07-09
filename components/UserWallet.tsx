@@ -178,14 +178,23 @@ export const UserWallet: React.FC = () => {
 
     const handleScanLive = async () => {
         audioEngine.play('click');
-        const count = await checkAndSyncRecentResults();
-        if (count > 0) {
-            queryClient.invalidateQueries({ queryKey: ['ticketResults'] });
-            audioEngine.play('success');
-            showToast(`${count} nouveaux tirages.`, "success");
-        } else {
-            audioEngine.play('success');
-            showToast("À jour.", "success");
+        try {
+            const count = await checkAndSyncRecentResults();
+            if (count > 0) {
+                queryClient.invalidateQueries({ queryKey: ['ticketResults'] });
+                audioEngine.play('success');
+                showToast(`${count} nouveaux tirages.`, "success");
+            } else {
+                audioEngine.play('success');
+                showToast("À jour.", "success");
+            }
+        } catch (e: any) {
+            if (e?.code === 'SYNC_REQUIRES_BACKEND') {
+                showToast("Mode démo : aucun backend configuré, synchronisation indisponible.", "info");
+            } else {
+                showToast("Échec de la synchronisation.", "error");
+            }
+            audioEngine.play('error');
         }
     };
 

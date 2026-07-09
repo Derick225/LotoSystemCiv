@@ -118,10 +118,19 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
       if (!currentDrawName) return;
       showToast("Synchronisation API...", "info");
       audioEngine.play('scan');
-      await syncDrawExternal(currentDrawName);
-      await refreshData(currentDrawName, true);
-      showToast("Flux mis à jour.", "success");
-      audioEngine.play('success');
+      try {
+        await syncDrawExternal(currentDrawName);
+        await refreshData(currentDrawName, true);
+        showToast("Flux mis à jour.", "success");
+        audioEngine.play('success');
+      } catch (e: any) {
+        if (e?.code === 'SYNC_REQUIRES_BACKEND') {
+          showToast("Mode démo : aucun backend configuré, synchronisation indisponible.", "info");
+        } else {
+          showToast("Échec de la synchronisation.", "error");
+        }
+        audioEngine.play('error');
+      }
   };
 
   // Assurer l'isolation hermétique et la convergence (TIRAGE ISOLATION RULE)

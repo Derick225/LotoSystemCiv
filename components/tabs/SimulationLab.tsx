@@ -1,17 +1,78 @@
 import { useNexusStore } from "../../store/useNexusStore";
 import React, { useState, useRef } from 'react';
 import * as tf from '@tensorflow/tfjs';
-import { Upload, Play, Square, Activity, Database, Sparkles, Sliders, CheckCircle } from 'lucide-react';
+import { Upload, Play, Square, Activity, Database, Sparkles, Sliders, CheckCircle, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { audioEngine } from '../../utils/audioEngine';
 import { useToast } from '../ui/Toast';
 import { LCG } from '../../utils/mathUtils';
 
+const DOMAIN_SIZE = 90;
+const DRAW_SIZE = 5;
+
+// Tente d'extraire 5 numéros gagnants valides (entiers distincts, 1-90) d'un enregistrement
+// brut importé (CSV ou JSON), quel que soit le nom exact des colonnes utilisées par l'utilisateur.
+const extractDrawFromRecord = (record: any): number[] | null => {
+  if (!record || typeof record !== 'object') return null;
+
+  const toNumberArray = (val: any): number[] | null => {
+    if (Array.isArray(val)) {
+      const nums = val.map(v => Number(v)).filter(n => Number.isFinite(n));
+      return nums.length >= DRAW_SIZE ? nums.slice(0, DRAW_SIZE) : null;
+    }
+    if (typeof val === 'string') {
+      const nums = val.split(/[\s,;\-\|]+/).map(v => Number(v.trim())).filter(n => Number.isFinite(n));
+      return nums.length >= DRAW_SIZE ? nums.slice(0, DRAW_SIZE) : null;
+    }
+    return null;
+  };
+
+  // Stratégie 1 : un champ unique contenant les 5 numéros (array ou chaîne délimitée)
+  const arrayFieldNames = ['gagnants', 'numbers', 'numeros', 'winningnumbers', 'winning_numbers', 'boules'];
+  for (const key of Object.keys(record)) {
+    if (arrayFieldNames.includes(key.toLowerCase())) {
+      const parsed = toNumberArray(record[key]);
+      if (parsed) return parsed;
+    }
+  }
+
+  // Stratégie 2 : 5 champs numériques séparés (n1..n5, num1..num5, boule1..boule5, etc.)
+  const prefixes = ['n', 'num', 'numero', 'boule', 'gagnant', 'b'];
+  for (const prefix of prefixes) {
+    const collected: number[] = [];
+    for (let i = 1; i <= DRAW_SIZE; i++) {
+      const key = Object.keys(record).find(k => k.toLowerCase() === `${prefix}${i}`);
+      if (key === undefined) break;
+      const n = Number(record[key]);
+      if (!Number.isFinite(n)) break;
+      collected.push(n);
+    }
+    if (collected.length === DRAW_SIZE) return collected;
+  }
+
+  // Stratégie 3 (repli) : les 5 premières valeurs numériques trouvées dans l'objet
+  const allNums = Object.values(record).map(v => Number(v)).filter(n => Number.isFinite(n));
+  if (allNums.length >= DRAW_SIZE) return allNums.slice(0, DRAW_SIZE);
+
+  return null;
+};
+
+// Valide qu'un tirage extrait est réellement exploitable : 5 entiers distincts dans [1, 90]
+const isValidDraw = (nums: number[] | null): nums is number[] => {
+  if (!nums || nums.length !== DRAW_SIZE) return false;
+  const unique = new Set(nums.map(n => Math.round(n)));
+  if (unique.size !== DRAW_SIZE) return false;
+  return nums.every(n => Number.isInteger(Math.round(n)) && n >= 1 && n <= DOMAIN_SIZE);
+};
+
 export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
   const [fileData, setFileData] = useState<any[] | null>(null);
+  const [fileDraws, setFileDraws] = useState<{ gagnants: number[] }[] | null>(null);
+  const [fileParseWarning, setFileParseWarning] = useState<string | null>(null);
   const [mlPrediction, setMlPrediction] = useState<number[]>([]);
   const [trainingState, setTrainingState] = useState<'idle' | 'training' | 'finished'>('idle');
+  const [trainingDataSource, setTrainingDataSource] = useState<{ type: 'history' | 'file'; sampleCount: number } | null>(null);
   const history = useNexusStore(state => state.history);
   const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
   const [epochLogs, setEpochLogs] = useState<{ epoch: number, loss: number, val_loss?: number, acc: number, val_acc?: number }[]>([]);
@@ -56,10 +117,33 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
         
         if (data && data.length > 0) {
+          const parsedDraws = data
+            .map(extractDrawFromRecord)
+            .filter(isValidDraw)
+            .map(gagnants => ({ gagnants: gagnants.sort((a, b) => a - b) }));
+
           setFileData(data);
-          showToast(`Données chargées : ${data.length} enregistrements.`, 'success');
-          audioEngine.play('success');
+
+          if (parsedDraws.length < 20) {
+            // Moins de 20 tirages exploitables : pas assez de matière pour un entraînement
+            // significatif. On le dit clairement plutôt que de basculer sur du bruit aléatoire.
+            setFileDraws(null);
+            setFileParseWarning(
+              `${parsedDraws.length} tirage(s) valide(s) détecté(s) sur ${data.length} ligne(s) — ` +
+              `il en faut au moins 20 (5 numéros distincts entre 1 et 90 par ligne). ` +
+              `Vérifiez le format du fichier (colonnes attendues : gagnants/numbers, ou n1..n5, ou boule1..boule5).`
+            );
+            showToast(`Format non exploitable : seulement ${parsedDraws.length} tirage(s) valide(s) détecté(s).`, 'error');
+          } else {
+            setFileDraws(parsedDraws);
+            setFileParseWarning(null);
+            showToast(`Données chargées : ${parsedDraws.length} tirage(s) valide(s) sur ${data.length} ligne(s).`, 'success');
+            audioEngine.play('success');
+          }
         } else {
+          setFileData(null);
+          setFileDraws(null);
+          setFileParseWarning(null);
           showToast(`Format de données non reconnu.`, 'error');
         }
       } catch (err) {
@@ -69,75 +153,90 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
     reader.readAsText(file);
   };
 
-  const prepareData = () => {
-    // Determine feature dimensions based on checkbox selection
-    let featureSize = 0;
-    if (selectedFeatures.winNums) featureSize += 5;
-    if (selectedFeatures.gaps) featureSize += 5;
-    if (selectedFeatures.parity) featureSize += 5;
-    if (featureSize === 0) featureSize = 5; // Fallback to avoid empty layer inputs
+  // Construit des paires (features, labels) à partir d'une séquence de tirages réels
+  // (fichier importé ou historique de l'app), en respectant l'ordre "plus récent en premier"
+  // utilisé partout ailleurs dans l'application (features tirées du tirage i, labels = tirage i+1
+  // -> devenu i, i.e. le tirage suivant chronologiquement).
+  const buildTensorsFromDraws = (draws: { gagnants: number[] }[]) => {
+    const samples = Math.min(draws.length - 1, 500);
+    const xData: number[][] = [];
+    const yData: number[][] = [];
 
-    if (fileData) {
-      const samples = Math.min(fileData.length, 500);
-      const X = tf.randomNormal([samples, featureSize]); 
-      const Y = tf.randomUniform([samples, 5]); 
-      return { X, Y, inputDim: featureSize };
-    } else {
-      if (history.length < 20) {
-         const samples = 100;
-         const X = tf.randomNormal([samples, featureSize]);
-         const Y = tf.randomUniform([samples, 5]);
-         return { X, Y, inputDim: featureSize };
-      }
-      const samples = Math.min(history.length - 1, 500);
-      const xData: number[][] = [];
-      const yData: number[][] = [];
-      
-      for (let i = 0; i < samples; i++) {
-        const currentDraw = history[i + 1];
-        const nextDraw = history[i]; 
-        if (!currentDraw || !nextDraw) continue;
-        
-        const features: number[] = [];
-        // Feature 1: Winning numbers (normalized)
-        if (selectedFeatures.winNums) {
-          features.push(...[...currentDraw.gagnants].map(n => n / 90));
-        }
-        // Feature 2: Differential gap/intervals between balls
-        if (selectedFeatures.gaps) {
-          for (let j = 0; j < 5; j++) {
-            features.push(j < currentDraw.gagnants.length - 1 ? (currentDraw.gagnants[j+1] - currentDraw.gagnants[j]) / 90 : 0);
-          }
-        }
-        // Feature 3: Parity / Odd-Even indicators (0 or 1)
-        if (selectedFeatures.parity) {
-          features.push(...[...currentDraw.gagnants].map(n => (n % 2 === 0 ? 1 : 0)));
-        }
+    for (let i = 0; i < samples; i++) {
+      const currentDraw = draws[i + 1];
+      const nextDraw = draws[i];
+      if (!currentDraw || !nextDraw) continue;
 
-        // If none selected, default win numbers
-        if (features.length === 0) {
-          features.push(...[...currentDraw.gagnants].map(n => n / 90));
-        }
-        
-        const labels = [...nextDraw.gagnants].map(n => n / 90);
-        
-        xData.push(features);
-        yData.push(labels);
+      const features: number[] = [];
+      if (selectedFeatures.winNums) {
+        features.push(...[...currentDraw.gagnants].map(n => n / DOMAIN_SIZE));
       }
-      
-      const X = tf.tensor2d(xData, [xData.length, xData[0].length]);
-      const Y = tf.tensor2d(yData, [yData.length, 5]);
-      return { X, Y, inputDim: xData[0].length };
+      if (selectedFeatures.gaps) {
+        for (let j = 0; j < DRAW_SIZE; j++) {
+          features.push(j < currentDraw.gagnants.length - 1 ? (currentDraw.gagnants[j + 1] - currentDraw.gagnants[j]) / DOMAIN_SIZE : 0);
+        }
+      }
+      if (selectedFeatures.parity) {
+        features.push(...[...currentDraw.gagnants].map(n => (n % 2 === 0 ? 1 : 0)));
+      }
+      if (features.length === 0) {
+        features.push(...[...currentDraw.gagnants].map(n => n / DOMAIN_SIZE));
+      }
+
+      const labels = [...nextDraw.gagnants].map(n => n / DOMAIN_SIZE);
+
+      xData.push(features);
+      yData.push(labels);
     }
+
+    if (xData.length === 0) return null;
+
+    const X = tf.tensor2d(xData, [xData.length, xData[0].length]);
+    const Y = tf.tensor2d(yData, [yData.length, 5]);
+    return { X, Y, inputDim: xData[0].length, sampleCount: xData.length };
+  };
+
+  // Retourne les tenseurs d'entraînement à partir de vraies données uniquement.
+  // Ne génère JAMAIS de données synthétiques : si rien d'exploitable n'est disponible,
+  // retourne null et l'appelant doit refuser l'entraînement plutôt que d'entraîner sur du bruit.
+  const prepareData = (): { X: tf.Tensor2D; Y: tf.Tensor2D; inputDim: number; source: 'history' | 'file'; sampleCount: number } | null => {
+    if (fileDraws && fileDraws.length >= 20) {
+      const built = buildTensorsFromDraws(fileDraws);
+      if (!built) return null;
+      const { X, Y, inputDim, sampleCount } = built;
+      return { X, Y, inputDim, source: 'file', sampleCount };
+    }
+
+    if (history.length >= 20) {
+      const built = buildTensorsFromDraws(history as unknown as { gagnants: number[] }[]);
+      if (!built) return null;
+      const { X, Y, inputDim, sampleCount } = built;
+      return { X, Y, inputDim, source: 'history', sampleCount };
+    }
+
+    return null;
   };
 
   const startTraining = async () => {
     if (trainingState === 'training') return;
     audioEngine.play('click');
+
+    const prepared = prepareData();
+    if (!prepared) {
+      showToast(
+        "Entraînement impossible : aucune donnée réelle exploitable (il faut au moins 20 tirages, " +
+        "via l'historique actif ou un fichier importé valide). Aucune donnée synthétique n'est générée à la place.",
+        'error'
+      );
+      audioEngine.play('error');
+      return;
+    }
+
     setTrainingState('training');
     setEpochLogs([]);
+    setTrainingDataSource({ type: prepared.source, sampleCount: prepared.sampleCount });
 
-    const { X, Y, inputDim } = prepareData();
+    const { X, Y, inputDim } = prepared;
 
     // Parse hidden layers dimensions
     const dims = hiddenLayersConfig.split('x').map(Number);
@@ -175,8 +274,10 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         batchSize: 32,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
-            const fakeAcc = 1.0 - (logs?.mse || 0.5);
-            const fakeValAcc = 1.0 - (logs?.val_mse || 0.5);
+            // Proxy continu dérivé du MSE (pas une "accuracy" de classification au sens strict,
+            // mais un indicateur de qualité d'ajustement borné [0,1] cohérent pour une régression).
+            const mseProxyAccuracy = 1.0 - (logs?.mse || 0.5);
+            const valMseProxyAccuracy = 1.0 - (logs?.val_mse || 0.5);
             
             // Interactive tick sound per 5 epochs
             if ((epoch + 1) % 5 === 0) {
@@ -187,8 +288,8 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
               epoch: epoch + 1,
               loss: logs?.loss || 0,
               val_loss: logs?.val_loss,
-              acc: Math.max(0, fakeAcc),
-              val_acc: Math.max(0, fakeValAcc)
+              acc: Math.max(0, mseProxyAccuracy),
+              val_acc: Math.max(0, valMseProxyAccuracy)
             }]);
           }
         }
@@ -260,14 +361,43 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const injectWeights = async () => {
     if (epochLogs.length === 0) return;
     audioEngine.play('click');
+
+    // GARDE-FOU : on n'injecte jamais de poids si l'entraînement n'a pas tourné sur de vraies
+    // données (historique réel ou fichier importé validé), et jamais sur un échantillon trop
+    // petit pour être statistiquement significatif. Avant ce correctif, un entraînement sur du
+    // bruit aléatoire (tf.randomNormal/tf.randomUniform) pouvait déclencher jusqu'à +40% sur le
+    // poids réel de production "aiIntuition", utilisé par le moteur de prédiction en direct.
+    if (!trainingDataSource) {
+      showToast("Injection refusée : aucune information sur la source des données d'entraînement.", "error");
+      return;
+    }
+    const MIN_SAMPLES_FOR_INJECTION = 25;
+    if (trainingDataSource.sampleCount < MIN_SAMPLES_FOR_INJECTION) {
+      showToast(
+        `Injection refusée : seulement ${trainingDataSource.sampleCount} échantillon(s) réel(s) ` +
+        `(minimum requis : ${MIN_SAMPLES_FOR_INJECTION}) — trop peu pour garantir un signal fiable.`,
+        "error"
+      );
+      return;
+    }
+
     try {
-      const firstLoss = epochLogs[0]?.loss || 1.0;
-      const finalLoss = epochLogs[epochLogs.length - 1]?.loss || 1.0;
-      const lossDelta = firstLoss - finalLoss;
-      
-      // If loss went down, we boost the weight of the neural intuition algorithm proportionally.
-      if (lossDelta > 0) {
-        const improvementRatio = lossDelta / firstLoss;
+      // On utilise la perte de VALIDATION (données jamais vues pendant l'entraînement, cf.
+      // validationSplit: 0.2 plus haut) plutôt que la perte d'entraînement brute : celle-ci peut
+      // diminuer même en cas de pur surapprentissage (ou, pire, en s'ajustant à du bruit), ce qui
+      // ne reflète aucune amélioration réelle de la capacité prédictive.
+      const epochsWithValLoss = epochLogs.filter(e => typeof e.val_loss === 'number');
+      if (epochsWithValLoss.length < 5) {
+        showToast("Injection refusée : pas assez d'époques avec perte de validation mesurée.", "error");
+        return;
+      }
+      const firstValLoss = epochsWithValLoss[0].val_loss as number;
+      const finalValLoss = epochsWithValLoss[epochsWithValLoss.length - 1].val_loss as number;
+      const valLossDelta = firstValLoss - finalValLoss;
+
+      // If validation loss went down, we boost the weight of the neural intuition algorithm proportionally.
+      if (valLossDelta > 0) {
+        const improvementRatio = Math.min(1, valLossDelta / firstValLoss);
         const drawNameKey = drawName || "Global";
         
         // Fetch current active weights
@@ -291,7 +421,7 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         const updated = { ...oldWeights } as any;
         const currentAiIntuition = updated.aiIntuition || 8.33;
         
-        // Max boost of up to 40% based on learning improvement
+        // Max boost of up to 40% based on VALIDATED learning improvement
         const boostAmount = currentAiIntuition * (improvementRatio * 0.40);
         updated.aiIntuition = parseFloat((currentAiIntuition + boostAmount).toFixed(4));
 
@@ -302,10 +432,15 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
 
         await updateGlobalWeights(updated, drawNameKey);
-        showToast(`Succès : L'Intuition IA a été boostée de +${boostAmount.toFixed(1)}% suite à l'apprentissage séquentiel.`, "success");
+        showToast(
+          `Succès : L'Intuition IA a été boostée de +${boostAmount.toFixed(1)}% ` +
+          `(validé sur ${trainingDataSource.sampleCount} échantillons réels, source : ` +
+          `${trainingDataSource.type === 'file' ? 'fichier importé' : 'historique du tirage'}).`,
+          "success"
+        );
         audioEngine.play('success');
       } else {
-        showToast("L'optimisation des poids a été annulée : aucune réduction de perte (Loss) observée.", "info");
+        showToast("Injection annulée : la perte de validation n'a pas diminué (aucune amélioration réelle mesurée).", "info");
       }
     } catch (err) {
       showToast("Erreur lors de l'injection des poids.", "error");
@@ -320,7 +455,7 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
           Laboratoire d'Inférence et d'Apprentissage TensorFlow.js
         </h3>
         <p className="text-slate-400 text-sm font-medium mb-8">
-          Entraînez un modèle de deep learning multi-couches de type Perceptron Séquentiel en temps réel dans votre navigateur. Les données d'entrée exploitent l'historique mathématique réel délimité sans aucune fuite d'information.
+          Entraînez un modèle de deep learning multi-couches de type Perceptron Séquentiel en temps réel dans votre navigateur, sur des données 100% réelles (historique du tirage ou fichier importé et validé). Aucune donnée synthétique n'est utilisée : si moins de 20 tirages exploitables sont disponibles, l'entraînement est désactivé plutôt que simulé.
         </p>
 
         {/* Feature selection and configurations */}
@@ -383,12 +518,24 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
               <input type="file" className="hidden" accept=".csv,.json" onChange={handleFileUpload} />
             </label>
             {fileData ? (
-              <div className="mt-3 text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-lg text-center">
-                Jeu de données chargé ({fileData.length} lignes)
+              fileDraws ? (
+                <div className="mt-3 text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-lg text-center">
+                  {fileDraws.length} tirage(s) valide(s) extraits de {fileData.length} ligne(s) — prêt pour l'entraînement
+                </div>
+              ) : (
+                <div className="mt-3 text-[10px] text-rose-400 font-bold bg-rose-500/10 px-3 py-1.5 rounded-lg text-center flex items-center justify-center gap-1.5">
+                  <AlertTriangle size={12} />
+                  {fileParseWarning || "Fichier non exploitable pour l'entraînement."}
+                </div>
+              )
+            ) : history.length >= 20 ? (
+              <div className="mt-3 text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-3 py-1.5 rounded-lg text-center">
+                Historique Actif Déterminisé ({history.length} tirages)
               </div>
             ) : (
-              <div className="mt-3 text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-3 py-1.5 rounded-lg text-center">
-                Historique Actif Déterminisé ({history.length} lignes)
+              <div className="mt-3 text-[10px] text-rose-400 font-bold bg-rose-500/10 px-3 py-1.5 rounded-lg text-center flex items-center justify-center gap-1.5">
+                <AlertTriangle size={12} />
+                Historique insuffisant ({history.length}/20 tirages minimum) — entraînement désactivé
               </div>
             )}
           </div>
@@ -488,7 +635,11 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   <Square size={16} /> Interrompre
                 </button>
              ) : (
-                <button onClick={startTraining} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/30">
+                <button
+                  onClick={startTraining}
+                  disabled={!fileDraws && history.length < 20}
+                  className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed disabled:hover:bg-slate-800 text-white rounded-xl flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/30 disabled:shadow-none"
+                >
                   <Play size={16} /> Lancer l'entraînement
                 </button>
              )}
