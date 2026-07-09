@@ -10,6 +10,8 @@ import { spatialPlugin } from './spatial';
 import { temporalPlugin, bayesPlugin } from './temporalBayes';
 import { decadePatternPlugin } from './decadePattern';
 import { echoStateNetworkPlugin } from './echoState';
+import { gapSequencePlugin } from './gapSequence';
+import { derivedNeighborPlugin } from './derivedNeighbor';
 import { 
   equilibriumPlugin, 
   shadowProbabilityPlugin, 
@@ -42,6 +44,10 @@ export const initCoreAlgorithms = () => {
   registerAlgorithm(shadowProbabilityPlugin);
   registerAlgorithm(networkCorrelationPlugin);
   registerAlgorithm(antiConsensusPlugin);
+
+  // Séquences, écarts et transformations
+  registerAlgorithm(gapSequencePlugin);
+  registerAlgorithm(derivedNeighborPlugin);
 };
 
 // Exécution immédiate de l'initialisation

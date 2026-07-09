@@ -36,7 +36,9 @@ const LABELS: Record<AlgoKey, string> = {
     [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
     [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
     [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
-    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)'
+    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
+    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre'
 };
 
 // --- SUB-COMPONENTS & UTILITIES ---

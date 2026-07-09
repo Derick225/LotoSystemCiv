@@ -321,7 +321,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
         return [
             {
                 name: "Core & Stats",
-                keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM]
+                keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE]
             },
             {
                 name: "Mathematical & Structural",
@@ -329,7 +329,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
             },
             {
                 name: "Advanced Dynamics",
-                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE]
+                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
             }
         ];
     }, []);

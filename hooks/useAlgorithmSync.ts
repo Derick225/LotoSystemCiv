@@ -20,12 +20,14 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
   [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
   [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
+  [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+  [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
 };
 
 export const ALGO_CATEGORIES = [
   {
     name: "Fréquentiel & Transition",
-    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM]
+    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE]
   },
   {
     name: "Mathématique & Structural",
@@ -33,7 +35,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
   }
 ];
 

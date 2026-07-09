@@ -115,7 +115,7 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({ drawName })
                         {[
                             {
                                 name: "Fréquentiel & Transition",
-                                keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM]
+                                keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE]
                             },
                             {
                                 name: "Mathématique & Structural",
@@ -123,7 +123,7 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({ drawName })
                             },
                             {
                                 name: "Dynamiques Avancées",
-                                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE]
+                                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
                             }
                         ].map((cat) => (
                             <div key={cat.name} className="space-y-4 border-b border-slate-100 dark:border-slate-700/50 pb-4 last:border-0 last:pb-0">

@@ -27,6 +27,8 @@ const LABELS: Record<string, string> = {
     [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
     [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
     [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
+    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
 };
 
 export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {

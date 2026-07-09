@@ -742,7 +742,7 @@ export const generateMasterPredictionCore = async (
   let adversarialApplied = false;
   let challengedNumbers: number[] = [];
   if (adversarialMode) {
-    const keyAlgos = [AlgoKey.FREQUENCY, AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.MARKOV, AlgoKey.TEMPORAL, AlgoKey.BAYES, AlgoKey.FRACTAL, AlgoKey.SPATIAL, AlgoKey.MOMENTUM, AlgoKey.AFFINITY];
+    const keyAlgos = [AlgoKey.FREQUENCY, AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.MARKOV, AlgoKey.TEMPORAL, AlgoKey.BAYES, AlgoKey.FRACTAL, AlgoKey.SPATIAL, AlgoKey.MOMENTUM, AlgoKey.AFFINITY, AlgoKey.GAP_SEQUENCE, AlgoKey.DERIVED_NEIGHBOR];
 
     const consensusMapping = masterScores.map((score) => {
       let continuousConsensus = 0;
