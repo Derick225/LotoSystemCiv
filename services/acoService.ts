@@ -87,21 +87,22 @@ export const runAntColonyOptimization = async (
     }
 
     return new Promise((resolve) => {
-        const worker = new Worker(new URL('./workers/aco.worker.ts?worker', import.meta.url), { type: 'module' });
+        const { workerPool } = require('./workerPoolManager');
+        const worker = workerPool.getWorker('aco');
         
         // Sécurité : Timeout configurable côté client
         const timeout = setTimeout(() => {
-            worker.terminate();
+            workerPool.releaseWorker(worker);
             console.warn(`ACO Worker Timeout (${timeoutMs}ms) - Fallback Heuristic triggered`);
             resolve(fallbackHeuristic(purifiedHistory));
         }, timeoutMs);
 
-        worker.onmessage = (e) => {
+        worker.onmessage = (e: any) => {
             const { type, bestPath, error } = e.data;
             
             if (type === 'result') {
                 clearTimeout(timeout);
-                worker.terminate();
+                workerPool.releaseWorker(worker);
                 
                 if (bestPath && Array.isArray(bestPath.numbers) && bestPath.numbers.length === 5) {
                     const isOracle = oracleTargets.some(t => bestPath.numbers.includes(t));
@@ -121,7 +122,7 @@ export const runAntColonyOptimization = async (
                 }
             } else if (error) {
                 clearTimeout(timeout);
-                worker.terminate();
+                workerPool.releaseWorker(worker);
                 console.error("ACO Worker Error:", error);
                 resolve(fallbackHeuristic(purifiedHistory));
             }

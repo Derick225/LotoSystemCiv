@@ -1,5 +1,7 @@
 
-import { workerService } from './workerService';
+const getWorkerService = () => {
+    return (globalThis as any).workerService;
+};
 import { computeTransferEntropy, runSpectral, denoiseFeaturesKernelPCA, runContinuousWaveletTransformAnalysis } from './mathCore';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 import { lcgGlobalRandom } from '../utils/mathUtils';
@@ -493,8 +495,9 @@ export const calculateGapEfficiency = async (history: DrawResult[]): Promise<Gap
     const cached = getCached<GapEfficiency[]>(cacheKey);
     if (cached) return cached;
 
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        const result = await workerService.runTask<GapEfficiency[]>('GAP_EFFICIENCY', {}, history);
+    const ws = getWorkerService();
+    if (typeof window !== 'undefined' && ws && ws.isAvailable()) {
+        const result = (await ws.runTask('GAP_EFFICIENCY', {}, history)) as GapEfficiency[];
         setCached(cacheKey, result);
         return result;
     }
@@ -1057,8 +1060,9 @@ export const findHistoricalMatches = (current: DrawResult, history: DrawResult[]
 };
 
 export const calculateTransferEntropyAsync = async (history: DrawResult[], targetNumbers?: number[]) => {
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        return workerService.runTask<{source: number, target: number, entropyTransfer: number, confidence: number}[]>('TRANSFER_ENTROPY', { targetNumbers }, history);
+    const ws = getWorkerService();
+    if (typeof window !== 'undefined' && ws && ws.isAvailable()) {
+        return ws.runTask('TRANSFER_ENTROPY', { targetNumbers }, history) as Promise<{source: number, target: number, entropyTransfer: number, confidence: number}[]>;
     }
     
     // Wrap to prevent UI blocking for 8100 iterations (although fast, it's good practice)
@@ -1164,8 +1168,9 @@ export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Prom
     const cached = getCached<SpectralMetric[]>(cacheKey);
     if (cached) return cached;
 
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        const result = await workerService.runTask<SpectralMetric[]>('SPECTRAL_METRICS', {}, history);
+    const ws = getWorkerService();
+    if (typeof window !== 'undefined' && ws && ws.isAvailable()) {
+        const result = (await ws.runTask('SPECTRAL_METRICS', {}, history)) as SpectralMetric[];
         setCached(cacheKey, result);
         return result;
     }
@@ -1183,8 +1188,9 @@ export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promi
     const cached = getCached<SpectralMetric[]>(cacheKey);
     if (cached) return cached;
 
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        const result = await workerService.runTask<SpectralMetric[]>('wavelet_analysis', {}, history);
+    const ws = getWorkerService();
+    if (typeof window !== 'undefined' && ws && ws.isAvailable()) {
+        const result = (await ws.runTask('wavelet_analysis', {}, history)) as SpectralMetric[];
         setCached(cacheKey, result);
         return result;
     }
@@ -1202,8 +1208,9 @@ export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promi
     const cached = getCached<FractalMetric[]>(cacheKey);
     if (cached) return cached;
 
-    if (typeof window !== 'undefined' && workerService.isAvailable()) {
-        const result = await workerService.runTask<FractalMetric[]>('hurst_exponent', {}, history);
+    const ws = getWorkerService();
+    if (typeof window !== 'undefined' && ws && ws.isAvailable()) {
+        const result = (await ws.runTask('hurst_exponent', {}, history)) as FractalMetric[];
         setCached(cacheKey, result);
         return result;
     }

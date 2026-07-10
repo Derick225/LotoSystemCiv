@@ -33,12 +33,25 @@ export const gapSequencePlugin: AlgorithmPlugin = {
         currentGaps[i] = lastSeen[i] !== undefined ? lastSeen[i] : 100;
     }
 
-    // 2. Calcul des probabilités de sortie par taille d'écart (Distribution Empirique)
+    // 2. Calcul de la fonction de répartition cumulative empirique par taille d'écart.
+    // CORRECTIF CONCEPTUEL : la version précédente utilisait la probabilité PONCTUELLE
+    // qu'un écart de taille exacte G précède un gain (gapSuccessCounts[G] / total). Sous
+    // hypothèse de tirages indépendants (loi géométrique), cette quantité décroît TOUJOURS
+    // mécaniquement avec G — l'algorithme ne faisait donc que reproduire la décroissance
+    // géométrique théorique et favorisait systématiquement les numéros récemment sortis,
+    // quel que soit le jeu de données réel ou même sur du bruit aléatoire. Aucune valeur
+    // prédictive réelle, et logique diamétralement opposée à l'algorithme `gaps.ts` déjà
+    // présent (qui favorise les numéros "en retard" via une CDF géométrique croissante).
+    //
+    // On utilise maintenant la fonction de répartition CUMULATIVE empirique :
+    // P(écart historique menant à un gain <= G), qui croît naturellement avec G — donc plus
+    // un numéro est en retard, plus il est probable (empiriquement) qu'un gain survienne
+    // "bientôt" au vu de la distribution réelle des écarts observés. Contrairement à `gaps.ts`
+    // (loi géométrique théorique pure), on reste ici fondé sur la distribution empirique
+    // réellement observée dans l'historique, ce qui capture d'éventuels écarts au modèle
+    // théorique (biais physique, dépendances non détectées, etc.).
     const gapSuccessCounts: Record<number, number> = {};
     let totalSuccesses = 0;
-
-    // Calcul simplifié de la distribution des écarts victorieux dans l'historique
-    // Pour être déterministe, on regarde les N derniers tirages
     for (let i = 0; i < recentHistory.length - 1; i++) {
         const draw = recentHistory[i];
         const prevDraws = recentHistory.slice(i + 1);
@@ -58,17 +71,19 @@ export const gapSequencePlugin: AlgorithmPlugin = {
         });
     }
 
-    const gapProbabilities: Record<number, number> = {};
-    Object.keys(gapSuccessCounts).forEach(gapStr => {
-        const gap = parseInt(gapStr, 10);
-        gapProbabilities[gap] = gapSuccessCounts[gap] / Math.max(1, totalSuccesses);
-    });
+    const maxObservedGap = Object.keys(gapSuccessCounts).reduce((max, g) => Math.max(max, parseInt(g, 10)), 0);
+    const cumulativeGapProbabilities: Record<number, number> = {};
+    let runningTotal = 0;
+    for (let g = 0; g <= maxObservedGap; g++) {
+        runningTotal += gapSuccessCounts[g] || 0;
+        cumulativeGapProbabilities[g] = totalSuccesses > 0 ? runningTotal / totalSuccesses : 0;
+    }
 
     ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.GAP_SEQUENCE] = {
         currentGaps,
-        gapProbabilities,
-        medianGapProb: 0 // sera calculé si nécessaire
+        cumulativeGapProbabilities,
+        maxObservedGap
     };
   },
 
@@ -79,19 +94,24 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache![AlgoKey.GAP_SEQUENCE];
     
     const myGap = cache.currentGaps[num] || 0;
-    const rawProb = cache.gapProbabilities[myGap] || 0.001; // Probabilité historique que cet écart sorte
+    // Au-delà du plus grand écart jamais observé menant à un gain, la CDF empirique sature
+    // naturellement à 1.0 (certitude croissante qu'un gain est "dû"), au lieu de retomber sur
+    // une valeur arbitraire faible comme dans l'ancienne version.
+    const rawProb = myGap >= cache.maxObservedGap
+      ? 1.0
+      : (cache.cumulativeGapProbabilities[myGap] ?? 0);
     
     // Normalisation sigmoïde pour intégration continue (Zero Hasard, Zero Hard Thresholds)
     // On utilise l'exposant de Hurst comme paramètre de pente si disponible
     const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
-    const center = 0.05; // Probabilité de base attendue (5/90 approx)
+    const center = 0.5; // Centré sur la médiane de la CDF (50% de la masse de probabilité)
     
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawProb - center) * 100.0));
+    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawProb - center) * 4.0));
     
     return {
       score: Math.max(0, Math.min(100, normalizedScore)),
       confidence: 0.85,
-      metadata: { currentGap: myGap, historicalProbability: rawProb }
+      metadata: { currentGap: myGap, cumulativeProbability: rawProb }
     };
   }
 };

@@ -126,23 +126,21 @@ export const runSurvivalSimulation = async (
 
   // 4. Fallback Local via Web Worker
   return new Promise((resolve, reject) => {
-    const worker = new Worker(
-      new URL("./workers/simulation.worker.ts?worker", import.meta.url),
-      { type: "module" }
-    );
+    const { workerPool } = require('./workerPoolManager');
+    const worker = workerPool.getWorker('simulation');
 
     let timeoutId = setTimeout(() => {
-      worker.terminate();
+      workerPool.releaseWorker(worker);
       reject(new Error("Simulation Timeout (Worker unresponsive)"));
     }, 60000);
 
-    worker.onmessage = (e) => {
+    worker.onmessage = (e: any) => {
       const { type, report, percent, error, log } = e.data;
 
       if (type === "progress") {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
-          worker.terminate();
+          workerPool.releaseWorker(worker);
           reject(new Error("Simulation Timeout (Worker unresponsive)"));
         }, 60000);
         if (onProgress) onProgress(percent);
@@ -150,18 +148,18 @@ export const runSurvivalSimulation = async (
         console.debug(`[Backtest Worker] ${log}`);
       } else if (type === "result") {
         clearTimeout(timeoutId);
-        worker.terminate();
+        workerPool.releaseWorker(worker);
         resolve(report);
       } else if (error) {
         clearTimeout(timeoutId);
-        worker.terminate();
+        workerPool.releaseWorker(worker);
         reject(new Error(error));
       }
     };
 
-    worker.onerror = (e) => {
+    worker.onerror = (e: any) => {
       clearTimeout(timeoutId);
-      worker.terminate();
+      workerPool.releaseWorker(worker);
       reject(new Error(`Worker Critical Error: ${e.message}`));
     };
 

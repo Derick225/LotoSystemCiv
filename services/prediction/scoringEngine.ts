@@ -267,7 +267,12 @@ export const applyPCADenoising = async (
           const rawVal = featureMatrix[idx][fIdx];
           const dval = Number(denoisedMatrix[idx]?.[fIdx]);
           const cleanDVal = isNaN(dval) ? rawVal : dval;
-          item.breakdown[key] = rawVal + pcaConfidence * (cleanDVal - rawVal);
+          const blended = rawVal + pcaConfidence * (cleanDVal - rawVal);
+          // La reconstruction PCA (régression linéaire dans un sous-espace réduit) peut
+          // dépasser l'intervalle [0, 100] que chaque algorithme garantit pourtant en sortie
+          // (confirmé empiriquement : gap_sequence et derived_neighbor ressortaient parfois
+          // négatifs après ce blend, alors que leur sortie brute était toujours dans [0, 100]).
+          item.breakdown[key] = Math.max(0, Math.min(100, blended));
         });
       });
       

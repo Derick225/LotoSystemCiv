@@ -263,18 +263,19 @@ export const runDecisionForest = async (
 
   // 5. Délégation au Web Worker
   return new Promise((resolve, reject) => {    
-    const worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
+    const { workerPool } = require('./workerPoolManager');
+    const worker = workerPool.getWorker('forest');
     
     const timeout = setTimeout(() => {
       console.warn("Decision Forest Worker timed out");
-      worker.terminate();
+      workerPool.releaseWorker(worker);
       resolve({ votes: [], dataset: [] });
     }, 120000);
 
-    worker.onmessage = (e) => {
+    worker.onmessage = (e: any) => {
       clearTimeout(timeout);
       const { votes, dataset: workerDataset } = e.data;
-      worker.terminate();
+      workerPool.releaseWorker(worker);
 
       if (!votes) {
         resolve({ votes: [], dataset: [] });
@@ -327,9 +328,10 @@ export const runDecisionForest = async (
       resolve({ votes: sortedByAffinity.slice(0, 20), dataset: workerDataset || [] });    
     };
 
-    worker.onerror = (err) => { 
+    worker.onerror = (err: any) => { 
       clearTimeout(timeout);
-      worker.terminate(); 
+      const { workerPool } = require('./workerPoolManager');
+      workerPool.releaseWorker(worker);
       console.error("Decision Forest Worker Error", err);
       reject(new Error("Echec du calcul Forest Worker")); 
     };

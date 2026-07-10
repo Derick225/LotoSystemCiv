@@ -59,25 +59,26 @@ export const runBayesianOptimization = async (
             return;
         }
 
-        const worker = new Worker(new URL('./workers/bayesian.worker.ts?worker', import.meta.url), { type: 'module' });
+        const { workerPool } = require('./workerPoolManager');
+        const worker = workerPool.getWorker('bayesian');
 
-        worker.onmessage = (e) => {
+        worker.onmessage = (e: any) => {
             const { type, data, message } = e.data;
 
             if (type === 'progress') {
                 if (onProgress) onProgress(data.progress, data.bestScore);
             } else if (type === 'result') {
-                worker.terminate();
+                workerPool.releaseWorker(worker);
                 if (data.observations) saveBayesianMemory(drawName, data.observations);
                 resolve(data);
             } else if (type === 'error') {
-                worker.terminate();
+                workerPool.releaseWorker(worker);
                 reject(new Error(message));
             }
         };
 
         worker.onerror = (err: any) => {
-            worker.terminate();
+            workerPool.releaseWorker(worker);
             reject(new Error(err?.message || "Échec de l'optimiseur Bayésien"));
         };
 

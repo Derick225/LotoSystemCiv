@@ -108,14 +108,15 @@ export const runGeneticOptimization = async (
     }
 
     // Note: Assurez-vous que le chemin du worker correspond à votre structure de projet
-    const worker = new Worker(new URL('./workers/genetic.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
+    const { workerPool } = require('./workerPoolManager');
+    const worker = workerPool.getWorker('genetic');
 
-    worker.onmessage = (e) => {
+    worker.onmessage = (e: any) => {
       const { type, data, message } = e.data;
       if (type === 'progress') {
         if (onRawProgress) onRawProgress(data);
       } else if (type === 'result') {
-        worker.terminate();
+        workerPool.releaseWorker(worker);
         resolve({ 
           ...data, 
           timeElapsed: Date.now() - startTime, 
@@ -123,12 +124,12 @@ export const runGeneticOptimization = async (
           totalEvaluations: config.populationSize * (data.generations || config.maxGenerations) 
         });
       } else if (type === 'error') {
-        worker.terminate();
+        workerPool.releaseWorker(worker);
         reject(new Error(message || "Erreur inconnue dans le Genetic Worker"));
       }
     };
-    worker.onerror = (err) => {
-      worker.terminate();
+    worker.onerror = (err: any) => {
+      workerPool.releaseWorker(worker);
       reject(new Error(`Échec de l'exécution du Worker Génétique: ${err.message}`));
     };
 
