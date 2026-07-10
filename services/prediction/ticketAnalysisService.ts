@@ -111,23 +111,15 @@ export const analyzeTicketStrengthSync = (
   const warnings: string[] = [];
   let score = 100.0;
 
-  const MAX_PENALTY_AC = 30.0;
-  const MAX_PENALTY_SUM = 25.0;
-  const MAX_PENALTY_CONSEC = 20.0;
-  const MAX_PENALTY_PARITY = 25.0;
+  const MAX_PENALTY_AC = 40.0;
+  const MAX_PENALTY_CONSEC = 25.0;
+  const MAX_PENALTY_PARITY = 35.0;
 
   const acZScore = (ac - calibration.meanAC) / calibration.stdAC;
   const acPenalty = MAX_PENALTY_AC * (1.0 - Math.exp(-0.5 * Math.pow(acZScore, 2)));
   score -= acPenalty;
   if (Math.abs(acZScore) > 2.0) {
     warnings.push(`AC anormale (Z=${acZScore.toFixed(2)}). Cible empirique: ${calibration.meanAC.toFixed(1)} ± ${calibration.stdAC.toFixed(2)}`);
-  }
-
-  const sumZScore = (sum - calibration.meanSum) / calibration.stdSum;
-  const sumPenalty = MAX_PENALTY_SUM * (1.0 - Math.exp(-0.5 * Math.pow(sumZScore, 2)));
-  score -= sumPenalty;
-  if (Math.abs(sumZScore) > 2.0) {
-    warnings.push(`Somme extrême (Z=${sumZScore.toFixed(2)}). Cible: ${calibration.meanSum.toFixed(0)} ± ${calibration.stdSum.toFixed(0)}`);
   }
 
   const lambda = calibration.lambdaConsecutives;
@@ -153,12 +145,10 @@ export const analyzeTicketStrengthSync = (
   }
 
   const acProb = 1.0 / (1.0 + Math.exp(Math.abs(acZScore)));
-  const sumFitProb = 1.0 / (1.0 + Math.exp(Math.abs(sumZScore)));
   const amplitudeZ = (amplitude - calibration.meanAmplitude) / (calibration.stdAmplitude || 1);
   const amplitudeProb = 1.0 / (1.0 + Math.exp(Math.abs(amplitudeZ)));
 
   if (acProb < 0.3) warnings.push(`AC sous-optimale (Score de fit: ${(acProb * 100).toFixed(0)}%)`);
-  if (sumFitProb < 0.3) warnings.push(`Somme atypique (Score de fit: ${(sumFitProb * 100).toFixed(0)}%)`);
   if (amplitudeProb < 0.3) warnings.push(`Amplitude structurelle restreinte (Score: ${(amplitudeProb * 100).toFixed(0)}%)`);
 
   return {

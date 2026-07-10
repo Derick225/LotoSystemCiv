@@ -1632,7 +1632,6 @@ export const generateForensicReport = (
 
   const sumZ =
     (sum - calibration.meanSum) / Math.max(Number.EPSILON, calibration.stdSum);
-  const sumProb = 2 * (1 - normalCDF(Math.abs(sumZ), 0, 1));
 
   const ampZ =
     (amplitude - calibration.meanAmplitude) /
@@ -1708,21 +1707,19 @@ export const generateForensicReport = (
     errorGradients[k] = grad;
   });
 
-  const cvSum = calibration.stdSum / (calibration.meanSum || 1.1);
   const cvAmp = calibration.stdAmplitude / (calibration.meanAmplitude || 1.1);
   const cvAC = calibration.stdAC / (calibration.meanAC || 1.1);
   const parityStdError = Math.sqrt(0.25 / n);
   const lambda = calibration.lambdaConsecutives || 0.5;
 
   const logProbSum =
-    Math.log(Math.max(Number.EPSILON, sumProb)) +
     Math.log(Math.max(Number.EPSILON, ampProb)) +
     Math.log(Math.max(Number.EPSILON, acProb)) +
     Math.log(Math.max(Number.EPSILON, consecProb)) +
     Math.log(Math.max(Number.EPSILON, parityExtremeProb));
 
   const maxExpectedLogDeviation =
-    5.0 * Math.log(DOMAIN_SIZE) * (1.0 + historyEntropy);
+    4.0 * Math.log(DOMAIN_SIZE) * (1.0 + historyEntropy);
   const rawAnomalyScore = Math.max(
     0,
     100 * (1.0 + logProbSum / maxExpectedLogDeviation),
@@ -1779,20 +1776,6 @@ export const generateForensicReport = (
     });
   }
 
-  // D. FRACTAL Adjustments (Gaussian Centering Force)
-  const gradSum = errorGradients[AlgoKey.FRACTAL] || 0;
-  const rawChangeSum =
-    cvSum * (0.7 * (1.0 - Math.exp(-0.5 * sumZ * sumZ)) - 0.3 * gradSum);
-  const sumCenteringForce = smoothGating(rawChangeSum);
-
-  if (Math.abs(sumCenteringForce) > 0.001) {
-    proposedAdjustments.push({
-      algo: AlgoKey.FRACTAL,
-      proposedWeightChange: sumCenteringForce,
-      reason: `Rappel de centrage gaussien : somme distante de ${sumZ.toFixed(2)}σ. Gradient: ${gradSum.toFixed(4)}. Activation FRACTAL de ${(sumCenteringForce * 100).toFixed(2)}%.`,
-    });
-  }
-
   // E. SPATIAL Adjustments (Binomial Harmonization)
   const parityAnomaly = 1.0 - parityExtremeProb;
   const gradEquil = errorGradients[AlgoKey.SPATIAL] || 0;
@@ -1815,7 +1798,6 @@ export const generateForensicReport = (
       k !== AlgoKey.SPECTRAL &&
       k !== AlgoKey.GAPS &&
       k !== AlgoKey.FREQUENCY &&
-      k !== AlgoKey.FRACTAL &&
       k !== AlgoKey.SPATIAL
     ) {
       const grad = errorGradients[k] || 0;

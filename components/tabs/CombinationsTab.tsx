@@ -155,9 +155,8 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
                 const chunk = baseTickets.slice(i, i + CHUNK_SIZE);
                 
                 const processedChunk = chunk.map(t => {
-                    // A. Filtre Somme
-                    const sum = t.reduce((a,b) => a+b, 0);
-                    if (sum < minSum || sum > maxSum) return null;
+                    // A. Filtre Somme (Retiré du filtrage, conservé pour les métadonnées)
+                    const sum = t.reduce((a, b) => a + b, 0);
 
                     // B. Filtre Harmonique avec amortissement continu (Sigmoïde)
                     const avgEnergy = t.reduce((acc, n) => acc + (spectralCache[n] || 0), 0) / 5;
@@ -439,8 +438,6 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
                                                 <input type="checkbox" checked={useHarmonicFilter} onChange={e => setUseHarmonicFilter(e.target.checked)} className="accent-indigo-600" />
                                                 Harmonique
                                             </label>
-                                            <div className="h-4 w-px bg-slate-300 dark:bg-slate-700"></div>
-                                            <span>Somme: {minSum}-{maxSum}</span>
                                         </div>
                                     </div>
                                 </div>

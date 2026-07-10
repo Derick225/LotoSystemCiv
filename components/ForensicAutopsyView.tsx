@@ -7,7 +7,8 @@ import { audioEngine } from '../utils/audioEngine';
 import { generateAutopsyAnalysis } from '../services/geminiService';
 import { LearningService } from '../services/learningService';
 import { useNexusStore } from '../store/useNexusStore';
-import { ForensicReport, ForensicEvidence, AlgoWeights } from '../types';
+import { ForensicReport, ForensicEvidence, AlgoWeights, NeuralFeedbackLog } from '../types';
+import { normalizeWeights } from '../services/prediction/weightsManager';
 import { logError, AppError } from '../utils/AppError';
 
 interface ForensicAutopsyViewProps {
@@ -36,8 +37,36 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
         try {
             const result = await LearningService.triggerAutoLearning(dName, undefined);
             if (result && result.improvement && result.weights) {
-                await updateGlobalWeights(result.weights, dName);
+                const oldW = { ...globalWeights };
+                const newW = result.weights;
+                await updateGlobalWeights(newW, dName);
                 await refreshData(dName, true);
+                
+                // Enregistrement des logs de feedback neuronal
+                const feedbackLogs: NeuralFeedbackLog[] = [];
+                Object.keys(newW).forEach(algo => {
+                    const oVal = Number(oldW[algo as keyof AlgoWeights]) || 0;
+                    const nVal = Number(newW[algo as keyof AlgoWeights]) || 0;
+                    const diff = nVal - oVal;
+                    if (Math.abs(diff) > 0.0001) {
+                        const impactPercentage = oVal > 0 ? (diff / oVal) * 100 : diff * 100;
+                        feedbackLogs.push({
+                            id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+                            timestamp: Date.now(),
+                            drawName: dName,
+                            algo,
+                            oldWeight: oVal,
+                            newWeight: nVal,
+                            direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
+                            impactPercentage: parseFloat(impactPercentage.toFixed(2)),
+                            reason: result.criticalDecision || result.message || "Rééquilibrage d'ADN post-tirage"
+                        });
+                    }
+                });
+                if (feedbackLogs.length > 0) {
+                    useNexusStore.getState().addNeuralFeedbackLogs(feedbackLogs);
+                }
+
                 audioEngine.play('success');
                 showToast(result.message, "success");
             } else {
@@ -72,7 +101,37 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
             }
 
             if (updated) {
-                await updateGlobalWeights(newWeights, report?.drawName || localReport?.drawName || drawName || "Loto 5/90");
+                const finalNormalized = normalizeWeights(newWeights);
+                const targetDraw = report?.drawName || localReport?.drawName || drawName || "Loto 5/90";
+                await updateGlobalWeights(finalNormalized, targetDraw);
+                
+                // Enregistrement des logs de feedback neuronal
+                const feedbackLogs: NeuralFeedbackLog[] = [];
+                report.proposedAdjustments.forEach(adj => {
+                    const algoKey = adj.algo as keyof AlgoWeights;
+                    const oldW = Number(globalWeights[algoKey]) || 0;
+                    const newW = finalNormalized[algoKey] ?? 0;
+                    const diff = newW - oldW;
+                    if (Math.abs(diff) > 0.0001) {
+                        const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+                        feedbackLogs.push({
+                            id: `log_${Date.now()}_${adj.algo}_${Math.random().toString(36).substr(2, 5)}`,
+                            timestamp: Date.now(),
+                            drawName: targetDraw,
+                            algo: adj.algo,
+                            oldWeight: oldW,
+                            newWeight: newW,
+                            direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
+                            impactPercentage: parseFloat(impactPercentage.toFixed(2)),
+                            reason: adj.reason || "Ajustement d'autopsie post-tirage"
+                        });
+                    }
+                });
+                
+                if (feedbackLogs.length > 0) {
+                    useNexusStore.getState().addNeuralFeedbackLogs(feedbackLogs);
+                }
+
                 audioEngine.play('success');
                 showToast("Ajustements Auto-Tune appliqués avec succès.", "success");
             } else {

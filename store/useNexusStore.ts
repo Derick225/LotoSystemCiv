@@ -15,6 +15,7 @@ import {
   GameRegime,
   NumberRegularity,
   SymbioticContext,
+  NeuralFeedbackLog,
 } from "../types";
 import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
 import {
@@ -44,6 +45,7 @@ interface NexusState {
     type: "SCAN" | "AUTOTUNE" | "WARNING" | "OVERRIDE" | "META";
     impact?: string;
   }[];
+  neuralFeedbackLogs: NeuralFeedbackLog[];
   vocalContext: OracleVocalContext | null;
   useCloudEngine: boolean;
   useSpatioTemporalHawkes: boolean;
@@ -87,6 +89,7 @@ interface NexusState {
     type: "SCAN" | "AUTOTUNE" | "WARNING" | "OVERRIDE" | "META";
     impact?: string;
   }) => void;
+  addNeuralFeedbackLogs: (logs: NeuralFeedbackLog[]) => void;
   setVocalContext: (ctx: OracleVocalContext | null) => void;
   setUseCloudEngine: (useCloud: boolean) => void;
   setUseSpatioTemporalHawkes: (use: boolean) => void;
@@ -130,6 +133,7 @@ export const useNexusStore = create<NexusState>()(
       isAutonomousAgentActive: false,
       useSpatioTemporalHawkes: false,
       agentLogs: [],
+      neuralFeedbackLogs: [],
       vocalContext: null,
       useCloudEngine: true,
       temporalDepth: 100,
@@ -222,6 +226,10 @@ export const useNexusStore = create<NexusState>()(
         set({ isAutonomousAgentActive: active }),
       addAgentLog: (log) =>
         set((s) => ({ agentLogs: [log, ...s.agentLogs].slice(0, 15) })),
+      addNeuralFeedbackLogs: (logs) =>
+        set((s) => ({
+          neuralFeedbackLogs: [...logs, ...s.neuralFeedbackLogs].slice(0, 100),
+        })),
       setVocalContext: (ctx) => set({ vocalContext: ctx }),
       setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
       setUseSpatioTemporalHawkes: (use) => set({ useSpatioTemporalHawkes: use }),

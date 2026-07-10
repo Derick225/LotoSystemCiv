@@ -40,10 +40,8 @@ export const calculateCombinationEnergy = (
     energy += Math.pow(zIntersection, 2.0);
   }
 
-  // 2. Contrainte de Somme : Z-score Gaussien Empirique
-  const sum = combo.reduce((a, b) => a + b, 0);
-  const zSum = (sum - calibration.meanSum) / Math.max(Number.EPSILON, calibration.stdSum);
-  energy += Math.pow(zSum, 2.0);
+  // 2. Contrainte de Somme : Retirée à la demande de l'utilisateur
+  // (Le filtrage de somme n'intervient plus dans l'évaluation énergétique du ticket)
 
   // 3. Parité : Loi binomiale B(5, 0.5)
   const evens = combo.filter((n) => n % 2 === 0).length;

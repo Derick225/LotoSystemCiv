@@ -1,4 +1,4 @@
-import { ForensicReport, DrawResult, LearningSession, AlgoWeights } from '../types';
+import { ForensicReport, DrawResult, LearningSession, AlgoWeights, NeuralFeedbackLog } from '../types';
 import { AlgoKey } from '../shared/prediction.types';
 import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from './prediction/weightsManager';
 import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysisService';
@@ -144,8 +144,36 @@ export const applyForensicAdjustments = async (
       try {
         const { useNexusStore } = await import('../store/useNexusStore');
         useNexusStore.getState().updateGlobalWeights(finalNormalized);
-      } catch {
+
+        // Génération et enregistrement des logs de feedback neuronal en temps réel
+        const feedbackLogs: NeuralFeedbackLog[] = [];
+        learningSession.adjustments?.forEach((adj) => {
+          const algo = adj.algo as AlgoKey;
+          const oldW = currentWeights[algo] ?? 0;
+          const newW = finalNormalized[algo] ?? 0;
+          const diff = newW - oldW;
+          if (Math.abs(diff) > 0.0001) {
+            const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+            feedbackLogs.push({
+              id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+              timestamp: Date.now(),
+              drawName,
+              algo,
+              oldWeight: oldW,
+              newWeight: newW,
+              direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
+              impactPercentage: parseFloat(impactPercentage.toFixed(2)),
+              reason: adj.reason || "Ajustement adaptatif de calibrage d'ADN"
+            });
+          }
+        });
+
+        if (feedbackLogs.length > 0) {
+          useNexusStore.getState().addNeuralFeedbackLogs(feedbackLogs);
+        }
+      } catch (err) {
         // Safe fallback in non-browser environments
+        console.warn("Could not log neural feedback in store:", err);
       }
     }
   }
@@ -224,7 +252,7 @@ export const getTrainingRecommendations = (
     } else if (algo === AlgoKey.FREQUENCY) {
       baseExplanation = "des grappes séquentielles de Poisson";
     } else if (algo === AlgoKey.FRACTAL) {
-      baseExplanation = "une somme distante de la moyenne gaussienne";
+      baseExplanation = "une déviation d'autosimilarité à mémoire longue (exposant de Hurst)";
     } else if (algo === AlgoKey.SPATIAL) {
       baseExplanation = "une déviance d'équilibre binomial de parité";
     } else {

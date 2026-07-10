@@ -249,6 +249,18 @@ export interface LearningSession {
   missedNumber?: number;
 }
 
+export interface NeuralFeedbackLog {
+  id: string;
+  timestamp: number;
+  drawName: string;
+  algo: string;
+  oldWeight: number;
+  newWeight: number;
+  direction: 'BOOST' | 'REDUCE' | 'STABILIZE';
+  impactPercentage: number;
+  reason: string;
+}
+
 export interface OrchestrationPattern {
   type: PatternType;
   count: number;

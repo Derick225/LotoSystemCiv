@@ -262,8 +262,8 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({ drawName }) =
                                         {selection.length >= 2 && (
                                             <div className="grid grid-cols-2 gap-2 text-[10px] font-mono mt-3">
                                                 <div className="bg-black/30 p-2 rounded-lg border border-white/5 flex flex-col items-center">
-                                                    <span className="text-slate-500">SOMME</span>
-                                                    <span className={Math.abs(metrics.sum - (5 * 91 / 2)) > (2 * Math.sqrt(5 * Math.pow(90, 2) / 12)) ? 'text-rose-400' : 'text-white'}>{metrics.sum}</span>
+                                                    <span className="text-slate-500">CONSÉCUTIFS</span>
+                                                    <span className={metrics.consecutives >= 2 ? 'text-amber-400' : 'text-white'}>{metrics.consecutives}</span>
                                                 </div>
                                                 <div className="bg-black/30 p-2 rounded-lg border border-white/5 flex flex-col items-center">
                                                     <span className="text-slate-500">AC</span>

@@ -4,7 +4,7 @@ import { deletePrediction } from "../../services/predictionHistoryService";
 import { deleteForensicReportLocal, syncForensicReportsWithCloud } from "../../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../../services/syncService";
 import { PredictionForensics } from "../PredictionForensics";
-import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, ArrowUpRight, ArrowDownRight, Brain, Activity, ShieldAlert, CheckCircle2, TrendingUp, Gauge } from "lucide-react";
+import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, ArrowUpRight, ArrowDownRight, Brain, Activity, ShieldAlert, CheckCircle2, TrendingUp, Gauge, BrainCircuit } from "lucide-react";
 import { ForensicReport, PredictionHistoryItem } from "../../types";
 import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";
@@ -13,8 +13,9 @@ import { computeDriftCorrectionWeights } from "../../services/prediction/driftCo
 import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
+import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
 
-type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrift";
+type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrift" | "neuralfeedback";
 
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawName }) => {
   const history = useNexusStore((state) => state.history);
@@ -273,7 +274,8 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
               { id: "prediction", label: "Rapports", icon: Target, color: "text-slate-900 dark:text-white" },
               { id: "historique", label: "Historique", icon: History, color: "text-indigo-500" },
               { id: "timemachine", label: "Time Machine", icon: Clock, color: "text-fuchsia-500" },
-              { id: "shrinkagedrift", label: "Audit Arithmétique", icon: Activity, color: "text-emerald-500" }
+              { id: "shrinkagedrift", label: "Audit Arithmétique", icon: Activity, color: "text-emerald-500" },
+              { id: "neuralfeedback", label: "Neural Feedback", icon: BrainCircuit, color: "text-amber-500" }
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -296,6 +298,12 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
       </div>
 
       <div className="flex-1 min-w-0 w-full space-y-8">
+        {mode === "neuralfeedback" && (
+          <div className="space-y-8 animate-slide-up">
+            <NeuralFeedbackPanel />
+          </div>
+        )}
+
         {mode === "historique" && (
           <div className="space-y-8 animate-slide-up">
             <PredictionHistory drawName={drawName} />
