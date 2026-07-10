@@ -8,7 +8,7 @@ interface OrchestrationRadarProps {
     drawName: string;
 }
 
-export const OrchestrationRadar: React.FC<OrchestrationRadarProps> = React.memo(({ drawName }) => {
+export const OrchestrationRadar: React.FC<OrchestrationRadarProps> = ({ drawName }) => {
     const [data, setData] = useState<{ subject: string, A: number, fullMark: number }[]>([]);
 
     useEffect(() => {
@@ -67,4 +67,4 @@ export const OrchestrationRadar: React.FC<OrchestrationRadarProps> = React.memo(
             </div>
         </div>
     );
-});
+};

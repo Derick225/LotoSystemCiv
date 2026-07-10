@@ -294,32 +294,25 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
 
   return new Promise((resolve) => {
     try {
-      const pool = (globalThis as any).workerPool;
-      if (!pool) {
-        logger.warn("WorkerPool is not initialized on globalThis. Falling back to dynamic weights.");
-        resolve(normalizeWeights(dynamicWeights));
-        return;
-      }
-      const worker = pool.getWorker('metaLearning');
-      worker.onmessage = (event: any) => {
+      const worker = new Worker(new URL('../../workers/metaLearning.worker.ts?worker', import.meta.url), { type: 'module' });
+      worker.onmessage = (event) => {
         const { type, bestConfig, error } = event.data;
         if (type === 'SUCCESS' && bestConfig) resolve(bestConfig);
         else {
           logger.warn({ err: error }, "Worker error during meta-learning fallback");
           resolve(normalizeWeights(dynamicWeights));
         }
-        pool.releaseWorker(worker);
+        worker.terminate();
       };
-      worker.onerror = (e: any) => {
+      worker.onerror = (e) => {
         logger.warn({ err: e.message }, "Worker execution error");
         resolve(normalizeWeights(dynamicWeights));
-        pool.releaseWorker(worker);
+        worker.terminate();
       };
       worker.postMessage({ dynamicWeights, history });
     } catch (err) {
       logger.warn({ err }, "Failed to spawn meta-learning worker");
-      resolve(normalizeWeights(dynamicWeights));
-    }
+      resolve(normalizeWeights(dynamicWeights));    }
   });
 };
 

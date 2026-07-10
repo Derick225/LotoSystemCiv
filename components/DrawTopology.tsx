@@ -8,7 +8,7 @@ interface DrawTopologyProps {
     size?: 'sm' | 'md' | 'lg';
 }
 
-export const DrawTopology: React.FC<DrawTopologyProps> = React.memo(({ winners, machine = [], size = 'sm' }) => {
+export const DrawTopology: React.FC<DrawTopologyProps> = ({ winners, machine = [], size = 'sm' }) => {
     const winnerSet = new Set(winners);
     const machineSet = new Set(machine);
     const sortedWinners = [...winners].sort((a, b) => a - b);
@@ -99,4 +99,4 @@ export const DrawTopology: React.FC<DrawTopologyProps> = React.memo(({ winners, 
             </svg>
         </div>
     );
-});
+};

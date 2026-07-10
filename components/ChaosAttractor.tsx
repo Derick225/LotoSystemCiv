@@ -8,7 +8,7 @@ interface ChaosAttractorProps {
     history: DrawResult[];
 }
 
-export const ChaosAttractor: React.FC<ChaosAttractorProps> = React.memo(({ history }) => {
+export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     const regime = useNexusStore(state => state.regime);
     const volatility = useNexusStore(state => state.volatility);
     
@@ -209,5 +209,5 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = React.memo(({ histo
             </div>
         </div>
     );
-});
+};
 

@@ -51,10 +51,9 @@ export const terminateActiveWorkers = (drawName: string): void => {
   const workers = activeWorkersMap.get(drawName);
   if (workers) {
     logger.info(`[Process Manager] Interruption de ${workers.size} workers d'arrière-plan actifs pour ${drawName}.`);
-    const { workerPool } = require('./workerPoolManager');
     for (const worker of workers) {
       try {
-        workerPool.terminateWorker(worker);
+        worker.terminate();
       } catch (err) {
         console.error("Échec de la coupure d'un worker", err);
       }
@@ -155,12 +154,14 @@ export const evolveNeuralDNA = async (
 
     const spawnWorker = (type: 'pso' | 'genetic' | 'bayesian'): Promise<any> => {
         return new Promise((resolve, reject) => {
-            const { workerPool } = require('./workerPoolManager');
-            let worker = workerPool.getWorker(type === 'genetic' ? 'tensor' : type);
+            let worker: Worker;
+            if (type === 'pso') worker = new Worker(new URL("./workers/pso.worker.ts?worker", /* @ts-ignore */ import.meta.url), { type: "module" });
+            else if (type === 'bayesian') worker = new Worker(new URL("./workers/bayesian.worker.ts?worker", /* @ts-ignore */ import.meta.url), { type: "module" });
+            else worker = new Worker(new URL("./workers/tensor.worker.ts?worker", /* @ts-ignore */ import.meta.url), { type: "module" });
 
             registerActiveWorker(drawName, worker);
 
-            worker.onmessage = (e: any) => {
+            worker.onmessage = (e) => {
                 if (e.data.type === "progress" && onTelemetry) {
                     const gen = e.data.data.gen || e.data.data.progress || 0;
                     const bestFit = e.data.data.bestFitness || e.data.data.bestScore || 0;
@@ -170,7 +171,7 @@ export const evolveNeuralDNA = async (
                     });
                 } else if (e.data.type === "result") {
                     unregisterActiveWorker(drawName, worker);
-                    workerPool.releaseWorker(worker);
+                    worker.terminate();
                     if (type === 'bayesian' && e.data.data.observations) {
                         saveBayesianMemory(drawName, e.data.data.observations);
                     }
@@ -180,7 +181,7 @@ export const evolveNeuralDNA = async (
             
             worker.onerror = (err: any) => {
                 unregisterActiveWorker(drawName, worker);
-                workerPool.releaseWorker(worker);
+                worker.terminate();
                 reject(new Error(err?.message || `Échec du chargement ou d'exécution de l'optimiseur ${type.toUpperCase()}`));
             };
 
@@ -402,16 +403,15 @@ export const applyOnlineLearning = async (
       const { generateLearningSession, applyForensicAdjustments } = await import("./forensicTrainingBridge");
       
       const forensicReport = await new Promise<any>((resolve, reject) => {
-          const { workerPool } = require('./workerPoolManager');
-          const worker = workerPool.getWorker('forensic');
-          worker.onmessage = (e: any) => {
+          const worker = new Worker(new URL("./workers/forensic.worker.ts?worker", import.meta.url), { type: "module" });
+          worker.onmessage = (e) => {
               if (e.data.success) resolve(e.data.result);
               else reject(new Error(e.data.error));
-              workerPool.releaseWorker(worker);
+              worker.terminate();
           };
-          worker.onerror = (err: any) => {
+          worker.onerror = (err) => {
               reject(err);
-              workerPool.releaseWorker(worker);
+              worker.terminate();
           };
           worker.postMessage({ actualWinners, history: contextHistory });
       });
@@ -448,16 +448,15 @@ export const runForensicTrainingStep = async (
 
   // Génération du rapport forensic
   const forensicReport = await new Promise<any>((resolve, reject) => {
-      const { workerPool } = require('./workerPoolManager');
-      const worker = workerPool.getWorker('forensic');
-      worker.onmessage = (e: any) => {
+      const worker = new Worker(new URL("./workers/forensic.worker.ts?worker", import.meta.url), { type: "module" });
+      worker.onmessage = (e) => {
           if (e.data.success) resolve(e.data.result);
           else reject(new Error(e.data.error));
-          workerPool.releaseWorker(worker);
+          worker.terminate();
       };
-      worker.onerror = (err: any) => {
+      worker.onerror = (err) => {
           reject(err);
-          workerPool.releaseWorker(worker);
+          worker.terminate();
       };
       worker.postMessage({ actualWinners: targetDraw.gagnants, history: contextHistory });
   });
@@ -698,21 +697,21 @@ export const runLoopSimulation = async (
     
     // 3. Generate Forensic Report for this draw
     const forensicReport = await new Promise<any>((resolve, reject) => {
-        const { workerPool } = require('./workerPoolManager');
-        const worker = workerPool.getWorker('forensic');
+        // @ts-ignore
+        const worker = new Worker(new URL("./workers/forensic.worker.ts?worker", import.meta.url), { type: "module" });
         
         registerActiveWorker(drawName, worker);
 
-        worker.onmessage = (e: any) => {
+        worker.onmessage = (e) => {
             unregisterActiveWorker(drawName, worker);
             if (e.data.success) resolve(e.data.result);
             else reject(new Error(e.data.error));
-            workerPool.releaseWorker(worker);
+            worker.terminate();
         };
-        worker.onerror = (err: any) => {
+        worker.onerror = (err) => {
             unregisterActiveWorker(drawName, worker);
             reject(err);
-            workerPool.releaseWorker(worker);
+            worker.terminate();
         };
         worker.postMessage({ actualWinners: targetDraw.gagnants, history: contextHistory });
     });
@@ -763,24 +762,25 @@ export const runBacktestTrainingAsync = (
 ): Promise<TrainingReport> => {
   const purifiedHistory = purifyHistoryForDraw(drawName, history);
   return new Promise((resolve, reject) => {
-    const { workerPool } = require('./workerPoolManager');
-    const worker = workerPool.getWorker('backtest');
+    // Determine the environment correctly for worker loading in Vite
+    // @ts-ignore
+    const worker = new Worker(new URL("./workers/backtest.worker.ts?worker", import.meta.url), { type: "module" });
 
-    worker.onmessage = (e: any) => {
+    worker.onmessage = (e) => {
       if (e.data.type === "progress" && onProgress) {
         onProgress(e.data.percent);
       } else if (e.data.type === "result") {
         resolve(e.data.report);
-        workerPool.releaseWorker(worker);
+        worker.terminate();
       } else if (e.data.type === "error") {
         reject(new Error(e.data.error));
-        workerPool.releaseWorker(worker);
+        worker.terminate();
       }
     };
 
-    worker.onerror = (err: any) => {
+    worker.onerror = (err) => {
       reject(err);
-      workerPool.releaseWorker(worker);
+      worker.terminate();
     };
 
     worker.postMessage({ drawName, history: purifiedHistory, sampleSize, customWeights });

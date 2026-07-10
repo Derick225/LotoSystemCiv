@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { evolveNeuralDNA, runBacktestTrainingAsync, calculatePositionalDNAProfiles, runLoopSimulation, terminateActiveWorkers } from '../../services/trainingService';
+import { runSurvivalSimulation } from '../../services/backtestingEngine';
+import { BacktestReport } from '../../services/simulationCore';
 import { normalizeWeights, getAlgoWeights } from '../../services/predictionEngine';
 import { useNexusStore } from '../../store/useNexusStore';
 import { useForensicData } from '../../hooks/useForensicData';
@@ -8,17 +10,36 @@ import { useToast } from '../ui/Toast';
 import { audioEngine } from '../../utils/audioEngine';
 import { 
     Dna, Play, Save, X, Activity, Microscope, 
-    TrendingUp, Zap, Cpu, RefreshCw,
-    Upload, Download, Gauge, Sliders, History,
+    TrendingUp, Zap, Cpu, Terminal, RefreshCw,
+    Upload, Download, ShieldCheck, Gauge, Layers, Sparkles, Sliders, History,
     BrainCircuit, HelpCircle
 } from 'lucide-react';
 import type { AlgoWeights, TrainingReport } from '../../types';
-import { PositionalWeightsPanel } from './training/PositionalWeightsPanel';
-import { TrainingDNAChart } from './training/TrainingDNAChart';
 import { ExportService } from '../../services/exportService';
-import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { parseDateSafely, formatDateSafely } from '../../utils/dateUtils';
+
+const LABELS: Record<AlgoKey, string> = {
+    [AlgoKey.FREQUENCY]: 'Fréquence',
+    [AlgoKey.GAPS]: 'Écart',
+    [AlgoKey.SPECTRAL]: 'Spectral',
+    [AlgoKey.MARKOV]: 'Markov',
+    [AlgoKey.BAYES]: 'Bayes',
+    [AlgoKey.MOMENTUM]: 'Momentum',
+    [AlgoKey.AFFINITY]: 'Affinité',
+    [AlgoKey.SPATIAL]: 'Spatial',
+    [AlgoKey.TEMPORAL]: 'Temporel',
+    [AlgoKey.FRACTAL]: 'Fractal',
+    [AlgoKey.EQUILIBRIUM]: 'Équilibre',
+    [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
+    [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
+    [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
+    [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
+    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
+    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre'
+};
 
 // --- SUB-COMPONENTS & UTILITIES ---
 
@@ -123,8 +144,128 @@ const GlowingHelix: React.FC<{ active: boolean }> = ({ active }) => {
         </svg>
     );
 };
-import { CyberneticValidation } from "./training/CyberneticValidation";
-import { LogTerminal } from "./training/LogTerminal";
+
+const CyberneticValidation: React.FC<{ weights: AlgoWeights, drawName: string, history: any[] }> = ({ weights, drawName, history }) => {
+    const [running, setRunning] = useState(false);
+    const [report, setReport] = useState<BacktestReport | null>(null);
+    const [strategy, setStrategy] = useState<"FLAT" | "KELLY" | "CONFIDENCE_SMART">("CONFIDENCE_SMART");
+    
+    const runValidation = async () => {
+        setRunning(true);
+        audioEngine.play('scan');
+        try {
+            const res = await runSurvivalSimulation(
+                drawName,
+                history,
+                weights,
+                Math.min(50, history.length),
+                strategy,
+                undefined,
+                10000,
+                200
+            );
+            setReport(res);
+            audioEngine.play('success');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    return (
+        <div className="bg-slate-950 p-6 rounded-2xl border border-indigo-900/50 shadow-xl mt-6 relative overflow-hidden min-w-0">
+            <div className="absolute -right-4 -top-4 bg-indigo-500/10 w-32 h-32 rounded-full blur-2xl pointer-events-none"></div>
+            
+            <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <ShieldCheck size={14} /> Validation Empirique (Cybérnétique)
+                </h4>
+                <div className="flex items-center gap-2">
+                    <select 
+                        value={strategy} 
+                        onChange={e => setStrategy(e.target.value as any)}
+                        className="bg-slate-900 text-[10px] text-slate-300 border border-slate-700 rounded p-1 uppercase tracking-wider font-bold"
+                    >
+                        <option value="FLAT">Flat Betting</option>
+                        <option value="KELLY">Critère de Kelly</option>
+                        <option value="CONFIDENCE_SMART">Smart Confidence</option>
+                    </select>
+                    <button 
+                        onClick={runValidation} 
+                        disabled={running}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white p-1.5 rounded disabled:opacity-50 transition-all cursor-pointer"
+                    >
+                        {running ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />}
+                    </button>
+                </div>
+            </div>
+
+            {report ? (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">ROI Net</div>
+                        <div className={`text-lg font-black ${report.roi >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {report.roi > 0 ? '+' : ''}{report.roi.toFixed(1)}%
+                        </div>
+                    </div>
+                    <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Win Rate</div>
+                        <div className="text-lg font-black text-blue-400">
+                            {report.winRate.toFixed(1)}%
+                        </div>
+                    </div>
+                    <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Max Drawdown</div>
+                        <div className="text-lg font-black text-amber-500">
+                            -{report.maxDrawdown.toFixed(1)}%
+                        </div>
+                    </div>
+                    <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
+                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Sharpe Ratio</div>
+                        <div className="text-lg font-black text-fuchsia-400">
+                            {report.sharpeRatio.toFixed(2)}
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="p-4 border border-dashed border-slate-800 rounded-xl flex justify-center items-center text-slate-600 text-[10px] font-bold uppercase tracking-widest">
+                    Lancer la simulation empirique pour valider l'ADN
+                </div>
+            )}
+        </div>
+    );
+};
+
+const LogTerminal: React.FC<{ logs: string[] }> = ({ logs }) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, [logs]);
+
+    return (
+        <div className="bg-[#040815] rounded-2xl border border-slate-800 p-4 font-mono text-[10px] h-48 overflow-hidden flex flex-col shadow-inner">
+            <div className="flex items-center gap-2 border-b border-slate-850 pb-2 mb-2 text-slate-500 justify-between">
+                <div className="flex items-center gap-2">
+                    <Terminal size={12} className="text-emerald-500" /> <span className="font-bold">NEXUS_KERNEL_LOGS</span>
+                </div>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+            </div>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
+                {logs.map((log, i) => (
+                    <div key={i} className="text-emerald-500/90 leading-relaxed text-[9.5px]">
+                        <span className="text-slate-600 mr-2 font-light">[{new Date().toLocaleTimeString()}]</span>
+                        {log}
+                    </div>
+                ))}
+                {logs.length === 0 && <span className="text-slate-700 italic">En attente du processus de calcul...</span>}
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN TRAINING TAB COMPONENT ---
+
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const { showToast } = useToast();
     // @ts-ignore - auto generated by cleanup
@@ -495,6 +636,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         { name: 'Optimisé', score: finalReport ? finalReport.score : 0, fill: '#10b981' }
     ];
 
+    const currentPosDNA = positionalProfiles[selectedPosition] || {};
+
     return (
         <div className="space-y-6 md:space-y-8 animate-fade-in pb-24 w-full overflow-hidden relative">
             
@@ -706,15 +849,123 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="lg:col-span-8 space-y-6 min-w-0">
                     
                     {/* Fitness Curve Chart */}
-                    <TrainingDNAChart evolutionData={evolutionData} />
+                    <div className="bg-[#05091a]/80 p-4 md:p-6 rounded-2xl shadow-xl border border-slate-850 h-80 relative overflow-hidden min-w-0 w-full">
+                        <div className="flex justify-between items-center mb-4 px-2">
+                            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                <TrendingUp size={14} className="text-emerald-400"/> Trajectoire de Convergence
+                            </h4>
+                            {evolutionData.length > 0 ? (
+                                <div className="flex gap-3 text-[9px] font-bold text-slate-400">
+                                    <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div> Meilleure</span>
+                                    <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Moyenne</span>
+                                    <span className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div> Diversité</span>
+                                </div>
+                            ) : (
+                                <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse flex items-center gap-1">
+                                    <Sparkles size={11} /> Attente de données
+                                </span>
+                            )}
+                        </div>
+                        
+                        {evolutionData.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={evolutionData}>
+                                    <defs>
+                                        <linearGradient id="colorFit" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                        </linearGradient>
+                                        <linearGradient id="colorDiv" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15}/>
+                                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} stroke="#fff" />
+                                    <XAxis dataKey="gen" tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} tickLine={false} />
+                                    <YAxis yAxisId="left" hide domain={['auto', 'auto']} />
+                                    <YAxis yAxisId="right" orientation="right" hide domain={[0, 1]} />
+                                    <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #1e293b', backgroundColor: '#020617', color: '#fff', fontSize: '9px' }} />
+                                    <Area yAxisId="left" type="monotone" dataKey="bestFitness" stroke="#10b981" strokeWidth={2.5} fill="url(#colorFit)" isAnimationActive={false} name="Best Fitness" />
+                                    <Area yAxisId="left" type="monotone" dataKey="avgFitness" stroke="#6366f1" strokeWidth={1.5} fill="transparent" strokeDasharray="4 4" isAnimationActive={false} name="Avg Fitness" />
+                                    <Area yAxisId="right" type="monotone" dataKey="diversity" stroke="#f59e0b" strokeWidth={1} fill="url(#colorDiv)" isAnimationActive={false} name="Diversity (0-1)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-full flex flex-col items-center justify-center text-slate-500 text-[10px] uppercase font-bold tracking-[0.2em] opacity-40">
+                                <History size={28} className="mb-2 animate-pulse text-indigo-400" />
+                                <span>Démarrer l'évolution pour projeter la trajectoire d'apprentissage</span>
+                            </div>
+                        )}
+                    </div>
 
                     {/* NEW COMPONENT: POSITION-BASED DNA PROFILE ANALYZER */}
-                    <PositionalWeightsPanel
-                        selectedPosition={selectedPosition}
-                        setSelectedPosition={setSelectedPosition}
-                        calculatingPositional={calculatingPositional}
-                        positionalProfiles={positionalProfiles}
-                    />
+                    <div className="bg-[#05091a]/85 border border-slate-800/80 p-6 rounded-2xl shadow-xl relative overflow-hidden min-w-0">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                        
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                            <div>
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                    <Layers size={14} className="text-indigo-400" /> Cartographie d'ADN Positionnel ($5 \times N_{"{algos}"}$)
+                                </h4>
+                                <p className="text-[10px] text-slate-500 mt-1">Estimations optimales par case de sortie (du premier au dernier sortant)</p>
+                            </div>
+                            
+                            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-white/5 flex-wrap sm:flex-nowrap">
+                                {Array.from({ length: 5 }).map((_, idx) => (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => { audioEngine.play('click'); setSelectedPosition(idx); }}
+                                        className={`px-2.5 py-1 text-[9px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                                            selectedPosition === idx 
+                                                ? 'bg-indigo-600 text-white' 
+                                                : 'text-slate-400 hover:text-white'
+                                        }`}
+                                    >
+                                        Pos {idx + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {calculatingPositional ? (
+                            <div className="h-48 flex items-center justify-center text-slate-500 text-[10px] uppercase font-bold tracking-widest gap-2">
+                                <RefreshCw className="animate-spin text-indigo-500" size={14} /> Extraction des profils...
+                            </div>
+                        ) : Object.keys(currentPosDNA).length > 0 ? (
+                            <div className="grid md:grid-cols-2 gap-4">
+                                {Object.keys(currentPosDNA)
+                                    .sort((a,b) => currentPosDNA[b as AlgoKey] - currentPosDNA[a as AlgoKey])
+                                    .slice(0, 14)
+                                    .map((key) => {
+                                        const weightVal = currentPosDNA[key as AlgoKey] || 0;
+                                        const percentage = (weightVal * 100).toFixed(1);
+                                        const isDominant = weightVal > 1.2 / Object.keys(currentPosDNA).length;
+                                        const label = LABELS[key as AlgoKey] || key;
+                                        
+                                        return (
+                                            <div key={key} className="bg-black/30 p-3 rounded-xl border border-white/5 flex flex-col justify-between hover:border-slate-800 transition-all">
+                                                <div className="flex justify-between items-center text-[10px] mb-2">
+                                                    <span className="font-bold text-slate-200 uppercase tracking-wide">{label}</span>
+                                                    <span className={`font-black ${isDominant ? 'text-emerald-400' : 'text-slate-400'}`}>{percentage}%</span>
+                                                </div>
+                                                <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className={`h-full rounded-full transition-all duration-500 ${isDominant ? 'bg-gradient-to-r from-indigo-500 to-emerald-400' : 'bg-slate-700'}`}
+                                                        style={{ width: `${Math.min(100, Math.max(2, weightVal * 500))}%` }}
+                                                    ></div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                }
+                            </div>
+                        ) : (
+                            <div className="text-center p-8 border border-dashed border-slate-850 rounded-2xl text-slate-600 text-[10px] font-bold uppercase tracking-wider">
+                                Calcul du profil positionnel stationnaire...
+                            </div>
+                        )}
+                    </div>
 
                     {/* Comparaison Radar Panel */}
                     <div className="bg-slate-950 p-6 rounded-3xl border border-slate-900 shadow-xl flex flex-col lg:flex-row items-center gap-8 relative overflow-hidden min-w-0 w-full">

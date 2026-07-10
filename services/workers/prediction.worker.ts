@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { generateMasterPredictionCore } from "../prediction/predictionFacade";
-import { generatePlatinumPredictionCore } from "../platinumPredictionCore";
+import { generatePlatinumPredictionCore } from "../metaAnalystService";
 
 self.onmessage = async (e: MessageEvent) => {
   const {

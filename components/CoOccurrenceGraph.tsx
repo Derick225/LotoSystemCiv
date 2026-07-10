@@ -6,7 +6,7 @@ interface CoOccurrenceGraphProps {
     history: DrawResult[];
 }
 
-export const CoOccurrenceGraph: React.FC<CoOccurrenceGraphProps> = React.memo(({ history }) => {
+export const CoOccurrenceGraph: React.FC<CoOccurrenceGraphProps> = ({ history }) => {
     const [hoveredNode, setHoveredNode] = useState<number | null>(null);
     const [timeFilter, setTimeFilter] = useState<number>(100);
 
@@ -209,4 +209,4 @@ export const CoOccurrenceGraph: React.FC<CoOccurrenceGraphProps> = React.memo(({
             </div>
         </div>
     );
-});
+};

@@ -31,7 +31,7 @@ const LABELS: Record<string, string> = {
     [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
 };
 
-export const AlgoRadar: React.FC<AlgoRadarProps> = React.memo(({ weights, previousWeights, height = 300 }) => {
+export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {
     const data = useMemo(() => {
         // On normalise les clés pour l'affichage
         const keys = Object.keys(LABELS) as Array<AlgoKey>;
@@ -102,4 +102,4 @@ export const AlgoRadar: React.FC<AlgoRadarProps> = React.memo(({ weights, previo
             )}
         </div>
     );
-});
+};
