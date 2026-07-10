@@ -573,21 +573,11 @@ export const calculatePositionalDNAProfiles = (
           const edgeDistance = Math.abs(pos - 2) / 2.0; // 0 au centre, 1 aux bords
           modifier = 1.0 + edgeDistance * Math.tanh(stdDev / 25.0);
           break;
-        case AlgoKey.EQUILIBRIUM:
-          const centerAffinity = 1.0 - Math.abs(pos - 2) / 2.0;
-          modifier = 1.0 + centerAffinity * (1.0 - Math.abs(autoCorr));
-          break;
         case AlgoKey.SHADOW_PROBABILITY:
           modifier = 1.0 + (1.0 - Math.abs(autoCorr)) * Math.tanh(stdDev / 30.0);
           break;
         case AlgoKey.NETWORK_CORRELATION:
           modifier = 1.0 + Math.tanh(stdDev / 20.0) * Math.sin(normalizedPos * Math.PI * 2.0);
-          break;
-        case AlgoKey.ANTI_CONSENSUS:
-          modifier = 1.0 + Math.tanh(varianceVal / 200.0) * (1.0 - Math.max(0, autoCorr));
-          break;
-        case AlgoKey.DECADE_PATTERN:
-          modifier = 1.0 + 0.15 * Math.sin(normalizedPos * Math.PI);
           break;
         default:
           modifier = 1.0;

@@ -656,14 +656,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   {lastPrediction.xapExp.map((xap) => (
                     <div
                       key={xap.number}
-                      className="bg-slate-50 dark:bg-slate-800/50 rounded-xl xs:rounded-2xl p-2 xs:p-4 border border-slate-100 dark:border-slate-700/50 flex flex-col items-center justify-between text-center min-h-[120px] xs:min-h-[140px] shadow-sm"
+                      className="bg-slate-50 dark:bg-slate-800/50 rounded-xl xs:rounded-2xl p-2 xs:p-4 border border-slate-100 dark:border-slate-700/50 flex flex-col items-center justify-between text-center min-h-[140px] xs:min-h-[160px] shadow-sm relative group cursor-help transition-all hover:border-indigo-500/30"
+                      title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(', ') || 'Aucun'}\nGini (Concentration): ${xap.compositionGini?.toFixed(2) || '0.00'}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || '1.00'}`}
                     >
-                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg mb-2 border border-indigo-200/50 dark:border-indigo-800/50">
+                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg mb-2 border border-indigo-200/50 dark:border-indigo-800/50 shadow-inner">
                         {xap.number}
                       </div>
                       <span
                         className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 mb-1 leading-tight line-clamp-1"
-                        title={xap.dominantAlgo}
                       >
                         {xap.dominantAlgo.substring(0, 15)}
                       </span>
@@ -676,6 +676,12 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                       <span className="text-[9px] font-mono text-slate-400">
                         {xap.contributionPercentage.toFixed(1)}% force
                       </span>
+                      
+                      {xap.compositionGini !== undefined && (
+                        <div className="text-[8px] font-mono text-indigo-500 dark:text-indigo-400 mt-1 opacity-80">
+                          Gini: {xap.compositionGini.toFixed(2)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

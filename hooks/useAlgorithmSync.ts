@@ -14,11 +14,8 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.SPATIAL]: 'Spatial',
   [AlgoKey.TEMPORAL]: 'Temporel',
   [AlgoKey.FRACTAL]: 'Fractal',
-  [AlgoKey.EQUILIBRIUM]: 'Équilibre',
   [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
   [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
-  [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
-  [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
   [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
   [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
   [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
@@ -31,11 +28,11 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Mathématique & Structural",
-    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.EQUILIBRIUM, AlgoKey.SHADOW_PROBABILITY]
+    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY]
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
   }
 ];
 

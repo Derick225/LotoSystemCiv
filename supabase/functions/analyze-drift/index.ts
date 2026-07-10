@@ -133,7 +133,6 @@ Deno.serve(async (req) => {
             
             newWeights['momentum'] = Math.min(1.0, (newWeights['momentum'] || fallbackWeight) * boost);
             newWeights['wavelet'] = Math.min(1.0, (newWeights['wavelet'] || fallbackWeight) * boost);
-            newWeights['anti_consensus'] = Math.min(1.0, (newWeights['anti_consensus'] || fallbackWeight) * (1.0 + (0.15 * driftProbability)));
 
             // Normalisation des poids pour assurer un total logique
             let sum = 0;

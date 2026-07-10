@@ -1,7 +1,6 @@
 import { DrawResult } from '../../types';
 import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
-import { analyzeDecadePatterns, getDecadeIndex } from './decadePatternService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export interface ExtractedFeatures {
@@ -11,11 +10,8 @@ export interface ExtractedFeatures {
   affinityMap: Float32Array[];
   momentumMap: Float32Array;
   machineTransferMap: Float32Array;
-  equilibriumMap: Float32Array;
-  antiConsensusMap: Float32Array;
   shadowProbabilityMap: Float32Array;
   networkCorrelationMap: Float32Array;
-  decadePatternMap: Float32Array;
 }
 
 // ============================================================================
@@ -89,11 +85,8 @@ export const extractFeatures = async (
           affinityMap,
           momentumMap,
           machineTransferMap,
-          equilibriumMap: new Float32Array(DOMAIN_MAX + 1).fill(50),
-          antiConsensusMap: new Float32Array(DOMAIN_MAX + 1),
           shadowProbabilityMap: new Float32Array(DOMAIN_MAX + 1),
-          networkCorrelationMap: new Float32Array(DOMAIN_MAX + 1),
-          decadePatternMap: new Float32Array(DOMAIN_MAX + 1)
+          networkCorrelationMap: new Float32Array(DOMAIN_MAX + 1)
         };
       }
 
@@ -221,30 +214,10 @@ export const extractFeatures = async (
       }
 
       // ============================================================================
-      // 4. CALCULS COMPLÉMENTAIRES (Equilibrium, AntiConsensus, Shadow, Network)
+      // 4. CALCULS COMPLÉMENTAIRES (Shadow, Network)
       // ============================================================================
-      const equilibriumMap = new Float32Array(DOMAIN_MAX + 1).fill(50.0);
-      const expectedFreq = (recentHistory.length * 5) / DOMAIN_SIZE;
-      for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
-        const diff = freqMap[n] - expectedFreq;
-        equilibriumMap[n] = Math.max(10, Math.min(90, 50.0 + diff * 15.0));
-      }
-
-      const antiConsensusMap = new Float32Array(DOMAIN_MAX + 1);
-      const shortWindow = Math.min(5, recentHistory.length);
-      for (let i = 0; i < shortWindow; i++) {
-        const { winners } = extractDrawNumbers(recentHistory[i]);
-        for (const n of winners) {
-          antiConsensusMap[n] += 1;
-        }
-      }
-
       const shadowProbabilityMap = new Float32Array(DOMAIN_MAX + 1);
       const networkCorrelationMap = new Float32Array(DOMAIN_MAX + 1);
-      const decadePatternMap = new Float32Array(DOMAIN_MAX + 1);
-
-      // Calcul des décennies de façon centralisée
-      const decadeAnalysis = analyzeDecadePatterns(drawName, filteredHistory);
 
       for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
         const gap = gapsMap[n];
@@ -258,9 +231,6 @@ export const extractFeatures = async (
           }
         }
         networkCorrelationMap[n] = affSum / DOMAIN_SIZE;
-
-        const d = getDecadeIndex(n);
-        decadePatternMap[n] = decadeAnalysis.projectedTemporalScore[d];
       }
 
       return {
@@ -270,11 +240,8 @@ export const extractFeatures = async (
         affinityMap,
         momentumMap,
         machineTransferMap,
-        equilibriumMap,
-        antiConsensusMap,
         shadowProbabilityMap,
-        networkCorrelationMap,
-        decadePatternMap
+        networkCorrelationMap
       };
     },
     CACHE_TTL.MEDIUM,

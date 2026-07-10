@@ -896,11 +896,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                             </h3>
                                             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                                 {prediction.xapExp.map((xap) => (
-                                                    <div key={xap.number} className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/50 flex flex-col items-center justify-between text-center min-h-[120px] relative z-10 transition-transform hover:scale-[1.02]">
+                                                    <div
+                                                      key={xap.number}
+                                                      className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/50 flex flex-col items-center justify-between text-center min-h-[140px] relative z-10 cursor-help group transition-all hover:border-fuchsia-500/30"
+                                                      title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(', ') || 'Aucun'}\nGini (Concentration): ${xap.compositionGini?.toFixed(2) || '0.00'}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || '1.00'}`}
+                                                    >
                                                         <div className="w-10 h-10 rounded-full bg-slate-900/80 flex items-center justify-center text-slate-300 font-black text-lg mb-3 shadow-inner border border-white/5">
                                                             {xap.number}
                                                         </div>
-                                                        <span className="text-[9px] uppercase font-bold text-fuchsia-400 mb-2 leading-tight line-clamp-1" title={xap.dominantAlgo}>
+                                                        <span className="text-[9px] uppercase font-bold text-fuchsia-400 mb-2 leading-tight line-clamp-1">
                                                             {xap.dominantAlgo}
                                                         </span>
                                                         <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden mb-1">
@@ -909,9 +913,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                                                 style={{ width: `${xap.contributionPercentage}%` }}
                                                             />
                                                         </div>
-                                                        <span className="text-[8px] font-mono font-bold text-slate-500">
+                                                        <span className="text-[8px] font-mono font-bold text-slate-500 mb-1">
                                                             {xap.contributionPercentage.toFixed(1)}% force
                                                         </span>
+                                                        
+                                                        {xap.compositionGini !== undefined && (
+                                                          <div className="text-[8px] font-mono text-fuchsia-400 mt-1 opacity-80">
+                                                            Gini: {xap.compositionGini.toFixed(2)}
+                                                          </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>

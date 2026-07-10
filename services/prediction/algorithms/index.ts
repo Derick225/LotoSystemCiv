@@ -8,15 +8,12 @@ import { affinityPlugin } from './affinity';
 import { spectralPlugin, fractalPlugin } from './signals';
 import { spatialPlugin } from './spatial';
 import { temporalPlugin, bayesPlugin } from './temporalBayes';
-import { decadePatternPlugin } from './decadePattern';
 import { echoStateNetworkPlugin } from './echoState';
 import { gapSequencePlugin } from './gapSequence';
 import { derivedNeighborPlugin } from './derivedNeighbor';
 import { 
-  equilibriumPlugin, 
   shadowProbabilityPlugin, 
   networkCorrelationPlugin, 
-  antiConsensusPlugin 
 } from './advancedTopology';
 
 /**
@@ -36,14 +33,11 @@ export const initCoreAlgorithms = () => {
   registerAlgorithm(spatialPlugin);
   registerAlgorithm(temporalPlugin);
   registerAlgorithm(bayesPlugin);
-  registerAlgorithm(decadePatternPlugin);
   registerAlgorithm(echoStateNetworkPlugin);
   
   // Nouvelles topologies déterministes
-  registerAlgorithm(equilibriumPlugin);
   registerAlgorithm(shadowProbabilityPlugin);
   registerAlgorithm(networkCorrelationPlugin);
-  registerAlgorithm(antiConsensusPlugin);
 
   // Séquences, écarts et transformations
   registerAlgorithm(gapSequencePlugin);

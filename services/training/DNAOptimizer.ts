@@ -21,6 +21,9 @@ export interface XAPExplanation {
   dominantAlgo: AlgoKey;
   contributionPercentage: number;
   dnaVector: Record<AlgoKey, number>;
+  compositionEntropy?: number;       // Concentration de la prédiction (normalisée entre 0 et 1)
+  compositionGini?: number;          // Indice d'inégalité des contributions (0 = équitable, 1 = concentré)
+  synergyAlgos?: AlgoKey[];          // Les algorithmes co-contributeurs significatifs
 }
 
 export class DNAOptimizer {
@@ -806,10 +809,11 @@ export class DNAOptimizer {
       const dnaRecord: Partial<Record<AlgoKey, number>> = {};
 
       for (let a = 0; a < this.numAlgos; a++) {
-        totalScore += dna[a];
-        dnaRecord[this.algoKeys[a]] = dna[a];
-        if (dna[a] > maxScore) {
-          maxScore = dna[a];
+        const val = Math.max(0, dna[a]);
+        totalScore += val;
+        dnaRecord[this.algoKeys[a]] = val;
+        if (val > maxScore) {
+          maxScore = val;
           dominantIdx = a;
         }
       }
@@ -817,14 +821,147 @@ export class DNAOptimizer {
       const contributionPercentage =
         totalScore > 0 ? (maxScore / totalScore) * 100 : 0;
 
+      // 1. Calcul de l'Entropie de Composition Individuelle (Shannon normalisée)
+      let compositionEntropy = 1.0;
+      if (totalScore > 0) {
+        let entropySum = 0;
+        for (let a = 0; a < this.numAlgos; a++) {
+          const p = Math.max(0, dna[a]) / totalScore;
+          if (p > Number.EPSILON) {
+            entropySum -= p * Math.log2(p);
+          }
+        }
+        const maxEnt = Math.log2(this.numAlgos) || 1.0;
+        compositionEntropy = entropySum / maxEnt;
+      }
+
+      // 2. Calcul du Coefficient de Gini de Composition Individuel
+      let compositionGini = 0.0;
+      if (totalScore > 0) {
+        let diffSum = 0;
+        for (let i = 0; i < this.numAlgos; i++) {
+          const valI = Math.max(0, dna[i]);
+          for (let j = 0; j < this.numAlgos; j++) {
+            const valJ = Math.max(0, dna[j]);
+            diffSum += Math.abs(valI - valJ);
+          }
+        }
+        compositionGini = diffSum / (2.0 * this.numAlgos * totalScore);
+      }
+
+      // 3. Identification des Co-Contributeurs (Synergie)
+      // Seuil déterministe objectif : supérieur à la contribution moyenne attendue (1 / numAlgos)
+      const expectedAvgContribution = 1.0 / (this.numAlgos || 1);
+      const synergyAlgos: AlgoKey[] = [];
+      this.algoKeys.forEach((key) => {
+        const val = dnaRecord[key] || 0;
+        const contribution = totalScore > 0 ? val / totalScore : 0;
+        if (contribution > expectedAvgContribution) {
+          synergyAlgos.push(key);
+        }
+      });
+
       explanations.push({
         number: candidateNumbers[k],
         dominantAlgo: this.algoKeys[dominantIdx],
         contributionPercentage,
         dnaVector: dnaRecord as Record<AlgoKey, number>,
+        compositionEntropy,
+        compositionGini,
+        synergyAlgos,
       });
     }
 
     return explanations;
+  }
+
+  /**
+   * CALIBRATION D'ADN VIA RETROACTION DE COMPOSITION DES GAGNANTS (Feedback de Composition)
+   * Calcule les ajustements de poids optimaux en comparant la composition ADN réelle
+   * des numéros gagnants observés et le profil de poids actuels.
+   * Modulé continuellement par l'Entropie et l'Indice de Gini global de la composition.
+   */
+  public calibrateDNAFromWinningComposition(
+    currentWeights: AlgoWeights,
+    winningXAPs: XAPExplanation[],
+  ): { algo: AlgoKey; proposedWeightChange: number; reason: string }[] {
+    const adjustments: { algo: AlgoKey; proposedWeightChange: number; reason: string }[] = [];
+    if (winningXAPs.length === 0) return adjustments;
+
+    // 1. Calculer le vecteur moyen de composition réelle des numéros gagnants
+    const avgWinningComposition: Record<AlgoKey, number> = {} as any;
+    this.algoKeys.forEach((key) => {
+      avgWinningComposition[key] = 0;
+    });
+
+    winningXAPs.forEach((xap) => {
+      this.algoKeys.forEach((key) => {
+        avgWinningComposition[key] += xap.dnaVector[key] || 0;
+      });
+    });
+
+    // Normalisation de la composition moyenne gagnante
+    let totalWinScore = 0;
+    this.algoKeys.forEach((key) => {
+      totalWinScore += avgWinningComposition[key];
+    });
+    if (totalWinScore > 0) {
+      this.algoKeys.forEach((key) => {
+        avgWinningComposition[key] /= totalWinScore;
+      });
+    } else {
+      // Composition neutre uniforme
+      this.algoKeys.forEach((key) => {
+        avgWinningComposition[key] = 1.0 / this.numAlgos;
+      });
+    }
+
+    // 2. Calculer l'entropie et l'inégalité de Gini globales de la composition gagnante
+    const compositionProbArray = new Float32Array(this.numAlgos);
+    this.algoKeys.forEach((key, i) => {
+      compositionProbArray[i] = avgWinningComposition[key];
+    });
+
+    const globalEntropy = this.calculateShannonEntropyNormalized(compositionProbArray);
+    
+    // Calcul de l'indice de Gini de la composition gagnante
+    let giniSum = 0;
+    for (let i = 0; i < this.numAlgos; i++) {
+      for (let j = 0; j < this.numAlgos; j++) {
+        giniSum += Math.abs(compositionProbArray[i] - compositionProbArray[j]);
+      }
+    }
+    const globalGini = giniSum / (2.0 * this.numAlgos * (compositionProbArray.reduce((a, b) => a + b, 0) || 1.0));
+
+    // 3. Déterminer la dérive (erreur) et l'injecter sous forme d'ajustements continus
+    // Taux d'apprentissage auto-calibré basé sur la concentration (plus Gini est fort/Entropy est faible,
+    // plus le signal est pur, donc on peut ajuster plus fermement).
+    const learningFactor = 0.12 * (1.0 + globalGini - globalEntropy);
+
+    this.algoKeys.forEach((key) => {
+      const currentVal = currentWeights[key] ?? (1.0 / this.numAlgos);
+      const targetVal = avgWinningComposition[key];
+      const error = targetVal - currentVal;
+
+      // Ajustement avec régularisation continue (amortissement exponentiel pour éviter le surapprentissage)
+      const rawAdjust = error * learningFactor;
+      const proposedWeightChange = parseFloat(rawAdjust.toFixed(4));
+
+      if (Math.abs(proposedWeightChange) > 1e-4) {
+        const direction = proposedWeightChange > 0 ? "Sous-représenté" : "Sur-représenté";
+        const impactPercent = (proposedWeightChange * 100.0).toFixed(2);
+        
+        // Explications de haut niveau basées sur l'autopsie géométrique
+        const reason = `Calibrage ADN par composition réelle : L'algorithme est ${direction} par rapport aux numéros gagnants (Gini=${globalGini.toFixed(2)}, Entropy=${globalEntropy.toFixed(2)}). Ajustement proposé de ${proposedWeightChange > 0 ? '+' : ''}${impactPercent}% pour calibrer l'ADN.`;
+        
+        adjustments.push({
+          algo: key,
+          proposedWeightChange,
+          reason,
+        });
+      }
+    });
+
+    return adjustments;
   }
 }

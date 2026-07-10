@@ -31,11 +31,8 @@ const LABELS: Record<AlgoKey, string> = {
     [AlgoKey.SPATIAL]: 'Spatial',
     [AlgoKey.TEMPORAL]: 'Temporel',
     [AlgoKey.FRACTAL]: 'Fractal',
-    [AlgoKey.EQUILIBRIUM]: 'Équilibre',
     [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
     [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
-    [AlgoKey.ANTI_CONSENSUS]: 'Anti-Consensus',
-    [AlgoKey.DECADE_PATTERN]: 'Analyse Décennies',
     [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
     [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
     [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre'
@@ -1274,10 +1271,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         <Line type="monotone" dataKey="spatial" stroke="#14b8a6" strokeWidth={1.5} dot={{ r: 1.5 }} name="Spatial" />
                                         <Line type="monotone" dataKey="temporal" stroke="#a855f7" strokeWidth={1.5} dot={{ r: 1.5 }} name="Temporel" />
                                         <Line type="monotone" dataKey="fractal" stroke="#06b6d4" strokeWidth={1.5} dot={{ r: 1.5 }} name="Fractal" />
-                                        <Line type="monotone" dataKey="equilibrium" stroke="#84cc16" strokeWidth={1.5} dot={{ r: 1.5 }} name="Équilibre" />
                                         <Line type="monotone" dataKey="shadow" stroke="#64748b" strokeWidth={1.5} dot={{ r: 1.5 }} name="Probabilité Ombre" />
                                         <Line type="monotone" dataKey="network" stroke="#e11d48" strokeWidth={1.5} dot={{ r: 1.5 }} name="Corrélation Réseau" />
-                                        <Line type="monotone" dataKey="anticonsensus" stroke="#d946ef" strokeWidth={1.5} dot={{ r: 1.5 }} name="Anti-Consensus" />
                                     </LineChart>
                                 </ResponsiveContainer>
                             )}

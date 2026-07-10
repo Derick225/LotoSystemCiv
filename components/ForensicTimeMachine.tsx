@@ -464,10 +464,8 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
       'spatial': 'Spatial',
       'temporal': 'Temporel',
       'fractal': 'Fractal',
-      'equilibrium': 'Équilibre',
       'shadow': 'Probabilité Ombre',
       'network': 'Corrélation Réseau',
-      'anticonsensus': 'Anti-Consensus',
     };
     return Object.keys(localWeights).map((key) => ({
       subject: labelMap[key] || key.replace(/_/g, " "),

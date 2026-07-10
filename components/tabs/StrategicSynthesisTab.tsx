@@ -228,10 +228,8 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({ drawName
             'spatial': 'Spatial',
             'temporal': 'Temporel',
             'fractal': 'Fractal',
-            'equilibrium': 'Équilibre',
             'shadow': 'Probabilité Ombre',
             'network': 'Corrélation Réseau',
-            'anticonsensus': 'Anti-Consensus',
         };
         return Object.entries(globalWeights).map(([key, val]) => ({
             subject: labelMap[key] || (key.charAt(0).toUpperCase() + key.slice(1).replace('_', ' ')),

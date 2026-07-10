@@ -757,6 +757,16 @@ export const performForensicAnalysis = async (
       },
       actualWinningNumbers,
     );
+
+    // Injection du calibrage ADN via la rétroaction de la composition réelle observée
+    try {
+      const dnaCalibrations = optimizer.calibrateDNAFromWinningComposition(baseWeights, winningXAP);
+      dnaCalibrations.forEach((adj) => {
+        proposedAdjustments.push(adj);
+      });
+    } catch (err) {
+      console.warn("[DNA Calibration Injection Error]:", err);
+    }
   }
 
   let consensusStrength = 0;

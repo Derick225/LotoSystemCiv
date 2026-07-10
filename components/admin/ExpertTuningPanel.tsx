@@ -325,11 +325,11 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
             },
             {
                 name: "Mathematical & Structural",
-                keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.EQUILIBRIUM, AlgoKey.SHADOW_PROBABILITY]
+                keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY]
             },
             {
                 name: "Advanced Dynamics",
-                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ANTI_CONSENSUS, AlgoKey.DECADE_PATTERN, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
+                keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
             }
         ];
     }, []);
