@@ -263,6 +263,124 @@ const LogTerminal: React.FC<{ logs: string[] }> = ({ logs }) => {
     );
 };
 
+const FirstPredictionDNASnapshotViewer: React.FC<{
+    snapshot: Record<number, Record<AlgoKey, number>> | null;
+    maxBalls: number;
+}> = ({ snapshot, maxBalls }) => {
+    const [selectedNumber, setSelectedNumber] = useState<number>(1);
+
+    if (!snapshot) {
+        return (
+            <div className="bg-[#05091a]/80 border border-slate-800/80 p-6 rounded-2xl shadow-xl text-center text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                <Dna size={28} className="mb-2 animate-pulse text-indigo-400 mx-auto" />
+                <span>Lancez l'entraînement pour capturer l'ADN initial de chaque numéro</span>
+            </div>
+        );
+    }
+
+    const numberDNA = snapshot[selectedNumber] || {};
+    const sortedAlgos = Object.entries(numberDNA)
+        .map(([algo, weight]) => ({ algo: algo as AlgoKey, weight }))
+        .sort((a, b) => b.weight - a.weight);
+
+    return (
+        <div className="bg-[#05091a]/85 border border-slate-800/80 p-6 rounded-2xl shadow-xl relative overflow-hidden min-w-0">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none"></div>
+            
+            <div className="mb-6">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <BrainCircuit size={14} className="text-emerald-400" /> Surveillance ADN Initial des Numéros (Étape 1)
+                </h4>
+                <p className="text-[10px] text-slate-500 mt-1">
+                    Visualisation de l'ADN algorithmique de chaque numéro au moment de générer la toute première prédiction chronologique.
+                </p>
+            </div>
+
+            <div className="grid lg:grid-cols-12 gap-6">
+                {/* Numéros de la grille */}
+                <div className="lg:col-span-7">
+                    <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider mb-2 block">
+                        Grille de sélection de numéro ({maxBalls} boules)
+                    </span>
+                    <div className="grid grid-cols-10 gap-1 bg-slate-950 p-3 rounded-xl border border-white/5 max-h-56 overflow-y-auto custom-scrollbar">
+                        {Array.from({ length: maxBalls }).map((_, idx) => {
+                            const num = idx + 1;
+                            const isSelected = selectedNumber === num;
+                            const hasDNA = !!snapshot[num];
+                            // Compute a quick sum to indicate magnitude
+                            const dnaSum = hasDNA ? Object.values(snapshot[num]).reduce((s, w) => s + w, 0) : 0;
+                            const hasActiveSignal = dnaSum > 0.05;
+
+                            return (
+                                <button
+                                    key={num}
+                                    onClick={() => {
+                                        audioEngine.play('click');
+                                        setSelectedNumber(num);
+                                    }}
+                                    className={`aspect-square rounded-lg text-[9px] font-black flex flex-col items-center justify-center transition-all cursor-pointer border ${
+                                        isSelected
+                                            ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)] scale-105'
+                                            : hasActiveSignal
+                                                ? 'bg-indigo-950/40 text-indigo-300 border-indigo-500/20 hover:bg-indigo-900/40 hover:border-indigo-400'
+                                                : 'bg-slate-900/60 text-slate-500 border-slate-800 hover:text-slate-300 hover:bg-slate-800'
+                                    }`}
+                                >
+                                    <span>{num}</span>
+                                    {hasActiveSignal && !isSelected && (
+                                        <div className="w-1 h-1 rounded-full bg-indigo-400 mt-0.5 animate-pulse"></div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Profil ADN de l'algorithme pour le numéro sélectionné */}
+                <div className="lg:col-span-5 flex flex-col justify-between">
+                    <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider mb-3 block">
+                            Profil ADN du numéro <span className="text-emerald-400 font-extrabold">#{selectedNumber}</span> à l'étape 1
+                        </span>
+
+                        <div className="space-y-2.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                            {sortedAlgos.slice(0, 8).map(({ algo, weight }) => {
+                                const label = LABELS[algo] || algo;
+                                const isDominant = weight > 0.15;
+                                const percentage = (weight * 100).toFixed(1);
+
+                                return (
+                                    <div key={algo} className="bg-black/35 p-2 rounded-lg border border-white/5">
+                                        <div className="flex justify-between items-center text-[9px] mb-1">
+                                            <span className="font-bold text-slate-300 uppercase tracking-wide">{label}</span>
+                                            <span className={`font-black ${isDominant ? 'text-emerald-400' : 'text-slate-400'}`}>
+                                                {percentage}%
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-slate-950 h-1 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-300 ${
+                                                    isDominant ? 'bg-emerald-400' : 'bg-slate-700'
+                                                }`}
+                                                style={{ width: `${Math.min(100, weight * 100)}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {sortedAlgos.length === 0 && (
+                                <div className="text-[10px] text-slate-600 italic text-center py-6">
+                                    Aucune composante capturée pour ce numéro
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN TRAINING TAB COMPONENT ---
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
@@ -286,6 +404,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [logs, setLogs] = useState<string[]>([]);
     const [finalReport, setFinalReport] = useState<TrainingReport | null>(null);
     const [improvement, setImprovement] = useState(0);
+    const [firstPredictionDNASnapshot, setFirstPredictionDNASnapshot] = useState<Record<number, Record<AlgoKey, number>> | null>(null);
 
     // Dynamic loading of specific draw weights to resolve persistence and tab switching desync
     useEffect(() => {
@@ -511,6 +630,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const handleStartTraining = async () => {
         setStatus('running');
         setEvolutionData([]);
+        setFirstPredictionDNASnapshot(null);
         setLogs([
             `[SYS] Initialisation de l'optimiseur cybernétique : ${optimizerType === 'pso' ? 'Essaim de Particules (PSO)' : optimizerType === 'genetic' ? 'Loi de Darwin (Évolution Génétique)' : optimizerType === 'bayesian' ? 'Inférence Bayésienne KDE' : 'Omni-Méta (PSO + Darwin + Bayesian Blending)'}...`,
             `[DB] Isolation du tirage actif : [${drawName}] - Strict isolation rule.`,
@@ -548,6 +668,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 setFinalReport(result.report);
                 setImprovement(result.improvement);
                 setLiveWeights(safeTrainedWeights);
+                // @ts-ignore
+                setFirstPredictionDNASnapshot(result.firstPredictionDNASnapshot || null);
                 setStatus('completed');
                 addLog(`✓ Convergence stabilisée atteinte. Solution optimale identifiée.`);
                 
@@ -965,6 +1087,9 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                         )}
                     </div>
+
+                    {/* NEW COMPONENT: INITIAL DNA MONITORING SNAPSHOT (STEP 1) */}
+                    <FirstPredictionDNASnapshotViewer snapshot={firstPredictionDNASnapshot} maxBalls={drawSpecifics.balls} />
 
                     {/* Comparaison Radar Panel */}
                     <div className="bg-slate-950 p-6 rounded-3xl border border-slate-900 shadow-xl flex flex-col lg:flex-row items-center gap-8 relative overflow-hidden min-w-0 w-full">
