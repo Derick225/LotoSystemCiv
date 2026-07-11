@@ -2,116 +2,122 @@ import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 
 export const gapSequencePlugin: AlgorithmPlugin = {
-  key: AlgoKey.GAP_SEQUENCE as any, // Type cast since we just added it to types but TS might lag
+  key: AlgoKey.GAP_SEQUENCE as any,
   category: 'advanced',
   stability: 'stable',
-  mathematicalBasis: 'Chaînes de Markov sur les états d\'écart et Affinité Topologique',
-  description: 'Évalue les séquences d\'écarts historiques (probabilité qu\'un écart X sorte) et l\'affinité entre les écarts actuels.',
+  mathematicalBasis: 'Autocorrélation de Lag-1, Variance continue et Processus Stochastique de Retour à la Moyenne',
+  description: 'Analyse les séquences historiques d\'écarts d\'un numéro pour détecter des patterns de rebond cycliques via l\'autocorrélation (Lag-1) et projeter le prochain écart attendu.',
   isStrictlyDeterministic: true,
-  
+
   precompute(ctx) {
     const N = 90;
-    // 1. Calcul des écarts actuels
-    const currentGaps: Record<number, number> = {};
+    const history = ctx.history; // This is sorted newest to oldest in standard prediction facade
+    
+    // Reverse history to process from oldest to newest
+    const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+    const totalDraws = sortedHistory.length;
+    
+    const lastSeenIndex: Record<number, number> = {};
+    const gapSequences: Record<number, number[]> = {};
+    
     for (let i = 1; i <= N; i++) {
-        currentGaps[i] = 0;
+        lastSeenIndex[i] = -1;
+        gapSequences[i] = [];
     }
     
-    // Reverse history to find the current gap of each number
-    const recentHistory = ctx.history.slice(0, 100); // 100 tirages pour les écarts
-    const lastSeen: Record<number, number> = {};
-    
-    recentHistory.forEach((draw, drawIndex) => {
-        (draw.gagnants || []).forEach(num => {
-            if (lastSeen[num] === undefined) {
-                lastSeen[num] = drawIndex;
+    sortedHistory.forEach((draw, index) => {
+        (draw.winningNumbers || draw.gagnants || []).forEach(num => {
+            if (num >= 1 && num <= N) {
+                const gap = index - lastSeenIndex[num] - 1;
+                gapSequences[num].push(gap);
+                lastSeenIndex[num] = index;
             }
         });
     });
-
-    for (let i = 1; i <= N; i++) {
-        currentGaps[i] = lastSeen[i] !== undefined ? lastSeen[i] : 100;
-    }
-
-    // 2. Calcul de la fonction de répartition cumulative empirique par taille d'écart.
-    // CORRECTIF CONCEPTUEL : la version précédente utilisait la probabilité PONCTUELLE
-    // qu'un écart de taille exacte G précède un gain (gapSuccessCounts[G] / total). Sous
-    // hypothèse de tirages indépendants (loi géométrique), cette quantité décroît TOUJOURS
-    // mécaniquement avec G — l'algorithme ne faisait donc que reproduire la décroissance
-    // géométrique théorique et favorisait systématiquement les numéros récemment sortis,
-    // quel que soit le jeu de données réel ou même sur du bruit aléatoire. Aucune valeur
-    // prédictive réelle, et logique diamétralement opposée à l'algorithme `gaps.ts` déjà
-    // présent (qui favorise les numéros "en retard" via une CDF géométrique croissante).
-    //
-    // On utilise maintenant la fonction de répartition CUMULATIVE empirique :
-    // P(écart historique menant à un gain <= G), qui croît naturellement avec G — donc plus
-    // un numéro est en retard, plus il est probable (empiriquement) qu'un gain survienne
-    // "bientôt" au vu de la distribution réelle des écarts observés. Contrairement à `gaps.ts`
-    // (loi géométrique théorique pure), on reste ici fondé sur la distribution empirique
-    // réellement observée dans l'historique, ce qui capture d'éventuels écarts au modèle
-    // théorique (biais physique, dépendances non détectées, etc.).
-    const gapSuccessCounts: Record<number, number> = {};
-    let totalSuccesses = 0;
-    for (let i = 0; i < recentHistory.length - 1; i++) {
-        const draw = recentHistory[i];
-        const prevDraws = recentHistory.slice(i + 1);
+    
+    const patternData: Record<number, any> = {};
+    
+    for (let num = 1; num <= N; num++) {
+        const seq = gapSequences[num];
+        const currentGap = totalDraws - lastSeenIndex[num] - 1;
         
-        draw.gagnants?.forEach(num => {
-            // Find gap of num in prevDraws
-            let gap = 0;
-            for (let j = 0; j < prevDraws.length; j++) {
-                if (prevDraws[j].gagnants?.includes(num)) {
-                    break;
-                }
-                gap++;
-            }
-            if (!gapSuccessCounts[gap]) gapSuccessCounts[gap] = 0;
-            gapSuccessCounts[gap]++;
-            totalSuccesses++;
-        });
+        if (seq.length < 2) {
+            patternData[num] = {
+                currentGap, expectedNextGap: currentGap, lag1Autocorrelation: 0, meanGap: currentGap, stdGap: 1
+            };
+            continue;
+        }
+        
+        const n = seq.length;
+        const meanGap = seq.reduce((acc, val) => acc + val, 0) / n;
+        const variance = seq.reduce((acc, val) => acc + Math.pow(val - meanGap, 2), 0) / n;
+        const stdGap = Math.sqrt(variance) || 1;
+        
+        // Autocorrélation de Lag 1
+        let numerator = 0;
+        let denominator = 0;
+        for (let i = 1; i < n; i++) {
+            numerator += (seq[i] - meanGap) * (seq[i - 1] - meanGap);
+        }
+        for (let i = 0; i < n; i++) {
+            denominator += Math.pow(seq[i] - meanGap, 2);
+        }
+        const lag1Autocorrelation = denominator > 0 ? numerator / denominator : 0;
+        
+        // Projection continue du prochain écart attendu (E[g_n])
+        const lastGap = seq[n - 1];
+        let expectedNextGap = meanGap + lag1Autocorrelation * (lastGap - meanGap);
+        expectedNextGap = Math.max(0, expectedNextGap); 
+        
+        patternData[num] = {
+            currentGap,
+            expectedNextGap,
+            lag1Autocorrelation,
+            meanGap,
+            stdGap
+        };
     }
-
-    const maxObservedGap = Object.keys(gapSuccessCounts).reduce((max, g) => Math.max(max, parseInt(g, 10)), 0);
-    const cumulativeGapProbabilities: Record<number, number> = {};
-    let runningTotal = 0;
-    for (let g = 0; g <= maxObservedGap; g++) {
-        runningTotal += gapSuccessCounts[g] || 0;
-        cumulativeGapProbabilities[g] = totalSuccesses > 0 ? runningTotal / totalSuccesses : 0;
-    }
-
+    
     ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.GAP_SEQUENCE] = {
-        currentGaps,
-        cumulativeGapProbabilities,
-        maxObservedGap
-    };
+    ctx.pluginCache[AlgoKey.GAP_SEQUENCE] = patternData;
   },
 
   evaluate(num, ctx) {
     if (!ctx.pluginCache?.[AlgoKey.GAP_SEQUENCE]) {
       this.precompute(ctx);
     }
-    const cache = ctx.pluginCache![AlgoKey.GAP_SEQUENCE];
     
-    const myGap = cache.currentGaps[num] || 0;
-    // Au-delà du plus grand écart jamais observé menant à un gain, la CDF empirique sature
-    // naturellement à 1.0 (certitude croissante qu'un gain est "dû"), au lieu de retomber sur
-    // une valeur arbitraire faible comme dans l'ancienne version.
-    const rawProb = myGap >= cache.maxObservedGap
-      ? 1.0
-      : (cache.cumulativeGapProbabilities[myGap] ?? 0);
+    const data = ctx.pluginCache![AlgoKey.GAP_SEQUENCE][num];
+    if (!data) return { score: 50, confidence: 0.5 };
     
-    // Normalisation sigmoïde pour intégration continue (Zero Hasard, Zero Hard Thresholds)
-    // On utilise l'exposant de Hurst comme paramètre de pente si disponible
-    const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
-    const center = 0.5; // Centré sur la médiane de la CDF (50% de la masse de probabilité)
+    const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation } = data;
     
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawProb - center) * 4.0));
+    // Normal CDF for fatigue
+    const z = (currentGap - meanGap) / stdGap;
+    const t = 1 / (1 + 0.2316419 * Math.abs(z));
+    const d = 0.3989423 * Math.exp(-z * z / 2);
+    const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    const fatigueScore = z > 0 ? 1 - prob : prob;
+    
+    // Pattern Resonance Score : Gaussienne autour de l'écart attendu
+    const zScoreResonance = (currentGap - expectedNextGap) / (stdGap / 1.5 + Number.EPSILON);
+    const patternResonanceScore = Math.exp(-0.5 * Math.pow(zScoreResonance, 2));
+    
+    // Mix basé sur la force du pattern (Hurst exponent proxy)
+    const patternWeight = Math.abs(lag1Autocorrelation);
+    const combinedSignal = (patternWeight * patternResonanceScore) + ((1 - patternWeight) * fatigueScore);
+    
+    // Sigmoïde finale pour lisser le score sur [0, 100]
+    const finalScore = 100.0 / (1.0 + Math.exp(-5.0 * (combinedSignal - 0.5)));
     
     return {
-      score: Math.max(0, Math.min(100, normalizedScore)),
-      confidence: 0.85,
-      metadata: { currentGap: myGap, cumulativeProbability: rawProb }
+      score: Math.max(0, Math.min(100, finalScore)),
+      confidence: 0.85 + 0.1 * patternWeight, // Plus le pattern est fort, plus on est confiant
+      metadata: { 
+          currentGap, 
+          expectedNextGap: parseFloat(expectedNextGap.toFixed(2)), 
+          lag1: parseFloat(lag1Autocorrelation.toFixed(3))
+      }
     };
   }
 };

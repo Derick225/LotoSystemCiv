@@ -10,6 +10,7 @@ import { spatialPlugin } from './spatial';
 import { temporalPlugin, bayesPlugin } from './temporalBayes';
 import { echoStateNetworkPlugin } from './echoState';
 import { gapSequencePlugin } from './gapSequence';
+import { gapPatternPlugin } from './gapPattern';
 import { derivedNeighborPlugin } from './derivedNeighbor';
 import { 
   shadowProbabilityPlugin, 
@@ -41,6 +42,7 @@ export const initCoreAlgorithms = () => {
 
   // Séquences, écarts et transformations
   registerAlgorithm(gapSequencePlugin);
+  registerAlgorithm(gapPatternPlugin);
   registerAlgorithm(derivedNeighborPlugin);
 };
 

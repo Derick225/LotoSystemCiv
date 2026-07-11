@@ -2,7 +2,7 @@
 import React, { useState, Suspense, lazy, useEffect } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { SmartInsights } from '../SmartInsights';
-import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box } from 'lucide-react';
+import { BarChart2, Waves, Activity, Layers, Clock, RefreshCw, BookOpen, Box, Compass } from 'lucide-react';
 import { LocalErrorBoundary } from '../ui/LocalErrorBoundary';
 import { ChaosAttractor } from '../ChaosAttractor';
 import { calculateGapEfficiency } from '../../services/mathService';
@@ -11,6 +11,7 @@ import type { GapEfficiency } from '../../types';
 import { audioEngine } from '../../utils/audioEngine';
 
 const StatsTab = lazy(() => import('./StatsTab').then(m => ({ default: m.StatsTab })));
+const GapPatternTab = lazy(() => import('./GapPatternTab').then(m => ({ default: m.GapPatternTab })));
 const SpectralTab = lazy(() => import('./SpectralTab').then(m => ({ default: m.SpectralTab })));
 const FractalTab = lazy(() => import('./FractalTab').then(m => ({ default: m.FractalTab })));
 const MathTab = lazy(() => import('./MathTab').then(m => ({ default: m.MathTab })));
@@ -50,6 +51,7 @@ export const SignalHub: React.FC = () => {
 
     const tabs = [
         { id: 'stats', label: 'Stats', icon: BarChart2, color: 'text-indigo-500' },
+        { id: 'gaps', label: 'Écarts', icon: Compass, color: 'text-rose-500' },
         { id: 'spectral', label: 'Spectral', icon: Waves, color: 'text-purple-500' },
         { id: 'fractal', label: 'Météo', icon: Layers, color: 'text-emerald-500' },
         { id: 'math', label: 'Maths', icon: Activity, color: 'text-rose-500' },
@@ -106,6 +108,7 @@ export const SignalHub: React.FC = () => {
                                 </div>
                             }>
                                 {activeSubTab === 'stats' && <StatsTab drawName={activeDraw} />}
+                                {activeSubTab === 'gaps' && <GapPatternTab drawName={activeDraw} />}
                                 {activeSubTab === 'spectral' && <SpectralTab drawName={activeDraw} />}
                                 {activeSubTab === 'fractal' && <FractalTab drawName={activeDraw} />}
                                 {activeSubTab === 'math' && <MathTab drawName={activeDraw} />}

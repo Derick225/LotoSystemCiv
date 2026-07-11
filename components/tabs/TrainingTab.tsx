@@ -35,7 +35,8 @@ const LABELS: Record<AlgoKey, string> = {
     [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
     [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
     [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
-    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre'
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
+    [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)'
 };
 
 // --- SUB-COMPONENTS & UTILITIES ---

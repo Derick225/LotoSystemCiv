@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { calculateSuccessionMatrixAsync, findFrequentTriplets } from '../../services/mathService';
+import { getNeighbors, getMirror, getShadow } from '../../services/prediction/differentialAffinityService';
 import { NumberBall } from '../NumberBall';
 import { Users, ArrowRight, Activity, Heart, UserMinus, Search, Network, Link, Atom } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -286,6 +287,46 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
                                                 </div>
                                             ))}
                                             {nemesis.length === 0 && <div className="text-xs text-slate-500 italic">Aucune exclusion</div>}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* SECTION: TOPOLOGIE DIFFÉRENTIELLE */}
+                                <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700 space-y-4">
+                                    <h5 className="font-black text-slate-800 dark:text-white uppercase text-[11px] tracking-widest flex items-center gap-3">
+                                        <Network size={16} className="text-indigo-500" /> Relations Différentielles (Topologie)
+                                    </h5>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-extrabold">
+                                        Calcul vectoriel de diffusion sur l'invariance structurelle de la grille
+                                    </p>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                                        {/* Voisins */}
+                                        <div className="p-4 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center">
+                                            <span className="text-[10px] font-black text-indigo-500 dark:text-indigo-400 uppercase tracking-widest mb-3">Voisins Circulaires</span>
+                                            <div className="flex gap-2 mb-3">
+                                                {getNeighbors(selectedNum).map(n => (
+                                                    <NumberBall key={n} number={n} size="sm" />
+                                                ))}
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Numéros adjacents (N-1 & N+1) sur la grille avec bouclage 1 ↔ 90.</span>
+                                        </div>
+
+                                        {/* Miroir */}
+                                        <div className="p-4 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center">
+                                            <span className="text-[10px] font-black text-purple-500 dark:text-purple-400 uppercase tracking-widest mb-3">Miroir Central</span>
+                                            <div className="mb-3">
+                                                <NumberBall number={getMirror(selectedNum)} size="sm" />
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Symétrie centrale parfaite sur la grille 1..90 (complément à 91).</span>
+                                        </div>
+
+                                        {/* Ombre */}
+                                        <div className="p-4 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center">
+                                            <span className="text-[10px] font-black text-rose-500 dark:text-rose-400 uppercase tracking-widest mb-3">Ombre / Inverse</span>
+                                            <div className="mb-3">
+                                                <NumberBall number={getShadow(selectedNum)} size="sm" />
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Inversion digitale des chiffres (ex: 23 ↔ 32, 5 ↔ 50) bornée à la grille.</span>
                                         </div>
                                     </div>
                                 </div>

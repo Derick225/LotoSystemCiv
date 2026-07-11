@@ -18,7 +18,7 @@ import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast';
 
 export const NeuralFeedbackPanel: React.FC = () => {
-  const { neuralFeedbackLogs, addNeuralFeedbackLogs } = useNexusStore();
+  const { neuralFeedbackLogs } = useNexusStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedAlgo, setSelectedAlgo] = useState<string>('ALL');
   const [selectedDirection, setSelectedDirection] = useState<string>('ALL');
