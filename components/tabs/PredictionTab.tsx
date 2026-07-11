@@ -509,6 +509,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                         </span>
                       )}
                     </div>
+                    {lastPrediction.diversityMetrics.isMonoculture && (
+                      <p className="text-[10px] text-rose-500 font-bold mt-1">
+                        ⚠️ Alerte Monoculture détectée dans l'ADN des candidats. Rejet par le générateur.
+                      </p>
+                    )}
                   </div>
                 )}
 

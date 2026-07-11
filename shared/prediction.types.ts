@@ -19,7 +19,8 @@ export enum AlgoKey {
     ECHO_STATE = 'echo_state',
     GAP_SEQUENCE = 'gap_sequence',
     DERIVED_NEIGHBOR = 'derived_neighbor',
-    GAP_PATTERN = 'gap_pattern'
+    GAP_PATTERN = 'gap_pattern',
+    SEQUENCE_PATTERN = 'sequence_pattern'
 }
 
 export type AlgoWeights = Record<AlgoKey, number>;

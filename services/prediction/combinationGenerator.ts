@@ -97,6 +97,12 @@ export const calculateCombinationEnergy = (
     }
     const diversity = calculateGeneticDiversityIndex(combo, smallBreakdowns);
     energy += diversity.penalty;
+    
+    // Contrainte stricte : les numéros de la prédiction Oracle Base ne doivent
+    // pas être TOUS composés du même profil d'ADN algorithmique.
+    if (diversity.isMonoculture || diversity.meanSimilarity > 0.85) {
+      energy += 100000.0; // Mur de pénalité pour rejeter fermement la monoculture
+    }
   }
 
   return energy;
