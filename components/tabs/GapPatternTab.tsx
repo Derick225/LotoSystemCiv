@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNexusStore } from '../../store/useNexusStore';
 import { NumberBall } from '../NumberBall';
 import { gapSequencePatternService } from '../../services/prediction/gapSequencePatternService';
+import { sequencePatternAnalyzer } from '../../services/prediction/sequencePatternAnalyzer';
 import { StatsSkeleton } from '../skeletons/StatsSkeleton';
 import { 
   LineChart, 
@@ -24,7 +25,10 @@ import {
   Search, 
   Flame, 
   Info,
-  Compass
+  Compass,
+  Settings,
+  Layers,
+  ChevronRight
 } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
 
@@ -37,11 +41,34 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const [sortBy, setSortBy] = useState<'number' | 'gap' | 'mean' | 'lag1' | 'signal'>('signal');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  // SequencePatternAnalyzer Configuration
+  const [windowSize, setWindowSize] = useState<number>(3);
+  const [minRecurrence, setMinRecurrence] = useState<number>(0.5);
+
   // Compute Gap Sequence Analysis report reactively on history or draw change
   const report = useMemo(() => {
     if (!history || history.length === 0) return null;
     return gapSequencePatternService.analyzePatterns(drawName, history);
   }, [drawName, history]);
+
+  // Compute sliding window sequence patterns dynamically
+  const sequencePatternResults = useMemo(() => {
+    if (!history || history.length === 0) return null;
+    return sequencePatternAnalyzer.analyze(drawName, history, {
+      slidingWindowSize: windowSize,
+      minRecurrenceThreshold: minRecurrence,
+      maxNumber: 90
+    });
+  }, [drawName, history, windowSize, minRecurrence]);
+
+  const selectedSequencePattern = useMemo(() => {
+    if (!sequencePatternResults) return null;
+    return sequencePatternResults.find(r => r.number === selectedNum) || null;
+  }, [sequencePatternResults, selectedNum]);
+
+  const bestMatch = useMemo(() => {
+    return selectedSequencePattern?.bestMatch || null;
+  }, [selectedSequencePattern]);
 
   // Set default selected number when report loads
   useEffect(() => {
@@ -401,6 +428,194 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
           </div>
 
+        </div>
+      )}
+
+      {/* SECTION EXCLUSIVE : ANALYSEUR SÉQUENTIEL PAR FENÊTRE GLISSANTE */}
+      {selectedSequencePattern && (
+        <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] border border-slate-100 dark:border-slate-700/50 shadow-sm relative overflow-hidden space-y-6">
+          <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+            <Sliders size={120} className="text-indigo-500 animate-pulse" />
+          </div>
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-slate-100 dark:border-slate-800/80 pb-6">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest mb-2">
+                <Settings size={12} className="animate-spin" style={{ animationDuration: '10s' }} />
+                Contrôle Stochastique Déterministe
+              </div>
+              <h4 className="text-sm md:text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
+                <Layers className="text-indigo-500" size={18} /> SequencePatternAnalyzer : Détection de Récurrences Séquentielles
+              </h4>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">
+                Ajustement en temps réel de l'algorithme d'affinité séquentielle pour le numéro {selectedNum}
+              </p>
+            </div>
+
+            {/* CONFIGURATION CONTROLS */}
+            <div className="flex flex-wrap items-center gap-6 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-100/40 dark:border-slate-800/60">
+              {/* SLIDING WINDOW SIZE */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Taille de la Fenêtre Glissante (N-Gaps) : <span className="text-indigo-500 font-extrabold">{windowSize}</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-bold text-slate-400">2</span>
+                  <input
+                    type="range"
+                    min="2"
+                    max="5"
+                    step="1"
+                    value={windowSize}
+                    onChange={(e) => {
+                      try { audioEngine.play('click'); } catch(e) {}
+                      setWindowSize(parseInt(e.target.value));
+                    }}
+                    className="w-32 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-[9px] font-bold text-slate-400">5</span>
+                </div>
+              </div>
+
+              {/* MIN RECURRENCE THRESHOLD */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Seuil de Récurrence Minimal : <span className="text-indigo-500 font-extrabold">{minRecurrence.toFixed(1)}</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-bold text-slate-400">0.1</span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.1"
+                    value={minRecurrence}
+                    onChange={(e) => {
+                      try { audioEngine.play('click'); } catch(e) {}
+                      setMinRecurrence(parseFloat(e.target.value));
+                    }}
+                    className="w-32 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-[9px] font-bold text-slate-400">2.0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* DETAILED RESULTS FOR SELECTED NUMBER */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            {/* CURRENT WINDOW & RECENT SEQUENCE */}
+            <div className="bg-slate-50 dark:bg-slate-900/40 p-5 rounded-2xl border border-slate-100/50 dark:border-slate-800/50 space-y-4">
+              <div>
+                <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
+                  Séquence Récente Active
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Derniers écarts consécutifs enregistrés chronologiquement pour ce numéro :
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                {selectedSequencePattern.recentSequence && selectedSequencePattern.recentSequence.length > 0 ? (
+                  selectedSequencePattern.recentSequence.map((gap, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <div className="flex flex-col items-center justify-center w-11 h-11 bg-indigo-500/10 dark:bg-indigo-500/20 rounded-xl border border-indigo-500/30 text-indigo-500 dark:text-indigo-400">
+                        <span className="text-sm font-black font-mono">{gap}</span>
+                        <span className="text-[7px] uppercase font-black tracking-wider text-slate-400">Gap {i + 1}</span>
+                      </div>
+                      {i < selectedSequencePattern.recentSequence.length - 1 && (
+                        <ChevronRight size={14} className="text-slate-300 dark:text-slate-700" />
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-xs font-bold text-slate-400 italic">Aucun écart suffisant</span>
+                )}
+              </div>
+            </div>
+
+            {/* MATCHED HISTORICAL PATTERN */}
+            <div className="bg-slate-50 dark:bg-slate-900/40 p-5 rounded-2xl border border-slate-100/50 dark:border-slate-800/50 space-y-4">
+              <div>
+                <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
+                  Meilleure Correspondance Séquentielle
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Pattern historique ayant la plus forte résonance de similarité gaussienne :
+                </p>
+              </div>
+
+              {bestMatch ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-1.5">
+                    {bestMatch.pattern.map((gap, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <div className="px-2 py-1 bg-slate-200 dark:bg-slate-800 rounded text-xs font-mono font-black text-slate-700 dark:text-slate-300">
+                          {gap}
+                        </div>
+                        {i < bestMatch.pattern.length - 1 && (
+                          <span className="text-slate-400 text-[10px]">-</span>
+                        )}
+                      </div>
+                    ))}
+                    <div className="ml-2 px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded text-[9px] font-extrabold uppercase">
+                      f: {bestMatch.frequency}x
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 space-y-1">
+                    <div>Prochain Écart attendu : <span className="text-slate-800 dark:text-white font-black">{bestMatch.nextExpectedGap}</span></div>
+                    <div>Confiance de résonance : <span className="text-indigo-500 font-extrabold">{bestMatch.confidence}%</span></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-12 flex items-center justify-center text-xs font-bold text-slate-400 italic">
+                  Aucune récurrence détectée avec ce seuil
+                </div>
+              )}
+            </div>
+
+            {/* STOCHASTIC RESONANCE SCORE */}
+            <div className="bg-slate-50 dark:bg-slate-900/40 p-5 rounded-2xl border border-slate-100/50 dark:border-slate-800/50 flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
+                  Score de Signal Déterministe
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Mesure de la probabilité de rupture par résonance de pattern stochastique :
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Score de Résonance</span>
+                  <span className={`text-xl font-black font-mono ${
+                    selectedSequencePattern.stochasticScore > 75 
+                      ? 'text-emerald-500' 
+                      : selectedSequencePattern.stochasticScore > 40 
+                      ? 'text-indigo-500' 
+                      : 'text-slate-400'
+                  }`}>
+                    {selectedSequencePattern.stochasticScore}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      selectedSequencePattern.stochasticScore > 75 
+                        ? 'bg-emerald-500' 
+                        : selectedSequencePattern.stochasticScore > 40 
+                        ? 'bg-indigo-500' 
+                        : 'bg-slate-400'
+                    }`} 
+                    style={{ width: `${selectedSequencePattern.stochasticScore}%` }} 
+                  />
+                </div>
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
 

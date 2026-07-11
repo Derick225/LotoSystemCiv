@@ -14,7 +14,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const history = ctx.history; // This is sorted newest to oldest in standard prediction facade
     
     // Reverse history to process from oldest to newest
-    const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+    const sortedHistory = [...history].reverse();
     const totalDraws = sortedHistory.length;
     
     const lastSeenIndex: Record<number, number> = {};
@@ -26,7 +26,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     }
     
     sortedHistory.forEach((draw, index) => {
-        (draw.winningNumbers || draw.gagnants || []).forEach(num => {
+        (draw.gagnants || []).forEach((num: number) => {
             if (num >= 1 && num <= N) {
                 const gap = index - lastSeenIndex[num] - 1;
                 gapSequences[num].push(gap);

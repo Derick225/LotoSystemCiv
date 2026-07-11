@@ -13,7 +13,6 @@ interface TicketXRayProps {
 }
 
 export const TicketXRay: React.FC<TicketXRayProps> = React.memo(({ numbers, score = 0, showTitle = true }) => {
-    const sum = useMemo(() => numbers.reduce((a, b) => a + b, 0), [numbers]);
     const ac = useMemo(() => calculateACValue(numbers), [numbers]);
     const oddCount = useMemo(() => numbers.filter(n => n % 2 !== 0).length, [numbers]);
     
@@ -22,17 +21,15 @@ export const TicketXRay: React.FC<TicketXRayProps> = React.memo(({ numbers, scor
 
     if (numbers.length === 0) return null;
 
-    // Diagnostic Dynamique (Zéro nombre magique)
-    const sumMin = calibration.meanSum - calibration.stdSum;
-    const sumMax = calibration.meanSum + calibration.stdSum;
-    const isSumGood = sum >= sumMin && sum <= sumMax;
+    // Retrait de l'obligation de Poids Total Équilibré à la demande de l'utilisateur
+    const isSumGood = true;
     
     const isMixGood = oddCount >= 2 && oddCount <= 3;
     const isAcGood = ac >= (calibration.meanAC - calibration.stdAC);
 
     const checks = [
         { label: "Mélange (Pair/Impair)", valid: isMixGood, text: isMixGood ? "Bien mélangé" : "Trop déséquilibré" },
-        { label: "Poids Total", valid: isSumGood, text: isSumGood ? "Équilibré" : "Trop lourd/léger" },
+        { label: "Poids Total", valid: isSumGood, text: "Équilibré" },
         { label: "Complexité", valid: isAcGood, text: isAcGood ? "Difficile à deviner" : "Trop simple" }
     ];
 
