@@ -157,7 +157,13 @@ export interface ForensicReport {
   predictionId?: string;
   drawResultId?: string;
   matches: ForensicEvidence[];
-  missedOpportunities: { number: number; reason: string }[];
+  missedOpportunities: {
+    number: number;
+    reason: string;
+    zScore?: number;
+    continuousWeight?: number;
+    bestAlgo?: string;
+  }[];
   scoreDivergence: { algo: string; impact: number }[];
   suspicionScore?: number;
   indicators?: ForensicIndicator[];

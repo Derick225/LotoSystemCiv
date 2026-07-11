@@ -284,7 +284,13 @@ export const performForensicAnalysis = async (
   });
 
   // 3. Identification des occasions manquées (Signaux forts non retenus)
-  const missed: { number: number; reason: string }[] = [];
+  const missed: {
+    number: number;
+    reason: string;
+    zScore?: number;
+    continuousWeight?: number;
+    bestAlgo?: string;
+  }[] = [];
 
   if (predictionBreakdown) {
     actualWinningNumbers.forEach((win) => {
@@ -320,18 +326,25 @@ export const performForensicAnalysis = async (
             missed.push({
               number: win,
               reason: `Signal de perte détecté sur ${bestAlgo[0]} (Z=${zScore.toFixed(2)}, Certitude=${certaintyPercent}%). Activée proportionnellement via CDF logistique.`,
+              zScore,
+              continuousWeight,
+              bestAlgo: bestAlgo[0]
             });
           }
         } else if (!isCovered) {
           missed.push({
             number: win,
             reason: "Aucune donnée spectrale continue capturée.",
+            zScore: 0,
+            continuousWeight: 0.5
           });
         }
       } else if (!isCovered) {
         missed.push({
           number: win,
           reason: "Aucune donnée spectrale capturée.",
+          zScore: 0,
+          continuousWeight: 0.5
         });
       }
     });

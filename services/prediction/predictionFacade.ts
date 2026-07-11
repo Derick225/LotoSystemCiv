@@ -421,6 +421,7 @@ export const generateMasterPredictionCore = async (
   const missedScores: Record<number, number> = {};
   const driftScores: Record<number, number> = {};
   const dynamicWeightModifiers: Record<number, Partial<Record<string, number>>> = {};
+  const exactMissedBoosts: Record<number, number> = {};
 
   const alphasDecades = new Float32Array(10).fill(1.0); // Prior Multinomial des Décades (Laplace)
   const alphasParity = new Float32Array(2).fill(1.0);   // Prior Binomial de Parité (Laplace)
@@ -432,7 +433,7 @@ export const generateMasterPredictionCore = async (
 
   const oracleDriftMap: Record<string, number> = {};
 
-  recentReports.forEach((r) => {
+  recentReports.forEach((r, idx) => {
     if (r.nearMisses) {
       r.nearMisses.forEach((nm) => {
         for (let i = 1; i <= 90; i++) {
@@ -480,6 +481,27 @@ export const generateMasterPredictionCore = async (
         }
         if (ms.pattern.includes("Impairs")) {
           alphasParity[1] += ms.significance;
+        }
+      });
+    }
+    if (r.missedOpportunities) {
+      r.missedOpportunities.forEach((mo) => {
+        const num = mo.number;
+        if (num >= 1 && num <= 90) {
+          const recencyWeight = Math.exp(-0.4 * idx);
+          const moWeight = mo.continuousWeight !== undefined ? mo.continuousWeight : 0.5;
+          const moZ = mo.zScore !== undefined ? mo.zScore : 1.0;
+          
+          const regimeCorrection = 1.0 + gameRegimeInfo.entropy * (1.0 - gameRegimeInfo.hurst);
+          const incrementalBoost = 8.5 * moWeight * Math.abs(moZ) * recencyWeight * regimeCorrection;
+          
+          exactMissedBoosts[num] = (exactMissedBoosts[num] || 0) + incrementalBoost;
+          
+          if (mo.bestAlgo) {
+            if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
+            if (!dynamicWeightModifiers[num][mo.bestAlgo]) dynamicWeightModifiers[num][mo.bestAlgo] = 0;
+            dynamicWeightModifiers[num][mo.bestAlgo]! += 0.25 * moWeight * recencyWeight;
+          }
         }
       });
     }
@@ -552,7 +574,8 @@ export const generateMasterPredictionCore = async (
 
     const jointFactor = weightDecade * weightParity;
 
-    missedScores[i] = Math.max(-3.0, Math.min(3.0, Math.log(jointFactor))) * 15.0;
+    const baseMissedScore = Math.max(-3.0, Math.min(3.0, Math.log(jointFactor))) * 15.0;
+    missedScores[i] = baseMissedScore + (exactMissedBoosts[i] || 0);
   }
 
   const enhancedMetrics: EnhancedMetrics = {
