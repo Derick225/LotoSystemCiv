@@ -1,6 +1,33 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 
+// Deterministic rescaled range Hurst Exponent helper for individual gap sequences
+function calculateHurstExponent(seq: number[]): number {
+  const N = seq.length;
+  if (N < 4) return 0.5; // Neutral default for short series
+
+  const mean = seq.reduce((a, b) => a + b, 0) / N;
+  let sumSq = 0;
+  let maxZ = -Infinity;
+  let minZ = Infinity;
+  let currentZ = 0;
+
+  for (let i = 0; i < N; i++) {
+    const diff = seq[i] - mean;
+    sumSq += diff * diff;
+    currentZ += diff;
+    if (currentZ > maxZ) maxZ = currentZ;
+    if (currentZ < minZ) minZ = currentZ;
+  }
+
+  const R = maxZ - minZ;
+  const S = Math.sqrt(sumSq / N) || Number.EPSILON;
+  const RS = R / S;
+  const hurst = Math.log(RS) / Math.log(N);
+  
+  return isNaN(hurst) || !isFinite(hurst) ? 0.5 : Math.max(0.01, Math.min(0.99, hurst));
+}
+
 export const gapSequencePlugin: AlgorithmPlugin = {
   key: AlgoKey.GAP_SEQUENCE as any,
   category: 'advanced',
@@ -43,7 +70,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
         
         if (seq.length < 2) {
             patternData[num] = {
-                currentGap, expectedNextGap: currentGap, lag1Autocorrelation: 0, meanGap: currentGap, stdGap: 1
+                currentGap, expectedNextGap: currentGap, lag1Autocorrelation: 0, meanGap: currentGap, stdGap: 1, hurstExponent: 0.5
             };
             continue;
         }
@@ -69,12 +96,15 @@ export const gapSequencePlugin: AlgorithmPlugin = {
         let expectedNextGap = meanGap + lag1Autocorrelation * (lastGap - meanGap);
         expectedNextGap = Math.max(0, expectedNextGap); 
         
+        const hurstExponent = calculateHurstExponent(seq);
+        
         patternData[num] = {
             currentGap,
             expectedNextGap,
             lag1Autocorrelation,
             meanGap,
-            stdGap
+            stdGap,
+            hurstExponent
         };
     }
     
@@ -90,7 +120,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const data = ctx.pluginCache![AlgoKey.GAP_SEQUENCE][num];
     if (!data) return { score: 50, confidence: 0.5 };
     
-    const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation } = data;
+    const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation, hurstExponent } = data;
     
     // Normal CDF for fatigue
     const z = (currentGap - meanGap) / stdGap;
@@ -103,20 +133,23 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const zScoreResonance = (currentGap - expectedNextGap) / (stdGap / 1.5 + Number.EPSILON);
     const patternResonanceScore = Math.exp(-0.5 * Math.pow(zScoreResonance, 2));
     
-    // Mix basé sur la force du pattern (Hurst exponent proxy)
-    const patternWeight = Math.abs(lag1Autocorrelation);
-    const combinedSignal = (patternWeight * patternResonanceScore) + ((1 - patternWeight) * fatigueScore);
+    // Continuous Modulation via the Hurst Exponent (Memory Regime) of the gap sequence
+    // H > 0.5 is persistent (pattern/cycles), H < 0.5 is anti-persistent (mean reversion fatigue)
+    const hurstSigmoid = 1.0 / (1.0 + Math.exp(-6.0 * (hurstExponent - 0.5)));
+    const blendedWeight = 0.5 * Math.abs(lag1Autocorrelation) + 0.5 * hurstSigmoid;
+    const combinedSignal = (blendedWeight * patternResonanceScore) + ((1.0 - blendedWeight) * fatigueScore);
     
     // Sigmoïde finale pour lisser le score sur [0, 100]
     const finalScore = 100.0 / (1.0 + Math.exp(-5.0 * (combinedSignal - 0.5)));
     
     return {
       score: Math.max(0, Math.min(100, finalScore)),
-      confidence: 0.85 + 0.1 * patternWeight, // Plus le pattern est fort, plus on est confiant
+      confidence: 0.85 + 0.1 * blendedWeight, // Plus le pattern est fort, plus on est confiant
       metadata: { 
           currentGap, 
           expectedNextGap: parseFloat(expectedNextGap.toFixed(2)), 
-          lag1: parseFloat(lag1Autocorrelation.toFixed(3))
+          lag1: parseFloat(lag1Autocorrelation.toFixed(3)),
+          hurst: parseFloat(hurstExponent.toFixed(3))
       }
     };
   }

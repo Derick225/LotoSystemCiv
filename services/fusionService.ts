@@ -13,6 +13,32 @@ const getMeanAndStdDev = (arr: number[]): { mean: number; std: number } => {
   return { mean, std: Math.max(Number.EPSILON, Math.sqrt(MathVariance)) };
 };
 
+const normalizeVector = (vector: Float64Array): Float64Array => {
+  let max = 0;
+  for (let i = 0; i < vector.length; i++) if (vector[i] > max) max = vector[i];
+  if (max === 0) return vector;
+  
+  const normalized = new Float64Array(vector.length);
+  for (let i = 0; i < vector.length; i++) {
+    normalized[i] = (vector[i] / max) * 100;
+  }
+  return normalized;
+};
+
+const computeVectorEntropy = (vector: Float64Array): number => {
+  let sum = 0;
+  for (let i = 1; i <= 90; i++) sum += vector[i];
+  if (sum === 0) return 1.0;
+  
+  let entropy = 0;
+  for (let i = 1; i <= 90; i++) {
+    const p = vector[i] / sum;
+    if (p > 0) entropy -= p * Math.log(p);
+  }
+  const maxEntropy = Math.log(90);
+  return entropy / maxEntropy;
+};
+
 /**
  * CALCUL DU VECTEUR PYTHON (Logique Statistique)
  * Strictement continu : pas de seuils ou constantes arbitraires.
@@ -99,7 +125,9 @@ const calculateQuantumVector = (spectral: SpectralMetric[]): { number: number; s
   
   return spectral.map(s => {
     const zEnergy = (s.energy - medianEnergy) / (stdDevEnergy + Number.EPSILON);
-    const activation = sigmoid(zEnergy, 0, 1);
+    // Pente sigmoïdale adaptée dynamiquement à la dispersion énergétique
+    const adaptiveGain = 1.0 / (1.0 + stdDevEnergy / (medianEnergy + Number.EPSILON));
+    const activation = sigmoid(zEnergy, 0, adaptiveGain);
     
     // Le "boost" est maintenant proportionnel à la variance dynamique de la série
     const dynamicBoost = stdDevEnergy * Math.E * activation; 
@@ -138,9 +166,16 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
     const commonWithLast = historicalRecent.filter(n => lastDrawNumbers.includes(n)).length;
     const commonWithPrev = historicalOlder.filter(n => prevDrawNumbers.includes(n)).length;
 
-    const maxCommon = lastDrawNumbers.length * 2.0 + prevDrawNumbers.length * 1.5;
-    const contextStrength = (commonWithLast * 2.0 + commonWithPrev * 1.5) / maxCommon;
-    const activation = sigmoid(contextStrength, 0.3, 10.0);
+    // ZÉRO NOMBRE MAGIQUE : Poids de contexte calculés continûment à partir de l'ADN
+    const lastWeight = 1.0 + dnaTemporal;
+    const prevWeight = 1.0 + dnaMarkov;
+    const maxCommon = lastDrawNumbers.length * lastWeight + prevDrawNumbers.length * prevWeight;
+    const contextStrength = (commonWithLast * lastWeight + commonWithPrev * prevWeight) / (maxCommon || Number.EPSILON);
+    
+    // Activation adaptative sigmoïdale dérivée du profil fractal et de Markov
+    const activationCenter = 0.25 + 0.10 * (1.0 - dnaFractal);
+    const activationGain = 5.0 + 10.0 * dnaMarkov;
+    const activation = sigmoid(contextStrength, activationCenter, activationGain);
 
     const futureDraw = history[i - 2];
     if (!futureDraw) continue;
@@ -157,13 +192,18 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
   const candidates = new Set(lastPrediction?.candidates || []);
   const maxScore = Math.max(Number.EPSILON, ...Array.from(associationScores));
   
+  // Dynamically scale prediction confirmations based on the confidence metric of the previous model
+  const lastConfidence = lastPrediction?.confidence || 50;
+  const dynamicPredBoost = (Math.E * 5.0) * (lastConfidence / 100.0);
+  const dynamicCandBoost = (Math.E * 1.5) * (lastConfidence / 100.0);
+  
   const result = [];
   for (let i = 1; i <= 90; i++) {
     let baseAssoc = (associationScores[i] / maxScore) * 100.0;
     
     // Modulation continue des confirmations (évite la logique if)
-    const predBoost = preds.has(i) ? Math.E * 5.0 : 0.0;
-    const candBoost = candidates.has(i) ? Math.E * 1.5 : 0.0;
+    const predBoost = preds.has(i) ? dynamicPredBoost : 0.0;
+    const candBoost = candidates.has(i) ? dynamicCandBoost : 0.0;
     
     result.push({ number: i, score: baseAssoc + predBoost + candBoost });
   }
@@ -220,10 +260,22 @@ export const calculateFusion = (
   const stdQ = Math.sqrt(varQ);
   const stdO = Math.sqrt(varO);
 
-  // Matrices de Précision (Inverse du bruit de covariance R) pondérées par l'ADN Algo et les Biais interactifs
-  const precP = W_PYTHON / varP;
-  const precQ = W_QUANTUM / varQ;
-  const precO = W_ORACLE / varO;
+  // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Kalman pour situations de forte variance
+  // Calcule l'entropie cumulée des trois signaux pour adapter la régularisation (zéro nombre magique)
+  const combinedScores = new Float64Array(91);
+  for (let i = 1; i <= 90; i++) {
+    combinedScores[i] = (mPython.get(i) || 0) + (mQuantum.get(i) || 0) + (mOracle.get(i) || 0);
+  }
+  const entropyMultiplier = computeVectorEntropy(normalizeVector(combinedScores));
+  const avgStd = (stdP + stdQ + stdO) / 3.0;
+  
+  // Lambda de régularisation continue : s'élève proportionnellement au désordre (entropie) et à l'écart type moyen
+  const lambda = avgStd * entropyMultiplier * 0.15;
+
+  // Matrices de Précision Régularisées (évite l'overfitting d'un capteur très bruité)
+  const precP = W_PYTHON / (varP + lambda);
+  const precQ = W_QUANTUM / (varQ + lambda);
+  const precO = W_ORACLE / (varO + lambda);
   
   const totalPrecision = precP + precQ + precO;
   const kalmanGainP = precP / totalPrecision;
@@ -281,6 +333,19 @@ export const calculateFusion = (
     };
   }
 
+  let sumScores = 0;
+  for (let i = 1; i <= 90; i++) sumScores += entropyCounts[i];
+  
+  const probArray = [];
+  if (sumScores > 0) {
+    for (let i = 1; i <= 90; i++) {
+        probArray.push(entropyCounts[i] / sumScores);
+    }
+  }
+  const entropy = calculateShannonEntropy(probArray);
+  const maxEntropy = Math.log2(90);
+  const normalizedEntropy = sumScores > 0 ? entropy / maxEntropy : 0;
+
   const convergedNumbers = Object.entries(scoreMap)
     .map(([n, data]) => ({ number: parseInt(n), score: data.score, sources: data.sources, details: data.details }))
     .sort((a, b) => b.score - a.score);
@@ -288,14 +353,15 @@ export const calculateFusion = (
   const finalTicket: number[] = [];
   
   if (selectionMethod === 'balanced') {
-    // Collecter les scores en pénalisant dynamiquement le cumul des mêmes sources déjà élues
+    // Dynamic continuous penalty factor based on normalized entropy (No magic 12.0)
+    const penaltyFactor = 4.0 + 12.0 * normalizedEntropy;
     const candidates = convergedNumbers.map(cn => ({ ...cn }));
     const sourceCounts: Record<string, number> = { python: 0, quantum: 0, oracle: 0 };
     
     while (finalTicket.length < 5 && candidates.length > 0) {
       candidates.sort((a, b) => {
-        const penaltyA = a.sources.reduce((sum, s) => sum + (sourceCounts[s] || 0), 0) * 12.0;
-        const penaltyB = b.sources.reduce((sum, s) => sum + (sourceCounts[s] || 0), 0) * 12.0;
+        const penaltyA = a.sources.reduce((sum, s) => sum + (sourceCounts[s] || 0), 0) * penaltyFactor;
+        const penaltyB = b.sources.reduce((sum, s) => sum + (sourceCounts[s] || 0), 0) * penaltyFactor;
         return (b.score - penaltyB) - (a.score - penaltyA);
       });
       
@@ -321,21 +387,6 @@ export const calculateFusion = (
   const expectedSynergy = Math.min(15, convergedNumbers.length) * Math.exp(-1); 
   const confidenceRaw = sigmoid(totalSynergy, expectedSynergy, 2.0);
   const confidence = confidenceRaw * 100.0;
-
-  let sumScores = 0;
-  for (let i = 1; i <= 90; i++) sumScores += entropyCounts[i];
-  
-  const probArray = [];
-  if (sumScores > 0) {
-    for (let i = 1; i <= 90; i++) {
-        probArray.push(entropyCounts[i] / sumScores);
-    }
-  }
-  const entropy = calculateShannonEntropy(probArray);
-  
-  // Entropie maximale de Shannon pour 90 états
-  const maxEntropy = Math.log2(90);
-  const normalizedEntropy = sumScores > 0 ? entropy / maxEntropy : 0;
 
   return {
     sources: {

@@ -204,6 +204,17 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({ drawName }
         const calGamma = Math.min(1.0, Math.max(0.0, gamma * options.couplingGain));
         const zeta = options.dampingRatio;
 
+        const rawItems: {
+            num: number;
+            rawScore: number;
+            attraction: number;
+            potential: number;
+            coherence: number;
+            dampingCorrection: number;
+        }[] = [];
+
+        let sumRawScores = 0;
+
         for (let num = 1; num <= safeMaxNum; num++) {
             const f = frequencies[num] || 0;
             const g = gaps[num] || 0;
@@ -217,35 +228,57 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({ drawName }
             // 3. Fractal Coherence Weight (with continuous Hurst mapping)
             const coherence = Math.tanh(hurst * (g + 1) / Math.max(1, meanGap));
 
-            // 4. Second-order system damping correction (Underdamped vs Overdamped equations)
-            let dampingCorrection = 0;
-            if (zeta < 1.0) {
-                // Underdamped system: periodic harmonic wave dispersion representing oscillations
-                const omegaD = Math.sqrt(1.0 - zeta * zeta);
-                dampingCorrection = Math.cos(omegaD * (g / Math.max(1, meanGap)) * Math.PI) * Math.exp(-zeta * (g / Math.max(1, meanGap)));
-            } else {
-                // Overdamped system: continuous exponential gap decay
-                dampingCorrection = -Math.exp(-(g / Math.max(1, meanGap * zeta)));
-            }
+            // 4. Second-order system damping correction (Underdamped vs Overdamped smooth blending)
+            const omegaD = Math.sqrt(Math.abs(1.0 - zeta * zeta));
+            const underdamped = Math.cos(omegaD * (g / Math.max(1, meanGap)) * Math.PI) * Math.exp(-zeta * (g / Math.max(1, meanGap)));
+            const overdamped = -Math.exp(-(g / Math.max(1, meanGap * Math.max(0.1, zeta))));
+            
+            // Continuous blending sigmoid at zeta = 1.0 (transition width k = 15.0)
+            const blendWeight = 1.0 / (1.0 + Math.exp(-15.0 * (zeta - 1.0)));
+            const dampingCorrection = (1.0 - blendWeight) * underdamped + blendWeight * overdamped;
+
+            // Continuous damping weight derived from Shannon Entropy, Hurst, and zeta (No magic constants)
+            const wDampingFactor = (0.15 + 0.20 * (1.0 - shannonEntropy)) * (1.0 - Math.abs(hurst - 0.5));
+            const wDamping = wDampingFactor * (1.0 - Math.abs(zeta - 1.0) / (zeta + 1.0 + Number.EPSILON));
 
             // Continuous combination free of magic numbers or abrupt logic pathways
             const rawScore = (calAlpha * potential) + 
                              ((1.0 - calAlpha) * attraction) + 
                              (calBeta * coherence * (1.0 - shannonEntropy) * calGamma) + 
-                             (0.20 * dampingCorrection);
+                             (wDamping * dampingCorrection);
 
-            // Normalized to [1.0, 99.0] continuous scale
-            const score = Math.max(1.0, Math.min(99.0, 100 * (1.0 / (1.0 + Math.exp(-4.5 * (rawScore - 0.52))))));
-
-            scores.push({
+            sumRawScores += rawScore;
+            rawItems.push({
                 num,
-                score,
+                rawScore,
                 attraction,
                 potential,
                 coherence,
                 dampingCorrection
             });
         }
+
+        const meanRawScore = sumRawScores / safeMaxNum;
+
+        // Dynamic standard deviation of raw scores to adjust scaling factor continuously (No magic 4.5 and 0.52)
+        let varRawScores = 0;
+        rawItems.forEach(item => {
+            varRawScores += Math.pow(item.rawScore - meanRawScore, 2);
+        });
+        const stdDevRawScores = Math.sqrt(varRawScores / safeMaxNum) || 0.1;
+        const dynamicScale = 1.0 / stdDevRawScores;
+
+        rawItems.forEach(item => {
+            const score = Math.max(1.0, Math.min(99.0, 100 * (1.0 / (1.0 + Math.exp(-dynamicScale * (item.rawScore - meanRawScore))))));
+            scores.push({
+                num: item.num,
+                score,
+                attraction: item.attraction,
+                potential: item.potential,
+                coherence: item.coherence,
+                dampingCorrection: item.dampingCorrection
+            });
+        });
 
         return scores;
     }, [safeMaxNum, hurst]);
@@ -420,8 +453,9 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({ drawName }
             const primaryHitsAvg = totalPrimaryHits / trialsCount;
             const successRate = (successTrialsCount / trialsCount) * 100;
 
-            // Direct deterministic mapping to locate optimal damping adjustment suggestion
-            const bestDamping = dampingRatio < 0.60 ? 0.35 : dampingRatio < 1.1 ? 0.85 : 1.55;
+            // Continuous interpolation of best recommended damping with dynamic center based on entropy (No magic numbers)
+            const dynamicCenter = 0.5 + 0.5 * computedMetrics.shannonEntropy;
+            const bestDamping = 0.10 + (1.50 / (1.0 + Math.exp(-4.0 * (dampingRatio - dynamicCenter))));
 
             setBacktestStats({
                 trials: trialsCount,

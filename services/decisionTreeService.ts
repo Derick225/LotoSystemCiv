@@ -35,7 +35,8 @@ const extractNumericFeatures = (
   datasetStats: { 
     medianGap: number, stdGap: number, 
     meanFreq: number, stdFreq: number, 
-    medianConsensus: number, stdConsensus: number 
+    medianConsensus: number, stdConsensus: number,
+    trapThresholdZ: number
   }
 ): number[] => {
   if (results.length < 5 || num < 1 || num > 90) {
@@ -99,11 +100,12 @@ const extractNumericFeatures = (
   const consensusSigma = Math.max(Number.EPSILON, datasetStats.stdConsensus);
   const zConsensus = (consensus - datasetStats.medianConsensus) / consensusSigma;
   
-  // Pénalise si le consensus est élevé (Z > 0) mais la fréquence locale est basse
-  const shadowDensity = (1.0 / (1.0 + Math.exp(-zConsensus))) * (rawFreq > datasetStats.meanFreq ? 1.0 : 0.5);
+  // ZÉRO SEUIL BINAIRE : Remplacement de l'activation abrupte par une fonction continue (Sigmoïde)
+  const smoothFactor = 0.5 + 0.5 / (1.0 + Math.exp(-zFreq));
+  const shadowDensity = (1.0 / (1.0 + Math.exp(-zConsensus))) * smoothFactor;
   
-  // Un "trap" est défini statistiquement comme un consensus > 1.5 écart-type au-dessus de la médiane
-  const trapFeature = 1.0 / (1.0 + Math.exp(-(zConsensus - 1.5)));
+  // ZÉRO NOMBRE MAGIQUE : Le seuil du "trap" n'est plus 1.5 fixe, mais calibré continûment via datasetStats.trapThresholdZ
+  const trapFeature = 1.0 / (1.0 + Math.exp(-(zConsensus - datasetStats.trapThresholdZ)));
 
   // D. Distances Topologiques : Noyau Gaussien avec sigma dérivé du domaine
   const neighborFeature = Math.exp(-0.5 * Math.pow(minNeighborDist / SIGMA_TOPOLOGY, 2));
@@ -194,14 +196,24 @@ export const runDecisionForest = async (
   const medianConsensus = freqsArr[Math.floor(freqsArr.length / 2)] || 0;
 
   const meanFreq = freqsArr.reduce((a, b) => a + b, 0) / freqsArr.length;
+  const stdFreq = calculateStdDev(freqsArr, meanFreq);
+
+  // Compute Skewness of the consensus distribution dynamically to determine outlier threshold Z
+  let skewFreq = 0;
+  if (stdFreq > Number.EPSILON) {
+    const sumCubedDiff = freqsArr.reduce((sum, val) => sum + Math.pow((val - meanFreq) / stdFreq, 3), 0);
+    skewFreq = sumCubedDiff / freqsArr.length;
+  }
+  const trapThresholdZ = 1.0 + Math.max(0.2, Math.min(2.0, Math.abs(skewFreq)));
   
   const datasetStats = {
     medianGap,
     stdGap: calculateStdDev(gapsArr, medianGap),
     meanFreq,
-    stdFreq: calculateStdDev(freqsArr, meanFreq),
+    stdFreq,
     medianConsensus,
-    stdConsensus: calculateStdDev(freqsArr, medianConsensus)
+    stdConsensus: calculateStdDev(freqsArr, medianConsensus),
+    trapThresholdZ
   };
 
   // 3. Préparation du Dataset d'entraînement (Sliding Window)
@@ -290,7 +302,7 @@ export const runDecisionForest = async (
           votes: { temporal: 0, spatial: 0, structural: 0 },
           decisionPath: { id: 'root', type: 'condition', label: 'Forest Consensus', children: [] } as DecisionNode,
           features: { 
-            isConsensusTrap: v.score > (datasetStats.medianConsensus + 1.5 * datasetStats.stdConsensus),
+            isConsensusTrap: v.score > (datasetStats.medianConsensus + datasetStats.trapThresholdZ * datasetStats.stdConsensus),
             values: cand ? cand.features : []
           }
         };

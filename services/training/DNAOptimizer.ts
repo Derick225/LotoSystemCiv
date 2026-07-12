@@ -628,6 +628,9 @@ export class DNAOptimizer {
     const factor = 2.0 / totalSamples;
     const lambdaL2 = 0.01 / Math.sqrt(numDraws || 1); // Scale-adaptive L2 regularization penalty
 
+    const initialEntropy = this.calculateShannonEntropyNormalized(new Float32Array(Object.values(initialWeights)));
+    const adaptiveLR = learningRate * (1.0 + Math.tanh(1.0 - initialEntropy));
+
     for (let idx = 0; idx < this.numAlgos; idx++) {
       const k = this.algoKeys[idx];
       if (weights[k] === undefined) continue;
@@ -638,7 +641,7 @@ export class DNAOptimizer {
       // Step in direction of negative gradient with weight decay
       weights[k] = Math.max(
         Number.EPSILON,
-        weights[k] - learningRate * (avgGradient + l2Penalty),
+        weights[k] - adaptiveLR * (avgGradient + l2Penalty),
       );
     }
 
@@ -690,8 +693,10 @@ export class DNAOptimizer {
       for (const key of this.algoKeys) {
         if (weights[key] === undefined) continue;
 
+        const initialEntropy = this.calculateShannonEntropyNormalized(new Float32Array(Object.values(initialWeights)));
+        const stepScale = 0.01 + 0.03 * (1.0 - initialEntropy);
         const currentVal = weights[key];
-        const stepSize = 0.02 / (iter + 1); // Adaptive decaying step size
+        const stepSize = stepScale / (iter + 1); // Adaptive decaying step size
 
         // Positive coordinate push
         const wPlus = { ...weights };

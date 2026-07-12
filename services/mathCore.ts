@@ -1027,7 +1027,21 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
     const scaledData = data.map(row => row.map((val, j) => (val - means[j]) / stdDevs[j]));
 
     // 2. Build RBF Kernel Matrix K of size N x N
-    const g = gamma ?? (1.0 / nFeatures);
+    // Calculate mean of pairwise squared distances to eliminate magic gamma
+    let sumDistSq = 0;
+    let pairsCount = 0;
+    for (let i = 0; i < nSamples; i++) {
+        for (let j = i + 1; j < nSamples; j++) {
+            let distSq = 0;
+            for (let f = 0; f < nFeatures; f++) {
+                distSq += Math.pow(scaledData[i][f] - scaledData[j][f], 2);
+            }
+            sumDistSq += distSq;
+            pairsCount++;
+        }
+    }
+    const meanDistSq = pairsCount > 0 ? (sumDistSq / pairsCount) : 1.0;
+    const g = gamma ?? (1.0 / (meanDistSq || Number.EPSILON));
     const K = Array(nSamples).fill(0).map(() => Array(nSamples).fill(0));
     for (let i = 0; i < nSamples; i++) {
         for (let j = i; j < nSamples; j++) {

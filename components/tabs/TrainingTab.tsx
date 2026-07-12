@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { evolveNeuralDNA, runBacktestTrainingAsync, calculatePositionalDNAProfiles, runLoopSimulation, terminateActiveWorkers } from '../../services/trainingService';
 import { runSurvivalSimulation } from '../../services/backtestingEngine';
 import { BacktestReport } from '../../services/simulationCore';
 import { normalizeWeights, getAlgoWeights } from '../../services/predictionEngine';
 import { useNexusStore } from '../../store/useNexusStore';
-import { useForensicData } from '../../hooks/useForensicData';
 import { AlgoRadar } from '../AlgoRadar';
 import { useToast } from '../ui/Toast';
 import { audioEngine } from '../../utils/audioEngine';
@@ -16,9 +15,8 @@ import {
 } from 'lucide-react';
 import type { AlgoWeights, TrainingReport } from '../../types';
 import { ExportService } from '../../services/exportService';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
-import { parseDateSafely, formatDateSafely } from '../../utils/dateUtils';
 
 const LABELS: Record<AlgoKey, string> = {
     [AlgoKey.FREQUENCY]: 'Fréquence',
@@ -421,10 +419,6 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         return () => { isMounted = false; };
     }, [drawName]);
     
-    // Forensic Integration States
-    const { reports } = useForensicData(drawName);
-    const [recentReportsImpact, setRecentReportsImpact] = useState<any[]>([]);
-    
     // Loop Simulation States
     const [loopRunning, setLoopRunning] = useState(false);
     const [loopSize, setLoopSize] = useState(10);
@@ -435,62 +429,6 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         totalHitsLoop: number;
         improvement: number;
     } | null>(null);
-
-    // Load recent reports impact
-    useEffect(() => {
-        let active = true;
-        const fetchImpacts = async () => {
-            if (reports && reports.length > 0) {
-                const sortedReports = [...reports].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                const top5 = sortedReports.slice(0, 5);
-                
-                const results = [];
-                const { generateLearningSession } = await import('../../services/forensicTrainingBridge');
-                
-                for (const rep of top5) {
-                    try {
-                        const repIndex = history.findIndex(h => h.date === rep.date);
-                        const contextHistory = repIndex >= 0 ? history.slice(repIndex + 1) : history;
-                        
-                        const session = await generateLearningSession(rep, contextHistory);
-                        results.push({
-                            report: rep,
-                            adjustments: session.adjustments,
-                            regime: rep.catastropheControlParams?.regime || "STABLE_MONOSTABLE"
-                        });
-                    } catch (e) {
-                        console.error("Error generating session for report in training tab", rep.date, e);
-                    }
-                }
-                if (active) {
-                    setRecentReportsImpact(results);
-                }
-            }
-        };
-        fetchImpacts();
-        return () => { active = false; };
-    }, [reports, history]);
-
-    // Chronological timeline data for the weight evolution chart
-    const evolutionChartData = useMemo(() => {
-        if (recentReportsImpact.length === 0) return [];
-        const sortedImpacts = [...recentReportsImpact].sort((a, b) => parseDateSafely(a.report.date).getTime() - parseDateSafely(b.report.date).getTime());
-        
-        return sortedImpacts.map((item) => {
-            const dateStr = formatDateSafely(item.report.date, { day: 'numeric', month: 'short' });
-            const entry: any = { date: dateStr };
-            
-            const baseWeights = item.report.counterfactuals?.find((c: any) => c.action === "OPTIMAL_DNA")?.originalWeightsDistribution || DEFAULT_ALGO_WEIGHTS;
-            const optimalWeights = item.report.counterfactuals?.find((c: any) => c.action === "OPTIMAL_DNA")?.optimalWeightsDistribution || baseWeights;
-            
-            Object.keys(DEFAULT_ALGO_WEIGHTS).forEach(algo => {
-                const val = optimalWeights[algo] !== undefined ? optimalWeights[algo] : (baseWeights[algo] || 0);
-                entry[algo] = parseFloat((val * 100).toFixed(1));
-            });
-            
-            return entry;
-        });
-    }, [recentReportsImpact]);
 
     const loopAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -1288,125 +1226,6 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
             {/* --- SECTIONS SPÉCIALISÉES FORENSIC-TRAINING BRIDGE --- */}
             <div className="border-t border-slate-800/65 pt-10 mt-10 space-y-8">
-                
-                {/* 1. SECTIONS INSIGHTS RÉCENTS ET EVOLUTION DES POIDS */}
-                <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-                    
-                    {/* INSIGHTS RÉCENTS (col-span-5) */}
-                    <div className="xl:col-span-5 bg-[#090e1f] border border-slate-800 p-6 md:p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-[80px] pointer-events-none"></div>
-                        
-                        <div className="flex items-center gap-3 mb-6 relative z-10">
-                          <div className="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400">
-                            <BrainCircuit size={18} />
-                          </div>
-                          <div>
-                            <h4 className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Pont Forensic Récents</h4>
-                            <h3 className="text-base font-black text-white uppercase tracking-tight">Dossiers d'Ajustement d'ADN</h3>
-                          </div>
-                        </div>
-
-                        {recentReportsImpact.length === 0 ? (
-                            <div className="h-64 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-2xl p-6 text-center text-slate-500">
-                                <HelpCircle size={32} className="text-slate-600 mb-2 animate-pulse" />
-                                <span className="text-[10px] font-bold uppercase tracking-wider">Aucun rapport forensic disponible</span>
-                                <p className="text-[9px] text-slate-500 leading-normal mt-1 max-w-xs">Générez des rapports dans l'onglet Forensic pour alimenter le pont d'ajustements cybernétiques.</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-4 max-h-[440px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
-                                {recentReportsImpact.map((item, idx) => {
-                                    const dateStr = formatDateSafely(item.report.date, { day: 'numeric', month: 'long', year: 'numeric' });
-                                    return (
-                                        <div key={idx} className="bg-slate-950/40 border border-slate-800/80 hover:border-indigo-900/40 p-4 rounded-2xl transition-all space-y-3">
-                                            <div className="flex justify-between items-center border-b border-slate-900 pb-2">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                                                    <span className="text-[10px] font-black text-slate-300">{dateStr}</span>
-                                                </div>
-                                                <span className="text-[9px] font-mono px-2 py-0.5 bg-indigo-950/40 text-indigo-300 border border-indigo-500/10 rounded-md">
-                                                    {item.regime.replace("_", " ")}
-                                                </span>
-                                            </div>
-                                            
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {item.adjustments.slice(0, 4).map((adj: any, i: number) => {
-                                                    const diff = (adj.newWeight - adj.oldWeight) * 100;
-                                                    return (
-                                                        <div key={i} className="bg-[#030712]/50 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
-                                                            <div className="flex justify-between items-center text-[9px] text-slate-400 capitalize">
-                                                                <span className="truncate max-w-[80px] font-bold">{adj.algo}</span>
-                                                                <span className={diff > 0 ? "text-emerald-400 font-bold" : diff < 0 ? "text-rose-400 font-bold" : "text-slate-500"}>
-                                                                    {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
-                                                                </span>
-                                                            </div>
-                                                            <div className="text-[9px] font-mono font-black text-indigo-400 mt-1">
-                                                                {(adj.newWeight * 100).toFixed(1)}%
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* GRAPHIQUE TEMPOREL EVOLUTION (col-span-7) */}
-                    <div className="xl:col-span-7 bg-[#090e1f] border border-slate-800 p-6 md:p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-80 h-80 bg-teal-500/5 rounded-full blur-[100px] pointer-events-none"></div>
-                        
-                        <div className="flex items-center justify-between mb-6 relative z-10 flex-wrap gap-4">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-teal-500/10 rounded-xl border border-teal-500/20 text-teal-400">
-                              <TrendingUp size={18} />
-                            </div>
-                            <div>
-                              <h4 className="text-[10px] font-black uppercase tracking-wider text-teal-400">Ligne Temporelle d'Évolution</h4>
-                              <h3 className="text-base font-black text-white uppercase tracking-tight">Evolution Chronologique des Poids</h3>
-                            </div>
-                          </div>
-                          
-                          <div className="text-[9px] text-slate-400 font-bold flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-lg border border-white/5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-teal-500"></span>
-                            <span>Ajusté via Forensic Feedback</span>
-                          </div>
-                        </div>
-
-                        <div className="h-72 w-full relative z-10">
-                            {evolutionChartData.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-2xl p-6 text-center text-slate-500">
-                                    <History size={32} className="text-slate-600 mb-2 animate-pulse" />
-                                    <span className="text-[10px] font-bold uppercase tracking-wider">Évolution indisponible</span>
-                                    <p className="text-[9px] text-slate-500 leading-normal mt-1 max-w-xs">Le graphique d'évolution nécessite au moins 1 rapport forensic généré pour dessiner la ligne de calibration.</p>
-                                </div>
-                            ) : (
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={evolutionChartData}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} stroke="#fff" />
-                                        <XAxis dataKey="date" tick={{fontSize: 9, fill: '#64748b'}} axisLine={false} tickLine={false} />
-                                        <YAxis tick={{fontSize: 9, fill: '#64748b'}} unit="%" axisLine={false} tickLine={false} />
-                                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #1e293b', backgroundColor: '#020617', color: '#fff', fontSize: '9px' }} />
-                                        <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '10px' }} />
-                                        <Line type="monotone" dataKey="frequency" stroke="#6366f1" strokeWidth={1.5} dot={{ r: 1.5 }} name="Fréquence" />
-                                        <Line type="monotone" dataKey="gap" stroke="#10b981" strokeWidth={1.5} dot={{ r: 1.5 }} name="Écart" />
-                                        <Line type="monotone" dataKey="spectral" stroke="#f43f5e" strokeWidth={1.5} dot={{ r: 1.5 }} name="Spectral" />
-                                        <Line type="monotone" dataKey="markov" stroke="#8b5cf6" strokeWidth={1.5} dot={{ r: 1.5 }} name="Markov" />
-                                        <Line type="monotone" dataKey="bayes" stroke="#3b82f6" strokeWidth={1.5} dot={{ r: 1.5 }} name="Bayes" />
-                                        <Line type="monotone" dataKey="momentum" stroke="#ec4899" strokeWidth={1.5} dot={{ r: 1.5 }} name="Momentum" />
-                                        <Line type="monotone" dataKey="affinity" stroke="#f59e0b" strokeWidth={1.5} dot={{ r: 1.5 }} name="Affinité" />
-                                        <Line type="monotone" dataKey="spatial" stroke="#14b8a6" strokeWidth={1.5} dot={{ r: 1.5 }} name="Spatial" />
-                                        <Line type="monotone" dataKey="temporal" stroke="#a855f7" strokeWidth={1.5} dot={{ r: 1.5 }} name="Temporel" />
-                                        <Line type="monotone" dataKey="fractal" stroke="#06b6d4" strokeWidth={1.5} dot={{ r: 1.5 }} name="Fractal" />
-                                        <Line type="monotone" dataKey="shadow" stroke="#64748b" strokeWidth={1.5} dot={{ r: 1.5 }} name="Probabilité Ombre" />
-                                        <Line type="monotone" dataKey="network" stroke="#e11d48" strokeWidth={1.5} dot={{ r: 1.5 }} name="Corrélation Réseau" />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            )}
-                        </div>
-                    </div>
-                </div>
 
                 {/* 2. MODE SIMULATION DE BOUCLE */}
                 <div className="bg-[#090e1f] border border-slate-800/85 p-6 md:p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
