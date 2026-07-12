@@ -3,6 +3,7 @@ import { DrawResult } from "../types";
 import { generateMasterPrediction } from "./predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useNexusStore } from "../store/useNexusStore";
+import { getPayoutMultiplier } from "../constants";
 
 export type BettingStrategy = "FLAT" | "MARTINGALE" | "KELLY" | "CONFIDENCE_SMART";
 
@@ -36,6 +37,7 @@ export interface SimulationConfig {
   onProgress?: (percent: number) => void;
   initialBankroll?: number;
   unitBet?: number;
+  payoutModel?: string;
 }
 
 
@@ -178,11 +180,8 @@ export async function runSimulationCore(config: SimulationConfig) {
     if (balance < bet) bet = balance;
 
     const hits = prediction.filter((n) => target.gagnants.includes(n)).length;
-    let winAmount = 0;
-    if (hits === 2) winAmount = bet * 15;
-    else if (hits === 3) winAmount = bet * 100;
-    else if (hits === 4) winAmount = bet * 1500;
-    else if (hits === 5) winAmount = bet * 15000;
+    const mult = getPayoutMultiplier(config.payoutModel || "LEGACY", hits);
+    const winAmount = bet * mult;
 
     const profit = winAmount - bet;
     balance += profit;

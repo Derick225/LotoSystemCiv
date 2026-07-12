@@ -3,6 +3,7 @@ import { generateMasterPrediction } from "./predictionEngine";
 import { useNexusStore } from "../store/useNexusStore";
 import { analyzeForManipulation } from "./forensicAuditService";
 import { AlgoKey } from "../shared/prediction.types";
+import { getPayoutMultiplier } from "../constants";
 
 export interface WalkForwardMetric {
   strategyName: string;
@@ -141,7 +142,8 @@ export class BacktestingFramework {
     strategyType: "FLAT" | "MARTINGALE" | "KELLY" = "FLAT",
     initialBankroll: number = 50000,
     unitBet: number = 200,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    payoutModel: string = "LEGACY"
   ): Promise<Record<string, WalkForwardMetric>> {
     
     if (!history || history.length < depth + 10) {
@@ -297,11 +299,8 @@ export class BacktestingFramework {
         const hits = selection.filter(n => winsSet.has(n)).length;
 
         // Financial outcomes
-        let winAmount = 0;
-        if (hits === 2) winAmount = bet * 15;
-        else if (hits === 3) winAmount = bet * 100;
-        else if (hits === 4) winAmount = bet * 1500;
-        else if (hits === 5) winAmount = bet * 15000;
+        const mult = getPayoutMultiplier(payoutModel, hits);
+        const winAmount = bet * mult;
 
         const profit = winAmount - bet;
         currentBalance += profit;

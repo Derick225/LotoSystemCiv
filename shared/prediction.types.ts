@@ -20,7 +20,8 @@ export enum AlgoKey {
     GAP_SEQUENCE = 'gap_sequence',
     DERIVED_NEIGHBOR = 'derived_neighbor',
     GAP_PATTERN = 'gap_pattern',
-    SEQUENCE_PATTERN = 'sequence_pattern'
+    SEQUENCE_PATTERN = 'sequence_pattern',
+    GAP_CADENCE = 'gap_cadence'
 }
 
 export type AlgoWeights = Record<AlgoKey, number>;

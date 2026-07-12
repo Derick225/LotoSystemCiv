@@ -58,6 +58,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const [depth, setDepth] = useState<number>(50);
     const [initialBankroll, setInitialBankroll] = useState<number>(50000);
     const [unitBet, setUnitBet] = useState<number>(200);
+    const [payoutModel, setPayoutModel] = useState<string>("LEGACY");
 
     // Walk Forward Advanced State
     const [wfResults, setWfResults] = useState<Record<string, WalkForwardMetric> | null>(null);
@@ -94,6 +95,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           },
           initialBankroll,
           unitBet,
+          payoutModel,
         );
 
         if (isMounted.current) {
@@ -107,7 +109,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
         audioEngine.play("error");
         if (isMounted.current) setSimulating(false);
       }
-    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet]);
+    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet, payoutModel]);
 
     const handleAutoRegulate = useCallback(async () => {
       audioEngine.play("click");
@@ -159,7 +161,8 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           unitBet,
           (p) => {
             if (isMounted.current) setWfProgress(p);
-          }
+          },
+          payoutModel
         );
 
         if (isMounted.current) {
@@ -173,7 +176,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
         audioEngine.play("error");
         if (isMounted.current) setWfRunning(false);
       }
-    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet]);
+    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet, payoutModel]);
 
     const handleRunMonteCarlo = useCallback(() => {
       audioEngine.play("click");
@@ -345,6 +348,26 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       }}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                     />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label htmlFor="sim-payout" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                      Modèle de Gains (Cote de Gains)
+                    </label>
+                    <select
+                      id="sim-payout"
+                      value={payoutModel}
+                      onChange={(e) => {
+                        audioEngine.play("click");
+                        setPayoutModel(e.target.value);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="LEGACY">Classique (×15 / ×100 / ×1500 / ×15000)</option>
+                      <option value="STANDARD">LONACI Standard (×15 / ×240 / ×2100 / ×15000 / ×40000)</option>
+                      <option value="DOUBLE_CHANCE">LONACI Double Chance (×10 / ×100 / ×1000 / ×5000 / ×20000)</option>
+                      <option value="DOUBLE_CHANCE_MACHINE">LONACI Double Chance Machine (×8 / ×80 / ×800 / ×4000 / ×15000)</option>
+                    </select>
                   </div>
                 </div>
 

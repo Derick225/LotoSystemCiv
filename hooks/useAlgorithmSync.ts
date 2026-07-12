@@ -21,6 +21,7 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
   [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)',
   [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
+  [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
 };
 
 export const ALGO_CATEGORIES = [
@@ -34,7 +35,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_CADENCE]
   }
 ];
 

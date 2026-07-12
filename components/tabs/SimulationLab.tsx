@@ -6,6 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { audioEngine } from '../../utils/audioEngine';
 import { useToast } from '../ui/Toast';
 import { LCG } from '../../utils/mathUtils';
+import { AlgoKey } from "../../shared/prediction.types";
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
@@ -401,39 +402,42 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         const drawNameKey = drawName || "Global";
         
         // Fetch current active weights
-        const currentStoreWeights = (useNexusStore.getState().globalWeights || {}) as any;
-        const oldWeights = currentStoreWeights[drawNameKey] || {
-          poisson: 8.33,
-          bayes: 8.33,
-          spectral: 8.33,
-          temporal: 8.33,
-          regression: 8.33,
-          resistance: 8.33,
-          aiIntuition: 8.33,
-          fractalResonance: 8.33,
-          hawkesProcess: 8.33,
-          topologicalLyapunov: 8.33,
-          coOccurrence: 8.33,
-          gapVelocity: 8.33
-        };
+        const storeWeights = (useNexusStore.getState().globalWeights || {}) as Record<string, number>;
+        const validKeys = Object.values(AlgoKey);
+        
+        // Check if there are any current valid keys in storeWeights
+        const hasValidKeys = Object.keys(storeWeights).some(k => validKeys.includes(k as AlgoKey));
+        
+        const oldWeights = hasValidKeys 
+          ? { ...storeWeights } 
+          : validKeys.reduce((acc, key) => {
+              acc[key] = 100.0 / validKeys.length;
+              return acc;
+            }, {} as Record<string, number>);
 
-        // Deep copy of weights
-        const updated = { ...oldWeights } as any;
-        const currentAiIntuition = updated.aiIntuition || 8.33;
+        // Deep copy of weights and filter out any stale/obsolete keys to prevent database/pipeline corruption
+        const updated = {} as Record<string, number>;
+        validKeys.forEach(key => {
+          updated[key] = typeof oldWeights[key] === 'number' ? oldWeights[key] : (100.0 / validKeys.length);
+        });
+        
+        // Boost Echo State (ESN) neural algorithm
+        const echoStateKey = AlgoKey.ECHO_STATE;
+        const currentEchoState = updated[echoStateKey] || (100.0 / validKeys.length);
         
         // Max boost of up to 40% based on VALIDATED learning improvement
-        const boostAmount = currentAiIntuition * (improvementRatio * 0.40);
-        updated.aiIntuition = parseFloat((currentAiIntuition + boostAmount).toFixed(4));
+        const boostAmount = currentEchoState * (improvementRatio * 0.40);
+        updated[echoStateKey] = parseFloat((currentEchoState + boostAmount).toFixed(4));
 
         // Normalize weights to sum back to exactly 100
-        const total = Object.values(updated).reduce((a: any, b: any) => (a as number) + (b as number), 0) as number;
+        const total = Object.values(updated).reduce((a, b) => a + b, 0);
         for (const key in updated) {
           updated[key] = parseFloat(((updated[key] / total) * 100).toFixed(4));
         }
 
-        await updateGlobalWeights(updated, drawNameKey);
+        await updateGlobalWeights(updated as any, drawNameKey);
         showToast(
-          `Succès : L'Intuition IA a été boostée de +${boostAmount.toFixed(1)}% ` +
+          `Succès : L'Echo State (ESN) a été boosté de +${boostAmount.toFixed(1)}% ` +
           `(validé sur ${trainingDataSource.sampleCount} échantillons réels, source : ` +
           `${trainingDataSource.type === 'file' ? 'fichier importé' : 'historique du tirage'}).`,
           "success"

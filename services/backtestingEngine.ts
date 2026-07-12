@@ -46,6 +46,7 @@ export const runSurvivalSimulation = async (
   onProgress?: (percent: number) => void,
   initialBankroll?: number,
   unitBet?: number,
+  payoutModel?: string,
 ): Promise<BacktestReport> => {
   const history = purifyHistoryForDraw(drawName, rawHistory);
 
@@ -87,6 +88,7 @@ export const runSurvivalSimulation = async (
           strategy,
           initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
           unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
+          payoutModel,
         },
         { suppressErrorLogging: true }
       );
@@ -117,6 +119,7 @@ export const runSurvivalSimulation = async (
         initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
         unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
         onProgress,
+        payoutModel,
       } as SimulationConfig);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -173,6 +176,7 @@ export const runSurvivalSimulation = async (
       strategy,
       initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
       unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
+      payoutModel,
     });
   });
 };
@@ -211,6 +215,7 @@ export const runAlternativeRealitiesSimulation = async (
   depth?: number,
   initialBankroll?: number,
   unitBet?: number,
+  payoutModel?: string,
 ): Promise<{
   flat: BacktestReport;
   martingale: BacktestReport;
@@ -220,10 +225,10 @@ export const runAlternativeRealitiesSimulation = async (
   const dynamicDepth = depth ?? calculateDynamicDepth(history, 0.25);
   try {
     const [flat, martingale, kelly, confidence_smart] = await Promise.all([
-      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "FLAT", undefined, initialBankroll, unitBet),
-      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "MARTINGALE", undefined, initialBankroll, unitBet),
-      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "KELLY", undefined, initialBankroll, unitBet),
-      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "CONFIDENCE_SMART", undefined, initialBankroll, unitBet),
+      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "FLAT", undefined, initialBankroll, unitBet, payoutModel),
+      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "MARTINGALE", undefined, initialBankroll, unitBet, payoutModel),
+      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "KELLY", undefined, initialBankroll, unitBet, payoutModel),
+      runSurvivalSimulation(drawName, history, weights, dynamicDepth, "CONFIDENCE_SMART", undefined, initialBankroll, unitBet, payoutModel),
     ]);
     return { flat, martingale, kelly, confidence_smart };
   } catch (e) {

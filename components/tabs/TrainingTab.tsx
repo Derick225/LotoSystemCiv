@@ -37,7 +37,8 @@ const LABELS: Record<AlgoKey, string> = {
     [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
     [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
     [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)',
-    [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel'
+    [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
+    [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts'
 };
 
 // --- SUB-COMPONENTS & UTILITIES ---

@@ -36,6 +36,10 @@ import {
   LayoutGrid,
   AlertTriangle,
   Trash2,
+  Cpu,
+  Sparkles,
+  Waves,
+  Lightbulb,
   } from "lucide-react";
 
 
@@ -52,7 +56,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
 }) => {
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<"spatial" | "ballistic">("spatial");
+  const [activeTab, setActiveTab] = useState<
+    "spatial" | "ballistic" | "autopsy" | "metrics" | "counterfactuals" | "spectral" | "xap"
+  >("spatial");
       const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [userRating, setUserRating] = useState<
@@ -259,25 +265,31 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
             </div>
           </div>
 
-          <div className="flex bg-slate-200 dark:bg-slate-900 p-1 rounded-2xl flex-wrap justify-center gap-1">
-            <button
-              onClick={() => {
-                audioEngine.play("click");
-                setActiveTab("spatial");
-              }}
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "spatial" ? "bg-white dark:bg-slate-700 shadow text-amber-500 dark:text-amber-400" : "text-slate-500"}`}
-            >
-              Spatial Heatmap
-            </button>
-            <button
-              onClick={() => {
-                audioEngine.play("click");
-                setActiveTab("ballistic");
-              }}
-              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "ballistic" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500"}`}
-            >
-              Balistique
-            </button>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:flex md:flex-wrap bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl max-w-full md:max-w-2xl gap-1.5 justify-center">
+            {[
+              { id: "spatial", label: "Spatial", color: "text-amber-500 dark:text-amber-400" },
+              { id: "ballistic", label: "Balistique", color: "text-indigo-600 dark:text-indigo-400" },
+              { id: "autopsy", label: "Autopsie IA", color: "text-purple-600 dark:text-purple-400" },
+              { id: "metrics", label: "Métriques", color: "text-rose-600 dark:text-rose-400" },
+              { id: "counterfactuals", label: "Contre-Factuels", color: "text-emerald-600 dark:text-emerald-400" },
+              { id: "spectral", label: "Spectral", color: "text-cyan-600 dark:text-cyan-400" },
+              { id: "xap", label: "XAP / ADN", color: "text-blue-600 dark:text-blue-400" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  audioEngine.play("click");
+                  setActiveTab(tab.id as any);
+                }}
+                className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap flex-1 text-center min-w-[80px] ${
+                  activeTab === tab.id
+                    ? `bg-white dark:bg-slate-800 shadow ${tab.color}`
+                    : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -995,6 +1007,478 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                       </div>
                     </section>
                   )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "autopsy" && (
+            <div className="animate-slide-up space-y-6">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl relative">
+                <div className="absolute top-4 right-4 flex items-center gap-2">
+                  {report.modelUsed && (
+                    <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                      MODÈLE: {report.modelUsed}
+                    </span>
+                  )}
+                  {report.isBlackSwan && (
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-rose-500 text-white px-2.5 py-0.5 rounded-full animate-pulse shadow-md shadow-rose-500/20">
+                      ⚠️ Cygne Noir Détecté
+                    </span>
+                  )}
+                </div>
+
+                <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-6">
+                  <Sparkles size={18} className="text-purple-500" />
+                  Rapport d'Autopsie IA (Narratif Post-Mortem)
+                </h4>
+
+                <div className="p-6 bg-slate-50 dark:bg-black/20 rounded-2xl border border-slate-100 dark:border-white/5 mb-6">
+                  <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed font-medium whitespace-pre-line">
+                    {report.aiAnalysis || "Aucune analyse narrative disponible pour ce tirage."}
+                  </p>
+                </div>
+
+                {report.recommendations && report.recommendations.length > 0 && (
+                  <div className="space-y-4">
+                    <h5 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+                      <Lightbulb size={14} className="text-amber-500" />
+                      Recommandations Stratégiques de l'Oracle
+                    </h5>
+                    <div className="grid gap-3">
+                      {report.recommendations.map((rec, i) => (
+                        <div key={i} className="flex items-start gap-3 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
+                          <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed">
+                            {rec}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Near misses & Missed signals sub-section */}
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+                  <h4 className="font-black text-slate-800 dark:text-slate-200 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
+                    <Activity size={14} className="text-indigo-500" /> Near Misses (+/- 1 & Miroirs)
+                  </h4>
+                  <div className="space-y-3">
+                    {report.nearMisses && report.nearMisses.length > 0 ? (
+                      report.nearMisses.map((nm, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-black/25 border border-slate-100 dark:border-slate-800 rounded-xl font-mono text-xs">
+                          <span className="text-slate-500">Prédiction {nm.predicted}</span>
+                          <ArrowRight size={12} className="text-slate-400" />
+                          <span className="text-indigo-500 font-bold">Réel {nm.actual} (dist. {nm.distance})</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">Aucun near miss de premier ordre détecté.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+                  <h4 className="font-black text-slate-800 dark:text-slate-200 mb-4 uppercase text-xs tracking-widest flex items-center gap-2">
+                    <AlertTriangle size={14} className="text-amber-500" /> Anomalies Globales Manquées
+                  </h4>
+                  <div className="space-y-3">
+                    {report.missedSignals && report.missedSignals.length > 0 ? (
+                      report.missedSignals.map((ms, idx) => (
+                        <div key={idx} className="p-3 bg-slate-50 dark:bg-black/25 border border-slate-100 dark:border-slate-800 rounded-xl text-xs flex justify-between items-center">
+                          <div>
+                            <span className="font-bold text-slate-700 dark:text-slate-300 block">{ms.pattern}</span>
+                            <span className="text-[10px] text-slate-400 uppercase tracking-wider">{ms.type}</span>
+                          </div>
+                          <span className="text-xs font-mono font-black text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            Importance: {(ms.significance * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">Aucune anomalie structurelle majeure ignorée.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "metrics" && (
+            <div className="animate-slide-up space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* 1. RMSE Card */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-indigo-500 tracking-widest block mb-1">Précision Globale</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">RMSE du Modèle</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Root Mean Square Error. Calcule la distance quadratique moyenne entre les scores assignés et les sorties réelles.
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.rmse !== undefined ? report.rmse.toFixed(3) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">/ 100</span>
+                  </div>
+                </div>
+
+                {/* 2. Brier Score Card */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest block mb-1">Fiabilité Probabiliste</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Brier Score</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Mesure de calibration de probabilité (0 = perfection absolue, 0.25 = tirage purement uniforme sans aucun signal).
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.brier_score !== undefined ? report.brier_score.toFixed(4) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">
+                      {report.brier_score !== undefined && report.brier_score < 0.2 ? "Excellent" : "Bruit Élevé"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. KL Divergence Card */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-purple-500 tracking-widest block mb-1">Gain d'Information</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Divergence KL</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Divergence de Kullback-Leibler. Quantité d'information stochastique perdue en approximant la distribution réelle.
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.kl_divergence !== undefined ? report.kl_divergence.toFixed(4) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">nats</span>
+                  </div>
+                </div>
+
+                {/* 4. Shannon Entropy */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-amber-500 tracking-widest block mb-1">Incertitude du Système</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Entropie de Shannon</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Incertitude intrinsèque du vecteur de prédiction avant le tirage. Une entropie basse indique des cibles fortes.
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.shannon_entropy !== undefined ? report.shannon_entropy.toFixed(2) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">bits</span>
+                  </div>
+                </div>
+
+                {/* 5. Benford Compliance */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-emerald-500 tracking-widest block mb-1">Intégrité Logarithmique</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Loi de Benford</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Degré de conformité de la distribution des premiers chiffres significatifs de l'historique par rapport à la loi logarithmique standard.
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.benfordCompliance !== undefined ? (report.benfordCompliance * 100).toFixed(1) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">% conformité</span>
+                  </div>
+                </div>
+
+                {/* 6. Continuous Topological Loss */}
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-pink-500 tracking-widest block mb-1">Maniabilité de Grille</span>
+                    <h4 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-tight mb-2">Perte Topologique</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      Mesure continue de la dispersion géométrique sur l'attracteur spatial par rapport à la grille bidimensionnelle idéale.
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800 dark:text-white font-mono">
+                      {report.continuousTopologicalLoss !== undefined ? report.continuousTopologicalLoss.toFixed(4) : "N/A"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">T-loss</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Catastrophe / Thom Params */}
+              {report.catastropheControlParams && (
+                <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md">
+                  <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-4">
+                    <Cpu size={18} className="text-rose-500" />
+                    Théorie des Catastrophes & Paramètres de Contrôle
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+                    Sous le modèle topologique d'une fronce de René Thom, l'instabilité structurelle est mesurée par le discriminant bistable Δ. Si le discriminant passe sous 0, le système entre en état de bifurcation, générant des transitions d'écart brutales.
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-4 bg-slate-50 dark:bg-black/25 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 block">PARAMÈTRE DE COMPRESSION (a)</span>
+                      <span className="text-lg font-black text-indigo-500 font-mono">{report.catastropheControlParams.a.toFixed(5)}</span>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-black/25 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 block">ASYMÉTRIE DE DÉRIVE (b)</span>
+                      <span className="text-lg font-black text-indigo-500 font-mono">{report.catastropheControlParams.b.toFixed(5)}</span>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-black/25 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 block">DISCRIMINANT (Δ = 4a³ + 27b²)</span>
+                      <span className={`text-lg font-black font-mono ${report.catastropheControlParams.discriminant <= 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                        {report.catastropheControlParams.discriminant.toFixed(5)}
+                      </span>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-black/25 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-400 block">RÉGIME ACTIF</span>
+                      <span className="text-xs font-black uppercase text-slate-850 dark:text-slate-100 block mt-1 tracking-wider">
+                        {report.catastropheControlParams.regime.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "counterfactuals" && (
+            <div className="animate-slide-up space-y-6">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
+                <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-4">
+                  <GitMerge size={18} className="text-emerald-500" />
+                  Optimisation Contre-Factuelle (Correction Gradient)
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
+                  Cette analyse rétrospective simule quel aurait été l'impact si nous avions modifié dynamiquement l'importance (le poids ADN) de chaque algorithme juste avant le tirage. Les écarts mesurés par rapport à l'impact réel nous donnent le gradient exact de correction à appliquer.
+                </p>
+
+                {report.counterfactuals && report.counterfactuals.length > 0 ? (
+                  <div className="space-y-6">
+                    {report.counterfactuals.map((cf, idx) => {
+                      const delta = cf.proposedWeightChange !== undefined ? cf.proposedWeightChange : (cf.optimalWeight - cf.originalWeight);
+                      return (
+                        <div key={idx} className="p-6 bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-6 transition-all hover:border-emerald-500/20">
+                          <div className="flex-1 space-y-2">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-mono font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md uppercase">
+                                {cf.action || (delta > 0 ? "BOOST" : "REDUCE")}
+                              </span>
+                              <h5 className="font-bold text-slate-800 dark:text-white capitalize">
+                                {cf.algo.replace(/_/g, " ")}
+                              </h5>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                              {cf.description || `Ajuster le poids global permettrait d'accroître l'alignement sur les tendances de ce tirage.`}
+                            </p>
+                            {cf.potentialNumbers && cf.potentialNumbers.length > 0 && (
+                              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                <span className="text-[10px] font-black uppercase text-slate-400">Numéros Ciblés :</span>
+                                {cf.potentialNumbers.map((n) => (
+                                  <span key={n} className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-[10px] font-bold">
+                                    {n}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex md:flex-col items-end gap-4 justify-between shrink-0">
+                            <div className="text-right">
+                              <span className="text-[10px] font-black text-slate-400 uppercase block">Amélioration Potentielle</span>
+                              <span className="text-xl font-black text-emerald-500 font-mono">+{cf.improvement.toFixed(1)}%</span>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                              <div className="text-center">
+                                <span className="text-[8px] font-black text-slate-400 uppercase block">Poids initial</span>
+                                <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{(cf.originalWeight * 100).toFixed(1)}%</span>
+                              </div>
+                              <ArrowRight size={12} className="text-slate-400" />
+                              <div className="text-center">
+                                <span className="text-[8px] font-black text-emerald-500 uppercase block">Poids Optima</span>
+                                <span className="font-mono text-xs font-black text-emerald-500">{(cf.optimalWeight * 100).toFixed(1)}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic text-center py-6">Aucune contre-analyse d'ADN disponible pour ce tirage.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "spectral" && (
+            <div className="animate-slide-up space-y-6">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
+                <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-4">
+                  <Waves size={18} className="text-cyan-500" />
+                  Divergence de Spectre d'Énergie Spectrale
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
+                  Chaque numéro vibre sur une fréquence d'apparition théorique modulée par transformée de Fourier discrète (DFT). Ce tableau quantifie le delta énergétique entre les probabilités attribuées par le spectre et le résultat concret du tirage réel (100 si sorti, 0 sinon).
+                </p>
+
+                {report.spectralDeviations && report.spectralDeviations.length > 0 ? (
+                  <div className="grid gap-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
+                    {report.spectralDeviations.map((spec, idx) => {
+                      const absoluteDelta = Math.abs(spec.delta);
+                      return (
+                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-slate-800 rounded-xl transition-all hover:bg-slate-100/50 dark:hover:bg-slate-800/50">
+                          <div className="flex items-center gap-4">
+                            <NumberBall number={spec.number} size="sm" />
+                            <div>
+                              <span className="text-xs font-black text-slate-700 dark:text-slate-300">Numéro {spec.number}</span>
+                              <span className="text-[10px] text-slate-400 block font-medium">Analyse d'énergie par déviation spectrale</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-8 font-mono text-xs">
+                            <div className="text-right">
+                              <span className="text-[8px] font-black text-slate-400 uppercase block">Énergie Prédite</span>
+                              <span className="text-slate-700 dark:text-slate-300">{spec.predictedEnergy.toFixed(2)}</span>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="text-[8px] font-black text-slate-400 uppercase block">Énergie Réelle</span>
+                              <span className={`font-bold ${spec.actualEnergy > 0 ? "text-emerald-500" : "text-slate-400"}`}>{spec.actualEnergy.toFixed(0)}</span>
+                            </div>
+
+                            <div className="text-right w-16">
+                              <span className="text-[8px] font-black text-slate-400 uppercase block">Δ Delta</span>
+                              <span className={`font-black ${absoluteDelta > 40 ? "text-rose-500" : "text-indigo-500"}`}>
+                                {spec.delta > 0 ? "+" : ""}{spec.delta.toFixed(1)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic text-center py-6">Aucune déviation spectrale disponible pour ce tirage.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "xap" && (
+            <div className="animate-slide-up space-y-6">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl relative">
+                <div className="absolute top-4 right-4 flex gap-2">
+                  {report.consensusStrength !== undefined && (
+                    <span className="text-[10px] font-mono font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 border border-indigo-100 dark:border-indigo-800 rounded">
+                      Consensus : {report.consensusStrength.toFixed(0)}%
+                    </span>
+                  )}
+                  {report.antiConsensusActive && (
+                    <span className="text-[10px] font-black uppercase text-rose-500 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded">
+                      🛡️ ADVERSARIAL ACTIVE
+                    </span>
+                  )}
+                </div>
+
+                <h4 className="font-black text-slate-800 dark:text-white uppercase text-sm tracking-widest flex items-center gap-2 mb-4">
+                  <Cpu size={18} className="text-blue-500" />
+                  Génome Oraculaire & Explications de Décision XAP
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
+                  La méthode eXplainable AI (XAP) dissèque l'origine de l'énergie prédictive de chaque numéro gagnant au sein du réseau d'algorithmes combinés. Elle retrace quelle composante du code génétique a joué le rôle de catalyseur principal.
+                </p>
+
+                {report.winningXAP && report.winningXAP.length > 0 ? (
+                  <div className="space-y-6">
+                    {report.winningXAP.map((xap, idx) => (
+                      <div key={idx} className="p-6 bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-4 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <NumberBall number={xap.number} size="sm" glow={true} />
+                            <div>
+                              <h5 className="font-black text-slate-800 dark:text-white text-sm">
+                                Numéro {xap.number}
+                              </h5>
+                              <p className="text-xs text-slate-400 font-mono">
+                                Algorithme Guide : <span className="font-bold text-indigo-500 capitalize">{xap.dominantAlgo.replace(/_/g, " ")}</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="text-[8px] font-black text-slate-400 uppercase block">Contribution Principale</span>
+                            <span className="text-lg font-black text-indigo-500 font-mono">{(xap.contributionPercentage).toFixed(1)}%</span>
+                          </div>
+                        </div>
+
+                        {/* Entropy and Gini */}
+                        {(xap.compositionEntropy !== undefined || xap.compositionGini !== undefined) && (
+                          <div className="grid grid-cols-2 gap-4 py-2 bg-slate-100/50 dark:bg-black/10 rounded-xl px-4 text-xs font-mono">
+                            {xap.compositionEntropy !== undefined && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-400">Entropie de Composition :</span>
+                                <span className="font-bold text-slate-700 dark:text-slate-300">{(xap.compositionEntropy).toFixed(3)}</span>
+                              </div>
+                            )}
+                            {xap.compositionGini !== undefined && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-400">Index de Gini (Inégalité) :</span>
+                                <span className="font-bold text-slate-700 dark:text-slate-300">{(xap.compositionGini).toFixed(3)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* DNA Vector display */}
+                        {xap.dnaVector && (
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Vecteur d'Affinité de l'ADN</span>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {Object.entries(xap.dnaVector).map(([algo, val]) => {
+                                const weightPercentage = Number(val) * 100;
+                                return (
+                                  <div key={algo} className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-[9px] font-mono">
+                                    <div className="flex justify-between font-bold mb-1">
+                                      <span className="text-slate-500 truncate capitalize" title={algo}>{algo.replace(/_/g, " ")}</span>
+                                      <span className="text-indigo-500">{weightPercentage.toFixed(1)}%</span>
+                                    </div>
+                                    <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, weightPercentage)}%` }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Synergy Algos */}
+                        {xap.synergyAlgos && xap.synergyAlgos.length > 0 && (
+                          <div className="flex items-center gap-2 flex-wrap pt-2">
+                            <span className="text-[10px] font-black uppercase text-slate-400">Co-contributeurs (Synergie) :</span>
+                            {xap.synergyAlgos.map((algo) => (
+                              <span key={algo} className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-500 font-mono text-[9px] font-bold capitalize">
+                                {algo.replace(/_/g, " ")}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic text-center py-6">Aucune explication décisionnelle oraculaire (XAP) disponible.</p>
+                )}
               </div>
             </div>
           )}

@@ -114,3 +114,43 @@ export const getNumberColor = (n: number): string => {
   if (n < 80) return 'bg-pink-600 border-pink-400 shadow-pink-400/20';
   return 'bg-rose-700 border-rose-500 shadow-rose-500/20';
 };
+
+export function getPayoutMultiplier(model: string, hits: number): number {
+  if (model === "LEGACY" || !model) {
+    if (hits === 2) return 15;
+    if (hits === 3) return 100;
+    if (hits === 4) return 1500;
+    if (hits === 5) return 15000;
+    return 0;
+  }
+  
+  if (model === "STANDARD") {
+    if (hits === 1) return 15;
+    if (hits === 2) return 240;
+    if (hits === 3) return 2100;
+    if (hits === 4) return 15000;
+    if (hits === 5) return 40000;
+    return 0;
+  }
+  
+  if (model === "DOUBLE_CHANCE") {
+    if (hits === 1) return 10;
+    if (hits === 2) return 100;
+    if (hits === 3) return 1000;
+    if (hits === 4) return 5000;
+    if (hits === 5) return 20000;
+    return 0;
+  }
+  
+  if (model === "DOUBLE_CHANCE_MACHINE") {
+    if (hits === 1) return 8;
+    if (hits === 2) return 80;
+    if (hits === 3) return 800;
+    if (hits === 4) return 4000;
+    if (hits === 5) return 15000;
+    return 0;
+  }
+  
+  return 0;
+}
+
