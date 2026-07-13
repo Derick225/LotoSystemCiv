@@ -22,12 +22,13 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)',
   [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
   [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
+  [AlgoKey.GAP_TREND]: 'Tendance des Écarts',
 };
 
 export const ALGO_CATEGORIES = [
   {
     name: "Fréquentiel & Transition",
-    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.SEQUENCE_PATTERN]
+    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.SEQUENCE_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND]
   },
   {
     name: "Mathématique & Structural",

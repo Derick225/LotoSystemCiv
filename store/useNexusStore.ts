@@ -120,8 +120,8 @@ interface NexusState {
 export const useNexusStore = create<NexusState>()(
   persist(
     (set, get) => ({
-      drawName: "Reveil",
-      currentDrawName: "Reveil",
+      drawName: "",
+      currentDrawName: "",
       inspectingNumber: null,
       hoveredNumber: null,
       activeMainTab: "Flux",
@@ -202,13 +202,22 @@ export const useNexusStore = create<NexusState>()(
         }
 
         const nextDraw = getNextScheduledDraw();
-        if (nextDraw) {
+        const currentDraw = get().drawName;
+        
+        if (!currentDraw && nextDraw) {
           set({ drawName: nextDraw.name, currentDrawName: nextDraw.name });
 
           // On initialise aussi les poids si le store est vide
           const { globalWeights } = get();
           if (Object.keys(globalWeights).length === 0) {
             const weights = await getAlgoWeights(nextDraw.name);
+            set({ globalWeights: weights });
+          }
+        } else if (currentDraw) {
+          // Si on a déjà un tirage actif, on s'assure de charger ses poids s'ils sont vides
+          const { globalWeights } = get();
+          if (Object.keys(globalWeights).length === 0) {
+            const weights = await getAlgoWeights(currentDraw);
             set({ globalWeights: weights });
           }
         }

@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import type { AlgoWeights } from '../types';
 import { AlgoKey } from '../shared/prediction.types';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, Tooltip } from 'recharts';
+import { LABELS_MAP } from '../hooks/useAlgorithmSync';
 
 interface AlgoRadarProps {
     weights: AlgoWeights;
@@ -10,31 +11,13 @@ interface AlgoRadarProps {
     height?: number;
 }
 
-const LABELS: Record<string, string> = {
-    [AlgoKey.FREQUENCY]: 'Fréquence',
-    [AlgoKey.GAPS]: 'Écart',
-    [AlgoKey.SPECTRAL]: 'Spectral',
-    [AlgoKey.MARKOV]: 'Markov',
-    [AlgoKey.BAYES]: 'Bayes',
-    [AlgoKey.MOMENTUM]: 'Momentum',
-    [AlgoKey.AFFINITY]: 'Affinité',
-    [AlgoKey.SPATIAL]: 'Spatial',
-    [AlgoKey.TEMPORAL]: 'Temporel',
-    [AlgoKey.FRACTAL]: 'Fractal',
-    [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
-    [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
-    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
-    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
-    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
-};
-
 export const AlgoRadar: React.FC<AlgoRadarProps> = ({ weights, previousWeights, height = 300 }) => {
     const data = useMemo(() => {
         // On normalise les clés pour l'affichage
-        const keys = Object.keys(LABELS) as Array<AlgoKey>;
+        const keys = Object.keys(LABELS_MAP) as Array<AlgoKey>;
         
         return keys.map(key => ({
-            subject: LABELS[key],
+            subject: LABELS_MAP[key],
             A: Math.round((weights[key] || 0) * 100), // Valeur Actuelle / Optimisée
             B: previousWeights ? Math.round((previousWeights[key] || 0) * 100) : 0, // Valeur Précédente
             fullMark: 100

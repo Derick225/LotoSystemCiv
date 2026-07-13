@@ -647,6 +647,7 @@ export const generateMasterPredictionCore = async (
   let macroPredBreakdown: Record<number, Record<string, number>> | null = null;
   let shrinkageApplied = false;
   let shrinkageFactorValue = 0;
+  let shrinkageFactorMap: Record<number, number> | undefined = undefined;
 
   if (drawName !== "ALL_COMBINED" && drawName !== "ALL") {
     try {
@@ -706,14 +707,51 @@ export const generateMasterPredictionCore = async (
 
     const varianceRatio = s2Local / (s2Local + mse + 1e-6);
     const maxShrinkage = 1.0 - gameRegimeInfo.entropy;
-    const B = maxShrinkage * (1.0 - varianceRatio);
-    shrinkageFactorValue = B;
-    shrinkageApplied = B > 1e-4;
+    const globalB = maxShrinkage * (1.0 - varianceRatio);
+    
+    // NOUVEAU : Calcul du lissage spécifique (Hiérarchique)
+    shrinkageFactorMap = {};
+    let avgB = 0;
+    let bCount = 0;
+
+    if (enhancedMetrics.regularity && enhancedMetrics.regularity.length > 0) {
+      const regularityMap = new Map<number, number>();
+      let maxStd = -Infinity;
+      let minStd = Infinity;
+      enhancedMetrics.regularity.forEach(reg => {
+        if (reg.stdDev > maxStd) maxStd = reg.stdDev;
+        if (reg.stdDev < minStd) minStd = reg.stdDev;
+        regularityMap.set(reg.number, reg.stdDev);
+      });
+      const stdRange = Math.max(1e-6, maxStd - minStd);
+      
+      masterScores.forEach((score) => {
+        const std = regularityMap.get(score.num) ?? ((maxStd + minStd) / 2);
+        // Normaliser de 0 (stable) à 1 (erratique)
+        const volatilityNorm = (std - minStd) / stdRange;
+        // B_i proportionnel à la volatilité, centré autour du globalB ou allant jusqu'à maxShrinkage
+        const b_i = Math.max(0, Math.min(maxShrinkage, globalB * (0.5 + volatilityNorm)));
+        shrinkageFactorMap![score.num] = b_i;
+        avgB += b_i;
+        bCount++;
+      });
+    } else {
+      masterScores.forEach((score) => {
+        shrinkageFactorMap![score.num] = globalB;
+        avgB += globalB;
+        bCount++;
+      });
+    }
+
+    const meanB = bCount > 0 ? avgB / bCount : globalB;
+    shrinkageFactorValue = meanB;
+    shrinkageApplied = meanB > 1e-4;
 
     if (shrinkageApplied) {
       masterScores.forEach((score) => {
+        const B_i = shrinkageFactorMap![score.num] || globalB;
         const macroScore = macroPriorScores![score.num] || 0;
-        score.score = (1.0 - B) * score.score + B * macroScore;
+        score.score = (1.0 - B_i) * score.score + B_i * macroScore;
 
         const bdown = score.breakdown;
         const macroBdown = macroPredBreakdown![score.num];
@@ -721,7 +759,7 @@ export const generateMasterPredictionCore = async (
           Object.keys(bdown).forEach((algo) => {
             const localVal = bdown[algo as AlgoKey] || 0;
             const macroVal = macroBdown[algo as AlgoKey] || 0;
-            bdown[algo as AlgoKey] = (1.0 - B) * localVal + B * macroVal;
+            bdown[algo as AlgoKey] = (1.0 - B_i) * localVal + B_i * macroVal;
           });
         }
       });
@@ -985,6 +1023,7 @@ export const generateMasterPredictionCore = async (
     explainabilityData,
     shrinkageApplied,
     shrinkageFactor: shrinkageFactorValue,
+    shrinkageFactorMap,
     shrinkageVerification: activeVerificationReport,
     hyperparameters,
     hyperTuningLog,

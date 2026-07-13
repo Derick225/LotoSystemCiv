@@ -14,6 +14,7 @@ import { gapPatternPlugin } from './gapPattern';
 import { sequencePatternPlugin } from './sequencePattern';
 import { derivedNeighborPlugin } from './derivedNeighbor';
 import { gapCadencePlugin } from './gapCadence';
+import { gapTrendPlugin } from './gapTrend';
 import { 
   shadowProbabilityPlugin, 
   networkCorrelationPlugin, 
@@ -48,6 +49,7 @@ export const initCoreAlgorithms = () => {
   registerAlgorithm(sequencePatternPlugin);
   registerAlgorithm(derivedNeighborPlugin);
   registerAlgorithm(gapCadencePlugin);
+  registerAlgorithm(gapTrendPlugin);
 };
 
 // Exécution immédiate de l'initialisation

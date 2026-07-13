@@ -24,6 +24,7 @@ export interface XAPExplanation {
   compositionEntropy?: number;       // Concentration de la prédiction (normalisée entre 0 et 1)
   compositionGini?: number;          // Indice d'inégalité des contributions (0 = équitable, 1 = concentré)
   synergyAlgos?: AlgoKey[];          // Les algorithmes co-contributeurs significatifs
+  shapleyValues?: Record<AlgoKey, number>; // Valeur de Shapley (contribution marginale exacte)
 }
 
 export class DNAOptimizer {
@@ -866,6 +867,50 @@ export class DNAOptimizer {
         }
       });
 
+      // 4. Valeurs de Shapley (Game Theory - Exact Marginal Contribution)
+      // On simule une fonction caractéristique non linéaire v(S) = (sum(S))^1.5
+      // pour évaluer la synergie non linéaire exacte de chaque algorithme.
+      const shapleyValues: Record<AlgoKey, number> = {} as any;
+      const MC_ITERATIONS = 300;
+      const marginalContributions = new Float32Array(this.numAlgos);
+      const lcg = this.createDeterministicLCG(candidateNumbers[k] + Math.round(totalScore * 100));
+
+      for (let i = 0; i < MC_ITERATIONS; i++) {
+        const permutation = Array.from({ length: this.numAlgos }, (_, idx) => idx);
+        for (let j = permutation.length - 1; j > 0; j--) {
+          const randIdx = Math.floor(lcg() * (j + 1));
+          [permutation[j], permutation[randIdx]] = [permutation[randIdx], permutation[j]];
+        }
+        
+        let currentScore = 0;
+        for (let j = 0; j < this.numAlgos; j++) {
+          const algoIdx = permutation[j];
+          const val = Math.max(0, dna[algoIdx]);
+          const newScore = currentScore + val;
+          const vS_old = Math.pow(currentScore, 1.5);
+          const vS_new = Math.pow(newScore, 1.5);
+          marginalContributions[algoIdx] += (vS_new - vS_old);
+          currentScore = newScore;
+        }
+      }
+
+      let sumShapley = 0;
+      for (let a = 0; a < this.numAlgos; a++) {
+        const sv = marginalContributions[a] / MC_ITERATIONS;
+        shapleyValues[this.algoKeys[a]] = sv;
+        sumShapley += sv;
+      }
+
+      if (sumShapley > 0) {
+        for (let a = 0; a < this.numAlgos; a++) {
+          shapleyValues[this.algoKeys[a]] = (shapleyValues[this.algoKeys[a]] / sumShapley) * 100;
+        }
+      } else {
+        for (let a = 0; a < this.numAlgos; a++) {
+          shapleyValues[this.algoKeys[a]] = 0;
+        }
+      }
+
       explanations.push({
         number: candidateNumbers[k],
         dominantAlgo: this.algoKeys[dominantIdx],
@@ -874,6 +919,7 @@ export class DNAOptimizer {
         compositionEntropy,
         compositionGini,
         synergyAlgos,
+        shapleyValues,
       });
     }
 

@@ -17,27 +17,7 @@ import type { AlgoWeights, TrainingReport } from '../../types';
 import { ExportService } from '../../services/exportService';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
-
-const LABELS: Record<AlgoKey, string> = {
-    [AlgoKey.FREQUENCY]: 'Fréquence',
-    [AlgoKey.GAPS]: 'Écart',
-    [AlgoKey.SPECTRAL]: 'Spectral',
-    [AlgoKey.MARKOV]: 'Markov',
-    [AlgoKey.BAYES]: 'Bayes',
-    [AlgoKey.MOMENTUM]: 'Momentum',
-    [AlgoKey.AFFINITY]: 'Affinité',
-    [AlgoKey.SPATIAL]: 'Spatial',
-    [AlgoKey.TEMPORAL]: 'Temporel',
-    [AlgoKey.FRACTAL]: 'Fractal',
-    [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
-    [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
-    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
-    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
-    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
-    [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)',
-    [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
-    [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts'
-};
+import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 
 // --- SUB-COMPONENTS & UTILITIES ---
 
@@ -344,7 +324,7 @@ const FirstPredictionDNASnapshotViewer: React.FC<{
 
                         <div className="space-y-2.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
                             {sortedAlgos.slice(0, 8).map(({ algo, weight }) => {
-                                const label = LABELS[algo] || algo;
+                                const label = LABELS_MAP[algo] || algo;
                                 const isDominant = weight > 0.15;
                                 const percentage = (weight * 100).toFixed(1);
 
@@ -1001,7 +981,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                         const weightVal = currentPosDNA[key as AlgoKey] || 0;
                                         const percentage = (weightVal * 100).toFixed(1);
                                         const isDominant = weightVal > 1.2 / Object.keys(currentPosDNA).length;
-                                        const label = LABELS[key as AlgoKey] || key;
+                                        const label = LABELS_MAP[key as AlgoKey] || key;
                                         
                                         return (
                                             <div key={key} className="bg-black/30 p-3 rounded-xl border border-white/5 flex flex-col justify-between hover:border-slate-800 transition-all">

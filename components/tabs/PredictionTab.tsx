@@ -655,45 +655,52 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               <div className="lg:col-span-12 bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm mt-4 mb-4">
                 <h3 className="text-[10px] font-black tracking-[0.2em] text-slate-400 uppercase mb-6 flex items-center gap-2">
                   <Network size={14} className="text-indigo-400" /> Attribution
-                  ADN Multi-Algorithmique (XAP)
+                  ADN Multi-Algorithmique (XAP / Shapley Values)
                 </h3>
                 <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 sm:gap-4">
-                  {lastPrediction.xapExp.map((xap) => (
-                    <div
-                      key={xap.number}
-                      className="bg-slate-50 dark:bg-slate-800/50 rounded-xl xs:rounded-2xl p-2 xs:p-4 border border-slate-100 dark:border-slate-700/50 flex flex-col items-center justify-between text-center min-h-[140px] xs:min-h-[160px] shadow-sm relative group cursor-help transition-all hover:border-indigo-500/30"
-                      title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(', ') || 'Aucun'}\nGini (Concentration): ${xap.compositionGini?.toFixed(2) || '0.00'}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || '1.00'}`}
-                    >
-                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg mb-2 border border-indigo-200/50 dark:border-indigo-800/50 shadow-inner">
-                        {xap.number}
-                      </div>
-                      <span
-                        className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 mb-1 leading-tight line-clamp-1"
+                  {lastPrediction.xapExp.map((xap) => {
+                    const topShapley = xap.shapleyValues 
+                      ? Object.entries(xap.shapleyValues)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 2)
+                      : [[xap.dominantAlgo, xap.contributionPercentage]];
+
+                    return (
+                      <div
+                        key={xap.number}
+                        className="bg-slate-50 dark:bg-slate-800/50 rounded-xl xs:rounded-2xl p-2 xs:p-4 border border-slate-100 dark:border-slate-700/50 flex flex-col items-center justify-between text-center min-h-[140px] xs:min-h-[160px] shadow-sm relative group cursor-help transition-all hover:border-indigo-500/30"
+                        title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(', ') || 'Aucun'}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || '1.00'}`}
                       >
-                        {xap.dominantAlgo.substring(0, 15)}
-                      </span>
-                      <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden mb-1">
-                        <div
-                          className="bg-indigo-500 h-full rounded-full transition-all duration-700"
-                          style={{ width: `${xap.contributionPercentage}%` }}
-                        />
-                      </div>
-                      <span className="text-[9px] font-mono text-slate-400">
-                        {xap.contributionPercentage.toFixed(1)}% force
-                      </span>
-                      
-                      {xap.compositionGini !== undefined && (
-                        <div className="text-[8px] font-mono text-indigo-500 dark:text-indigo-400 mt-1 opacity-80">
-                          Gini: {xap.compositionGini.toFixed(2)}
+                        <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg mb-2 border border-indigo-200/50 dark:border-indigo-800/50 shadow-inner">
+                          {xap.number}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        
+                        <div className="w-full space-y-2 mt-1">
+                          {topShapley.map(([algo, sv], idx) => (
+                            <div key={algo} className="w-full">
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="text-[9px] uppercase font-bold text-slate-500 dark:text-slate-400 leading-tight line-clamp-1 text-left">
+                                  {String(algo).substring(0, 12)}
+                                </span>
+                                <span className="text-[8px] font-mono text-indigo-500 dark:text-indigo-400">
+                                  {Number(sv).toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-200 dark:bg-slate-700 h-1 rounded-full overflow-hidden">
+                                <div
+                                  className={`${idx === 0 ? 'bg-indigo-500' : 'bg-slate-400 dark:bg-slate-500'} h-full rounded-full transition-all duration-700`}
+                                  style={{ width: `${Number(sv)}%` }}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="mt-6 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400 italic border-l-2 border-indigo-500 pl-3">
-                  * L'XAP (eXplainable Attribution Prediction) attribue de façon
-                  transparente la dimension originelle la plus influente dans
-                  l'ADN stochastique du vecteur tiré.
+                  * L'XAP (eXplainable Attribution Prediction) utilise la Théorie des Jeux (Valeurs de Shapley) pour quantifier la contribution marginale exacte de chaque modèle corrélé dans la synergie algorithmique du vecteur.
                 </p>
               </div>
             )}

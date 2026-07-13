@@ -100,7 +100,7 @@ export const useRealtimeSync = () => {
         const handleLocalUpdated = (e: Event) => {
             const customEvent = e as CustomEvent;
             const targetDraw = customEvent.detail?.drawName || drawName;
-            if (targetDraw) {
+            if (targetDraw && targetDraw === drawName) {
                 console.log(`[Local Sync Event] Refraîchissement des données pour : ${targetDraw}`);
                 refreshData(targetDraw, true);
             }

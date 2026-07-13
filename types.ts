@@ -93,6 +93,7 @@ export interface Prediction {
   explainabilityData?: Record<number, any>;
   shrinkageApplied?: boolean;
   shrinkageFactor?: number;
+  shrinkageFactorMap?: Record<number, number>;
   shrinkageVerification?: any;
   hyperparameters?: any;
   hyperTuningLog?: string[];

@@ -93,12 +93,13 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         drawNamesToAnalyze = [drawKey];
       }
       
-      const keys = [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE];
+      const keys = [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND];
       const algoScores: Record<string, number[]> = {
         [AlgoKey.GAPS]: [],
         [AlgoKey.GAP_SEQUENCE]: [],
         [AlgoKey.GAP_PATTERN]: [],
-        [AlgoKey.GAP_CADENCE]: []
+        [AlgoKey.GAP_CADENCE]: [],
+        [AlgoKey.GAP_TREND]: []
       };
       
       for (const dName of drawNamesToAnalyze) {
@@ -125,6 +126,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           algoScores[AlgoKey.GAP_SEQUENCE].push(bd[AlgoKey.GAP_SEQUENCE] || 0);
           algoScores[AlgoKey.GAP_PATTERN].push(bd[AlgoKey.GAP_PATTERN] || 0);
           algoScores[AlgoKey.GAP_CADENCE].push(bd[AlgoKey.GAP_CADENCE] || 0);
+          algoScores[AlgoKey.GAP_TREND].push(bd[AlgoKey.GAP_TREND] || 0);
         }
       }
       
@@ -959,6 +961,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">Gap Seq.</th>
                       <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">Gap Pat.</th>
                       <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">Gap Cad.</th>
+                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">Gap Trend</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -966,11 +969,12 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       { key: AlgoKey.GAPS, label: 'Gaps Theo. CDF' },
                       { key: AlgoKey.GAP_SEQUENCE, label: 'Gap Seq. Pop.' },
                       { key: AlgoKey.GAP_PATTERN, label: 'Gap Pat. AR(1)' },
-                      { key: AlgoKey.GAP_CADENCE, label: 'Gap Cad. Regime' }
+                      { key: AlgoKey.GAP_CADENCE, label: 'Gap Cad. Regime' },
+                      { key: AlgoKey.GAP_TREND, label: 'Gap Trend' }
                     ].map(row => (
                       <tr key={row.key} className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                         <td className="p-3 text-[10px] font-bold text-slate-700 dark:text-slate-300">{row.label}</td>
-                        {[AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE].map(colKey => {
+                        {[AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND].map(colKey => {
                           const val = correlationData.matrix[row.key]?.[colKey] ?? 0;
                           const absVal = Math.abs(val);
                           
