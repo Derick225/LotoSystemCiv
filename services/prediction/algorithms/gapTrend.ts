@@ -1,5 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
+import { calculateShannonEntropy } from '../../mathService';
 
 /**
  * PROJECTEUR DE TENDANCE DES ÉCARTS (Gap Trend Projector)
@@ -44,12 +45,23 @@ export const gapTrendPlugin: AlgorithmPlugin = {
     // points supplémentaires pour que la recherche en grille SSE soit significative).
     const MIN_GAPS_FOR_TREND = 5;
 
-    // Grille de recherche déterministe pour les paramètres de lissage de Holt. Ce ne sont
-    // pas des valeurs magiques choisies arbitrairement : c'est l'ESPACE DE RECHERCHE
-    // standard (pas de 0.1 sur l'intervalle ouvert (0,1)) parmi lequel le meilleur couple
-    // est sélectionné par minimisation d'erreur — la valeur RETENUE est donc bien dérivée
-    // des données, seule la granularité de la recherche est fixée.
-    const ALPHA_BETA_GRID = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+    // --- MODULATION DYNAMIQUE DE L'AMORTISSEMENT DE LA TENDANCE (Requirement 1) ---
+    // On calcule l'entropie de Shannon sur les 10 derniers tirages.
+    const localHistory = history.slice(0, Math.min(history.length, 10));
+    const localEntropy = calculateShannonEntropy(localHistory).normalized;
+
+    // Plus l'entropie s'effondre (motifs ordonnés), plus maxCoeff augmente (réactivité accrue de Holt).
+    // Plus l'entropie est forte (chaos), plus maxCoeff baisse (on lisse fortement pour éviter de sur-réagir au bruit).
+    // On utilise un sigmoïde continu différentiable (sans transition de seuil brusque).
+    const maxCoeff = 0.05 + 0.90 * (1.0 / (1.0 + Math.exp(5.0 * (localEntropy - 0.7))));
+
+    // On génère ensuite la grille de recherche ALPHA_BETA_GRID de manière continue,
+    // de 0.05 jusqu'à maxCoeff.
+    const ALPHA_BETA_GRID: number[] = [];
+    const GRID_STEPS = 9;
+    for (let i = 0; i <= GRID_STEPS; i++) {
+      ALPHA_BETA_GRID.push(0.05 + (maxCoeff - 0.05) * (i / GRID_STEPS));
+    }
 
     /** Ajuste un modèle de Holt sur une séquence et retourne (niveau, tendance, SSE). */
     const fitHolt = (seq: number[], alpha: number, beta: number): { level: number; trend: number; sse: number } => {

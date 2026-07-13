@@ -1079,7 +1079,21 @@ export const runCounterfactualSimulation = (
       const commonDiv = gcd(p, w);
       const primeHarmonicSim = commonDiv > 1 ? (2.0 * Math.log(commonDiv)) / maxSurprisal : 0.0;
 
-      return Math.max(linSim, gridSim, mirror91Sim, mirrorRevSim, harmonicSim, decadeSim, primeHarmonicSim);
+      const baseSim = Math.max(linSim, gridSim, mirror91Sim, mirrorRevSim, harmonicSim, decadeSim, primeHarmonicSim);
+
+      // ASYMMETRIC RE-EVALUATION MODULATORS (Requirement 3)
+      // 1. Parity asymmetric scaling: boost same parity, penalize different parity
+      const parityFactor = (p % 2 === w % 2) ? 1.15 : 0.85;
+
+      // 2. Mirror/Flip resonance booster (e.g. 13 <-> 31)
+      const isMirror = (revP === w || p === (parseInt(w.toString().split("").reverse().join(""), 10) || 0));
+      const mirrorBoost = isMirror ? 1.45 : 1.0;
+
+      // 3. Modular proximity resonance (distance modulo 90)
+      const mod90Dist = Math.min(Math.abs(p - w), DOMAIN_SIZE - Math.abs(p - w));
+      const modProximityBoost = 1.0 + Math.exp(-0.2 * mod90Dist);
+
+      return Math.min(0.99, baseSim * parityFactor * mirrorBoost * modProximityBoost);
     };
 
     let totalContinLoss = 0;

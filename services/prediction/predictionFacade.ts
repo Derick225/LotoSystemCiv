@@ -925,6 +925,23 @@ export const generateMasterPredictionCore = async (
 
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
   if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
+
+  // --- PLATT SCALING FOR BRIER SCORE CALIBRATION (Requirement 2) ---
+  const currentEntropyResult = calculateShannonEntropy(history);
+  const currentEntropy = currentEntropyResult.normalized;
+
+  // Platt parameters A and B are continuous functions of the Shannon entropy.
+  // In highly chaotic regimes (high entropy), the slope plattA is flattened and the offset plattB is lowered,
+  // squeezing false confidence spikes down to realistic, calibrated baselines.
+  const plattA = 1.2 - 0.8 * currentEntropy;
+  const plattB = -0.5 - 1.5 * currentEntropy;
+
+  // Normalize raw averageScore to [-3, 3] centered at 50
+  const rawX = (averageScore - 50.0) / 15.0;
+  // Platt Sigmoid scaling
+  const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
+  const calibratedConfidence = Math.max(1, Math.min(99, plattCalibratedProbability * 100.0));
+
   onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
 
   let analysisText = adversarialApplied
@@ -1005,7 +1022,7 @@ export const generateMasterPredictionCore = async (
   return {
     suggestedNumbers: selection,
     candidates: sortedScores.slice(5, 15).map((s) => s.num),
-    confidence: Math.min(99, Math.max(1, Math.round(averageScore))),
+    confidence: Math.round(calibratedConfidence),
     confidenceNote: HONEST_NOTE, // [7] transparence : l'indicateur est interne, pas prédictif
     analysis: analysisText,
     breakdown: breakdownRecord,
