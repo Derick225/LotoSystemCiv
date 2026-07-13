@@ -23,6 +23,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
     const [loading, setLoading] = useState(true);
     const [forensicReport, setForensicReport] = useState<ForensicReport | null>(null);
     const [expandedItem, setExpandedItem] = useState<string | null>(null);
+    const attemptedLinksRef = useRef<Set<string>>(new Set());
+    const isLinkingRef = useRef(false);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -66,47 +68,59 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({ drawName }
     // Operational Auto-Linker & Forensic Automator
     useEffect(() => {
         const linkOrphansAndAutomateForensics = async () => {
+            if (isLinkingRef.current) return;
             if (history.length > 0 && results.length > 0) {
+                isLinkingRef.current = true;
                 let changed = false;
                 let forensicGenerated = false;
-                for (const item of history) {
-                    let match = item.drawResultId ? getResultById(item.drawResultId) : null;
-                    
-                    if (!item.drawResultId) {
-                        match = findMatchingResultForPrediction(item, results);
-
-                        if (match) {
-                            await linkPredictionToResult(item.id, match.id);
-                            changed = true;
+                try {
+                    for (const item of history) {
+                        if (attemptedLinksRef.current.has(item.id)) {
+                            continue;
                         }
-                    }
 
-                    // Automate Forensic Analysis if linked and no report exists
-                    if (match) {
-                        const existingReport = getForensicReportByPredictionId(item.id);
-                        if (!existingReport) {
-                            try {
-                                const report = await performForensicAnalysis(
-                                    drawName, match.date, 
-                                    item.prediction.suggestedNumbers, 
-                                    match.gagnants, item.prediction.breakdown,
-                                    item.id,
-                                    match.id,
-                                    true, // skipLLM for automated background analysis
-                                    results
-                                );
-                                saveForensicReport(report);
-                                forensicGenerated = true;
-                            } catch (error) {
-                                console.warn("Failed to automate forensic analysis for prediction", item.id, error);
+                        let match = item.drawResultId ? getResultById(item.drawResultId) : null;
+                        
+                        if (!item.drawResultId) {
+                            match = findMatchingResultForPrediction(item, results);
+
+                            if (match) {
+                                attemptedLinksRef.current.add(item.id);
+                                await linkPredictionToResult(item.id, match.id);
+                                changed = true;
+                            }
+                        }
+
+                        // Automate Forensic Analysis if linked and no report exists
+                        if (match) {
+                            const existingReport = await getForensicReportByPredictionId(item.id);
+                            if (!existingReport) {
+                                attemptedLinksRef.current.add(item.id);
+                                try {
+                                    const report = await performForensicAnalysis(
+                                        drawName, match.date, 
+                                        item.prediction.suggestedNumbers, 
+                                        match.gagnants, item.prediction.breakdown,
+                                        item.id,
+                                        match.id,
+                                        true, // skipLLM for automated background analysis
+                                        results
+                                    );
+                                    saveForensicReport(report);
+                                    forensicGenerated = true;
+                                } catch (error) {
+                                    console.warn("Failed to automate forensic analysis for prediction", item.id, error);
+                                }
                             }
                         }
                     }
+                    if (forensicGenerated) {
+                        syncForensicReportsWithCloud().catch(e => logError(new AppError("Auto-sync forensic failed", "AUTO_SYNC_FAILED", "low", { error: e })));
+                    }
+                    if (changed) loadData();
+                } finally {
+                    isLinkingRef.current = false;
                 }
-                if (forensicGenerated) {
-                    syncForensicReportsWithCloud().catch(e => logError(new AppError("Auto-sync forensic failed", "AUTO_SYNC_FAILED", "low", { error: e })));
-                }
-                if (changed) loadData();
             }
         };
         linkOrphansAndAutomateForensics();

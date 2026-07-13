@@ -432,8 +432,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     // Run Forensic Feedback Loop Simulation (Decoupled to core computation)
     const handleStartLoopSimulation = async () => {
-        if (history.length < 15) {
-            showToast("Historique insuffisant pour lancer la simulation de boucle (minimum 15 tirages).", "error");
+        if (history.length === 0) {
+            showToast("Aucun historique disponible pour lancer la simulation.", "error");
             return;
         }
         setLoopRunning(true);
