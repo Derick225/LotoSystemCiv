@@ -17,6 +17,8 @@ import { apiClient } from "../core/api/apiClient";
 import { useToast } from "./ui/Toast";
 import { applyOnlineLearning } from "../services/trainingService";
 import { useNexusStore } from "../store/useNexusStore";
+import { applyBayesianForensicFeedback } from "../services/prediction/weightsManager";
+import { Forensic3DRadar } from "./Forensic3DRadar";
 import { audioEngine } from "../utils/audioEngine";
 import {
   ThumbsUp,
@@ -55,10 +57,11 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
   onClose,
 }) => {
   const { showToast } = useToast();
+  const globalWeights = useNexusStore((state) => state.globalWeights);
 
   const [activeTab, setActiveTab] = useState<
-    "spatial" | "ballistic" | "autopsy" | "metrics" | "counterfactuals" | "spectral" | "xap"
-  >("spatial");
+    "spatial" | "ballistic" | "autopsy" | "metrics" | "counterfactuals" | "spectral" | "xap" | "radar3d"
+  >("radar3d");
       const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [userRating, setUserRating] = useState<
@@ -128,6 +131,13 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
       const feedbackScore = userRating === "Visionnaire" ? 1.0 : (userRating === "Incohérente" ? -1.0 : 0.0);
       const history = useNexusStore.getState().history;
       await applyOnlineLearning(report.drawName, history, feedbackScore);
+
+      // Appliquer le feedback Bayesien direct sur les poids d'algorithmes locaux associé au rapport forensic
+      const updatedWeights = await applyBayesianForensicFeedback(report.drawName, report, userRating);
+      
+      // Mettre à jour le store global
+      const { updateGlobalWeights } = useNexusStore.getState();
+      await updateGlobalWeights(updatedWeights, report.drawName);
 
       setFeedbackSent(true);
       audioEngine.play("success");
@@ -267,6 +277,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
 
           <div className="grid grid-cols-3 sm:grid-cols-4 md:flex md:flex-wrap bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl max-w-full md:max-w-2xl gap-1.5 justify-center">
             {[
+              { id: "radar3d", label: "Radar 3D", color: "text-fuchsia-500 dark:text-fuchsia-400" },
               { id: "spatial", label: "Spatial", color: "text-amber-500 dark:text-amber-400" },
               { id: "ballistic", label: "Balistique", color: "text-indigo-600 dark:text-indigo-400" },
               { id: "autopsy", label: "Autopsie IA", color: "text-purple-600 dark:text-purple-400" },
@@ -315,6 +326,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-10 bg-slate-50/50 dark:bg-slate-900/50">
+          {activeTab === "radar3d" && (
+            <div className="animate-slide-up space-y-6">
+              <Forensic3DRadar report={report} globalWeights={globalWeights} />
+            </div>
+          )}
+
           {activeTab === "spatial" && (
             <div className="animate-slide-up space-y-6">
               <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden relative">

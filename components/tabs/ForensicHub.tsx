@@ -14,6 +14,7 @@ import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
+import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
 
 type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrift" | "neuralfeedback";
 
@@ -506,6 +507,14 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                   )}
                 </div>
               </div>
+              
+              {/* Frise Post-Mortem Unifiée (Drift, Alignement & Navigation) */}
+              <UnifiedForensicTimeline 
+                reports={reports}
+                selectedReport={selectedReport}
+                onSelectReport={setSelectedReport}
+                onDeleteReport={handleDeleteReport}
+              />
               
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* COLUMN 1: En attente de résultat */}

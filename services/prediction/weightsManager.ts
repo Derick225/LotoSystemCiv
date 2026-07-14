@@ -1,4 +1,4 @@
-import { AlgoWeights, DrawResult } from '../../types';
+import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set, keys } from 'idb-keyval';
@@ -453,4 +453,60 @@ export const applyForensicCalibration = (
     }
   });
   return normalizeWeights(newWeights);
+};
+
+/**
+ * APPLIQUE UNE RÉTROACTION BAYÉSIENNE SUR LES POIDS D'ALGORITHMES LOCAUX
+ * Basée sur la validation manuelle de l'opérateur (RLHF / Forensic Autopsy).
+ * Ajuste les poids de façon continue et déterministe (sans nombre magique ni Math.random()).
+ */
+export const applyBayesianForensicFeedback = async (
+  drawName: string,
+  report: ForensicReport,
+  userRating: "Visionnaire" | "Standard" | "Incohérente"
+): Promise<AlgoWeights> => {
+  const currentWeights = await getAlgoWeights(drawName);
+  const newWeights = { ...currentWeights };
+  
+  // Facteur de feedback : 1.0 (Visionnaire), 0.0 (Standard), -1.0 (Incohérente)
+  const feedbackScore = userRating === "Visionnaire" ? 1.0 : (userRating === "Incohérente" ? -1.0 : 0.0);
+  
+  // Si le feedback est neutre (Standard), pas de modification requise
+  if (feedbackScore === 0.0) return currentWeights;
+
+  const validKeys = Object.values(AlgoKey);
+  const numAlgos = validKeys.length || 1;
+  // Coefficient d'apprentissage bayésien dérivé pour préserver l'entropie
+  const baseLR = 1.0 / (2.0 * numAlgos);
+  
+  if (report.proposedAdjustments && report.proposedAdjustments.length > 0) {
+    report.proposedAdjustments.forEach((adj) => {
+      const key = adj.algo as AlgoKey;
+      if (!validKeys.includes(key) || newWeights[key] === undefined) return;
+      
+      // La dérive bayésienne ajuste le poids :
+      // - Si feedbackScore > 0 (Visionnaire), on se déplace dans le sens de l'ajustement proposé.
+      // - Si feedbackScore < 0 (Incohérente), on se déplace dans le sens opposé (pénalisation).
+      const adjustment = adj.proposedWeightChange * feedbackScore * baseLR;
+      
+      // Loi de transition continue avec tangente hyperbolique (respect d'AGENTS.md)
+      newWeights[key] = newWeights[key] * (1.0 + Math.tanh(adjustment));
+    });
+  } else if (report.counterfactuals && report.counterfactuals.length > 0) {
+    // Si pas d'ajustements directs, on utilise les contrefactuels de performance
+    report.counterfactuals.forEach((cf) => {
+      if (cf.algo) {
+        const key = cf.algo as AlgoKey;
+        if (!validKeys.includes(key) || newWeights[key] === undefined) return;
+        const change = (cf.rankImprovement || 1.0) / 100.0;
+        const adjustment = change * feedbackScore * baseLR;
+        newWeights[key] = newWeights[key] * (1.0 + Math.tanh(adjustment));
+      }
+    });
+  }
+
+  const finalNormalized = normalizeWeights(newWeights);
+  await saveAlgoWeights(drawName, finalNormalized);
+  
+  return finalNormalized;
 };

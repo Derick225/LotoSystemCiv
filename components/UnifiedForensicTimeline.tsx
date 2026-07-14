@@ -1,15 +1,9 @@
 import React, { useMemo } from "react";
 import { 
   Activity, 
-  Target, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Calendar, 
-  Cpu, 
   TrendingUp, 
   Zap,
   TrendingDown,
-  BookOpen
 } from "lucide-react";
 import { ForensicReport } from "../types";
 import { formatDateSafely } from "../utils/dateUtils";

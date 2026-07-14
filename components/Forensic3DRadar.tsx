@@ -1,14 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { 
-  Shield, 
-  Activity, 
-  Award, 
   Layers, 
   Sliders, 
   HelpCircle,
-  TrendingUp,
-  Target,
-  Zap
 } from "lucide-react";
 import { ForensicReport } from "../types";
 import { LABELS_MAP } from "../hooks/useAlgorithmSync";
