@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { getPredictionHistoryAsync, linkPredictionToResult, findMatchingResultForPrediction } from '../services/predictionHistoryService';
-import { getLocalForensicReports, performForensicAnalysis, saveForensicReport } from '../services/postPredictionAnalysisService';
+import { getLocalForensicReports, performForensicAnalysis, saveForensicReport, healForensicReport } from '../services/postPredictionAnalysisService';
 import { getPlatinumHistory, performPlatinumAudit } from '../services/metaAnalystService';
 import { PredictionHistoryItem, ForensicReport, PlatinumAudit } from '../types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
@@ -166,7 +166,7 @@ export const useForensicData = (drawName: string) => {
                     uniqueSortedMap.set(r.id, r);
                 }
             });
-            const uniqueSortedList = Array.from(uniqueSortedMap.values());
+            const uniqueSortedList = Array.from(uniqueSortedMap.values()).map(healForensicReport);
 
             setReports(uniqueSortedList);
             setPendingPredictions(pending);
