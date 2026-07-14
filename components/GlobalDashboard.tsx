@@ -530,10 +530,33 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           const driftResult = await LearningService.checkDrift(drawName, predictions, history);
           
           if (driftResult && driftResult.hasDrift) {
-             showToast(
-                `Alerte Dérive Algorithmique : L'agent recommande un rééquilibrage via Autopsie Forensic pour ${drawName}. (${driftResult.reason})`,
-                "error"
-             );
+             const bgEnabled = localStorage.getItem("nexus_enable_bg_autolearn") === "true";
+             if (bgEnabled) {
+                showToast(
+                   `Dérive détectée pour ${drawName} (${driftResult.reason}). Lancement de la boucle de correction active autonome...`,
+                   "info"
+                );
+                
+                try {
+                   // 1. Appliquer les corrélations de dérive au moteur neuronal
+                   const { applyDriftCorrelationsToNeuralEngine } = await import("../services/training/driftCorrelationService");
+                   await applyDriftCorrelationsToNeuralEngine(drawName);
+                   
+                   // 2. Déclencher un auto-apprentissage complet
+                   const result = await LearningService.triggerAutoLearning(drawName, undefined, true, true);
+                   if (result && result.improvement && result.weights) {
+                      await useNexusStore.getState().updateGlobalWeights(result.weights, drawName);
+                      showToast(`Correction active appliquée avec succès : ADN stabilisé (${result.message}).`, "success");
+                   }
+                } catch (corrErr) {
+                   console.error("Failed active drift correction:", corrErr);
+                }
+             } else {
+                showToast(
+                   `Alerte Dérive Algorithmique : L'agent recommande un rééquilibrage via Autopsie Forensic pour ${drawName}. (${driftResult.reason})`,
+                   "error"
+                );
+             }
           }
         } catch (e) {
           console.error("Drift check failed", e);

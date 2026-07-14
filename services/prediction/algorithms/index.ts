@@ -15,6 +15,7 @@ import { sequencePatternPlugin } from './sequencePattern';
 import { derivedNeighborPlugin } from './derivedNeighbor';
 import { gapCadencePlugin } from './gapCadence';
 import { gapTrendPlugin } from './gapTrend';
+import { interMonthlyResonancePlugin } from './interMonthlyResonance';
 import { 
   shadowProbabilityPlugin, 
   networkCorrelationPlugin, 
@@ -50,6 +51,7 @@ export const initCoreAlgorithms = () => {
   registerAlgorithm(derivedNeighborPlugin);
   registerAlgorithm(gapCadencePlugin);
   registerAlgorithm(gapTrendPlugin);
+  registerAlgorithm(interMonthlyResonancePlugin);
 };
 
 // Exécution immédiate de l'initialisation

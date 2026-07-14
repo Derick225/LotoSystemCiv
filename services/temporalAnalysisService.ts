@@ -195,7 +195,15 @@ export const getTemporalScores = async (drawName: string, history: DrawResult[])
     const maxHawkes = Math.max(...Array.from(hawkes)) || 1;
     for (let i = 1; i <= 90; i++) {
         const normalisedHawkes = (hawkes[i] / maxHawkes) * 100;
-        scores[i] = (scores[i] || 0) + (normalisedHawkes * 0.25);
+        scores[i] = (scores[i] || 0) + (normalisedHawkes * 0.20);
+    }
+
+    // 5. Résonance Temporelle Croisée Inter-Mensuelle (Stratégie cohorte-saisonnière d'excitation croisée Gagnants-Machines)
+    const crossMonth = calculateCrossMonthResonance(history);
+    const maxCross = Math.max(...Array.from(crossMonth)) || 1;
+    for (let i = 1; i <= 90; i++) {
+        const normalisedCross = (crossMonth[i] / maxCross) * 100;
+        scores[i] = (scores[i] || 0) + (normalisedCross * 0.20); // Intégration à hauteur de 20%
     }
 
     const maxVal = Math.max(...Object.values(scores), 1);
@@ -204,6 +212,79 @@ export const getTemporalScores = async (drawName: string, history: DrawResult[])
     }
 
     return scores;
+};
+
+/**
+ * CALCULE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE (CROSS-MONTH RESONANCE)
+ * Identifie les transitions ou retours de numéros (Gagnants + Machines) entre les mois
+ * de façon purement déterministe et adaptative, sans aucun nombre magique.
+ * Aligné avec l'observation des résonances de cohorte mensuelles (ex: Février vers Juillet).
+ */
+export const calculateCrossMonthResonance = (history: DrawResult[]): Float32Array => {
+    const resonance = new Float32Array(91);
+    if (history.length < 12) return resonance; // Pas assez de profondeur pour une analyse mensuelle croisée solide
+
+    const currentMonth = new Date().getMonth(); // [0..11]
+
+    // 1. Profil fréquentiel des numéros (Gagnants + Machines x0.5) par mois de l'année
+    const monthProfiles = Array.from({ length: 12 }, () => new Float32Array(91));
+    
+    history.forEach(draw => {
+        const m = extractMonth(draw.date);
+        if (m !== -1) {
+            draw.gagnants.forEach(n => {
+                if (n >= 1 && n <= 90) monthProfiles[m][n] += 1.0;
+            });
+            if (Array.isArray(draw.machine)) {
+                draw.machine.forEach(n => {
+                    if (n >= 1 && n <= 90) monthProfiles[m][n] += 0.5; // Moindre poids mais prise en compte réelle des machines
+                });
+            }
+        }
+    });
+
+    // 2. Calcul de la matrice de transition par cosinus de similarité inter-mensuel vers le mois actuel
+    const correlations = new Float32Array(12);
+    const normCurrent = Math.sqrt(monthProfiles[currentMonth].reduce((acc, val) => acc + val * val, 0)) || 1;
+
+    for (let m = 0; m < 12; m++) {
+        if (m === currentMonth) continue; // On cherche les transitions depuis un mois différent
+        
+        let dotProduct = 0;
+        let sumSqrM = 0;
+        
+        for (let n = 1; n <= 90; n++) {
+            dotProduct += monthProfiles[m][n] * monthProfiles[currentMonth][n];
+            sumSqrM += monthProfiles[m][n] * monthProfiles[m][n];
+        }
+        
+        const normM = Math.sqrt(sumSqrM) || 1;
+        correlations[m] = dotProduct / (normM * normCurrent);
+    }
+
+    // 3. Identifier le mois source de résonance maximale
+    let bestSourceMonth = -1;
+    let maxCorr = -1;
+    for (let m = 0; m < 12; m++) {
+        if (m === currentMonth) continue;
+        if (correlations[m] > maxCorr) {
+            maxCorr = correlations[m];
+            bestSourceMonth = m;
+        }
+    }
+
+    // Si aucune corrélation significative ou profil vide
+    if (bestSourceMonth === -1 || maxCorr <= 0) {
+        return resonance;
+    }
+
+    // 4. Projection de résonance pour chaque numéro basé sur le profil du mois source optimal
+    // Multiplié de façon continue par la force de corrélation
+    for (let n = 1; n <= 90; n++) {
+        resonance[n] = monthProfiles[bestSourceMonth][n] * maxCorr;
+    }
+
+    return resonance;
 };
 
 /**
@@ -257,3 +338,113 @@ export const calculateHawkesIntensity = (history: DrawResult[]): Float32Array =>
 
     return intensities;
 };
+
+export interface CrossMonthResonanceAnalysis {
+    currentMonthIndex: number;
+    currentMonthName: string;
+    sourceMonthIndex: number;
+    sourceMonthName: string;
+    correlation: number;
+    topNumbers: { number: number; score: number }[];
+    allMonthsCorrelation: { monthIndex: number; monthName: string; correlation: number }[];
+}
+
+/**
+ * FOURNIT UNE ANALYSE DÉTAILLÉE DE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE
+ */
+export const getCrossMonthResonanceAnalysis = (history: DrawResult[]): CrossMonthResonanceAnalysis => {
+    const monthsFr = [
+        "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+    ];
+    
+    const currentMonth = new Date().getMonth();
+    const result: CrossMonthResonanceAnalysis = {
+        currentMonthIndex: currentMonth,
+        currentMonthName: monthsFr[currentMonth],
+        sourceMonthIndex: -1,
+        sourceMonthName: "N/A",
+        correlation: 0,
+        topNumbers: [],
+        allMonthsCorrelation: []
+    };
+
+    if (history.length < 12) return result;
+
+    const monthProfiles = Array.from({ length: 12 }, () => new Float32Array(91));
+    
+    history.forEach(draw => {
+        const m = extractMonth(draw.date);
+        if (m !== -1) {
+            draw.gagnants.forEach(n => {
+                if (n >= 1 && n <= 90) monthProfiles[m][n] += 1.0;
+            });
+            if (Array.isArray(draw.machine)) {
+                draw.machine.forEach(n => {
+                    if (n >= 1 && n <= 90) monthProfiles[m][n] += 0.5;
+                });
+            }
+        }
+    });
+
+    const correlations = new Float32Array(12);
+    const normCurrent = Math.sqrt(monthProfiles[currentMonth].reduce((acc, val) => acc + val * val, 0)) || 1;
+
+    for (let m = 0; m < 12; m++) {
+        if (m === currentMonth) {
+            correlations[m] = 1.0;
+            continue;
+        }
+        
+        let dotProduct = 0;
+        let sumSqrM = 0;
+        
+        for (let n = 1; n <= 90; n++) {
+            dotProduct += monthProfiles[m][n] * monthProfiles[currentMonth][n];
+            sumSqrM += monthProfiles[m][n] * monthProfiles[m][n];
+        }
+        
+        const normM = Math.sqrt(sumSqrM) || 1;
+        correlations[m] = dotProduct / (normM * normCurrent);
+    }
+
+    let bestSourceMonth = -1;
+    let maxCorr = -1;
+    
+    for (let m = 0; m < 12; m++) {
+        if (m === currentMonth) continue;
+        
+        result.allMonthsCorrelation.push({
+            monthIndex: m,
+            monthName: monthsFr[m],
+            correlation: correlations[m]
+        });
+
+        if (correlations[m] > maxCorr) {
+            maxCorr = correlations[m];
+            bestSourceMonth = m;
+        }
+    }
+
+    if (bestSourceMonth !== -1 && maxCorr > 0) {
+        result.sourceMonthIndex = bestSourceMonth;
+        result.sourceMonthName = monthsFr[bestSourceMonth];
+        result.correlation = maxCorr;
+
+        const rawResonance = calculateCrossMonthResonance(history);
+        const maxRes = Math.max(...Array.from(rawResonance)) || 1;
+
+        const numbersScores = Array.from({ length: 90 }, (_, i) => i + 1)
+            .map(n => ({
+                number: n,
+                score: Math.round((rawResonance[n] / maxRes) * 100)
+            }))
+            .filter(item => item.score > 0)
+            .sort((a, b) => b.score - a.score);
+
+        result.topNumbers = numbersScores.slice(0, 12);
+    }
+
+    return result;
+};
+

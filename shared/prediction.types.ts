@@ -22,7 +22,8 @@ export enum AlgoKey {
     GAP_PATTERN = 'gap_pattern',
     SEQUENCE_PATTERN = 'sequence_pattern',
     GAP_CADENCE = 'gap_cadence',
-    GAP_TREND = 'gap_trend'
+    GAP_TREND = 'gap_trend',
+    INTER_MONTHLY_RESONANCE = 'inter_monthly_resonance'
 }
 
 export type AlgoWeights = Record<AlgoKey, number>;

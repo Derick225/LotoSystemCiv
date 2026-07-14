@@ -130,7 +130,7 @@ export const useNexusStore = create<NexusState>()(
 
       globalWeights: {} as AlgoWeights, // Will be initialized by initialize or getAlgoWeights
       isForensicOptimized: false,
-      isAutonomousAgentActive: false,
+      isAutonomousAgentActive: typeof window !== "undefined" && window.localStorage && window.localStorage.getItem("nexus_enable_bg_autolearn") === "true" ? true : false,
       useSpatioTemporalHawkes: false,
       agentLogs: [],
       neuralFeedbackLogs: [],
@@ -231,8 +231,12 @@ export const useNexusStore = create<NexusState>()(
         set({ activeMainTab: mainTab, activeSubTab: subTab }),
       setGlobalWeights: (weights) => set({ globalWeights: weights }),
       setForensicOptimized: (opt) => set({ isForensicOptimized: opt }),
-      setAutonomousAgentActive: (active) =>
-        set({ isAutonomousAgentActive: active }),
+      setAutonomousAgentActive: (active) => {
+        if (typeof window !== "undefined" && window.localStorage) {
+          window.localStorage.setItem("nexus_enable_bg_autolearn", active ? "true" : "false");
+        }
+        set({ isAutonomousAgentActive: active });
+      },
       addAgentLog: (log) =>
         set((s) => ({ agentLogs: [log, ...s.agentLogs].slice(0, 15) })),
       addNeuralFeedbackLogs: (logs) =>

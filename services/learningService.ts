@@ -1,4 +1,4 @@
-import type { PredictionHistoryItem, DrawResult, AlgoWeights } from "../types";
+import type { PredictionHistoryItem, DrawResult, AlgoWeights, NeuralFeedbackLog } from "../types";
 import {
   applyMetaLearning,
   saveAlgoWeights,
@@ -390,6 +390,35 @@ export const LearningService = {
 
       // === Phase 4 : Application et versioning ===
       await saveAlgoWeights(drawName, candidateWeights as any);
+
+      // Génération automatique des logs de feedback neuronal pour le visualiseur en temps réel
+      try {
+        const feedbackLogs: NeuralFeedbackLog[] = [];
+        Object.entries(weightChanges).forEach(([algo, diff]) => {
+          if (Math.abs(diff) > 0.0001) {
+            const oldW = (weightsBase as any)[algo] || 0;
+            const newW = (candidateWeights as any)[algo] || 0;
+            const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+            
+            feedbackLogs.push({
+              id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+              timestamp: Date.now(),
+              drawName,
+              algo,
+              oldWeight: oldW,
+              newWeight: newW,
+              direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
+              impactPercentage: parseFloat(impactPercentage.toFixed(2)),
+              reason: criticalDecision || "Ajustement automatique d'apprentissage ADN"
+            });
+          }
+        });
+        if (feedbackLogs.length > 0) {
+          useNexusStore.getState().addNeuralFeedbackLogs(feedbackLogs);
+        }
+      } catch (logErr) {
+        console.warn("[LearningService Feedback Logging Error]:", logErr);
+      }
 
       await WeightVersionManager.saveVersion(
         drawName,

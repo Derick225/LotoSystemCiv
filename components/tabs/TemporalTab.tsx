@@ -3,12 +3,14 @@ import {
     getCyclicCandidates, 
     getSeasonalAffinity, 
     getDayAffinity, 
-    type CyclicCandidate 
+    getCrossMonthResonanceAnalysis,
+    type CyclicCandidate,
+    type CrossMonthResonanceAnalysis
 } from '../../services/temporalAnalysisService';
 import { fetchAssociatedNumbers } from '../../services/lotteryService';
 import { NumberBall } from '../NumberBall';
 import { useNexusStore } from '../../store/useNexusStore';
-import { RotateCw, Link, ArrowRight, Hourglass, Calendar, TrendingUp } from 'lucide-react';
+import { RotateCw, Link, ArrowRight, Hourglass, Calendar, TrendingUp, Sparkles, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface DependencyFlow {
@@ -27,6 +29,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const [currentMonthName, setCurrentMonthName] = useState("");
     const [dependencies, setDependencies] = useState<DependencyFlow[]>([]);
     const [loadingDeps, setLoadingDeps] = useState(false);
+    const [crossMonthResonance, setCrossMonthResonance] = useState<CrossMonthResonanceAnalysis | null>(null);
     
     const isMounted = useRef(true);
 
@@ -53,6 +56,12 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 const dayAff = getDayAffinity(history);
                 if (isMounted.current) {
                     setDecayTrendData(dayAff.slice(0, 6));
+                }
+
+                // 3.5 Résonance Inter-Mensuelle (Pilier 1)
+                const resonanceDetail = getCrossMonthResonanceAnalysis(history);
+                if (isMounted.current) {
+                    setCrossMonthResonance(resonanceDetail);
                 }
 
                 // 4. Dépendances (T-1 -> T)
@@ -143,6 +152,89 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                 </div>
             </div>
+
+            {/* SECTION DÉDIÉE : RÉSONANCE INTER-MENSUELLE (PILIER 1) */}
+            {crossMonthResonance && crossMonthResonance.sourceMonthIndex !== -1 && (
+                <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-gradient-to-r from-slate-900/40 via-indigo-950/25 to-slate-900/40 p-8 rounded-3xl border border-indigo-500/15 shadow-xl relative overflow-hidden"
+                >
+                    <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+                        <Sparkles size={120} className="text-indigo-400" />
+                    </div>
+                    
+                    <div className="flex flex-col lg:flex-row gap-8 items-start relative z-10">
+                        {/* Info card */}
+                        <div className="lg:w-5/12 space-y-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400 border border-indigo-500/20">
+                                    <Sparkles size={16} />
+                                </div>
+                                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-400">Stratégie Analytique — Pilier 1</span>
+                            </div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tight">Résonance Inter-Mensuelle</h3>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                                Analyse stochastique de l'excitation de cohorte. Le système a identifié une transition temporelle majeure entre le mois de <strong className="text-indigo-300 font-bold">{crossMonthResonance.sourceMonthName}</strong> et le mois en cours (<span className="text-white font-bold">{crossMonthResonance.currentMonthName}</span>) avec un coefficient de similarité de <strong className="text-emerald-400 font-mono">{(crossMonthResonance.correlation * 100).toFixed(1)}%</strong>.
+                            </p>
+                            
+                            <div className="p-3.5 rounded-2xl bg-indigo-950/20 border border-indigo-500/10 space-y-1.5">
+                                <div className="flex items-center gap-2 text-[10px] font-black text-indigo-300 uppercase tracking-wide">
+                                    <Activity size={12} /> Impact Prédictif Direct
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-normal">
+                                    Les numéros gagnants et machines de {crossMonthResonance.sourceMonthName} projettent un élan d'excitation de <strong>20%</strong> dans le vecteur final de la modélisation temporelle, optimisant ainsi l'alignement continu des prédictions.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Visual graph and numbers */}
+                        <div className="lg:w-7/12 w-full space-y-6">
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">Vecteur d'émergence (Cohorte Gagnants + Machines)</span>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                    {crossMonthResonance.topNumbers.slice(0, 8).map((item) => (
+                                        <div 
+                                            key={item.number} 
+                                            className="flex items-center gap-2 px-3 py-2 bg-slate-950/40 hover:bg-slate-950/60 border border-slate-800/80 hover:border-indigo-500/30 rounded-2xl transition-all duration-300"
+                                        >
+                                            <NumberBall number={item.number} size="sm" />
+                                            <div className="flex flex-col">
+                                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Résonance</span>
+                                                <span className="text-xs font-mono font-black text-emerald-400">{item.score}%</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Mini horizontal bar-chart for other months correlation */}
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">Matrice de corrélation temporelle croisée (vs {crossMonthResonance.currentMonthName})</span>
+                                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                                    {crossMonthResonance.allMonthsCorrelation.map(m => {
+                                        const isPeak = m.monthIndex === crossMonthResonance.sourceMonthIndex;
+                                        return (
+                                            <div 
+                                                key={m.monthIndex} 
+                                                className={`p-2 rounded-xl border flex flex-col justify-between transition-all ${isPeak ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-900/10 border-slate-800/40'}`}
+                                            >
+                                                <div className="flex justify-between items-center mb-0.5">
+                                                    <span className={`text-[9px] font-black uppercase tracking-tight ${isPeak ? 'text-indigo-300 animate-pulse' : 'text-slate-500'}`}>{m.monthName}</span>
+                                                    {isPeak && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+                                                </div>
+                                                <span className={`text-xs font-mono font-bold ${isPeak ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                                    {(m.correlation * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
 
             {/* SAISONNALITÉ ET TENDANCES D'AFFINITÉ */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
