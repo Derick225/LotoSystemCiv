@@ -213,41 +213,40 @@ export const applyDeterministicMicroSgd = async (
       const subFeatures = await extractFeatures(drawName, subHistory);
       const scoredNumbers = calculateScores(subFeatures, adjustedWeights, subMetrics, subHistory);
 
-      // 2. Softmax stabilisé des scores
-      let maxScore = -Infinity;
-      scoredNumbers.forEach(s => { if (s.score > maxScore) maxScore = s.score; });
-
-      let sumExp = 0;
-      const expScores: Record<number, number> = {};
-      scoredNumbers.forEach(s => {
-        const expVal = Math.exp(s.score - maxScore);
-        expScores[s.num] = expVal;
-        sumExp += expVal;
-      });
+      // 2. Normalize scores using Z-score mapping (Z = (score - median) / stdDev)
+      const subScores = scoredNumbers.map(s => s.score);
+      const subMedian = getMedian(subScores);
+      const subStd = getStdDev(subScores, subMedian);
 
       const probs: Record<number, number> = {};
       scoredNumbers.forEach(s => {
-        probs[s.num] = sumExp > 0 ? expScores[s.num] / sumExp : 1.0 / 90.0;
+        const z = (s.score - subMedian) / (subStd + Number.EPSILON);
+        probs[s.num] = 1.0 / (1.0 + Math.exp(-z)); // Sigmoid continuous mapping
       });
 
-      // 3. [2] Gradient de Cross-Entropy vs poids.
-      // dL/d(w_a) = sum_i (p_i - y_i) * C_{i,a}, où C_{i,a} est la CONTRIBUTION
-      // BRUTE de l'algo a au numéro i (= breakdown[a]), et NON shapValue/w_a.
-      // La contribution brute est la bonne dérivée quand le score est une
-      // combinaison pondérée sum_a w_a * breakdown_a ; elle ne dépend pas de w_a.
+      // 3. [2] Gradient de Brier Score vs poids.
+      // Brier Score Loss = 1/90 * sum_i (p_i - y_i)^2
+      // dL/d(w_a) = 1/90 * sum_i 2 * (p_i - y_i) * dp_i/ds_i * dL_i/dw_a
+      // dp_i/ds_i = p_i * (1 - p_i) / (subStd + Number.EPSILON)
+      // dL_i/dw_a = C_{i,a} (contribution brute / breakdown)
+      // dL/d(w_a) = sum_i [ 2/90 * (p_i - y_i) * p_i * (1 - p_i) * (1 / (subStd + Number.EPSILON)) ] * C_{i,a}
       const gradients: Record<string, number> = {};
       const algoKeys = Object.keys(adjustedWeights);
       algoKeys.forEach(algo => { gradients[algo] = 0; });
 
       scoredNumbers.forEach(s => {
         const isWinner = gagnants.includes(s.num);
-        const y_i = isWinner ? 1.0 / TICKET_SIZE : 0.0; // 0.2 = 1/5 gagnants
+        const y_i = isWinner ? 1.0 : 0.0; // True binary labels [0, 1] without 0.2 penalty cap
         const diff = probs[s.num] - y_i;
+        const p_i = probs[s.num];
+        
+        // sigmoid derivative factor
+        const ds_factor = (2.0 / 90.0) * diff * p_i * (1.0 - p_i) / (subStd + Number.EPSILON);
 
         algoKeys.forEach(algo => {
           // [2] Contribution brute de l'algo (indépendante du poids courant)
           const C_ia = (s.breakdown?.[algo as AlgoKey] as number) || 0;
-          gradients[algo] += diff * C_ia;
+          gradients[algo] += ds_factor * C_ia;
         });
       });
 
@@ -275,35 +274,51 @@ export const applyDeterministicMicroSgd = async (
   return adjustedWeights;
 };
 
-export const generateMasterPredictionCore = async (
+// Cache dédié pour les prédictions macro (James-Stein Bayesian Shrinkage) afin d'éviter les appels récursifs bloquants
+const macroPriorCache = new Map<string, Prediction>();
+
+const normalizeDateStr = (d: any): string => {
+  if (!d) return '';
+  try {
+    const dateObj = d instanceof Date ? d : new Date(d);
+    return isNaN(dateObj.getTime()) ? '' : dateObj.toISOString().split('T')[0];
+  } catch {
+    return '';
+  }
+};
+
+interface Hyperparameters {
+  hawkesDecay: number;
+  spatialSigma: number;
+  gapVelocityWeight: number;
+  bayesWindowRatio: number;
+  sgdLearningRate: number;
+  lyapunovHorizon: number;
+}
+
+const tuneAndAdjustWeights = async (
   drawName: string,
   history: DrawResult[],
-  temporalDepth: number,
-  weightsToUse?: AlgoWeights,
-  metrics?: EnhancedMetrics,
-  symbioticContext?: SymbioticContext,
-  skipTraining: boolean = false,
-  adversarialMode: boolean = false,
-  forcedOutsiderCount?: number,
-  isForensicOptimized: boolean = false,
-  useSpatioTemporalHawkes: boolean = true,
+  weightsToUse: AlgoWeights | undefined,
+  gameRegimeInfo: any,
+  skipTraining: boolean,
+  useSpatioTemporalHawkes: boolean,
   onProgress?: (progress: number, message: string) => void,
-  preloadedForensicReports?: ForensicReport[],
-): Promise<Prediction> => {
-  initializeLcgForDraw(drawName);
-  if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
-  onProgress?.(5, "Initialisation de l'ADN algorithmique...");
-
+): Promise<{
+  weights: AlgoWeights;
+  hyperparameters: Hyperparameters;
+  hyperAccuracyGain: number;
+  hyperTuningLog: string[];
+}> => {
   let weights = normalizeWeights(weightsToUse || (await getAlgoWeights(drawName)));
-  const gameRegimeInfo = detectGameRegime(history);
   weights = adjustWeightsForRegime(weights, gameRegimeInfo);
 
-  let hyperparameters = {
-    hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY as number,
+  let hyperparameters: Hyperparameters = {
+    hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
     spatialSigma: 1.5,
     gapVelocityWeight: 1.0,
     bayesWindowRatio: 0.1,
-    sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE as number,
+    sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
     lyapunovHorizon: 15
   };
   let hyperTuningLog: string[] = [];
@@ -312,10 +327,16 @@ export const generateMasterPredictionCore = async (
   if (!skipTraining) {
     try {
       const { tunePredictiveHyperparameters } = await import("./hyperParameterTuner");
-      const tunerResult = await tunePredictiveHyperparameters(drawName, history, weights, useSpatioTemporalHawkes, (p, msg) => {
-        onProgress?.(Math.round(5 + p * 0.8), msg);
-      });
-      hyperparameters = tunerResult.tunedParams;
+      const tunerResult = await tunePredictiveHyperparameters(
+        drawName,
+        history,
+        weights,
+        useSpatioTemporalHawkes,
+        (p, msg) => {
+          onProgress?.(Math.round(5 + p * 0.8), msg);
+        }
+      );
+      hyperparameters = tunerResult.tunedParams as Hyperparameters;
       hyperAccuracyGain = tunerResult.accuracyGain;
       hyperTuningLog = tunerResult.log;
     } catch (err) {
@@ -325,75 +346,73 @@ export const generateMasterPredictionCore = async (
     onProgress?.(45, "Micro-ajustement des poids par descente de gradient stochastique...");
     weights = await applyMetaLearning(weights, history, drawName);
 
-    // [5] useSpatioTemporalHawkes passé en paramètre (plus de lecture de store dans le SGD)
     weights = await applyDeterministicMicroSgd(
-      drawName, weights, history, gameRegimeInfo.entropy, hyperparameters.sgdLearningRate, useSpatioTemporalHawkes,
+      drawName,
+      weights,
+      history,
+      gameRegimeInfo.entropy,
+      hyperparameters.sgdLearningRate,
+      useSpatioTemporalHawkes,
     );
     await saveAlgoWeights(drawName, weights);
   }
 
-  onProgress?.(50, "Extraction des distributions de Poisson...");
-  const localHistoryContext = history.slice(0, temporalDepth);
+  return { weights, hyperparameters, hyperAccuracyGain, hyperTuningLog };
+};
 
-  const poissonScores = calculatePoissonScores(localHistoryContext);
-  onProgress?.(55, "Analyse des probabilités de transition bayésiennes...");
-  const bayesScores = calculateBayesianScore(localHistoryContext);
-  const temporalScores = calculateTemporalScores(localHistoryContext);
-  const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
-  const resistanceScores = calculateResistanceScores(localHistoryContext);
-  const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
+const computeAdvancedMetrics = async (
+  localHistoryContext: DrawResult[],
+  drawName: string,
+  hyperparameters: Hyperparameters,
+  useSpatioTemporalHawkes: boolean,
+  metrics: EnhancedMetrics | undefined,
+): Promise<EnhancedMetrics> => {
+  const [
+    poissonScores,
+    bayesScores,
+    temporalScores,
+    digitalRootScores,
+    resistanceScores,
+    gapVelocityScores,
+    leaderSuccessionScores,
+    aiIntuitionScores,
+    fractalResonanceScores,
+    spatialHotSpots,
+    symbioticClusterScores,
+    anomalyScores,
+    hawkesExcitationScores,
+    topologicalLyapunovScores
+  ] = await Promise.all([
+    Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext)),
+    Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
+    Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateGapVelocityScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
+    Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>)),
+    Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
+    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext)),
+    Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
+    Promise.resolve().then(() => useSpatioTemporalHawkes
+      ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
+      : calculateHawkesExcitation(localHistoryContext)
+    ),
+    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext))
+  ]);
 
+  // Adjust gap velocity scores
   for (const k in gapVelocityScores) {
     gapVelocityScores[k] *= hyperparameters.gapVelocityWeight;
   }
 
-  onProgress?.(65, "Synthèse des résonances fractales et processus Hawkes...");
-  const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
-  const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
-  const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-
-  onProgress?.(75, "Analyse des affinités symbiotiques et anomalies d'entropie...");
-  const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext);
-  const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
-  const anomalyScores = calculateAnomalyScores(localHistoryContext);
-
-  const hawkesExcitationScores = useSpatioTemporalHawkes
-    ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
-    : calculateHawkesExcitation(localHistoryContext);
-
+  // Adjust Hawkes scores
   for (const k in hawkesExcitationScores) {
     hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay / TUNING.DEFAULT_HAWKES_DECAY);
   }
 
-  const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext);
-
-  const volatilityObj = calculateVolatility(localHistoryContext);
-  const entropyObj = calculateShannonEntropy(localHistoryContext);
-  const volatilityScore = isNaN(volatilityObj.score) ? 50 : Math.max(0, Math.min(100, volatilityObj.score));
-  const entropyScore = isNaN(entropyObj.normalized) ? 50 : Math.max(0, Math.min(100, entropyObj.normalized * 100));
-  const regimeState = (volatilityScore + entropyScore) / 2;
-
-  const entropyRegimeScores: Record<number, number> = {};
-  const clusterBoosts: Record<number, number> = {};
-  for (let i = 1; i <= 90; i++) {
-    const freqVal = (metrics?.frequencies?.[i] || 0) * 10;
-    entropyRegimeScores[i] = regimeState > 65 ? Math.max(0, 100 - freqVal) : Math.min(100, freqVal);
-    clusterBoosts[i] = Math.max(0, symbioticClusterScores[i] || 0);
-  }
-
-  let recentReports: ForensicReport[] = [];
-  if (!skipTraining || isForensicOptimized) {
-    onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
-    if (preloadedForensicReports && preloadedForensicReports.length > 0) {
-      recentReports = preloadedForensicReports;
-    } else {
-      const forensicReports = await getLocalForensicReports();
-      const historyDates = new Set(history.map(h => h.date).filter(d => d !== 'Invalid Date' && d !== null && d !== undefined));
-      recentReports = forensicReports.filter((r) => r.drawName === drawName && r.date !== 'Invalid Date' && r.date !== null && r.date !== undefined && historyDates.has(r.date)).slice(0, 5);
-    }
-  }
-
-  const intermediateMetrics: EnhancedMetrics = {
+  return {
     ...metrics,
     poisson: poissonScores,
     bayes: bayesScores,
@@ -406,16 +425,46 @@ export const generateMasterPredictionCore = async (
     fractalResonance: fractalResonanceScores,
     spatial: spatialHotSpots,
     symbioticClusters: symbioticClusterScores,
+    anomaly: anomalyScores,
     hawkesExcitation: hawkesExcitationScores,
     topologicalLyapunov: topologicalLyapunovScores
   };
+};
 
-  const features = await extractFeatures(drawName, history, temporalDepth);
-  const baseScoresRaw = calculateScores(features, weights, intermediateMetrics, history);
-  const algoBreakdowns = baseScoresRaw.reduce(
-    (acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }),
-    {} as Record<number, Record<string, number>>,
-  );
+const applyForensicAdjustments = async (
+  drawName: string,
+  history: DrawResult[],
+  gameRegimeInfo: any,
+  skipTraining: boolean,
+  isForensicOptimized: boolean,
+  preloadedForensicReports: ForensicReport[] | undefined,
+  algoBreakdowns: Record<number, Record<string, number>>,
+  stdDevScore: number,
+  medianScore: number,
+): Promise<{
+  recentReports: ForensicReport[];
+  proximityScores: Record<number, number>;
+  missedScores: Record<number, number>;
+  driftScores: Record<number, number>;
+  dynamicWeightModifiers: Record<number, Partial<Record<string, number>>>;
+  oracleDriftMap: Record<string, number>;
+}> => {
+  let recentReports: ForensicReport[] = [];
+  if (!skipTraining || isForensicOptimized) {
+    if (preloadedForensicReports && preloadedForensicReports.length > 0) {
+      recentReports = preloadedForensicReports;
+    } else {
+      const forensicReports = await getLocalForensicReports();
+      const historyDates = new Set(
+        history.map(h => normalizeDateStr(h.date)).filter(d => d !== '')
+      );
+      recentReports = forensicReports.filter((r) => 
+        r.drawName === drawName && 
+        normalizeDateStr(r.date) !== '' && 
+        historyDates.has(normalizeDateStr(r.date))
+      ).slice(0, 5);
+    }
+  }
 
   const proximityScores: Record<number, number> = {};
   const missedScores: Record<number, number> = {};
@@ -426,47 +475,47 @@ export const generateMasterPredictionCore = async (
   const alphasDecades = new Float32Array(10).fill(1.0); // Prior Multinomial des Décades (Laplace)
   const alphasParity = new Float32Array(2).fill(1.0);   // Prior Binomial de Parité (Laplace)
 
-  // Médianes / écarts-types pour remplacer les seuils fixes
-  const allScores = baseScoresRaw.map(s => s.score);
-  const medianScore = getMedian(allScores);
-  const stdDevScore = getStdDev(allScores, medianScore);
-
   const oracleDriftMap: Record<string, number> = {};
+  
+  const SIGMA_PROXIMITY = 3.0; // 90.0 / 30.0
+  const TWO_SIGMA_SQ = 2.0 * SIGMA_PROXIMITY * SIGMA_PROXIMITY; // 18.0
+  const structuralWeight = gameRegimeInfo.hurst + gameRegimeInfo.entropy;
 
   recentReports.forEach((r, idx) => {
     if (r.nearMisses) {
       r.nearMisses.forEach((nm) => {
+        const predStr = nm.predicted.toString().split("").reverse().join("");
+        const revNum = parseInt(predStr);
+        const validRev = revNum >= 1 && revNum <= 90 ? revNum : nm.predicted;
+
         for (let i = 1; i <= 90; i++) {
           const distPredicted = Math.min(Math.abs(i - nm.predicted), 90 - Math.abs(i - nm.predicted));
           const distActual = Math.min(Math.abs(i - nm.actual), 90 - Math.abs(i - nm.actual));
 
-          const sigmaProximity = 90.0 / 30.0;
-          const predictedWave = 1.0 * Math.exp(-(distPredicted * distPredicted) / (2.0 * sigmaProximity * sigmaProximity));
-          const actualWave = 1.0 * (1.0 - Math.pow(distActual, 2) / Math.pow(sigmaProximity, 2)) * Math.exp(-Math.pow(distActual, 2) / (2.0 * Math.pow(sigmaProximity, 2)));
+          const predictedWave = Math.exp(-(distPredicted * distPredicted) / TWO_SIGMA_SQ);
+          const actualWave = (1.0 - (distActual * distActual) / (SIGMA_PROXIMITY * SIGMA_PROXIMITY)) * Math.exp(-(distActual * distActual) / TWO_SIGMA_SQ);
 
           let specificCorrection = 0;
 
-          const diffVoisin = Math.abs(Math.abs(i - nm.predicted) - 1.0);
-          const voisinAffinity = Math.exp(-Math.pow(diffVoisin, 2) / 0.5);
-
-          const diffMiroir = Math.abs(i - (91 - nm.predicted));
-          const miroirAffinity = Math.exp(-Math.pow(diffMiroir, 2) / 0.5);
-
-          const revNum = parseInt(nm.predicted.toString().split("").reverse().join(""));
-          const validRev = revNum >= 1 && revNum <= 90 ? revNum : nm.predicted;
-          const diffShadow = Math.abs(i - validRev);
-          const shadowAffinity = Math.exp(-Math.pow(diffShadow, 2) / 0.5);
-
-          const structuralWeight = gameRegimeInfo.hurst + gameRegimeInfo.entropy;
-
-          if (nm.errorType === "Voisin") specificCorrection += voisinAffinity * structuralWeight;
-          if (nm.errorType === "Miroir") specificCorrection += miroirAffinity * structuralWeight;
-          if (nm.errorType === "Shadow") specificCorrection += shadowAffinity * structuralWeight;
+          if (nm.errorType === "Voisin") {
+            const diffVoisin = Math.abs(Math.abs(i - nm.predicted) - 1.0);
+            const voisinAffinity = Math.exp(-Math.pow(diffVoisin, 2) / 0.5);
+            specificCorrection += voisinAffinity * structuralWeight;
+          } else if (nm.errorType === "Miroir") {
+            const diffMiroir = Math.abs(i - (91 - nm.predicted));
+            const miroirAffinity = Math.exp(-Math.pow(diffMiroir, 2) / 0.5);
+            specificCorrection += miroirAffinity * structuralWeight;
+          } else if (nm.errorType === "Shadow") {
+            const diffShadow = Math.abs(i - validRev);
+            const shadowAffinity = Math.exp(-Math.pow(diffShadow, 2) / 0.5);
+            specificCorrection += shadowAffinity * structuralWeight;
+          }
 
           proximityScores[i] = (proximityScores[i] || 0) + predictedWave + actualWave + specificCorrection;
         }
       });
     }
+
     if (r.missedSignals) {
       r.missedSignals.forEach((ms) => {
         const decadeMatch = ms.pattern.match(/Décade (\d)0s/);
@@ -484,6 +533,7 @@ export const generateMasterPredictionCore = async (
         }
       });
     }
+
     if (r.missedOpportunities) {
       r.missedOpportunities.forEach((mo) => {
         const num = mo.number;
@@ -505,11 +555,10 @@ export const generateMasterPredictionCore = async (
         }
       });
     }
+
     if (r.algorithmicDrift) {
       const driftValues = r.algorithmicDrift.map(d => d.driftScore);
       const medianDrift = getMedian(driftValues);
-      const stdDevDrift = getStdDev(driftValues, medianDrift);
-      void stdDevDrift; // conservé pour instrumentation éventuelle
 
       r.algorithmicDrift.forEach((drift) => {
         const val = drift.direction === "overestimating" ? drift.driftScore : -drift.driftScore;
@@ -535,6 +584,7 @@ export const generateMasterPredictionCore = async (
         }
       });
     }
+
     if (r.z_scores && r.proposedAdjustments) {
       r.z_scores.forEach((z) => {
         const zWeight = 1.0 / (1.0 + Math.exp(-3.0 * (Math.abs(z.z) - 1.0)));
@@ -578,6 +628,118 @@ export const generateMasterPredictionCore = async (
     missedScores[i] = baseMissedScore + (exactMissedBoosts[i] || 0);
   }
 
+  return {
+    recentReports,
+    proximityScores,
+    missedScores,
+    driftScores,
+    dynamicWeightModifiers,
+    oracleDriftMap,
+  };
+};
+
+export const generateMasterPredictionCore = async (
+  drawName: string,
+  history: DrawResult[],
+  temporalDepth: number,
+  weightsToUse?: AlgoWeights,
+  metrics?: EnhancedMetrics,
+  symbioticContext?: SymbioticContext,
+  skipTraining: boolean = false,
+  adversarialMode: boolean = false,
+  forcedOutsiderCount?: number,
+  isForensicOptimized: boolean = false,
+  useSpatioTemporalHawkes: boolean = true,
+  onProgress?: (progress: number, message: string) => void,
+  preloadedForensicReports?: ForensicReport[],
+): Promise<Prediction> => {
+  initializeLcgForDraw(drawName);
+  if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
+  onProgress?.(5, "Initialisation de l'ADN algorithmique...");
+
+  // Validation et sécurisation de temporalDepth [5, history.length]
+  const validTemporalDepth = Math.max(5, Math.min(temporalDepth, history.length));
+  const localHistoryContext = history.slice(0, validTemporalDepth);
+
+  const gameRegimeInfo = detectGameRegime(history);
+
+  // Étape 1 : Optimisation des poids et hyperparamètres
+  const tuningResult = await tuneAndAdjustWeights(
+    drawName,
+    history,
+    weightsToUse,
+    gameRegimeInfo,
+    skipTraining,
+    useSpatioTemporalHawkes,
+    onProgress,
+  );
+
+  let weights = tuningResult.weights;
+  const hyperparameters = tuningResult.hyperparameters;
+  const hyperAccuracyGain = tuningResult.hyperAccuracyGain;
+  const hyperTuningLog = tuningResult.hyperTuningLog;
+
+  onProgress?.(50, "Extraction des distributions de Poisson...");
+
+  // Étape 2 : Calcul parallèle des 14 algorithmes avancés
+  const intermediateMetrics = await computeAdvancedMetrics(
+    localHistoryContext,
+    drawName,
+    hyperparameters,
+    useSpatioTemporalHawkes,
+    metrics,
+  );
+
+  const volatilityObj = calculateVolatility(localHistoryContext);
+  const entropyObj = calculateShannonEntropy(localHistoryContext);
+  const volatilityScore = isNaN(volatilityObj.score) ? 50 : Math.max(0, Math.min(100, volatilityObj.score));
+  const entropyScore = isNaN(entropyObj.normalized) ? 50 : Math.max(0, Math.min(100, entropyObj.normalized * 100));
+  const regimeState = (volatilityScore + entropyScore) / 2;
+
+  const entropyRegimeScores: Record<number, number> = {};
+  const clusterBoosts: Record<number, number> = {};
+  for (let i = 1; i <= 90; i++) {
+    const freqVal = (metrics?.frequencies?.[i] || 0) * 10;
+    entropyRegimeScores[i] = regimeState > 65 ? Math.max(0, 100 - freqVal) : Math.min(100, freqVal);
+    clusterBoosts[i] = Math.max(0, (intermediateMetrics.symbioticClusters?.[i] || 0));
+  }
+
+  // Étape 3 : Calcul des scores de base alignés sur la fenêtre locale pour cohérence absolue
+  const features = await extractFeatures(drawName, localHistoryContext, validTemporalDepth);
+  const baseScoresRaw = calculateScores(features, weights, intermediateMetrics, localHistoryContext);
+
+  // Correction O(n^2) spread operator sur reduce
+  const algoBreakdowns: Record<number, Record<string, number>> = {};
+  for (let i = 0; i < baseScoresRaw.length; i++) {
+    const curr = baseScoresRaw[i];
+    algoBreakdowns[curr.num] = curr.breakdown;
+  }
+
+  const allScores = baseScoresRaw.map(s => s.score);
+  const medianScore = getMedian(allScores);
+  const stdDevScore = getStdDev(allScores, medianScore);
+
+  // Étape 4 : Application des ajustements forensiques (Double Aveugle & Alignement)
+  onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
+  const forensicResult = await applyForensicAdjustments(
+    drawName,
+    history,
+    gameRegimeInfo,
+    skipTraining,
+    isForensicOptimized,
+    preloadedForensicReports,
+    algoBreakdowns,
+    stdDevScore,
+    medianScore,
+  );
+
+  const recentReports = forensicResult.recentReports;
+  const proximityScores = forensicResult.proximityScores;
+  const missedScores = forensicResult.missedScores;
+  const driftScores = forensicResult.driftScores;
+  const dynamicWeightModifiers = forensicResult.dynamicWeightModifiers;
+  const oracleDriftMap = forensicResult.oracleDriftMap;
+
   const enhancedMetrics: EnhancedMetrics = {
     ...intermediateMetrics,
     proximityDiagnostic: proximityScores,
@@ -585,7 +747,7 @@ export const generateMasterPredictionCore = async (
     driftCorrection: driftScores,
     symbioticClusters: clusterBoosts,
     entropyRegime: entropyRegimeScores,
-    anomalyDetection: anomalyScores,
+    anomalyDetection: (intermediateMetrics.anomaly as Record<number, number> | undefined) || ({} as Record<number, number>),
     symbioticContext,
     dynamicWeightModifiers,
   };
@@ -595,13 +757,14 @@ export const generateMasterPredictionCore = async (
   let masterScores = calculateScores(features, weights, enhancedMetrics, localHistoryContext);
 
   const feedbackOptimizer = new DNAOptimizer(Object.keys(weights) as AlgoKey[]);
-  const feedbackBreakdowns = masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {} as Record<number, any>);
 
-  // [3] CORRECTION : l'ancienne version copiait la MÊME référence de breakdown
-  // pour les 15 tirages de la fenêtre => 15 points identiques, aucune info.
-  // On effectue un unique pas de calibration honnête sur les breakdowns réels
-  // disponibles. (Pour une vraie fenêtre walk-forward, il faudrait recalculer
-  // les breakdowns tirage par tirage — coûteux ; on ne le simule pas faussement.)
+  // Correction O(n^2) reduce spread
+  const feedbackBreakdowns: Record<number, any> = {};
+  for (let i = 0; i < masterScores.length; i++) {
+    const curr = masterScores[i];
+    feedbackBreakdowns[curr.num] = curr.breakdown;
+  }
+
   const breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>> = {
     0: feedbackBreakdowns,
   };
@@ -636,7 +799,6 @@ export const generateMasterPredictionCore = async (
     }
   }
 
-  // Utilisation à la volée, sans réécriture en storage (auto-save désactivé).
   weights = normalizeWeights(calibratedWeights);
 
   // Pass 2 : re-scoring avec les poids calibrés
@@ -654,17 +816,40 @@ export const generateMasterPredictionCore = async (
       const { lotteryService } = await import("../lotteryService");
       const allHistory = await lotteryService.fetchHistory("ALL");
       if (allHistory && allHistory.length >= 10) {
-        const macroPred = await generateMasterPrediction(
-          "ALL_COMBINED",
-          allHistory,
-          temporalDepth,
-          weightsToUse,
-          undefined,
-          undefined,
-          true, // skip training pour la vitesse
-          false,
-          0
-        );
+        const macroCacheKey = `${validTemporalDepth}_${weightsToUse ? JSON.stringify(weightsToUse) : "def"}_${allHistory.length}`;
+        let macroPred = macroPriorCache.get(macroCacheKey);
+
+        if (!macroPred) {
+          // Encapsuler dans un timeout de 3000ms pour éviter tout thread bloquant ou boucle infinie
+          macroPred = await new Promise<Prediction>((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+              reject(new Error("Timeout waiting for macro prediction in James-Stein"));
+            }, 3000);
+
+            generateMasterPrediction(
+              "ALL_COMBINED",
+              allHistory,
+              validTemporalDepth,
+              weightsToUse,
+              undefined,
+              undefined,
+              true, // skip training pour la vitesse
+              false,
+              0
+            ).then(res => {
+              clearTimeout(timeoutId);
+              resolve(res);
+            }).catch(err => {
+              clearTimeout(timeoutId);
+              reject(err);
+            });
+          });
+
+          if (macroPred) {
+            macroPriorCache.set(macroCacheKey, macroPred);
+          }
+        }
+
         if (macroPred && macroPred.breakdown) {
           macroPriorScores = {};
           macroPredBreakdown = macroPred.breakdown;
@@ -686,7 +871,7 @@ export const generateMasterPredictionCore = async (
         }
       }
     } catch (e) {
-      logger.warn({ err: e }, "[predictionFacade] Failed to fetch macro prior for Bayesian Shrinkage");
+      logger.warn({ err: e }, "[predictionFacade] Failed to fetch macro prior for Bayesian Shrinkage (handled gracefully)");
     }
   }
 
@@ -805,15 +990,24 @@ export const generateMasterPredictionCore = async (
   if (adversarialMode) {
     const keyAlgos = [AlgoKey.FREQUENCY, AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.MARKOV, AlgoKey.TEMPORAL, AlgoKey.BAYES, AlgoKey.FRACTAL, AlgoKey.SPATIAL, AlgoKey.MOMENTUM, AlgoKey.AFFINITY, AlgoKey.GAP_SEQUENCE, AlgoKey.DERIVED_NEIGHBOR];
 
+    // Optimisation de la boucle adversarial O(n^2 * algos) en extrayant les médianes / écarts-types d'algos sains
+    const algoRobustStats: Record<string, { median: number; stdDev: number }> = {};
+    keyAlgos.forEach((algo) => {
+      const algoValues = masterScores.map(s => s.breakdown[algo] || 0);
+      const medianAlgo = getMedian(algoValues);
+      const stdDevAlgo = getStdDev(algoValues, medianAlgo);
+      algoRobustStats[algo] = { median: medianAlgo, stdDev: stdDevAlgo };
+    });
+
     const consensusMapping = masterScores.map((score) => {
       let continuousConsensus = 0;
       let sumVal = 0;
       keyAlgos.forEach((algo) => {
         const val = score.breakdown[algo] || 0;
         sumVal += val;
-        const algoValues = masterScores.map(s => s.breakdown[algo] || 0);
-        const medianAlgo = getMedian(algoValues);
-        const stdDevAlgo = getStdDev(algoValues, medianAlgo);
+        const stats = algoRobustStats[algo];
+        const medianAlgo = stats.median;
+        const stdDevAlgo = stats.stdDev;
         continuousConsensus += 1.0 / (1.0 + Math.exp(-(1.0 / Math.max(1e-6, stdDevAlgo)) * (val - medianAlgo)));
       });
       return { num: score.num, continuousConsensus, meanVal: sumVal / keyAlgos.length, originalScore: score.score };
@@ -828,6 +1022,12 @@ export const generateMasterPredictionCore = async (
     const scaleConsensusSigmoid = 1.0 / Math.max(1e-6, stdDevContinuousConsensus);
 
     const scaleMeanValSigmoid = 1.0 / Math.max(1e-6, getStdDev(consensusMapping.map(c => c.meanVal), medianMeanVal));
+
+    // Pré-calcul de altStrengths hors de la boucle d'attribution
+    const altStrengths = masterScores.map(s => ((s.breakdown[AlgoKey.FRACTAL] || 0) + (s.breakdown[AlgoKey.SPECTRAL] || 0) + (s.breakdown[AlgoKey.SPATIAL] || 0) + (s.breakdown[AlgoKey.BAYES] || 0)) / 4);
+    const medianAltStrength = getMedian(altStrengths);
+    const stdDevAltStrength = getStdDev(altStrengths, medianAltStrength);
+    const scaleAltSigmoid = 1.0 / Math.max(1e-6, stdDevAltStrength);
 
     consensusMapping.forEach((c) => {
       const probConsensus = (1.0 / (1.0 + Math.exp(-scaleConsensusSigmoid * (c.continuousConsensus - medianContinuousConsensus)))) * (1.0 / (1.0 + Math.exp(-scaleMeanValSigmoid * (c.meanVal - medianMeanVal))));
@@ -845,11 +1045,6 @@ export const generateMasterPredictionCore = async (
         const stochasticVal = scoreEntry.breakdown[AlgoKey.SPATIAL] || 0;
         const anomalyVal = scoreEntry.breakdown[AlgoKey.BAYES] || 0;
         const alternativeStrength = (antiConsensusVal + entropyRegimeVal + stochasticVal + anomalyVal) / 4;
-
-        const altStrengths = masterScores.map(s => ((s.breakdown[AlgoKey.FRACTAL] || 0) + (s.breakdown[AlgoKey.SPECTRAL] || 0) + (s.breakdown[AlgoKey.SPATIAL] || 0) + (s.breakdown[AlgoKey.BAYES] || 0)) / 4);
-        const medianAltStrength = getMedian(altStrengths);
-        const stdDevAltStrength = getStdDev(altStrengths, medianAltStrength);
-        const scaleAltSigmoid = 1.0 / Math.max(1e-6, stdDevAltStrength);
 
         const boostProb = 1.0 / (1.0 + Math.exp(-scaleAltSigmoid * (alternativeStrength - medianAltStrength)));
         const alternativeMultiplier = 1.0 + maxImpact * boostProb * (1.0 - probConsensus);
@@ -886,7 +1081,6 @@ export const generateMasterPredictionCore = async (
       const trueProbabilityExp = (Math.exp((bayesianImpact - 50) / 50) + Math.exp((poissonImpact - 50) / 50)) / 2;
       let adjustedScore = raw * trueProbabilityExp;
 
-      // [7] Amortisseur forensic : centre/pente nommés (TUNING_*)
       const N_reports = recentReports.length;
       const baseDamping = 1.0 / (1.0 + Math.exp(-TUNING.FORENSIC_DAMPING_SLOPE * (N_reports - TUNING.FORENSIC_DAMPING_CENTER)));
       const volatility = typeof (enhancedMetrics as any).volatility === 'number' ? (enhancedMetrics as any).volatility : 0.5;
@@ -918,27 +1112,19 @@ export const generateMasterPredictionCore = async (
   const outsiderCount = forcedOutsiderCount !== undefined ? forcedOutsiderCount : 2;
   const empiricalCalibration = generateEmpiricalCalibration(history);
 
-  // regimeState est sur [0,100] ; generateCombination l'utilise en exposant de
-  // Math.exp() => on normalise sur [0,1] pour éviter l'explosion combinatoire.
   const regimeStateNormalized = regimeState / 100.0;
   const selection = generateCombination(sortedScores, features.affinityMap, empiricalCalibration, outsiderCount, history[0]?.gagnants, regimeStateNormalized);
 
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
   if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
 
-  // --- PLATT SCALING FOR BRIER SCORE CALIBRATION (Requirement 2) ---
   const currentEntropyResult = calculateShannonEntropy(history);
   const currentEntropy = currentEntropyResult.normalized;
 
-  // Platt parameters A and B are continuous functions of the Shannon entropy.
-  // In highly chaotic regimes (high entropy), the slope plattA is flattened and the offset plattB is lowered,
-  // squeezing false confidence spikes down to realistic, calibrated baselines.
   const plattA = 1.2 - 0.8 * currentEntropy;
   const plattB = -0.5 - 1.5 * currentEntropy;
 
-  // Normalize raw averageScore to [-3, 3] centered at 50
   const rawX = (averageScore - 50.0) / 15.0;
-  // Platt Sigmoid scaling
   const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
   const calibratedConfidence = Math.max(1, Math.min(99, plattCalibratedProbability * 100.0));
 
@@ -954,10 +1140,15 @@ export const generateMasterPredictionCore = async (
 
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, localHistoryContext);
 
-  const breakdownRecord = masterScores.reduce((acc, curr) => ({ ...acc, [curr.num]: curr.breakdown }), {} as Record<number, any>);
+  // Correction O(n^2) reduce spread
+  const breakdownRecord: Record<number, any> = {};
+  for (let i = 0; i < masterScores.length; i++) {
+    const curr = masterScores[i];
+    breakdownRecord[curr.num] = curr.breakdown;
+  }
+
   const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
 
-  // --- XAP: Explainable Attribution Prediction via DNAOptimizer ---
   const optimizer = new DNAOptimizer(Object.keys(weights) as AlgoKey[]);
   const dnaMatrix = selection.map(num => {
     const bdown = breakdownRecord[num] || {};
@@ -982,20 +1173,16 @@ export const generateMasterPredictionCore = async (
     }
   }
 
-  // [7] Indice d'alignement = indicateur d'affichage cosmétique (voir HONEST_NOTE).
-  // Il mesure la ressemblance interne des vecteurs ADN, PAS une chance de gain.
-  let calculatedAlignment = 82; // valeur de repli neutre
+  let calculatedAlignment = 82;
   if (historicalVectors.length >= 5) {
     try {
-      const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, sampleDepth);
+      const targetProfile = optimizer.extractTargetDNAProfile(fbHistoricalVectors, fbSampleDepth);
       const evaluation = optimizer.evaluateCandidate(
         dnaMatrix,
         targetProfile,
         selection,
         history.slice(0, sampleDepth).map(d => d.gagnants)
       );
-      // Mappe une distance [0,+inf) vers un indice borné [ALIGNMENT_MIN, ALIGNMENT_MAX].
-      // La borne haute reste 99 (0.99) et non un ×105 qui gonflait artificiellement l'affichage.
       const rawAlign = (1.0 / (1.0 + evaluation.distance)) * 100;
       calculatedAlignment = Math.min(TUNING.ALIGNMENT_MAX, Math.max(TUNING.ALIGNMENT_MIN, Math.round(rawAlign)));
     } catch (err) {
@@ -1014,16 +1201,20 @@ export const generateMasterPredictionCore = async (
 
   const proxyValidation = evaluateAdversarialSurvival(selection, breakdownRecord, history, oracleDriftMap);
 
-  const explainabilityData = masterScores.reduce((acc, curr) => {
-    if (curr.explainability) acc[curr.num] = curr.explainability;
-    return acc;
-  }, {} as Record<number, any>);
+  // Correction O(n^2) reduce spread
+  const explainabilityData: Record<number, any> = {};
+  for (let i = 0; i < masterScores.length; i++) {
+    const curr = masterScores[i];
+    if (curr.explainability) {
+      explainabilityData[curr.num] = curr.explainability;
+    }
+  }
 
   return {
     suggestedNumbers: selection,
     candidates: sortedScores.slice(5, 15).map((s) => s.num),
     confidence: Math.round(calibratedConfidence),
-    confidenceNote: HONEST_NOTE, // [7] transparence : l'indicateur est interne, pas prédictif
+    confidenceNote: HONEST_NOTE,
     analysis: analysisText,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
