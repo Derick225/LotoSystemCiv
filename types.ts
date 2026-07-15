@@ -98,6 +98,10 @@ export interface Prediction {
   hyperparameters?: any;
   hyperTuningLog?: string[];
   hyperAccuracyGain?: number;
+  aiWeights?: Record<string, number>;
+  aiRationale?: string;
+  aiStrategicAdvice?: string;
+  isLocalFallback?: boolean;
 }
 
 export interface PredictionFeedback {
@@ -220,6 +224,7 @@ export interface ForensicReport {
   challengedTargets?: number[]; // Cibles restreintes par l'Oracle Adversarial avant le tirage
   topologicalTensionIndex?: number; // Tension topologique globale sur la grille de jeu
   catastropheControlParams?: { a: number; b: number; discriminant: number; regime: string }; // Paramètres d'écart catastrophe de René Thom
+  gravitationalDriftVelocity?: number; // Vitesse de dérive gravitationnelle
 }
 
 export interface AlgorithmicAdjustment {

@@ -55,6 +55,7 @@ import { safeSetItem } from "../utils/safeStorage";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../utils/audioEngine";
 import { SLOT_CONFIG } from "../constants";
+import { useDriftCorrection } from "../hooks/useDriftCorrection";
 
 import { GlobalMacroPredictionView } from "./GlobalMacroPredictionView";
 
@@ -463,6 +464,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     const drawName = useNexusStore((state) => state.drawName);
     const temporalDepth = useNexusStore((state) => state.temporalDepth);
     const navigateToModule = useNexusStore((state) => state.navigateToModule);
+    const isAutonomousAgentActive = useNexusStore((state) => state.isAutonomousAgentActive);
 
     const queryClient = useQueryClient();
 
@@ -521,56 +523,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       return base;
     }, [regime, globalWeights]);
 
-    useEffect(() => {
-      const checkForDrift = async () => {
-        if (!history || history.length === 0 || !drawName) return;
-        try {
-          const { getPredictionHistoryAsync } = await import('../services/predictionHistoryService');
-          const predictions = await getPredictionHistoryAsync(drawName);
-          const driftResult = await LearningService.checkDrift(drawName, predictions, history);
-          
-          if (driftResult && driftResult.hasDrift) {
-             const bgEnabled = localStorage.getItem("nexus_enable_bg_autolearn") === "true";
-             if (bgEnabled) {
-                showToast(
-                   `Dérive détectée pour ${drawName} (${driftResult.reason}). Lancement de la boucle de correction active autonome...`,
-                   "info"
-                );
-                
-                try {
-                   // 1. Appliquer les corrélations de dérive au moteur neuronal
-                   const { applyDriftCorrelationsToNeuralEngine } = await import("../services/training/driftCorrelationService");
-                   await applyDriftCorrelationsToNeuralEngine(drawName);
-                   
-                   // 2. Déclencher un auto-apprentissage complet
-                   const result = await LearningService.triggerAutoLearning(drawName, undefined, true, true);
-                   if (result && result.improvement && result.weights) {
-                      await useNexusStore.getState().updateGlobalWeights(result.weights, drawName);
-                      showToast(`Correction active appliquée avec succès : ADN stabilisé (${result.message}).`, "success");
-                   }
-                } catch (corrErr) {
-                   console.error("Failed active drift correction:", corrErr);
-                }
-             } else {
-                showToast(
-                   `Alerte Dérive Algorithmique : L'agent recommande un rééquilibrage via Autopsie Forensic pour ${drawName}. (${driftResult.reason})`,
-                   "error"
-                );
-             }
-          }
-        } catch (e) {
-          console.error("Drift check failed", e);
-        }
-      };
-      
-      checkForDrift();
-    }, [drawName, history?.length]);
+    // Extraction de la logique de dérive via un hook dédié
+    useDriftCorrection(drawName, history || []);
 
     // AUTO-LEARN TRIGGER (Nightly Build Simulation) - Deactivated by default on startup to prevent browser freezing.
     useEffect(() => {
       const triggerAutoLearn = async () => {
-        const bgEnabled = localStorage.getItem("nexus_enable_bg_autolearn") === "true";
-        if (!bgEnabled) return;
+        if (!isAutonomousAgentActive) return;
 
         if (history && history.length > 60) {
           const drawName = history[0]?.drawName || "Global";
@@ -595,7 +554,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       // Delay to let UI settle
       const t = setTimeout(triggerAutoLearn, 15000);
       return () => clearTimeout(t);
-    }, [history]);
+    }, [history, isAutonomousAgentActive]);
 
     const handleAutoLearn = useCallback(async () => {
       if (!history || history.length < 60) {

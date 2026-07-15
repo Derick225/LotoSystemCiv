@@ -1038,7 +1038,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                     </div>
 
                                     {/* AI Weights & Rationale Bento Panel */}
-                                    {(prediction as any).aiWeights && (
+                                    {prediction.aiWeights && (
                                         <div className="bg-gradient-to-br from-slate-900/60 to-indigo-950/20 p-8 rounded-[2rem] border border-slate-800/80 shadow-2xl space-y-6 relative overflow-hidden">
                                             <div className="absolute top-0 right-0 h-48 w-48 rounded-full bg-fuchsia-500/5 blur-[80px] pointer-events-none" />
                                             
@@ -1049,15 +1049,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                                         Pondération Hybride de l'Oracle
                                                     </h3>
                                                     <p className="text-[11px] text-slate-500">
-                                                        Configuration des 19 algorithmes calibrée par {(prediction as any).isLocalFallback ? "le moteur cybernétique local" : "l'IA Gemini"}
+                                                        Configuration des 19 algorithmes calibrée par {prediction.isLocalFallback ? "le moteur cybernétique local" : "l'IA Gemini"}
                                                     </p>
                                                 </div>
                                                 <span className={`px-3 py-1 text-[9px] font-black uppercase tracking-wider rounded-full border ${
-                                                    (prediction as any).isLocalFallback 
+                                                    prediction.isLocalFallback 
                                                         ? "bg-blue-500/10 text-blue-400 border-blue-500/20" 
                                                         : "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20"
                                                 }`}>
-                                                    {(prediction as any).isLocalFallback ? "Moteur Déterministe" : "Gemini Optimisé"}
+                                                    {prediction.isLocalFallback ? "Moteur Déterministe" : "Gemini Optimisé"}
                                                 </span>
                                             </div>
 
@@ -1067,18 +1067,18 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                                     Raisonnement stratégique de l'IA :
                                                 </h4>
                                                 <p className="text-[11px] text-slate-400 leading-relaxed font-normal whitespace-pre-line">
-                                                    {(prediction as any).aiRationale}
+                                                    {prediction.aiRationale}
                                                 </p>
                                             </div>
 
                                             {/* Strategic Advice Highlight */}
-                                            {(prediction as any).aiStrategicAdvice && (
+                                            {prediction.aiStrategicAdvice && (
                                                 <div className="p-4.5 bg-emerald-500/5 border border-emerald-500/15 rounded-2xl flex items-start gap-3">
                                                     <Award size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
                                                     <div className="space-y-0.5">
                                                         <h5 className="text-[9.5px] font-black uppercase tracking-wider text-emerald-400">Conseil Tactique de Jeu</h5>
                                                         <p className="text-[11px] text-slate-300 leading-relaxed font-normal">
-                                                            {(prediction as any).aiStrategicAdvice}
+                                                            {prediction.aiStrategicAdvice}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -1090,7 +1090,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                                     Matrice de Pondération Algorithmique Calibrée (DNA) :
                                                 </h4>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                                    {Object.entries((prediction as any).aiWeights || {}).map(([algoName, val]: [string, any]) => {
+                                                    {Object.entries(prediction.aiWeights || {}).map(([algoName, val]: [string, any]) => {
                                                         const baseline = 1.0;
                                                         const ratio = val / baseline;
                                                         const isBoosted = ratio > 1.08;

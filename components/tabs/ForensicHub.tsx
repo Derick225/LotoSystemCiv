@@ -9,7 +9,6 @@ import { ForensicReport, PredictionHistoryItem } from "../../types";
 import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
-import { computeDriftCorrectionWeights } from "../../services/prediction/driftCorrectionService";
 import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
@@ -21,7 +20,6 @@ type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrif
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
   const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
   const setForensicOptimized = useNexusStore((state) => state.setForensicOptimized);
   const { showToast } = useToast();
@@ -239,21 +237,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
     }
   };
 
-  const handleIntegrateLessons = () => {
-    try {
-      const { newWeights, adjustments } = computeDriftCorrectionWeights(reports, globalWeights);
-      setGlobalWeights(newWeights);
-      audioEngine.play("success");
-      
-      const adjustedCount = Object.keys(adjustments).length;
-      showToast(`${adjustedCount} algorithmes réalignés avec succès dans le moteur neural.`, "success");
-    } catch (e) {
-      console.error(e);
-      showToast("Erreur lors de l'intégration des leçons.", "error");
-      audioEngine.play("error");
-    }
-  };
-
   return (
     <div id="forensic-content" className="max-w-7xl mx-auto space-y-6 pt-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
@@ -332,15 +315,21 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                 </div>
               </div>
 
-              {/* REGISTRE D'APPRENTISSAGE ACTIF (LEARNED LESSONS LEDGER) */}
-              <div className="mb-8 p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+              {/* CONSOLE D'AJUSTEMENT CYBERNÉTIQUE UNIFIÉE */}
+              <div className="mb-8 p-6 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xl">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-2">
-                    <BookOpen className="text-indigo-500" size={20} />
-                    <h4 className="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                      Registre d'Apprentissage Actif (Learned Lessons Ledger)
-                    </h4>
+                    <Brain className="text-emerald-500 animate-pulse" size={20} />
+                    <div>
+                      <h4 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        Console d'Ajustement Cybernétique
+                      </h4>
+                      <p className="text-[10px] text-slate-500">
+                        Calibrage adaptatif continu basé sur l'autopsie des 5 dernières sessions de tirages.
+                      </p>
+                    </div>
                   </div>
+                  
                   <button
                     onClick={() => {
                       setForensicOptimized(!isForensicOptimized);
@@ -358,151 +347,108 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                     }`}
                   >
                     <Brain size={12} className={isForensicOptimized ? "animate-pulse" : ""} />
-                    <span>Optimisation Forensic : {isForensicOptimized ? "Active" : "Inactive"}</span>
+                    <span>Optimisation : {isForensicOptimized ? "Active" : "Inactive"}</span>
                   </button>
                 </div>
 
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 font-medium leading-relaxed">
-                  Ce registre consolide les anomalies topologiques (écarts de voisinage, effets miroirs, translations d'ombres) identifiées lors des 5 dernières autopsies. Ces leçons orientent continuellement les forces de probabilité de la prochaine orchestration.
-                </p>
-
+                {/* 6 Core Topological Metrics */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/50 dark:border-slate-800/80 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Écarts de Voisins (±1)</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Écarts de Voisins</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.neighborsCount}
-                      <span className="text-[10px] font-medium text-slate-500">corrigés</span>
+                      <span className="text-[9px] font-medium text-slate-500">corrigés</span>
                     </span>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/50 dark:border-slate-800/80 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Effets Miroirs (91-X)</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Effets Miroirs</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.mirrorsCount}
-                      <span className="text-[10px] font-medium text-slate-500">capturés</span>
+                      <span className="text-[9px] font-medium text-slate-500">capturés</span>
                     </span>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/50 dark:border-slate-800/80 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Transpositions d'Ombres</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Transpositions d'Ombres</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.shadowsCount}
-                      <span className="text-[10px] font-medium text-slate-500">identifiées</span>
+                      <span className="text-[9px] font-medium text-slate-500">isolées</span>
                     </span>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/50 dark:border-slate-800/80 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Vitesse Machine</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Vitesse Machine</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.machineShifts}
-                      <span className="text-[10px] font-medium text-slate-500">neutralisés</span>
+                      <span className="text-[9px] font-medium text-slate-500">corrigées</span>
                     </span>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-rose-500/10 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-5"><Activity size={40} /></div>
-                    <span className="text-[10px] font-bold text-rose-400 uppercase block mb-1">Collapses Entropiques</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-500/10 shadow-sm relative overflow-hidden">
+                    <span className="text-[9px] font-bold text-rose-400 uppercase block mb-1">Collapses Entropiques</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.entropyCollapses}
-                      <span className="text-[10px] font-medium text-slate-500">évités</span>
+                      <span className="text-[9px] font-medium text-rose-500/70">neutralisés</span>
                     </span>
                   </div>
 
-                  <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-emerald-500/10 shadow-sm relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-5"><Brain size={40} /></div>
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">Déviances Benford</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/10 shadow-sm relative overflow-hidden">
+                    <span className="text-[9px] font-bold text-emerald-400 uppercase block mb-1">Déviances Benford</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.benfordDeviations}
-                      <span className="text-[10px] font-medium text-slate-500">réalignées</span>
+                      <span className="text-[9px] font-medium text-emerald-500/70">réalignées</span>
                     </span>
                   </div>
                 </div>
 
-                {ledgerStats.algoDrifts.length > 0 ? (
-                  <div>
-                    <h5 className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-3">Taux de Dérive Algorithmique Compensés (Feedback Cybernétique)</h5>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {ledgerStats.algoDrifts.map((dr) => (
-                        <div key={dr.algo} className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-150 dark:border-slate-850">
-                          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{dr.algo}</span>
-                          <div className="flex items-center gap-1.5">
-                            {dr.netDrift > 0 ? (
-                              <span className="text-[10px] font-bold text-amber-500 flex items-center gap-0.5">
-                                <ArrowUpRight size={12} />
-                                Overestimation: +{dr.netDrift.toFixed(1)}
-                              </span>
-                            ) : dr.netDrift < 0 ? (
-                              <span className="text-[10px] font-bold text-indigo-500 flex items-center gap-0.5">
-                                <ArrowDownRight size={12} />
-                                Underestimation: {dr.netDrift.toFixed(1)}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-slate-400">Stable</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[10px] text-slate-400 italic">Aucune dérive significative mesurée pour le moment.</p>
-                )}
-
-                <div className="mt-4 flex justify-end">
-                  <button 
-                    onClick={handleIntegrateLessons}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg active:scale-95"
-                  >
-                    <Brain size={14} /> Injecter les Leçons dans le Moteur Neural
-                  </button>
-                </div>
-
-                {/* NOUVELLE SECTION: BOUCLE DE FEEDBACK CORRELATIVE */}
-                <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
+                {/* Algorithmic Drift & proposed weight adjustments */}
+                <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
                     <div>
                       <h5 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Corrélations de Dérive (Moteur Neural)
+                        Facteurs Multiplicateurs de Dérive Proposés
                       </h5>
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        Boucle de rétroaction qui module continuellement les poids d'entraînement via les échecs prédictifs récurrents.
+                      <p className="text-[10px] text-slate-500">
+                        Ajustements continus calculés par le moteur adaptatif d'après les déviances constatées.
                       </p>
                     </div>
+                    
                     <button
                       onClick={applyDriftFeedback}
                       disabled={applyingDriftFeedback || driftCorrelations.length === 0}
-                      className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer shadow-sm shadow-indigo-500/20"
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer shadow-md"
                     >
                       <RefreshCw size={12} className={applyingDriftFeedback ? "animate-spin" : ""} />
-                      <span>{applyingDriftFeedback ? "Application..." : "Appliquer au Moteur Neural"}</span>
+                      <span>{applyingDriftFeedback ? "Ajustement..." : "Appliquer le Réalignement Cybernétique"}</span>
                     </button>
                   </div>
                   
                   {driftCorrelations.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                       {driftCorrelations.map(corr => (
-                        <div key={corr.algoName} className="p-3 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/80 rounded-xl shadow-sm flex flex-col gap-2">
+                        <div key={corr.algoName} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex flex-col gap-1.5">
                           <div className="flex justify-between items-center">
                             <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{corr.algoName}</span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                              {corr.failureFrequency} itérations
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-500 border border-slate-150 dark:border-slate-850">
+                              {corr.failureFrequency} cas
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-medium text-slate-500">Sévérité: {corr.driftSeverity > 0 ? "+" : ""}{corr.driftSeverity.toFixed(2)}</span>
-                            <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                            <span className="text-[9px] text-slate-400 font-mono">Sévérité: {corr.driftSeverity > 0 ? "+" : ""}{corr.driftSeverity.toFixed(2)}</span>
+                            <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
                               corr.proposedWeightMultiplier > 1 ? "text-emerald-500" : "text-rose-500"
                             }`}>
                               {corr.proposedWeightMultiplier > 1 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-                              {(corr.proposedWeightMultiplier * 100).toFixed(1)}% mod
+                              {(corr.proposedWeightMultiplier * 100).toFixed(0)}%
                             </span>
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-xl text-center">
-                      <p className="text-[10px] text-slate-500 italic font-medium">Aucune corrélation de dérive suffisante pour le feedback.</p>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl text-center">
+                      <p className="text-[10px] text-slate-500 italic font-medium">Aucun correcteur de dérive requis à ce stade.</p>
                     </div>
                   )}
                 </div>

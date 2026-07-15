@@ -358,7 +358,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                   </div>
                   <div className="text-center text-[10px] font-mono text-slate-400">
                     <span className="block font-black text-emerald-500">{Array.isArray(report.matches) ? report.matches.filter(m => m.errorType === "Hit").length : 0} Hits</span>
-                    <span>Vitesse : {(report as any).gravitationalDriftVelocity !== undefined ? `${(report as any).gravitationalDriftVelocity.toFixed(3)} rad/s` : "0.345 rad/s"}</span>
+                    <span>Vitesse : {report.gravitationalDriftVelocity !== undefined ? `${report.gravitationalDriftVelocity.toFixed(3)} rad/s` : "0.345 rad/s"}</span>
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <span className="text-[9px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">Tirage Réel</span>

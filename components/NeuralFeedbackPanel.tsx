@@ -22,6 +22,21 @@ import { audioEngine } from '../utils/audioEngine';
 import { useToast } from './ui/Toast';
 import { LearningService } from '../services/learningService';
 
+interface DriftMetrics {
+  hasDrift: boolean;
+  reason: string;
+  metrics?: {
+    recentAvgHits: number;
+    baselineAvgHits: number;
+    ewma: number;
+    driftScore: number;
+    recentSuccessRate: number;
+    pageHinkleyConfidence: number;
+    structuralDivergence: number;
+    structuralSeverity: string;
+  };
+}
+
 export const NeuralFeedbackPanel: React.FC = () => {
   const { neuralFeedbackLogs } = useNexusStore();
   const isAutonomousAgentActive = useNexusStore(state => state.isAutonomousAgentActive);
@@ -34,7 +49,7 @@ export const NeuralFeedbackPanel: React.FC = () => {
   const [selectedDirection, setSelectedDirection] = useState<string>('ALL');
   const { showToast } = useToast();
 
-  const [driftMetrics, setDriftMetrics] = useState<any>(null);
+  const [driftMetrics, setDriftMetrics] = useState<DriftMetrics | null>(null);
   const [checkingDrift, setCheckingDrift] = useState(false);
   const [learning, setLearning] = useState(false);
 
