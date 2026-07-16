@@ -19,7 +19,7 @@ export const markovPlugin: AlgorithmPlugin = {
       const median = sorted[Math.floor(sorted.length / 2)];
       const q1 = sorted[Math.floor(sorted.length * 0.25)];
       const q3 = sorted[Math.floor(sorted.length * 0.75)];
-      const iqr = Math.max(1e-6, q3 - q1);
+      const iqr = Math.max(Number.EPSILON, q3 - q1);
       cacheVal = { median, iqr };
     }
     ctx.pluginCache = ctx.pluginCache || {};

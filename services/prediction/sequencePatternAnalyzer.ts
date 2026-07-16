@@ -96,6 +96,16 @@ class SequencePatternAnalyzer {
       let totalWeights = 0;
       let weightedNextGap = 0;
 
+      // Calcul des moments de la série de gaps pour adapter le noyau gaussien aux propriétés réelles de dispersion du numéro
+      const seqMean = seq.reduce((a, b) => a + b, 0) / seq.length;
+      const gapVariance = seq.reduce((acc, val) => acc + Math.pow(val - seqMean, 2), 0) / seq.length;
+      const gapStd = Math.sqrt(gapVariance) || 1.0;
+
+      // Définition de la largeur de bande (bandwidth) du noyau RBF
+      // ACTION : Remplacement du diviseur magique par l'écart-type réel des gaps de la séquence
+      // Cela adapte de façon continue et adaptative la fenêtre de similarité à la dispersion intrinsèque du numéro
+      const bandwidth = Math.max(1.0, gapStd);
+
       for (let i = 0; i <= seq.length - windowSize - 1; i++) {
         const historicalWindow = seq.slice(i, i + windowSize);
         const historicalNextGap = seq[i + windowSize];
@@ -105,11 +115,12 @@ class SequencePatternAnalyzer {
           squaredDistance += Math.pow(recentSequence[j] - historicalWindow[j], 2);
         }
         
-        const meanGap = seq.reduce((a, b) => a + b, 0) / seq.length;
-        const bandwidth = Math.max(1.0, meanGap / 2.0);
+        // Noyau gaussien (RBF) : similarity = exp(-d^2 / (2 * h^2))
         const similarity = Math.exp(-squaredDistance / (2 * Math.pow(bandwidth, 2)));
         
-        if (similarity > 0.05) {
+        // Seuil d'importance statistique : correspond à exp(-3) ≈ 0.05, soit 3 écarts-types de distance dans un espace normalisé
+        const significanceCutoff = Math.exp(-3.0);
+        if (similarity > significanceCutoff) {
           matchedFrequency += similarity;
           totalWeights += similarity;
           weightedNextGap += historicalNextGap * similarity;
@@ -123,11 +134,9 @@ class SequencePatternAnalyzer {
       let bestMatch: PatternMatch | null = null;
       let score = 0;
 
+      // minRecurrenceThreshold sert de borne continue de significativité des observations cumulées (score de similarité normalisé)
       if (totalWeights >= minRecurrenceThreshold) {
         expectedNextGap = weightedNextGap / totalWeights;
-        
-        const gapVariance = seq.reduce((acc, val) => acc + Math.pow(val - (seq.reduce((a, b) => a + b, 0) / seq.length), 2), 0) / seq.length;
-        const gapStd = Math.sqrt(gapVariance) || 1.0;
         
         const signalSpread = Math.max(1.0, gapStd);
         const continuousResonance = Math.exp(-Math.pow(currentGap - expectedNextGap, 2) / (2 * Math.pow(signalSpread, 2)));

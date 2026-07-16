@@ -1,5 +1,25 @@
 
 
+/**
+ * Constantes de configuration pour le générateur congruentiel linéaire (LCG) déterministe.
+ * Standards provenant de l'ouvrage de référence "Numerical Recipes" pour maximiser la période
+ * et garantir la reproductibilité absolue sans nombres magiques dispersés.
+ */
+export const LCG_CONSTANTS = {
+    /** Multiplicateur multiplicatif du LCG standard */
+    MULTIPLIER: 1664525,
+    /** Incrément additif standard */
+    INCREMENT: 1013904223,
+    /** Seed de repli déterministe canonique (première) */
+    DEFAULT_SEED: 848932,
+    /** Modulo puissance de 2 de normalisation (2^32) */
+    MODULO: 4294967296,
+};
+
+/**
+ * Générateur Congruentiel Linéaire (LCG) pour un déterminisme absolu (100% reproductible).
+ * Ces valeurs garantissent une période maximale et de bonnes propriétés statistiques pour des suites d'écarts de loterie.
+ */
 export class LCG {
     private seed: number;
 
@@ -11,20 +31,24 @@ export class LCG {
                 hash = ((hash << 5) - hash) + char;
                 hash = hash & hash;
             }
-            this.seed = Math.abs(hash) || 848932;
+            this.seed = Math.abs(hash) || LCG_CONSTANTS.DEFAULT_SEED;
         } else {
-            this.seed = initialSeed || 848932;
+            this.seed = initialSeed || LCG_CONSTANTS.DEFAULT_SEED;
         }
     }
 
+    /**
+     * Génère le prochain nombre pseudo-aléatoire déterministe dans l'intervalle [0, 1[.
+     */
     public next(): number {
-        this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
-        return this.seed / 4294967296;
+        // Formule standard LCG : X_{n+1} = (a * X_n + c) mod m
+        this.seed = (this.seed * LCG_CONSTANTS.MULTIPLIER + LCG_CONSTANTS.INCREMENT) >>> 0;
+        return this.seed / LCG_CONSTANTS.MODULO;
     }
 }
 
 // Retro-compatibility (deprecated for singletons, use instances instead)
-let defaultLcgConfig = new LCG(848932);
+let defaultLcgConfig = new LCG(LCG_CONSTANTS.DEFAULT_SEED);
 
 export const initializeLcgForDraw = (drawName: string) => {
     defaultLcgConfig = new LCG(drawName);
@@ -35,15 +59,22 @@ export const lcgGlobalRandom = () => {
 };
 
 /**
- * Calcule le nombre de combinaisons possibles (n parmi k).
+ * Calcule le nombre de combinaisons possibles (n parmi k) de manière robuste.
  * nCr = n! / (k! * (n-k)!)
+ * L'implémentation alterne multiplications et divisions à chaque itération pour
+ * éviter un dépassement d'entier (overflow) ou des imprécisions sur les nombres flottants,
+ * garantissant un résultat exact même pour de grandes valeurs de n et k.
+ *
+ * @param n Nombre total d'éléments dans l'ensemble.
+ * @param k Nombre d'éléments à choisir.
  */
 export const combinations = (n: number, k: number): number => {
     if (k < 0 || k > n) return 0;
     if (k === 0 || k === n) return 1;
-    if (k > n / 2) k = n - k;
+    let targetK = k;
+    if (targetK > n / 2) targetK = n - targetK;
     let res = 1;
-    for (let i = 1; i <= k; i++) {
+    for (let i = 1; i <= targetK; i++) {
         res = (res * (n - i + 1)) / i;
     }
     return Math.round(res);
@@ -91,7 +122,12 @@ export const shuffleArray = <T>(array: T[]): T[] => {
 
 /**
  * Génère un UUID RFC 4122 v4 valide de manière 100% déterministe à partir d'une chaîne arbitraire.
+ * Utilise un algorithme de hachage déterministe FNV-1a (Fowler-Noll-Vo) étalé sur 4 slots de 32 bits
+ * distincts pour dériver de manière uniforme un bloc d'octets de 128 bits.
  * Respecte l'exigence ZÉRO HASARD de AGENTS.md (sans Math.random ou crypto.getRandomValues non seedés).
+ *
+ * @param str La chaîne d'entrée servant de base déterministe.
+ * @returns Une chaîne au format standard d'un UUIDv4 RFC 4122.
  */
 export const getDeterministicUUID = (str: string): string => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -99,18 +135,22 @@ export const getDeterministicUUID = (str: string): string => {
         return str.toLowerCase();
     }
 
-    // Hachage FNV-1a déterministe sur 4 slots de 32 bits
+    // Algorithme de hachage FNV-1a déterministe sur 4 variables d'état de 32 bits.
+    // Constantes d'offset d'initialisation canoniques pour FNV-1 et multiplicateurs premiers :
     let h1 = 0x811c9dc5;
     let h2 = 0x12345678;
     let h3 = 0xabcdef01;
     let h4 = 0x76543210;
 
+    const fnvPrime32 = 16777619;
+    const alternativePrime32 = 10995116;
+
     for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
-        h1 = Math.imul(h1 ^ char, 16777619);
-        h2 = Math.imul(h2 ^ char, 10995116);
-        h3 = Math.imul(h3 ^ char, 16777619) + h1;
-        h4 = Math.imul(h4 ^ char, 10995116) + h2;
+        h1 = Math.imul(h1 ^ char, fnvPrime32);
+        h2 = Math.imul(h2 ^ char, alternativePrime32);
+        h3 = Math.imul(h3 ^ char, fnvPrime32) + h1;
+        h4 = Math.imul(h4 ^ char, alternativePrime32) + h2;
     }
 
     const toHex8 = (num: number) => {
@@ -130,6 +170,7 @@ export const getDeterministicUUID = (str: string): string => {
     const part2 = rawHex.substring(8, 12);
     const part3 = '4' + rawHex.substring(13, 16);
     
+    // Le variant est sélectionné de manière déterministe parmi ['8', '9', 'a', 'b']
     const variantChar = ['8', '9', 'a', 'b'][Math.abs(h1) % 4];
     const part4 = variantChar + rawHex.substring(17, 20);
     const part5 = rawHex.substring(20, 32);

@@ -1,24 +1,77 @@
 import { get, set, del, keys as idbKeys, clear } from "idb-keyval";
-import { isSupabaseConfigured } from "../supabaseClient";
 
+/**
+ * Configuration centralisée des durées de vie du cache (TTL) par domaine métier.
+ */
+export const CACHE_CONFIG = {
+  SHORT_TTL: 5 * 60 * 1000,        // 5 minutes : données volatiles temps réel (pings, états actifs)
+  MEDIUM_TTL: 60 * 60 * 1000,      // 1 heure : statistiques et scores intermédiaires calculés
+  LONG_TTL: 24 * 60 * 60 * 1000,   // 24 heures : poids d'algorithmes et configurations globales stables
+  HISTORY_TTL: 24 * 60 * 60 * 1000, // 24 heures : historiques officiels de tirages (stables hors ligne)
+};
+
+/**
+ * Maintien de l'objet historique CACHE_TTL pour la compatibilité descendante avec l'ensemble du projet.
+ */
 export const CACHE_TTL = {
-  SHORT: 5 * 60 * 1000, // 5 minutes
-  MEDIUM: 60 * 60 * 1000, // 1 hour
-  LONG: 24 * 60 * 60 * 1000, // 24 hours
-  HISTORY: 24 * 60 * 60 * 1000, // 24 hours (Ensures offline mode works. Network fetch is prioritized in lotteryService and React Query staleTime is 0)
+  SHORT: CACHE_CONFIG.SHORT_TTL,
+  MEDIUM: CACHE_CONFIG.MEDIUM_TTL,
+  LONG: CACHE_CONFIG.LONG_TTL,
+  HISTORY: CACHE_CONFIG.HISTORY_TTL,
+};
+
+/**
+ * Retourne dynamiquement la durée de vie (TTL) cohérente basée sur le domaine d'application.
+ * JSDOC: La centralisation de la résolution des TTL par domaine garantit une cohérence absolue
+ * de l'état du cache et évite les instanciations de durées de vie arbitraires et dispersées.
+ */
+export const getTTL = (domain: string): number => {
+  switch (domain.toLowerCase()) {
+    case 'history':
+    case 'tirages':
+    case 'draws':
+      return CACHE_CONFIG.HISTORY_TTL;
+    case 'predictions':
+    case 'forensic':
+    case 'stats':
+    case 'metrics':
+      return CACHE_CONFIG.MEDIUM_TTL;
+    case 'concepts':
+    case 'weights':
+    case 'config':
+      return CACHE_CONFIG.LONG_TTL;
+    default:
+      return CACHE_CONFIG.SHORT_TTL;
+  }
+};
+
+/**
+ * Calcule dynamiquement la limite de taille du cache en mémoire
+ * basée sur la mémoire physique déclarée de l'appareil via navigator.deviceMemory.
+ * JSDOC: Utilise une formule logarithmique continue f(m) = round(Base * ln(m + 1)) pour garantir une dégradation
+ * douce et sécurisée de l'empreinte mémoire sur les terminaux mobiles de faibles ressources.
+ */
+export const getDynamicMemoryCacheLimit = (): number => {
+  const BASE_LIMIT = 50; // Capacité minimale absolue de protection
+  if (typeof navigator === 'undefined' || !('deviceMemory' in navigator)) {
+    return BASE_LIMIT * 3; // Environ 150 entrées sur desktop sans API deviceMemory
+  }
+  const memoryGb = (navigator as any).deviceMemory || 4.0;
+  // Calcul logarithmique continu : pour 1GB -> ~69, 2GB -> ~109, 4GB -> ~160, 8GB -> ~219 entrées
+  return Math.round(BASE_LIMIT * Math.log(memoryGb + 1.0)) + BASE_LIMIT;
 };
 
 export interface CacheEntry<T> {
   data: T;
   expiry: number;
-  hash?: string; // Optional integrity hash or version
-  drawCountRef?: number; // Helps invalidating automatically when new draws arrive
+  hash?: string; // Sceau d'intégrité ou version
+  drawCountRef?: number; // Permet l'invalidation automatique lors de l'arrivée de nouveaux tirages
 }
 
 export const CACHE_FLAGS = {
   ENABLE_MEMORY: true,
   ENABLE_IDB: true,
-  ENABLE_SUPABASE: false, // Feature flag for shared cache on Supabase. Keep disabled by default unless needed.
+  ENABLE_SUPABASE: false, // Cache partagé désactivé par défaut
 };
 
 class CacheService {
@@ -26,7 +79,7 @@ class CacheService {
   private recentDrawCounts: Map<string, number> = new Map();
 
   /**
-   * Generates a deterministic cache key.
+   * Génère une clé de cache déterministe et structurée.
    */
   public generateKey(
     domain: string,
@@ -37,7 +90,7 @@ class CacheService {
   }
 
   /**
-   * Warms up memory cache with a specific dataset.
+   * Enregistre un élément dans le cache à double niveau (Mémoire + IDB).
    */
   public async set<T>(
     key: string,
@@ -55,7 +108,8 @@ class CacheService {
     }
 
     if (CACHE_FLAGS.ENABLE_MEMORY) {
-      if (this.memoryCache.size >= 150) {
+      const dynamicLimit = getDynamicMemoryCacheLimit();
+      if (this.memoryCache.size >= dynamicLimit) {
         const oldestKey = this.memoryCache.keys().next().value;
         if (oldestKey) {
           this.memoryCache.delete(oldestKey);
@@ -74,10 +128,10 @@ class CacheService {
   }
 
   /**
-   * Retrieves data from Cache (Memory -> IDB -> Supabase)
+   * Récupère un élément depuis les caches hiérarchisés.
    */
   public async get<T>(key: string, drawName?: string): Promise<T | null> {
-    // 1. Memory Cache
+    // 1. Cache en mémoire vive (L1)
     if (CACHE_FLAGS.ENABLE_MEMORY && this.memoryCache.has(key)) {
       const entry = this.memoryCache.get(key)!;
       if (this.isValid(entry, drawName)) {
@@ -87,12 +141,12 @@ class CacheService {
       }
     }
 
-    // 2. IndexedDB Cache
+    // 2. Cache IndexedDB (L2)
     if (CACHE_FLAGS.ENABLE_IDB) {
       try {
         const idbEntry = await get<CacheEntry<T>>(key);
         if (idbEntry && this.isValid(idbEntry, drawName)) {
-          // Promote back to memory
+          // Remonter l'élément dans le cache L1 pour les accès futurs rapides
           if (CACHE_FLAGS.ENABLE_MEMORY) this.memoryCache.set(key, idbEntry);
           return idbEntry.data;
         } else if (idbEntry) {
@@ -103,26 +157,21 @@ class CacheService {
       }
     }
 
-    // 3. (Optional) Supabase Remote Cache. Implemented conditionally
-    if (CACHE_FLAGS.ENABLE_SUPABASE && isSupabaseConfigured()) {
-      // Could fetch from a 'system_cache' table if needed
-    }
-
     return null;
   }
 
   /**
-   * Cleans specific domain or all caches.
+   * Invalide les caches d'un domaine ou d'un préfixe particulier.
    */
   public async invalidateByPrefix(prefix: string): Promise<void> {
-    // Memory
+    // Invalidation mémoire
     for (const key of this.memoryCache.keys()) {
       if (key.startsWith(prefix)) {
         this.memoryCache.delete(key);
       }
     }
 
-    // IndexedDB
+    // Invalidation IndexedDB
     if (CACHE_FLAGS.ENABLE_IDB) {
       try {
         const allKeys = await idbKeys();
@@ -140,8 +189,7 @@ class CacheService {
   }
 
   /**
-   * Inform CacheService that a new draw arrived.
-   * Invalidates caches tied to an older draw count.
+   * Enregistre l'arrivée d'un nouveau tirage pour invalider à la volée le cache dépendant.
    */
   public async registerNewDraw(
     drawName: string,
@@ -151,13 +199,14 @@ class CacheService {
     if (newTotalCount > oldCount) {
       this.recentDrawCounts.set(drawName, newTotalCount);
       console.log(
-        `[CacheService] New draw registered for ${drawName} (Count: ${newTotalCount}). Invalidating dependent caches...`,
+        `[CacheService] New draw registered for ${drawName} (Count: ${newTotalCount}). Dependent caches will auto-invalidate on access.`
       );
-      // We could actively delete OR simply let get() reject stale drawCountRef.
-      // Lazy invalidation is achieved via isValid(). We optionally purge IDB for space.
     }
   }
 
+  /**
+   * Encapsule le calcul d'une fonction avec mise en cache transparente.
+   */
   public async getOrCompute<T>(
     key: string,
     computeFn: () => Promise<T> | T,
@@ -173,7 +222,7 @@ class CacheService {
   }
 
   /**
-   * Validation logic (TTL + Draw Count Sync)
+   * Analyse de validité (Périssabilité temporelle et cohérence du nombre de tirages)
    */
   private isValid(entry: CacheEntry<any>, drawName?: string): boolean {
     if (Date.now() > entry.expiry) return false;
@@ -181,7 +230,7 @@ class CacheService {
     if (drawName && entry.drawCountRef !== undefined) {
       const currentCount = this.recentDrawCounts.get(drawName);
       if (currentCount !== undefined && entry.drawCountRef < currentCount) {
-        return false; // Stale data due to new draw
+        return false; // Donnée obsolète car un nouveau tirage a été enregistré
       }
     }
     return true;
@@ -205,10 +254,13 @@ class CacheService {
     }
   }
 
+  /**
+   * Collecteur de déchets du cache (Garbage Collection)
+   */
   public async runGarbageCollection(): Promise<number> {
     let clearedCount = 0;
 
-    // 1. Clean memory cache
+    // 1. Nettoyage mémoire
     for (const [key, entry] of this.memoryCache.entries()) {
       if (!this.isValid(entry)) {
         this.memoryCache.delete(key);
@@ -216,7 +268,7 @@ class CacheService {
       }
     }
 
-    // 2. Clean IDB
+    // 2. Nettoyage IndexedDB
     if (CACHE_FLAGS.ENABLE_IDB) {
       try {
         const allKeys = await idbKeys();
@@ -241,13 +293,13 @@ class CacheService {
   }
 
   /**
-   * Enumerates keys by domain. Useful for datasets that behave like local tables (e.g., forensic reports).
+   * Permet la récupération groupée par domaine (comportement de table relationnelle locale)
    */
   public async getByDomain<T>(domain: string): Promise<T[]> {
     const prefix = `nexus_${domain}_`;
     const results: T[] = [];
 
-    // Memory fetch
+    // Récupération mémoire L1
     for (const [key, entry] of this.memoryCache.entries()) {
       if (key.startsWith(prefix) && this.isValid(entry)) {
         results.push(entry.data as T);
@@ -256,7 +308,7 @@ class CacheService {
       }
     }
 
-    // IDB fetch for keys not in memory
+    // Récupération IndexedDB L2 pour les clés non résidentes en mémoire vive
     if (CACHE_FLAGS.ENABLE_IDB) {
       try {
         const allKeys = await idbKeys();

@@ -1,7 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { calculateShannonEntropy, calculateFractalIndex } from '../../mathService';
-import { EmpiricalCalibration, FALLBACK_CALIBRATION } from './predictionEngine';
 
 /**
  * PROJECTEUR DE TENDANCE DES ÉCARTS (Gap Trend Projector)

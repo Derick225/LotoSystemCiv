@@ -104,7 +104,8 @@ export const gapSequencePlugin: AlgorithmPlugin = {
             lag1Autocorrelation,
             meanGap,
             stdGap,
-            hurstExponent
+            hurstExponent,
+            numGaps: n
         };
     }
     
@@ -120,7 +121,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const data = ctx.pluginCache![AlgoKey.GAP_SEQUENCE][num];
     if (!data) return { score: 50, confidence: 0.5 };
     
-    const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation, hurstExponent } = data;
+    const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation, hurstExponent, numGaps } = data;
     
     // Normal CDF for fatigue
     const z = (currentGap - meanGap) / stdGap;
@@ -133,10 +134,25 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const zScoreResonance = (currentGap - expectedNextGap) / (stdGap / 1.5 + Number.EPSILON);
     const patternResonanceScore = Math.exp(-0.5 * Math.pow(zScoreResonance, 2));
     
-    // Continuous Modulation via the Hurst Exponent (Memory Regime) of the gap sequence
+    /**
+     * CONTINUITY & STATISTICAL SIGNIFICANCE MANDATES (AGENTS.md):
+     * 1. The significance threshold of the lag-1 autocorrelation is derived from time series theory:
+     *    threshold = 1.96 / sqrt(N), representing a 95% confidence interval for white noise.
+     * 2. Any binary decision threshold is strictly avoided. We use a logistic function (sigmoid)
+     *    to smoothly map the significance level.
+     * 3. The Hurst exponent is mapped to a continuous sigmoid to define the memory regime score
+     *    (Persistence vs. Anti-Persistence) smoothly.
+     */
+    const threshold = numGaps > 0 ? 1.96 / Math.sqrt(numGaps) : 1.96;
+    const significance = 1.0 / (1.0 + Math.exp(-10.0 * (Math.abs(lag1Autocorrelation) - threshold)));
+    
+    // Continuous Regime Score (Persistence vs Anti-Persistence)
     // H > 0.5 is persistent (pattern/cycles), H < 0.5 is anti-persistent (mean reversion fatigue)
-    const hurstSigmoid = 1.0 / (1.0 + Math.exp(-6.0 * (hurstExponent - 0.5)));
-    const blendedWeight = 0.5 * Math.abs(lag1Autocorrelation) + 0.5 * hurstSigmoid;
+    const hurstSigmoid = 1.0 / (1.0 + Math.exp(-12.0 * (hurstExponent - 0.5)));
+    
+    // Blended weight of pattern resonance vs fatigue.
+    // Highly significant autocorrelation and high persistence favor pattern resonance.
+    const blendedWeight = 0.5 * significance * Math.abs(lag1Autocorrelation) + 0.5 * hurstSigmoid;
     const combinedSignal = (blendedWeight * patternResonanceScore) + ((1.0 - blendedWeight) * fatigueScore);
     
     // Sigmoïde finale pour lisser le score sur [0, 100]
@@ -149,7 +165,8 @@ export const gapSequencePlugin: AlgorithmPlugin = {
           currentGap, 
           expectedNextGap: parseFloat(expectedNextGap.toFixed(2)), 
           lag1: parseFloat(lag1Autocorrelation.toFixed(3)),
-          hurst: parseFloat(hurstExponent.toFixed(3))
+          hurst: parseFloat(hurstExponent.toFixed(3)),
+          autocorrSignificance: parseFloat(significance.toFixed(3))
       }
     };
   }

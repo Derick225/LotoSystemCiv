@@ -48,9 +48,9 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   const gaps = new Int16Array(91);
   const factorNum = history.length;
   
-  // Demi-vie adaptative dérivée de la taille de l'échantillon (exponentielle continue)
-  const adaptiveHalfLife = Math.max(1, factorNum * Math.exp(-1)); 
-  const ALPHA = 1.0 - Math.pow(Math.exp(-1), 1.0 / adaptiveHalfLife);
+  // Demi-vie adaptative dérivée de la taille de l'échantillon (loi de désintégration continue)
+  const adaptiveHalfLife = Math.log(2) / Math.max(1, factorNum * 0.05); 
+  const ALPHA = 1.0 - Math.pow(0.5, 1.0 / adaptiveHalfLife);
   
   const chronoHistory = [];
   for (let i = factorNum - 1; i >= 0; i--) chronoHistory.push(history[i]);
@@ -90,10 +90,12 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
     
     // Sigmoïdes basées sur des Z-scores normalisés
     const zGap = (gap - medianGap) / (stdDevGap + Number.EPSILON);
-    const probGapHigh = sigmoid(zGap, 0, 1);
-    const probZLow = sigmoid(-zScore, 1, 1); // Fort potentiel si la fréquence baisse drastiquement
-    const probGapLow = sigmoid(-zGap, Math.log(2), 1);
-    const probZHigh = sigmoid(zScore, 1, 1);
+    const gainZ = 1.0 / stdDev;
+    const gainGap = 1.0 / (stdDevGap + Number.EPSILON);
+    const probGapHigh = sigmoid(zGap, 0, gainGap);
+    const probZLow = sigmoid(-zScore, 1.0 / Math.max(0.1, probBase), gainZ); 
+    const probGapLow = sigmoid(-zGap, Math.log(2) * gainGap, gainGap);
+    const probZHigh = sigmoid(zScore, 1.0 / Math.max(0.1, probBase), gainZ);
 
     // Pondération inverse de la variance continue
     const varianceWeight = Math.exp(-stdDev); 
@@ -106,7 +108,8 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
 
     // Bonus Maturité Classique Continu : distribution Gaussienne des retards
     const maturityBonus = gaussianPDF(gap, medianGap, stdDevGap * stdDevGap);
-    const lateGapBonus = (stdDevGap) * sigmoid(zGap, 1.5, 1);
+    const stdErrorGap = stdDevGap / Math.sqrt(factorNum);
+    const lateGapBonus = stdDevGap * sigmoid(zGap, stdErrorGap, gainGap);
 
     finalScore += maturityBonus + lateGapBonus;
     result.push({ number: num, score: finalScore * 100.0 }); // Projection sur 100
@@ -353,8 +356,9 @@ export const calculateFusion = (
   const finalTicket: number[] = [];
   
   if (selectionMethod === 'balanced') {
-    // Dynamic continuous penalty factor based on normalized entropy (No magic 12.0)
-    const penaltyFactor = 4.0 + 12.0 * normalizedEntropy;
+    // Le facteur de pénalité continu est basé sur l'écart type des scores et l'entropie normalisée du système
+    const scoresStd = getMeanAndStdDev(convergedNumbers.map(cn => cn.score)).std;
+    const penaltyFactor = scoresStd * normalizedEntropy;
     const candidates = convergedNumbers.map(cn => ({ ...cn }));
     const sourceCounts: Record<string, number> = { python: 0, quantum: 0, oracle: 0 };
     
@@ -383,9 +387,10 @@ export const calculateFusion = (
   let totalSynergy = 0;
   convergedNumbers.slice(0, 15).forEach(c => { totalSynergy += parseFloat((c.details as any).symbiosis) - 1.0; });
   
-  // Confiance Logistique Analytique sans seuils constants
-  const expectedSynergy = Math.min(15, convergedNumbers.length) * Math.exp(-1); 
-  const confidenceRaw = sigmoid(totalSynergy, expectedSynergy, 2.0);
+  // Confiance Logistique Analytique dérivée continûment de l'entropie de Shannon normalisée du système
+  const expectedEntropy = 0.95; // Seuil théorique de bruit blanc stochastique équilibré
+  const slope = 1.0 / Math.max(Number.EPSILON, 1.0 - expectedEntropy);
+  const confidenceRaw = 1.0 / (1.0 + Math.exp(slope * (normalizedEntropy - expectedEntropy)));
   const confidence = confidenceRaw * 100.0;
 
   return {

@@ -3,6 +3,9 @@ import { ExtractedFeatures } from './featureExtractor';
 import { DrawResult } from '../../types';
 import { EnhancedMetrics } from './metrics.types';
 
+export type PluginCacheValue = Float64Array | Int32Array | Record<number, any> | Record<string, any> | any;
+export type PluginCacheData = Record<string, PluginCacheValue>;
+
 /**
  * CONTEXTE MATHÉMATIQUE STRICT
  * Remplace les "nombres magiques" par des descripteurs statistiques dérivés des données.
@@ -14,7 +17,10 @@ export interface AlgorithmContext {
   history: DrawResult[];
   
   // CACHE DE CORRÉLATION ET PRÉCALCUL POUR RENDEMENT PHÉNOMÉNAL
-  pluginCache?: Record<string, any>;
+  pluginCache?: PluginCacheData;
+
+  // NOM DU TIRAGE ACTIF POUR ISOLATION ET TRAÇABILITÉ (TIRAGE ISOLATION RULE)
+  drawName?: string;
   
   // REMPLACEMENT DES CONSTANTES ARBITRAIRES PAR DES BORNES STATISTIQUES
   statisticalBounds: {
@@ -36,7 +42,7 @@ export interface AlgorithmContext {
   maxFreq?: number;
   maxMarkov?: number;
   maxMachineTransfer?: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -70,6 +76,9 @@ export interface AlgorithmPlugin {
   precompute(context: AlgorithmContext): void;
   
   evaluate(num: number, context: AlgorithmContext): { score: number; confidence: number; metadata?: any };
+
+  // Optionnel: Permet d'indiquer si l'algorithme est marqué comme désactivé suite à une anomalie détectée
+  disabled?: boolean;
 }
 
 /**
@@ -77,6 +86,71 @@ export interface AlgorithmPlugin {
  * Découplage total de la logique d'évaluation de ScoringEngine.
  */
 export const algorithmRegistry: AlgorithmPlugin[] = [];
+
+/**
+ * Creates a robust mock AlgorithmContext for deterministic verification of plugins.
+ */
+const createMockContextForValidation = (): AlgorithmContext => {
+  const dummyHistory: DrawResult[] = Array(15).fill(0).map((_, i) => ({
+    id: `draw_${i}`,
+    date: `2026-01-${i + 1}`,
+    gagnants: [1, 2, 3, 4, 5],
+    boule_machine: "A",
+    drawName: "Reveil",
+    timestamp: Date.now() - i * 86400000
+  }));
+
+  const freqMap = new Float32Array(91);
+  const gapsMap = new Int32Array(91);
+  const markovMap = new Float32Array(91);
+  const momentumMap = new Float32Array(91);
+  const machineTransferMap = new Float32Array(91);
+  const shadowProbabilityMap = new Float32Array(91);
+  const networkCorrelationMap = new Float32Array(91);
+  const affinityMap: Float32Array[] = Array.from({ length: 91 }, () => new Float32Array(91));
+
+  for (let i = 1; i <= 90; i++) {
+    freqMap[i] = 10.0;
+    gapsMap[i] = 5;
+    shadowProbabilityMap[i] = 0.5;
+    networkCorrelationMap[i] = 0.3;
+    momentumMap[i] = 1.0;
+    machineTransferMap[i] = 0.5;
+  }
+
+  const mockContext: AlgorithmContext = {
+    features: {
+      freqMap,
+      gapsMap,
+      markovMap,
+      affinityMap,
+      momentumMap,
+      machineTransferMap,
+      shadowProbabilityMap,
+      networkCorrelationMap
+    },
+    advancedMetrics: {
+      digitalRoot: {},
+      harmonicTension: {},
+      volatility: {},
+      drift: {}
+    } as any,
+    history: dummyHistory,
+    deterministicSeed: 987654321,
+    statisticalBounds: {
+      median: 5.0,
+      q1: 2.0,
+      q3: 8.0,
+      variance: 3.0,
+      kurtosis: 1.5,
+      skewness: 0.2,
+      shannonEntropy: 3.5,
+      hurstExponent: 0.5
+    }
+  };
+
+  return mockContext;
+};
 
 /**
  * Enregistre un nouvel algorithme d'évaluation.
@@ -107,7 +181,39 @@ export const registerAlgorithm = (plugin: AlgorithmPlugin) => {
     );
   }
 
-  // 3. ENREGISTREMENT (Pattern Plugin dynamique avec écrasement)
+  // 3. RUNTIME MATHEMATICAL INTEGRITY TEST (Unit testing via mock context)
+  try {
+    const mockCtx = createMockContextForValidation();
+    // Call precompute to populate plugin cache if needed
+    plugin.precompute(mockCtx);
+    
+    // Test evaluate on sample numbers
+    const testNumbers = [1, 45, 90];
+    for (const num of testNumbers) {
+      const result = plugin.evaluate(num, mockCtx);
+      if (!result) {
+        throw new Error(`L'évaluation a retourné null ou undefined pour le numéro ${num}.`);
+      }
+      const score = result.score;
+      if (typeof score !== 'number' || isNaN(score) || !isFinite(score)) {
+        throw new Error(`Le score '${score}' retourné pour le numéro ${num} n'est pas un nombre fini.`);
+      }
+      if (score < 0 || score > 100) {
+        throw new Error(`Le score '${score}' retourné pour le numéro ${num} est hors de l'intervalle [0, 100].`);
+      }
+      const confidence = result.confidence;
+      if (typeof confidence !== 'number' || isNaN(confidence) || !isFinite(confidence)) {
+        throw new Error(`La confiance '${confidence}' retournée pour le numéro ${num} n'est pas un nombre fini.`);
+      }
+    }
+  } catch (error: any) {
+    throw new Error(
+      `[VIOLATION INTÉGRITÉ MATHÉMATIQUE] L'algorithme '${plugin.key}' a échoué au test d'intégrité de l'évaluateur.\n` +
+      `Détails de l'erreur: ${error.message}`
+    );
+  }
+
+  // 4. ENREGISTREMENT (Pattern Plugin dynamique avec écrasement)
   const existingIndex = algorithmRegistry.findIndex(p => p.key === plugin.key);
   if (existingIndex >= 0) {
     console.warn(`[REGISTRY] Mise à jour de l'algorithme existant : ${plugin.key}`);
@@ -122,6 +228,25 @@ export const registerAlgorithm = (plugin: AlgorithmPlugin) => {
  */
 export const getAlgorithm = (key: AlgoKey): AlgorithmPlugin | undefined => {
   return algorithmRegistry.find(p => p.key === key);
+};
+
+/**
+ * Marque un algorithme comme désactivé sans le supprimer du registre.
+ * Permet une récupération gracieuse en cas d'erreur de calcul détectée au runtime.
+ */
+export const disableAlgorithm = (key: AlgoKey, reason: string): void => {
+  console.warn(`[REGISTRY] Désactivation de l'algorithme '${key}'. Raison : ${reason}`);
+  const plugin = getAlgorithm(key);
+  if (plugin) {
+    plugin.disabled = true;
+  }
+};
+
+/**
+ * Retourne uniquement les algorithmes actifs (non désactivés).
+ */
+export const getActiveAlgorithms = (): AlgorithmPlugin[] => {
+  return algorithmRegistry.filter(p => !p.disabled);
 };
 
 /**

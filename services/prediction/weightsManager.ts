@@ -1,7 +1,7 @@
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
-import { get, set, keys } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
@@ -53,7 +53,8 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
 
     if (Math.abs(currentSum - 1.0) < Number.EPSILON * 100) break;
 
-    const error = 1.0 - currentSum;    const freeKeys = keys.filter(k => w[k] > FLOOR && w[k] < CEILING);
+    const error = 1.0 - currentSum;
+    const freeKeys = keys.filter(k => w[k] > FLOOR && w[k] < CEILING);
     const adjustment = freeKeys.length > 0 ? (error / freeKeys.length) : (error / numAlgos);
     const targetKeys = freeKeys.length > 0 ? freeKeys : keys;
 
@@ -94,7 +95,7 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   // CORRECTION : Multiplicateurs continus sans constantes arbitraires
   // Si persistance = 1, le poids est doublé.
   adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor);
-  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + (persistenceFactor * 0.5));
+  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + (persistenceFactor * (1.0 / 2.0)));
   
   // Si mean-reversion = 1, le poids est doublé.
   adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor);
@@ -149,7 +150,8 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
       // Chargement passif de l'historique de feedback humain pour RLHF (Phase 3)
       const predictionsMap = new Map<string, any>();
       try {
-        const allKeys = await keys();
+        const { keys: idbKeys } = await import('idb-keyval');
+        const allKeys = await idbKeys();
         const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('pred_'));
         for (const k of histKeys) {
           const itemStr = await get(k as string);
@@ -180,14 +182,14 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
         // Pénalité d'incertitude liée à l'unité d'intégrité (UFI)
         const ufiPenalty = report.unifiedIntegrityIndex !== undefined ? Math.max(0, (100 - report.unifiedIntegrityIndex) / 100) : 0;
         
-        // Bruit de mesure de base R
-        const baseR = Math.max(0.05, brierNormalized + ufiPenalty * 0.5);
+        // Bruit de mesure de base R (Zéro Nombre Magique, déduit des algos et pénalités)
+        const baseR = Math.max(1.0 / (2.0 * numAlgos), brierNormalized + ufiPenalty * (1.0 / Math.sqrt(numAlgos)));
         
         // Bruit de mesure modulé par le temps d'observation: l'incertitude augmente pour les données historiques (timeDecay faible)
         const finalR = baseR / (timeDecay + Number.EPSILON);
 
         // Bruit de procédé/dynamique Q (stabilité temporelle et protection anti-amnésie)
-        const Q = 0.01 / Math.sqrt(recentReports.length + 1);
+        const Q = (1.0 / (numAlgos * numAlgos)) / Math.sqrt(recentReports.length + 1);
 
         algosList.forEach(algo => {
           const state = kalmanStates[algo];
@@ -216,7 +218,7 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
                 if (typeof optW === 'number' && weights[algo] > 0) {
                   const multiplier = optW / weights[algo];
                   // Intégration de la divergence d'ADN optimal dans la mesure
-                  z_t += (multiplier - 1.0) * 0.5;
+                  z_t += (multiplier - 1.0) * (1.0 / 2.0);
                 }
               } else if (cf.action === 'SYNERGY' && cf.algo) {
                 const parts = cf.algo.split('+').map(a => a.trim() as AlgoKey);
@@ -258,11 +260,11 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
               if (rating === "Visionnaire") {
                 // Renforcement positif proportionnel à l'ajustement proposé
                 const isContrib = adj && adj.proposedWeightChange > 0;
-                z_t += changeMagnitude * (isContrib ? 1.0 : 0.5); 
+                z_t += changeMagnitude * (isContrib ? 1.0 : (1.0 / 2.0)); 
               } else if (rating === "Incohérente") {
                 // Pénalisation continue (feedback négatif) 
                 const isOffender = adj && adj.proposedWeightChange < 0;
-                z_t -= changeMagnitude * (isOffender ? 1.0 : 0.5);
+                z_t -= changeMagnitude * (isOffender ? 1.0 : (1.0 / 2.0));
               }
             }
           }
@@ -341,14 +343,10 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   let remoteWeights: Partial<AlgoWeights> | null = null;
   let remoteUpdatedAt: Date | null = null;
 
-  // 1. Lire les poids locaux depuis IndexedDB (Source de Vérité Locale) et fallback localStorage
+  // 1. Lire les poids locaux depuis IndexedDB (Source de Vérité Locale) sans aucun fallback synchrone vers localStorage
   if (typeof window !== 'undefined') {
     try {
-      let parsed = await get(`nexus_config_${drawName}`);
-      if (!parsed) {
-        const raw = localStorage.getItem(`nexus_config_${drawName}`);
-        if (raw) parsed = JSON.parse(raw);
-      }
+      const parsed = await get<{ weights: Partial<AlgoWeights>; updatedAt?: string }>(`nexus_config_${drawName}`);
       if (parsed?.weights && Object.keys(parsed.weights).length > 0) {
         localWeights = parsed.weights as Partial<AlgoWeights>;
         if (parsed.updatedAt) {
@@ -414,7 +412,6 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
     if (typeof window !== 'undefined') {
       const payload = { weights, updatedAt: new Date().toISOString() };
       await set(`nexus_config_${drawName}`, payload);
-      localStorage.setItem(`nexus_config_${drawName}`, JSON.stringify(payload));
     }
     if (isSupabaseConfigured()) {
       await supabase.from('algo_weights').upsert({ draw_name: drawName, weights });
@@ -428,12 +425,13 @@ export const applyForensicCalibration = (
   historyLength: number // Ajout pour dériver le damping
 ): AlgoWeights => {
   const newWeights = { ...currentWeights };
-    // @ts-ignore - auto generated by cleanup
   const numAlgos = Object.keys(currentWeights).length || 1;
   
   // CORRECTION : Damping dérivé de l'inverse de la racine de la taille de l'historique (loi des grands nombres)
   // Plus l'historique est long, plus on fait confiance aux données réelles, moins on damp les ajustements.
-  const damping = Math.max(0.1, Math.min(0.5, 1.0 / Math.sqrt(historyLength)));
+  const dampingMin = 1.0 / numAlgos;
+  const dampingMax = 1.0 / Math.sqrt(numAlgos);
+  const damping = Math.max(dampingMin, Math.min(dampingMax, 1.0 / Math.sqrt(historyLength)));
 
   suggestions.forEach(s => {
     const change = (s.improvement / 100.0) * damping;

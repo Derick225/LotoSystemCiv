@@ -4,8 +4,15 @@ import { AlgorithmPlugin } from '../algorithmRegistry';
 // Utilitaire pour obtenir la semaine ISO et le jour de la semaine
 const getCalendarMetrics = (dateStr: string) => {
   if (!dateStr) return { week: 0, dayOfWeek: 0, timestamp: 0 };
-  // Conversion du format DD/MM/YYYY en Date JS
-  const d = new Date(dateStr.split('/').reverse().join('-'));
+  
+  let d: Date;
+  if (dateStr.includes('/')) {
+    // Conversion du format DD/MM/YYYY en Date JS (YYYY-MM-DD)
+    d = new Date(dateStr.split('/').reverse().join('-'));
+  } else {
+    d = new Date(dateStr);
+  }
+  
   if (isNaN(d.getTime())) return { week: 0, dayOfWeek: 0, timestamp: 0 };
   
   // Calcul de la semaine ISO (norme internationale)

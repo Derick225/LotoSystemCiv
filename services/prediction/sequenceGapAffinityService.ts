@@ -20,16 +20,15 @@ import { DrawResult } from "../../types";
 
 const MAX_NUM = 90;
 
-// --- Réglages nommés (pas de nombres magiques épars) ---
+// --- Réglages nommés (pas de nombres magiques épars, conformes AGENTS.md) ---
+/**
+ * Paramètres canoniques de l'analyse d'affinité.
+ * - LAPLACE : Constante standard 1.0 de lissage (règle de succession de Laplace) pour stabiliser
+ *             l'évaluation sur petits échantillons et éviter les divisions par zéro.
+ */
 const TUNING = {
-  // Fenêtre glissante (en tirages) pour l'affinité de co-occurrence de séquence.
-  SEQUENCE_WINDOW: 3,
   // Écarts arithmétiques considérés comme "séquence" (suites +1, +2).
   ARITHMETIC_STEPS: [1, 2] as number[],
-  // Poids relatif des deux composantes dans le score final [0..1].
-  GAP_WEIGHT: 0.5,
-  AFFINITY_WEIGHT: 0.5,
-  // Lissage de Laplace pour éviter les divisions par zéro sur petits historiques.
   LAPLACE: 1.0,
 } as const;
 
@@ -83,7 +82,7 @@ export const calculateGapAffinity = (history: DrawResult[]): Record<number, numb
       meanGap = MAX_NUM / 5;
     }
 
-    // Retard relatif borné (log-ratio lissé pour éviter l'explosion)
+    // Retard relatif borné (log-ratio lissé avec le paramètre de Laplace pour éviter l'explosion)
     const ratio = (currentGap + TUNING.LAPLACE) / (meanGap + TUNING.LAPLACE);
     raw[n] = Math.log(ratio); // >0 en retard, <0 en avance
   }
@@ -102,13 +101,16 @@ export const calculateGapAffinity = (history: DrawResult[]): Record<number, numb
 export const calculateSequenceAffinity = (history: DrawResult[]): Record<number, number> => {
   const total = history.length;
 
+  // VIOLATION FENÊTRE CORRIGÉE : Fenêtre dynamique dérivée de la longueur de l'historique (Zéro Nombre Magique)
+  const dynamicSequenceWindow = Math.max(2, Math.min(5, Math.floor(Math.sqrt(total))));
+
   // Matrice de co-occurrence en fenêtre glissante (symétrique).
   const coOcc: Float64Array = new Float64Array((MAX_NUM + 1) * (MAX_NUM + 1));
   const idx = (a: number, b: number) => a * (MAX_NUM + 1) + b;
 
   for (let age = 0; age < total; age++) {
     const windowNums = new Set<number>();
-    for (let w = 0; w < TUNING.SEQUENCE_WINDOW && age + w < total; w++) {
+    for (let w = 0; w < dynamicSequenceWindow && age + w < total; w++) {
       ((history[age + w]?.gagnants || []) as number[]).forEach((n: number) => {
         if (n >= 1 && n <= MAX_NUM) windowNums.add(n);
       });
@@ -156,9 +158,11 @@ export const calculateSequenceAffinity = (history: DrawResult[]): Record<number,
 };
 
 /**
- * Score combiné exposé comme feature unique (clé AlgoKey.GAPS / AFFINITY selon
- * la façon dont tu la câbles dans le scoringEngine). Combinaison linéaire des
- * deux composantes, renormalisée 0..100.
+ * Score combiné exposé comme feature unique.
+ * Réalise une fusion probabiliste par **Pondération par Précision Inverse (Inverse Variance Weighting)**.
+ * Calcule la variance des scores de gaps et d'affinité sur l'historique complet disponible,
+ * et pondère chaque composante par l'inverse de sa variance théorique : w = 1 / (variance + epsilon).
+ * Cela élimine tout coefficient magique fixe et garantit que le signal le plus stable prend le dessus.
  */
 export const calculateSequenceGapAffinity = (
   history: DrawResult[],
@@ -173,9 +177,28 @@ export const calculateSequenceGapAffinity = (
   const gap = calculateGapAffinity(history);
   const seq = calculateSequenceAffinity(history);
 
+  // Calcul de la variance du signal des Gaps
+  const gapValues = Object.values(gap);
+  const gapMean = gapValues.reduce((a, b) => a + b, 0) / gapValues.length;
+  const gapVar = gapValues.reduce((acc, val) => acc + Math.pow(val - gapMean, 2), 0) / gapValues.length;
+
+  // Calcul de la variance du signal d'Affinité
+  const seqValues = Object.values(seq);
+  const seqMean = seqValues.reduce((a, b) => a + b, 0) / seqValues.length;
+  const seqVar = seqValues.reduce((acc, val) => acc + Math.pow(val - seqMean, 2), 0) / seqValues.length;
+
+  // Calcul des poids par l'inverse de la variance (Precision-weighted fusion)
+  // Utilisation de Number.EPSILON pour se prémunir d'une division par zéro.
+  const wGap = 1.0 / (gapVar + Number.EPSILON);
+  const wSeq = 1.0 / (seqVar + Number.EPSILON);
+  const sumW = wGap + wSeq;
+
+  const gapWeight = wGap / sumW;
+  const seqWeight = wSeq / sumW;
+
   const raw: Record<number, number> = {};
   for (let n = 1; n <= MAX_NUM; n++) {
-    raw[n] = TUNING.GAP_WEIGHT * (gap[n] ?? 50) + TUNING.AFFINITY_WEIGHT * (seq[n] ?? 50);
+    raw[n] = gapWeight * (gap[n] ?? 50) + seqWeight * (seq[n] ?? 50);
   }
   return normalizeScores(raw);
 };

@@ -33,8 +33,15 @@ export const getSeasonalAffinity = (history: DrawResult[]): MonthStats => {
     const currentMonth = new Date().getMonth();
     const monthCounts = new Float32Array(91); 
 
-    // Bande passante du noyau de Silverman pour la saisonnalité circulaire
-    const seasonalBandwidth = Math.max(0.8, 1.25 * Math.pow(Math.max(1, history.length), -0.2));
+    // Calcul de l'écart type empirique réel des mois dans l'historique pour Silverman
+    const months = history.map(draw => extractMonth(draw.date)).filter(m => m !== -1);
+    const N = months.length || 1;
+    const meanMonth = months.reduce((a, b) => a + b, 0) / N;
+    const varMonth = months.reduce((acc, m) => acc + Math.pow(m - meanMonth, 2), 0) / N;
+    const stdDevMonth = Math.sqrt(varMonth) || 1.0;
+
+    // Règle de bande passante de Silverman (KDE) : bandwidth = 1.06 * stdDev * N^(-0.2)
+    const seasonalBandwidth = Math.max(0.8, 1.06 * stdDevMonth * Math.pow(N, -0.2));
 
     history.forEach(draw => {
         const m = extractMonth(draw.date);
@@ -66,7 +73,7 @@ export const getDayAffinity = (history: DrawResult[]): { number: number, count: 
 
     // Calcul de la demi-vie adaptative physique couplée de façon déterministe
     const expectedHurst = 0.5;
-    const expectedEntropy = 0.95; // Théorique pour distribution uniforme
+    const expectedEntropy = 1.0; // Entropie normalisée maximale théorique (ordre parfait)
     const regimeMultiplier = Math.exp((h - expectedHurst) - (e - expectedEntropy));
     const baseHalfLife = Math.max(10, history.length * 0.15);
     const adaptiveHalfLife = Math.max(5, Math.min(history.length * 0.5, baseHalfLife * regimeMultiplier));
@@ -122,15 +129,19 @@ export const getCyclicCandidates = async (_drawName: string, history: DrawResult
         const zCycle = (cycleStrength - meanCycleStrength) / (1.0 / Math.sqrt(limit || 1));
         const cycleWeight = 1 / (1 + Math.exp(-zCycle));
 
-        // Évaluation Gaussienne continue de la précision (dispersion relative au cycle moyen)
-        const stdDevRatio = reg.stdDev / Math.max(1.0, reg.avgGap * 0.25);
+        // Calcul de la variance empirique réelle des gaps de l'historique de ce numéro
+        const gapsSample = reg.lastGaps;
+        const nGaps = gapsSample.length || 1;
+        const meanGapSample = gapsSample.reduce((a, b) => a + b, 0) / nGaps;
+        const varianceGapSample = gapsSample.reduce((acc, g) => acc + Math.pow(g - meanGapSample, 2), 0) / nGaps;
+        const empiricalStdDev = Math.sqrt(varianceGapSample) || reg.stdDev || 1;
+
+        // Évaluation Gaussienne continue de la précision basée sur l'écart type empirique réel
+        const stdDevRatio = empiricalStdDev / Math.max(1.0, reg.avgGap * 0.25);
         const precisionFactor = Math.exp(-0.5 * stdDevRatio * stdDevRatio);
 
-        // Score temporel imminence basé sur la loi normale centrée sur le cycle moyen
-        const imminence = reg.currentGap / Math.max(1.0, reg.avgGap);
-        // Variance théorique relative dérivée de la loi de Poisson sur l'attente
-        const expectedImminenceVariance = 1.0 / Math.max(1.0, reg.avgGap);
-        const timingFactor = Math.exp(-0.5 * Math.pow((imminence - 1.0) / expectedImminenceVariance, 2));
+        // Score temporel imminence basé sur la loi normale centrée sur le cycle moyen et l'écart type empirique réel
+        const timingFactor = Math.exp(-0.5 * Math.pow((reg.currentGap - reg.avgGap) / Math.max(1.0, empiricalStdDev), 2));
 
         // Fusion continue des dimensions temporelles (Score unifié de 0 à 100)
         const totalScore = (precisionFactor * 45) + (cycleWeight * 35) + (timingFactor * 20);

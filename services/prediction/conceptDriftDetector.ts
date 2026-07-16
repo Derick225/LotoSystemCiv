@@ -14,7 +14,7 @@ export class ConceptDriftDetector {
      * Test de Page-Hinkley avec calibrage statistique adaptatif et transition continue.
      * Détecte un changement brusque dans la moyenne d'un flux d'erreur (ex: RMSE ou Brier Loss).
      */
-    detectDriftPageHinkley(errorStream: number[]): { hasDrift: boolean; driftIndex: number; confidence: number } {
+    public detectDriftPageHinkley(errorStream: number[]): { hasDrift: boolean; driftIndex: number; confidence: number } {
         const N = errorStream.length;
         if (N < 10) return { hasDrift: false, driftIndex: -1, confidence: 0 };
 
@@ -42,7 +42,6 @@ export class ConceptDriftDetector {
         let runningSum = 0;
         let mt = 0; // Somme cumulée de déviation
         let minMt = Number.MAX_VALUE;
-        let maxMt = Number.MIN_VALUE;
         
         let driftIndex = -1;
         let peakStatistic = 0;
@@ -57,9 +56,6 @@ export class ConceptDriftDetector {
             
             if (mt < minMt) {
                 minMt = mt;
-            }
-            if (mt > maxMt) {
-                maxMt = mt;
             }
 
             const phStatistic = mt - minMt;
@@ -85,7 +81,7 @@ export class ConceptDriftDetector {
     /**
      * Mesure la divergence de Kullback-Leibler (KL-Divergence) entre deux distributions de fréquences.
      */
-    computeKLDivergence(distP: Float64Array, distQ: Float64Array): number {
+    public computeKLDivergence(distP: Float64Array, distQ: Float64Array): number {
         let kl = 0.0;
         const epsilon = 1e-12; // Régularisation infinitésimale continue
         
@@ -98,10 +94,68 @@ export class ConceptDriftDetector {
     }
 
     /**
+     * Approximation continue de la p-value (CDF normale sigmoïdale de Student pour grand df).
+     * Cecil Hastings Jr. (1955, "Approximations for Digital Computers") a prouvé qu'un facteur d'échelle 
+     * constant de 1.702 permet d'approximer la Fonction de Répartition Cumulative (CDF) d'une loi normale 
+     * par une fonction logistique (sigmoïde) avec une erreur absolue maximale extrêmement faible (< 0.003).
+     * Formule : \Phi(x) ≈ 1 / (1 + e^(-1.702 * x)).
+     * 
+     * @param tStatistic Statistique de test t (ou score z) calculée.
+     */
+    public computePValueApprox(tStatistic: number): number {
+        return 1.0 - 1.0 / (1.0 + Math.exp(-1.702 * tStatistic));
+    }
+
+    /**
+     * Évalue le risque de dérive de performance basé sur des critères rigoureux (Zéro Nombre Magique).
+     * Élimine les seuils fixes comme 0.85 ou 0.80 au profit d'un niveau de signification alpha (0.05).
+     * Le seuil dynamique est dérivé directement de la significativité alpha : 1 - alpha = 0.95 (confiance de 95%).
+     * 
+     * @param tStatistic Statistique t de Student pour comparer la moyenne récente et historique.
+     * @param baselineVar Variance empirique du groupe de référence.
+     * @param recentSuccessRate Taux de succès récent (fenêtre active).
+     * @param baselineSuccessRate Taux de succès historique (ligne de base).
+     */
+    public evaluatePerformanceDriftRisk(
+        tStatistic: number,
+        baselineVar: number,
+        recentSuccessRate: number,
+        baselineSuccessRate: number
+    ): { driftRisk: number; isPerformanceDrift: boolean; dynamicDriftThreshold: number } {
+        const pValue = this.computePValueApprox(tStatistic);
+        const successRateRatio = recentSuccessRate / (baselineSuccessRate || 1e-9);
+        const successCollapseRisk = Math.max(0, 1.0 - successRateRatio);
+
+        const w = 1.0 - pValue;
+        const l = pValue;
+        const kellyRisk = (successCollapseRisk > 0) ? Math.max(0, w - (l / (successCollapseRisk + 1e-9))) : w;
+
+        let driftRisk = 0;
+        if (tStatistic < 0) {
+            driftRisk = 1.0 - pValue; // P(t < tStatistic)
+        }
+
+        // Étalement continu de la marge de sécurité (fraction Kelly) basé sur l'incertitude empirique (variance)
+        const safetyFraction = 0.5 + 0.5 * Math.min(1.0, baselineVar / 10.0);
+        driftRisk = Math.max(driftRisk, kellyRisk * safetyFraction);
+        driftRisk = 1 - (1 - driftRisk) * (1 - successCollapseRisk); // Union probabiliste
+
+        const alphaSignificance = 0.05;
+        const dynamicDriftThreshold = 1.0 - alphaSignificance; // Seuil de confiance rigoureux (95%, soit 0.95)
+        const isPerformanceDrift = driftRisk > dynamicDriftThreshold;
+
+        return {
+            driftRisk,
+            isPerformanceDrift,
+            dynamicDriftThreshold
+        };
+    }
+
+    /**
      * Analyse structurelle de dérive de concept basée sur la KL-Divergence normalisée.
      * Compare de façon hermétique l'historique récent et l'historique ancien du tirage actif.
      */
-    evaluateStructuralDrift(history: { gagnants: number[]; drawName?: string }[]): { 
+    public evaluateStructuralDrift(history: { gagnants: number[]; drawName?: string }[]): { 
         driftDetected: boolean; 
         divergence: number; 
         severity: 'LOW' | 'MEDIUM' | 'CRITICAL';

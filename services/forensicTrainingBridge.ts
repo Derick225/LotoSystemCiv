@@ -3,6 +3,18 @@ import { AlgoKey } from '../shared/prediction.types';
 import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from './prediction/weightsManager';
 import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysisService';
 import { detectGameRegime } from './mathService';
+import { LCG } from '../utils/mathUtils';
+
+const generateDeterministicId = (prefix: string, index: number, seedStr: string): string => {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = (hash << 5) - hash + seedStr.charCodeAt(i);
+    hash |= 0;
+  }
+  const prng = new LCG(Math.abs(hash) + index);
+  const randomPart = Math.floor(prng.next() * 1000000).toString(36);
+  return `${prefix}_${randomPart}`;
+};
 
 /**
  * Génère une session d'apprentissage exploitable à partir d'un rapport forensic.
@@ -46,19 +58,18 @@ export const generateLearningSession = async (
     const oldWeight = currentWeights[algo as AlgoKey] ?? 0.1;
     let proposedDelta = proposedMap.get(algo) ?? 0.0;
 
-    // Continuous adjustments for Black Swan or chaotic regimes
-    if (forensicReport.isBlackSwan) {
-      const isResilientAlgo = [
-        AlgoKey.GAPS,
-        AlgoKey.SPECTRAL,
-        AlgoKey.FRACTAL,
-        AlgoKey.SPATIAL,
-        AlgoKey.BAYES
-      ].includes(algo as AlgoKey);
-      
-      const blackSwanBoost = 0.3 * (isResilientAlgo ? 1.0 : -0.6);
-      proposedDelta = proposedDelta * 0.5 + blackSwanBoost;
-    }
+    // Continuous adjustments for Black Swan or chaotic regimes using continuous intensity (Math.tanh)
+    const blackSwanIntensity = forensicReport.isBlackSwan ? 1.0 : Math.tanh((forensicReport.suspicionScore || 0) / 100.0);
+    const isResilientAlgo = [
+      AlgoKey.GAPS,
+      AlgoKey.SPECTRAL,
+      AlgoKey.FRACTAL,
+      AlgoKey.SPATIAL,
+      AlgoKey.BAYES
+    ].includes(algo as AlgoKey);
+    
+    const blackSwanBoost = 0.3 * (isResilientAlgo ? 1.0 : -0.6) * blackSwanIntensity;
+    proposedDelta = proposedDelta * (1.0 - 0.5 * blackSwanIntensity) + blackSwanBoost;
 
     const delta = proposedDelta * learningRate;
     const rawNewWeight = oldWeight + delta;
@@ -147,15 +158,20 @@ export const applyForensicAdjustments = async (
 
         // Génération et enregistrement des logs de feedback neuronal en temps réel
         const feedbackLogs: NeuralFeedbackLog[] = [];
-        learningSession.adjustments?.forEach((adj) => {
+        learningSession.adjustments?.forEach((adj, idx) => {
           const algo = adj.algo as AlgoKey;
           const oldW = currentWeights[algo] ?? 0;
           const newW = finalNormalized[algo] ?? 0;
           const diff = newW - oldW;
           if (Math.abs(diff) > 0.0001) {
             const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+            
+            // Calcul d'un ID déterministe pour supprimer tout Math.random()
+            const idSeed = `${drawName}_${algo}_${Date.now()}`;
+            const feedbackLogId = generateDeterministicId("log", idx, idSeed);
+
             feedbackLogs.push({
-              id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+              id: feedbackLogId,
               timestamp: Date.now(),
               drawName,
               algo,
@@ -235,14 +251,16 @@ export const getTrainingRecommendations = (
   Object.keys(aggregates).forEach((algo) => {
     const agg = aggregates[algo];
     const avgChange = agg.sumChange / (agg.count || 1);
-    const impactPercentage = Math.abs(avgChange) * 100;
-
-    if (Math.abs(avgChange) < 0.005) {
+    
+    // Continuous activation function replacing binary threshold check
+    const significance = 1.0 / (1.0 + Math.exp(-1000.0 * (Math.abs(avgChange) - 0.005)));
+    if (significance < 0.01) {
       return;
     }
 
     const type = avgChange > 0 ? 'BOOST' : 'REDUCE';
-    const priority = Math.abs(avgChange) * (1.0 + Math.tanh(agg.count / 5.0));
+    const priority = Math.abs(avgChange) * (1.0 + Math.tanh(agg.count / 5.0)) * significance;
+    const impactPercentage = Math.abs(avgChange) * 100 * significance;
 
     let baseExplanation = "";
     if (algo === AlgoKey.SPECTRAL) {

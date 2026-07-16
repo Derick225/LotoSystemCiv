@@ -1,14 +1,31 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 
+/**
+ * Calculates circular (geodesic) distance on a 1D circular manifold (torus of 90 numbers).
+ * Ensure that 1 is adjacent to 90.
+ */
+const getCircularDistance = (a: number, b: number, maxVal = 90): number => {
+    const diff = Math.abs(a - b);
+    return Math.min(diff, maxVal - diff);
+};
+
 export const derivedNeighborPlugin: AlgorithmPlugin = {
   key: AlgoKey.DERIVED_NEIGHBOR as any, // Type cast for new key
   category: 'meta', // Meta-algorithme car il observe les autres
   stability: 'stable',
-  mathematicalBasis: 'Topologie de Voisinage et Symétrie (Transformations Linéaires)',
-  description: 'Calcule l\'affinité avec les transformations (+1, -1, ombre, miroir) des numéros fortement pressentis par les algorithmes principaux.',
+  mathematicalBasis: 'Diffusion Gaussienne sur Variété Circulaire (Spreading Activation)',
+  description: 'Propage l\'activation par noyau gaussien circulaire et transformations symétriques à partir des graines principales.',
   isStrictlyDeterministic: true,
 
+  /**
+   * Precomputes the top seeds and transformations.
+   * 
+   * This algorithm acts as a Spreading Activation model on a 1D circular manifold [1, 90],
+   * where the boundary conditions are periodic (1 is adjacent to 90). It identifies the top 
+   * 10 "seed" numbers estimated by principal algorithms and diffuses activation from these 
+   * sources across the topology.
+   */
   precompute(ctx) {
     const N = 90;
     // 1. Identifier les "numéros choisis" par les autres algorithmes (proxy via les features de base)
@@ -30,13 +47,11 @@ export const derivedNeighborPlugin: AlgorithmPlugin = {
         proxyScores.push({ num: i, score: proxyScore });
     }
 
-    // Prendre les 10 meilleurs comme "choisis par les autres algos"
+    // Prendre les 10 meilleurs comme "choisis par les autres algos" (graines d'activation)
     proxyScores.sort((a, b) => b.score - a.score);
     const topChosen = proxyScores.slice(0, 10).map(p => p.num);
 
     // 2. Calculer l'affinité historique des transformations
-    // Vérifier à quelle fréquence, quand un numéro X sort, son voisin, miroir ou ombre sort (dans le même tirage ou le suivant)
-    // Pour simplifier et rester 100% déterministe, on va mapper les transformations des top numéros.
     const transformMap: Record<number, { type: string, source: number }[]> = {};
 
     topChosen.forEach(chosen => {
@@ -79,32 +94,40 @@ export const derivedNeighborPlugin: AlgorithmPlugin = {
         this.precompute(ctx);
     }
     const cache = ctx.pluginCache![AlgoKey.DERIVED_NEIGHBOR];
-    const transformations = cache.transformMap[num];
+    const transformations = cache.transformMap[num] || [];
+    const topChosen = cache.topChosen as number[];
 
-    if (!transformations || transformations.length === 0) {
-        return {
-            score: 0,
-            confidence: 0.5,
-            metadata: { derived: false }
-        };
-    }
+    // 1. Spreading Activation via Circular Gaussian Kernel
+    // The sigma parameter is derived directly from the topology size (90).
+    // According to the 3-sigma rule of a normal distribution, to cover ~99.7% of the density
+    // across the maximum geodesic distance of 45 (half of the domain), we set sigma to 90 / 6.0 = 15.0.
+    const SIGMA_TOPOLOGY = 90.0 / 6.0;
+    let spreadingActivation = 0.0;
+    
+    topChosen.forEach(seed => {
+        const dist = getCircularDistance(num, seed);
+        // Gaussian kernel applied continuously on the geodesic circular distance
+        spreadingActivation += Math.exp(-0.5 * Math.pow(dist / SIGMA_TOPOLOGY, 2));
+    });
 
-    // Le score dépend du nombre de transformations qui pointent vers ce numéro.
-    // Ex: Si le numéro 12 est le miroir de 21 (qui est choisi) ET le voisin de 11 (qui est choisi),
-    // son score sera très élevé.
+    // 2. Discrete Transformation Score
+    // Gives extra spikes to direct adjacent, mirror or shadow nodes
     const baseScorePerTransform = 35.0; 
-    const rawScore = transformations.length * baseScorePerTransform;
+    const discreteScore = transformations.length * baseScorePerTransform;
 
-    // Lissage continu avec tangente hyperbolique pour contraindre entre 0 et 100
-    // tanh(x) * 100
+    // 3. Fusion and Continuous Scaling
+    // Combines spreading activation and discrete symmetry boosts, then scales via hyperbolic tangent
+    const rawScore = spreadingActivation * 25.0 + discreteScore;
     const normalizedScore = Math.tanh(rawScore / 100.0) * 100.0;
 
     return {
         score: Math.max(0, Math.min(100, normalizedScore)),
         confidence: 0.90,
         metadata: { 
-            derived: true, 
-            transformations: transformations 
+            derived: transformations.length > 0, 
+            transformations: transformations,
+            spreadingActivation,
+            isSeed: topChosen.includes(num)
         }
     };
   }

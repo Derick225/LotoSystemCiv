@@ -3,6 +3,7 @@ import { DrawResult, GeminiReasoning } from '../types';
 import { AppError, logError } from '../utils/AppError';
 import { z } from 'zod';
 import { apiClient } from '../core/api/apiClient';
+import { CACHE_TTL } from './cache/CacheService';
 
 // Cache LRU ultra-simple local
 const logicCache: Record<string, { data: GeminiReasoning; expiry: number }> = {};
@@ -64,7 +65,7 @@ export const analyzeDrawLogic = async (
         // Gestion du cache LRU
         logicCache[cacheKey] = {
             data: result,
-            expiry: Date.now() + 1000 * 60 * 30 // 30 mins caching
+            expiry: Date.now() + CACHE_TTL.MEDIUM
         };
 
         return result;
@@ -104,7 +105,7 @@ export const getNarrativeAnalysis = async (drawName: string, history: DrawResult
         if (textOutput) {
             narrativeCache[cacheKey] = {
                 data: textOutput,
-                expiry: Date.now() + 1000 * 60 * 15 // 15 mins cache
+                expiry: Date.now() + CACHE_TTL.SHORT
             };
         }
 

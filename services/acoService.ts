@@ -12,6 +12,26 @@ import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 const DEFAULT_TIMEOUT = 8000;
 
+const getStringHash = (str: string): number => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash);
+};
+
+const shuffleArray = <T>(arr: T[], prng: LCG): T[] => {
+    const result = [...arr];
+    for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(prng.next() * (i + 1));
+        const temp = result[i];
+        result[i] = result[j];
+        result[j] = temp;
+    }
+    return result;
+};
+
 /**
  * Exécute l'optimisation par colonie de fourmis avec gestion de timeout et contexte vocal.
  */
@@ -44,7 +64,7 @@ export const runAntColonyOptimization = async (
     const oracleTargets = vocalContext?.targets || [];
 
     const config = { 
-        antsCount: Math.ceil(90 * (0.5 + 0.5 * entropy)), // Nombre de fourmis proportionnel au chaos
+        antsCount: Math.ceil(90 * (0.5 + entropy)), // Nombre de fourmis proportionnel au chaos (ex: 90 * (0.5 + entropy))
         generations: Math.ceil(100 * (1.0 + h)), 
         alpha, 
         beta, 
@@ -148,8 +168,10 @@ const generateVariations = (
     const oracleTargets = vocalContext?.targets || [];
     const normalizedConfidence = Math.max(Number.EPSILON, Math.min(1 - Number.EPSILON, baseConfidence / 100.0));
     
-    // Seed déterministe basé sur la somme du ticket et l'historique
-    const seed = base.reduce((a, b) => a + b, 0) + history.length;
+    // Seed déterministe basé sur le contexte de tirage et de l'historique
+    const activeDraw = useNexusStore.getState().drawName || "Reveil";
+    const timestamp = history.length > 0 ? getStringHash(history[0].date) : Date.now();
+    const seed = base.reduce((a, b) => a + b, 0) + history.length + getStringHash(activeDraw) + timestamp;
     const prng = new LCG(seed);
 
     const seenTickets = new Set<string>();
@@ -174,8 +196,8 @@ const generateVariations = (
         const variant = [...base];
         const mutationsCount = prng.next() < (1.0 - normalizedConfidence) ? 2 : 1;
         
-        // Sélection déterministe des indices à muter
-        const indices = [0, 1, 2, 3, 4].sort(() => prng.next() - 0.5).slice(0, mutationsCount);
+        // Sélection déterministe des indices à muter à l'aide de Fisher-Yates
+        const indices = shuffleArray([0, 1, 2, 3, 4], prng).slice(0, mutationsCount);
 
         for (const idx of indices) {
             const originalVal = variant[idx];
@@ -191,23 +213,25 @@ const generateVariations = (
             const scoreVoisinage = normalizedConfidence; // Toujours une option viable
 
             // CORRECTION : Distribution Softmax pour choisir la stratégie, pas de probabilités magiques
-            const maxScore = Math.max(scoreOracle, scoreGap, scoreVoisinage, Number.EPSILON);
-            const expOracle = Math.exp((scoreOracle - maxScore) / 0.5); // Température 0.5 pour lisser
-            const expGap = Math.exp((scoreGap - maxScore) / 0.5);
-            const expVoisinage = Math.exp((scoreVoisinage - maxScore) / 0.5);
+            const scores = [scoreOracle, scoreGap, scoreVoisinage];
+            const maxScore = Math.max(...scores, Number.EPSILON);
+            const exps = scores.map(s => Math.exp((s - maxScore) / 0.5)); // Température 0.5 pour lisser
+            const sumExps = exps.reduce((a, b) => a + b, 0);
+            const probs = exps.map(e => e / sumExps);
             
-            const totalExp = expOracle + expGap + expVoisinage;
-            const pOracle = expOracle / totalExp;
-            const pGap = expGap / totalExp;
+            const pOracle = probs[0];
+            const pGap = probs[1];
 
             const roll = prng.next();
             let newVal = originalVal;
 
             if (roll < pOracle && scoreOracle > 0) {
                 const unused = oracleTargets.filter(t => !variant.includes(t));
-                newVal = unused[Math.floor(prng.next() * unused.length)];
+                const unusedIdx = unused.length > 0 ? Math.floor(prng.next() * unused.length) : 0;
+                newVal = unused.length > 0 ? unused[unusedIdx] : originalVal;
             } else if (roll < pOracle + pGap && scoreGap > 0) {
-                newVal = gapCandidates[Math.floor(prng.next() * gapCandidates.length)][0];
+                const candidateIdx = gapCandidates.length > 0 ? Math.floor(prng.next() * gapCandidates.length) : 0;
+                newVal = gapCandidates.length > 0 ? gapCandidates[candidateIdx][0] : originalVal;
             } else {
                 // Mutation de voisinage déterministe
                 const shift = prng.next() > 0.5 ? 1 : -1;
@@ -274,3 +298,4 @@ const fallbackHeuristic = (history: DrawResult[]): AntColonyPath[] => {
         isOracleBiased: false
     }];
 };
+

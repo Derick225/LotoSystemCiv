@@ -317,6 +317,7 @@ export interface AnalysisResponse {
 export const analyzeHarmonyLinear = (
   numbers: Uint8Array,
   criticalVariance: number,
+  history?: DrawResult[],
 ): AnalysisResponse => {
   const indicators: ForensicIndicator[] = [];
   const logs: ForensicLog[] = [];
@@ -339,8 +340,32 @@ export const analyzeHarmonyLinear = (
     }
     const gapVariance = gapVarianceSum / gaps.length;
 
+    let stdDevVariance = criticalVariance * 0.25;
+    if (history && history.length > 0) {
+      const historyVariances = history.map(draw => {
+        const sortedDraw = [...draw.gagnants].sort((a, b) => a - b);
+        if (sortedDraw.length <= 1) return 0;
+        let localGapSum = 0;
+        const localGaps = new Uint8Array(sortedDraw.length - 1);
+        for (let j = 0; j < sortedDraw.length - 1; j++) {
+          const gap = sortedDraw[j + 1] - sortedDraw[j];
+          localGaps[j] = gap;
+          localGapSum += gap;
+        }
+        const localAvgGap = localGapSum / localGaps.length;
+        let localVarianceSum = 0;
+        for (let j = 0; j < localGaps.length; j++) {
+          localVarianceSum += (localGaps[j] - localAvgGap) * (localGaps[j] - localAvgGap);
+        }
+        return localVarianceSum / localGaps.length;
+      });
+      const meanVariance = historyVariances.reduce((a, b) => a + b, 0) / historyVariances.length;
+      const varOfVariances = historyVariances.reduce((acc, v) => acc + Math.pow(v - meanVariance, 2), 0) / historyVariances.length;
+      stdDevVariance = Math.sqrt(varOfVariances) || (criticalVariance * 0.25);
+    }
+    const slope = 1.0 / Math.max(Number.EPSILON, stdDevVariance);
     const varianceAnomaly =
-      1 / (1 + Math.exp(1.5 * (gapVariance - criticalVariance)));
+      1 / (1 + Math.exp(slope * (gapVariance - criticalVariance)));
 
     if (varianceAnomaly > 0.1) {
       const impact = varianceAnomaly * 50;
@@ -372,13 +397,21 @@ export const analyzeHarmonyLinear = (
  */
 export const analyzeBenfordContinuous = (
   benfordScore: number,
+  sampleLength: number = 500,
 ): AnalysisResponse => {
   const indicators: ForensicIndicator[] = [];
   const logs: ForensicLog[] = [];
   let points = 0;
 
-  const stdBenford = 10;
-  const zBenford = (benfordScore - 50) / stdBenford;
+  // Distance continue par rapport à la conformité théorique parfaite (100)
+  const benfordDistance = Math.abs(benfordScore - 100);
+
+  // Espérance de l'écart L1 (deviation * 50) sous l'hypothèse nulle (loi multinomiale)
+  // E[L1] ≈ \sum_{d=1}^9 \sqrt{p_d(1-p_d)/N} * 50. Pour p_d ≈ 0.11, la constante est de 50 * \sum \sqrt{0.11 * 0.89} ≈ 140.
+  const expectedDistance = 140 / Math.sqrt(Math.max(10, sampleLength));
+
+  // Évaluation d'un Z-score continu par rapport à l'espérance de bruit pour de l'anomalie
+  const zBenford = (benfordDistance - expectedDistance) / Math.max(1, expectedDistance * 0.5);
   const benfordAnomaly = 1 / (1 + Math.exp(-zBenford));
   if (benfordAnomaly > 0.1) {
     const impact = benfordAnomaly * 50;
@@ -757,7 +790,11 @@ export const analyzeSurvivalAnomalies = (
 
     const p = 5 / 90;
     const survivalProb = Math.pow(1 - p, gap);
-    const anomalyScore = 1 / (1 + Math.exp(10 * (survivalProb - 0.05)));
+    
+    // Utilisation d'une CDF logistique centrée sur le niveau de signification théorique alpha (0.05)
+    const theoreticalProb = 0.05;
+    const slope = 1.0 / (theoreticalProb * (1 - theoreticalProb) + Number.EPSILON);
+    const anomalyScore = 1.0 / (1.0 + Math.exp(slope * (survivalProb - theoreticalProb)));
 
     if (anomalyScore > 0.1) {
       const impact = anomalyScore * 25;
@@ -876,7 +913,10 @@ export const analyzeMarkovAnomalies = (
   const currEvens = Array.from(numbers).filter((n) => n % 2 === 0).length;
 
   const stateJump = Math.abs(lastEvens - currEvens);
-  const jumpAnomaly = 1 / (1 + Math.exp(-2.5 * (stateJump - 3.5)));
+  const expectedJump = 2.5; // Espérance théorique de transition de parité pour deux tirages indépendants équilibrés
+  const binomialVariance = 2 * (5 * 0.5 * 0.5); // Variance de deux variables binomiales indépendantes B(5, 0.5) = 2.5
+  const slope = 1.0 / Math.max(Number.EPSILON, Math.sqrt(binomialVariance));
+  const jumpAnomaly = 1 / (1 + Math.exp(-slope * (stateJump - expectedJump)));
 
   if (jumpAnomaly > 0.2) {
     const impact = jumpAnomaly * 35;
@@ -1024,16 +1064,21 @@ export const analyzeCliqueTripletAnomalies = (
       }
     }
 
-    if (occurrences >= 2) {
-      const impact = occurrences >= 3 ? 60 : 35;
-      const severity: SeverityLevel = occurrences >= 3 ? "critical" : "high";
+    const expectedOccurrences = maxHistory * (10 / 117480);
+    const center = 1.5; // Centré entre 1 et 2 occurrences
+    const slope = 1.0 / Math.max(Number.EPSILON, Math.sqrt(expectedOccurrences));
+    const anomalyScore = 1.0 / (1.0 + Math.exp(-slope * (occurrences - center)));
+
+    if (anomalyScore > 0.1) {
+      const impact = anomalyScore * 60;
+      const severity: SeverityLevel = occurrences >= 3 ? "critical" : occurrences >= 2 ? "high" : "medium";
 
       indicators.push({
         type: "CLIQUE_TRIPLET",
         label: `Clique Triplet d'ADN [${t1}-${t2}-${t3}]`,
         value: `${occurrences} occurrences`,
         severity,
-        description: `Surgissement hautement anormal d'un triplet fixe. Risque critique de biais mécanique ou structurel.`,
+        description: `Surgissement hautement anormal d'un triplet fixe. Risque critique de biais mécanique ou structurel (Anomalie continue = ${(anomalyScore * 100).toFixed(1)}%).`,
         impact,
       });
 
@@ -1097,11 +1142,17 @@ export const analyzeHurstExponentAnomalies = (
   const rescaledRange = range / stdDev;
   const H = Math.log(rescaledRange) / Math.log(n);
 
-  if (H > 0.7 || H < 0.3) {
-    const isPersistent = H > 0.7;
-    const delta = isPersistent ? H - 0.7 : 0.3 - H;
-    const impact = Math.min(50, Math.round(15 + delta * 90));
-    const severity: SeverityLevel = delta > 0.12 ? "high" : "medium";
+  const dH = Math.abs(H - 0.5);
+  const delta = dH;
+  const thresholdDH = 0.2; // Seuil de déviation théorique (H > 0.7 ou H < 0.3)
+  const stdErrorH = 1.0 / Math.sqrt(historyLength);
+  const slope = 1.0 / Math.max(Number.EPSILON, stdErrorH);
+  const anomalyScore = 1.0 / (1.0 + Math.exp(-slope * (dH - thresholdDH)));
+
+  if (anomalyScore > 0.1) {
+    const isPersistent = H > 0.5;
+    const impact = anomalyScore * 50;
+    const severity: SeverityLevel = anomalyScore > 0.8 ? "critical" : anomalyScore > 0.5 ? "high" : "medium";
 
     indicators.push({
       type: "HURST_EXPONENT",
@@ -1109,8 +1160,8 @@ export const analyzeHurstExponentAnomalies = (
       value: `H=${H.toFixed(3)}`,
       severity,
       description: isPersistent
-        ? "Mémoire à long terme détectée. Les écarts d'énergie tendent à s'auto-entretenir de manière non-stochastique."
-        : "Hyper-correction ou oscillation artificielle (Anti-persistance excessive).",
+        ? "Mémoire à long terme détectée. Les écarts d'énergie tendent à s'auto-entretenir de manière non-stochastique (Anomalie continue)."
+        : "Hyper-correction ou oscillation artificielle (Anti-persistance excessive, Anomalie continue).",
       impact,
     });
 
@@ -1168,8 +1219,15 @@ export const analyzeCatastropheRupture = (
   const avgDist =
     pairsDist.reduce((sum, val) => sum + val, 0) / pairsDist.length;
 
-  const a = (avgDist - 4.2) * 2.2;
-  const b = (meanX - 4.0) * 0.75;
+  // 4.2 est la distance euclidienne moyenne théorique entre deux points choisis aléatoirement sur une grille 9x10 (dérivée géométriquement)
+  const theoreticalMeanDist = 4.2;
+  const varX = xCoords.reduce((sum, val) => sum + Math.pow(val - meanX, 2), 0) / 5;
+  const varY = yCoords.reduce((sum, val) => sum + Math.pow(val - meanY, 2), 0) / 5;
+  const spatialVariance = (varX + varY) / 2.0 || 1.0;
+
+  // Les coefficients d'échelle a et b sont rendus proportionnels à la variance spatiale observée
+  const a = (avgDist - theoreticalMeanDist) * (10.0 / spatialVariance);
+  const b = (meanX - 4.0) * (5.0 / Math.sqrt(spatialVariance));
   const discriminant = 4 * Math.pow(a, 3) + 27 * Math.pow(b, 2);
 
   let regime = "STABLE_MONOSTABLE";
@@ -1315,8 +1373,8 @@ export const analyzeForManipulation = (
 
   // --- Execute Pure Analyses (Statically Composed Framework) ---
   const subAnalyses = [
-    analyzeHarmonyLinear(numbers, config.criticalVariance),
-    analyzeBenfordContinuous(benford.score),
+    analyzeHarmonyLinear(numbers, config.criticalVariance, history),
+    analyzeBenfordContinuous(benford.score, benfordSampleLength),
     analyzeKolmogorovSmirnovContinuous(numbers),
     analyzeLjungBoxContinuous(history),
     analyzeClusteringAnomalies(numbers),

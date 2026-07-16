@@ -45,6 +45,7 @@ export const gapPatternPlugin: AlgorithmPlugin = {
       numGaps: number;
       autocorrelation: number;
       meanGap: number;
+      variance: number;
     }> = {};
 
     for (let num = 1; num <= N; num++) {
@@ -69,7 +70,8 @@ export const gapPatternPlugin: AlgorithmPlugin = {
           scaleForNormalization: 1,
           numGaps: 0,
           autocorrelation: 0,
-          meanGap: 0
+          meanGap: 0,
+          variance: 0
         };
         continue;
       }
@@ -119,7 +121,8 @@ export const gapPatternPlugin: AlgorithmPlugin = {
         scaleForNormalization,
         numGaps,
         autocorrelation,
-        meanGap
+        meanGap,
+        variance
       };
     }
 
@@ -144,22 +147,30 @@ export const gapPatternPlugin: AlgorithmPlugin = {
       };
     }
 
-    const { currentOpenGap, predictedGap, scaleForNormalization, numGaps, autocorrelation, meanGap } = analysis;
+    const { currentOpenGap, predictedGap, numGaps, autocorrelation, meanGap, variance } = analysis;
 
-    // Score continu (sigmoïde) : plus l'écart actuellement ouvert dépasse l'écart prédit
-    // par le modèle AR(1) personnel du numéro, plus le score monte — le numéro est "en
-    // retard" par rapport à SON PROPRE rythme habituel, pas par rapport à une moyenne
-    // globale. La pente s'ajuste via l'exposant de Hurst global, cohérent avec les autres
-    // algorithmes du pipeline.
+    /**
+     * CRITICAL IMPROVEMENT: AR(1) Standard Error and Z-score.
+     * 1. Calculate Standard Error (SE) of the prediction based on the residuals variance:
+     *    SE = sqrt((1 - rho^2) * variance)
+     * 2. Compute Z-score:
+     *    Z = (currentOpenGap - predictedGap) / SE
+     * 3. Base the final score on this normalized Z-score to guarantee the confidence
+     *    reflects the model's actual precision for this specific number.
+     */
+    const rho = autocorrelation;
+    const SE = Math.sqrt(Math.max(Number.EPSILON, (1.0 - rho * rho) * variance));
+    const zScore = (currentOpenGap - predictedGap) / (SE + Number.EPSILON);
+
+    // Sigmoid function mapped to Z-score
     const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (currentOpenGap - predictedGap) / scaleForNormalization));
+    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * zScore));
 
-    // La confiance croît avec le nombre d'écarts observés pour ce numéro (fiabilité de
-    // l'estimation d'auto-corrélation), selon l'erreur-type asymptotique d'une corrélation
-    // (~ 1/sqrt(n)) : peu d'échantillons -> confiance proche du plancher ; beaucoup
-    // d'échantillons -> confiance proche du plafond.
+    // La confiance croît avec le nombre d'écarts observés (fiabilité de l'autocorrélation)
+    // et décroît lorsque l'erreur de prédiction SE est élevée par rapport à la moyenne.
     const sampleReliability = 1.0 - 1.0 / Math.sqrt(numGaps + 1);
-    const confidence = Math.max(0.3, Math.min(0.95, 0.3 + 0.65 * sampleReliability));
+    const predictionPrecision = 1.0 / (1.0 + SE / (meanGap + Number.EPSILON));
+    const confidence = Math.max(0.3, Math.min(0.95, 0.3 + 0.65 * sampleReliability * predictionPrecision));
 
     return {
       score: Math.max(0, Math.min(100, normalizedScore)),
@@ -170,7 +181,9 @@ export const gapPatternPlugin: AlgorithmPlugin = {
         predictedGap: Number(predictedGap.toFixed(2)),
         personalMeanGap: Number(meanGap.toFixed(2)),
         autocorrelation: Number(autocorrelation.toFixed(3)),
-        sampleSize: numGaps
+        sampleSize: numGaps,
+        standardError: Number(SE.toFixed(3)),
+        predictionZScore: Number(zScore.toFixed(3))
       }
     };
   }

@@ -50,7 +50,8 @@ export const advancedStatsService = {
    * Adheres strictly to the TIRAGE ISOLATION RULE.
    */
   async computeAdvancedStats(drawName: string, history: DrawResult[], forceRefresh = false): Promise<AdvancedStatsReport> {
-    const cacheKey = `${CACHE_PREFIX}${drawName}`;
+    const activeDraw = drawName || "Reveil";
+    const cacheKey = `${CACHE_PREFIX}${activeDraw}`;
 
     if (!forceRefresh) {
       try {
@@ -67,14 +68,13 @@ export const advancedStatsService = {
     }
 
     // Filter history to handle isolation and ensure order is chronological for transitions (oldest to newest)
-    const filteredHistory = !drawName
-      ? history.slice()
-      : purifyHistoryForDraw(drawName, history);
+    // Respects TIRAGE ISOLATION RULE strictly
+    const filteredHistory = purifyHistoryForDraw(activeDraw, history);
     
     // Total draws for this specific game
     const n = filteredHistory.length;
     if (n === 0) {
-      return this.emptyReport(drawName);
+      return this.emptyReport(activeDraw);
     }
 
     // CHRONOLOGICAL order makes sequential transitions much easier to calculate
@@ -84,7 +84,7 @@ export const advancedStatsService = {
     // 1. FREQUENCIES AND HYPERGEOMETRIC/BINOMIAL Z-SCORES
     const pSingle = 5 / 90; // Probability of any specific number being in a 5/90 draw
     const expectedSingle = n * pSingle;
-    const stdDevSingle = Math.sqrt(n * pSingle * (1 - pSingle));
+    const stdDevSingle = Math.max(Number.EPSILON, Math.sqrt(n * pSingle * (1 - pSingle)));
 
     const singleCounts: Record<number, number> = {};
     for (let i = 1; i <= 90; i++) {
@@ -123,7 +123,7 @@ export const advancedStatsService = {
     // P = C(5, 2) / C(90, 2) = 10 / 4005 = 0.0024968789
     const pPair = 10 / 4005;
     const expectedPair = n * pPair;
-    const stdDevPair = Math.sqrt(n * pPair * (1 - pPair));
+    const stdDevPair = Math.max(Number.EPSILON, Math.sqrt(n * pPair * (1 - pPair)));
 
     const pairCounts: Map<string, number> = new Map();
 
@@ -156,7 +156,7 @@ export const advancedStatsService = {
     // P = C(5, 3) / C(90, 3) = 10 / 117480 = 0.0000851208
     const pTriplet = 10 / 117480;
     const expectedTriplet = n * pTriplet;
-    const stdDevTriplet = Math.sqrt(n * pTriplet * (1 - pTriplet));
+    const stdDevTriplet = Math.max(Number.EPSILON, Math.sqrt(n * pTriplet * (1 - pTriplet)));
 
     const tripletCounts: Map<string, number> = new Map();
 

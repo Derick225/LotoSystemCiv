@@ -80,6 +80,66 @@ export const runAutomatedBacktestSimulation = async (
   return { efficiencyScore: report.score, hitDistribution: report.winDistribution, averageHits: report.averageHits, report };
 };
 
+/**
+ * Effectue un bootstrap de percentile pour déterminer si la différence de performance
+ * (erreur de validation - erreur d'entraînement) est significativement supérieure à 0 (surapprentissage).
+ * Niveau alpha = 0.05 (Intervalle de confiance à 95% unilatéral).
+ */
+const runBootstrapOverfittingTest = (
+  trainErrors: number[],
+  valErrors: number[],
+  numResamples: number = 200
+): { isOverfitting: boolean; pValue: number; ciLower: number } => {
+  const N = trainErrors.length;
+  const M = valErrors.length;
+  if (N < 5 || M < 5) return { isOverfitting: false, pValue: 0.5, ciLower: 0 };
+
+  // Déterminisme par LCG pour le bootstrap
+  let seed = 42;
+  const lcg = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  const bootstrapDiffMeans: number[] = [];
+  for (let b = 0; b < numResamples; b++) {
+    // Rééchantillonnage de l'erreur d'entraînement
+    let sumTrain = 0;
+    for (let i = 0; i < N; i++) {
+      const randIdx = Math.floor(lcg() * N);
+      sumTrain += trainErrors[randIdx];
+    }
+    const trainMean = sumTrain / N;
+
+    // Rééchantillonnage de l'erreur de validation (holdout)
+    let sumVal = 0;
+    for (let i = 0; i < M; i++) {
+      const randIdx = Math.floor(lcg() * M);
+      sumVal += valErrors[randIdx];
+    }
+    const valMean = sumVal / M;
+
+    // Différence : validation_error - train_error
+    // Si positive, l'erreur de validation est supérieure à l'erreur d'entraînement (surapprentissage)
+    bootstrapDiffMeans.push(valMean - trainMean);
+  }
+
+  bootstrapDiffMeans.sort((a, b) => a - b);
+  
+  // Pour un test unilatéral au seuil alpha = 0.05, on cherche le percentile 5% (borne inférieure de l'IC de surapprentissage)
+  const ciLowerIdx = Math.floor(numResamples * 0.05);
+  const ciLower = bootstrapDiffMeans[ciLowerIdx] ?? 0;
+
+  // Calcul de la p-value : proportion de rééchantillonnages où la différence est <= 0
+  const countNull = bootstrapDiffMeans.filter(diff => diff <= 0).length;
+  const pValue = countNull / numResamples;
+
+  // Il y a surapprentissage statistiquement significatif si la borne inférieure à 95% est strictement supérieure à 0
+  const isOverfitting = ciLower > 0;
+
+  return { isOverfitting, pValue, ciLower };
+};
+
 export const evolveNeuralDNA = async (
   drawName: string,
   options: { generations: number; sampleSize: number; optimizerType?: "genetic" | "pso" | "bayesian" | "meta" } = { generations: 20, sampleSize: 30, optimizerType: "pso" },
@@ -121,7 +181,10 @@ export const evolveNeuralDNA = async (
 
   logger.info(`[Sequential Training] Démarrage de l'apprentissage cybernétique type: ${optType}`);
 
-  const actualSampleSize = Math.min(options.sampleSize, fullHistory.length);
+  // Enforce programmatically a minimum training sample size of 30 (Central Limit Theorem) if the history permits
+  const actualSampleSize = fullHistory.length >= 30
+    ? Math.max(30, Math.min(options.sampleSize, fullHistory.length))
+    : fullHistory.length;
   const trainingSlice = fullHistory.slice(0, actualSampleSize);
   
   if (trainingSlice.length < 5) {
@@ -534,13 +597,15 @@ export const evolveNeuralDNA = async (
 
     overfittingRatio = trainReport.score / (holdoutReport.score || 1);
 
-    // La tolérance au surapprentissage (marge d'erreur) diminue avec la racine carrée de la taille de l'échantillon
-    const expectedVarianceMargin = 1.0 / Math.sqrt(holdoutSize);
-    const overfittingThreshold = 1.0 + expectedVarianceMargin;
+    // Erreurs d'entraînement et de validation (holdout) définies par rapport au nombre maximum de ratés (5 - hitCount)
+    const trainErrors = trainReport.history.map(h => 5.0 - h.hitCount);
+    const holdoutErrors = holdoutReport.history.map(h => 5.0 - h.hitCount);
+
+    const bootstrapTest = runBootstrapOverfittingTest(trainErrors, holdoutErrors);
     
-    // Pente dérivée de la taille de l'échantillon pour une transition douce mais ferme
-    const slope = Math.sqrt(holdoutSize);
-    rejectionProbability = 1 / (1 + Math.exp(-slope * (overfittingRatio - overfittingThreshold)));
+    // Si isOverfitting est vrai (la borne inférieure du IC de différence est > 0), le rejet est proportionnel au degré de surapprentissage.
+    // Transition continue via sigmoïde logistique de la borne inférieure (ciLower).
+    rejectionProbability = 1.0 / (1.0 + Math.exp(-4.0 * bootstrapTest.ciLower));
 
     const blendedWeights: any = {};
     Object.keys(currentWeights).forEach(k => {

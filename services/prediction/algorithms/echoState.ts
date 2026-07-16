@@ -1,55 +1,59 @@
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { AlgoKey } from '../../../shared/prediction.types';
+import { LCG } from '../../../utils/mathUtils';
+import { useNexusStore } from '../../../store/useNexusStore';
 
 // Déterministe et statique, partagé par tous les appels
 const RESERVOIR_SIZE = 64;
-const SPECTRAL_RADIUS = 0.9;
 const LEAKY_RATE = 0.3;
 
-let W_res: number[][] | null = null;
-let W_in: number[][] | null = null;
-let initialized = false;
+// Cache d'isolation par tirage pour les poids d'ESN afin d'éviter toute pollution inter-tirages
+const W_res_map: Record<string, number[][]> = {};
+const W_in_map: Record<string, number[][]> = {};
 
-function initDeterministicReservoir(inputSize: number) {
-  if (initialized && W_in && W_in[0].length === inputSize) return;
+/**
+ * Initialisation déterministe d'un réservoir d'Echo State Network.
+ * 
+ * Les matrices de poids d'entrée (W_in) et de réservoir (W_res) sont initialisées 
+ * de manière strictement reproductible et bit-à-bit à l'aide d'un LCG local 
+ * seedé uniquement par le nom du tirage cible. Ceci garantit un déterminisme absolu 
+ * et respecte scrupuleusement la règle TIRAGE ISOLATION RULE.
+ */
+function initDeterministicReservoir(inputSize: number, spectralRadius: number, drawName: string) {
+  if (W_in_map[drawName] && W_res_map[drawName] && W_in_map[drawName][0].length === inputSize) return;
 
-  // LCG pour Zéro hasard
-  let seed = 123456789;
-  const lcg = () => {
-    seed = (1103515245 * seed + 12345) % 2147483648;
-    return seed / 2147483648;
-  };
+  const seedStr = `${drawName}_ESN_init_v12`;
+  const prng = new LCG(seedStr);
 
-  W_in = Array(RESERVOIR_SIZE).fill(0).map(() => 
-    Array(inputSize).fill(0).map(() => (lcg() * 2.0 - 1.0) * 0.1)
+  W_in_map[drawName] = Array(RESERVOIR_SIZE).fill(0).map(() => 
+    Array(inputSize).fill(0).map(() => (prng.next() * 2.0 - 1.0) * 0.1)
   );
 
-  W_res = Array(RESERVOIR_SIZE).fill(0).map(() => 
+  W_res_map[drawName] = Array(RESERVOIR_SIZE).fill(0).map(() => 
     Array(RESERVOIR_SIZE).fill(0).map(() => {
       // 20% sparsity
-      if (lcg() > 0.2) return 0;
-      return lcg() * 2.0 - 1.0;
+      if (prng.next() > 0.2) return 0;
+      return prng.next() * 2.0 - 1.0;
     })
   );
 
-  // Approximation de la normalisation du rayon spectral
+  // Normalisation du rayon spectral pour garantir la propriété "Echo State" (oubli)
   let maxSum = 0;
+  const wRes = W_res_map[drawName];
   for (let i = 0; i < RESERVOIR_SIZE; i++) {
     let sum = 0;
     for (let j = 0; j < RESERVOIR_SIZE; j++) {
-      sum += Math.abs(W_res[i][j]);
+      sum += Math.abs(wRes[i][j]);
     }
     if (sum > maxSum) maxSum = sum;
   }
 
-  const scale = maxSum > 0 ? (SPECTRAL_RADIUS / maxSum) : 1;
+  const scale = maxSum > 0 ? (spectralRadius / maxSum) : 1.0;
   for (let i = 0; i < RESERVOIR_SIZE; i++) {
     for (let j = 0; j < RESERVOIR_SIZE; j++) {
-      W_res[i][j] *= scale;
+      wRes[i][j] *= scale;
     }
   }
-
-  initialized = true;
 }
 
 export const echoStateNetworkPlugin: AlgorithmPlugin = {
@@ -64,13 +68,24 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     // Si l'historique est trop court, on skip
     if (!ctx.history || ctx.history.length < 10) return;
 
+    const activeDraw = useNexusStore.getState().drawName || "Reveil";
+
+    // 1. Dérivation dynamique du rayon spectral basée sur l'entropie de Shannon
+    // Un régime hautement chaotique (entropie élevée) nécessite un rayon spectral plus faible (ex: 0.8)
+    // pour garantir la propriété d'écho (stabilité d'activation et évanouissement de l'état)
+    // tandis qu'un régime plus ordonné peut tolérer un rayon proche de 1.0 (mémoire à plus long terme).
+    const baseEntropy = ctx.statisticalBounds?.shannonEntropy ?? 3.5;
+    const dynamicSpectralRadius = Math.max(0.7, Math.min(0.98, 0.9 + 0.05 * (3.5 - baseEntropy)));
+
     // Feature extraction: utiliser une matrice N_tirages x 90
     const N = Math.min(ctx.history.length, 128); // On limite pour performance
     
     // Inverser l'historique pour l'avoir du plus ancien au plus récent (ordre chronologique)
     const chronologicalHistory = ctx.history.slice(0, N).reverse();
 
-    initDeterministicReservoir(90);
+    initDeterministicReservoir(90, dynamicSpectralRadius, activeDraw);
+    const W_in = W_in_map[activeDraw];
+    const W_res = W_res_map[activeDraw];
 
     // Initialisation de l'état du réservoir
     let state = new Float64Array(RESERVOIR_SIZE);
@@ -91,10 +106,10 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
       
       for (let i = 0; i < RESERVOIR_SIZE; i++) {
         let inSum = 0;
-        for (let j = 0; j < 90; j++) inSum += W_in![i][j] * u[j];
+        for (let j = 0; j < 90; j++) inSum += W_in[i][j] * u[j];
         
         let resSum = 0;
-        for (let j = 0; j < RESERVOIR_SIZE; j++) resSum += W_res![i][j] * state[j];
+        for (let j = 0; j < RESERVOIR_SIZE; j++) resSum += W_res[i][j] * state[j];
         
         // Equation de mise à jour Leaky-Integrator
         const activation = Math.tanh(inSum + resSum);
@@ -106,15 +121,9 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
       statesMatrix.push(Array.from(state));
     }
 
-    // Régression linéaire : on veut prédire la probabilité de sortie de chaque numéro au temps N (prochain)
-    // Au lieu de faire 90 régressions de 64 poids, on peut projeter un readout vectoriel.
-    // L'état final contient le contexte du dernier tirage
+    // Régression linéaire / similarité de trajectoire dans le réservoir
     const finalState = state;
-    
-    // Pour simplifier et respecter l'isolation, on utilise une métrique d'affinité continue
-    // entre l'état final et les états où le numéro n est sorti.
     const numberScores = new Float64Array(91);
-    const hitCounts = new Float64Array(91);
     
     for (let t = 0; t < statesMatrix.length - 1; t++) {
       const s = statesMatrix[t];
@@ -129,20 +138,24 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
         magS += s[i] * s[i];
         magF += finalState[i] * finalState[i];
       }
-      const similarity = dot / (Math.sqrt(magS) * Math.sqrt(magF) + 1e-8);
+      
+      // Protection rigoureuse de la division par Number.EPSILON
+      const similarity = dot / (Math.sqrt(magS) * Math.sqrt(magF) + Number.EPSILON);
       
       // On accumule la similarité continue pour les numéros qui sont sortis
       nextDraw.forEach(n => {
         if (n >= 1 && n <= 90) {
           numberScores[n] += (similarity + 1.0) / 2.0; // Mappé de 0 à 1
-          hitCounts[n] += 1;
         }
       });
     }
 
     // Caching des scores lissés
     ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.ECHO_STATE as string] = { scores: Array.from(numberScores) };
+    ctx.pluginCache[AlgoKey.ECHO_STATE as string] = { 
+      scores: Array.from(numberScores),
+      spectralRadiusUsed: dynamicSpectralRadius 
+    };
   },
 
   evaluate(num, ctx) {
@@ -158,15 +171,16 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     const rawScore = cache.scores[num];
     // Sigmoïde d'étalement basée sur la moyenne/médiane pour obtenir une échelle 0-100 continue
     const allScores = [...cache.scores.slice(1)].filter(s => s > 0).sort((a,b) => a-b);
-    const max = allScores[allScores.length - 1] || 1;
+    const max = allScores[allScores.length - 1] || 1.0;
     
-    const scale = 100.0 / (max + 1e-6);
+    // Remplacement de 1e-6 par Number.EPSILON
+    const scale = 100.0 / (max + Number.EPSILON);
     const score = Math.max(0, Math.min(100, rawScore * scale));
     
     return {
       score,
       confidence: 85, // Réseau de neurones déterministe
-      metadata: { rawScore }
+      metadata: { rawScore, spectralRadius: cache.spectralRadiusUsed }
     };
   }
 };

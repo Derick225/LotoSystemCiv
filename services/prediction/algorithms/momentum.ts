@@ -15,7 +15,7 @@ export const momentumPlugin: AlgorithmPlugin = {
     const median = sorted[Math.floor(sorted.length / 2)] || 0;
     const q1 = sorted[Math.floor(sorted.length * 0.25)] || 0;
     const q3 = sorted[Math.floor(sorted.length * 0.75)] || 0;
-    const iqr = Math.max(1e-6, q3 - q1);
+    const iqr = Math.max(Number.EPSILON, q3 - q1);
 
     // 2. Diff stats
     const allDiffs: number[] = [];

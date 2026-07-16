@@ -24,6 +24,7 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
   [AlgoKey.GAP_TREND]: 'Tendance des Écarts',
   [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Résonance Inter-Mensuelle',
+  [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation (Inverse-Variance)',
 };
 
 export const ALGO_CATEGORIES = [
@@ -33,7 +34,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Mathématique & Structural",
-    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY]
+    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY, AlgoKey.ISOLATION_ANOMALY]
   },
   {
     name: "Dynamiques Avancées",

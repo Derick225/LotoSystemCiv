@@ -23,6 +23,21 @@ const getDistance = (n1: number, n2: number) => {
     return Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
 };
 
+// Approximation de la fonction quantile normale standard (Probit)
+// Permet de calculer le Z-score exact pour une probabilité cumulée p.
+const ndtri = (p: number): number => {
+    if (p <= 0 || p >= 1) return 0.0;
+    const t = Math.sqrt(-2.0 * Math.log(p < 0.5 ? p : 1.0 - p));
+    const c0 = 2.515517;
+    const c1 = 0.802853;
+    const c2 = 0.010328;
+    const d1 = 1.432788;
+    const d2 = 0.189269;
+    const d3 = 0.001308;
+    const z = t - ((c2 * t + c1) * t + c0) / (((d3 * t + d2) * t + d1) * t + 1.0);
+    return p < 0.5 ? -z : z;
+};
+
 export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics => {
     // Grille de densité (Index 1-90)
     const gridDensity = new Float32Array(91).fill(0);
@@ -43,24 +58,40 @@ export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics =
     const variance = squaredDiffsSum / 90;
     const stdDev = Math.sqrt(variance);
 
-    // Continuous threshold adaptivity: mean density adjusted by standard deviation damping
-    // This scales automatically with the size of data N and its concentration
-    const densityThreshold = stdDev > 0 ? meanDensity - (stdDev * 0.15) : meanDensity;
+    // Calcul de l'entropie de Shannon normalisée sur la distribution de densité
+    const totalDensitySum = densityValues.reduce((a, b) => a + b, 0) || 1;
+    let entropy = 0;
+    densityValues.forEach(v => {
+        const p_val = v / totalDensitySum;
+        if (p_val > 0) entropy -= p_val * Math.log2(p_val);
+    });
+    const maxEntropy = Math.log2(90);
+    const normEntropy = entropy / maxEntropy; // entre 0 (concentration max) et 1 (dispersion uniforme)
+
+    // Confiance adaptative : si l'entropie est forte (chaos), on élargit la recherche (confiance basse -> seuil bas)
+    // Si l'entropie est faible (pics nets), on resserre (confiance haute -> seuil haut)
+    const p_confidence = 0.3 + 0.4 * normEntropy;
+    const z = ndtri(p_confidence);
+    const densityThreshold = meanDensity + z * stdDev;
     
     // Clustering DBSCAN (Density-Based Spatial Clustering)
     // Identifies zones where numbers appear grouped geographically on the grid
     const clusters: SpatialCluster[] = [];
     const visited = new Set<number>();
-    const EPSILON = Math.sqrt(2); // Exact geometric distance for diagonals in 1x1 grid
     const MIN_PTS = 2;
 
     for (let i = 1; i <= 90; i++) {
         // Only cluster "hot" points to avoid noise
         if (visited.has(i) || gridDensity[i] < densityThreshold) continue;
         
-        // Find geographically hot neighbors
+        // Find geographically hot neighbors using exact integer Chebyshev distance
         const neighbors = Array.from({length: 90}, (_, idx) => idx + 1)
-            .filter(n => !visited.has(n) && getDistance(i, n) <= (EPSILON + 0.01) && gridDensity[n] >= densityThreshold);
+            .filter(n => {
+                if (visited.has(n) || gridDensity[n] < densityThreshold) return false;
+                const c1 = getCoords(i);
+                const c2 = getCoords(n);
+                return Math.max(Math.abs(c1.x - c2.x), Math.abs(c1.y - c2.y)) <= 1;
+            });
 
         if (neighbors.length >= MIN_PTS) {
             const clusterIds = [i, ...neighbors]; // Inclure le point source

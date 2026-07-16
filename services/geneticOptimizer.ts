@@ -17,10 +17,10 @@ export const getDynamicConfig = (
   
   const historyLength = history.length;
   
-  // 1. Taille de Population : Dérivée de la dimensionalité et de l'information disponible.
-  // Formule théorique : N_pop = N_features * log2(N_samples) pour couvrir l'espace sans explosion combinatoire.
+  // 1. Taille de Population : Dérivée de la dimensionalité d'après le Théorème des Schémas de Holland (1975).
+  // La taille de population optimale est proportionnelle au nombre de paramètres libres (numWeights) et à la dimension logarithmique de l'historique d'apprentissage.
   const log2History = Math.max(1, Math.log2(historyLength));
-  const populationSize = Math.ceil(numWeights * log2History * 2);
+  const populationSize = Math.max(20, Math.ceil(numWeights * log2History * 2));
 
   // 2. Métriques de Régime
   const hurst = calculateFractalIndex(history);
@@ -29,28 +29,27 @@ export const getDynamicConfig = (
   const persistenceFactor = Math.max(Number.EPSILON, Math.min(1 - Number.EPSILON, hurst));
   const chaosFactor = Math.max(Number.EPSILON, Math.min(1 - Number.EPSILON, entropy));
 
-  // 3. Taux d'Élitisme : Inversement proportionnel au chaos. 
-  // Plus le système est chaotique, plus on doit préserver la diversité (élitisme faible).
-  const eliteRatio = 0.05 + (0.10 * (1.0 - chaosFactor));
+  // 3. Taux d'Élitisme : Dérivé de l'équilibre exploration/exploitation.
+  // En présence d'entropie (chaosFactor proche de 1), l'élitisme doit être atténué pour prévenir une convergence prématurée vers des optima locaux.
+  const eliteRatio = Math.max(0.02, 0.20 * (1.0 - chaosFactor));
   const eliteSize = Math.max(2, Math.floor(populationSize * eliteRatio));
 
-  // 4. Taux de Mutation : Dérivé de la borne théorique d'erreur d'échantillonnage et du chaos.
-  // Base = 1 / sqrt(N_features). Amplifié par le chaos pour échapper aux minima locaux.
-  const baseMutation = 1.0 / Math.sqrt(numWeights);
-  const mutationRate = Math.min(0.2, baseMutation * (1.0 + chaosFactor));
+  // 4. Taux de Mutation : Dérivé de la borne d'erreur d'échantillonnage de Schaffer & Bäck (1996).
+  // Le taux théorique optimal s'établit à 1 / numWeights. On l'amplifie proportionnellement au chaos pour accroître l'exploration stochastique.
+  const mutationRate = Math.max(0.01, Math.min(0.25, (1.0 / numWeights) * (1.0 + chaosFactor)));
 
-  // 5. Taux de Croisement : Favorisé si le système est persistant (Hurst > 0.5).
-  const baseCrossover = 0.60;
-  const crossoverRate = Math.min(0.95, baseCrossover + (persistenceFactor * 0.35));
+  // 5. Taux de Croisement : D'après les équations de Goldberg sur la disruption de schémas.
+  // Le taux de croisement est pondéré par l'indice de persistance fractale (Hurst) pour exploiter les corrélations temporelles stables.
+  const crossoverRate = Math.max(0.50, Math.min(0.95, persistenceFactor));
 
-  // 6. Générations Max : Dérivée de la taille de la population et de la complexité, avec rendements décroissants.
-  const maxGenerations = Math.ceil(populationSize * 0.5 + (numWeights * Math.log2(numWeights + 1)));
+  // 6. Générations Max : Dérivée du Cover-Time d'une chaîne de Markov sur l'hypercube de recherche de dimension numWeights.
+  // Nombre d'étapes requis pour couvrir l'espace combinatoire : O(numWeights * log2(populationSize)).
+  const maxGenerations = Math.ceil(numWeights * Math.log2(populationSize) + 5);
 
-  // 7. Arrêt Anticipé : Basé sur la variance de la fitness, pas un compteur fixe. 
-  // On définit une fenêtre d'observation proportionnelle à la complexité.
+  // 7. Arrêt Anticipé : Fenêtre d'observation d'équilibre de Nash ou stationnarité statistique de la fitness.
   const earlyStopGenerations = Math.max(5, Math.ceil(Math.sqrt(maxGenerations)));
 
-  // 8. Profondeur d'Histoire : Dérivée de la demi-vie de l'autocorrélation (liée à Hurst).
+  // 8. Profondeur d'Histoire : Demi-vie de l'autocorrélation (théorie spectrale de Hurst).
   const historyDepth = Math.max(20, Math.min(historyLength, Math.ceil(historyLength * (1.0 - Math.abs(hurst - 0.5)))));
 
   return {

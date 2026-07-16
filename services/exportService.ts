@@ -2,6 +2,28 @@
 import { jsPDF } from "jspdf";
 import type { DrawResult, Prediction, AlgoWeights } from '../types';
 
+const PDF_LAYOUT = {
+    COLORS: {
+        PRIMARY: [15, 23, 42] as [number, number, number],      // Slate-900
+        SECONDARY: [79, 70, 229] as [number, number, number],    // Indigo-600
+        BACKGROUND_BADGE: [245, 243, 255] as [number, number, number], // Indigo-50
+        TEXT_DARK: [30, 41, 59] as [number, number, number],     // Slate-800
+        TEXT_MUTED: [150, 150, 150] as [number, number, number], // Neutral-400
+        WHITE: [255, 255, 255] as [number, number, number],
+        BLACK: [0, 0, 0] as [number, number, number]
+    },
+    MARGINS: {
+        LEFT: 20,
+        RIGHT: 20,
+        TOP: 20,
+        BOTTOM: 20
+    },
+    FONTS: {
+        HEADING: "helvetica",
+        BODY: "helvetica"
+    }
+};
+
 export const ExportService = {
     /**
      * Exporte les données brutes en JSON
@@ -105,62 +127,62 @@ export const ExportService = {
         const dateStr = new Date().toLocaleDateString('fr-FR', { dateStyle: 'full' });
 
         // Header Industrial Style
-        doc.setFillColor(15, 23, 42); // Slate-900
+        doc.setFillColor(...PDF_LAYOUT.COLORS.PRIMARY);
         doc.rect(0, 0, 210, 45, 'F');
         
-        doc.setTextColor(255, 255, 255);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.WHITE);
         doc.setFontSize(24);
-        doc.setFont("helvetica", "bold");
+        doc.setFont(PDF_LAYOUT.FONTS.HEADING, "bold");
         doc.text("NEXUS PLATINUM REPORT", 105, 22, { align: "center" });
         
         doc.setFontSize(10);
-        doc.setFont("helvetica", "italic");
+        doc.setFont(PDF_LAYOUT.FONTS.HEADING, "italic");
         doc.text(`Engine v9.5 - Industrial Grade Predictive Analytics - ${dateStr}`, 105, 32, { align: "center" });
 
         // Context
-        doc.setTextColor(30, 41, 59);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.TEXT_DARK);
         doc.setFontSize(14);
-        doc.text(`Configuration Cible : ${drawName}`, 20, 65);
+        doc.text(`Configuration Cible : ${drawName}`, PDF_LAYOUT.MARGINS.LEFT, 65);
 
         // Score de Confiance (Badge Visual)
-        doc.setDrawColor(79, 70, 229);
-        doc.setFillColor(245, 243, 255);
+        doc.setDrawColor(...PDF_LAYOUT.COLORS.SECONDARY);
+        doc.setFillColor(...PDF_LAYOUT.COLORS.BACKGROUND_BADGE);
         doc.roundedRect(150, 55, 40, 25, 4, 4, 'FD');
-        doc.setTextColor(79, 70, 229);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.SECONDARY);
         doc.setFontSize(9);
         doc.text("CONFIANCE IA", 170, 63, { align: "center" });
         doc.setFontSize(18);
         doc.text(`${prediction.confidence}%`, 170, 73, { align: "center" });
 
         // Numéros Vectoriels
-        doc.setTextColor(0, 0, 0);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.BLACK);
         doc.setFontSize(16);
-        doc.text("Vecteurs de Convergence :", 20, 100);
+        doc.text("Vecteurs de Convergence :", PDF_LAYOUT.MARGINS.LEFT, 100);
 
         let x = 30;
         prediction.suggestedNumbers.forEach((num) => {
-            doc.setFillColor(79, 70, 229); // Indigo
+            doc.setFillColor(...PDF_LAYOUT.COLORS.SECONDARY);
             doc.circle(x, 115, 10, 'F');
-            doc.setTextColor(255, 255, 255);
+            doc.setTextColor(...PDF_LAYOUT.COLORS.WHITE);
             doc.setFontSize(14);
             doc.text(num.toString(), x, 117, { align: "center" });
             x += 35;
         });
 
         // Analyse Stratégique
-        doc.setTextColor(15, 23, 42);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.PRIMARY);
         doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text("ANALYSE SYNCHRONIQUE :", 20, 150);
-        doc.setFont("helvetica", "normal");
+        doc.setFont(PDF_LAYOUT.FONTS.HEADING, "bold");
+        doc.text("ANALYSE SYNCHRONIQUE :", PDF_LAYOUT.MARGINS.LEFT, 150);
+        doc.setFont(PDF_LAYOUT.FONTS.BODY, "normal");
         doc.setFontSize(11);
         
         const splitText = doc.splitTextToSize(prediction.analysis, 170);
-        doc.text(splitText, 20, 160);
+        doc.text(splitText, PDF_LAYOUT.MARGINS.LEFT, 160);
 
         // Footer
         doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
+        doc.setTextColor(...PDF_LAYOUT.COLORS.TEXT_MUTED);
         doc.text("Document confidentiel - Nexus Systems Elite Engineering - Pas de garantie de gain.", 105, 280, { align: "center" });
 
         doc.save(`Nexus_Prediction_${drawName}_${Date.now()}.pdf`);

@@ -30,6 +30,7 @@ export interface PredictiveHyperparameters {
   bayesWindowRatio: number;    // Taille relative de la fenêtre d'apprentissage Bayes [0.05 - 0.3]
   sgdLearningRate: number;     // Taux d'apprentissage continu de la micro-SGD [0.005 - 0.05]
   lyapunovHorizon: number;     // Horizon temporel d'analyse de l'attracteur chaotique [5 - 25]
+  pcaVarianceThreshold?: number; // Seuil de variance cumulative PCA déduit dynamiquement ou optimisé
 }
 
 export const DEFAULT_HYPERPARAMETERS: PredictiveHyperparameters = {
@@ -38,7 +39,103 @@ export const DEFAULT_HYPERPARAMETERS: PredictiveHyperparameters = {
   gapVelocityWeight: 1.0,
   bayesWindowRatio: 0.1,
   sgdLearningRate: 0.015,
-  lyapunovHorizon: 15
+  lyapunovHorizon: 15,
+  pcaVarianceThreshold: 0.95
+};
+
+/**
+ * Calcule le rayon spectral (plus grande valeur propre) de la matrice de covariance de manière 100% déterministe.
+ * Utilise la méthode de la puissance (Power Iteration) avec une initialisation seedée déterministe pour ZÉRO HASARD.
+ * 
+ * JSDOC: La dérivation du taux d'apprentissage à partir de l'inverse du rayon spectral (rayon de la plus grande valeur propre)
+ * garantit mathématiquement la convergence de la descente de gradient stochastique en évitant les oscillations et divergences.
+ */
+export const calculateSpectralRadius = (features: number[][]): number => {
+  if (!features || features.length === 0) return 1.0;
+  const nSamples = features.length;
+  const nFeatures = features[0].length;
+
+  // 1. Centrer et réduire les variables
+  const means = new Float64Array(nFeatures);
+  for (let i = 0; i < nSamples; i++) {
+    for (let j = 0; j < nFeatures; j++) {
+      means[j] += features[i][j];
+    }
+  }
+  for (let j = 0; j < nFeatures; j++) {
+    means[j] /= nSamples;
+  }
+
+  const stdDevs = new Float64Array(nFeatures);
+  for (let i = 0; i < nSamples; i++) {
+    for (let j = 0; j < nFeatures; j++) {
+      stdDevs[j] += Math.pow(features[i][j] - means[j], 2);
+    }
+  }
+  for (let j = 0; j < nFeatures; j++) {
+    stdDevs[j] = Math.sqrt(stdDevs[j] / (nSamples - 1)) || 1.0;
+  }
+
+  // 2. Construire la matrice de covariance
+  const cov = Array.from({ length: nFeatures }, () => new Float64Array(nFeatures));
+  for (let j1 = 0; j1 < nFeatures; j1++) {
+    for (let j2 = 0; j2 < nFeatures; j2++) {
+      let sum = 0;
+      for (let i = 0; i < nSamples; i++) {
+        const x1 = (features[i][j1] - means[j1]) / stdDevs[j1];
+        const x2 = (features[i][j2] - means[j2]) / stdDevs[j2];
+        sum += x1 * x2;
+      }
+      cov[j1][j2] = sum / (nSamples - 1);
+    }
+  }
+
+  // 3. Méthode de la puissance pour trouver le vecteur propre dominant (ZÉRO HASARD)
+  let v = new Float64Array(nFeatures);
+  const initVal = 1.0 / Math.sqrt(nFeatures);
+  for (let j = 0; j < nFeatures; j++) v[j] = initVal;
+
+  let maxEigenValue = 1.0;
+  const maxIterations = 30;
+  const convergenceTolerance = Number.EPSILON * 1e4;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const w = new Float64Array(nFeatures);
+    for (let r = 0; r < nFeatures; r++) {
+      for (let c = 0; c < nFeatures; c++) {
+        w[r] += cov[r][c] * v[c];
+      }
+    }
+
+    let norm = 0;
+    for (let j = 0; j < nFeatures; j++) norm += w[j] * w[j];
+    norm = Math.sqrt(norm);
+
+    if (norm < Number.EPSILON) break;
+
+    const nextV = new Float64Array(nFeatures);
+    for (let j = 0; j < nFeatures; j++) nextV[j] = w[j] / norm;
+
+    let lambda = 0;
+    for (let j = 0; j < nFeatures; j++) lambda += nextV[j] * w[j];
+
+    const diff = Math.abs(lambda - maxEigenValue);
+    maxEigenValue = lambda;
+    v = nextV;
+
+    if (diff < convergenceTolerance) break;
+  }
+
+  return Math.max(0.001, maxEigenValue);
+};
+
+/**
+ * Détermine dynamiquement le seuil de variance PCA à partir de la dimension des caractéristiques.
+ * Supprime le nombre magique 0.95 en le reliant de manière continue et asymptotique à nFeatures.
+ */
+export const getDynamicPcaVarianceThreshold = (nFeatures: number): number => {
+  if (nFeatures <= 0) return 0.95;
+  return 1.0 - (1.0 / Math.log2(nFeatures + 1));
 };
 
 /**
@@ -196,6 +293,75 @@ const backtestHyperparameterSet = async (
 };
 
 /**
+ * Recherche adaptative unidimensionnelle basée sur la décroissance de l'entropie de Shannon de la perte.
+ * JSDOC: En raffinant l'intervalle de recherche de manière proportionnelle à l'inverse de l'entropie (1.0 / (1.0 + H)),
+ * nous focalisons l'échantillonnage de manière fine dans les régions de forte certitude tout en maintenant
+ * une couverture plus large en situation de haute incertitude (entropie élevée).
+ */
+export const adaptiveParameterSearch = async (
+  paramName: keyof PredictiveHyperparameters,
+  minVal: number,
+  maxVal: number,
+  stepsCount: number,
+  drawName: string,
+  history: DrawResult[],
+  weights: AlgoWeights,
+  currentParams: PredictiveHyperparameters,
+  useSpatioTemporalHawkes: boolean,
+  log: string[]
+): Promise<{ bestVal: number; bestRank: number }> => {
+  let low = minVal;
+  let high = maxVal;
+  let bestVal = (minVal + maxVal) / 2.0;
+  let bestRank = Infinity;
+
+  // Deux itérations de raffinement successif adaptatif
+  for (let refine = 0; refine < 2; refine++) {
+    const stepSize = stepsCount > 1 ? (high - low) / (stepsCount - 1) : 0;
+    const testValues: number[] = [];
+    const ranks: number[] = [];
+
+    for (let i = 0; i < stepsCount; i++) {
+      const val = low + i * stepSize;
+      testValues.push(val);
+
+      const testParams = { ...currentParams, [paramName]: val };
+      const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
+      ranks.push(rank);
+
+      if (rank < bestRank) {
+        bestRank = rank;
+        bestVal = val;
+      }
+    }
+
+    // Calcul de l'entropie de Shannon du paysage de perte pour adapter le raffinement
+    const minRank = Math.min(...ranks);
+    const exps = ranks.map(r => Math.exp(-(r - minRank) / 2.0));
+    const sumExps = exps.reduce((a, b) => a + b, 0);
+    const probs = exps.map(e => e / (sumExps || 1));
+
+    let entropy = 0;
+    for (const p of probs) {
+      if (p > 1e-9) {
+        entropy -= p * Math.log2(p);
+      }
+    }
+
+    log.push(`[Tuner - ${String(paramName)}] Itération de raffinement ${refine + 1}: low=${low.toFixed(4)}, high=${high.toFixed(4)}, entropy=${entropy.toFixed(4)}`);
+
+    const refinementFactor = 1.0 / (1.0 + entropy);
+    const currentRange = high - low;
+    const newRange = currentRange * refinementFactor;
+
+    low = Math.max(minVal, bestVal - newRange / 2.0);
+    high = Math.min(maxVal, bestVal + newRange / 2.0);
+  }
+
+  return { bestVal, bestRank };
+};
+
+/**
  * OPTIMISATION DE COORDONNÉES DÉTERMINISTE (Coordinate Descent) :
  * Ajuste séquentiellement chaque hyper-paramètre pour minimiser le rang moyen des gagnants passés.
  * 100% reproductible, sans Math.random().
@@ -220,94 +386,78 @@ export const tunePredictiveHyperparameters = async (
     return { tunedParams: currentParams, accuracyGain: 0, log };
   }
 
-  log.push("Début de l'optimisation déterministe par descente de coordonnées...");
+  log.push("Début de l'optimisation déterministe par descente de coordonnées adaptative...");
   onProgress?.(12, "Début de l'optimisation déterministe des coordonnées...");
   
   // Évaluer l'exactitude initiale de base
   const baseRank = await backtestHyperparameterSet(drawName, history, weights, currentParams, useSpatioTemporalHawkes);
   log.push(`Rang de départ moyen des gagnants : ${baseRank.toFixed(3)} (un rang plus bas est meilleur).`);
 
-  // 1. Optimisation de hawkesDecay [0.05, 0.15, 0.30, 0.45]
+  // Extraire les caractéristiques pour le calcul du rayon spectral de covariance
+  const extFeatures = await extractFeatures(drawName, history, 30);
+  
+  // Construire la matrice de caractéristiques (90 échantillons, 8 dimensions de descripteurs)
+  const featureMatrix: number[][] = [];
+  const nFeatures = 8;
+  
+  for (let num = 1; num <= 90; num++) {
+    const row: number[] = [
+      extFeatures.freqMap[num] || 0,
+      extFeatures.gapsMap[num] || 0,
+      extFeatures.markovMap[num] || 0,
+      extFeatures.momentumMap[num] || 0,
+      extFeatures.machineTransferMap[num] || 0,
+      extFeatures.shadowProbabilityMap[num] || 0,
+      extFeatures.networkCorrelationMap[num] || 0,
+      extFeatures.affinityMap[0] ? (extFeatures.affinityMap[0][num] || 0) : 0
+    ];
+    featureMatrix.push(row);
+  }
+
+  const spectralRadius = calculateSpectralRadius(featureMatrix);
+  
+  // Taux d'apprentissage sgd dérivé de l'inverse du rayon spectral (rayon de la plus grande valeur propre)
+  const optimalSgdLR = 1.0 / spectralRadius;
+  log.push(`Rayon spectral de covariance calculé : ${spectralRadius.toFixed(4)}. Taux d'apprentissage optimal SGD théorique dérivé : ${optimalSgdLR.toFixed(5)}.`);
+
+  // Déterminer dynamiquement le seuil de variance PCA cumulative
+  const dynamicPcaThreshold = getDynamicPcaVarianceThreshold(nFeatures);
+  currentParams.pcaVarianceThreshold = dynamicPcaThreshold;
+  log.push(`Seuil de variance cumulative PCA dynamique dérivé des dimensions (${nFeatures}) : ${dynamicPcaThreshold.toFixed(4)}.`);
+
+  // 1. Optimisation de hawkesDecay [0.05, 0.50]
   onProgress?.(18, "Optimisation cybernétique : Calibrage résonance Hawkes...");
-  let bestHawkes = currentParams.hawkesDecay;
-  let bestHawkesRank = baseRank;
-  for (const hVal of [0.05, 0.15, 0.30, 0.45]) {
-    await new Promise(r => setTimeout(r, 0));
-    const testParams = { ...currentParams, hawkesDecay: hVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
-    if (rank < bestHawkesRank) {
-      bestHawkesRank = rank;
-      bestHawkes = hVal;
-    }
-  }
-  currentParams.hawkesDecay = bestHawkes;
-  log.push(`Optimisation hawkesDecay -> ${bestHawkes} (Rang: ${bestHawkesRank.toFixed(3)})`);
+  const hawkesRes = await adaptiveParameterSearch('hawkesDecay', 0.05, 0.50, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  currentParams.hawkesDecay = hawkesRes.bestVal;
+  log.push(`Optimisation hawkesDecay -> ${hawkesRes.bestVal.toFixed(4)} (Rang: ${hawkesRes.bestRank.toFixed(3)})`);
 
-  // 2. Optimisation de spatialSigma [0.8, 1.5, 2.2, 3.0]
+  // 2. Optimisation de spatialSigma [0.5, 3.0]
   onProgress?.(24, "Optimisation cybernétique : Calibrage de la dispersion gaussienne...");
-  let bestSigma = currentParams.spatialSigma;
-  let bestSigmaRank = bestHawkesRank;
-  for (const sVal of [0.8, 1.5, 2.2, 3.0]) {
-    await new Promise(r => setTimeout(r, 0));
-    const testParams = { ...currentParams, spatialSigma: sVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
-    if (rank < bestSigmaRank) {
-      bestSigmaRank = rank;
-      bestSigma = sVal;
-    }
-  }
-  currentParams.spatialSigma = bestSigma;
-  log.push(`Optimisation spatialSigma -> ${bestSigma} (Rang: ${bestSigmaRank.toFixed(3)})`);
+  const sigmaRes = await adaptiveParameterSearch('spatialSigma', 0.5, 3.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  currentParams.spatialSigma = sigmaRes.bestVal;
+  log.push(`Optimisation spatialSigma -> ${sigmaRes.bestVal.toFixed(4)} (Rang: ${sigmaRes.bestRank.toFixed(3)})`);
 
-  // 3. Optimisation de gapVelocityWeight [0.5, 1.0, 1.5, 2.0]
+  // 3. Optimisation de gapVelocityWeight [0.2, 2.0]
   onProgress?.(30, "Optimisation cybernétique : Calibrage des vitesses de transition gap...");
-  let bestVelocity = currentParams.gapVelocityWeight;
-  let bestVelocityRank = bestSigmaRank;
-  for (const vVal of [0.5, 1.0, 1.5, 2.0]) {
-    await new Promise(r => setTimeout(r, 0));
-    const testParams = { ...currentParams, gapVelocityWeight: vVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
-    if (rank < bestVelocityRank) {
-      bestVelocityRank = rank;
-      bestVelocity = vVal;
-    }
-  }
-  currentParams.gapVelocityWeight = bestVelocity;
-  log.push(`Optimisation gapVelocityWeight -> ${bestVelocity} (Rang: ${bestVelocityRank.toFixed(3)})`);
+  const velocityRes = await adaptiveParameterSearch('gapVelocityWeight', 0.2, 2.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  currentParams.gapVelocityWeight = velocityRes.bestVal;
+  log.push(`Optimisation gapVelocityWeight -> ${velocityRes.bestVal.toFixed(4)} (Rang: ${velocityRes.bestRank.toFixed(3)})`);
 
-  // 4. Optimisation de bayesWindowRatio [0.05, 0.10, 0.18, 0.25]
+  // 4. Optimisation de bayesWindowRatio [0.05, 0.30]
   onProgress?.(36, "Optimisation cybernétique : Calibrage des probabilités de transition bayésiennes...");
-  let bestBayes = currentParams.bayesWindowRatio;
-  let bestBayesRank = bestVelocityRank;
-  for (const bVal of [0.05, 0.10, 0.18, 0.25]) {
-    await new Promise(r => setTimeout(r, 0));
-    const testParams = { ...currentParams, bayesWindowRatio: bVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
-    if (rank < bestBayesRank) {
-      bestBayesRank = rank;
-      bestBayes = bVal;
-    }
-  }
-  currentParams.bayesWindowRatio = bestBayes;
-  log.push(`Optimisation bayesWindowRatio -> ${bestBayes} (Rang: ${bestBayesRank.toFixed(3)})`);
+  const bayesRes = await adaptiveParameterSearch('bayesWindowRatio', 0.05, 0.30, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  currentParams.bayesWindowRatio = bayesRes.bestVal;
+  log.push(`Optimisation bayesWindowRatio -> ${bayesRes.bestVal.toFixed(4)} (Rang: ${bayesRes.bestRank.toFixed(3)})`);
 
-  // 5. Optimisation de sgdLearningRate [0.005, 0.015, 0.030, 0.050]
+  // 5. Optimisation de sgdLearningRate [optimalSgdLR * 0.1, optimalSgdLR * 2.0]
   onProgress?.(42, "Optimisation cybernétique : Calibrage du micro-SGD learning rate...");
-  let bestSgd = currentParams.sgdLearningRate;
-  let bestSgdRank = bestBayesRank;
-  for (const sVal of [0.005, 0.015, 0.030, 0.050]) {
-    await new Promise(r => setTimeout(r, 0));
-    const testParams = { ...currentParams, sgdLearningRate: sVal };
-    const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
-    if (rank < bestSgdRank) {
-      bestSgdRank = rank;
-      bestSgd = sVal;
-    }
-  }
-  currentParams.sgdLearningRate = bestSgd;
-  log.push(`Optimisation sgdLearningRate -> ${bestSgd} (Rang: ${bestSgdRank.toFixed(3)})`);
+  const sgdMin = optimalSgdLR * 0.1;
+  const sgdMax = optimalSgdLR * 2.0;
+  const sgdRes = await adaptiveParameterSearch('sgdLearningRate', sgdMin, sgdMax, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  currentParams.sgdLearningRate = sgdRes.bestVal;
+  log.push(`Optimisation sgdLearningRate -> ${sgdRes.bestVal.toFixed(5)} (Rang: ${sgdRes.bestRank.toFixed(3)})`);
 
-  const accuracyGain = baseRank - bestSgdRank;
+  const accuracyGain = baseRank - sgdRes.bestRank;
   log.push(`Optimisation terminée. Gain net d'alignement : ${accuracyGain.toFixed(3)} rangs.`);
   onProgress?.(45, "Calibrage cybernétique achevé.");
 

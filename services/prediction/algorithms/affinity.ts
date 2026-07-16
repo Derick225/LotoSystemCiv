@@ -8,6 +8,17 @@ export const affinityPlugin: AlgorithmPlugin = {
   mathematicalBasis: 'Fusion de Co-occurrence d\'Affinité',
   description: 'Unification continue des forces d\'attraction bidirectionnelles.',
   isStrictlyDeterministic: true,
+  /**
+   * Precomputes the affinity scores using an approximation of conditional covariance.
+   * 
+   * Mathematical Explanation:
+   * The product scalar of the Markov transition probability vector (markovMap) and the historical 
+   * attraction force vector (affinityMap) approximates the **Conditional Covariance** between 
+   * short-term sequence transition probabilities and long-term co-occurrence attractors.
+   * To maintain statistical resilience against extreme outliers and severe distribution skew, 
+   * a robust Z-score normalization is computed using the Interquartile Range (IQR) as the scale estimator,
+   * where division is safely guarded by the machine precision constant `Number.EPSILON`.
+   */
   precompute(ctx) {
     const domainSize = ctx.features.markovMap.length;
     const maxNum = ctx.features.freqMap?.length ? ctx.features.freqMap.length - 1 : 90;
@@ -31,7 +42,7 @@ export const affinityPlugin: AlgorithmPlugin = {
         const median = sorted[Math.floor(sorted.length / 2)] || 0;
         const q1 = sorted[Math.floor(sorted.length * 0.25)] || 0;
         const q3 = sorted[Math.floor(sorted.length * 0.75)] || 0;
-        const iqr = Math.max(1e-6, q3 - q1);
+        const iqr = Math.max(Number.EPSILON, q3 - q1);
         
         medians[num] = median;
         iqrs[num] = iqr;

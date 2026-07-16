@@ -138,11 +138,14 @@ export const gapCadencePlugin: AlgorithmPlugin = {
       percentileScore = (lo / cache.sortedPooled.length) * 100.0;
     }
 
-    // Modulation par l'intensité de la cadence collective : en phase de "vague de retour"
-    // (cadenceIntensity proche de 1), le signal de retard individuel est amplifié ; en phase
-    // calme (cadenceIntensity proche de 0), il reste inchangé. Amplification continue et
-    // bornée, sans jamais dépasser 100.
-    const amplifiedScore = percentileScore * (1.0 + cache.cadenceIntensity);
+    // Bounded continuous logistic modulation for return wave boost to avoid abrupt transitions
+    const maxBoost = 1.0;
+    const k = 6.0;
+    const center = 0.5;
+    const intensity = cache.cadenceIntensity;
+    const logisticMultiplier = 1.0 + (maxBoost / (1.0 + Math.exp(-k * (intensity - center))));
+    
+    const amplifiedScore = percentileScore * logisticMultiplier;
     const finalScore = Math.max(0, Math.min(100, amplifiedScore));
 
     return {

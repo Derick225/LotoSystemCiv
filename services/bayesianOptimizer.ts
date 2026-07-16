@@ -2,7 +2,7 @@ import { AlgoWeights } from '../shared/prediction.types';
 import { fetchResults } from './lotteryService';
 import { getAlgoWeights } from './predictionEngine';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
-import { getBayesianMemory, saveBayesianMemory } from './prediction/bayesianMemory';
+import { getBayesianMemoryAsync, saveBayesianMemoryAsync } from './prediction/bayesianMemory';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 export interface BayesianConfig {
@@ -68,8 +68,16 @@ export const runBayesianOptimization = async (
                 if (onProgress) onProgress(data.progress, data.bestScore);
             } else if (type === 'result') {
                 worker.terminate();
-                if (data.observations) saveBayesianMemory(drawName, data.observations);
-                resolve(data);
+                if (data.observations) {
+                    saveBayesianMemoryAsync(drawName, data.observations).then(() => {
+                        resolve(data);
+                    }).catch((err) => {
+                        console.error("Failed to save bayesian memory:", err);
+                        resolve(data);
+                    });
+                } else {
+                    resolve(data);
+                }
             } else if (type === 'error') {
                 worker.terminate();
                 reject(new Error(message));
@@ -81,15 +89,19 @@ export const runBayesianOptimization = async (
             reject(new Error(err?.message || "Échec de l'optimiseur Bayésien"));
         };
 
-        worker.postMessage({
-            type: 'start',
-            payload: {
-                drawName,
-                history: fullHistory,
-                currentWeights,
-                config,
-                memoryObservations: getBayesianMemory(drawName)
-            }
+        getBayesianMemoryAsync(drawName).then((memoryObservations) => {
+            worker.postMessage({
+                type: 'start',
+                payload: {
+                    drawName,
+                    history: fullHistory,
+                    currentWeights,
+                    config,
+                    memoryObservations
+                }
+            });
+        }).catch((err) => {
+            reject(new Error(`Failed to load bayesian memory: ${err.message}`));
         });
     });
 };

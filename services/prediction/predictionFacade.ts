@@ -1,12 +1,11 @@
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { getAlgoWeights, normalizeWeights, applyMetaLearning, adjustWeightsForRegime, saveAlgoWeights } from "./weightsManager";
+import { getAlgoWeights, normalizeWeights } from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { calculateGeneticDiversityIndex } from "./diversityService";
-import { getLocalForensicReports } from "../postPredictionAnalysisService";
 import { logger } from "../../utils/logger";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
@@ -17,9 +16,7 @@ import {
   calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores,
   calculateHawkesExcitation, calculateTopologicalLyapunov
 } from "../advancedMathService";
-import { detectGameRegime, calculateVolatility, calculateShannonEntropy } from "../mathService";
-import { evaluateAdversarialSurvival } from "./adversarialProxy";
-import { DNAOptimizer } from '../training/DNAOptimizer';
+import { detectGameRegime, calculateShannonEntropy } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
@@ -316,15 +313,15 @@ const computeAdvancedMetrics = async (
  * Application des ajustements forensiques (Double Aveugle & Alignement)
  */
 const applyForensicAdjustments = async (
-  drawName: string,
-  history: DrawResult[],
-  gameRegimeInfo: any,
-  skipTraining: boolean,
-  isForensicOptimized: boolean,
-  preloadedForensicReports: ForensicReport[] | undefined,
-  algoBreakdowns: Record<number, Record<string, number>>,
-  stdDevScore: number,
-  medianScore: number,
+  _drawName: string,
+  _history: DrawResult[],
+  _gameRegimeInfo: any,
+  _skipTraining: boolean,
+  _isForensicOptimized: boolean,
+  _preloadedForensicReports: ForensicReport[] | undefined,
+  _algoBreakdowns: Record<number, Record<string, number>>,
+  _stdDevScore: number,
+  _medianScore: number,
 ): Promise<{
   recentReports: ForensicReport[];
   proximityScores: Record<number, number>;
@@ -479,7 +476,7 @@ export const generateMasterPredictionCore = async (
     challengedNumbers: [],
     stabilityScore,
     diversityMetrics,
-    xapExp: null,
+    xapExp: undefined,
     adversarialSurvivalScore: 0,
     adversarialRisks: [],
     explainabilityData: {},

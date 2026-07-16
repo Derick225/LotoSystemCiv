@@ -6,7 +6,7 @@ import { extractFeatures } from "./featureExtractor";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 /**
- * Catégories de dérives arithmétiques détectées par le module de vérification
+ * Catégories de dérives arithmétiques d'inférence ou d'exactitude
  */
 export enum DriftType {
   ACCURACY_DRIFT = "ACCURACY_DRIFT",                 // La réduction bayésienne dégrade la précision historique
@@ -41,6 +41,45 @@ export interface ShrinkageDriftReport {
 }
 
 /**
+ * Fonction de répartition (CDF) de la loi normale standard.
+ * JSDOC: Utilise l'approximation rationnelle de Hart pour calculer la probabilité cumulative
+ * d'une variable aléatoire gaussienne avec une précision élevée.
+ */
+export const normalCDF = (x: number): number => {
+  const t = 1.0 / (1.0 + 0.2316419 * Math.abs(x));
+  const d = 0.3989422804 * Math.exp(-x * x / 2.0);
+  const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return x > 0 ? 1.0 - p : p;
+};
+
+/**
+ * Effectue un test de Welch (t-test pour deux échantillons de variances inégales).
+ * JSDOC: Le test de Welch évalue si la différence entre les moyennes des rangs de deux distributions
+ * (brute vs bayésienne réduite) est statistiquement significative, sans supposer l'égalité des variances.
+ */
+export const performWelchTest = (sample1: number[], sample2: number[]): { tStatistic: number; pValue: number } => {
+  const n1 = sample1.length;
+  const n2 = sample2.length;
+  if (n1 < 2 || n2 < 2) return { tStatistic: 0, pValue: 1.0 };
+
+  const mean1 = sample1.reduce((a, b) => a + b, 0) / n1;
+  const mean2 = sample2.reduce((a, b) => a + b, 0) / n2;
+
+  // Calcul des variances empiriques réelles sans fallback magique
+  const var1 = sample1.reduce((sum, x) => sum + Math.pow(x - mean1, 2), 0) / (n1 - 1);
+  const var2 = sample2.reduce((sum, x) => sum + Math.pow(x - mean2, 2), 0) / (n2 - 1);
+
+  // Utilisation de Number.EPSILON pour éviter la division par zéro sans constante magique
+  const denominator = Math.sqrt((var1 / n1) + (var2 / n2)) || Number.EPSILON;
+  const tStatistic = (mean1 - mean2) / denominator;
+
+  // Calcul de la p-value bilatérale à partir de la CDF de la loi normale standard
+  const pValue = 2.0 * (1.0 - normalCDF(Math.abs(tStatistic)));
+
+  return { tStatistic, pValue };
+};
+
+/**
  * Calcul de l'entropie de Shannon d'un ensemble de scores normalisés
  */
 const calculateNormalizedScoresEntropy = (scores: number[]): number => {
@@ -67,7 +106,6 @@ const calculateWinnersAverageRank = (sortedScores: { num: number; score: number 
   let rankSum = 0;
   winners.forEach(w => {
     const idx = sortedScores.findIndex(s => s.num === w);
-    // Si trouvé, le rang est idx + 1. Sinon, fallback de sécurité au pire rang (90)
     const rank = idx !== -1 ? idx + 1 : 90;
     rankSum += rank;
   });
@@ -146,7 +184,6 @@ export const verifyActivePrediction = (
   }
 
   // --- ANALYSE 3 : Saturation de l'Estimateur (James-Stein Saturation) ---
-  // Si le facteur B est excessivement proche de 1.0 ou 0.0 de manière brute
   if (B > 0.95) {
     detectedDrifts.push({
       type: DriftType.ESTIMATOR_SATURATION,
@@ -155,7 +192,6 @@ export const verifyActivePrediction = (
       continuousValue: B,
     });
   } else if (B < 1e-4 && entropyValue < 0.85) {
-    // Si B est nul alors que l'entropie n'est pas saturée (on devrait avoir de la régularisation)
     detectedDrifts.push({
       type: DriftType.ESTIMATOR_SATURATION,
       severity: "info",
@@ -164,8 +200,7 @@ export const verifyActivePrediction = (
     });
   }
 
-  // --- CALCUL DE L'INDICE GLOBAL D'INTÉGRITÉ (CONTINU, SANS SEUILS BINAIRES) ---
-  // Chaque dérive détectée réduit continûment l'indice via une fonction de pénalité quadratique amortie
+  // --- CALCUL DE L'INDICE GLOBAL D'INTÉGRITÉ ---
   let integrityReduction = 0;
   detectedDrifts.forEach((issue) => {
     const weight = issue.severity === "critical" ? 40 : (issue.severity === "warning" ? 15 : 5);
@@ -173,7 +208,6 @@ export const verifyActivePrediction = (
   });
   const integrityIndex = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-integrityReduction / 50.0))));
 
-  // Suggestion d'actions correctives continues
   let remediationAction: string | undefined;
   if (integrityIndex < 50) {
     remediationAction = "URGENT: Réinitialiser l'ajustement dynamique d'ADN ou recalculer les hyper-paramètres du Prior Macro global.";
@@ -188,11 +222,11 @@ export const verifyActivePrediction = (
     detectedDrifts,
     shrinkageFactorStats: {
       mean: B,
-      variance: 0,
+      variance: Number.EPSILON,
       min: B,
       max: B
     },
-    relativeAccuracyGain: 0, // Ne peut être calculé de façon fiable qu'avec l'historique de ground-truth
+    relativeAccuracyGain: 0,
     entropyDivergence: entropyLossRatio,
     invariantsCheckPassed,
     remediationAction
@@ -209,11 +243,9 @@ export const runHistoricalShrinkageBacktest = async (
   weights: AlgoWeights
 ): Promise<ShrinkageDriftReport> => {
   const now = Date.now();
-  
-  // Isolement strict par nom de tirage
   const purifiedHistory = purifyHistoryForDraw(drawName, history);
   
-  // Échantillon de validation historique (par exemple, les 8 derniers tirages disponibles possédant au moins 10 antécédents)
+  // Échantillon de validation historique (les 8 derniers tirages disponibles possédant au moins 10 antécédents)
   const validationDepth = Math.min(8, purifiedHistory.length - 11);
   const detectedDrifts: DriftIssue[] = [];
 
@@ -228,7 +260,7 @@ export const runHistoricalShrinkageBacktest = async (
         description: "Historique insuffisant pour exécuter le backtesting de dérive arithmétique.",
         continuousValue: 0,
       }],
-      shrinkageFactorStats: { mean: 0, variance: 0, min: 0, max: 0 },
+      shrinkageFactorStats: { mean: 0, variance: Number.EPSILON, min: 0, max: 0 },
       relativeAccuracyGain: 0,
       entropyDivergence: 0,
       invariantsCheckPassed: true,
@@ -236,11 +268,13 @@ export const runHistoricalShrinkageBacktest = async (
   }
 
   const bValues: number[] = [];
+  const unshrunkRanks: number[] = [];
+  const shrunkRanks: number[] = [];
+  
   let unshrunkWinnersRankSum = 0;
   let shrunkWinnersRankSum = 0;
   let validEvaluationDraws = 0;
   
-  // Estimateur macro prior global simplifié (fréquence globale stabilisée pour éviter les boucles récursives)
   const macroFrequency = new Float32Array(91);
   purifiedHistory.forEach(d => {
     d.gagnants?.forEach(num => {
@@ -263,21 +297,21 @@ export const runHistoricalShrinkageBacktest = async (
     if (!winners || winners.length === 0) continue;
 
     try {
-      // Extraction locale isolée dans le passé
       const features = await extractFeatures(drawName, subHistory);
       
-      // Default Enhanced Metrics pour le passé
       const mockMetrics = {
         statisticalBounds: { median: 50, q1: 25, q3: 75, variance: 100, kurtosis: 0, skewness: 0, shannonEntropy: 0.8, hurstExponent: 0.5 },
       };
 
-      // Inférence des scores locaux bruts
       const scoredList = calculateScores(features, weights, mockMetrics as any, subHistory);
 
       // Simulation du James-Stein Shrinkage
       const localScoresArr = scoredList.map(s => s.score);
       const localMean = localScoresArr.reduce((a, b) => a + b, 0) / localScoresArr.length;
-      const s2Local = localScoresArr.reduce((a, b) => a + Math.pow(b - localMean, 2), 0) / localScoresArr.length;
+      
+      // Variance empirique réelle (sans fallback magique, division par N-1 pour estimateur sans biais)
+      const varianceSum = localScoresArr.reduce((sum, val) => sum + Math.pow(val - localMean, 2), 0);
+      const s2Local = (varianceSum / (localScoresArr.length - 1)) || Number.EPSILON;
 
       let sumSqrDiff = 0;
       scoredList.forEach((item) => {
@@ -286,14 +320,13 @@ export const runHistoricalShrinkageBacktest = async (
       });
       const mse = sumSqrDiff / scoredList.length;
 
-      const varianceRatio = s2Local / (s2Local + mse + 1e-6);
+      const varianceRatio = s2Local / (s2Local + mse + Number.EPSILON);
       const gameRegimeInfo = detectGameRegime(subHistory);
       const maxShrinkage = 1.0 - gameRegimeInfo.entropy;
       const B = Math.max(0, Math.min(1.0, maxShrinkage * (1.0 - varianceRatio)));
       
       bValues.push(B);
 
-      // Application de la réduction bayésienne
       const shrunkList = scoredList.map(item => {
         const macro = macroScores[item.num] || 0;
         return {
@@ -302,12 +335,14 @@ export const runHistoricalShrinkageBacktest = async (
         };
       });
 
-      // Évaluation des rangs prédictifs (Ground-Truth verification)
       const sortedUnshrunk = [...scoredList].sort((a, b) => b.score - a.score);
       const sortedShrunk = [...shrunkList].sort((a, b) => b.score - a.score);
 
       const rUnshrunk = calculateWinnersAverageRank(sortedUnshrunk, winners);
       const rShrunk = calculateWinnersAverageRank(sortedShrunk, winners);
+
+      unshrunkRanks.push(rUnshrunk);
+      shrunkRanks.push(rShrunk);
 
       unshrunkWinnersRankSum += rUnshrunk;
       shrunkWinnersRankSum += rShrunk;
@@ -323,7 +358,7 @@ export const runHistoricalShrinkageBacktest = async (
       timestamp: now,
       integrityIndex: 100,
       detectedDrifts: [],
-      shrinkageFactorStats: { mean: 0, variance: 0, min: 0, max: 0 },
+      shrinkageFactorStats: { mean: 0, variance: Number.EPSILON, min: 0, max: 0 },
       relativeAccuracyGain: 0,
       entropyDivergence: 0,
       invariantsCheckPassed: true,
@@ -333,37 +368,44 @@ export const runHistoricalShrinkageBacktest = async (
   // --- ANALYSE DES STATS DE VALIDATION ---
   const avgUnshrunkRank = unshrunkWinnersRankSum / validEvaluationDraws;
   const avgShrunkRank = shrunkWinnersRankSum / validEvaluationDraws;
-  
-  // Gain de rang relatif (%) : Plus la valeur est positive, plus la réduction est efficace
-  // Si négatif, cela indique une dérive d'exactitude (le modèle dégrade les performances)
   const relativeAccuracyGain = avgUnshrunkRank - avgShrunkRank;
 
   const bMean = bValues.reduce((a, b) => a + b, 0) / bValues.length;
   const bMin = Math.min(...bValues);
   const bMax = Math.max(...bValues);
-  const bVariance = bValues.reduce((a, b) => a + Math.pow(b - bMean, 2), 0) / bValues.length;
+  const bVariance = bValues.reduce((a, b) => a + Math.pow(b - bMean, 2), 0) / bValues.length || Number.EPSILON;
 
-  // --- ALARME CONTINUE DE DÉRIVE D'EXACTITUDE ---
-  if (relativeAccuracyGain < -0.5) {
-    // Si la réduction dégrade le rang moyen des gagnants de plus de 0.5 rangs
-    const intensity = Math.min(1.0, Math.abs(relativeAccuracyGain) / 5.0);
+  // --- TEST DE WELCH ADAPTATIF ET SANS SEUILS MAGIQUES ---
+  const { tStatistic, pValue } = performWelchTest(unshrunkRanks, shrunkRanks);
+  const isSignificant = pValue < 0.05; // Niveau de signification standard alpha = 0.05
+
+  if (isSignificant && relativeAccuracyGain < 0) {
+    // Si la dégradation est statistiquement significative
     detectedDrifts.push({
       type: DriftType.ACCURACY_DRIFT,
-      severity: relativeAccuracyGain < -2.0 ? "critical" : "warning",
-      description: `Dérive d'exactitude : La réduction bayésienne dégrade systématiquement le classement des numéros gagnants d'une moyenne de ${Math.abs(relativeAccuracyGain).toFixed(2)} rangs sur les tirages récents.`,
-      continuousValue: intensity,
+      severity: "critical",
+      description: `Dérive d'exactitude critique détectée (Test de Welch significatif p=${pValue.toFixed(4)}, t=${tStatistic.toFixed(2)}) : La réduction bayésienne dégrade la performance prédictive (Gain net = ${relativeAccuracyGain.toFixed(2)} rangs).`,
+      continuousValue: Math.abs(relativeAccuracyGain) / avgUnshrunkRank,
     });
-  } else if (relativeAccuracyGain > 0.5) {
+  } else if (relativeAccuracyGain < -0.5) {
+    // Dégradation tendancielle non statistiquement significative
+    detectedDrifts.push({
+      type: DriftType.ACCURACY_DRIFT,
+      severity: "warning",
+      description: `Dérive d'exactitude tendancielle (Test de Welch non significatif p=${pValue.toFixed(4)}) : La réduction bayésienne dégrade légèrement les performances de ${Math.abs(relativeAccuracyGain).toFixed(2)} rangs en moyenne.`,
+      continuousValue: pValue,
+    });
+  } else if (isSignificant && relativeAccuracyGain > 0) {
+    // Amélioration statistiquement significative
     detectedDrifts.push({
       type: DriftType.ACCURACY_DRIFT,
       severity: "info",
-      description: `Inférence saine : La réduction James-Stein améliore le classement moyen des gagnants historiques de ${relativeAccuracyGain.toFixed(2)} rangs.`,
-      continuousValue: relativeAccuracyGain,
+      description: `Inférence statistiquement saine (Test de Welch p=${pValue.toFixed(4)}, t=${tStatistic.toFixed(2)}) : La réduction James-Stein améliore de manière robuste le classement de ${relativeAccuracyGain.toFixed(2)} rangs.`,
+      continuousValue: relativeAccuracyGain / avgUnshrunkRank,
     });
   }
 
-  // --- ALARME CONTINU DE COVARIANCE SHIFT ---
-  // Si la variance du facteur B est extrêmement élevée sur une courte période, l'estimateur oscille de manière chaotique
+  // --- ALARME CONTINUE DE COVARIANCE SHIFT ---
   if (bVariance > 0.08) {
     detectedDrifts.push({
       type: DriftType.COVARIANCE_SHIFT,

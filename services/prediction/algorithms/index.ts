@@ -19,6 +19,7 @@ import { interMonthlyResonancePlugin } from './interMonthlyResonance';
 import { 
   shadowProbabilityPlugin, 
   networkCorrelationPlugin, 
+  isolationAnomalyPlugin,
 } from './advancedTopology';
 
 /**
@@ -43,6 +44,7 @@ export const initCoreAlgorithms = () => {
   // Nouvelles topologies déterministes
   registerAlgorithm(shadowProbabilityPlugin);
   registerAlgorithm(networkCorrelationPlugin);
+  registerAlgorithm(isolationAnomalyPlugin);
 
   // Séquences, écarts et transformations
   registerAlgorithm(gapSequencePlugin);

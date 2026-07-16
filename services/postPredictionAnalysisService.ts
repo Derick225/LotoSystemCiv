@@ -20,6 +20,32 @@ import { parseDateSafely } from "../utils/dateUtils";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { getDeterministicUUID } from "../utils/mathUtils";
 
+/**
+ * Calcule la probabilité binomiale cumulée P(X >= k) pour X ~ B(n, p)
+ * Utilisé pour déterminer la signification statistique de l'accord des algorithmes.
+ */
+const binomialPValue = (n: number, p: number, k: number): number => {
+  if (k <= 0) return 1.0;
+  if (k > n) return 0.0;
+  
+  const fact = (num: number): number => {
+    let r = 1;
+    for (let i = 2; i <= num; i++) r *= i;
+    return r;
+  };
+  
+  const nCr = (nVal: number, rVal: number): number => {
+    if (rVal < 0 || rVal > nVal) return 0;
+    return fact(nVal) / (fact(rVal) * fact(nVal - rVal));
+  };
+  
+  let sum = 0;
+  for (let j = k; j <= n; j++) {
+    sum += nCr(n, j) * Math.pow(p, j) * Math.pow(1 - p, n - j);
+  }
+  return sum;
+};
+
 // ============================================================================
 // SCHÉMAS DE VALIDATION (Inchangés, déjà robustes)
 // ============================================================================
@@ -861,48 +887,46 @@ export const performForensicAnalysis = async (
   }
 
   let consensusStrength = 0;
-  if (predictionBreakdown) {
-    let totalConsensusScores = 0;
-    let counts = 0;
-    const keyAlgos = [
-      "frequency",
-      "gaps",
-      "spectral",
-      "markov",
-      "temporal",
-      "bayes",
-      "poisson",
-      "fractal",
-    ];
+  if (predictionBreakdown && Object.keys(baseWeights).length > 0) {
+    const keyAlgos = Object.keys(baseWeights);
+    const numAlgos = keyAlgos.length;
+    
+    // Pour chaque algorithme, identifier les 18 meilleurs numéros (20% supérieur du domaine de 90)
+    const algoRecommendations: Record<string, Set<number>> = {};
+    keyAlgos.forEach(algo => {
+      const scored: { num: number; s: number }[] = [];
+      for (let i = 1; i <= 90; i++) {
+        const score = (predictionBreakdown as any)[i]?.[algo] || (predictionBreakdown as any)[i]?.[algo.toUpperCase()] || 0;
+        scored.push({ num: i, s: score });
+      }
+      scored.sort((a, b) => b.s - a.s);
+      algoRecommendations[algo] = new Set(scored.slice(0, 18).map(x => x.num));
+    });
 
-    for (let i = 1; i <= 90; i++) {
-      const scores = predictionBreakdown[i];
-      if (!scores) continue;
+    // Compter le nombre de recommandations (succès) pour chaque numéro suggéré dans la prédiction
+    let totalSurprisal = 0;
+    let counted = 0;
 
-      const keyScores = keyAlgos
-        .map(
-          (algo) =>
-            (scores as any)[algo] || (scores as any)[algo.toUpperCase()] || 0,
-        )
-        .filter((v: any) => typeof v === "number");
-      if (keyScores.length === 0) continue;
+    predictedNumbers.forEach(num => {
+      let successes = 0;
+      keyAlgos.forEach(algo => {
+        if (algoRecommendations[algo]?.has(num)) {
+          successes++;
+        }
+      });
 
-      const meanKeyScore =
-        keyScores.reduce((a: number, b: number) => a + b, 0) / keyScores.length;
-      // Mapping continu logistique centré sur l'espérance théorique (50.0) et la déviation uniforme (28.87)
-      const expectedMean = 50.0;
-      const expectedStd = 100.0 / Math.sqrt(12.0);
-      const continuousAgreement =
-        1.0 / (1.0 + Math.exp(-(meanKeyScore - expectedMean) / expectedStd));
-      const agreementWeight = continuousAgreement;
+      // Probabilité de voir au moins 'successes' accords sous l'hypothèse nulle d'un bruit blanc de Bernoulli
+      // p = 18 / 90 = 0.2
+      const pVal = binomialPValue(numAlgos, 0.2, successes);
+      // Surprisal d'information : I = -log2(pVal)
+      const surprisal = -Math.log2(Math.max(Number.EPSILON, pVal));
+      totalSurprisal += surprisal;
+      counted++;
+    });
 
-      totalConsensusScores += continuousAgreement * 100.0 * agreementWeight;
-      counts += agreementWeight;
-    }
-    consensusStrength =
-      counts > 0
-        ? Math.min(100, Math.round(totalConsensusScores / counts))
-        : 10;
+    const avgSurprisal = counted > 0 ? totalSurprisal / counted : 0;
+    const maxPossibleSurprisal = -numAlgos * Math.log2(0.2); // si tous les algos s'accordent à 100%
+    consensusStrength = Math.min(100, Math.max(10, Math.round((avgSurprisal / (maxPossibleSurprisal || 1)) * 100)));
   } else {
     consensusStrength = 10; // Fallback neutre
   }

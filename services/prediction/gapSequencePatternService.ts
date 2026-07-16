@@ -16,6 +16,8 @@ export interface GapSequenceStats {
   resonanceScore: number; // Gaussian radial basis function of current gap vs expected next gap
   signalScore: number;    // Fused score [0, 100] using autocorrelation weight
   compressionFactor: number; // Ratio of rolling short-term std / long-term std (continuous measure of variance tightening)
+  kaplanMeierProb: number; // Kaplan-Meier cumulative probability of breakout before/at current gap [0..100]
+  hazardRate: number;      // Current conditional breakout probability (hazard rate) under Kaplan-Meier
 }
 
 export interface GapSequenceAnalysisReport {
@@ -52,7 +54,7 @@ export const gapSequencePatternService = {
    * Analyzes the sequence of gaps of each number (1-90) from history.
    */
   analyzePatterns(drawName: string, history: DrawResult[], maxNumber: number = 90): GapSequenceAnalysisReport {
-    // 1. Isolate history per draw
+    // 1. Isolate history per draw (TIRAGE ISOLATION RULE)
     const isolatedHistory = !drawName
       ? history.slice()
       : purifyHistoryForDraw(drawName, history);
@@ -121,7 +123,9 @@ export const gapSequencePatternService = {
           fatigueScore: parseFloat(fatigue.toFixed(4)),
           resonanceScore: 0.5,
           signalScore: parseFloat((fatigue * 100).toFixed(2)),
-          compressionFactor: 1.0
+          compressionFactor: 1.0,
+          kaplanMeierProb: parseFloat((fatigue * 100).toFixed(2)),
+          hazardRate: 1 / theoreticalMean
         };
         continue;
       }
@@ -134,13 +138,44 @@ export const gapSequencePatternService = {
       const stdGap = Math.sqrt(variance) || 1.0;
       const maxGap = Math.max(...seq);
       
-      // Autocorrelation Lag-1 & Lag-2
-      let numLag1 = 0, denLag1 = 0;
+      // --- Kaplan-Meier Survival Analysis & Hazard Rate Estimation ---
+      // Calcule le produit-limite de survie S_t = S_{t-1} * (1 - h_t)
+      // et dérive la probabilité cumulée de sortie et le taux de hasard instantané.
+      let kaplanMeierProb = 0;
+      let hazardRate = 0;
+      
+      const gapFreq = new Map<number, number>();
+      seq.forEach(g => gapFreq.set(g, (gapFreq.get(g) || 0) + 1));
+      
+      const uniqueGaps = Array.from(gapFreq.keys()).sort((a, b) => a - b);
+      
+      let nRisk = n;
+      let S_t = 1.0;
+      
+      for (const t of uniqueGaps) {
+        if (t > currentGap) break;
+        
+        const d_t = gapFreq.get(t) || 0;
+        if (nRisk > 0) {
+          const hazard_t = d_t / nRisk;
+          S_t = S_t * (1.0 - hazard_t);
+          if (t === currentGap) {
+            hazardRate = hazard_t;
+          }
+        }
+        nRisk -= d_t; // Décrémentation stricte du risk set à chaque pas de temps
+      }
+      
+      // La probabilité cumulée de rupture avant ou à l'écart actuel est 1 - S_current
+      kaplanMeierProb = (1.0 - S_t) * 100.0;
+      
+      // Autocorrelation Lag-1 & Lag-2 (estimateurs mathématiques sans amortissement arbitraire)
+      let numLag1 = 0, denLag = 0;
       let numLag2 = 0;
       
       for (let i = 0; i < n; i++) {
         const diff = seq[i] - meanGap;
-        denLag1 += diff * diff;
+        denLag += diff * diff;
         
         if (i >= 1) {
           numLag1 += diff * (seq[i - 1] - meanGap);
@@ -150,8 +185,8 @@ export const gapSequencePatternService = {
         }
       }
       
-      const autocorrelationLag1 = denLag1 > 0 ? numLag1 / denLag1 : 0;
-      const autocorrelationLag2 = denLag1 > 0 ? numLag2 / denLag1 : 0;
+      const autocorrelationLag1 = denLag > 0 ? numLag1 / denLag : 0;
+      const autocorrelationLag2 = denLag > 0 ? numLag2 / denLag : 0;
       
       // Expected Next Gap from Lag 1 AR(1) process:
       // E[G_t] = mu + rho_1 * (G_{t-1} - mu)
@@ -167,20 +202,21 @@ export const gapSequencePatternService = {
       const fatigueScore = continuousNormalCdf(currentGap, meanGap, stdGap);
       
       // Continuous Resonance Score: Gaussian Radial Basis Function
-      // Measures how close current gap is to the autocorrelation-projected expected gap
-      // Spread parameter scaled dynamically by stdGap
-      const width = stdGap / 1.5;
+      // Mesure l'écart entre le gap actuel et la projection d'autocorrélation attendue.
+      // Le paramètre de dispersion (width) correspond exactement à l'écart-type stdGap
+      // intrinsèque de la séquence pour bannir tout coefficient diviseur arbitraire.
+      const width = stdGap;
       const resonanceScore = Math.exp(-0.5 * Math.pow((currentGap - expectedNextGap) / width, 2));
       
       // Combined continuous Signal:
-      // Higher autocorrelation weight increases the resonance score importance,
-      // otherwise fallback to classical fatigue (due-factor) score.
+      // Plus l'autocorrélation de premier ordre est forte, plus la résonance du modèle AR(1) domine.
+      // Sinon, on s'appuie de façon continue sur le score de fatigue classique.
       const weight = Math.abs(autocorrelationLag1);
       const combinedSignal = (weight * resonanceScore) + ((1.0 - weight) * fatigueScore);
       const signalScore = Math.max(0.0, Math.min(100.0, combinedSignal * 100.0));
       
       // Short-term variance vs long-term variance (Compression Wave)
-      // Measures if recent gaps are in a state of tight compression (volatility cluster)
+      // Mesure la contraction locale de la variance pour détecter les clusters de volatilité.
       const shortTermWindow = Math.min(5, Math.max(2, Math.floor(n / 4)));
       const recentGaps = seq.slice(-shortTermWindow);
       const recentMean = recentGaps.reduce((acc, v) => acc + v, 0) / recentGaps.length;
@@ -202,7 +238,9 @@ export const gapSequencePatternService = {
         fatigueScore: parseFloat(fatigueScore.toFixed(4)),
         resonanceScore: parseFloat(resonanceScore.toFixed(4)),
         signalScore: parseFloat(signalScore.toFixed(2)),
-        compressionFactor: parseFloat(compressionFactor.toFixed(4))
+        compressionFactor: parseFloat(compressionFactor.toFixed(4)),
+        kaplanMeierProb: parseFloat(kaplanMeierProb.toFixed(4)),
+        hazardRate: parseFloat(hazardRate.toFixed(6))
       };
     }
     

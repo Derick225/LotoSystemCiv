@@ -36,6 +36,18 @@ export const generateFullWheelWithBankers = (
   return combinations.map(c => [...bankers, ...c].sort((a, b) => a - b));
 };
 
+const nCr = (n: number, r: number): number => {
+  if (r < 0 || r > n) return 0;
+  if (r === 0 || r === n) return 1;
+  let currentR = r;
+  if (currentR > n / 2) currentR = n - currentR;
+  let res = 1;
+  for (let i = 1; i <= currentR; i++) {
+    res = (res * (n - currentR + i)) / i;
+  }
+  return res;
+};
+
 export const generateAbbreviatedWheel = (
   numbers: number[],
   bankers: number[] = [],
@@ -47,10 +59,18 @@ export const generateAbbreviatedWheel = (
   
   const filteredPool = numbers.filter(n => !bankers.includes(n));
   
-  // Limite dynamique basée sur la complexité combinatoire (n choose guarantee)
-  const maxPoolForGuarantee = guarantee >= 4 ? 20 : 30;
+  // Limite dynamique basée sur la complexité combinatoire réelle (n choose guarantee)
+  // On recherche le maxPoolForGuarantee tel que nCr(maxPool, guarantee) <= 15000.
+  let maxPoolForGuarantee = 10;
+  while (maxPoolForGuarantee < 90) {
+    if (nCr(maxPoolForGuarantee + 1, guarantee) > 15000) {
+      break;
+    }
+    maxPoolForGuarantee++;
+  }
+
   if (filteredPool.length > maxPoolForGuarantee) {
-    throw new Error(`Pool trop large (${filteredPool.length}) pour une garantie de ${guarantee}. Limite technique: ${maxPoolForGuarantee}.`);
+    throw new Error(`Pool trop large (${filteredPool.length}) pour une garantie de ${guarantee}. Limite technique dérivée de la complexité (max scenarios <= 15000): ${maxPoolForGuarantee}.`);
   }
   
   const allWinningScenarios = generateFullWheel(filteredPool, guarantee).map(c => c.join('-'));
@@ -64,8 +84,8 @@ export const generateAbbreviatedWheel = (
     generateFullWheel(ticket, guarantee).map(c => c.join('-'))
   );
   
-  // Limite dynamique de tickets : proportionnelle à l'espace des scénarios
-  const maxTickets = Math.min(1000, Math.max(50, Math.floor(totalScenarios / guarantee)));
+  // Limite dynamique de tickets : proportionnelle à l'espace des scénarios et dérivée de Set Cover (ex: Math.ceil(totalScenarios * 0.1))
+  const maxTickets = Math.min(2000, Math.max(50, Math.ceil(totalScenarios * 0.1)));
   
   while (coveredScenarios.size < totalScenarios && selectedTickets.length < maxTickets) {
     let bestIdx = -1;

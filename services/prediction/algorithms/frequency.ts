@@ -9,6 +9,10 @@ export const frequencyPlugin: AlgorithmPlugin = {
   mathematicalBasis: 'Loi des Grands Nombres et Distribution Empirique Robuste',
   description: 'Évalue la fréquence historique normalisée de manière robuste aux valeurs aberrantes (outliers).',
   isStrictlyDeterministic: true,
+  /**
+   * Precomputes median and IQR of frequencies.
+   * Uses Number.EPSILON to guarantee division safety.
+   */
   precompute(ctx) {
     const values = Array.from(ctx.features.freqMap).slice(1).filter(v => v > 0);
     let cacheVal;
@@ -19,12 +23,21 @@ export const frequencyPlugin: AlgorithmPlugin = {
       const median = sorted[Math.floor(sorted.length / 2)];
       const q1 = sorted[Math.floor(sorted.length * 0.25)];
       const q3 = sorted[Math.floor(sorted.length * 0.75)];
-      const iqr = Math.max(1e-6, q3 - q1);
+      const iqr = Math.max(Number.EPSILON, q3 - q1);
       cacheVal = { median, iqr };
     }
     ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.FREQUENCY] = cacheVal;
   },
+  /**
+   * Evaluates the frequency score of a number.
+   * 
+   * CRITICAL DESIGN DECISION:
+   * Any non-statistical heuristics (such as Digital Root / Numerology) have been completely removed
+   * to strictly adhere to the project's statistical philosophy of "Zero Non-Statistical Heuristics".
+   * Under the Law of Large Numbers, the expectation of draws is independent of digit sums, and 
+   * injecting numerological boosts would distort the gradient landscape and compromise prediction rigor.
+   */
   evaluate(num, ctx) {
     const rawFreq = Number(ctx.features.freqMap[num]) || 0;
     
@@ -35,18 +48,14 @@ export const frequencyPlugin: AlgorithmPlugin = {
     const median = cache.median;
     const iqr = cache.iqr;
     
-    // Intégration de la racine numérique (Digital Root)
-    const digitalRootBoost = (ctx.advancedMetrics?.digitalRoot as Record<number, number>)?.[num] || 0.0;
-    
     const slope = 1.0 / iqr;
-    const effectiveFreq = rawFreq * (1.0 + digitalRootBoost / 100.0);
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (effectiveFreq - median)));
+    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawFreq - median)));
     
     const score = Math.max(0.0, Math.min(100.0, normalizedScore));
     return {
       score,
       confidence: 0.95,
-      metadata: { rawFreq, digitalRootBoost }
+      metadata: { rawFreq }
     };
   }
 };

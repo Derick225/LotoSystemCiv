@@ -4,6 +4,8 @@ export const LCG_M = Math.pow(2, 32);
 
 /**
  * Générateur Congruentiel Linéaire (LCG) pur, 100% déterministe basé sur un seed.
+ * Utilise un algorithme de hachage non-collisionnel FNV-1a (32-bit) pour garantir
+ * la distribution uniforme de la graine d'initialisation (seed).
  */
 export class DeterministicSeededGenerator {
     private state: number;
@@ -12,13 +14,16 @@ export class DeterministicSeededGenerator {
         this.state = this.hashString(String(seedString));
     }
 
+    /**
+     * Algorithme de hachage FNV-1a 32-bit déterministe.
+     */
     private hashString(str: string): number {
-        let hash = 0;
+        let hash = 2166136261;
         for (let i = 0; i < str.length; i++) {
-            hash = (hash << 5) - hash + str.charCodeAt(i);
-            hash |= 0;
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
         }
-        return Math.abs(hash);
+        return (hash >>> 0);
     }
 
     /**
@@ -54,10 +59,15 @@ export const calculateMedian = (values: number[]): number => {
 /**
  * Fonction Mathématique Continue : Probabilité de densité Gaussienne (PDF)
  * Permet d'atténuer les écarts sans "nombres magiques".
+ * Inclut une protection stricte contre les divisions par zéro et les valeurs aberrantes.
+ * 
+ * @param x Valeur d'évaluation.
+ * @param mean Moyenne empirique (µ).
+ * @param variance Variance empirique (σ²).
  */
 export const gaussianPDF = (x: number, mean: number = 0, variance: number = 1): number => {
-    if (variance <= 0) return 0;
-    return (1 / Math.sqrt(2 * Math.PI * variance)) * Math.exp(-Math.pow(x - mean, 2) / (2 * variance));
+    const safeVariance = Math.max(Number.EPSILON, variance);
+    return (1 / Math.sqrt(2 * Math.PI * safeVariance)) * Math.exp(-Math.pow(x - mean, 2) / (2 * safeVariance));
 };
 
 /**
