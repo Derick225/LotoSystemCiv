@@ -1,164 +1,238 @@
 import { AlgoKey } from '../../../shared/prediction.types';
-import { AlgorithmPlugin } from '../algorithmRegistry';
+import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
+import { LOTTERY_CONSTANTS } from '../../lotteryService';
 
-// Utilitaire pour obtenir la semaine ISO et le jour de la semaine
-const getCalendarMetrics = (dateStr: string) => {
-  if (!dateStr) return { week: 0, dayOfWeek: 0, timestamp: 0 };
+// Utilitaires de parsing de date pures et déterministes
+const parseDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
   
-  let d: Date;
+  // Format DD/MM/YYYY
   if (dateStr.includes('/')) {
-    // Conversion du format DD/MM/YYYY en Date JS (YYYY-MM-DD)
-    d = new Date(dateStr.split('/').reverse().join('-'));
-  } else {
-    d = new Date(dateStr);
+    const [day, month, year] = dateStr.split('/').map(Number);
+    return new Date(year, month - 1, day);
   }
   
-  if (isNaN(d.getTime())) return { week: 0, dayOfWeek: 0, timestamp: 0 };
+  // Format ISO
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Trouver le tirage jumeau d'une année passée de façon flexible et robuste
+const findTwinDraw = (history: any[], currentDate: Date, yearsAgo: number): { draw: any; index: number } | null => {
+  const targetMonth = currentDate.getMonth();
+  const targetDay = currentDate.getDate();
+  const targetYear = currentDate.getFullYear() - yearsAgo;
   
-  // Calcul de la semaine ISO (norme internationale)
-  const tempDate = new Date(d.getTime());
-  tempDate.setHours(0, 0, 0, 0);
-  tempDate.setDate(tempDate.getDate() + 3 - (tempDate.getDay() + 6) % 7);
-  const week1 = new Date(tempDate.getFullYear(), 0, 4);
-  const week = 1 + Math.round(((tempDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  // Fenêtre adaptative de recherche (tolérance temporelle de ± 3 jours)
+  const toleranceDays = 3;
   
-  return {
-    week,
-    dayOfWeek: d.getDay(), // 0 = Dimanche, 1 = Lundi...
-    timestamp: d.getTime()
-  };
+  for (let i = 1; i < history.length; i++) {
+    const draw = history[i];
+    const drawDate = parseDate(draw.date);
+    if (!drawDate) continue;
+    
+    const drawMonth = drawDate.getMonth();
+    const drawDay = drawDate.getDate();
+    const drawYear = drawDate.getFullYear();
+    
+    // Vérifier si c'est la même période (mois et jour ± tolérance, année cible)
+    if (drawYear === targetYear && drawMonth === targetMonth) {
+      const dayDiff = Math.abs(drawDay - targetDay);
+      if (dayDiff <= toleranceDays) {
+        return { draw, index: i };
+      }
+    }
+  }
+  
+  return null;
 };
 
 /**
- * RÉSONANCE CALENDRAIRE FINE (Fine-Grained Calendar Resonance)
- * ZÉRO NOMBRE MAGIQUE : Capture les échos temporels précis (même semaine ISO, même jour, multiples de 28 jours).
+ * RÉTRO-INGÉNIERIE TEMPORELLE DE COUPLAGE (Couplet & Triplet Temporal Reverse Engineering)
+ * 
+ * ALGORITHME CYBERNÉTIQUE DE PROJECTION :
+ * 1. Identifier le tirage "jumeau" de l'année passée (Y-1, avec Y-2 en repli) de la même période calendaire.
+ * 2. Analyser l'historique antérieur à ce jumeau pour trouver les "périodes sources" d'où proviennent
+ *    les combinaisons (couplets, triplets, etc., soit un chevauchement >= 2 numéros) du jumeau.
+ * 3. Noter la distance relative 'k' de ces sources par rapport au jumeau.
+ * 4. "Répertorier ces périodes correspondant au tirage du jour" : projeter ces mêmes distances 'k'
+ *    sur le tirage actuel (index 0), ce qui donne les tirages correspondants aux indices 'k'.
+ * 5. Collecter tous les numéros (gagnants et machines) de ces périodes projétées d'aujourd'hui,
+ *    puis leur attribuer des scores continus pondérés par l'importance de la combinaison (overlap)
+ *    et amortis selon l'exposant de Hurst (Zéro Nombre Magique).
  */
 export const interMonthlyResonancePlugin: AlgorithmPlugin = {
   key: AlgoKey.INTER_MONTHLY_RESONANCE,
   category: 'advanced',
   stability: 'stable',
-  mathematicalBasis: 'Résonance Calendaire Fine (Périodicité Hebdomadaire et Saisonnalité ISO)',
-  description: 'Analyse la résonance des numéros sur des cycles temporels précis (même semaine ISO, même jour de la semaine, multiples de 28 jours) pour capturer les échos calendaire exacts.',
+  mathematicalBasis: 'Rétro-ingénierie Temporelle et Projection Symétrique de Périodes de Couplage',
+  description: 'Analyse d\'où proviennent les couplets et triplets du tirage jumeau de l\'année passée, puis projette ces mêmes périodes sources sur le tirage du jour pour en récolter les numéros candidats.',
   isStrictlyDeterministic: true,
 
-  precompute(ctx) {
+  precompute(ctx: AlgorithmContext) {
     const history = ctx.history || [];
-    if (history.length === 0) {
-      ctx.pluginCache = ctx.pluginCache || {};
-      ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = { scores: {} };
+    ctx.pluginCache = ctx.pluginCache || {};
+
+    const defaultCache = {
+      scores: {},
+      median: 0.0,
+      iqr: 1.0,
+      twinDrawDate: 'N/A',
+      periodsAnalyzed: 0,
+      totalProjectedNumbers: 0
+    };
+
+    if (history.length < 30) {
+      ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = defaultCache;
       return;
     }
 
     const currentDraw = history[0];
-    const currentMetrics = getCalendarMetrics(currentDraw.date);
-    
-    if (currentMetrics.timestamp === 0) {
-      ctx.pluginCache = ctx.pluginCache || {};
-      ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = { scores: {} };
+    const currentDate = parseDate(currentDraw.date);
+    if (!currentDate) {
+      ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = defaultCache;
       return;
     }
 
+    // Trouver le tirage jumeau de l'année passée (Y-1) ou de repli (Y-2)
+    let twinRes = findTwinDraw(history, currentDate, 1);
+    if (!twinRes) {
+      twinRes = findTwinDraw(history, currentDate, 2);
+    }
+
+    if (!twinRes) {
+      ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = defaultCache;
+      return;
+    }
+
+    const { draw: twinDraw, index: twinIndex } = twinRes;
+    const twinNumbers = new Set<number>([
+      ...(twinDraw.gagnants || []),
+      ...(twinDraw.machine || [])
+    ]);
+
+    // Extraction de l'exposant de Hurst pour l'amortissement temporel (Zéro Nombre Magique)
+    let hurst = ctx.statisticalBounds?.hurstExponent;
+    if (hurst === undefined || isNaN(hurst)) {
+      hurst = 0.5;
+    }
+    const DECAY_GAMMA = 0.05 / (Math.max(0.1, hurst) * 2.0); // Décroissance exponentielle continue
+
     const rawResonanceScores: Record<number, number> = {};
-    for (let i = 1; i <= 90; i++) rawResonanceScores[i] = 0.0;
+    for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
+      rawResonanceScores[i] = 0.0;
+    }
 
-    // Paramètres de décroissance dérivés de la variance temporelle
-    // Demi-vie calendaire : 12 semaines (environ 3 mois)
-    const HALF_LIFE_WEEKS = 12.0;
-    const DECAY_LAMBDA = Math.log(2) / HALF_LIFE_WEEKS;
+    let periodsAnalyzed = 0;
+    let totalProjectedNumbers = 0;
 
-    // Tolérance de décalage temporel (écart-type en jours pour la résonance exacte)
-    // Un écart de 2 jours est considéré comme une résonance forte
-    const TEMPORAL_SIGMA_DAYS = 2.0; 
+    // On parcourt l'historique plus ancien que le tirage jumeau (distance k)
+    const maxLookback = Math.min(150, history.length - twinIndex - 1);
 
-    history.forEach((draw, index) => {
-      if (index === 0) return; // On ignore le tirage actuel
-      
-      const drawMetrics = getCalendarMetrics(draw.date);
-      if (drawMetrics.timestamp === 0) return;
+    for (let k = 1; k <= maxLookback; k++) {
+      const pastDrawIdx = twinIndex + k;
+      const pastDraw = history[pastDrawIdx];
+      if (!pastDraw) continue;
 
-      const diffMs = currentMetrics.timestamp - drawMetrics.timestamp;
-      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-      const diffWeeks = diffDays / 7.0;
+      const pastDrawNumbers = [
+        ...(pastDraw.gagnants || []),
+        ...(pastDraw.machine || [])
+      ];
 
-      if (diffWeeks <= 0) return;
+      // Compter le chevauchement (combien de numéros du jumeau proviennent de ce tirage historique ?)
+      const intersection = pastDrawNumbers.filter(num => twinNumbers.has(num));
+      const overlapCount = intersection.length;
 
-      // 1. Facteur de Résonance Hebdomadaire (Même jour de la semaine)
-      // Si le tirage historique est tombé le même jour de la semaine (ex: tous les deux Lundis)
-      const dayMatch = currentMetrics.dayOfWeek === drawMetrics.dayOfWeek ? 1.0 : 0.0;
-      
-      // 2. Facteur de Résonance ISO (Même semaine calendaire sur un cycle mensuel)
-      // Capture l'effet "même semaine du mois" (ex: 2ème semaine de Mars vs 2ème semaine de Février)
-      const weekMatch = currentMetrics.week === drawMetrics.week ? 1.0 : 0.0;
+      // On cible spécifiquement les couplages (couplets, triplets, quadruplets, etc. => overlapCount >= 2)
+      if (overlapCount >= 2) {
+        // Le tirage correspondant pour aujourd'hui (à la même distance relative k de l'actuel)
+        const currentCorrespondingDraw = history[k];
+        if (currentCorrespondingDraw) {
+          periodsAnalyzed++;
 
-      // 3. Facteur de Périodicité Exacte (Multiples de 28 jours / 4 semaines)
-      // Plus la distance est proche d'un multiple exact de 28 jours, plus le poids est fort
-      const mod28 = diffDays % 28.0;
-      const periodicityMatch = Math.exp(-0.5 * Math.pow(mod28 / TEMPORAL_SIGMA_DAYS, 2));
+          // Poids proportionnel à la taille de la combinaison (quadratique) et décroissant avec k
+          const combinationWeight = Math.pow(overlapCount, 2.0);
+          const timeAmortization = Math.exp(-DECAY_GAMMA * k);
+          const periodWeight = combinationWeight * timeAmortization;
 
-      // Pondération temporelle globale (Décroissance exponentielle)
-      const timeWeight = Math.exp(-DECAY_LAMBDA * diffWeeks);
+          // Récupérer tous les numéros du tirage projeté actuel
+          if (Array.isArray(currentCorrespondingDraw.gagnants)) {
+            currentCorrespondingDraw.gagnants.forEach(num => {
+              if (num >= 1 && num <= LOTTERY_CONSTANTS.TOTAL_NUMBERS) {
+                rawResonanceScores[num] += periodWeight * 1.0;
+                totalProjectedNumbers++;
+              }
+            });
+          }
 
-      // Score de résonance continu (Zéro Nombre Magique)
-      // La combinaison est une moyenne pondérée par l'inverse de la variance des matchs
-      const resonanceStrength = (dayMatch * 0.4) + (weekMatch * 0.4) + (periodicityMatch * 0.2);
-      
-      const finalWeight = resonanceStrength * timeWeight;
-
-      if (finalWeight > Number.EPSILON * 100) { // Seuil de bruit dérivé de la précision machine
-        if (Array.isArray(draw.gagnants)) {
-          draw.gagnants.forEach(num => {
-            if (num >= 1 && num <= 90) {
-              rawResonanceScores[num] += finalWeight;
-            }
-          });
-        }
-        if (Array.isArray(draw.machine)) {
-          draw.machine.forEach(num => {
-            if (num >= 1 && num <= 90) {
-              rawResonanceScores[num] += finalWeight * 0.5; // Pondération relative machine/gagnant
-            }
-          });
+          if (Array.isArray(currentCorrespondingDraw.machine)) {
+            currentCorrespondingDraw.machine.forEach(num => {
+              if (num >= 1 && num <= LOTTERY_CONSTANTS.TOTAL_NUMBERS) {
+                rawResonanceScores[num] += periodWeight * 0.5;
+                totalProjectedNumbers++;
+              }
+            });
+          }
         }
       }
-    });
+    }
 
-    // Normalisation sigmoïdale robuste (IQR)
+    // Normalisation Robuste via Interquartile Range (IQR) pour éradiquer les sauts brusques
     const allValues = Object.values(rawResonanceScores);
     const sorted = [...allValues].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)] || 0;
-    const q1 = sorted[Math.floor(sorted.length * 0.25)] || 0;
-    const q3 = sorted[Math.floor(sorted.length * 0.75)] || 0;
-    const iqr = Math.max(Number.EPSILON, q3 - q1);
+    const median = sorted[Math.floor(sorted.length / 2)] || 0.0;
+    const q1 = sorted[Math.floor(sorted.length * 0.25)] || 0.0;
+    const q3 = sorted[Math.floor(sorted.length * 0.75)] || 0.0;
+    const rawIqr = q3 - q1;
+    const iqr = isNaN(rawIqr) || rawIqr <= 1e-9 ? 1.0 : rawIqr;
 
-    ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.INTER_MONTHLY_RESONANCE] = {
       scores: rawResonanceScores,
       median,
-      iqr
+      iqr,
+      twinDrawDate: twinDraw.date,
+      periodsAnalyzed,
+      totalProjectedNumbers
     };
   },
 
-  evaluate(num, ctx) {
+  evaluate(num: number, ctx: AlgorithmContext) {
     if (!ctx.pluginCache?.[AlgoKey.INTER_MONTHLY_RESONANCE]) {
       this.precompute(ctx);
     }
-    
-    const cache = ctx.pluginCache![AlgoKey.INTER_MONTHLY_RESONANCE];
-    const rawVal = cache.scores[num] || 0.0;
-    const median = cache.median;
-    const iqr = cache.iqr;
 
-    // Pente dérivée de l'IQR (Zéro Nombre Magique)
+    const cache = ctx.pluginCache![AlgoKey.INTER_MONTHLY_RESONANCE];
+    const rawVal = isNaN(cache.scores[num]) || cache.scores[num] === undefined ? 0.0 : cache.scores[num];
+    const median = isNaN(cache.median) || cache.median === undefined ? 0.0 : cache.median;
+    const iqr = isNaN(cache.iqr) || cache.iqr === undefined || cache.iqr <= 1e-9 ? 1.0 : cache.iqr;
+
+    // Fonction sigmoïde douce d'activation continue basée sur l'IQR
     const slope = 1.5 / iqr;
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawVal - median)));
-    const score = Math.max(0.0, Math.min(100.0, normalizedScore));
+    const exponent = -slope * (rawVal - median);
+    
+    // Protection contre les débordements exponentiels ou NaN
+    let normalizedScore = 50.0;
+    if (!isNaN(exponent)) {
+      normalizedScore = 100.0 / (1.0 + Math.exp(Math.max(-100, Math.min(100, exponent))));
+    }
+    
+    let score = Math.max(0.0, Math.min(100.0, normalizedScore));
+    if (isNaN(score) || !isFinite(score)) {
+      score = 0.0;
+    }
+
+    // Confiance continue basée sur le volume de périodes d'échos analysées
+    const periodsCount = cache.periodsAnalyzed ?? 0;
+    const confidence = 0.5 + 0.4 * (1.0 / (1.0 + Math.exp(-(periodsCount - 5.0))));
 
     return {
       score,
-      confidence: 0.90,
+      confidence: isNaN(confidence) || !isFinite(confidence) ? 0.5 : confidence,
       metadata: {
         rawVal,
-        resonanceType: 'Fine-Grained Calendar (ISO/Weekly/28d)'
+        twinDrawDate: cache.twinDrawDate,
+        periodsAnalyzed: periodsCount,
+        totalProjectedNumbers: cache.totalProjectedNumbers ?? 0
       }
     };
   }
