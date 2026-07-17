@@ -403,14 +403,15 @@ export const LearningService = {
       // Génération automatique des logs de feedback neuronal pour le visualiseur en temps réel
       try {
         const feedbackLogs: NeuralFeedbackLog[] = [];
-        Object.entries(weightChanges).forEach(([algo, diff]) => {
+        Object.entries(weightChanges).forEach(([algo, diff], idx) => {
           if (Math.abs(diff) > 0.0001) {
             const oldW = (weightsBase as any)[algo] || 0;
             const newW = (candidateWeights as any)[algo] || 0;
             const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+            const uniqueSuffix = Math.abs(Math.round(diff * 100000)).toString(36);
             
             feedbackLogs.push({
-              id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+              id: `log_${Date.now()}_${algo}_${idx}_${uniqueSuffix}`,
               timestamp: Date.now(),
               drawName,
               algo,

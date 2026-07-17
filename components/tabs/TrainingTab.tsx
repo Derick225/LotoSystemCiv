@@ -694,7 +694,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             <p className="text-slate-400 text-xs mt-1">Calibration dynamique des vecteurs algorithmiques...</p>
                         </div>
                         
-                        {/* Fake logs */}
+                        {/* Télémétrie de calibration */}
                         <div className="bg-black/40 rounded-xl p-4 font-mono text-[9px] text-emerald-400 text-left h-48 overflow-y-auto mb-6 border border-white/5 space-y-1">
                             {calibrationLogs.map((log, lIdx) => (
                                 <div key={lIdx} className="leading-relaxed">

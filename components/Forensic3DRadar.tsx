@@ -39,6 +39,16 @@ export const Forensic3DRadar: React.FC<Forensic3DRadarProps> = ({
 
   const keys = useMemo(() => Object.values(AlgoKey), []);
 
+  const isRealDataAvailable = useMemo(() => {
+    if (!report) return false;
+    if (report.winningXAP && report.winningXAP.length > 0) return true;
+    if (report.matches && Array.isArray(report.matches)) {
+      const totalHits = report.matches.filter(m => m.errorType === "Hit").length;
+      if (totalHits > 0) return true;
+    }
+    return false;
+  }, [report]);
+
   // Compute values for the three layers (Génome initial, Ajustement, Résultats réels)
   const radarData = useMemo(() => {
     const activeWeights = globalWeights || defaultWeights;
@@ -150,7 +160,9 @@ export const Forensic3DRadar: React.FC<Forensic3DRadarProps> = ({
       fill: "rgba(16, 185, 129, 0.18)",
       glowColor: "rgba(16, 185, 129, 0.5)",
       name: "Résultats Réels",
-      desc: "Convergence physique observée lors du tirage"
+      desc: isRealDataAvailable 
+        ? "Convergence physique observée lors du tirage"
+        : "⚠️ Données réelles indisponibles (Mode simulation)"
     }
   };
 
@@ -180,6 +192,15 @@ export const Forensic3DRadar: React.FC<Forensic3DRadarProps> = ({
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-2 font-medium">
             Fusion tridimensionnelle des couches d'ADN prédictif et de la réalité physique. Comparez instantanément l'alignement stochastique, la dérive et la correction idéale d'un simple coup d'œil.
           </p>
+          {!isRealDataAvailable && (
+            <div className="mt-4 p-3.5 bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-2xl text-[10px] leading-relaxed font-bold flex items-start gap-2.5 shadow-sm">
+              <span className="text-xs shrink-0 select-none">⚠️</span>
+              <span>
+                <strong className="uppercase tracking-wide block mb-0.5 text-amber-700 dark:text-amber-300">Résultats Réels Simulés</strong>
+                Aucune donnée historique de tirage réel n'est associée à ce rapport de prédiction. Le tracé de la couche verte est simulé mathématiquement à des fins d'analyse structurelle théorique.
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Legend / Layer Hover Selector */}

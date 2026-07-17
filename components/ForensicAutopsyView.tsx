@@ -44,14 +44,15 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 
                 // Enregistrement des logs de feedback neuronal
                 const feedbackLogs: NeuralFeedbackLog[] = [];
-                Object.keys(newW).forEach(algo => {
+                Object.keys(newW).forEach((algo, idx) => {
                     const oVal = Number(oldW[algo as keyof AlgoWeights]) || 0;
                     const nVal = Number(newW[algo as keyof AlgoWeights]) || 0;
                     const diff = nVal - oVal;
                     if (Math.abs(diff) > 0.0001) {
                         const impactPercentage = oVal > 0 ? (diff / oVal) * 100 : diff * 100;
+                        const uniqueSuffix = Math.abs(Math.round(diff * 100000)).toString(36);
                         feedbackLogs.push({
-                            id: `log_${Date.now()}_${algo}_${Math.random().toString(36).substr(2, 5)}`,
+                            id: `log_${Date.now()}_${algo}_${idx}_${uniqueSuffix}`,
                             timestamp: Date.now(),
                             drawName: dName,
                             algo,
@@ -107,15 +108,16 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 
                 // Enregistrement des logs de feedback neuronal
                 const feedbackLogs: NeuralFeedbackLog[] = [];
-                report.proposedAdjustments.forEach(adj => {
+                report.proposedAdjustments.forEach((adj, idx) => {
                     const algoKey = adj.algo as keyof AlgoWeights;
                     const oldW = Number(globalWeights[algoKey]) || 0;
                     const newW = finalNormalized[algoKey] ?? 0;
                     const diff = newW - oldW;
                     if (Math.abs(diff) > 0.0001) {
                         const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
+                        const uniqueSuffix = Math.abs(Math.round(diff * 100000)).toString(36);
                         feedbackLogs.push({
-                            id: `log_${Date.now()}_${adj.algo}_${Math.random().toString(36).substr(2, 5)}`,
+                            id: `log_${Date.now()}_${adj.algo}_${idx}_${uniqueSuffix}`,
                             timestamp: Date.now(),
                             drawName: targetDraw,
                             algo: adj.algo,

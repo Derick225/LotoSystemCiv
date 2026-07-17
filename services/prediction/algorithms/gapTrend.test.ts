@@ -24,8 +24,9 @@ describe('Algorithm - Gap Trend Projector', () => {
     // Draw 14: contains 5 (gap = 5)
     // Draw 20: contains 5 (gap = 6)
     // Draw 27: contains 5 (gap = 7)
+    // Draw 35: contains 5 (gap = 8)
     // All other draws don't contain 5.
-    const appearanceDraws = [0, 2, 5, 9, 14, 20, 27]; // 7 appearances -> 6 complete gaps: 2, 3, 4, 5, 6, 7
+    const appearanceDraws = [0, 2, 5, 9, 14, 20, 27, 35]; // 8 appearances -> 7 complete gaps: 2, 3, 4, 5, 6, 7, 8
 
     const history: DrawResult[] = Array.from({ length: 40 }, (_, idx) => {
       const winners = appearanceDraws.includes(idx) ? [5, 10, 20, 30, 40] : [11, 12, 13, 14, 15];
@@ -64,7 +65,7 @@ describe('Algorithm - Gap Trend Projector', () => {
     const analysisForFive = cache.perNumberAnalysis[5];
     expect(analysisForFive).toBeDefined();
     expect(analysisForFive.hasPattern).toBe(true);
-    expect(analysisForFive.numGaps).toBe(6); // 6 completed gaps
+    expect(analysisForFive.numGaps).toBe(7); // 7 completed gaps
     expect(analysisForFive.projectedNextGap).toBeGreaterThan(0);
     // Gaps sequence in order of appearance (chrono): 7, 6, 5, 4, 3, 2
     // We expect the trend direction to be negative (gap values are decreasing, i.e., accelerating appearance)
