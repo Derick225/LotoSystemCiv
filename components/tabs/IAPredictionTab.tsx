@@ -42,6 +42,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
     const globalRegime = useNexusStore(state => state.regime);
     const globalWeights = useNexusStore(state => state.globalWeights);
     const temporalDepth = useNexusStore(state => state.temporalDepth);
+    const useCloudEngine = useNexusStore(state => state.useCloudEngine);
+    const setUseCloudEngine = useNexusStore(state => state.setUseCloudEngine);
     
     // Switch between 'inference' (direct mode), 'backtest' (retrospective audit) and 'audit_log' (local journal)
     const [activeMode, setActiveMode] = useState<'inference' | 'backtest' | 'audit_log'>('inference');
@@ -581,7 +583,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6 pt-6 border-t border-slate-800/60 relative z-10">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-6 pt-6 border-t border-slate-800/60 relative z-10">
                             {/* Toggle 1: Active Learning */}
                             <label className="flex items-start gap-3 cursor-pointer select-none group" style={{ minHeight: '44px' }}>
                                 <div className="relative flex items-center h-5 mt-1.5 shrink-0">
@@ -606,7 +608,39 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                                 </div>
                             </label>
 
-                            {/* Toggle 2: Adversarial Protocol */}
+                            {/* Toggle 2: Execution Engine Mode */}
+                            <label className="flex items-start gap-3 cursor-pointer select-none group" style={{ minHeight: '44px' }}>
+                                <div className="relative flex items-center h-5 mt-1.5 shrink-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={useCloudEngine}
+                                        onChange={(e) => {
+                                            audioEngine.play('click');
+                                            setUseCloudEngine(e.target.checked);
+                                            showToast(
+                                                e.target.checked 
+                                                    ? "Moteur Cloud Supabase activé (10 Algos)." 
+                                                    : "Moteur Local Intégral activé (19 Algos).", 
+                                                "info"
+                                            );
+                                        }}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white" />
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-indigo-400 group-hover:text-indigo-300 transition-colors block">
+                                        Moteur Cloud Supabase
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 block leading-normal">
+                                        {useCloudEngine 
+                                            ? "Délègue la prédiction à l'Edge Function Supabase (10 Algos)." 
+                                            : "Calcul local intégral haute fidélité (19 Algos d'Écarts complexes)."}
+                                    </span>
+                                </div>
+                            </label>
+
+                            {/* Toggle 3: Adversarial Protocol */}
                             <label className="flex items-start gap-3 cursor-pointer select-none group" style={{ minHeight: '44px' }}>
                                 <div className="relative flex items-center h-5 mt-1.5 shrink-0">
                                     <input

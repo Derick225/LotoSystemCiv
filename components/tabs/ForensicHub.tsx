@@ -40,6 +40,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
   const [auditing, setAuditing] = useState(false);
   const [driftCorrelations, setDriftCorrelations] = useState<any[]>([]);
   const [applyingDriftFeedback, setApplyingDriftFeedback] = useState(false);
+  const [showDriftDetails, setShowDriftDetails] = useState(false);
 
   const loadDriftCorrelations = async () => {
     try {
@@ -351,53 +352,53 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                   </button>
                 </div>
 
-                {/* 6 Core Topological Metrics */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Écarts de Voisins</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                {/* 6 Core Topological Metrics - Single elegant high-density row */}
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Voisins</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.neighborsCount}
-                      <span className="text-[9px] font-medium text-slate-500">corrigés</span>
+                      <span className="text-[8px] font-medium text-slate-500">corr.</span>
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Effets Miroirs</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Miroirs</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.mirrorsCount}
-                      <span className="text-[9px] font-medium text-slate-500">capturés</span>
+                      <span className="text-[8px] font-medium text-slate-500">capt.</span>
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Transpositions d'Ombres</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Ombres</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.shadowsCount}
-                      <span className="text-[9px] font-medium text-slate-500">isolées</span>
+                      <span className="text-[8px] font-medium text-slate-500">isol.</span>
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Vitesse Machine</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
+                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Vitesse Mach.</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.machineShifts}
-                      <span className="text-[9px] font-medium text-slate-500">corrigées</span>
+                      <span className="text-[8px] font-medium text-slate-500">corr.</span>
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-500/10 shadow-sm relative overflow-hidden">
-                    <span className="text-[9px] font-bold text-rose-400 uppercase block mb-1">Collapses Entropiques</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-500/10 shadow-sm relative overflow-hidden">
+                    <span className="text-[8px] font-bold text-rose-400 uppercase block mb-0.5">Entropie</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.entropyCollapses}
-                      <span className="text-[9px] font-medium text-rose-500/70">neutralisés</span>
+                      <span className="text-[8px] font-medium text-rose-500/70">neutral.</span>
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/10 shadow-sm relative overflow-hidden">
-                    <span className="text-[9px] font-bold text-emerald-400 uppercase block mb-1">Déviances Benford</span>
-                    <span className="text-lg font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/10 shadow-sm relative overflow-hidden">
+                    <span className="text-[8px] font-bold text-emerald-400 uppercase block mb-0.5">Benford</span>
+                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
                       {ledgerStats.benfordDeviations}
-                      <span className="text-[9px] font-medium text-emerald-500/70">réalignées</span>
+                      <span className="text-[8px] font-medium text-emerald-500/70">réalign.</span>
                     </span>
                   </div>
                 </div>
@@ -414,41 +415,61 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                       </p>
                     </div>
                     
-                    <button
-                      onClick={applyDriftFeedback}
-                      disabled={applyingDriftFeedback || driftCorrelations.length === 0}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer shadow-md"
-                    >
-                      <RefreshCw size={12} className={applyingDriftFeedback ? "animate-spin" : ""} />
-                      <span>{applyingDriftFeedback ? "Ajustement..." : "Appliquer le Réalignement Cybernétique"}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          try { audioEngine.play("click"); } catch(e) {}
+                          setShowDriftDetails(!showDriftDetails);
+                        }}
+                        className={`px-3 py-1.5 border rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          showDriftDetails 
+                            ? "bg-slate-200 border-slate-350 text-slate-800 dark:bg-slate-850 dark:text-white" 
+                            : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900/50 dark:border-slate-800 dark:text-slate-400"
+                        }`}
+                      >
+                        {showDriftDetails ? "Masquer Détails" : "Voir Détails"}
+                      </button>
+                      
+                      <button
+                        onClick={applyDriftFeedback}
+                        disabled={applyingDriftFeedback || driftCorrelations.length === 0}
+                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-505 text-white rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <RefreshCw size={11} className={applyingDriftFeedback ? "animate-spin" : ""} />
+                        <span>{applyingDriftFeedback ? "Ajustement..." : "Appliquer"}</span>
+                      </button>
+                    </div>
                   </div>
                   
-                  {driftCorrelations.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {driftCorrelations.map(corr => (
-                        <div key={corr.algoName} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex flex-col gap-1.5">
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{corr.algoName}</span>
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-500 border border-slate-150 dark:border-slate-850">
-                              {corr.failureFrequency} cas
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-[9px] text-slate-400 font-mono">Sévérité: {corr.driftSeverity > 0 ? "+" : ""}{corr.driftSeverity.toFixed(2)}</span>
-                            <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
-                              corr.proposedWeightMultiplier > 1 ? "text-emerald-500" : "text-rose-500"
-                            }`}>
-                              {corr.proposedWeightMultiplier > 1 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-                              {(corr.proposedWeightMultiplier * 100).toFixed(0)}%
-                            </span>
-                          </div>
+                  {showDriftDetails && (
+                    <div className="animate-fade-in mt-4">
+                      {driftCorrelations.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {driftCorrelations.map(corr => (
+                            <div key={corr.algoName} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex flex-col gap-1.5">
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{corr.algoName}</span>
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-500 border border-slate-150 dark:border-slate-850">
+                                  {corr.failureFrequency} cas
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-[9px] text-slate-400 font-mono">Sévérité: {corr.driftSeverity > 0 ? "+" : ""}{corr.driftSeverity.toFixed(2)}</span>
+                                <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
+                                  corr.proposedWeightMultiplier > 1 ? "text-emerald-500" : "text-rose-500"
+                                }`}>
+                                  {corr.proposedWeightMultiplier > 1 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+                                  {(corr.proposedWeightMultiplier * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl text-center">
-                      <p className="text-[10px] text-slate-500 italic font-medium">Aucun correcteur de dérive requis à ce stade.</p>
+                      ) : (
+                        <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl text-center">
+                          <p className="text-[10px] text-slate-500 italic font-medium">Aucun correcteur de dérive requis à ce stade.</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
