@@ -4,7 +4,7 @@ import { deletePrediction } from "../../services/predictionHistoryService";
 import { deleteForensicReportLocal, syncForensicReportsWithCloud } from "../../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../../services/syncService";
 import { PredictionForensics } from "../PredictionForensics";
-import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, ArrowUpRight, ArrowDownRight, Brain, Activity, ShieldAlert, CheckCircle2, TrendingUp, Gauge, BrainCircuit } from "lucide-react";
+import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, Activity, ShieldAlert, CheckCircle2, TrendingUp, Gauge, BrainCircuit } from "lucide-react";
 import { ForensicReport, PredictionHistoryItem } from "../../types";
 import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";
@@ -20,8 +20,6 @@ type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrif
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
-  const setForensicOptimized = useNexusStore((state) => state.setForensicOptimized);
   const { showToast } = useToast();
   
   const { 
@@ -38,41 +36,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
 
   const [auditResult, setAuditResult] = useState<any>(null);
   const [auditing, setAuditing] = useState(false);
-  const [driftCorrelations, setDriftCorrelations] = useState<any[]>([]);
-  const [applyingDriftFeedback, setApplyingDriftFeedback] = useState(false);
-  const [showDriftDetails, setShowDriftDetails] = useState(false);
-
-  const loadDriftCorrelations = async () => {
-    try {
-      const { analyzeDriftCorrelations } = await import("../../services/training/driftCorrelationService");
-      const correlations = await analyzeDriftCorrelations(drawName);
-      setDriftCorrelations(correlations);
-    } catch (e) {
-      console.warn("Failed to load drift correlations", e);
-    }
-  };
-
-  const applyDriftFeedback = async () => {
-    setApplyingDriftFeedback(true);
-    try {
-      const { applyDriftCorrelationsToNeuralEngine } = await import("../../services/training/driftCorrelationService");
-      await applyDriftCorrelationsToNeuralEngine(drawName);
-      showToast("Boucle de feedback corrélative appliquée avec succès au Moteur Neural.", "success");
-      try { audioEngine.play("success"); } catch(e) {}
-      await loadDriftCorrelations(); // reload to show updated state
-    } catch (err) {
-      showToast("Erreur lors de l'application de la boucle de feedback.", "error");
-      try { audioEngine.play("error"); } catch(e) {}
-    } finally {
-      setApplyingDriftFeedback(false);
-    }
-  };
-
-  useEffect(() => {
-    if (mode === "prediction") {
-      loadDriftCorrelations();
-    }
-  }, [mode, drawName, reports]);
 
   const runAudit = async () => {
     setAuditing(true);
@@ -95,61 +58,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
       runAudit();
     }
   }, [mode, auditResult, auditing]);
-
-  const ledgerStats = React.useMemo(() => {
-    let neighborsCount = 0;
-    let mirrorsCount = 0;
-    let shadowsCount = 0;
-    let machineShifts = 0;
-    let benfordDeviations = 0;
-    let entropyCollapses = 0;
-    const algoDrifts: Record<string, { over: number; under: number; count: number }> = {};
-
-    reports.slice(0, 5).forEach((r) => {
-      if (r.entropyCollapse) {
-          entropyCollapses++;
-      }
-      if (r.benfordCompliance !== undefined && r.benfordCompliance < 0.5) {
-          benfordDeviations++;
-      }
-
-      if (Array.isArray(r.matches)) {
-        r.matches.forEach((m) => {
-          if (m.errorType === "Voisin") neighborsCount++;
-          if (m.errorType === "Miroir") mirrorsCount++;
-          if (m.errorType === "Shadow") shadowsCount++;
-          if (m.errorType === "Machine") machineShifts++;
-        });
-      }
-      if (Array.isArray(r.algorithmicDrift)) {
-        r.algorithmicDrift.forEach((d) => {
-          if (!algoDrifts[d.algo]) {
-            algoDrifts[d.algo] = { over: 0, under: 0, count: 0 };
-          }
-          if (d.direction === "overestimating") {
-            algoDrifts[d.algo].over += d.driftScore;
-          } else {
-            algoDrifts[d.algo].under += d.driftScore;
-          }
-          algoDrifts[d.algo].count++;
-        });
-      }
-    });
-
-    return {
-      neighborsCount,
-      mirrorsCount,
-      shadowsCount,
-      machineShifts,
-      benfordDeviations,
-      entropyCollapses,
-      algoDrifts: Object.entries(algoDrifts).map(([algo, data]) => ({
-        algo,
-        netDrift: (data.over - data.under) / (data.count || 1),
-        count: data.count,
-      })),
-    };
-  }, [reports]);
 
   // SYMBIOSE : Écouteur d'événements pour navigation croisée
   useEffect(() => {
@@ -316,165 +224,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                 </div>
               </div>
 
-              {/* CONSOLE D'AJUSTEMENT CYBERNÉTIQUE UNIFIÉE */}
-              <div className="mb-8 p-6 rounded-[2rem] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xl">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <Brain className="text-emerald-500 animate-pulse" size={20} />
-                    <div>
-                      <h4 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Console d'Ajustement Cybernétique
-                      </h4>
-                      <p className="text-[10px] text-slate-500">
-                        Calibrage adaptatif continu basé sur l'autopsie des 5 dernières sessions de tirages.
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <button
-                    onClick={() => {
-                      setForensicOptimized(!isForensicOptimized);
-                      try { audioEngine.play("click"); } catch(e) {}
-                      showToast(
-                        `Optimisation Forensic ${!isForensicOptimized ? "activée" : "désactivée"} avec succès.`,
-                        "success"
-                      );
-                    }}
-                    title="Cliquer pour activer/désactiver l'intégration des ajustements d'autopsies passées"
-                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm ${
-                      isForensicOptimized
-                        ? "bg-emerald-500/10 hover:bg-emerald-500/20 dark:bg-emerald-500/25 dark:hover:bg-emerald-500/35 text-emerald-600 dark:text-emerald-300 border border-emerald-500/20"
-                        : "bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-300/20"
-                    }`}
-                  >
-                    <Brain size={12} className={isForensicOptimized ? "animate-pulse" : ""} />
-                    <span>Optimisation : {isForensicOptimized ? "Active" : "Inactive"}</span>
-                  </button>
-                </div>
-
-                {/* 6 Core Topological Metrics - Single elegant high-density row */}
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Voisins</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.neighborsCount}
-                      <span className="text-[8px] font-medium text-slate-500">corr.</span>
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Miroirs</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.mirrorsCount}
-                      <span className="text-[8px] font-medium text-slate-500">capt.</span>
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Ombres</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.shadowsCount}
-                      <span className="text-[8px] font-medium text-slate-500">isol.</span>
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-150 dark:border-slate-850">
-                    <span className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Vitesse Mach.</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.machineShifts}
-                      <span className="text-[8px] font-medium text-slate-500">corr.</span>
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-rose-500/10 shadow-sm relative overflow-hidden">
-                    <span className="text-[8px] font-bold text-rose-400 uppercase block mb-0.5">Entropie</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.entropyCollapses}
-                      <span className="text-[8px] font-medium text-rose-500/70">neutral.</span>
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/10 shadow-sm relative overflow-hidden">
-                    <span className="text-[8px] font-bold text-emerald-400 uppercase block mb-0.5">Benford</span>
-                    <span className="text-sm font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
-                      {ledgerStats.benfordDeviations}
-                      <span className="text-[8px] font-medium text-emerald-500/70">réalign.</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Algorithmic Drift & proposed weight adjustments */}
-                <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-                    <div>
-                      <h5 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Facteurs Multiplicateurs de Dérive Proposés
-                      </h5>
-                      <p className="text-[10px] text-slate-500">
-                        Ajustements continus calculés par le moteur adaptatif d'après les déviances constatées.
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          try { audioEngine.play("click"); } catch(e) {}
-                          setShowDriftDetails(!showDriftDetails);
-                        }}
-                        className={`px-3 py-1.5 border rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          showDriftDetails 
-                            ? "bg-slate-200 border-slate-350 text-slate-800 dark:bg-slate-850 dark:text-white" 
-                            : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900/50 dark:border-slate-800 dark:text-slate-400"
-                        }`}
-                      >
-                        {showDriftDetails ? "Masquer Détails" : "Voir Détails"}
-                      </button>
-                      
-                      <button
-                        onClick={applyDriftFeedback}
-                        disabled={applyingDriftFeedback || driftCorrelations.length === 0}
-                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-505 text-white rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer shadow-sm active:scale-95"
-                      >
-                        <RefreshCw size={11} className={applyingDriftFeedback ? "animate-spin" : ""} />
-                        <span>{applyingDriftFeedback ? "Ajustement..." : "Appliquer"}</span>
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {showDriftDetails && (
-                    <div className="animate-fade-in mt-4">
-                      {driftCorrelations.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {driftCorrelations.map(corr => (
-                            <div key={corr.algoName} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/80 rounded-xl flex flex-col gap-1.5">
-                              <div className="flex justify-between items-center">
-                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{corr.algoName}</span>
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-500 border border-slate-150 dark:border-slate-850">
-                                  {corr.failureFrequency} cas
-                                </span>
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-[9px] text-slate-400 font-mono">Sévérité: {corr.driftSeverity > 0 ? "+" : ""}{corr.driftSeverity.toFixed(2)}</span>
-                                <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
-                                  corr.proposedWeightMultiplier > 1 ? "text-emerald-500" : "text-rose-500"
-                                }`}>
-                                  {corr.proposedWeightMultiplier > 1 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-                                  {(corr.proposedWeightMultiplier * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl text-center">
-                          <p className="text-[10px] text-slate-500 italic font-medium">Aucun correcteur de dérive requis à ce stade.</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              
               {/* Frise Post-Mortem Unifiée (Drift, Alignement & Navigation) */}
               <UnifiedForensicTimeline 
                 reports={reports}

@@ -72,7 +72,8 @@ const detectThermoStatisticalRegime = (history: DrawResult[]): ThermoState => {
  * La demi-vie est directement modulée par le régime Thermo-Statistique continu.
  */
 const calculateAdaptiveHalfLife = (history: DrawResult[], thermoState: ThermoState): number => {
-  if (history.length < 10) return 15.0; // Fallback empirique moyen
+  // Fallback théorique : Espérance mathématique d'un tirage 5/90 (90/5 = 18.0)
+  if (history.length < 10) return 18.0; 
   
   // Calcul de l'écart médian des gaps pour estimer la fréquence de base
   const allGaps: number[] = [];
@@ -88,7 +89,7 @@ const calculateAdaptiveHalfLife = (history: DrawResult[], thermoState: ThermoSta
   
   const medianGap = allGaps.length > 0 
     ? allGaps.sort((a, b) => a - b)[Math.floor(allGaps.length / 2)] 
-    : 15.0;
+    : 18.0;
 
   // Modulation du régime continu :
   // Le régime Cryo allonge la mémoire (dépendance forte), le Chaos la détruit (amnésie de Markov)

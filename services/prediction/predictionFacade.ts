@@ -1,10 +1,11 @@
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { getAlgoWeights, normalizeWeights } from "./weightsManager";
-import { extractFeatures } from "./featureExtractor";
-import { calculateScores, applyPCADenoising } from "./scoringEngine";
+import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
+import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
+import { PredictiveHyperparameters } from "./hyperParameterTuner";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { logger } from "../../utils/logger";
 import { EnhancedMetrics } from "./metrics.types";
@@ -90,9 +91,9 @@ const hashHistoryContent = (history: DrawResult[]): string => {
  */
 const evaluatePredictionStability = (
   baseSelection: number[],
-  features: any,
+  features: ExtractedFeatures,
   weights: AlgoWeights,
-  enhancedMetrics: any,
+  enhancedMetrics: EnhancedMetrics,
   history: DrawResult[],
 ): number => {
   const baseSet = new Set(baseSelection);
@@ -237,9 +238,10 @@ export const applyDeterministicMicroSgd = async (
         const oldWeight = adjustedWeights[algo as AlgoKey] || 0;
         let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
         
-        // [RULE] Plafonner la variation par poids : newWeight = clamp(oldWeight * 0.85, oldWeight * 1.15, newWeight)
-        const minW = oldWeight * 0.85;
-        const maxW = oldWeight * 1.15;
+        // La variation maximale autorisée dépend dynamiquement de l'entropie (plus c'est chaotique, plus on bride)
+        const variationClamp = 0.05 + 0.20 * (1.0 - entropyValue); 
+        const minW = oldWeight * (1.0 - variationClamp);
+        const maxW = oldWeight * (1.0 + variationClamp);
         newWeight = Math.max(minW, Math.min(maxW, newWeight));
         
         adjustedWeights[algo as AlgoKey] = newWeight;
@@ -252,11 +254,12 @@ export const applyDeterministicMicroSgd = async (
     }
   }
 
-  // Guard 2: Si le taux d'échec dépasse le seuil (25%), on annule complètement l'ajustement SGD
-  if (attempted > 0 && failedDraws / attempted > 0.25) {
+  // Taux de tolérance aux échecs continu, inversement proportionnel à l'entropie (les environnements stables pardonnent moins les erreurs)
+  const dynamicFailureTolerance = 0.15 + 0.20 * entropyValue;
+  if (attempted > 0 && failedDraws / attempted > dynamicFailureTolerance) {
     logger.warn(
-      { failedDraws, attempted, rate: failedDraws / attempted },
-      "[predictionFacade] SGD: Taux d'échec supérieur au seuil de sécurité (25%). Annulation de l'ajustement des poids pour éviter la déstabilisation."
+      { failedDraws, attempted, rate: failedDraws / attempted, threshold: dynamicFailureTolerance },
+      "[predictionFacade] SGD: Taux d'échec supérieur au seuil dynamique de sécurité. Annulation de l'ajustement."
     );
     return weights; // On retourne les poids initiaux intacts
   }
@@ -270,7 +273,7 @@ export const applyDeterministicMicroSgd = async (
 const computeAdvancedMetrics = async (
   localHistoryContext: DrawResult[],
   drawName: string,
-  hyperparameters: any,
+  hyperparameters: Partial<PredictiveHyperparameters>,
   useSpatioTemporalHawkes: boolean,
   metrics: EnhancedMetrics | undefined,
 ): Promise<EnhancedMetrics> => {
@@ -302,10 +305,10 @@ const computeAdvancedMetrics = async (
 
   // Ajustements continus
   for (const k in gapVelocityScores) {
-    gapVelocityScores[k] *= hyperparameters.gapVelocityWeight;
+    gapVelocityScores[k] *= (hyperparameters.gapVelocityWeight || 1.0);
   }
   for (const k in hawkesExcitationScores) {
-    hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay / TUNING.DEFAULT_HAWKES_DECAY);
+    hawkesExcitationScores[k] *= ((hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY);
   }
 
   return {
@@ -515,7 +518,7 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
 export const applyForensicAdjustments = async (
   drawName: string,
   _history: DrawResult[],
-  gameRegimeInfo: any,
+  gameRegimeInfo: { regime: string; hurst: number; entropy: number; volatility: number; weylDiscrepancy: number; chaosDimension: number; },
   _skipTraining: boolean,
   isForensicOptimized: boolean,
   preloadedForensicReports: ForensicReport[] | undefined,
@@ -762,7 +765,7 @@ export const extractPredictionFeatures = async (context: PredictionRuntimeContex
 
 export const scorePredictionNumbers = (
   context: PredictionRuntimeContext,
-  features: any,
+  features: ExtractedFeatures,
   weights: AlgoWeights,
   advancedMetrics: EnhancedMetrics
 ) => {
@@ -776,7 +779,7 @@ export const scorePredictionNumbers = (
 
 export const resolveForensicAdjustments = async (
   context: PredictionRuntimeContext,
-  baseScores: any[]
+  baseScores: ScoredNumber[]
 ): Promise<{
   recentReports: ForensicReport[];
   proximityScores: Record<number, number>;
@@ -811,11 +814,18 @@ export const resolveForensicAdjustments = async (
 
 export const rescoreWithAdjustments = (
   context: PredictionRuntimeContext,
-  features: any,
+  features: ExtractedFeatures,
   weights: AlgoWeights,
   advancedMetrics: EnhancedMetrics,
-  forensicAdjustments: any
-): { rescored: any[]; enhancedMetrics: EnhancedMetrics } => {
+  forensicAdjustments: {
+  recentReports: ForensicReport[];
+  proximityScores: Record<number, number>;
+  missedScores: Record<number, number>;
+  driftScores: Record<number, number>;
+  dynamicWeightModifiers: Record<number, Partial<Record<string, number>>>;
+  oracleDriftMap: Record<string, number>;
+}
+): { rescored: ScoredNumber[]; enhancedMetrics: EnhancedMetrics } => {
   const enhancedMetrics: EnhancedMetrics = {
     ...advancedMetrics,
     proximityDiagnostic: forensicAdjustments.proximityScores,
@@ -840,17 +850,17 @@ export const rescoreWithAdjustments = (
 
 export const applyPredictionDenoising = async (
   _context: PredictionRuntimeContext,
-  rescored: any[],
+  rescored: ScoredNumber[],
   weights: AlgoWeights,
   enhancedMetrics: EnhancedMetrics
-): Promise<any[]> => {
+): Promise<ScoredNumber[]> => {
   return await applyPCADenoising(rescored, weights, enhancedMetrics);
 };
 
 export const selectPredictionNumbers = (
   context: PredictionRuntimeContext,
-  denoisedScores: any[],
-  features: any
+  denoisedScores: ScoredNumber[],
+  features: ExtractedFeatures
 ): {
   selection: number[];
   candidates: number[];
@@ -910,12 +920,12 @@ export const selectPredictionNumbers = (
 
 export const finalizePredictionPayload = (
   context: PredictionRuntimeContext,
-  denoisedScores: any[],
+  denoisedScores: ScoredNumber[],
   selection: number[],
   candidates: number[],
   weights: AlgoWeights,
   enhancedMetrics: EnhancedMetrics,
-  features: any,
+  features: ExtractedFeatures,
   shrinkageApplied: boolean,
   shrinkageFactor: number
 ): Prediction => {
@@ -950,7 +960,7 @@ export const finalizePredictionPayload = (
 
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
 
-  const breakdownRecord: Record<number, any> = {};
+  const breakdownRecord: Record<number, Record<string, number>> = {};
   denoisedScores.forEach(curr => {
     breakdownRecord[curr.num] = curr.breakdown;
   });

@@ -2011,30 +2011,40 @@ export const generateForensicReport = (
     }
   });
 
-  // Severity Classification
+  // Severity Classification (Continuous mapping to discrete labels for UI representation)
   const severityScore = modelMissScore * 0.6 + drawAnomalyScore * 0.4;
-  let severity: SeverityLevel = "low";
-  if (severityScore > 0.75) severity = "critical";
-  else if (severityScore > 0.5) severity = "high";
-  else if (severityScore > 0.25) severity = "medium";
+  const severities: { threshold: number; label: SeverityLevel }[] = [
+    { threshold: 0.75, label: "critical" },
+    { threshold: 0.50, label: "high" },
+    { threshold: 0.25, label: "medium" },
+    { threshold: 0.00, label: "low" }
+  ];
+  let severity: SeverityLevel = severities.find(s => severityScore >= s.threshold)?.label || "low";
 
-  // Forensic Confidence Calculation
-  let confLevel: 'low' | 'medium' | 'high' = 'high';
+  // Forensic Confidence Calculation (Continuous Evaluation)
+  // Base confidence grows asymptotically with history length
+  const historyConfidence = 1.0 - Math.exp(-history.length / 30.0);
+  // Entropy penalty: higher entropy smoothly reduces confidence
+  const entropyPenalty = Math.exp(10.0 * (historyEntropy - 1.0)); // Close to 1.0 -> max penalty
+  const continuousConfScore = Math.max(0.1, historyConfidence * (1.0 - 0.5 * entropyPenalty));
+  
+  let confLevel: 'low' | 'medium' | 'high' = continuousConfScore > 0.7 ? 'high' : continuousConfScore > 0.4 ? 'medium' : 'low';
   const confReasons: string[] = [];
-  if (history.length < 15) {
-    confLevel = 'low';
-    confReasons.push("Historique d'apprentissage extrêmement restreint (moins de 15 tirages), limitant la convergence statistique.");
-  } else if (history.length < 50) {
-    confLevel = 'medium';
-    confReasons.push("Historique d'apprentissage modéré (moins de 50 tirages). Bruit d'échantillonnage présent.");
+  
+  if (historyConfidence < 0.4) {
+    confReasons.push("Historique d'apprentissage restreint, limitant la convergence statistique.");
+  } else if (historyConfidence < 0.8) {
+    confReasons.push("Historique d'apprentissage modéré. Bruit d'échantillonnage présent.");
   } else {
-    confReasons.push("Profondeur historique robuste garantissant une convergence théorique asymptotique.");
+    confReasons.push("Profondeur historique robuste garantissant une convergence asymptotique.");
   }
-  if (historyEntropy > 0.98) {
-    confReasons.push("Désordre entropique total compliquant la dissociation signal/bruit.");
+  
+  if (entropyPenalty > 0.8) {
+    confReasons.push("Désordre entropique majeur compliquant la dissociation signal/bruit.");
   } else {
     confReasons.push("Régime de distribution stable avec un bruit entropique calibré.");
   }
+  
   const forensicConfidence = { level: confLevel, reasons: confReasons };
 
   // Identify Dominant Causes (Max 3)

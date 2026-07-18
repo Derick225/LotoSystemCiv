@@ -126,10 +126,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
         entropy: number,
         volatility: number
     ) => {
-        // Reference parameters to bypass strict unused-locals checks
-        if (regime || volatility !== undefined) {
-            // No-op
-        }
         const baseWeights: Record<string, number> = {
             frequency: 1.0,
             gap: 1.0,
@@ -154,61 +150,71 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
 
         const hDiff = hurst - 0.5; 
         const eDiff = entropy - 3.0;
+        
+        // Volatility modulation (higher volatility -> favor agile models)
+        const volMod = Math.max(-0.5, Math.min(0.5, volatility / 100.0));
+
         const adjustedWeights = { ...baseWeights };
 
         // Continuous mapping based on statistical indicators:
-        const trendFactor = 1.0 + 1.5 * hDiff;
+        const trendFactor = 1.0 + 1.5 * hDiff - 0.5 * volMod;
         adjustedWeights.frequency = Math.max(0.1, adjustedWeights.frequency * trendFactor);
         adjustedWeights.momentum = Math.max(0.1, adjustedWeights.momentum * trendFactor);
         adjustedWeights.gap_trend = Math.max(0.1, adjustedWeights.gap_trend * trendFactor);
 
-        const transitionFactor = 1.0 - 1.5 * hDiff;
+        const transitionFactor = 1.0 - 1.5 * hDiff + 0.8 * volMod;
         adjustedWeights.markov = Math.max(0.1, adjustedWeights.markov * transitionFactor);
         adjustedWeights.bayes = Math.max(0.1, adjustedWeights.bayes * transitionFactor);
         adjustedWeights.shadow = Math.max(0.1, adjustedWeights.shadow * transitionFactor);
         adjustedWeights.fractal = Math.max(0.1, adjustedWeights.fractal * (1.0 + Math.abs(hDiff)));
 
-        const chaoticFactor = 1.0 + 0.8 * eDiff;
+        const chaoticFactor = 1.0 + 0.8 * eDiff + 1.2 * volMod;
         adjustedWeights.spectral = Math.max(0.1, adjustedWeights.spectral * chaoticFactor);
         adjustedWeights.echo_state = Math.max(0.1, adjustedWeights.echo_state * chaoticFactor);
         adjustedWeights.gap_sequence = Math.max(0.1, adjustedWeights.gap_sequence * chaoticFactor);
 
-        const structureFactor = 1.0 - 0.8 * eDiff;
+        const structureFactor = 1.0 - 0.8 * eDiff - 0.5 * volMod;
         adjustedWeights.affinity = Math.max(0.1, adjustedWeights.affinity * structureFactor);
         adjustedWeights.spatial = Math.max(0.1, adjustedWeights.spatial * structureFactor);
         adjustedWeights.gap_pattern = Math.max(0.1, adjustedWeights.gap_pattern * structureFactor);
         adjustedWeights.sequence_pattern = Math.max(0.1, adjustedWeights.sequence_pattern * structureFactor);
 
         const sum = Object.values(adjustedWeights).reduce((a, b) => a + b, 0);
-        const normalizedWeights = {} as any;
+        const normalizedWeights = {} as Record<string, number>;
         for (const key in adjustedWeights) {
             normalizedWeights[key] = (adjustedWeights[key] / sum) * 19.0;
         }
 
-        let rationale = `[CONVERGENCE CYBERNÉTIQUE LOCALE] L'analyse du tirage ${drawName} montre un exposant de Hurst de ${hurst.toFixed(4)} (dynamique temporelle) et une entropie de Shannon de ${entropy.toFixed(4)}. `;
+        let rationale = `[CONVERGENCE CYBERNÉTIQUE LOCALE] L'analyse du tirage ${drawName} (Régime: ${regime}) montre un exposant de Hurst de ${hurst.toFixed(4)} et une entropie de ${entropy.toFixed(4)}. `;
         if (hDiff > 0.05) {
-            rationale += `La persistance temporelle est forte (Hurst > 0.5), confirmant une stabilité d'inertie. Le système a accru la pondération des vecteurs de tendance : Frequency (+${(trendFactor * 100 - 100).toFixed(0)}%) et Gap Trend (+${(trendFactor * 100 - 100).toFixed(0)}%). `;
+            rationale += `La persistance temporelle est forte (Hurst > 0.5), confirmant une stabilité d'inertie. `;
         } else if (hDiff < -0.05) {
-            rationale += `La signature stochastique est anti-persistante (Hurst < 0.5), favorisant les dynamiques de transition et de retour à la moyenne. Le moteur a augmenté continuement les chaînes de transition : Markov (+${(transitionFactor * 100 - 100).toFixed(0)}%) et Bayes (+${(transitionFactor * 100 - 100).toFixed(0)}%). `;
+            rationale += `La signature stochastique est anti-persistante (Hurst < 0.5), favorisant les dynamiques de transition. `;
         } else {
-            rationale += `Le régime présente une dérive neutre (Hurst proche de 0.5), induisant une balance équitable entre la fréquence linéaire et les transitions stochastiques. `;
+            rationale += `Le régime présente une dérive neutre (Hurst proche de 0.5). `;
         }
 
         if (eDiff > 0.1) {
-            rationale += `L'entropie élevée (${entropy.toFixed(3)}) indique une distribution spectrale élargie (chaos). Le moteur renforce les modèles d'état d'écho et d'analyse spectrale (+${(chaoticFactor * 100 - 100).toFixed(0)}%).`;
+            rationale += `L'entropie élevée (${entropy.toFixed(3)}) indique une distribution spectrale élargie (chaos). `;
         } else if (eDiff < -0.1) {
-            rationale += `L'entropie basse (${entropy.toFixed(3)}) traduit des motifs géométriques structurés. Les pondérations spatiales et d'affinités de co-occurrence ont été augmentées (+${(structureFactor * 100 - 100).toFixed(0)}%).`;
+            rationale += `L'entropie basse (${entropy.toFixed(3)}) traduit des motifs géométriques structurés. `;
         }
 
-        const confidence = Math.round(Math.max(65, Math.min(95, 80 + hDiff * 20 - eDiff * 10)));
+        if (volatility > 20) {
+            rationale += `La volatilité forte a amplifié les modèles spectraux et de transition. `;
+        }
+
+        const confidence = Math.round(100.0 / (1.0 + Math.exp(-0.1 * (hDiff * 200 - eDiff * 50 - volMod * 50)))); // Sigmoid instead of min/max clamping
+        const boundedConfidence = Math.max(65, Math.min(95, 65 + 30 * confidence / 100));
+
         const strategicAdvice = hDiff > 0 
             ? "Favoriser les numéros chauds de l'historique récent et les motifs géométriques d'inertie de dérive continue."
             : "Privilégier les écarts longs parvenus à maturité stochastique et les combinaisons à forte rupture de phase.";
 
         return {
-            weights: normalizedWeights as Record<string, number>,
+            weights: normalizedWeights,
             rationale,
-            confidence,
+            confidence: boundedConfidence,
             strategicAdvice
         };
     };

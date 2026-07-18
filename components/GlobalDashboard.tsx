@@ -93,11 +93,15 @@ const MetaLearningIndicator = React.memo(() => {
     ) as number[];
     if (values.length === 0) return baseConfidence;
     const maxWeight = Math.max(...values);
-    const boost = maxWeight > 0.4 ? 10 : 0;
+    // Continuous boost: bounded between 0 and 15 based on the max weight deviation
+    const boost = 15.0 * Math.max(0, Math.min(1.0, (maxWeight - 0.2) / 0.5));
     return Math.min(99, baseConfidence + boost);
   }, [globalWeights, calibration]);
 
-  const isShadowActive = (globalWeights?.fractal || 0) > 0.05;
+  // Using a continuous sigmoid-based activation concept instead of strict binary, 
+  // but keeping boolean for UI styling flags.
+  const shadowIntensity = Math.min(1.0, Math.max(0.0, (globalWeights?.fractal || 0) * 10.0));
+  const isShadowActive = shadowIntensity > 0.3;
 
   return (
     <div className="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-3xl md:rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">

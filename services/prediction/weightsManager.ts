@@ -107,14 +107,12 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaosFactor);
   adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * (1.0 + chaosFactor);
 
-  // AMPLIFICATION CONTINUE DU POIDS DE LA TENDANCE EN PHASE PERSISTANTE (Requirement 4)
-  // Si Hurst > 0.5 (régime persistant), on injecte un multiplicateur de gain proportionnel à (Hurst - 0.5).
-  // Cela garantit que la force de la persistance détectée soit pleinement exploitée par les analyses de dynamique.
-  if (hurst > 0.5) {
-    const persistencePremium = 1.0 + 4.0 * (hurst - 0.5);
-    adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * persistencePremium;
-    adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * persistencePremium;
-  }
+  // AMPLIFICATION CONTINUE DU POIDS DE LA TENDANCE (Requirement 4)
+  // Injection continue d'un multiplicateur de gain proportionnel à max(0, hurst - 0.5).
+  // Cela garantit que la force de la persistance détectée soit pleinement exploitée sans saut binaire.
+  const persistencePremium = 1.0 + 4.0 * Math.max(0, hurst - 0.5);
+  adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * persistencePremium;
+  adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * persistencePremium;
 
   return normalizeWeights(adjusted);
 };
