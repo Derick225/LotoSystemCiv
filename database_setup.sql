@@ -177,6 +177,35 @@ CREATE TABLE IF NOT EXISTS public.draw_regimes (
     CONSTRAINT unique_draw_regime UNIQUE (draw_name)
 );
 
+-- M. MODEL PERFORMANCE METRICS (Forensic Continuous Learning)
+CREATE TABLE IF NOT EXISTS public.model_performance_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL,
+    date DATE,
+    exact_matches INTEGER NOT NULL,
+    partial_matches_2_5 BOOLEAN,
+    partial_matches_3_5 BOOLEAN,
+    partial_matches_4_5 BOOLEAN,
+    brier_score NUMERIC,
+    near_miss_count INTEGER,
+    sliding_window_yield NUMERIC,
+    model_version TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- N. MODEL WEIGHTS CONFIG (Adaptive Dynamic Learning and Platt Calibration Sigmoids)
+CREATE TABLE IF NOT EXISTS public.model_weights_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL,
+    weights JSONB NOT NULL,
+    sigmoid_slope NUMERIC DEFAULT 1.0,
+    sigmoid_intercept NUMERIC DEFAULT 0.0,
+    boosting_multiplier NUMERIC DEFAULT 1.0,
+    prudence_mode_active BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_model_weights_config_draw UNIQUE (draw_name)
+);
+
 -- 4. INDEXES
 CREATE INDEX IF NOT EXISTS idx_results_lookup ON public.draw_results(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
@@ -204,6 +233,8 @@ ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_regimes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.model_performance_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.model_weights_config ENABLE ROW LEVEL SECURITY;
 
 -- Policies Publiques
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
@@ -211,6 +242,8 @@ CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING 
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
 CREATE POLICY "Public Read Regimes" ON public.draw_regimes FOR SELECT USING (true);
+CREATE POLICY "Public Read Performance Metrics" ON public.model_performance_metrics FOR SELECT USING (true);
+CREATE POLICY "Public Read Weights Config" ON public.model_weights_config FOR SELECT USING (true);
 
 -- Policies User
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
@@ -244,6 +277,8 @@ CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO serv
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
+CREATE POLICY "Service Full Access Performance Metrics" ON public.model_performance_metrics FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Service Full Access Weights Config" ON public.model_weights_config FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 6. REALTIME
 DO $$
@@ -271,6 +306,7 @@ CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_prediction_snapshots BEFORE UPDATE ON public.prediction_snapshots FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_model_weights_config BEFORE UPDATE ON public.model_weights_config FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 
 -- Fonction pour assigner automatiquement le rôle admin au premier utilisateur ou à un email spécifique
 CREATE OR REPLACE FUNCTION public.handle_new_user()

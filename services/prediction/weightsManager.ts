@@ -357,16 +357,31 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   // 2. Lire les poids distants depuis Supabase
   if (isSupabaseConfigured() && navigator.onLine) {
     try {
-      const { data } = await supabase
-        .from('algo_weights')
+      // D'abord tenter de récupérer la configuration de poids recalibrés de l'auto-apprentissage
+      const { data: adaptiveConfig } = await supabase
+        .from('model_weights_config')
         .select('weights, updated_at')
         .eq('draw_name', drawName)
         .maybeSingle();
 
-      if (data?.weights) {
-        remoteWeights = data.weights as Partial<AlgoWeights>;
-        if (data.updated_at) {
-          remoteUpdatedAt = new Date(data.updated_at);
+      if (adaptiveConfig?.weights) {
+        remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
+        if (adaptiveConfig.updated_at) {
+          remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
+        }
+      } else {
+        // Fallback vers les poids de base de algo_weights
+        const { data } = await supabase
+          .from('algo_weights')
+          .select('weights, updated_at')
+          .eq('draw_name', drawName)
+          .maybeSingle();
+
+        if (data?.weights) {
+          remoteWeights = data.weights as Partial<AlgoWeights>;
+          if (data.updated_at) {
+            remoteUpdatedAt = new Date(data.updated_at);
+          }
         }
       }
     } catch (e) { /* Silenced */ }
@@ -505,4 +520,43 @@ export const applyBayesianForensicFeedback = async (
   await saveAlgoWeights(drawName, finalNormalized);
   
   return finalNormalized;
+};
+
+export interface CalibratedHyperparameters {
+  sigmoid_slope: number;
+  sigmoid_intercept: number;
+  boosting_multiplier: number;
+  prudence_mode_active: boolean;
+}
+
+export const getCalibratedHyperparameters = async (drawName: string, currentEntropy: number): Promise<CalibratedHyperparameters> => {
+  const defaultParams = {
+    sigmoid_slope: 1.2 - 0.8 * currentEntropy,
+    sigmoid_intercept: -0.5 - 1.5 * currentEntropy,
+    boosting_multiplier: 1.0,
+    prudence_mode_active: false
+  };
+
+  if (!isSupabaseConfigured() || !navigator.onLine) {
+    return defaultParams;
+  }
+
+  try {
+    const { data } = await supabase
+      .from('model_weights_config')
+      .select('sigmoid_slope, sigmoid_intercept, boosting_multiplier, prudence_mode_active')
+      .eq('draw_name', drawName)
+      .maybeSingle();
+
+    if (data) {
+      return {
+        sigmoid_slope: typeof data.sigmoid_slope === 'number' ? data.sigmoid_slope : defaultParams.sigmoid_slope,
+        sigmoid_intercept: typeof data.sigmoid_intercept === 'number' ? data.sigmoid_intercept : defaultParams.sigmoid_intercept,
+        boosting_multiplier: typeof data.boosting_multiplier === 'number' ? data.boosting_multiplier : defaultParams.boosting_multiplier,
+        prudence_mode_active: !!data.prudence_mode_active
+      };
+    }
+  } catch (e) { /* Silenced */ }
+
+  return defaultParams;
 };

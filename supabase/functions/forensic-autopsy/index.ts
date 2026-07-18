@@ -217,6 +217,107 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
         modelUsed: reportData.modelUsed
     }
 
+    // === ENHANCED POST-MORTEM AUTO-LEARNING SYSTEM ===
+    // 1. Calculate Brier Score (Probabilistic calibration error)
+    const confidenceVal = (snapData.metrics_snapshot?.confidence || snapData.metrics_snapshot?.hyperparameters?.confidence || 50) / 100;
+    let brierSum = 0;
+    for (let i = 1; i <= 90; i++) {
+        const isPredicted = predicted.includes(i);
+        const isActual = actual.includes(i);
+        const p = isPredicted ? confidenceVal : 0.011; // 1/90 uniform prior for unpredicted numbers
+        const o = isActual ? 1.0 : 0.0;
+        brierSum += Math.pow(p - o, 2);
+    }
+    const brierScore = brierSum / 90;
+
+    // 2. Sliding Window Performance & Prudence Mode Detection
+    let slidingWindowYield = exactHits / 5;
+    let prudenceModeActive = false;
+
+    // Fetch previous 29 performance metrics to construct a 30-draw sliding window
+    const { data: recentMetrics } = await supabase
+        .from('model_performance_metrics')
+        .select('exact_matches')
+        .eq('draw_name', snapData.draw_name)
+        .order('created_at', { ascending: false })
+        .limit(29);
+
+    if (recentMetrics && recentMetrics.length >= 9) {
+        const matchCounts = recentMetrics.map((r: { exact_matches: number }) => r.exact_matches);
+        const totalMatches = matchCounts.reduce((a: number, b: number) => a + b, 0) + exactHits;
+        slidingWindowYield = totalMatches / ((matchCounts.length + 1) * 5);
+
+        // Compute statistical deviation of match counts to identify significant performance drops
+        const allMatches = [...matchCounts, exactHits];
+        const meanMatches = totalMatches / allMatches.length;
+        const varianceMatches = allMatches.reduce((acc: number, m: number) => acc + Math.pow(m - meanMatches, 2), 0) / allMatches.length;
+        const stdDevMatches = Math.sqrt(varianceMatches);
+
+        // Expected random match count = 5 * (5/90) = 0.277
+        // Trigger Prudence Mode if current performance has dropped significantly
+        if (meanMatches < 0.277 || (exactHits < meanMatches - 1.5 * stdDevMatches)) {
+            prudenceModeActive = true;
+        }
+    }
+
+    // 3. Sigmoid Slope (Gain) Calibration via Platt Scaling Adaptation
+    // Continuous slope adjustment based on calibration error (Brier Score)
+    const expectedBS = 0.04;
+    const bsError = expectedBS - brierScore; // positive if model calibrated better than expected
+    const slopeAdjustment = 0.25 * Math.tanh(bsError * 15.0); // smooth tanh scaling
+    
+    const currentEntropy = snapData.metrics_snapshot?.shannon_entropy || 0.5;
+    const baseSlope = snapData.metrics_snapshot?.hyperparameters?.sigmoid_slope || (1.2 - 0.8 * currentEntropy);
+    const baseIntercept = snapData.metrics_snapshot?.hyperparameters?.sigmoid_intercept || (-0.5 - 1.5 * currentEntropy);
+    
+    const newSigmoidSlope = Math.max(0.2, Math.min(3.0, baseSlope + slopeAdjustment));
+    const newSigmoidIntercept = baseIntercept - (0.15 * slopeAdjustment);
+
+    // 4. Weight Delta Calibration and Continuous Boosting
+    // Adjust weights based on continuous mathematical feedback of exact hits and Shannon entropy
+    const activeWeights = { ...(snapData.decision_dna || {}) };
+    const algosList = Object.keys(activeWeights);
+    const exactMatchMultiplier = 1.0 + (exactHits * 0.12);
+    const entropyDampener = Math.exp(-currentEntropy);
+
+    algosList.forEach(algo => {
+        let delta = 0.0;
+        if (exactHits > 0) {
+            delta += 0.06 * exactMatchMultiplier * entropyDampener;
+        } else {
+            delta -= 0.03 * (1.0 - entropyDampener);
+        }
+        
+        // Continuous activation to safeguard weight boundaries and prevent sudden adjustments
+        const continuousDelta = 0.15 * Math.tanh(delta);
+        activeWeights[algo] = activeWeights[algo] * (1.0 + continuousDelta);
+    });
+
+    // Save metrics
+    await supabase.from('model_performance_metrics').insert({
+        draw_name: snapData.draw_name,
+        date: resultData.date,
+        exact_matches: exactHits,
+        partial_matches_2_5: exactHits >= 2,
+        partial_matches_3_5: exactHits >= 3,
+        partial_matches_4_5: exactHits >= 4,
+        brier_score: brierScore,
+        near_miss_count: nearMissesCount,
+        sliding_window_yield: slidingWindowYield,
+        model_version: "v12.0"
+    });
+
+    // Save/Upsert adaptive config
+    await supabase.from('model_weights_config').upsert({
+        draw_name: snapData.draw_name,
+        weights: activeWeights,
+        sigmoid_slope: newSigmoidSlope,
+        sigmoid_intercept: newSigmoidIntercept,
+        boosting_multiplier: 1.0 + (exactHits * 0.05),
+        prudence_mode_active: prudenceModeActive,
+        updated_at: new Date().toISOString()
+    }, { onConflict: 'draw_name' });
+
     // Insérer dans forensic_reports
     await supabase.from('forensic_reports').insert({
         user_id: snapData.user_id,

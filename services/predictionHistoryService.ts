@@ -111,13 +111,36 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
     const weights = await getAlgoWeights(drawName);
     const targetDate = new Date().toISOString().split('T')[0];
     
+    // Enrich metrics_snapshot with full mathematical and model context
+    const enrichedMetrics: Record<string, any> = { ...(metrics || {}) };
+    
+    enrichedMetrics.app_version = "v12.0";
+    
+    const currentEntropy = metrics?.statisticalBounds?.shannonEntropy !== undefined
+        ? metrics.statisticalBounds.shannonEntropy
+        : 0.5; // Fallback
+        
+    enrichedMetrics.shannon_entropy = currentEntropy;
+    enrichedMetrics.hurst_exponent = metrics?.statisticalBounds?.hurstExponent !== undefined
+        ? metrics.statisticalBounds.hurstExponent
+        : 0.5; // Fallback
+        
+    enrichedMetrics.fft_spectral_metrics = metrics?.spectral || [];
+    
+    enrichedMetrics.hyperparameters = prediction.hyperparameters || {
+        sigmoid_slope: 1.2 - 0.8 * currentEntropy,
+        sigmoid_intercept: -0.5 - 1.5 * currentEntropy,
+        boosting_multiplier: 1.0,
+        prudence_mode_active: false
+    };
+
     const snapshotData = {
         id: id,
         draw_name: drawName,
         target_date: targetDate,
         predicted_numbers: prediction.suggestedNumbers,
         decision_dna: weights,
-        metrics_snapshot: metrics || {},
+        metrics_snapshot: enrichedMetrics,
         status: 'PENDING'
     };
 

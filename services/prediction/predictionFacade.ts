@@ -1,6 +1,6 @@
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { getAlgoWeights, normalizeWeights } from "./weightsManager";
+import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
@@ -666,7 +666,7 @@ export const runLocalPredictionPipeline = async (context: PredictionRuntimeConte
   const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, denoised, features);
 
   context.onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
-  return finalizePredictionPayload(context, denoised, selection, candidates, weights, enhancedMetrics, features, shrinkageApplied, shrinkageFactor);
+  return await finalizePredictionPayload(context, denoised, selection, candidates, weights, enhancedMetrics, features, shrinkageApplied, shrinkageFactor);
 };
 
 /**
@@ -714,7 +714,7 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
   const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, baseScores, features);
 
   context.onProgress?.(100, "Calcul de secours achevé avec succès !");
-  return finalizePredictionPayload(
+  return await finalizePredictionPayload(
     context,
     baseScores,
     selection,
@@ -918,7 +918,7 @@ export const selectPredictionNumbers = (
   };
 };
 
-export const finalizePredictionPayload = (
+export const finalizePredictionPayload = async (
   context: PredictionRuntimeContext,
   denoisedScores: ScoredNumber[],
   selection: number[],
@@ -928,7 +928,7 @@ export const finalizePredictionPayload = (
   features: ExtractedFeatures,
   shrinkageApplied: boolean,
   shrinkageFactor: number
-): Prediction => {
+): Promise<Prediction> => {
   const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
   
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
@@ -936,12 +936,16 @@ export const finalizePredictionPayload = (
 
   const currentEntropyResult = calculateShannonEntropy(context.history);
   const currentEntropy = currentEntropyResult.normalized;
-  const plattA = 1.2 - 0.8 * currentEntropy;
-  const plattB = -0.5 - 1.5 * currentEntropy;
+  
+  // Load calibrated hyperparameters from adaptive model weights config (post-mortem learning)
+  const calibratedParams = await getCalibratedHyperparameters(context.drawName, currentEntropy);
+  const plattA = calibratedParams.sigmoid_slope;
+  const plattB = calibratedParams.sigmoid_intercept;
+  
   const rawX = (averageScore - 50.0) / 15.0;
   const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
   
-  let calibratedConfidence = plattCalibratedProbability * 100.0;
+  let calibratedConfidence = plattCalibratedProbability * 100.0 * calibratedParams.boosting_multiplier;
   
   if (shrinkageApplied) {
     calibratedConfidence *= shrinkageFactor;
@@ -952,6 +956,8 @@ export const finalizePredictionPayload = (
   let analysisText = "";
   if (context.adversarialMode) {
     analysisText = `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus.`;
+  } else if (calibratedParams.prudence_mode_active) {
+    analysisText = `Mode Prudence activé : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
   } else if (shrinkageApplied) {
     analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
   } else {
@@ -998,7 +1004,8 @@ export const finalizePredictionPayload = (
       gapVelocityWeight: 1.0,
       bayesWindowRatio: 0.1,
       sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
-      lyapunovHorizon: 15
+      lyapunovHorizon: 15,
+      ...calibratedParams
     },
     hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],
     hyperAccuracyGain: 0
