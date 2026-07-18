@@ -133,6 +133,11 @@ CREATE TABLE IF NOT EXISTS public.prediction_snapshots (
     target_date DATE,
     predicted_numbers INTEGER[] NOT NULL,
     decision_dna JSONB,
+    shannon_entropy NUMERIC,
+    hurst_exponent NUMERIC,
+    fft_spectral_metrics JSONB,
+    engine_hyperparameters JSONB,
+    app_version TEXT DEFAULT 'v12.0',
     metrics_snapshot JSONB,
     status TEXT DEFAULT 'PENDING',
     actual_numbers INTEGER[],
@@ -140,6 +145,27 @@ CREATE TABLE IF NOT EXISTS public.prediction_snapshots (
     autopsy_report JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- I2. POST MORTEM REVIEWS
+CREATE TABLE IF NOT EXISTS public.post_mortem_reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_id UUID NOT NULL REFERENCES public.prediction_snapshots(id) ON DELETE CASCADE,
+    draw_name TEXT NOT NULL,
+    draw_date DATE NOT NULL,
+    exact_hits INTEGER NOT NULL CHECK (exact_hits BETWEEN 0 AND 5),
+    near_miss_count INTEGER NOT NULL DEFAULT 0,
+    brier_score NUMERIC NOT NULL,
+    sliding_window_yield NUMERIC,
+    prudence_mode_triggered BOOLEAN DEFAULT FALSE,
+    calibration_delta_slope NUMERIC NOT NULL DEFAULT 0.0,
+    calibration_delta_intercept NUMERIC NOT NULL DEFAULT 0.0,
+    entropy_dampener_value NUMERIC NOT NULL,
+    weight_deltas JSONB NOT NULL,
+    counterfactual_analysis JSONB,
+    ai_forensic_critique TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_snapshot_review UNIQUE (snapshot_id)
 );
 
 -- J. FORENSIC REPORTS

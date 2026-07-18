@@ -30,7 +30,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
         setLocalLoading(true);
         try {
             // Lancement du Worker Forest avec le mode sélectionné
-            const { votes, dataset } = await runDecisionForest(history, filterMode, selectedFeatures);
+            const { votes, dataset } = await runDecisionForest(history, filterMode, selectedFeatures, drawName);
             setCandidates(votes);
             
             if (votes.length > 0) {
@@ -52,7 +52,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
         } finally { 
             setLocalLoading(false); 
         }
-    }, [history, filterMode, selectedFeatures, showToast]);
+    }, [history, filterMode, selectedFeatures, showToast, drawName]);
 
     useEffect(() => { 
         if (history.length >= 40) {

@@ -163,7 +163,7 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
                 calculateFractalMetricsAsync(history),
                 Promise.resolve(calculateRegularity(history)), // Synchrone mais rapide
                 calculateCorrelationMatrixAsync(history),
-                runDecisionForest(history)
+                runDecisionForest(history, 'consensus', undefined, drawName)
             ]);
 
             // Calculs Contextuels
