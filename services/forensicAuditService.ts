@@ -6,6 +6,8 @@ import {
   ForensicIndicator,
   ForensicReport,
   AlgorithmicAdjustment,
+  ForensicFailureMode,
+  ForensicActionableAdjustment,
 } from "../types";
 import {
   calculateShannonEntropy,
@@ -1402,12 +1404,36 @@ export const analyzeForManipulation = (
   logs.push(...catastropheRes.logs);
   suspicionPoints += catastropheRes.points;
 
+  // Group indicators into families
+  const randomnessTypes = ["ENTROPY", "KS_TEST", "LJUNG_BOX", "BENFORD"];
+  const structuralTypes = ["HARMONY", "SPECTRAL", "SIGMA", "CLUSTER"];
+  const regimeDriftTypes = ["CATASTROPHE_RUPTURE", "RUNS_TEST", "HURST_EXPONENT", "CYCLE"];
+  const overfitTypes = ["ECHO", "CLIQUE_TRIPLET", "CORRELATION", "SURVIVAL"];
+
+  const getFamilyScore = (types: string[]): number => {
+    const filtered = indicators.filter(ind => types.includes(ind.type));
+    if (filtered.length === 0) return 0;
+    const totalImpact = filtered.reduce((sum, ind) => sum + ind.impact, 0);
+    return Math.min(100, Math.round((totalImpact / filtered.length) * 1.5));
+  };
+
+  const randomnessScore = getFamilyScore(randomnessTypes);
+  const structuralScore = getFamilyScore(structuralTypes);
+  const regimeDriftScore = getFamilyScore(regimeDriftTypes);
+  const overfitScore = getFamilyScore(overfitTypes);
+
+  // Unified global score using family weight average
+  const finalSuspicionScore = Math.min(100, Math.round(
+    randomnessScore * 0.3 +
+    structuralScore * 0.2 +
+    regimeDriftScore * 0.25 +
+    overfitScore * 0.25
+  ));
+
   const riggedProb = calculateBayesianRigging(
     config.baseRiggedProbability,
     indicators,
   );
-  const finalSuspicionScore =
-    100 / (1 + Math.exp(-(suspicionPoints - 30) / 10));
 
   const entropyHealth = Math.min(100, entropy.normalized * 100);
   const bayesHealth = 100 * (1 - riggedProb);
@@ -1899,6 +1925,215 @@ export const generateForensicReport = (
   );
   const id = `rep_${comboHash}_${history.length}`;
 
+  // Run full forensic analysis of the actual draw (to compute drawAnomalyScore)
+  const drawForensic = analyzeForManipulation(combo, history);
+  const drawAnomalyScore = drawForensic.suspicionScore / 100.0;
+
+  // Reconstruct predicted combo to evaluate modelMissScore
+  const predictedScores: { num: number; score: number }[] = [];
+  for (let i = 1; i <= DOMAIN_SIZE; i++) {
+    let score = 0;
+    if (predictionMatrix && predictionMatrix[i]) {
+      const bd = predictionMatrix[i];
+      Object.keys(algoWeights).forEach((kKey) => {
+        const k = kKey as AlgoKey;
+        score += (algoWeights[k] || 0) * (bd[k] || 0);
+      });
+    }
+    predictedScores.push({ num: i, score });
+  }
+  predictedScores.sort((a, b) => b.score - a.score);
+  const predictedCombo = predictedScores.slice(0, 5).map(s => s.num);
+
+  const actualSet = new Set(combo);
+  let hits = 0;
+  predictedCombo.forEach(num => {
+    if (actualSet.has(num)) hits++;
+  });
+
+  let nearMisses = 0;
+  predictedCombo.forEach(num => {
+    if (!actualSet.has(num)) {
+      for (const act of combo) {
+        if (Math.abs(num - act) === 1 || Math.abs(num - act) === 2) {
+          nearMisses++;
+          break;
+        }
+      }
+    }
+  });
+
+  const modelMissScore = Math.max(0, 1.0 - (hits * 1.0 + nearMisses * 0.25) / 5.0);
+
+  // Evaluate predicted combo structural alignment
+  const predSorted = [...predictedCombo].sort((a, b) => a - b);
+  const predAmp = predSorted[4] - predSorted[0];
+  const predAC = calculateACValue(predSorted);
+  const predUniqueDecades = new Set(predSorted.map(x => Math.floor(x / 10))).size;
+  const predACZ = (predAC - calibration.meanAC) / Math.max(Number.EPSILON, calibration.stdAC);
+  const predAmpZ = (predAmp - calibration.meanAmplitude) / Math.max(Number.EPSILON, calibration.stdAmplitude);
+  const structuralQualityScore = Math.min(1.0, Math.max(0, (Math.abs(predACZ) + Math.abs(predAmpZ) + (5 - predUniqueDecades)) / 10.0));
+
+  // Evaluate potential recent-overfit bias
+  let repeats = 0;
+  if (history.length > 0) {
+    const lastWinnersSet = new Set(history[0].gagnants);
+    combo.forEach(num => {
+      if (lastWinnersSet.has(num)) repeats++;
+    });
+  }
+  const recentOverfitScore = Math.min(1.0, repeats / 4.0);
+
+  // Evaluate overconfidence level
+  const predictionEntropy = shannonResult?.normalized || 0.95;
+  const modelConfidence = 1.0 - predictionEntropy;
+  const overconfidenceScore = Math.max(0, modelConfidence * (1.0 - (hits / 5.0)));
+
+  // Evaluate regime break / instability
+  const regimeBreakScore = Math.min(1.0, (1.0 - historyEntropy) + (drawForensic.topologicalTensionIndex || 0) / 100.0);
+
+  // Failure Mode (Verdict) Classifier
+  const candidateScores = {
+    anomalousdraw: drawAnomalyScore,
+    recentoverfit: recentOverfitScore,
+    overconfidence: overconfidenceScore,
+    structuralmisalignment: structuralQualityScore,
+    regimebreak: regimeBreakScore,
+    normalnoise: 0.15
+  };
+
+  let verdict: string = "normalnoise";
+  let maxVal = -1;
+  Object.entries(candidateScores).forEach(([key, val]) => {
+    if (val > maxVal) {
+      maxVal = val;
+      verdict = key;
+    }
+  });
+
+  // Severity Classification
+  const severityScore = modelMissScore * 0.6 + drawAnomalyScore * 0.4;
+  let severity: SeverityLevel = "low";
+  if (severityScore > 0.75) severity = "critical";
+  else if (severityScore > 0.5) severity = "high";
+  else if (severityScore > 0.25) severity = "medium";
+
+  // Forensic Confidence Calculation
+  let confLevel: 'low' | 'medium' | 'high' = 'high';
+  const confReasons: string[] = [];
+  if (history.length < 15) {
+    confLevel = 'low';
+    confReasons.push("Historique d'apprentissage extrêmement restreint (moins de 15 tirages), limitant la convergence statistique.");
+  } else if (history.length < 50) {
+    confLevel = 'medium';
+    confReasons.push("Historique d'apprentissage modéré (moins de 50 tirages). Bruit d'échantillonnage présent.");
+  } else {
+    confReasons.push("Profondeur historique robuste garantissant une convergence théorique asymptotique.");
+  }
+  if (historyEntropy > 0.98) {
+    confReasons.push("Désordre entropique total compliquant la dissociation signal/bruit.");
+  } else {
+    confReasons.push("Régime de distribution stable avec un bruit entropique calibré.");
+  }
+  const forensicConfidence = { level: confLevel, reasons: confReasons };
+
+  // Identify Dominant Causes (Max 3)
+  const potentialCauses = [
+    { key: "recent-bias excessif / inertie court terme surpondérée", score: recentOverfitScore },
+    { key: "surconfiance du moteur vis-à-vis des tirages récents / calibration erronée", score: overconfidenceScore },
+    { key: "faible diversité structurelle du ticket / asymétrie spatiale", score: structuralQualityScore },
+    { key: "rupture de distribution du régime / transition de phase", score: regimeBreakScore },
+    { key: "tirage atypique d'intégrité dégradée / anomalie de distribution", score: drawAnomalyScore }
+  ];
+  potentialCauses.sort((a, b) => b.score - a.score);
+  const dominantCauses = potentialCauses.slice(0, 3).filter(c => c.score > 0.2).map(c => c.key);
+  if (dominantCauses.length === 0) {
+    dominantCauses.push("Variabilité stochastique naturelle (bruit blanc standard)");
+  }
+
+  // Construct Recommended Actionable Adjustments
+  const recommendedAdjustments: ForensicActionableAdjustment[] = [];
+  if (verdict === "recentoverfit") {
+    recommendedAdjustments.push({
+      target: "recentBiasPenalty",
+      action: "increase",
+      magnitude: 0.12,
+      reason: "La prédiction était trop exposée aux signaux à court terme T-1/T-2."
+    });
+    recommendedAdjustments.push({
+      target: "machineWeight",
+      action: "decrease",
+      magnitude: 0.08,
+      reason: "Réduction de l'inertie du transfert machine court terme."
+    });
+  } else if (verdict === "overconfidence") {
+    recommendedAdjustments.push({
+      target: "confidenceCalibration",
+      action: "decrease",
+      magnitude: 0.10,
+      reason: "La confiance interne affichée était trop élevée par rapport aux résultats réels."
+    });
+    recommendedAdjustments.push({
+      target: "shrinkageFactor",
+      action: "increase",
+      magnitude: 0.05,
+      reason: "Renforcement du rétrécissement (shrinkage) pour régulariser les scores."
+    });
+  } else if (verdict === "structuralmisalignment") {
+    recommendedAdjustments.push({
+      target: "diversityConstraint",
+      action: "increase",
+      magnitude: 0.15,
+      reason: "Le ticket présente une faible dispersion spatiale ou parité déséquilibrée."
+    });
+    recommendedAdjustments.push({
+      target: "combinationSelector",
+      action: "stabilize",
+      magnitude: 0.10,
+      reason: "Correction du sélecteur glouton contraint pour restaurer la diversité spatiale."
+    });
+  } else if (verdict === "regimebreak") {
+    recommendedAdjustments.push({
+      target: "regimeDetectorSensitivity",
+      action: "increase",
+      magnitude: 0.08,
+      reason: "Rupture de distribution statistique. Ajustement du filtre de régime."
+    });
+    recommendedAdjustments.push({
+      target: "confidenceCalibration",
+      action: "decrease",
+      magnitude: 0.12,
+      reason: "Réduction de la confiance affichée en contexte instable."
+    });
+  } else if (verdict === "anomalousdraw") {
+    recommendedAdjustments.push({
+      target: "globalLearningRate",
+      action: "decrease",
+      magnitude: 0.15,
+      reason: "Le tirage présente des anomalies structurelles élevées. Réduction du taux d'apprentissage pour éviter d'ajuster sur du bruit."
+    });
+  } else {
+    recommendedAdjustments.push({
+      target: "weightsLearningRate",
+      action: "stabilize",
+      magnitude: 0.02,
+      reason: "Bruit blanc normal. Taux d'apprentissage faible maintenu pour la stabilité globale."
+    });
+  }
+
+  // Warnings Generation
+  const warnings: string[] = [];
+  if (drawAnomalyScore > 0.5) {
+    warnings.push("Tirage réel atypique identifié : déviance statistique globale élevée.");
+  } else {
+    warnings.push("Aucune anomalie d'intégrité significative sur le tirage réel.");
+  }
+  if (overconfidenceScore > 0.5) {
+    warnings.push("Calibration de confiance surévaluée par rapport aux probabilités réelles.");
+  }
+
+  const postMortemStabilityScore = Math.min(100, Math.round(100 * (1.0 - 0.2 * (1.0 / Math.sqrt(history.length)) - 0.1 * (drawAnomalyScore * (1.0 - drawAnomalyScore)))));
+
   return {
     id,
     drawName: history[0]?.drawName || "Loto",
@@ -1927,6 +2162,17 @@ export const generateForensicReport = (
     kl_divergence,
     klDivergenceProxy,
     isBlackSwan,
+    failureMode: verdict as ForensicFailureMode,
+    verdict: verdict as ForensicFailureMode,
+    severity,
+    forensicConfidence,
+    drawAnomalyScore: parseFloat(drawAnomalyScore.toFixed(4)),
+    modelMissScore: parseFloat(modelMissScore.toFixed(4)),
+    structuralQualityScore: parseFloat(structuralQualityScore.toFixed(4)),
+    dominantCauses,
+    recommendedAdjustments,
+    warnings,
+    postMortemStabilityScore
   };
 };
 

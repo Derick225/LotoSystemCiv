@@ -384,6 +384,120 @@ export const ForensicAutopsyView: React.FC<ForensicAutopsyViewProps> = ({ snapsh
                 </div>
             </div>
 
+            {/* Action-Oriented Post-Mortem Dashboard (4-Layer Actionable Diagnostic) */}
+            {report.verdict && (
+                <div className="bg-gradient-to-r from-gray-800/80 to-slate-900/90 p-5 rounded-xl border border-purple-500/20 space-y-4">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <div className="flex items-center space-x-2">
+                                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest font-mono">Verdict Diagnostic</span>
+                                <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                                    report.severity === 'critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                    report.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                    report.severity === 'medium' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                }`}>
+                                    Gravité : {report.severity}
+                                </span>
+                            </div>
+                            <h4 className="text-xl font-extrabold text-white font-mono mt-1 capitalize">
+                                {report.verdict === 'normalnoise' && '🔊 Bruit Stochastique Normal'}
+                                {report.verdict === 'overconfidence' && '🔥 Échec par Surconfiance'}
+                                {report.verdict === 'recentoverfit' && '⏳ Échec par Biais Récence'}
+                                {report.verdict === 'structuralmisalignment' && '📐 Échec Structurel de Ticket'}
+                                {report.verdict === 'regimebreak' && '🌊 Anomalie de Régime'}
+                                {report.verdict === 'anomalousdraw' && '🎰 Anomalie Majeure du Tirage'}
+                            </h4>
+                        </div>
+                        {report.forensicConfidence && (
+                            <div className="flex flex-col items-end">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-mono">Confiance Diagnostic</span>
+                                <span className={`text-sm font-bold font-mono ${
+                                    report.forensicConfidence.level === 'high' ? 'text-emerald-400' :
+                                    report.forensicConfidence.level === 'medium' ? 'text-amber-400' : 'text-rose-400'
+                                }`}>
+                                    {report.forensicConfidence.level === 'high' ? 'Haute ✅' :
+                                     report.forensicConfidence.level === 'medium' ? 'Modérée ⚖️' : 'Faible ⚠️'}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Three Core Scores */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                        <div className="bg-gray-950/40 p-3 rounded-lg border border-gray-800">
+                            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest font-mono">Anomalie du Tirage</span>
+                            <div className="flex items-baseline space-x-2 mt-1">
+                                <span className="text-lg font-bold text-yellow-400 font-mono">{(report.drawAnomalyScore !== undefined ? report.drawAnomalyScore * 100 : 0).toFixed(1)}%</span>
+                                <span className="text-xs text-gray-500">atypicité</span>
+                            </div>
+                            <div className="w-full bg-gray-800 h-1 rounded-full mt-2 overflow-hidden">
+                                <div className="bg-yellow-400 h-full" style={{ width: `${(report.drawAnomalyScore || 0) * 100}%` }}></div>
+                            </div>
+                        </div>
+                        <div className="bg-gray-950/40 p-3 rounded-lg border border-gray-800">
+                            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest font-mono">Erreur du Moteur</span>
+                            <div className="flex items-baseline space-x-2 mt-1">
+                                <span className="text-lg font-bold text-rose-400 font-mono">{(report.modelMissScore !== undefined ? report.modelMissScore * 100 : 0).toFixed(1)}%</span>
+                                <span className="text-xs text-gray-500">miss-rate</span>
+                            </div>
+                            <div className="w-full bg-gray-800 h-1 rounded-full mt-2 overflow-hidden">
+                                <div className="bg-rose-400 h-full" style={{ width: `${(report.modelMissScore || 0) * 100}%` }}></div>
+                            </div>
+                        </div>
+                        <div className="bg-gray-950/40 p-3 rounded-lg border border-gray-800">
+                            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest font-mono">Qualité Structurelle</span>
+                            <div className="flex items-baseline space-x-2 mt-1">
+                                <span className="text-lg font-bold text-cyan-400 font-mono">{(100 - (report.structuralQualityScore !== undefined ? report.structuralQualityScore * 100 : 0)).toFixed(1)}%</span>
+                                <span className="text-xs text-gray-500">cohérence</span>
+                            </div>
+                            <div className="w-full bg-gray-800 h-1 rounded-full mt-2 overflow-hidden">
+                                <div className="bg-cyan-400 h-full" style={{ width: `${100 - (report.structuralQualityScore || 0) * 100}%` }}></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Dominant Causes */}
+                    {report.dominantCauses && report.dominantCauses.length > 0 && (
+                        <div className="pt-2">
+                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest font-mono">Causes Dominantes Identifiées (Max 3)</span>
+                            <div className="flex flex-col sm:flex-row gap-2 mt-1.5">
+                                {report.dominantCauses.map((cause, i) => (
+                                    <div key={i} className="flex-1 bg-gray-900/60 px-3 py-2 rounded-lg border border-gray-800 text-xs text-gray-300 font-mono flex items-center space-x-2">
+                                        <span className="text-purple-400 font-bold">{i + 1}.</span>
+                                        <span>{cause}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Recommended Adjustments */}
+                    {report.recommendedAdjustments && report.recommendedAdjustments.length > 0 && (
+                        <div className="pt-2 border-t border-gray-800">
+                            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest font-mono">Actions Correctives Recommandées</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1.5">
+                                {report.recommendedAdjustments.map((adj, i) => (
+                                    <div key={i} className="bg-gray-950/50 p-3 rounded-lg border border-gray-800 flex flex-col justify-between">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-mono text-xs text-gray-300 font-bold">{adj.target}</span>
+                                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                                adj.action === 'increase' ? 'bg-emerald-500/20 text-emerald-400' :
+                                                adj.action === 'decrease' ? 'bg-rose-500/20 text-rose-400' :
+                                                'bg-blue-500/20 text-blue-400'
+                                            }`}>
+                                                {adj.action === 'increase' ? 'HAUSSE' : adj.action === 'decrease' ? 'BAISSE' : 'STABILISER'} (+{(adj.magnitude * 100).toFixed(0)}%)
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 italic mt-1 leading-relaxed">{adj.reason}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                     <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">

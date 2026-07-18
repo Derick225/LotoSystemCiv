@@ -28,6 +28,7 @@ import {
   Cpu,
   Sparkles,
   Waves,
+  ShieldAlert,
 } from "lucide-react";
 
 interface PredictionForensicsProps {
@@ -232,6 +233,123 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
         {/* Tab Content Panels */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 space-y-8 bg-slate-50/50 dark:bg-slate-900/50">
           
+          {/* Action-Oriented Post-Mortem Dashboard (4-Layer Actionable Diagnostic) */}
+          {(report.verdict || report.failureMode) && (
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-950 p-6 rounded-3xl border border-indigo-500/30 space-y-4 shadow-xl text-white">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">Verdict Diagnostic Unifié</span>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                      report.severity === 'critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                      report.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                      report.severity === 'medium' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                      'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    }`}>
+                      Sévérité : {report.severity || 'low'}
+                    </span>
+                  </div>
+                  <h4 className="text-xl font-extrabold text-white font-mono mt-1 capitalize flex items-center gap-2">
+                    <ShieldAlert size={18} className="text-indigo-400" />
+                    {(report.verdict || report.failureMode) === 'normalnoise' && '🔊 Bruit Stochastique Normal'}
+                    {(report.verdict || report.failureMode) === 'overconfidence' && '🔥 Échec par Surconfiance'}
+                    {(report.verdict || report.failureMode) === 'recentoverfit' && '⏳ Échec par Biais Récence'}
+                    {(report.verdict || report.failureMode) === 'structuralmisalignment' && '📐 Échec Structurel de Ticket'}
+                    {(report.verdict || report.failureMode) === 'regimebreak' && '🌊 Anomalie de Régime'}
+                    {(report.verdict || report.failureMode) === 'anomalousdraw' && '🎰 Anomalie Majeure du Tirage'}
+                  </h4>
+                </div>
+                {report.forensicConfidence && (
+                  <div className="flex flex-col items-start md:items-end">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Confiance Diagnostic</span>
+                    <span className={`text-xs font-bold font-mono ${
+                      report.forensicConfidence.level === 'high' ? 'text-emerald-400' :
+                      report.forensicConfidence.level === 'medium' ? 'text-amber-400' : 'text-rose-400'
+                    }`}>
+                      {report.forensicConfidence.level === 'high' ? 'Haute ✅' :
+                       report.forensicConfidence.level === 'medium' ? 'Modérée ⚖️' : 'Faible ⚠️'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Three Core Scores */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Atypicité du Tirage</span>
+                  <div className="flex items-baseline space-x-2 mt-1">
+                    <span className="text-base font-black text-yellow-400 font-mono">{(report.drawAnomalyScore !== undefined ? report.drawAnomalyScore * 100 : 0).toFixed(1)}%</span>
+                    <span className="text-[9px] text-slate-500 uppercase font-bold">score</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
+                    <div className="bg-yellow-400 h-full animate-pulse" style={{ width: `${(report.drawAnomalyScore || 0) * 100}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Taux d'Échec Moteur</span>
+                  <div className="flex items-baseline space-x-2 mt-1">
+                    <span className="text-base font-black text-rose-400 font-mono">{(report.modelMissScore !== undefined ? report.modelMissScore * 100 : 0).toFixed(1)}%</span>
+                    <span className="text-[9px] text-slate-500 uppercase font-bold">miss</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
+                    <div className="bg-rose-400 h-full" style={{ width: `${(report.modelMissScore || 0) * 100}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Alignement Structurel</span>
+                  <div className="flex items-baseline space-x-2 mt-1">
+                    <span className="text-base font-black text-cyan-400 font-mono">{(100 - (report.structuralQualityScore !== undefined ? report.structuralQualityScore * 100 : 0)).toFixed(1)}%</span>
+                    <span className="text-[9px] text-slate-500 uppercase font-bold">cohérence</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
+                    <div className="bg-cyan-400 h-full" style={{ width: `${100 - (report.structuralQualityScore || 0) * 100}%` }}></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dominant Causes */}
+              {report.dominantCauses && report.dominantCauses.length > 0 && (
+                <div className="pt-2">
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">Causes Fondamentales Identifiées</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-1.5">
+                    {report.dominantCauses.map((cause, i) => (
+                      <div key={i} className="bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono flex items-center space-x-2">
+                        <span className="text-indigo-400 font-bold font-mono">#0{i + 1}</span>
+                        <span className="truncate" title={cause}>{cause}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recommended Adjustments */}
+              {report.recommendedAdjustments && report.recommendedAdjustments.length > 0 && (
+                <div className="pt-3 border-t border-slate-800/80">
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest font-mono">Actions Correctives d'Alignement Recommandées</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-1.5">
+                    {report.recommendedAdjustments.map((adj, i) => (
+                      <div key={i} className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 flex flex-col justify-between">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-mono text-xs text-slate-200 font-bold truncate max-w-[120px]" title={adj.target}>{adj.target}</span>
+                          <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                            adj.action === 'increase' ? 'bg-emerald-500/20 text-emerald-400' :
+                            adj.action === 'decrease' ? 'bg-rose-500/20 text-rose-400' :
+                            'bg-blue-500/20 text-blue-400'
+                          }`}>
+                            {adj.action === 'increase' ? 'HAUSSE' : adj.action === 'decrease' ? 'BAISSE' : 'STABILISER'} (+{(adj.magnitude * 100).toFixed(0)}%)
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 italic mt-1 leading-relaxed line-clamp-2" title={adj.reason}>{adj.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* WORKSPACE 1: DIAGNOSTIC SPATIAL & VISUEL */}
           {activeTab === "spatial" && (
             <div className="animate-slide-up space-y-6">

@@ -131,6 +131,21 @@ export interface CounterfactualResult {
 export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical';
 export type IndicatorType = 'BENFORD' | 'SIGMA' | 'ENTROPY' | 'HARMONY' | 'CYCLE' | 'CLUSTER' | 'KS_TEST' | 'LJUNG_BOX' | 'ECHO' | 'SURVIVAL' | 'SPECTRAL' | 'CORRELATION' | 'MARKOV_CHAIN' | 'RUNS_TEST' | 'HURST_EXPONENT' | 'CLIQUE_TRIPLET' | 'CATASTROPHE_RUPTURE';
 
+export type ForensicFailureMode =
+  | "normalnoise"
+  | "overconfidence"
+  | "recentoverfit"
+  | "structuralmisalignment"
+  | "regimebreak"
+  | "anomalousdraw";
+
+export interface ForensicActionableAdjustment {
+  target: string;
+  action: 'increase' | 'decrease' | 'stabilize';
+  magnitude: number;
+  reason?: string;
+}
+
 export interface ForensicLog {
     timestamp: string;
     level: 'info' | 'warn' | 'error' | 'critical';
@@ -225,6 +240,18 @@ export interface ForensicReport {
   topologicalTensionIndex?: number; // Tension topologique globale sur la grille de jeu
   catastropheControlParams?: { a: number; b: number; discriminant: number; regime: string }; // Paramètres d'écart catastrophe de René Thom
   gravitationalDriftVelocity?: number; // Vitesse de dérive gravitationnelle
+  // New action-oriented forensic fields
+  failureMode?: ForensicFailureMode;
+  verdict?: ForensicFailureMode;
+  severity?: SeverityLevel;
+  forensicConfidence?: { level: 'low' | 'medium' | 'high'; reasons: string[] };
+  drawAnomalyScore?: number;
+  modelMissScore?: number;
+  structuralQualityScore?: number;
+  dominantCauses?: string[];
+  recommendedAdjustments?: ForensicActionableAdjustment[];
+  warnings?: string[];
+  postMortemStabilityScore?: number;
 }
 
 export interface AlgorithmicAdjustment {
