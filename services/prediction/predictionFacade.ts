@@ -9,6 +9,8 @@ import { calculateGeneticDiversityIndex } from "./diversityService";
 import { logger } from "../../utils/logger";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
+import { getLocalForensicReports } from "../postPredictionAnalysisService";
+import { evaluateAdversarialSurvival } from "./adversarialProxy";
 import {
   calculatePoissonScores, calculateBayesianScore, calculateTemporalScores,
   calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores,
@@ -16,7 +18,7 @@ import {
   calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores,
   calculateHawkesExcitation, calculateTopologicalLyapunov
 } from "../advancedMathService";
-import { detectGameRegime, calculateShannonEntropy } from "../mathService";
+import { detectGameRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
@@ -164,6 +166,12 @@ export const applyDeterministicMicroSgd = async (
   useSpatioTemporalHawkes: boolean,
 ): Promise<AlgoWeights> => {
   let adjustedWeights = { ...weights };
+
+  // Guard 1: Ne l'exécuter que si history.length >= 25 (pour éviter le sur-ajustement et le coût élevé)
+  if (history.length < 25) {
+    return adjustedWeights;
+  }
+
   const K = Math.min(5, history.length - 1);
   if (K <= 0) return adjustedWeights;
 
@@ -224,9 +232,17 @@ export const applyDeterministicMicroSgd = async (
         });
       });
 
-      // Pas de gradient + projection sur le simplexe
+      // Pas de gradient + projection sur le simplexe avec garde-fou de variation
       algoKeys.forEach(algo => {
-        adjustedWeights[algo as AlgoKey] = Math.max(0, (adjustedWeights[algo as AlgoKey] || 0) - eta * gradients[algo]);
+        const oldWeight = adjustedWeights[algo as AlgoKey] || 0;
+        let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
+        
+        // [RULE] Plafonner la variation par poids : newWeight = clamp(oldWeight * 0.85, oldWeight * 1.15, newWeight)
+        const minW = oldWeight * 0.85;
+        const maxW = oldWeight * 1.15;
+        newWeight = Math.max(minW, Math.min(maxW, newWeight));
+        
+        adjustedWeights[algo as AlgoKey] = newWeight;
       });
       adjustedWeights = normalizeWeights(adjustedWeights);
 
@@ -236,12 +252,13 @@ export const applyDeterministicMicroSgd = async (
     }
   }
 
-  // Journalisation des échecs
+  // Guard 2: Si le taux d'échec dépasse le seuil (25%), on annule complètement l'ajustement SGD
   if (attempted > 0 && failedDraws / attempted > 0.25) {
     logger.warn(
       { failedDraws, attempted, rate: failedDraws / attempted },
-      "[predictionFacade] SGD: taux d'échec élevé"
+      "[predictionFacade] SGD: Taux d'échec supérieur au seuil de sécurité (25%). Annulation de l'ajustement des poids pour éviter la déstabilisation."
     );
+    return weights; // On retourne les poids initiaux intacts
   }
 
   return adjustedWeights;
@@ -309,17 +326,200 @@ const computeAdvancedMetrics = async (
     topologicalLyapunov: topologicalLyapunovScores
   };
 };
+
 /**
- * Application des ajustements forensiques (Double Aveugle & Alignement)
+ * Interface unifiée de contexte d'exécution pour le moteur de prédiction
  */
-const applyForensicAdjustments = async (
-  _drawName: string,
+export interface PredictionRuntimeContext {
+  drawName: string;
+  rawHistory: DrawResult[];
+  history: DrawResult[];
+  temporalDepth: number;
+  validTemporalDepth: number;
+  weightsToUse?: AlgoWeights;
+  metrics?: EnhancedMetrics;
+  symbioticContext?: SymbioticContext;
+  skipTraining: boolean;
+  adversarialMode: boolean;
+  forcedOutsiderCount?: number;
+  isForensicOptimized: boolean;
+  useSpatioTemporalHawkes: boolean;
+  onProgress?: (progress: number, message: string) => void;
+  preloadedForensicReports?: ForensicReport[];
+  contentHash: string;
+}
+
+/**
+ * Construit le contexte d'exécution d'une prédiction
+ */
+export const buildPredictionRequestContext = (
+  drawName: string,
+  rawHistory: DrawResult[],
+  temporalDepth: number,
+  weightsToUse?: AlgoWeights,
+  metrics?: EnhancedMetrics,
+  symbioticContext?: SymbioticContext,
+  skipTraining: boolean = false,
+  adversarialMode: boolean = false,
+  forcedOutsiderCount?: number,
+  isForensicOptimized: boolean = false,
+  onProgress?: (progress: number, message: string) => void,
+  preloadedForensicReports?: ForensicReport[],
+): PredictionRuntimeContext => {
+  const history = purifyHistoryForDraw(drawName, rawHistory);
+  const contentHash = hashHistoryContent(history);
+  const validTemporalDepth = Math.max(5, Math.min(temporalDepth, history.length));
+  
+  const nexusState = useNexusStore.getState();
+  const useSpatioTemporalHawkes = nexusState.useSpatioTemporalHawkes;
+
+  return {
+    drawName,
+    rawHistory,
+    history,
+    temporalDepth,
+    validTemporalDepth,
+    weightsToUse,
+    metrics,
+    symbioticContext,
+    skipTraining,
+    adversarialMode,
+    forcedOutsiderCount,
+    isForensicOptimized,
+    useSpatioTemporalHawkes,
+    onProgress,
+    preloadedForensicReports,
+    contentHash,
+  };
+};
+
+/**
+ * Évaluation de la dégradation / Scénario A : Dataset insuffisant
+ */
+const handleScenarioADegradedPrediction = (context: PredictionRuntimeContext): Prediction => {
+  logger.warn(
+    { drawName: context.drawName, len: context.history.length },
+    "[predictionFacade] Scenario A : Dataset insuffisant pour une inférence robuste. Mode dégradé sécurisé."
+  );
+  context.onProgress?.(100, "Dataset insuffisant. Génération d'une prédiction conservatrice.");
+
+  let selected = [1, 2, 3, 4, 5];
+  if (context.history.length > 0 && context.history[0]?.gagnants) {
+    selected = [...context.history[0].gagnants];
+  }
+  
+  const candidates = [11, 22, 33, 44, 55, 66, 77, 88, 12, 13]
+    .filter(n => !selected.includes(n))
+    .slice(0, 10);
+
+  return {
+    suggestedNumbers: selected,
+    candidates,
+    confidence: 10,
+    confidenceNote: "MOTEUR EN MODE FAIBLE PROFONDEUR - " + HONEST_NOTE,
+    analysis: `Dataset insuffisant (${context.history.length} tirages utiles). Inférence haute fidélité impossible. Mode dégradé sécurisé activé.`,
+    breakdown: {},
+    timestamp: Date.now(),
+    symbiosisFactor: 1.0,
+    realityAlignment: 10,
+    realityAlignmentNote: HONEST_NOTE,
+    adversarialApplied: false,
+    challengedNumbers: [],
+    stabilityScore: 10,
+    diversityMetrics: {
+      meanSimilarity: 0,
+      diversityScore: 100,
+      penalty: 0,
+      isMonoculture: false,
+      pairwiseSimilarities: [],
+      dominantAlgo: null
+    },
+    adversarialSurvivalScore: 0,
+    adversarialRisks: ["Dataset insuffisant pour audit antagoniste"],
+    explainabilityData: {},
+    shrinkageApplied: true,
+    shrinkageFactor: 1.0,
+    hyperparameters: {
+      hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
+      spatialSigma: 1.5,
+      gapVelocityWeight: 1.0,
+      bayesWindowRatio: 0.1,
+      sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
+      lyapunovHorizon: 15
+    },
+    hyperTuningLog: ["Ajustement impossible : dataset trop court (< 12)"],
+    hyperAccuracyGain: 0
+  } as Prediction;
+};
+
+/**
+ * Délégation au supercalculateur Cloud / Scénario B & C
+ */
+export const tryCloudPrediction = async (context: PredictionRuntimeContext): Promise<Prediction | null> => {
+  const nexusState = useNexusStore.getState();
+  const useCloudEngine = nexusState.useCloudEngine;
+
+  if (
+    useCloudEngine &&
+    isSupabaseConfigured() &&
+    context.drawName !== "ALL_COMBINED" &&
+    context.drawName !== "ALL"
+  ) {
+    context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
+    try {
+      logger.info({ drawName: context.drawName }, "[predictionFacade] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
+      const result = await apiClient.post<Prediction>('predict-elite', {
+        drawName: context.drawName,
+        history: context.history,
+        weights: context.weightsToUse,
+        symbioticContext: context.symbioticContext,
+        metrics: context.metrics
+      });
+
+      const isPayloadValid = (
+        result &&
+        Array.isArray(result.suggestedNumbers) &&
+        result.suggestedNumbers.length === TICKET_SIZE &&
+        new Set(result.suggestedNumbers).size === TICKET_SIZE &&
+        result.suggestedNumbers.every(n => typeof n === 'number' && n >= 1 && n <= 90 && !isNaN(n) && Number.isInteger(n)) &&
+        Array.isArray(result.candidates) &&
+        result.candidates.every(n => typeof n === 'number' && n >= 1 && n <= 90 && !isNaN(n) && Number.isInteger(n)) &&
+        typeof result.confidence === 'number' && !isNaN(result.confidence) &&
+        result.confidence >= 1 && result.confidence <= 100
+      );
+
+      if (isPayloadValid) {
+        logger.info({ drawName: context.drawName }, "[predictionFacade] Scenario B : Prédiction obtenue et validée avec succès depuis le Cloud.");
+        context.onProgress?.(100, "[Cloud] Alignement finalisé avec succès.");
+        return result;
+      } else {
+        logger.warn(
+          { drawName: context.drawName, result },
+          "[predictionFacade] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET (transport OK, contenu HS). Activation du repli local."
+        );
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logger.error(
+        { drawName: context.drawName, error: errorMsg },
+        "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
+      );
+    }
+  }
+  return null;
+};
+
+/**
+ * Application des ajustements forensiques / Scénario D
+ */
+export const applyForensicAdjustments = async (
+  drawName: string,
   _history: DrawResult[],
-  _gameRegimeInfo: any,
+  gameRegimeInfo: any,
   _skipTraining: boolean,
-  _isForensicOptimized: boolean,
-  _preloadedForensicReports: ForensicReport[] | undefined,
-  _algoBreakdowns: Record<number, Record<string, number>>,
+  isForensicOptimized: boolean,
+  preloadedForensicReports: ForensicReport[] | undefined,
+  algoBreakdowns: Record<number, Record<string, number>>,
   _stdDevScore: number,
   _medianScore: number,
 ): Promise<{
@@ -330,27 +530,561 @@ const applyForensicAdjustments = async (
   dynamicWeightModifiers: Record<number, Partial<Record<string, number>>>;
   oracleDriftMap: Record<string, number>;
 }> => {
-  // ... (Logique forensique avec corrections des nombres magiques)
-  // Cette section est identique à la version originale mais avec :
-  // - Seuils dérivés dynamiquement
-  // - Sigmoïdes normalisées
-  // - Mémoïsation des calculs
-  
-  // Pour des raisons de concision, je ne répète pas toute la logique ici
-  // mais elle suit les mêmes principes de correction
-  
+  const proximityScores: Record<number, number> = {};
+  const missedScores: Record<number, number> = {};
+  const driftScores: Record<number, number> = {};
+  const dynamicWeightModifiers: Record<number, Partial<Record<string, number>>> = {};
+  const oracleDriftMap: Record<string, number> = {};
+
+  let reports = preloadedForensicReports;
+  if (!reports && isForensicOptimized) {
+    try {
+      reports = await getLocalForensicReports();
+    } catch (e) {
+      logger.warn(e, "[predictionFacade] Échec du chargement des rapports forensiques locaux.");
+    }
+  }
+
+  const recentReports = (reports || []).filter(r => r.drawName === drawName);
+
+  if (recentReports.length === 0) {
+    logger.debug("[predictionFacade] Scénario D : Rapport forensique indisponible pour ce tirage. Ajustements neutralisés.");
+    return {
+      recentReports: [],
+      proximityScores,
+      missedScores,
+      driftScores,
+      dynamicWeightModifiers,
+      oracleDriftMap,
+    };
+  }
+
+  const sortedReports = [...recentReports].sort((a, b) => {
+    const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return tB - tA;
+  }).slice(0, 5);
+
+  // [RULE] Facteur de prudence continu calculé à partir du régime du jeu (Zéro magic number)
+  const entropy = gameRegimeInfo?.entropy || 0.5;
+  const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
+  const prudenceFactor = Math.exp(-(entropy + volatility));
+
+  sortedReports.forEach((report, index) => {
+    const ageDecay = Math.exp(-0.25 * index) * prudenceFactor;
+
+    if (report.missedOpportunities) {
+      report.missedOpportunities.forEach(opp => {
+        const num = opp.number;
+        if (num >= 1 && num <= 90) {
+          const w = opp.continuousWeight !== undefined ? opp.continuousWeight : 0.5;
+          missedScores[num] = (missedScores[num] || 0) + w * ageDecay;
+          
+          if (opp.bestAlgo) {
+            const algoKey = opp.bestAlgo as AlgoKey;
+            if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
+            dynamicWeightModifiers[num][algoKey] = (dynamicWeightModifiers[num][algoKey] || 0) + 0.15 * ageDecay;
+          }
+        }
+      });
+    }
+
+    if (report.nearMisses) {
+      report.nearMisses.forEach(miss => {
+        const num = miss.actual;
+        if (num >= 1 && num <= 90) {
+          const distBoost = 1.0 / (Math.max(1, miss.distance) + Number.EPSILON);
+          proximityScores[num] = (proximityScores[num] || 0) + distBoost * ageDecay;
+        }
+      });
+    }
+
+    if (report.algorithmicDrift) {
+      report.algorithmicDrift.forEach(drift => {
+        const algo = drift.algo as AlgoKey;
+        const score = drift.driftScore || 0.1;
+        const factor = drift.direction === 'underestimating' ? 1.0 : -1.0;
+        
+        oracleDriftMap[algo] = (oracleDriftMap[algo] || 0) + factor * score * ageDecay;
+        
+        // [CORRECTION] Calcul et population de driftScores par numéro basé sur le breakdown d'algorithme
+        for (let num = 1; num <= 90; num++) {
+          const breakdownVal = algoBreakdowns[num]?.[algo] || 0;
+          if (breakdownVal > 0) {
+            driftScores[num] = (driftScores[num] || 0) + factor * score * breakdownVal * ageDecay;
+          }
+          
+          if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
+          dynamicWeightModifiers[num][algo] = (dynamicWeightModifiers[num][algo] || 0) + factor * score * 0.1 * ageDecay;
+        }
+      });
+    }
+  });
+
   return {
-    recentReports: [],
-    proximityScores: {},
-    missedScores: {},
-    driftScores: {},
-    dynamicWeightModifiers: {},
-    oracleDriftMap: {}
+    recentReports: sortedReports,
+    proximityScores,
+    missedScores,
+    driftScores,
+    dynamicWeightModifiers,
+    oracleDriftMap,
   };
 };
 
 /**
- * Génération de la prédiction maîtresse (Core)
+ * Pipeline local modulaire de prédiction
+ */
+export const runLocalPredictionPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
+  context.onProgress?.(5, "Initialisation de l'ADN algorithmique...");
+  initializeLcgForDraw(context.drawName);
+
+  context.onProgress?.(10, "Optimisation des hyperparamètres...");
+  const weights = await resolvePredictionWeights(context);
+
+  context.onProgress?.(30, "Calcul des métriques avancées...");
+  const advancedMetrics = await computeAdvancedMetricsBundle(context);
+
+  context.onProgress?.(50, "Extraction des descripteurs de caractéristiques...");
+  const features = await extractPredictionFeatures(context);
+
+  context.onProgress?.(70, "Évaluation et scoring des numéros...");
+  const baseScores = scorePredictionNumbers(context, features, weights, advancedMetrics);
+
+  context.onProgress?.(80, "Résolution des ajustements forensiques...");
+  const forensicAdjustments = await resolveForensicAdjustments(context, baseScores);
+
+  context.onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
+  const { rescored, enhancedMetrics } = rescoreWithAdjustments(context, features, weights, advancedMetrics, forensicAdjustments);
+
+  context.onProgress?.(90, "Désensibilisation au bruit (PCA)...");
+  const denoised = await applyPredictionDenoising(context, rescored, weights, enhancedMetrics);
+
+  context.onProgress?.(95, "Formulation finale et sélection des combinaisons...");
+  const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, denoised, features);
+
+  context.onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
+  return finalizePredictionPayload(context, denoised, selection, candidates, weights, enhancedMetrics, features, shrinkageApplied, shrinkageFactor);
+};
+
+/**
+ * Pipeline local simplifié (Scénario de secours extrême)
+ * Ignore : forensic, PCA denoising, micro-SGD, modules lourds
+ * Garde : features essentielles, scoring normalisé, sélection diversifiée sous contraintes
+ */
+export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
+  context.onProgress?.(10, "Lancement du pipeline Local Simplifié...");
+  initializeLcgForDraw(context.drawName);
+
+  // No micro-SGD weight training, just get direct weights
+  const weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
+
+  // Minimal statistical bounds + basic frequency metrics (Fast and lightweight)
+  context.onProgress?.(30, "Calcul des métriques essentielles...");
+  const subHistory = context.history.slice(0, context.validTemporalDepth);
+  const statisticalBounds = calculateStatisticalBounds(subHistory);
+  
+  const advancedMetrics: EnhancedMetrics = {
+    statisticalBounds,
+    frequencies: subHistory.reduce((acc, draw) => {
+      draw.gagnants.forEach(num => {
+        acc[num] = (acc[num] || 0) + 1;
+      });
+      return acc;
+    }, {} as Record<number, number>)
+  };
+
+  // Extract essential features
+  context.onProgress?.(55, "Extraction des descripteurs de caractéristiques essentiels...");
+  const features = await extractPredictionFeatures(context);
+
+  // Compute base scores without forensic or PCA
+  context.onProgress?.(75, "Évaluation essentielle des numéros...");
+  const baseScores = calculateScores(
+    features,
+    weights,
+    advancedMetrics,
+    subHistory
+  );
+
+  // Select prediction numbers with constraints
+  context.onProgress?.(90, "Formulation finale et sélection (Mode Secours)...");
+  const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, baseScores, features);
+
+  context.onProgress?.(100, "Calcul de secours achevé avec succès !");
+  return finalizePredictionPayload(
+    context,
+    baseScores,
+    selection,
+    candidates,
+    weights,
+    advancedMetrics,
+    features,
+    shrinkageApplied,
+    shrinkageFactor
+  );
+};
+
+export const resolvePredictionWeights = async (context: PredictionRuntimeContext): Promise<AlgoWeights> => {
+  let weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
+  
+  if (!context.skipTraining && context.history.length >= 10) {
+    const currentEntropyResult = calculateShannonEntropy(context.history);
+    const currentEntropy = currentEntropyResult.normalized;
+    weights = await applyDeterministicMicroSgd(
+      context.drawName,
+      weights,
+      context.history,
+      currentEntropy,
+      undefined,
+      context.useSpatioTemporalHawkes
+    );
+  }
+  return weights;
+};
+
+export const computeAdvancedMetricsBundle = async (context: PredictionRuntimeContext): Promise<EnhancedMetrics> => {
+  return await computeAdvancedMetrics(
+    context.history.slice(0, context.validTemporalDepth),
+    context.drawName,
+    { hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY, gapVelocityWeight: 1.0 },
+    context.useSpatioTemporalHawkes,
+    context.metrics
+  );
+};
+
+export const extractPredictionFeatures = async (context: PredictionRuntimeContext) => {
+  return await extractFeatures(
+    context.drawName,
+    context.history.slice(0, context.validTemporalDepth),
+    context.validTemporalDepth
+  );
+};
+
+export const scorePredictionNumbers = (
+  context: PredictionRuntimeContext,
+  features: any,
+  weights: AlgoWeights,
+  advancedMetrics: EnhancedMetrics
+) => {
+  return calculateScores(
+    features,
+    weights,
+    advancedMetrics,
+    context.history.slice(0, context.validTemporalDepth)
+  );
+};
+
+export const resolveForensicAdjustments = async (
+  context: PredictionRuntimeContext,
+  baseScores: any[]
+): Promise<{
+  recentReports: ForensicReport[];
+  proximityScores: Record<number, number>;
+  missedScores: Record<number, number>;
+  driftScores: Record<number, number>;
+  dynamicWeightModifiers: Record<number, Partial<Record<string, number>>>;
+  oracleDriftMap: Record<string, number>;
+}> => {
+  const algoBreakdowns: Record<number, Record<string, number>> = {};
+  baseScores.forEach(curr => {
+    algoBreakdowns[curr.num] = curr.breakdown;
+  });
+
+  const allScores = baseScores.map(s => s.score);
+  const medianScore = getMedian(allScores);
+  const stdDevScore = getStdDev(allScores, medianScore);
+
+  const gameRegimeInfo = detectGameRegime(context.history);
+
+  return await applyForensicAdjustments(
+    context.drawName,
+    context.history,
+    gameRegimeInfo,
+    context.skipTraining,
+    context.isForensicOptimized,
+    context.preloadedForensicReports,
+    algoBreakdowns,
+    stdDevScore,
+    medianScore
+  );
+};
+
+export const rescoreWithAdjustments = (
+  context: PredictionRuntimeContext,
+  features: any,
+  weights: AlgoWeights,
+  advancedMetrics: EnhancedMetrics,
+  forensicAdjustments: any
+): { rescored: any[]; enhancedMetrics: EnhancedMetrics } => {
+  const enhancedMetrics: EnhancedMetrics = {
+    ...advancedMetrics,
+    proximityDiagnostic: forensicAdjustments.proximityScores,
+    missedModulator: forensicAdjustments.missedScores,
+    driftCorrection: forensicAdjustments.driftScores,
+    symbioticClusters: {},
+    entropyRegime: {},
+    anomalyDetection: (advancedMetrics.anomaly as Record<number, number> | undefined) || {},
+    symbioticContext: context.symbioticContext,
+    dynamicWeightModifiers: forensicAdjustments.dynamicWeightModifiers,
+  };
+
+  const rescored = calculateScores(
+    features,
+    weights,
+    enhancedMetrics,
+    context.history.slice(0, context.validTemporalDepth)
+  );
+
+  return { rescored, enhancedMetrics };
+};
+
+export const applyPredictionDenoising = async (
+  _context: PredictionRuntimeContext,
+  rescored: any[],
+  weights: AlgoWeights,
+  enhancedMetrics: EnhancedMetrics
+): Promise<any[]> => {
+  return await applyPCADenoising(rescored, weights, enhancedMetrics);
+};
+
+export const selectPredictionNumbers = (
+  context: PredictionRuntimeContext,
+  denoisedScores: any[],
+  features: any
+): {
+  selection: number[];
+  candidates: number[];
+  shrinkageApplied: boolean;
+  shrinkageFactor: number;
+} => {
+  const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
+  
+  const top10Scores = sortedScores.slice(0, 10).map(s => s.score);
+  const gap = top10Scores[0] - top10Scores[9];
+  
+  let shrinkageApplied = false;
+  let shrinkageFactor = 1.0;
+  
+  if (gap < 8.0) {
+    shrinkageApplied = true;
+    shrinkageFactor = Math.max(0.7, 0.7 + 0.3 * (gap / 8.0));
+    logger.info(
+      { gap, shrinkageFactor },
+      "[predictionFacade] Scenario E : Instabilité des scores détectée. Application d'un shrinkage continu."
+    );
+    sortedScores.forEach(s => {
+      s.score = s.score * shrinkageFactor;
+    });
+  }
+
+  const outsiderCount = context.forcedOutsiderCount !== undefined ? context.forcedOutsiderCount : 2;
+  const empiricalCalibration = generateEmpiricalCalibration(context.history);
+  const gameRegimeInfo = detectGameRegime(context.history);
+  const regimeStateNormalized = Math.max(0, Math.min(1,
+    (gameRegimeInfo.volatility / 100.0 + gameRegimeInfo.entropy) / 2.0
+  ));
+
+  const selection = generateCombination(
+    sortedScores,
+    features.affinityMap,
+    empiricalCalibration,
+    outsiderCount,
+    context.history[0]?.gagnants,
+    regimeStateNormalized
+  );
+
+  const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
+  const candidates = sortedScores
+    .slice(5, 5 + maxCandidates)
+    .map(s => s.num)
+    .filter(n => !selection.includes(n))
+    .slice(0, 10);
+
+  return {
+    selection,
+    candidates,
+    shrinkageApplied,
+    shrinkageFactor,
+  };
+};
+
+export const finalizePredictionPayload = (
+  context: PredictionRuntimeContext,
+  denoisedScores: any[],
+  selection: number[],
+  candidates: number[],
+  weights: AlgoWeights,
+  enhancedMetrics: EnhancedMetrics,
+  features: any,
+  shrinkageApplied: boolean,
+  shrinkageFactor: number
+): Prediction => {
+  const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
+  
+  let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
+  if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
+
+  const currentEntropyResult = calculateShannonEntropy(context.history);
+  const currentEntropy = currentEntropyResult.normalized;
+  const plattA = 1.2 - 0.8 * currentEntropy;
+  const plattB = -0.5 - 1.5 * currentEntropy;
+  const rawX = (averageScore - 50.0) / 15.0;
+  const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
+  
+  let calibratedConfidence = plattCalibratedProbability * 100.0;
+  
+  if (shrinkageApplied) {
+    calibratedConfidence *= shrinkageFactor;
+  }
+  
+  const finalConfidence = Math.round(Math.max(1, Math.min(99, calibratedConfidence)));
+
+  let analysisText = "";
+  if (context.adversarialMode) {
+    analysisText = `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus.`;
+  } else if (shrinkageApplied) {
+    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
+  } else {
+    analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
+  }
+
+  const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
+
+  const breakdownRecord: Record<number, any> = {};
+  denoisedScores.forEach(curr => {
+    breakdownRecord[curr.num] = curr.breakdown;
+  });
+
+  const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
+
+  const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
+  const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
+
+  return {
+    suggestedNumbers: selection,
+    candidates,
+    confidence: finalConfidence,
+    confidenceNote: HONEST_NOTE,
+    analysis: analysisText,
+    breakdown: breakdownRecord,
+    timestamp: Date.now(),
+    symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
+    realityAlignment: 82,
+    realityAlignmentNote: HONEST_NOTE,
+    adversarialApplied: context.adversarialMode,
+    challengedNumbers: [],
+    stabilityScore,
+    diversityMetrics,
+    adversarialSurvivalScore: adversarialResult.survivalScore,
+    adversarialRisks: adversarialResult.risks,
+    explainabilityData: {},
+    shrinkageApplied,
+    shrinkageFactor,
+    shrinkageFactorMap: undefined,
+    shrinkageVerification: null,
+    hyperparameters: {
+      hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
+      spatialSigma: 1.5,
+      gapVelocityWeight: 1.0,
+      bayesWindowRatio: 0.1,
+      sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
+      lyapunovHorizon: 15
+    },
+    hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],
+    hyperAccuracyGain: 0
+  } as Prediction;
+};
+
+/**
+ * Cache global des prédictions & Point d'Entrée Orchestrateur Unique
+ */
+import { globalCache, CACHE_TTL } from "../cache/CacheService";
+
+export const generateMasterPrediction = async (
+  drawName: string,
+  rawHistory: DrawResult[],
+  temporalDepth: number,
+  weightsToUse?: AlgoWeights,
+  metrics?: EnhancedMetrics,
+  symbioticContext?: SymbioticContext,
+  skipTraining: boolean = false,
+  adversarialMode: boolean = false,
+  forcedOutsiderCount?: number,
+  isForensicOptimized: boolean = false,
+  onProgress?: (progress: number, message: string) => void,
+  preloadedForensicReports?: ForensicReport[],
+): Promise<Prediction> => {
+  // 1. buildPredictionRequestContext
+  const context = buildPredictionRequestContext(
+    drawName,
+    rawHistory,
+    temporalDepth,
+    weightsToUse,
+    metrics,
+    symbioticContext,
+    skipTraining,
+    adversarialMode,
+    forcedOutsiderCount,
+    isForensicOptimized,
+    onProgress,
+    preloadedForensicReports
+  );
+
+  // SCÉNARIO A — Dataset insuffisant (Moins de 12 tirages)
+  if (context.history.length < 12) {
+    return handleScenarioADegradedPrediction(context);
+  }
+
+  const keyParams = `${context.history.length}_${context.contentHash}_${context.weightsToUse ? JSON.stringify(context.weightsToUse) : "def"}_adv_${context.adversarialMode}_forcedOutsider_${context.forcedOutsiderCount !== undefined ? context.forcedOutsiderCount : "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
+  const cacheKey = globalCache.generateKey('prediction', context.drawName, keyParams);
+
+  return globalCache.getOrCompute(
+    cacheKey,
+    async () => {
+      // PHASE 1 — Cloud Complet
+      try {
+        const cloudResult = await tryCloudPrediction(context);
+        if (cloudResult) {
+          return cloudResult;
+        }
+      } catch (e) {
+        logger.error(
+          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
+          "[predictionFacade] Échec technique ou transport du Cloud complet. Basculement sur le Local complet."
+        );
+      }
+
+      // PHASE 2 — Local Complet
+      try {
+        context.onProgress?.(25, "Lancement du pipeline Local Complet...");
+        return await runLocalPredictionPipeline(context);
+      } catch (e) {
+        logger.error(
+          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
+          "[predictionFacade] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
+        );
+      }
+
+      // PHASE 3 — Local Simplifié
+      try {
+        context.onProgress?.(60, "Exécution du pipeline Local Simplifié (Mode Secours)...");
+        return await runLocalSimplifiedPipeline(context);
+      } catch (e) {
+        logger.error(
+          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
+          "[predictionFacade] Échec critique du Local Simplifié. Repli final sur la Réponse Prudente Dégradée."
+        );
+      }
+
+      // PHASE 4 — Réponse Prudente Dégradée
+      return handleScenarioADegradedPrediction(context);
+    },
+    CACHE_TTL.LONG
+  );
+};
+
+/**
+ * Version rétro-compatible de l'orchestration locale pure (exécutée par les Web Workers)
  */
 export const generateMasterPredictionCore = async (
   drawName: string,
@@ -367,182 +1101,25 @@ export const generateMasterPredictionCore = async (
   onProgress?: (progress: number, message: string) => void,
   preloadedForensicReports?: ForensicReport[],
 ): Promise<Prediction> => {
-  initializeLcgForDraw(drawName);
-  if (history.length < 10) throw new Error("Dataset insuffisant pour convergence.");
-
-  onProgress?.(5, "Initialisation de l'ADN algorithmique...");
-
-  const validTemporalDepth = Math.max(5, Math.min(temporalDepth, history.length));
-  const localHistoryContext = history.slice(0, validTemporalDepth);
-  const gameRegimeInfo = detectGameRegime(history);
-
-  // Étape 1 : Optimisation des poids
-  onProgress?.(10, "Optimisation des hyperparamètres...");
-  const weights = normalizeWeights(weightsToUse || (await getAlgoWeights(drawName)));
-  
-  // Étape 2 : Calcul des métriques avancées
-  onProgress?.(50, "Extraction des distributions de Poisson...");
-  const intermediateMetrics = await computeAdvancedMetrics(
-    localHistoryContext, drawName, { hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY, gapVelocityWeight: 1.0 },
-    useSpatioTemporalHawkes, metrics
-  );
-
-  // Étape 3 : Calcul des scores de base
-  const features = await extractFeatures(drawName, localHistoryContext, validTemporalDepth);
-  const baseScoresRaw = calculateScores(features, weights, intermediateMetrics, localHistoryContext);
-  
-  const algoBreakdowns: Record<number, Record<string, number>> = {};
-  for (let i = 0; i < baseScoresRaw.length; i++) {
-    const curr = baseScoresRaw[i];
-    algoBreakdowns[curr.num] = curr.breakdown;
-  }
-
-  const allScores = baseScoresRaw.map(s => s.score);
-  const medianScore = getMedian(allScores);
-  const stdDevScore = getStdDev(allScores, medianScore);
-
-  // Étape 4 : Ajustements forensiques
-  onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
-  const forensicResult = await applyForensicAdjustments(
-    drawName, history, gameRegimeInfo, skipTraining, isForensicOptimized,
-    preloadedForensicReports, algoBreakdowns, stdDevScore, medianScore
-  );
-
-  const enhancedMetrics: EnhancedMetrics = {
-    ...intermediateMetrics,
-    proximityDiagnostic: forensicResult.proximityScores,
-    missedModulator: forensicResult.missedScores,
-    driftCorrection: forensicResult.driftScores,
-    symbioticClusters: {},
-    entropyRegime: {},
-    anomalyDetection: (intermediateMetrics.anomaly as Record<number, number> | undefined) || ({} as Record<number, number>),
+  const context = buildPredictionRequestContext(
+    drawName,
+    history,
+    temporalDepth,
+    weightsToUse,
+    metrics,
     symbioticContext,
-    dynamicWeightModifiers: forensicResult.dynamicWeightModifiers,
-  };
+    skipTraining,
+    adversarialMode,
+    forcedOutsiderCount,
+    isForensicOptimized,
+    onProgress,
+    preloadedForensicReports
+  );
+  context.useSpatioTemporalHawkes = useSpatioTemporalHawkes;
 
-  // Étape 5 : PCA Denoising
-  let masterScores = calculateScores(features, weights, enhancedMetrics, localHistoryContext);
-  masterScores = await applyPCADenoising(masterScores, weights, enhancedMetrics);
-
-  // Étape 6 : Génération de la combinaison
-  onProgress?.(95, "Formulation finale et sélection des combinaisons...");
-  const sortedScores = masterScores.sort((a, b) => b.score - a.score);
-  const outsiderCount = forcedOutsiderCount !== undefined ? forcedOutsiderCount : 2;
-  const empiricalCalibration = generateEmpiricalCalibration(history);
-  const regimeStateNormalized = 0.5; // À calculer dynamiquement
-
-  const selection = generateCombination(sortedScores, features.affinityMap, empiricalCalibration, outsiderCount, history[0]?.gagnants, regimeStateNormalized);
-
-  // Étape 7 : Calcul de la confiance
-  let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
-  if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
-
-  const currentEntropyResult = calculateShannonEntropy(history);
-  const currentEntropy = currentEntropyResult.normalized;
-  const plattA = 1.2 - 0.8 * currentEntropy;
-  const plattB = -0.5 - 1.5 * currentEntropy;
-  const rawX = (averageScore - 50.0) / 15.0;
-  const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
-  const calibratedConfidence = Math.max(1, Math.min(99, plattCalibratedProbability * 100.0));
-
-  onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
-
-  const analysisText = adversarialMode
-    ? `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus.`
-    : `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
-
-  const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, localHistoryContext);
-
-  const breakdownRecord: Record<number, any> = {};
-  for (let i = 0; i < masterScores.length; i++) {
-    const curr = masterScores[i];
-    breakdownRecord[curr.num] = curr.breakdown;
+  if (context.history.length < 12) {
+    return handleScenarioADegradedPrediction(context);
   }
 
-  const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
-
-  return {
-    suggestedNumbers: selection,
-    candidates: sortedScores.slice(5, 15).map((s) => s.num),
-    confidence: Math.round(calibratedConfidence),
-    confidenceNote: HONEST_NOTE,
-    analysis: analysisText,
-    breakdown: breakdownRecord,
-    timestamp: Date.now(),
-    symbiosisFactor: symbioticContext ? 1.5 : 1.0,
-    realityAlignment: 82,
-    realityAlignmentNote: HONEST_NOTE,
-    adversarialApplied: adversarialMode,
-    challengedNumbers: [],
-    stabilityScore,
-    diversityMetrics,
-    xapExp: undefined,
-    adversarialSurvivalScore: 0,
-    adversarialRisks: [],
-    explainabilityData: {},
-    shrinkageApplied: false,
-    shrinkageFactor: 0,
-    shrinkageFactorMap: undefined,
-    shrinkageVerification: null,
-    hyperparameters: { hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY, spatialSigma: 1.5, gapVelocityWeight: 1.0, bayesWindowRatio: 0.1, sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE, lyapunovHorizon: 15 },
-    hyperTuningLog: [],
-    hyperAccuracyGain: 0
-  } as Prediction;
-};
-
-/**
- * Cache global des prédictions
- */
-import { globalCache, CACHE_TTL } from "../cache/CacheService";
-
-export const generateMasterPrediction = async (
-  drawName: string,
-  rawHistory: DrawResult[],
-  temporalDepth: number,
-  weightsToUse?: AlgoWeights,
-  metrics?: EnhancedMetrics,
-  symbioticContext?: SymbioticContext,
-  skipTraining: boolean = false,
-  adversarialMode: boolean = false,
-  forcedOutsiderCount?: number,
-  isForensicOptimized: boolean = false,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<Prediction> => {
-  const history = purifyHistoryForDraw(drawName, rawHistory);
-  const contentHash = hashHistoryContent(history);
-  const keyParams = `${history.length}_${contentHash}_${weightsToUse ? JSON.stringify(weightsToUse) : "def"}_adv_${adversarialMode}_forcedOutsider_${forcedOutsiderCount !== undefined ? forcedOutsiderCount : "none"}_depth_${temporalDepth}_forensic_${isForensicOptimized}`;
-  const cacheKey = globalCache.generateKey('prediction', drawName, keyParams);
-
-  return globalCache.getOrCompute(
-    cacheKey,
-    async () => {
-      const nexusState = useNexusStore.getState();
-      const useCloudEngine = nexusState.useCloudEngine;
-      const useSpatioTemporalHawkes = nexusState.useSpatioTemporalHawkes;
-
-      // Délégation cloud
-      if (useCloudEngine && isSupabaseConfigured() && drawName !== "ALL_COMBINED" && drawName !== "ALL") {
-        try {
-          console.log(`[CLOUD COMPUTING] Délégation de la prédiction ${drawName} vers Supabase Edge Function...`);
-          const result = await apiClient.post<Prediction>('predict-elite', {
-            drawName, history, weights: weightsToUse, symbioticContext, metrics
-          });
-          if (result && result.suggestedNumbers && result.suggestedNumbers.length > 0) {
-            console.log(`[CLOUD COMPUTING] Prédiction ${drawName} obtenue avec succès depuis le Cloud !`);
-            return result;
-          }
-        } catch (e) {
-          console.warn("[CLOUD COMPUTING] Échec de la prédiction Cloud, basculement sur le moteur local.", e);
-        }
-      }
-
-      // Calcul local
-      return await generateMasterPredictionCore(
-        drawName, history, temporalDepth, weightsToUse, metrics, symbioticContext,
-        skipTraining, adversarialMode, forcedOutsiderCount, isForensicOptimized,
-        useSpatioTemporalHawkes, onProgress
-      );
-    },
-    CACHE_TTL.LONG
-  );
+  return await runLocalPredictionPipeline(context);
 };

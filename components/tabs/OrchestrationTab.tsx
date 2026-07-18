@@ -353,27 +353,54 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
     return (
         <div className="space-y-10 animate-fade-in pb-20 w-full overflow-hidden">
             {/* HERO CARD */}
-            <div className="bg-slate-900 p-8 md:p-8 rounded-3xl shadow-2xl border border-indigo-500/20 relative overflow-hidden group">
+            <div className="bg-slate-900 p-8 md:p-10 rounded-3xl shadow-2xl border border-indigo-500/20 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] group-hover:scale-125 transition-transform duration-500 -mr-20 -mt-20"></div>
                 
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Share2 size={20} className="text-white"/></div>
-                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Interconnexion Temporelle</span>
+                <div className="relative z-10 flex flex-col xl:flex-row justify-between items-stretch gap-8">
+                    <div className="flex-1 flex flex-col justify-between">
+                        <div>
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-indigo-600 rounded-xl shadow-lg"><Share2 size={20} className="text-white"/></div>
+                                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400">Interconnexion Temporelle</span>
+                            </div>
+                            <h3 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none">
+                                Orchestration <span className="text-indigo-500">Flux</span>
+                            </h3>
                         </div>
-                        <h3 className="text-3xl md:text-5xl font-black text-white tracking-tighter leading-none">
-                            Orchestration <span className="text-indigo-500">Flux</span>
-                        </h3>
-                        <p className="text-slate-400 text-sm mt-4 max-w-xl font-medium leading-relaxed border-l-2 border-indigo-500/30 pl-4">
+                        <p className="text-slate-400 text-sm mt-6 max-w-xl font-medium leading-relaxed border-l-2 border-indigo-500/30 pl-4">
                             {metrics.narrativeLesson}
                         </p>
                     </div>
                     
-                    <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl text-center min-w-[220px]">
-                        <div className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-2">Couverture Backtest</div>
-                        <div className="text-6xl font-black text-white">{metrics.backtestAccuracy}%</div>
-                        <div className="text-xs font-bold text-slate-500 mt-2">Précision estimée sur 5 tirages</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 xl:min-w-[550px]">
+                        <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 shadow-xl flex flex-col justify-between items-center text-center">
+                            <span className="text-[9px] font-black text-indigo-300 uppercase tracking-widest">Backtest</span>
+                            <div className="text-4xl font-black text-white my-2">{metrics.backtestAccuracy}%</div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">Couverture 5T</span>
+                        </div>
+
+                        <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 shadow-xl flex flex-col justify-between items-center text-center">
+                            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Stabilité Gate</span>
+                            <div className="text-4xl font-black text-white my-2">
+                                {Math.round((metrics.stabilityScore ?? 1.0) * 100)}%
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                <span className={`h-2 w-2 rounded-full ${(metrics.stabilityScore ?? 1.0) >= 0.75 ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                                <span className="text-[10px] text-slate-500 font-bold uppercase">
+                                    {(metrics.stabilityScore ?? 1.0) >= 0.75 ? 'Sécurisé' : 'Lissé'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 shadow-xl flex flex-col justify-between items-center text-center">
+                            <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Diagnostic Régime</span>
+                            <div className="text-2xl font-black text-white capitalize my-2">
+                                {metrics.regimeDiagnostic?.regime ?? "Stable"}
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">
+                                Conf. {Math.round((metrics.regimeDiagnostic?.confidenceInRegime ?? 0.5) * 100)}%
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

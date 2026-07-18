@@ -1,7 +1,7 @@
 import { EmpiricalCalibration, FALLBACK_CALIBRATION } from "../../shared/prediction.types";
 import { ScoredNumber } from "./scoringEngine";
 import { calculateACValue } from "../mathService";
-import { ScoreBreakdown } from "../../shared/prediction.types";
+import { ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 
 const DOMAIN_SIZE = 90;
@@ -167,14 +167,127 @@ export const generateCombination = (
 
   const targetOutsiders = Math.round(DRAW_SIZE * outsiderRatio);
   const targetTop = Math.max(0, DRAW_SIZE - targetOutsiders);
-  const tempGlouton = new Set<number>();
-  
-  for (let i = 0; i < topPool.length && tempGlouton.size < targetTop; i++) tempGlouton.add(topPool[i]);
-  for (let i = 0; i < outsiderPool.length && tempGlouton.size < DRAW_SIZE; i++) tempGlouton.add(outsiderPool[i]);
 
-  let currentCombo = Array.from(tempGlouton);
+  const getDominantAlgo = (num: number): string | null => {
+    const bd = breakdownsMap.get(num);
+    if (!bd) return null;
+    let maxVal = -Infinity;
+    let maxAlgo: string | null = null;
+    Object.entries(bd).forEach(([algo, val]) => {
+      if (typeof val === "number" && val > maxVal) {
+        maxVal = val;
+        maxAlgo = algo;
+      }
+    });
+    return maxAlgo;
+  };
+
+  const getProfileSimilarity = (n1: number, n2: number): number => {
+    const bd1 = breakdownsMap.get(n1);
+    const bd2 = breakdownsMap.get(n2);
+    if (!bd1 || !bd2) return 0;
+    
+    let dot = 0;
+    let norm1 = 0;
+    let norm2 = 0;
+    const keys = Object.keys(bd1);
+    
+    keys.forEach(k => {
+      const v1 = bd1[k as AlgoKey] || 0;
+      const v2 = bd2[k as AlgoKey] || 0;
+      dot += v1 * v2;
+      norm1 += v1 * v1;
+      norm2 += v2 * v2;
+    });
+    
+    if (norm1 === 0 || norm2 === 0) return 0;
+    return dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
+  };
+
+  // Étape 1 : Prendre un pool top 12 ou top 15
+  const poolSize = Math.min(15, sortedScores.length);
+  const candidatePool = sortedScores.slice(0, poolSize).map(s => s.num);
+
+  // Étape 2 : Construire le ticket en glouton contraint
+  let currentCombo: number[] = [];
+  
+  if (candidatePool.length >= DRAW_SIZE) {
+    // Prendre le premier (meilleur score pur)
+    currentCombo.push(candidatePool[0]);
+    
+    for (let step = 1; step < DRAW_SIZE; step++) {
+      let bestCandidate = -1;
+      let bestCandidateScore = -Infinity;
+      
+      const isOutsiderSlot = step >= targetTop;
+      const filteredPool = isOutsiderSlot && outsiderPool.length > 0 ? outsiderPool : candidatePool;
+      
+      for (let p = 0; p < filteredPool.length; p++) {
+        const candidate = filteredPool[p];
+        if (currentCombo.includes(candidate)) continue;
+        
+        const baseScore = scoresMap.get(candidate) || 0;
+        let penalty = 0;
+        
+        // A. similarité de profil avec les déjà sélectionnés
+        for (const selected of currentCombo) {
+          const sim = getProfileSimilarity(candidate, selected);
+          if (sim > 0.75) {
+            penalty += 15.0 * sim; // Forte pénalité pour ressemblance excessive
+          }
+        }
+        
+        // B. anti-redondance des familles dominantes
+        const candidateDom = getDominantAlgo(candidate);
+        if (candidateDom) {
+          let familyCount = 0;
+          for (const selected of currentCombo) {
+            if (getDominantAlgo(selected) === candidateDom) {
+              familyCount++;
+            }
+          }
+          if (familyCount > 0) {
+            penalty += 10.0 * familyCount; // Pénalité si la même famille se répète
+          }
+        }
+        
+        // C. concentration par dizaine (décades)
+        const candidateDecade = Math.floor(candidate / 10.0);
+        let decadeCount = 0;
+        for (const selected of currentCombo) {
+          if (Math.floor(selected / 10.0) === candidateDecade) {
+            decadeCount++;
+          }
+        }
+        if (decadeCount > 0) {
+          penalty += 8.0 * decadeCount; // Pénalité si même dizaine répétée
+        }
+        
+        const finalCandidateScore = baseScore - penalty;
+        if (finalCandidateScore > bestCandidateScore) {
+          bestCandidateScore = finalCandidateScore;
+          bestCandidate = candidate;
+        }
+      }
+      
+      if (bestCandidate !== -1) {
+        currentCombo.push(bestCandidate);
+      } else {
+        // Fallback
+        for (const cand of filteredPool) {
+          if (!currentCombo.includes(cand)) {
+            currentCombo.push(cand);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback de sécurité si non complet
   if (currentCombo.length !== DRAW_SIZE) {
-    currentCombo = sortedScores.slice(0, DRAW_SIZE).map(s => s.num);
+    currentCombo.length = 0;
+    sortedScores.slice(0, DRAW_SIZE).forEach(s => currentCombo.push(s.num));
   }
 
   let currentEnergy = calculateCombinationEnergy(currentCombo, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap);

@@ -367,6 +367,17 @@ export interface ScoreComposition {
   trend: number;
 }
 
+export interface FeatureVector {
+  repeatShort: number;      // 0..1
+  machineTransfer: number;  // 0..1
+  mirror: number;           // 0..1
+  neighbor: number;         // 0..1
+  markov: number;           // 0..1
+  trend: number;            // 0..1
+  seasonal: number;         // 0..1
+  structuralCoherence: number; // 0..1
+}
+
 export interface SymbioticContext {
   spatialHotZones: number[];
   orchestrationBoosts: Record<number, number>;
@@ -567,6 +578,11 @@ export interface OrchestrationMetrics {
   topCandidates: { number: number; score: number; reasons: string[] }[];
   backtestAccuracy: number;
   narrativeLesson: string;
+  stabilityScore?: number;
+  regimeDiagnostic?: {
+    regime: "stable" | "volatile" | "chaotic" | "cryo";
+    confidenceInRegime: number;
+  };
 }
 
 export interface MimicryMetric {

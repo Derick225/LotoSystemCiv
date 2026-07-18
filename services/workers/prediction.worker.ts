@@ -32,7 +32,7 @@ self.onmessage = async (e: MessageEvent) => {
         userOptions,
         symbioticContext,
         _basePrediction,
-        (progress, message) => {
+        (progress: number, message: string) => {
           self.postMessage({ taskId, isProgress: true, progress, message });
         },
         temporalDepth,
@@ -53,7 +53,7 @@ self.onmessage = async (e: MessageEvent) => {
         forcedOutsiderCount,
         isForensicOptimized,
         useSpatioTemporalHawkes,
-        (progress, message) => {
+        (progress: number, message: string) => {
           self.postMessage({ taskId, isProgress: true, progress, message });
         },
         preloadedForensicReports

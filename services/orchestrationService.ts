@@ -1,5 +1,5 @@
 import { EmpiricalCalibration, FALLBACK_CALIBRATION } from "../shared/prediction.types";
-import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition, AlgoWeights } from '../types';
+import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition, AlgoWeights, FeatureVector } from '../types';
 import { calculateACValue, calculateShannonEntropy, calculateFractalIndex } from './mathService';
 
 
@@ -277,38 +277,547 @@ export const analyzeImmediateTrend = (history: DrawResult[], config: Orchestrati
   return { lessons: lessons.sort((a, b) => b.impactScore !== a.impactScore ? b.impactScore - a.impactScore : a.pattern.localeCompare(b.pattern)) };
 };
 
-export const calculateOrchestrationScores = (history: DrawResult[], config: OrchestrationConfig = adaptConfigurationToPhase(history)): Record<number, number> => {
-  const scores: Record<number, number> = {};
-  if (history.length < 2) return scores;
+export interface RefactoredPipelineResult {
+  scores: Record<number, number>;
+  rawFeatures: Record<number, FeatureVector>;
+  normalizedFeatures: Record<number, FeatureVector>;
+  weightedScores: Record<number, number>;
+  calibratedScores: Record<number, number>;
+  candidatesDetails: Record<number, ScoreComposition>;
+  top5: number[];
+  top18: number[];
+  stabilityScore: number;
+  regimeDiagnostic: {
+    regime: "stable" | "volatile" | "chaotic" | "cryo";
+    confidenceInRegime: number;
+  };
+}
 
-  const successionScores = detectLeaderSuccessions(history, config);
-  Object.entries(successionScores).forEach(([n, s]) => scores[parseInt(n)] = (scores[parseInt(n)] || 0) + s);
+/**
+ * PIPELINE UNIFIÉ EN 5 ÉTAGES (DÉTERMINISTE, CONTINU ET SANS NOMBRES MAGIQUES)
+ * 1. Extraction des Caractéristiques (7 signaux normalisés dans [0..1] de même unité)
+ * 2. Normalisation Statistique (Z-score to Sigmoid dans [0, 1] de façon homogène)
+ * 3. Pondération Dynamique (Normalisée selon le régime Thermo-Statistique)
+ * 4. Calibration et Shrinkage de Contradiction (James-Stein style)
+ * 5. Sélection d'Élite avec Garde-fous de Diversité
+ */
+export const runOrchestrationPipeline = (
+  history: DrawResult[],
+  weights?: AlgoWeights
+): RefactoredPipelineResult | null => {
+  if (history.length < 2) return null;
 
-  const lookBack = Math.min(Math.floor(config.adaptiveHalfLife), history.length);
-  const baseImpact = 90.0 / 5.0;
+  // --- ÉTAPE 1 : DIAGNOSTIC DU RÉGIME ---
+  const thermoState = detectThermoStatisticalRegime(history);
+  const maxProb = Math.max(thermoState.stable, thermoState.volatile, thermoState.chaotic, thermoState.cryo);
+  let regime: "stable" | "volatile" | "chaotic" | "cryo" = "stable";
+  if (maxProb === thermoState.cryo) regime = "cryo";
+  else if (maxProb === thermoState.volatile) regime = "volatile";
+  else if (maxProb === thermoState.chaotic) regime = "chaotic";
   
-  for (let i = 0; i < lookBack; i++) {
-    const draw = history[i];
-    const decay = Math.pow(config.timeDecay, i);
+  const regimeDiagnostic = {
+    regime,
+    confidenceInRegime: maxProb
+  };
 
-    draw.machine?.forEach(m => {
-      scores[m] = (scores[m] || 0) + (baseImpact * config.machineWeight * decay);
-    }); 
-
-    draw.gagnants.forEach(w => {
-      const mirror = 91 - w;
-      if (mirror !== w && mirror >= 1 && mirror <= 90) {
-        scores[mirror] = (scores[mirror] || 0) + (baseImpact * config.mirrorWeight * decay);
+  const config = adaptConfigurationToPhase(history);
+  const lookBack = Math.min(Math.floor(config.adaptiveHalfLife), history.length);
+  const totalDraws = history.length;
+  
+  // --- ÉTAGE 1 (SUITE) : FEATURE EXTRACTION ---
+  const rawFeatures: Record<number, FeatureVector> = {} as any;
+  
+  // Construction des lookup tables
+  const lastSeen = new Map<number, number>();
+  const appearances = new Map<number, number>();
+  const shortAppearances = new Map<number, number>();
+  
+  history.forEach((draw, idx) => {
+    draw.gagnants.forEach(num => {
+      if (!lastSeen.has(num)) lastSeen.set(num, idx);
+      appearances.set(num, (appearances.get(num) || 0) + 1);
+      if (idx < 10) {
+        shortAppearances.set(num, (shortAppearances.get(num) || 0) + 1);
       }
-      
-      const nLeft = w > 1 ? w - 1 : 90;
-      const nRight = w < 90 ? w + 1 : 1;
-      scores[nLeft] = (scores[nLeft] || 0) + (baseImpact * config.neighborWeight * decay);
-      scores[nRight] = (scores[nRight] || 0) + (baseImpact * config.neighborWeight * decay);
     });
+  });
+
+  // Évaluation des cycles de retour moyens
+  const averageCycles = new Map<number, number>();
+  for (let num = 1; num <= 90; num++) {
+    const indices: number[] = [];
+    history.forEach((draw, idx) => {
+      if (draw.gagnants.includes(num)) indices.push(idx);
+    });
+    if (indices.length > 1) {
+      let sumGaps = 0;
+      for (let j = 0; j < indices.length - 1; j++) {
+        sumGaps += (indices[j + 1] - indices[j]);
+      }
+      averageCycles.set(num, sumGaps / (indices.length - 1));
+    } else {
+      averageCycles.set(num, 18.0); // 18.0 est l'écart moyen théorique pour un loto 5/90
+    }
   }
 
-  return scores;
+  // Transitions markoviennes pondérées par la décroissance temporelle
+  const lastDrawWinners = history[0].gagnants;
+  const pastResults = history.slice(1);
+  const markovTransitions = new Map<number, Map<number, number>>();
+  
+  pastResults.forEach((draw, idx) => {
+    const nextDraw = idx > 0 ? pastResults[idx - 1] : history[0];
+    const decay = Math.pow(config.timeDecay, idx + 1);
+    
+    draw.gagnants.forEach(leader => {
+      if (lastDrawWinners.includes(leader)) {
+        if (!markovTransitions.has(leader)) {
+          markovTransitions.set(leader, new Map());
+        }
+        const followers = markovTransitions.get(leader)!;
+        nextDraw.gagnants.forEach(follower => {
+          followers.set(follower, (followers.get(follower) || 0) + decay);
+        });
+      }
+    });
+  });
+
+  for (let num = 1; num <= 90; num++) {
+    // 1. repeatShort : répétition courte
+    let repeatRaw = 0;
+    for (let t = 0; t < lookBack; t++) {
+      if (history[t].gagnants.includes(num)) {
+        repeatRaw += Math.pow(config.timeDecay, t);
+      }
+    }
+
+    // 2. machineTransfer : machine carry-over
+    let machineRaw = 0;
+    for (let t = 0; t < lookBack; t++) {
+      if (history[t].machine?.includes(num)) {
+        machineRaw += Math.pow(config.timeDecay, t);
+      }
+    }
+
+    // 3. neighbor : voisinage de proximité
+    let neighborRaw = 0;
+    for (let t = 0; t < lookBack; t++) {
+      const winners = history[t].gagnants;
+      const decay = Math.pow(config.timeDecay, t);
+      winners.forEach(w => {
+        const nLeft = w > 1 ? w - 1 : 90;
+        const nRight = w < 90 ? w + 1 : 1;
+        if (num === nLeft || num === nRight) {
+          neighborRaw += decay;
+        }
+      });
+    }
+
+    // 4. mirror : miroir (91 - n)
+    let mirrorRaw = 0;
+    for (let t = 0; t < lookBack; t++) {
+      const mirrorVal = 91 - num;
+      if (history[t].gagnants.includes(mirrorVal)) {
+        mirrorRaw += Math.pow(config.timeDecay, t);
+      }
+    }
+
+    // 5. markov : transitions
+    let markovRaw = 0;
+    lastDrawWinners.forEach(leader => {
+      const followers = markovTransitions.get(leader);
+      if (followers && followers.has(num)) {
+        markovRaw += followers.get(num)!;
+      }
+    });
+
+    // 6. trend : Vélocité d'écart (Gap Velocity) combiné au ratio de fréquence
+    const currentGap = lastSeen.get(num) ?? totalDraws;
+    const avgGap = averageCycles.get(num) || 18.0;
+    const gapRaw = 1.0 - Math.exp(-currentGap / avgGap);
+
+    const fShort = (shortAppearances.get(num) || 0) / 10.0;
+    const fLong = (appearances.get(num) || 0) / totalDraws;
+    const freqRaw = fShort / (fLong + Number.EPSILON);
+    const trendRaw = (gapRaw + freqRaw) / 2.0;
+
+    // 7. seasonal : alignement harmonique des cycles (saisonnalité)
+    const cycle = averageCycles.get(num) || 18.0;
+    const cyclePos = currentGap / cycle;
+    const seasonalRaw = Math.cos(2 * Math.PI * cyclePos) * 0.5 + 0.5;
+
+    // 8. structuralCoherence : Cohérence harmonique de l'ajout du numéro au sein du ticket T-1
+    const testSetForCoherence = [...lastDrawWinners.slice(0, 4), num];
+    const structuralCoherenceRaw = calculateCoherence(testSetForCoherence) / 100.0;
+
+    rawFeatures[num] = {
+      repeatShort: repeatRaw,
+      machineTransfer: machineRaw,
+      neighbor: neighborRaw,
+      mirror: mirrorRaw,
+      markov: markovRaw,
+      trend: trendRaw,
+      seasonal: seasonalRaw,
+      structuralCoherence: structuralCoherenceRaw
+    };
+  }
+
+  // --- ÉTAGE 2 : NORMALIZATION ---
+  const normalizedFeatures: Record<number, FeatureVector> = {} as any;
+  const featureKeys: (keyof FeatureVector)[] = [
+    'repeatShort',
+    'machineTransfer',
+    'mirror',
+    'neighbor',
+    'markov',
+    'trend',
+    'seasonal',
+    'structuralCoherence'
+  ];
+
+  for (let num = 1; num <= 90; num++) {
+    normalizedFeatures[num] = {} as FeatureVector;
+  }
+
+  featureKeys.forEach(key => {
+    const values: number[] = [];
+    for (let num = 1; num <= 90; num++) {
+      values.push(rawFeatures[num][key]);
+    }
+
+    // Calcul de la médiane et de l'écart-type robustes
+    const sortedVals = [...values].sort((a, b) => a - b);
+    const median = sortedVals[45];
+    const mean = values.reduce((a, b) => a + b, 0) / 90;
+    const stdDev = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / 90) || 1.0;
+
+    // Normalisation continue via la sigmoïde logistique centrée sur la médiane
+    for (let num = 1; num <= 90; num++) {
+      const val = rawFeatures[num][key];
+      const z = (val - median) / (stdDev + Number.EPSILON);
+      normalizedFeatures[num][key] = 1.0 / (1.0 + Math.exp(-z));
+    }
+  });
+
+  // --- ÉTAGE 3 : WEIGHTING & DE-CORRELATION PENALTY ---
+  // Détermination des poids d'importance initiaux
+  const rawW_repeat = config.neighborWeight * (1.0 + (weights?.temporal || 0.0));
+  const rawW_machine = config.machineWeight;
+  const rawW_neighbor = config.neighborWeight;
+  const rawW_mirror = config.mirrorWeight;
+  const rawW_markov = 1.0 + (weights?.markov || 0.0);
+  const rawW_trend = 1.0 + (((weights?.gap || 0.0) + (weights?.frequency || 0.0)) / 2.0);
+  const rawW_seasonal = 1.0 + (weights?.temporal || 0.0);
+  const rawW_structuralCoherence = 1.0 + (weights?.derived_neighbor || 0.0);
+
+  // Modulation continue selon le régime stochastique détecté
+  const cryoMod = thermoState.cryo;
+  const volatileMod = thermoState.volatile;
+  const chaoticMod = thermoState.chaotic;
+  
+  // Modulation par canal (Cryo favorise repeat, markov, trend; Volatile favorise neighbor, mirror)
+  let modW_repeat = rawW_repeat * (1.0 + 0.5 * cryoMod - 0.5 * volatileMod);
+  let modW_machine = rawW_machine * (1.0 - 0.4 * cryoMod);
+  let modW_neighbor = rawW_neighbor * (1.0 - 0.4 * cryoMod + 0.5 * volatileMod);
+  let modW_mirror = rawW_mirror * (1.0 + 0.4 * volatileMod);
+  let modW_markov = rawW_markov * (1.0 + 0.4 * cryoMod);
+  let modW_trend = rawW_trend * (1.0 + 0.4 * cryoMod);
+  let modW_seasonal = rawW_seasonal;
+  let modW_structuralCoherence = rawW_structuralCoherence * (1.0 - 0.3 * volatileMod);
+
+  // Le chaos harmonise tous les poids vers la moyenne plate pour favoriser la diversité
+  if (chaoticMod > 0.01) {
+    const avgW = (modW_repeat + modW_machine + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence) / 8.0;
+    modW_repeat = modW_repeat * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_machine = modW_machine * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_neighbor = modW_neighbor * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_mirror = modW_mirror * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_markov = modW_markov * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_trend = modW_trend * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_seasonal = modW_seasonal * (1.0 - chaoticMod) + avgW * chaoticMod;
+    modW_structuralCoherence = modW_structuralCoherence * (1.0 - chaoticMod) + avgW * chaoticMod;
+  }
+
+  const sumWeights = modW_repeat + modW_machine + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence;
+  
+  const w: Record<keyof FeatureVector, number> = {
+    repeatShort: modW_repeat / sumWeights,
+    machineTransfer: modW_machine / sumWeights,
+    neighbor: modW_neighbor / sumWeights,
+    mirror: modW_mirror / sumWeights,
+    markov: modW_markov / sumWeights,
+    trend: modW_trend / sumWeights,
+    seasonal: modW_seasonal / sumWeights,
+    structuralCoherence: modW_structuralCoherence / sumWeights
+  };
+
+  const weightedScores: Record<number, number> = {};
+  for (let num = 1; num <= 90; num++) {
+    const f = normalizedFeatures[num];
+    
+    // Détermination de l'activité continue des familles
+    const act_inertia = (f.repeatShort + f.trend) / 2.0;
+    const act_structure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
+    const act_transition = (f.markov + f.machineTransfer) / 2.0;
+    const act_seasonal = f.seasonal;
+
+    const families = [act_inertia, act_structure, act_transition, act_seasonal];
+    const activeFamiliesCount = families.filter(v => v > 0.4).length;
+
+    // Détermination de la redondance au sein des mêmes familles (signaux corrélés)
+    const hasInertiaRedundancy = Math.max(0, Math.min(f.repeatShort, f.trend) - 0.4);
+    const hasStructureRedundancy = Math.max(0, Math.min(f.mirror, f.neighbor) - 0.4) + 
+                                   Math.max(0, Math.min(f.neighbor, f.structuralCoherence) - 0.4) +
+                                   Math.max(0, Math.min(f.mirror, f.structuralCoherence) - 0.4);
+    const hasTransitionRedundancy = Math.max(0, Math.min(f.markov, f.machineTransfer) - 0.4);
+
+    const correlatedSignalsCount = (hasInertiaRedundancy ? 1 : 0) + 
+                                   (hasStructureRedundancy > 0.2 ? 1 : 0) + 
+                                   (hasTransitionRedundancy ? 1 : 0);
+
+    const overlapPenalty = Math.min(0.25, correlatedSignalsCount * 0.08);
+
+    // Récompense de la diversité des familles actives
+    const diversityBonus = 0.85 + 0.15 * (activeFamiliesCount / 4.0);
+
+    // Score de base linéaire
+    const baseLinearScore =
+      w.repeatShort * f.repeatShort +
+      w.machineTransfer * f.machineTransfer +
+      w.mirror * f.mirror +
+      w.neighbor * f.neighbor +
+      w.markov * f.markov +
+      w.trend * f.trend +
+      w.seasonal * f.seasonal +
+      w.structuralCoherence * f.structuralCoherence;
+
+    weightedScores[num] = baseLinearScore * (1.0 - overlapPenalty) * diversityBonus;
+  }
+
+  // --- ÉTAGE 4 : CALIBRATION & GLOBAL SHRINKAGE ---
+  const allWeightedScores = Object.values(weightedScores).sort((a, b) => b - a);
+  const top20Scores = allWeightedScores.slice(0, 20);
+  const top20Mean = top20Scores.reduce((a, b) => a + b, 0) / 20;
+  const top20Variance = top20Scores.reduce((sum, s) => sum + Math.pow(s - top20Mean, 2), 0) / 20;
+  const scoreStd = Math.sqrt(top20Variance) || 0.001;
+  const top1 = top20Scores[0];
+  const top10ScoreVal = top20Scores[9];
+  const scoreGap = top1 - top10ScoreVal;
+  const sumTop5 = top20Scores.slice(0, 5).reduce((a, b) => a + b, 0);
+  const sumTop20 = top20Scores.reduce((a, b) => a + b, 0) || 1.0;
+  const concentration = sumTop5 / sumTop20;
+
+  // Formules continues de pénalisation
+  const concentrationPenalty = Math.max(0, concentration - 0.28) * 1.5;
+  const instabilityPenalty = Math.max(0, scoreStd - 0.12) * 1.0 + Math.max(0, scoreGap - 0.15) * 1.0;
+
+  // Contradiction des caractéristiques sur les 5 meilleures prédictions a priori
+  const top5NumsForContradiction = Object.entries(weightedScores)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(e => Number(e[0]));
+  let totalTop5FeatureVariance = 0;
+  top5NumsForContradiction.forEach(num => {
+    const fVals = featureKeys.map(k => normalizedFeatures[num][k]);
+    const fMean = fVals.reduce((a, b) => a + b, 0) / 8;
+    const fVar = fVals.reduce((sum, f) => sum + Math.pow(f - fMean, 2), 0) / 8;
+    totalTop5FeatureVariance += fVar;
+  });
+  const contradictionPenalty = (totalTop5FeatureVariance / 5.0) * 1.5;
+
+  const clamp = (min: number, max: number, val: number) => Math.max(min, Math.min(max, val));
+  const shrinkage = 1.0 - clamp(0.0, 0.35, concentrationPenalty + instabilityPenalty + contradictionPenalty);
+
+  const calibratedScores: Record<number, number> = {};
+  const globalMean = Object.values(weightedScores).reduce((a, b) => a + b, 0) / 90;
+  const alpha = 1.0 + 3.0 * thermoState.chaotic;
+
+  for (let num = 1; num <= 90; num++) {
+    const numFeatures = featureKeys.map(k => normalizedFeatures[num][k]);
+    const numMean = numFeatures.reduce((a, b) => a + b, 0) / 8;
+    const numVariance = numFeatures.reduce((sum, f) => sum + Math.pow(f - numMean, 2), 0) / 8;
+
+    const signalVarianceMultiplier = Math.exp(-alpha * numVariance);
+    const weightedScore = weightedScores[num];
+    const rawCalibrated = globalMean + signalVarianceMultiplier * (weightedScore - globalMean);
+    
+    calibratedScores[num] = rawCalibrated * shrinkage;
+  }
+
+  // --- ÉTAGE 5 : SÉLECTION DIVERSIFIÉE ---
+  const selected: number[] = [];
+  const familyCounts: Record<string, number> = {
+    inertia: 0,
+    structure: 0,
+    transition: 0,
+    seasonal: 0
+  };
+
+  for (let step = 0; step < 5; step++) {
+    let bestNum = 1;
+    let bestSelectionScore = -Infinity;
+
+    const t1Count = selected.filter(sel => history[0].gagnants.includes(sel)).length;
+    const neighborsCount = selected.filter(sel => 
+      selected.some(other => other !== sel && Math.abs(sel - other) === 1)
+    ).length / 2;
+
+    for (let num = 1; num <= 90; num++) {
+      if (selected.includes(num)) continue;
+
+      const score = calibratedScores[num];
+
+      // Famille dominante du candidat
+      const f = normalizedFeatures[num];
+      const famInertia = (f.repeatShort + f.trend) / 2.0;
+      const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
+      const famTransition = (f.markov + f.machineTransfer) / 2.0;
+      const famSeasonal = f.seasonal;
+
+      const famVals = [famInertia, famStructure, famTransition, famSeasonal];
+      const maxIdx = famVals.indexOf(Math.max(...famVals));
+      const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
+
+      let familyPenalty = 1.0;
+      if (familyCounts[dominantFamily] >= 2) {
+        familyPenalty = 0.35; // Éviter la concentration excessive dans une seule famille
+      }
+
+      // Pénalités géométriques et spatiales continues
+      let decadePenalty = 1.0;
+      let lastDigitPenalty = 1.0;
+      let consecutivePenalty = 1.0;
+      let mirrorPenalty = 1.0;
+
+      const numDecade = Math.floor((num - 1) / 10);
+      const numLastDigit = num % 10;
+
+      selected.forEach(sel => {
+        const selDecade = Math.floor((sel - 1) / 10);
+        const selLastDigit = sel % 10;
+
+        if (numDecade === selDecade) {
+          decadePenalty -= 0.25;
+        }
+        if (numLastDigit === selLastDigit) {
+          lastDigitPenalty -= 0.15;
+        }
+        if (Math.abs(num - sel) === 1) {
+          consecutivePenalty *= (neighborsCount > 0 ? 0.2 : 0.4);
+        }
+        if (num === 91 - sel) {
+          mirrorPenalty *= 0.6;
+        }
+      });
+
+      decadePenalty = Math.max(0.2, decadePenalty);
+      lastDigitPenalty = Math.max(0.2, lastDigitPenalty);
+
+      // Limiter le nombre de candidats issus uniquement du tirage T-1
+      let t1Penalty = 1.0;
+      if (history[0].gagnants.includes(num)) {
+        if (t1Count >= 2) {
+          t1Penalty = 0.4;
+        }
+      }
+
+      const totalPenalty = familyPenalty * decadePenalty * lastDigitPenalty * consecutivePenalty * mirrorPenalty * t1Penalty;
+      const selectionScore = score * totalPenalty;
+
+      if (selectionScore > bestSelectionScore) {
+        bestSelectionScore = selectionScore;
+        bestNum = num;
+      }
+    }
+
+    selected.push(bestNum);
+
+    // Mettre à jour les comptes des familles dominantes
+    const f = normalizedFeatures[bestNum];
+    const famInertia = (f.repeatShort + f.trend) / 2.0;
+    const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
+    const famTransition = (f.markov + f.machineTransfer) / 2.0;
+    const famSeasonal = f.seasonal;
+    const famVals = [famInertia, famStructure, famTransition, famSeasonal];
+    const maxIdx = famVals.indexOf(Math.max(...famVals));
+    const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
+    familyCounts[dominantFamily] = (familyCounts[dominantFamily] || 0) + 1;
+  }
+
+  // Sélection des candidats complémentaires de réserve
+  const candidatesList = Object.entries(calibratedScores)
+    .filter(([numStr]) => !selected.includes(Number(numStr)))
+    .sort((a, b) => b[1] - a[1])
+    .map(([numStr]) => Number(numStr));
+
+  const top18 = [...selected, ...candidatesList.slice(0, 13)];
+
+  // --- STABILITY GATE ---
+  // Recalcul de l'indice de stabilité sur les candidats finaux
+  const top10Scores = selected.map(num => calibratedScores[num] || 0);
+  const top10Mean = top10Scores.reduce((a, b) => a + b, 0) / 10;
+  const top10Variance = top10Scores.reduce((sum, s) => sum + Math.pow(s - top10Mean, 2), 0) / 10;
+  const top10StdDev = Math.sqrt(top10Variance);
+  const scoreVariancePenalty = Math.min(0.25, Math.max(0, 0.12 - top10StdDev) * 2.0);
+
+  const top18Scores = top18.map(num => calibratedScores[num] || 0);
+  const sumTop3 = top18Scores.slice(0, 3).reduce((a, b) => a + b, 0);
+  const sumTop18 = top18Scores.reduce((a, b) => a + b, 0) || 1.0;
+  const concentrationRatio = sumTop3 / sumTop18;
+  const overConcentrationPenalty = Math.min(0.25, Math.max(0, concentrationRatio - 0.25) * 1.5);
+
+  const stabilityScore = Math.max(0.1, Math.min(1.0, 1.0 - scoreVariancePenalty - contradictionPenalty - overConcentrationPenalty));
+
+  // Si la stabilité est faible, lisser les prédictions pour élargir les chances
+  if (stabilityScore < 0.75) {
+    const spreadFactor = 0.4 * (1.0 - stabilityScore);
+    for (let num = 1; num <= 90; num++) {
+      calibratedScores[num] = calibratedScores[num] * (1.0 - spreadFactor) + globalMean * spreadFactor;
+    }
+  }
+
+  // Restructuration des détails du score pour la compatibilité d'affichage UI (radar, bento)
+  const candidatesDetails: Record<number, ScoreComposition> = {};
+  for (let num = 1; num <= 90; num++) {
+    const structural = (normalizedFeatures[num].mirror + normalizedFeatures[num].neighbor + normalizedFeatures[num].seasonal + normalizedFeatures[num].structuralCoherence) / 4 * 100;
+    const markov = normalizedFeatures[num].markov * 100;
+    const machine = normalizedFeatures[num].machineTransfer * 100;
+    const trend = (normalizedFeatures[num].repeatShort + normalizedFeatures[num].trend) / 2 * 100;
+
+    candidatesDetails[num] = {
+      structural: Math.round(structural),
+      markov: Math.round(markov),
+      machine: Math.round(machine),
+      trend: Math.round(trend)
+    };
+  }
+
+  const finalScores: Record<number, number> = {};
+  for (let num = 1; num <= 90; num++) {
+    finalScores[num] = Math.round(calibratedScores[num] * 100);
+  }
+
+  return {
+    scores: finalScores,
+    rawFeatures,
+    normalizedFeatures,
+    weightedScores,
+    calibratedScores,
+    candidatesDetails,
+    top5: selected,
+    top18,
+    stabilityScore,
+    regimeDiagnostic
+  };
+};
+
+export const calculateOrchestrationScores = (
+  history: DrawResult[], 
+  _config?: OrchestrationConfig
+): Record<number, number> => {
+  if (history.length < 2) return {};
+  const pipeline = runOrchestrationPipeline(history);
+  return pipeline ? pipeline.scores : {};
 };
 
 export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] => {
@@ -335,13 +844,13 @@ export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] 
       const timeWeight = 1.0 / i; // Décroissance harmonique simple et déterministe
 
       if (drawSet.gagnants.has(n)) { 
-        score += baseImpact * timeWeight; 
-        type = i === 1 ? 'Répétition' : 'Lag'; 
-        sourceSet.add(`T-${i}`); 
+         score += baseImpact * timeWeight; 
+         type = i === 1 ? 'Répétition' : 'Lag'; 
+         sourceSet.add(`T-${i}`); 
       } else if (drawSet.gagnants.has(n - 1) || drawSet.gagnants.has(n + 1)) { 
-        score += (baseImpact / 2.0) * timeWeight; 
-        if (type === 'Complexe') type = 'Voisin'; 
-        sourceSet.add(`T-${i}`); 
+         score += (baseImpact / 2.0) * timeWeight; 
+         if (type === 'Complexe') type = 'Voisin'; 
+         sourceSet.add(`T-${i}`); 
       }
       if (drawSet.machine.has(n)) {
         score += baseImpact * timeWeight;
@@ -351,7 +860,6 @@ export const analyzeShortTermMimicry = (history: DrawResult[]): MimicryMetric[] 
     });
 
     // Remplacement du seuil binaire arbitraire par une fonction de pondération continue
-    // Sigmoïde centrée sur le pivot. Plus le score est haut, plus le poids s'approche de 1.
     const k = 0.5; // Pente de la sigmoïde
     const continuousWeight = 1.0 / (1.0 + Math.exp(-k * (score - pivotScore)));
     
@@ -405,65 +913,21 @@ export const getFullOrchestrationAnalysis = async (
   calibration: EmpiricalCalibration = FALLBACK_CALIBRATION
 ): Promise<OrchestrationMetrics & { candidatesDetails: Record<number, ScoreComposition> }> => {
   const config = adaptConfigurationToPhase(history);
-  
-  // Coefficients dérivés des poids, bornés pour éviter l'explosion
-  const coeffMachine = weights ? Math.min(2.0, 1.0 + (weights.spatial || 0)) : 1.0; 
-  const coeffMarkov = weights ? Math.min(2.0, 1.0 + (weights.markov || 0)) : 1.0;
-  const coeffStruct = weights ? Math.min(2.0, 1.0 + (weights.temporal || 0)) : 1.0;
-  const coeffTrend = weights ? Math.min(2.0, 1.0 + (weights.frequency || 0)) : 1.0;
+  const pipeline = runOrchestrationPipeline(history, weights);
 
-  const successionScores = detectLeaderSuccessions(history, config);
-  const finalScores: Record<number, number> = {};
-  const candidatesDetails: Record<number, ScoreComposition> = {};
-  const lookBack = Math.min(Math.floor(config.adaptiveHalfLife), history.length); 
-
-  for (let i = 1; i <= 90; i++) {
-    const m_raw = successionScores[i] || 0;
-    const markov = m_raw * coeffMarkov;
-
-    let mac_raw = 0;
-    for (let idx = 0; idx < lookBack; idx++) {
-      if (history[idx].machine?.includes(i)) {
-        mac_raw += (90.0 / 5.0) * Math.pow(config.timeDecay, idx);      }
-    }
-    const machine = mac_raw * coeffMachine;
-
-    let struct_raw = 0;
-    for (let idx = 0; idx < lookBack; idx++) {
-      const draw = history[idx];
-      const decay = Math.pow(config.timeDecay, idx);
-      draw.gagnants.forEach(w => {
-        const mirror = 91 - w;
-        if (mirror === i && mirror >= 1 && mirror <= 90) struct_raw += (90.0 / 5.0) * config.mirrorWeight * decay;
-        
-        const nLeft = w > 1 ? w - 1 : 90;
-        const nRight = w < 90 ? w + 1 : 1;
-        if (nLeft === i) struct_raw += (90.0 / 5.0) * config.neighborWeight * decay;
-        if (nRight === i) struct_raw += (90.0 / 5.0) * config.neighborWeight * decay;
-      });
-    }
-    const structural = struct_raw * coeffStruct;
-
-    let trend_raw = 0;
-    for (let idx = 0; idx < lookBack; idx++) {
-      if (history[idx].gagnants.includes(i)) {
-        trend_raw += (90.0 / 5.0) * Math.pow(config.timeDecay, idx);
-      }
-    }
-    const trendVal = trend_raw * coeffTrend;
-
-    const total = structural + markov + machine + trendVal;
-    
-    if (total > 0) {
-      finalScores[i] = total;
-      candidatesDetails[i] = {
-        structural: Math.round(structural),
-        markov: Math.round(markov),
-        machine: Math.round(machine),
-        trend: Math.round(trendVal)
-      };
-    }
+  if (!pipeline) {
+    return {
+      globalScore: 0,
+      activePatterns: [],
+      topCandidates: [],
+      backtestAccuracy: 0,
+      narrativeLesson: "Historique insuffisant.",
+      candidatesDetails: {}
+    };
   }
+
+  const finalScores = pipeline.scores;
+  const candidatesDetails = pipeline.candidatesDetails;
 
   const trend = analyzeImmediateTrend(history, config);
   const activePatterns: DetectedPattern[] = trend.lessons.map(l => ({ 
@@ -472,37 +936,37 @@ export const getFullOrchestrationAnalysis = async (
     impact: l.impactScore / 10.0 
   }));
 
-  const topCandidates = Object.entries(finalScores)
-    .sort((a, b) => b[1] - a[1])    .slice(0, 18)
-    .map(([numStr, score]) => {
-      const num = Number(numStr);
-      const reasons: string[] = [];
-      const details = candidatesDetails[num] || { machine: 0, structural: 0, markov: 0, trend: 0 };
-       
-      const lookBackReasons = Math.min(3, history.length);
-      for(let j = 0; j < lookBackReasons; j++) {
-        if (history[j].machine?.includes(num) && !reasons.includes("Sortie Machine Récents")) {
-          reasons.push("Sortie Machine Récents");
-        }
-        const mir = 91 - num;
-        if (mir >= 1 && mir <= 90 && history[j].gagnants.includes(mir) && !reasons.includes("Miroir Récent")) {
-          reasons.push("Miroir Récent");
-        }
-      }
-      
-      if (successionScores[num] > 5.0 && !reasons.includes("Forte Affinité Markovienne")) {
-        reasons.push("Forte Affinité Markovienne");
-      }
+  const successionScores = detectLeaderSuccessions(history, config);
 
-      if (reasons.length === 0) {
-        if (details.machine > 5) reasons.push("Canal Machine");
-        else if (details.structural > 5) reasons.push("Symétrie T-1");
-        else if (details.trend > 5) reasons.push("Inertie");
-        else reasons.push("Résonance stochastique");
+  const topCandidates = pipeline.top18.map(num => {
+    const score = finalScores[num] || 0;
+    const reasons: string[] = [];
+    const details = candidatesDetails[num] || { machine: 0, structural: 0, markov: 0, trend: 0 };
+     
+    const lookBackReasons = Math.min(3, history.length);
+    for(let j = 0; j < lookBackReasons; j++) {
+      if (history[j].machine?.includes(num) && !reasons.includes("Sortie Machine Récents")) {
+        reasons.push("Sortie Machine Récents");
       }
+      const mir = 91 - num;
+      if (mir >= 1 && mir <= 90 && history[j].gagnants.includes(mir) && !reasons.includes("Miroir Récent")) {
+        reasons.push("Miroir Récent");
+      }
+    }
+    
+    if ((successionScores[num] || 0) > 5.0 && !reasons.includes("Forte Affinité Markovienne")) {
+      reasons.push("Forte Affinité Markovienne");
+    }
 
-      return { number: num, score: Math.round(score), reasons };
-    });
+    if (reasons.length === 0) {
+      if (details.machine > 50) reasons.push("Canal Machine");
+      else if (details.structural > 50) reasons.push("Symétrie T-1");
+      else if (details.trend > 50) reasons.push("Inertie");
+      else reasons.push("Résonance stochastique");
+    }
+
+    return { number: num, score, reasons };
+  });
 
   // Backtest de précision déterministe
   let backtestHits = 0;
@@ -532,7 +996,9 @@ export const getFullOrchestrationAnalysis = async (
     topCandidates, 
     backtestAccuracy, 
     narrativeLesson: trend.lessons[0]?.description || `Cohérence harmonique empirique du Top 5 : ${calculateCoherence(top5Numbers, calibration)}%.`,
-    candidatesDetails
+    candidatesDetails,
+    stabilityScore: pipeline.stabilityScore,
+    regimeDiagnostic: pipeline.regimeDiagnostic
   };
 };
 
