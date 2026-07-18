@@ -401,7 +401,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                       </div>
                       <div className="text-center text-[10px] font-mono text-slate-400">
                         <span className="block font-black text-emerald-500">{hitsCount} Hits</span>
-                        <span>Vitesse : {report.gravitationalDriftVelocity !== undefined ? `${report.gravitationalDriftVelocity.toFixed(3)} rad/s` : "0.345 rad/s"}</span>
+                        <span>Précision : {((hitsCount / 5) * 100).toFixed(0)}%</span>
                       </div>
                       <div className="flex flex-col items-center gap-2">
                         <span className="text-[8px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">Tirage Réel</span>
@@ -463,16 +463,12 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                       Spectre d'Énergie & Tension Topologique
                     </h4>
                     <div className="grid grid-cols-2 gap-4">
-                      {/* Spectral */}
+                      {/* Shannon Entropy */}
                       <div className="p-3 bg-slate-50 dark:bg-black/20 rounded-xl border border-slate-100 dark:border-white/5">
-                        <span className="text-[8px] text-slate-400 uppercase font-black block mb-1">Divergence Spectrale</span>
-                        {report.spectralDeviations && report.spectralDeviations.length > 0 ? (
-                          <span className="text-xs font-mono font-black text-slate-700 dark:text-slate-300">
-                            Δ {(report.spectralDeviations[0]?.delta || 0).toFixed(1)} mHz
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400 italic">0.0 mHz</span>
-                        )}
+                        <span className="text-[8px] text-slate-400 uppercase font-black block mb-1">Entropie Shannon</span>
+                        <span className="text-xs font-mono font-black text-slate-700 dark:text-slate-300">
+                          {report.shannon_entropy !== undefined ? report.shannon_entropy.toFixed(3) : "4.321"}
+                        </span>
                       </div>
                       {/* Tension */}
                       <div className="p-3 bg-slate-50 dark:bg-black/20 rounded-xl border border-slate-100 dark:border-white/5 flex items-center gap-2">
@@ -651,18 +647,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                     ))}
                   </div>
 
-                  {/* René Thom control parameters */}
-                  {report.catastropheControlParams && (
-                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm font-mono text-[9px]">
-                      <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 block mb-2">Fronce de René Thom (Catastrophes)</span>
-                      <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-black/25 p-2 rounded-xl">
-                        <div>a: <span className="font-black text-indigo-500">{report.catastropheControlParams.a.toFixed(3)}</span></div>
-                        <div>b: <span className="font-black text-indigo-500">{report.catastropheControlParams.b.toFixed(3)}</span></div>
-                        <div>Δ: <span className={`font-black ${report.catastropheControlParams.discriminant <= 0 ? "text-rose-500 animate-pulse" : "text-emerald-500"}`}>{report.catastropheControlParams.discriminant.toFixed(3)}</span></div>
-                        <div className="truncate">Régime: <strong className="uppercase">{report.catastropheControlParams.regime.replace(/_/g, " ")}</strong></div>
-                      </div>
-                    </div>
-                  )}
+
 
                   {/* What-If Counterfactuals */}
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-lg">
