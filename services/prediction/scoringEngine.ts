@@ -241,7 +241,8 @@ export const applyPCADenoising = async (
   const featureKeys = Object.keys(weights) as Array<AlgoKey>;
   try {
     const featureMatrix = masterScores.map((item) => featureKeys.map((k) => Number(item.breakdown[k]) || 0));
-    const denoisedMatrix = denoiseFeaturesKernelPCA_wrapper(featureMatrix);
+    const varThreshold = enhancedMetrics?.pcaVarianceThreshold as number | undefined;
+    const denoisedMatrix = denoiseFeaturesKernelPCA_wrapper(featureMatrix, undefined, varThreshold);
     
     if (denoisedMatrix && denoisedMatrix.length === masterScores.length) {
       let mse = 0;

@@ -40,6 +40,7 @@ const getTimeDecayWeight = (
 export const calculateSpatialHotSpots = (
   history: DrawResult[],
   hurstExponent: number = 0.5,
+  customSigma?: number,
 ): Record<number, number> => {
   const gridWidth = 10;
   const gridHeight = 9;
@@ -65,7 +66,7 @@ export const calculateSpatialHotSpots = (
   });
 
   const hotScores: Record<number, number> = {};
-  const sigma = 1.5; // Écart-type du noyau gaussien spatial (en cellules de grille)
+  const sigma = customSigma !== undefined ? customSigma : 1.5; // Écart-type du noyau gaussien spatial (en cellules de grille)
 
   for (let r = 0; r < gridHeight; r++) {
     for (let c = 0; c < gridWidth; c++) {
@@ -530,6 +531,7 @@ export const calculateLeaderSuccession = (
 // --- BAYESIAN ANALYSIS (Théorème de Bayes avec Lissage de Laplace rigoureux) ---
 export const calculateBayesianScore = (
   history: DrawResult[],
+  customWindowRatio?: number,
 ): Record<number, number> => {
   const scores: Record<number, number> = {};
   if (history.length < 2) return scores;
@@ -546,7 +548,8 @@ export const calculateBayesianScore = (
 
   const likelihoods = new Map<number, number>();
   // Utilisation de 10% de l'historique de manière adaptative pour lisser le contexte, avec un min de 2.
-  const windowSize = Math.max(2, Math.floor(totalDraws * 0.1));
+  const windowRatio = customWindowRatio !== undefined ? customWindowRatio : 0.1;
+  const windowSize = Math.max(2, Math.floor(totalDraws * windowRatio));
 
   for (let i = 0; i < totalDraws - windowSize; i++) {
     const targetDraw = history[i].gagnants;
@@ -914,11 +917,13 @@ export const calculateHawkesExcitation = (
  */
 export const calculateTopologicalLyapunov = (
   history: DrawResult[],
+  customHorizon?: number,
 ): Record<number, number> => {
   const scores: Record<number, number> = {};
   if (history.length < 5) return scores;
 
-  const horizon = Math.min(50, history.length);
+  const baseHorizon = customHorizon !== undefined ? customHorizon : 50;
+  const horizon = Math.min(baseHorizon, history.length);
   const recentHistory = history.slice(0, horizon);
 
   const getGridPos = (val: number) => {

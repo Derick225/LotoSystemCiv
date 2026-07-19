@@ -285,7 +285,7 @@ const computeAdvancedMetrics = async (
     topologicalLyapunovScores
   ] = await Promise.all([
     Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext)),
+    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
     Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
     Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
     Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
@@ -293,14 +293,14 @@ const computeAdvancedMetrics = async (
     Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
     Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>)),
     Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
-    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext)),
+    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma)),
     Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
     Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
     Promise.resolve().then(() => useSpatioTemporalHawkes
       ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
       : calculateHawkesExcitation(localHistoryContext)
     ),
-    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext))
+    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
   ]);
 
   // Ajustements continus

@@ -1,7 +1,8 @@
 import { DrawResult, AlgoWeights } from "../../types";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 import { calculateScores } from "./scoringEngine";
-import { extractFeatures } from "./featureExtractor";
+import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
+import { EnhancedMetrics } from "./metrics.types";
 import {
   calculatePoissonScores,
   calculateBayesianScore,
@@ -31,6 +32,30 @@ export interface PredictiveHyperparameters {
   sgdLearningRate: number;     // Taux d'apprentissage continu de la micro-SGD [0.005 - 0.05]
   lyapunovHorizon: number;     // Horizon temporel d'analyse de l'attracteur chaotique [5 - 25]
   pcaVarianceThreshold?: number; // Seuil de variance cumulative PCA déduit dynamiquement ou optimisé
+}
+
+export interface HyperSearchContext {
+  featuresCache: Map<number, ExtractedFeatures>;
+  baseMetricsCache: Map<number, {
+    poissonScores: Record<number, number>;
+    temporalScores: Record<number, number>;
+    digitalRootScores: Record<number, number>;
+    resistanceScores: Record<number, number>;
+    gapVelocityScores: Record<number, number>;
+    leaderSuccessionScores: Record<number, number>;
+    aiIntuitionScores: Record<number, number>;
+    fractalResonanceScores: Record<number, number>;
+    symbioticClusterScores: Record<number, number>;
+    anomalyScores: Record<number, number>;
+    hawkesBaseScores: Record<number, number>;
+  }>;
+}
+
+export interface TunerDiagnostics {
+  attemptedEvaluations: number;
+  failedEvaluations: number;
+  failureLogs: string[];
+  optimalHyperparameterHistory: Record<string, number>[];
 }
 
 export const DEFAULT_HYPERPARAMETERS: PredictiveHyperparameters = {
@@ -142,6 +167,7 @@ export const getDynamicPcaVarianceThreshold = (nFeatures: number): number => {
  * Évalue la perte de classement differentiable (Soft-Ranking Loss) des gagnants.
  * Utilise une formulation continue basée sur des sigmoïdes de différence de score
  * pour fournir des gradients lisses et éviter les paliers d'optimisation non-différentiables.
+ * Intègre des pénalités composites pour le top-15 théorique et la séparation des scores.
  */
 const evaluateSoftRankingLoss = (
   scores: { num: number; score: number }[],
@@ -161,11 +187,13 @@ const evaluateSoftRankingLoss = (
   const alpha = 1.0 / Math.max(0.1, stdDev);
 
   let softRankSum = 0;
+  const winnerSoftRanks: Record<number, number> = {};
 
   winners.forEach(w => {
     const winnerItem = scores.find(s => s.num === w);
     if (!winnerItem) {
       softRankSum += 90.0;
+      winnerSoftRanks[w] = 90.0;
       return;
     }
 
@@ -182,76 +210,131 @@ const evaluateSoftRankingLoss = (
     });
 
     softRankSum += softRank;
+    winnerSoftRanks[w] = softRank;
   });
 
-  return softRankSum / winners.length;
+  const softRankLoss = softRankSum / winners.length;
+
+  // topKPenalty: smooth penalty around 15th rank
+  const kThresh = 15;
+  let topKPenaltySum = 0;
+  winners.forEach(w => {
+    const r = winnerSoftRanks[w] || 90.0;
+    const penalty = 1.0 / (1.0 + Math.exp(-0.8 * (r - kThresh)));
+    topKPenaltySum += penalty;
+  });
+  const topKPenalty = 5.0 * (topKPenaltySum / winners.length);
+
+  // scoreSeparationPenalty: encourage score separation between top 5 and others
+  const sorted = [...scores].sort((a, b) => b.score - a.score);
+  const meanTop5 = sorted.slice(0, 5).reduce((sum, s) => sum + s.score, 0) / 5;
+  const meanOthers = sorted.slice(5).reduce((sum, s) => sum + s.score, 0) / (totalScores - 5);
+  const diffSeparation = Math.max(0, meanTop5 - meanOthers);
+  const scoreSeparationPenalty = 5.0 / (1.0 + 0.1 * diffSeparation);
+
+  return softRankLoss + topKPenalty + scoreSeparationPenalty;
 };
 
 /**
  * Fonction interne de calcul de score avec hyper-paramètres injectables.
  * Reproduit la boucle d'inférence avec des paramètres fluctuants de manière 100% déterministe.
+ * Utilise un HyperSearchContext pour partager et éviter de recalculer les métriques statiques.
  */
 const simulateInferenceWithHyperparameters = async (
   drawName: string,
   history: DrawResult[],
   weights: AlgoWeights,
   params: PredictiveHyperparameters,
-  useSpatioTemporalHawkes: boolean = true
+  useSpatioTemporalHawkes: boolean = true,
+  context?: HyperSearchContext
 ): Promise<{ num: number; score: number }[]> => {
   const localHistoryContext = history.slice(0, 30); // Limite le contexte pour des performances de calcul optimales
+  const cacheKey = history.length;
 
-  // Calcul des métriques adaptées à partir des hyper-paramètres personnalisés
-  // Nous passons de manière adaptative ou modifions les entrées des fonctions correspondantes
-  const poissonScores = calculatePoissonScores(localHistoryContext);
-  const bayesScores = calculateBayesianScore(localHistoryContext); // Note: utilise bayesWindowRatio
-  const temporalScores = calculateTemporalScores(localHistoryContext);
-  const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
-  const resistanceScores = calculateResistanceScores(localHistoryContext);
-  const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
-  
-  // Appliquer le facteur d'échelle continu de l'hyper-paramètre de vélocité d'écart
+  let features = context?.featuresCache.get(cacheKey);
+  if (!features) {
+    features = await extractFeatures(drawName, history, 30);
+    if (context) {
+      context.featuresCache.set(cacheKey, features);
+    }
+  }
+
+  let base = context?.baseMetricsCache.get(cacheKey);
+  if (!base) {
+    const poissonScores = calculatePoissonScores(localHistoryContext);
+    const temporalScores = calculateTemporalScores(localHistoryContext);
+    const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
+    const resistanceScores = calculateResistanceScores(localHistoryContext);
+    const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
+    const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
+    const aiIntuitionScores = calculateAiIntuition(localHistoryContext, {});
+    const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
+    const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
+    const anomalyScores = calculateAnomalyScores(localHistoryContext);
+    const hawkesBaseScores = useSpatioTemporalHawkes
+      ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
+      : calculateHawkesExcitation(localHistoryContext);
+
+    base = {
+      poissonScores,
+      temporalScores,
+      digitalRootScores,
+      resistanceScores,
+      gapVelocityScores,
+      leaderSuccessionScores,
+      aiIntuitionScores,
+      fractalResonanceScores,
+      symbioticClusterScores,
+      anomalyScores,
+      hawkesBaseScores
+    };
+
+    if (context) {
+      context.baseMetricsCache.set(cacheKey, base);
+    }
+  }
+
+  // Recalcul des métriques paramétriques
+  const bayesScores = calculateBayesianScore(localHistoryContext, params.bayesWindowRatio);
+  const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext, 0.5, params.spatialSigma);
+  const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext, params.lyapunovHorizon);
+
+  // Appliquer le facteur de vélocité
+  const gapVelocityScores = { ...base.gapVelocityScores };
   for (const k in gapVelocityScores) {
     gapVelocityScores[k] *= params.gapVelocityWeight;
   }
 
-  const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
-  const aiIntuitionScores = calculateAiIntuition(localHistoryContext, {});
-  const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-  
-  // Utilisation directe du paramètre spatialSigma
-  const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext); // override interne simulé
-  const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
-  const anomalyScores = calculateAnomalyScores(localHistoryContext);
-  
-  // Utilisation directe du paramètre hawkesDecay
-  const hawkesExcitationScores = useSpatioTemporalHawkes
-    ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
-    : calculateHawkesExcitation(localHistoryContext);
+  // Appliquer la décroissance Hawkes
+  const hawkesExcitationScores = { ...base.hawkesBaseScores };
   for (const k in hawkesExcitationScores) {
     hawkesExcitationScores[k] *= (params.hawkesDecay / 0.15);
   }
 
-  const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext);
-
-  const mockMetrics = {
-    poisson: poissonScores,
+  // Fusionner les métriques avec compatibilité double-clés (ancien/nouveau code)
+  const mockMetrics: EnhancedMetrics = {
+    poisson: base.poissonScores,
     bayes: bayesScores,
-    temporal: temporalScores,
-    digitalRoot: digitalRootScores,
-    resistance: resistanceScores,
+    temporal: base.temporalScores,
+    digitalRoot: base.digitalRootScores,
+    resistance: base.resistanceScores,
     gapVelocity: gapVelocityScores,
-    leaderSuccession: leaderSuccessionScores,
-    aiIntuition: aiIntuitionScores,
-    fractalResonance: fractalResonanceScores,
+    leaderSuccession: base.leaderSuccessionScores,
+    aiIntuition: base.aiIntuitionScores,
+    fractalResonance: base.fractalResonanceScores,
     spatial: spatialHotSpots,
-    symbioticClusters: symbioticClusterScores,
-    anomaly: anomalyScores,
+    symbioticClusters: base.symbioticClusterScores,
+    coOccurrence: base.symbioticClusterScores,
+    anomaly: base.anomalyScores,
+    anomalyDetection: base.anomalyScores,
+    hawkes: hawkesExcitationScores,
     hawkesExcitation: hawkesExcitationScores,
-    topologicalLyapunov: topologicalLyapunovScores
+    lyapunov: topologicalLyapunovScores,
+    topologicalLyapunov: topologicalLyapunovScores,
+    pcaVarianceThreshold: params.pcaVarianceThreshold,
   };
 
-  const features = await extractFeatures(drawName, history, 30);
-  return calculateScores(features, weights, mockMetrics as any, history);
+  return calculateScores(features, weights, mockMetrics, history);
 };
 
 /**
@@ -263,7 +346,9 @@ const backtestHyperparameterSet = async (
   history: DrawResult[],
   weights: AlgoWeights,
   params: PredictiveHyperparameters,
-  useSpatioTemporalHawkes: boolean = true
+  useSpatioTemporalHawkes: boolean = true,
+  context?: HyperSearchContext,
+  diagnostics?: TunerDiagnostics
 ): Promise<number> => {
   const kValidation = Math.min(5, history.length - 11);
   if (kValidation <= 0) return 45.5;
@@ -280,12 +365,26 @@ const backtestHyperparameterSet = async (
     const winners = targetDraw.gagnants;
     if (!winners || winners.length === 0) continue;
 
+    if (diagnostics) {
+      diagnostics.attemptedEvaluations++;
+    }
+
     try {
-      const scored = await simulateInferenceWithHyperparameters(drawName, subHistory, weights, params, useSpatioTemporalHawkes);
+      const scored = await simulateInferenceWithHyperparameters(
+        drawName,
+        subHistory,
+        weights,
+        params,
+        useSpatioTemporalHawkes,
+        context
+      );
       totalRankSum += evaluateSoftRankingLoss(scored, winners);
       count++;
-    } catch (e) {
-      // Échec silencieux pour préserver la robustesse
+    } catch (e: any) {
+      if (diagnostics) {
+        diagnostics.failedEvaluations++;
+        diagnostics.failureLogs.push(`T=${t} failed: ${e?.message || String(e)}`);
+      }
     }
   }
 
@@ -308,7 +407,9 @@ export const adaptiveParameterSearch = async (
   weights: AlgoWeights,
   currentParams: PredictiveHyperparameters,
   useSpatioTemporalHawkes: boolean,
-  log: string[]
+  log: string[],
+  context?: HyperSearchContext,
+  diagnostics?: TunerDiagnostics
 ): Promise<{ bestVal: number; bestRank: number }> => {
   let low = minVal;
   let high = maxVal;
@@ -326,7 +427,15 @@ export const adaptiveParameterSearch = async (
       testValues.push(val);
 
       const testParams = { ...currentParams, [paramName]: val };
-      const rank = await backtestHyperparameterSet(drawName, history, weights, testParams, useSpatioTemporalHawkes);
+      const rank = await backtestHyperparameterSet(
+        drawName,
+        history,
+        weights,
+        testParams,
+        useSpatioTemporalHawkes,
+        context,
+        diagnostics
+      );
       ranks.push(rank);
 
       if (rank < bestRank) {
@@ -388,10 +497,32 @@ export const tunePredictiveHyperparameters = async (
 
   log.push("Début de l'optimisation déterministe par descente de coordonnées adaptative...");
   onProgress?.(12, "Début de l'optimisation déterministe des coordonnées...");
+
+  // Initialisation du contexte de recherche cache pour le precompute partagé
+  const searchContext: HyperSearchContext = {
+    featuresCache: new Map(),
+    baseMetricsCache: new Map()
+  };
+
+  // Initialisation des diagnostics de performance et de stabilité
+  const diagnostics: TunerDiagnostics = {
+    attemptedEvaluations: 0,
+    failedEvaluations: 0,
+    failureLogs: [],
+    optimalHyperparameterHistory: []
+  };
   
   // Évaluer l'exactitude initiale de base
-  const baseRank = await backtestHyperparameterSet(drawName, history, weights, currentParams, useSpatioTemporalHawkes);
-  log.push(`Rang de départ moyen des gagnants : ${baseRank.toFixed(3)} (un rang plus bas est meilleur).`);
+  const baseRank = await backtestHyperparameterSet(
+    drawName,
+    history,
+    weights,
+    currentParams,
+    useSpatioTemporalHawkes,
+    searchContext,
+    diagnostics
+  );
+  log.push(`Rang de départ moyen des gagnants (Loss composite) : ${baseRank.toFixed(3)} (un rang plus bas est meilleur).`);
 
   // Extraire les caractéristiques pour le calcul du rayon spectral de covariance
   const extFeatures = await extractFeatures(drawName, history, 30);
@@ -427,25 +558,25 @@ export const tunePredictiveHyperparameters = async (
 
   // 1. Optimisation de hawkesDecay [0.05, 0.50]
   onProgress?.(18, "Optimisation cybernétique : Calibrage résonance Hawkes...");
-  const hawkesRes = await adaptiveParameterSearch('hawkesDecay', 0.05, 0.50, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  const hawkesRes = await adaptiveParameterSearch('hawkesDecay', 0.05, 0.50, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log, searchContext, diagnostics);
   currentParams.hawkesDecay = hawkesRes.bestVal;
   log.push(`Optimisation hawkesDecay -> ${hawkesRes.bestVal.toFixed(4)} (Rang: ${hawkesRes.bestRank.toFixed(3)})`);
 
   // 2. Optimisation de spatialSigma [0.5, 3.0]
   onProgress?.(24, "Optimisation cybernétique : Calibrage de la dispersion gaussienne...");
-  const sigmaRes = await adaptiveParameterSearch('spatialSigma', 0.5, 3.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  const sigmaRes = await adaptiveParameterSearch('spatialSigma', 0.5, 3.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log, searchContext, diagnostics);
   currentParams.spatialSigma = sigmaRes.bestVal;
   log.push(`Optimisation spatialSigma -> ${sigmaRes.bestVal.toFixed(4)} (Rang: ${sigmaRes.bestRank.toFixed(3)})`);
 
   // 3. Optimisation de gapVelocityWeight [0.2, 2.0]
   onProgress?.(30, "Optimisation cybernétique : Calibrage des vitesses de transition gap...");
-  const velocityRes = await adaptiveParameterSearch('gapVelocityWeight', 0.2, 2.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  const velocityRes = await adaptiveParameterSearch('gapVelocityWeight', 0.2, 2.0, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log, searchContext, diagnostics);
   currentParams.gapVelocityWeight = velocityRes.bestVal;
   log.push(`Optimisation gapVelocityWeight -> ${velocityRes.bestVal.toFixed(4)} (Rang: ${velocityRes.bestRank.toFixed(3)})`);
 
   // 4. Optimisation de bayesWindowRatio [0.05, 0.30]
   onProgress?.(36, "Optimisation cybernétique : Calibrage des probabilités de transition bayésiennes...");
-  const bayesRes = await adaptiveParameterSearch('bayesWindowRatio', 0.05, 0.30, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  const bayesRes = await adaptiveParameterSearch('bayesWindowRatio', 0.05, 0.30, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log, searchContext, diagnostics);
   currentParams.bayesWindowRatio = bayesRes.bestVal;
   log.push(`Optimisation bayesWindowRatio -> ${bayesRes.bestVal.toFixed(4)} (Rang: ${bayesRes.bestRank.toFixed(3)})`);
 
@@ -453,12 +584,16 @@ export const tunePredictiveHyperparameters = async (
   onProgress?.(42, "Optimisation cybernétique : Calibrage du micro-SGD learning rate...");
   const sgdMin = optimalSgdLR * 0.1;
   const sgdMax = optimalSgdLR * 2.0;
-  const sgdRes = await adaptiveParameterSearch('sgdLearningRate', sgdMin, sgdMax, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log);
+  const sgdRes = await adaptiveParameterSearch('sgdLearningRate', sgdMin, sgdMax, 4, drawName, history, weights, currentParams, useSpatioTemporalHawkes, log, searchContext, diagnostics);
   currentParams.sgdLearningRate = sgdRes.bestVal;
   log.push(`Optimisation sgdLearningRate -> ${sgdRes.bestVal.toFixed(5)} (Rang: ${sgdRes.bestRank.toFixed(3)})`);
 
   const accuracyGain = baseRank - sgdRes.bestRank;
-  log.push(`Optimisation terminée. Gain net d'alignement : ${accuracyGain.toFixed(3)} rangs.`);
+  log.push(`Optimisation terminée. Gain net d'alignement (Loss composite) : ${accuracyGain.toFixed(3)} rangs.`);
+  log.push(`Diagnostics de l'Optimisation: Evaluations tentées = ${diagnostics.attemptedEvaluations}, Échecs = ${diagnostics.failedEvaluations}`);
+  if (diagnostics.failedEvaluations > 0) {
+    log.push(`Échantillon d'erreurs: ${diagnostics.failureLogs.slice(0, 3).join(" | ")}`);
+  }
   onProgress?.(45, "Calibrage cybernétique achevé.");
 
   return {
