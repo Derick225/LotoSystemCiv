@@ -112,7 +112,7 @@ export const NexusEngine: React.FC = () => {
         }
     }, [analytics, setAnalyticsData]);
 
-    // 3. Génération Prédiction & Insights (Dépendant des Analytics)
+    // 3. Génération Prédiction & Insights (Dépendant des Analytics et Weights)
     useEffect(() => {
         if (!analytics || !history || history.length < 10) return;
 
@@ -143,7 +143,28 @@ export const NexusEngine: React.FC = () => {
                     analytics.regularity
                 );
                 if (mounted) setSmartInsights(insights);
+            } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : String(e);
+                logError(new AppError(msg || "Engine Error", "NEXUS_ENGINE_ERROR", "high", { error: e }), { source: 'NexusEngine' });
+            }
+        };
 
+        const t = setTimeout(() => {
+            runEngine();
+        }, 100);
+        return () => { 
+            mounted = false; 
+            clearTimeout(t);
+        };
+    }, [drawName, history, analytics, globalWeights, temporalDepth, setLastPrediction, setSmartInsights]);
+
+    // 4. Calibration & Forensic Automator (Dépendant de l'historique uniquement)
+    useEffect(() => {
+        if (!history || history.length < 10) return;
+
+        let mounted = true;
+        const runCalibration = async () => {
+            try {
                 // Calibration (Backtesting historique des prédictions)
                 const preds = await getPredictionHistoryAsync(drawName);
                 if (preds.length > 0 && mounted) {
@@ -190,13 +211,15 @@ export const NexusEngine: React.FC = () => {
                                     } else {
                                         hasTriggerableLearning = true;
                                     }
-
-                                    // Heavy calculation, yield to event loop
-                                    await new Promise(r => setTimeout(r, 10));
                                 } catch (e) {
                                     console.warn("Auto-Forensic failed for", item.id, e);
                                 }
                             }
+                        }
+                        
+                        // Yield to event loop every 5 items to keep UI responsive
+                        if (i % 5 === 0) {
+                            await new Promise(r => setTimeout(r, 5));
                         }
                     }
                     
@@ -204,7 +227,7 @@ export const NexusEngine: React.FC = () => {
                     if (hasTriggerableLearning && bgEnabled) {
                         try {
                             const learningResult = await LearningService.triggerAutoLearning(drawName);
-                            if (learningResult && learningResult.improvement && learningResult.weights) {
+                            if (learningResult && learningResult.improvement && learningResult.weights && mounted) {
                                 setGlobalWeights(learningResult.weights);
                             }
                         } catch (e) {
@@ -212,7 +235,7 @@ export const NexusEngine: React.FC = () => {
                         }
                     }
                     
-                    if (forensicGenerated) {
+                    if (forensicGenerated && mounted) {
                         syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
                     }
                     
@@ -220,31 +243,32 @@ export const NexusEngine: React.FC = () => {
                     const updatedPreds = historyChanged ? await getPredictionHistoryAsync(drawName) : preds;
                     const perf = calculateHistoricalPerformance(updatedPreds, history);
                     
-                    setCalibration({
-                        overallScore: 0.25,
-                        reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
-                        bias: 'NEUTRAL',
-                        sampleSize: perf.analyzedDrawsCount,
-                        baseline: 0.2,
-                        variance: 0.05,
-                        trend: 0,
-                        confidence: 0.8
-                    });
+                    if (mounted) {
+                        setCalibration({
+                            overallScore: 0.25,
+                            reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
+                            bias: 'NEUTRAL',
+                            sampleSize: perf.analyzedDrawsCount,
+                            baseline: 0.2,
+                            variance: 0.05,
+                            trend: 0,
+                            confidence: 0.8
+                        });
+                    }
                 }
             } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : String(e);
-                logError(new AppError(msg || "Engine Error", "NEXUS_ENGINE_ERROR", "high", { error: e }), { source: 'NexusEngine' });
+                console.error("Calibration Error", e);
             }
         };
 
         const t = setTimeout(() => {
-            runEngine();
-        }, 100);
+            runCalibration();
+        }, 500); // give the UI time to render first
         return () => { 
             mounted = false; 
             clearTimeout(t);
         };
-    }, [drawName, history, analytics, globalWeights, setLastPrediction, setSmartInsights, setCalibration]);
+    }, [drawName, history, setCalibration, setGlobalWeights]);
 
     // Override refresh in store to use React Query refetch
     useEffect(() => {

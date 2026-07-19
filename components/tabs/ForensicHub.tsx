@@ -4,7 +4,7 @@ import { deletePrediction } from "../../services/predictionHistoryService";
 import { deleteForensicReportLocal, syncForensicReportsWithCloud } from "../../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../../services/syncService";
 import { PredictionForensics } from "../PredictionForensics";
-import { Target, Trash2, RefreshCw, Cloud, History, Clock, ShieldAlert, CheckCircle2, TrendingUp, Gauge } from "lucide-react";
+import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, Activity, CheckCircle2 } from "lucide-react";
 import { ForensicReport, PredictionHistoryItem } from "../../types";
 import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";

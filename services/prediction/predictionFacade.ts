@@ -25,6 +25,7 @@ import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
+import { globalCache, CACHE_TTL } from "../cache/CacheService";
 
 const TICKET_SIZE = 5;
 
@@ -97,8 +98,11 @@ const evaluatePredictionStability = (
   history: DrawResult[],
 ): number => {
   const baseSet = new Set(baseSelection);
-  const activeKeys = (Object.keys(weights) as AlgoKey[])
-    .filter((k) => (weights[k] || 0) > (1.0 / Object.keys(weights).length))
+  const weightKeys = Object.keys(weights) as AlgoKey[];
+  if (weightKeys.length === 0) return 100;
+
+  const activeKeys = weightKeys
+    .filter((k) => (weights[k] || 0) > (1.0 / weightKeys.length))
     .sort((a, b) => (weights[b] || 0) - (weights[a] || 0))
     .slice(0, 3);
 
@@ -107,7 +111,7 @@ const evaluatePredictionStability = (
   let totalOverlap = 0;
   activeKeys.forEach((k) => {
     // Perturbation proportionnelle à l'inverse du nombre d'algorithmes
-    const perturbationFactor = 1.0 + (1.0 / Object.keys(weights).length);
+    const perturbationFactor = 1.0 + (1.0 / weightKeys.length);
     const perturbedWeights = { ...weights };
     perturbedWeights[k] = (perturbedWeights[k] || 0) * perturbationFactor;
     const normPerturbed = normalizeWeights(perturbedWeights, { bypassCap: true });
@@ -177,7 +181,8 @@ export const applyDeterministicMicroSgd = async (
   if (K <= 0) return adjustedWeights;
 
   const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
-  const eta = baseEta * (1.0 - Math.pow(entropyValue, 2.0));
+  const safeEntropy = (typeof entropyValue === 'number' && !isNaN(entropyValue)) ? entropyValue : 0.5;
+  const eta = baseEta * (1.0 - Math.pow(safeEntropy, 2.0));
 
   // Cache des bundles d'algos par taille de sous-historique
   const bundleCache = new Map<number, AlgoBundle>();
@@ -239,7 +244,7 @@ export const applyDeterministicMicroSgd = async (
         let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
         
         // La variation maximale autorisée dépend dynamiquement de l'entropie (plus c'est chaotique, plus on bride)
-        const variationClamp = 0.05 + 0.20 * (1.0 - entropyValue); 
+        const variationClamp = 0.05 + 0.20 * (1.0 - safeEntropy); 
         const minW = oldWeight * (1.0 - variationClamp);
         const maxW = oldWeight * (1.0 + variationClamp);
         newWeight = Math.max(minW, Math.min(maxW, newWeight));
@@ -255,7 +260,7 @@ export const applyDeterministicMicroSgd = async (
   }
 
   // Taux de tolérance aux échecs continu, inversement proportionnel à l'entropie (les environnements stables pardonnent moins les erreurs)
-  const dynamicFailureTolerance = 0.15 + 0.20 * entropyValue;
+  const dynamicFailureTolerance = 0.15 + 0.20 * safeEntropy;
   if (attempted > 0 && failedDraws / attempted > dynamicFailureTolerance) {
     logger.warn(
       { failedDraws, attempted, rate: failedDraws / attempted, threshold: dynamicFailureTolerance },
@@ -1024,7 +1029,6 @@ export const finalizePredictionPayload = async (
 /**
  * Cache global des prédictions & Point d'Entrée Orchestrateur Unique
  */
-import { globalCache, CACHE_TTL } from "../cache/CacheService";
 
 export const generateMasterPrediction = async (
   drawName: string,

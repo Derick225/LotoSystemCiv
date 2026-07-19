@@ -48,23 +48,31 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
   const timeStr = drawInfo ? drawInfo.time : "21:00";
   const [drawHour, drawMinute] = timeStr.split(':').map(Number);
 
-  const sortedHistory = [...historyUpdates].sort((a, b) => {
-    const d1 = new Date(a.date.split('/').reverse().join('-')).getTime();
-    const d2 = new Date(b.date.split('/').reverse().join('-')).getTime();
-    return d1 !== d2 ? d1 - d2 : a.id.localeCompare(b.id); // Tri déterministe
-  });
+  let bestMatch: DrawResult | null = null;
+  let bestDiff = Infinity;
 
-  return sortedHistory.find(d => {
-    if (!d.date) return false;
+  for (const d of historyUpdates) {
+    if (!d.date) continue;
     const resultDrawName = d.drawName || (d as any).draw_name;
     if (resultDrawName && prediction.drawName && resultDrawName.trim().toLowerCase() !== prediction.drawName.trim().toLowerCase()) {
-      return false;
+      continue;
     }
     const [day, month, year] = d.date.split('/').map(Number);
     const drawOccurrence = new Date(year, month - 1, day, drawHour, drawMinute, 0).getTime();
     const diff = drawOccurrence - predTime;
-    return diff >= -TIME_CONSTANTS.GRACE_PERIOD_MS && diff < TIME_CONSTANTS.MAX_LOOKAHEAD_MS;
-  }) || null;
+    
+    if (diff >= -TIME_CONSTANTS.GRACE_PERIOD_MS && diff < TIME_CONSTANTS.MAX_LOOKAHEAD_MS) {
+        // We want the draw that is closest in the future (smallest positive diff, or smallest absolute diff if negative)
+        // Wait, if it's the exact draw, diff should be small.
+        const absDiff = Math.abs(diff);
+        if (absDiff < bestDiff) {
+            bestDiff = absDiff;
+            bestMatch = d;
+        }
+    }
+  }
+  
+  return bestMatch;
 };
 
 // ... (existing imports)
