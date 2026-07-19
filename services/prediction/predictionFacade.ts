@@ -482,7 +482,7 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
         weights: context.weightsToUse,
         symbioticContext: context.symbioticContext,
         metrics: context.metrics
-      });
+      }, { suppressErrorLogging: true });
 
       const isPayloadValid = (
         result &&
@@ -508,7 +508,7 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      logger.error(
+      logger.warn(
         { drawName: context.drawName, error: errorMsg },
         "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
       );
@@ -1030,6 +1030,68 @@ export const finalizePredictionPayload = async (
  * Cache global des prédictions & Point d'Entrée Orchestrateur Unique
  */
 
+const runLocalPredictionViaWorker = async (
+  context: PredictionRuntimeContext
+): Promise<Prediction> => {
+  if (typeof Worker !== "undefined") {
+    return new Promise<Prediction>((resolve, reject) => {
+      try {
+        const worker = new Worker(
+          new URL("../workers/prediction.worker.ts", import.meta.url),
+          { type: "module" }
+        );
+
+        const timeoutId = setTimeout(() => {
+          worker.terminate();
+          reject(new Error("Timeout du Web Worker de prédiction locale"));
+        }, 60000);
+
+        worker.onmessage = (e: MessageEvent) => {
+          const { success, result, error, isProgress, progress, message } = e.data;
+          if (isProgress) {
+            context.onProgress?.(progress, message);
+            return;
+          }
+          clearTimeout(timeoutId);
+          if (success) {
+            resolve(result);
+          } else {
+            reject(new Error(error || "Erreur inconnue du worker de prédiction"));
+          }
+          worker.terminate();
+        };
+
+        worker.onerror = (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+          worker.terminate();
+        };
+
+        worker.postMessage({
+          taskId: `MASTER_${Date.now()}`,
+          type: "master",
+          drawName: context.drawName,
+          history: context.history,
+          temporalDepth: context.temporalDepth,
+          weightsToUse: context.weightsToUse,
+          metrics: context.metrics,
+          symbioticContext: context.symbioticContext,
+          skipTraining: context.skipTraining,
+          adversarialMode: context.adversarialMode,
+          forcedOutsiderCount: context.forcedOutsiderCount,
+          isForensicOptimized: context.isForensicOptimized,
+          useSpatioTemporalHawkes: context.useSpatioTemporalHawkes ?? true,
+          preloadedForensicReports: context.preloadedForensicReports
+        });
+      } catch (workerError) {
+        reject(workerError);
+      }
+    });
+  } else {
+    throw new Error("Web Worker non supporté dans cet environnement");
+  }
+};
+
 export const generateMasterPrediction = async (
   drawName: string,
   rawHistory: DrawResult[],
@@ -1078,7 +1140,7 @@ export const generateMasterPrediction = async (
           return cloudResult;
         }
       } catch (e) {
-        logger.error(
+        logger.warn(
           { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
           "[predictionFacade] Échec technique ou transport du Cloud complet. Basculement sur le Local complet."
         );
@@ -1087,7 +1149,19 @@ export const generateMasterPrediction = async (
       // PHASE 2 — Local Complet
       try {
         context.onProgress?.(25, "Lancement du pipeline Local Complet...");
-        return await runLocalPredictionPipeline(context);
+        if (typeof Worker !== "undefined") {
+          try {
+            return await runLocalPredictionViaWorker(context);
+          } catch (workerErr) {
+            logger.warn(
+              { drawName: context.drawName, error: workerErr instanceof Error ? workerErr.message : String(workerErr) },
+              "[predictionFacade] Échec du Web Worker de prédiction locale. Basculement sur le thread principal pour Local Complet."
+            );
+            return await runLocalPredictionPipeline(context);
+          }
+        } else {
+          return await runLocalPredictionPipeline(context);
+        }
       } catch (e) {
         logger.error(
           { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },

@@ -44,6 +44,8 @@ export const useAutonomousAgent = () => {
     };
 
     useEffect(() => {
+        let active = true;
+
         if (!isAutonomousAgentActive) {
             isRunningRef.current = false;
             return;
@@ -139,14 +141,14 @@ export const useAutonomousAgent = () => {
         const agentLoop = async () => {
             logAction("Agent autonome en ligne. Boucle déterministe lancée.", "SCAN");
             
-            while (isRunningRef.current) {
+            while (active && isRunningRef.current) {
                 const intervalSecString = localStorage.getItem('nexus_agent_interval_sec');
                 const intervalSec = intervalSecString ? parseFloat(intervalSecString) : 8;
                 
                 // 3. DÉTERMINISME TEMPOREL
                 // Suppression du bruit aléatoire (lcgGlobalRandom). Le cycle est strict.
                 await new Promise(resolve => setTimeout(resolve, intervalSec * 1000));
-                if (!isRunningRef.current) break;
+                if (!active || !isRunningRef.current) break;
 
                 await performAutoTune();
             }
@@ -163,6 +165,7 @@ export const useAutonomousAgent = () => {
         window.addEventListener('TRIGGER_AUTONOMOUS_AUTOTUNE', handleForceTrigger);
 
         return () => {
+            active = false;
             isRunningRef.current = false;
             window.removeEventListener('TRIGGER_AUTONOMOUS_AUTOTUNE', handleForceTrigger);
             logAction("Agent autonome hors-ligne.", "WARNING");

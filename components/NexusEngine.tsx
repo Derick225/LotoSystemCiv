@@ -5,7 +5,7 @@ import { getAlgoWeights, generateMasterPrediction } from '../services/prediction
 import { generateEmpiricalCalibration } from '../services/prediction/ticketAnalysisService';
 import { generateSmartInsights } from '../services/insightService';
 import { getPredictionHistoryAsync, calculateHistoricalPerformance, linkPredictionToResult, findMatchingResultForPrediction } from '../services/predictionHistoryService';
-import { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, syncForensicReportsWithCloud } from '../services/postPredictionAnalysisService';
+import { performForensicAnalysis, saveForensicReport, syncForensicReportsWithCloud, getLocalForensicReports } from '../services/postPredictionAnalysisService';
 import { LearningService } from '../services/learningService';
 import { AppError, logError } from '../utils/AppError';
 import { useAutonomousAgent } from '../hooks/useAutonomousAgent';
@@ -168,6 +168,9 @@ export const NexusEngine: React.FC = () => {
                 // Calibration (Backtesting historique des prédictions)
                 const preds = await getPredictionHistoryAsync(drawName);
                 if (preds.length > 0 && mounted) {
+                    // Preload all local forensic reports to prevent O(N * M) IndexedDB lookups/parsing inside the loop
+                    const allLocalReports = await getLocalForensicReports();
+
                     // --- AUTO-LINKER & FORENSIC AUTOMATOR ---
                     let historyChanged = false;
                     let forensicGenerated = false;
@@ -189,7 +192,7 @@ export const NexusEngine: React.FC = () => {
 
                         // Automate Forensic Analysis if linked and no report exists
                         if (match) {
-                            const existingReport = await getForensicReportByPredictionId(item.id);
+                            const existingReport = allLocalReports.find(r => r.predictionId === item.id);
                             if (!existingReport) {
                                 try {
                                     const report = await performForensicAnalysis(
