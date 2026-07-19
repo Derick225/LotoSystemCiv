@@ -1,13 +1,14 @@
 
-import React, { ReactNode, useState, useEffect } from 'react';
+import React, { ReactNode, useState, useEffect, lazy, Suspense } from 'react';
 import { Home, Settings, Wallet, Activity, LogOut, WifiOff, Maximize, Minimize } from 'lucide-react';
 import { MarqueeTicker } from '../ui/MarqueeTicker';
-import { CommandPalette } from '../ui/CommandPalette';
 import { useNexusStore } from '../../store/useNexusStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
-import { QuantumInspector } from '../QuantumInspector';
 import { InstallButton } from '../ui/InstallButton';
+
+const CommandPalette = lazy(() => import('../ui/CommandPalette').then(m => ({ default: m.CommandPalette })));
+const QuantumInspector = lazy(() => import('../QuantumInspector').then(m => ({ default: m.QuantumInspector })));
 
 export type ViewMode = 'home' | 'admin';
 
@@ -188,8 +189,10 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
       </div>
 
-      <QuantumInspector />
-      <CommandPalette isOpen={showPalette} onClose={() => setShowPalette(false)} onNavigate={(v) => setViewMode(v as ViewMode)} onAction={(a) => a === 'wallet' && setShowWallet(true)} />
+      <Suspense fallback={null}>
+        <QuantumInspector />
+        <CommandPalette isOpen={showPalette} onClose={() => setShowPalette(false)} onNavigate={(v) => setViewMode(v as ViewMode)} onAction={(a) => a === 'wallet' && setShowWallet(true)} />
+      </Suspense>
     </div>
   );
 };

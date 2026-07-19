@@ -640,30 +640,39 @@ export const applyForensicAdjustments = async (
 export const runLocalPredictionPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
   context.onProgress?.(5, "Initialisation de l'ADN algorithmique...");
   initializeLcgForDraw(context.drawName);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(10, "Optimisation des hyperparamètres...");
   const weights = await resolvePredictionWeights(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(30, "Calcul des métriques avancées...");
   const advancedMetrics = await computeAdvancedMetricsBundle(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(50, "Extraction des descripteurs de caractéristiques...");
   const features = await extractPredictionFeatures(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(70, "Évaluation et scoring des numéros...");
   const baseScores = scorePredictionNumbers(context, features, weights, advancedMetrics);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(80, "Résolution des ajustements forensiques...");
   const forensicAdjustments = await resolveForensicAdjustments(context, baseScores);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
   const { rescored, enhancedMetrics } = rescoreWithAdjustments(context, features, weights, advancedMetrics, forensicAdjustments);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(90, "Désensibilisation au bruit (PCA)...");
   const denoised = await applyPredictionDenoising(context, rescored, weights, enhancedMetrics);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(95, "Formulation finale et sélection des combinaisons...");
   const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, denoised, features);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
   return await finalizePredictionPayload(context, denoised, selection, candidates, weights, enhancedMetrics, features, shrinkageApplied, shrinkageFactor);

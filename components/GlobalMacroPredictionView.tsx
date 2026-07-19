@@ -75,7 +75,10 @@ export const GlobalMacroPredictionView: React.FC = () => {
   }, [temporalDepth, globalWeights, adversarialMode, forcedOutsiderCount, showToast]);
 
   useEffect(() => {
-    loadAllHistoryAndPredict();
+    const t = setTimeout(() => {
+      loadAllHistoryAndPredict();
+    }, 150);
+    return () => clearTimeout(t);
   }, [loadAllHistoryAndPredict]);
 
   const consensusPercentages = useMemo(() => {

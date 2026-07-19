@@ -24,6 +24,11 @@ export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
     ];
 
     useEffect(() => {
+        if (sessionStorage.getItem('nexus_booted') === 'true') {
+            onComplete();
+            return;
+        }
+
         let timeouts: number[] = [];
 
         const runSequence = async () => {
@@ -33,6 +38,7 @@ export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
                 console.warn("Audio boot failed", e);
             }
             
+            // Accelerated boot sequence for speed
             bootSteps.forEach((s, i) => {
                 const t = window.setTimeout(() => {
                     setStep(i + 1);
@@ -41,13 +47,14 @@ export const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
                         if (i < bootSteps.length - 1) audioEngine.play('click');
                         else audioEngine.play('success');
                     } catch (e) { /* ignore audio error */ }
-                }, s.delay);
+                }, s.delay * 0.15); // Fast forward 85%
                 timeouts.push(t);
             });
 
             const finalT = window.setTimeout(() => {
+                sessionStorage.setItem('nexus_booted', 'true');
                 onComplete();
-            }, 4200);
+            }, 4200 * 0.15); // Fast forward 85%
             timeouts.push(finalT);
         };
 

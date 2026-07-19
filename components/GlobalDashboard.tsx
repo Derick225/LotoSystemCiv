@@ -456,6 +456,60 @@ const NextDrawWidget = React.memo(
   },
 );
 
+const IsolatedNextDrawWidget = React.memo(() => {
+  const [nextDraw, setNextDraw] = useState<{
+    name: string;
+    timeLeft: string;
+    isUrgent: boolean;
+    time: string;
+    day: string;
+  } | null>(null);
+
+  useEffect(() => {
+    // Initial call to avoid 1s delay
+    const updateDraw = () => {
+      const next = getNextScheduledDraw();
+      if (next) {
+        const now = new Date();
+        const [h, m] = next.time.split(":").map(Number);
+        const targetDate = new Date();
+        targetDate.setHours(h, m, 0, 0);
+        if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
+
+        const diffMs = targetDate.getTime() - now.getTime();
+
+        const isUrgent = diffMs < 600000;
+        const hh = Math.floor(diffMs / 3600000);
+        const mm = Math.floor((diffMs % 3600000) / 60000);
+        const ss = Math.floor((diffMs % 60000) / 1000);
+
+        setNextDraw({
+          name: next.name,
+          timeLeft: `${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`,
+          isUrgent,
+          time: next.time,
+          day: next.day,
+        });
+      }
+    };
+    updateDraw();
+    const timer = setInterval(updateDraw, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!nextDraw) return null;
+
+  return (
+    <NextDrawWidget
+      isUrgent={nextDraw.isUrgent}
+      timeLeft={nextDraw.timeLeft}
+      day={nextDraw.day}
+      time={nextDraw.time}
+      name={nextDraw.name}
+    />
+  );
+});
+
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
   ({ onSelectDraw }) => {
     const { showToast } = useToast();
@@ -490,13 +544,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
 
     // const { data: globalHotData = [] } = useGlobalStats(drawName);
 
-    const [nextDraw, setNextDraw] = useState<{
-      name: string;
-      timeLeft: string;
-      isUrgent: boolean;
-      time: string;
-      day: string;
-    } | null>(null);
     const [fullSyncing, setFullSyncing] = useState(false);
 
 
@@ -595,32 +642,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     }, [history, showToast, refreshData]);
 
     useEffect(() => {
-      const timer = setInterval(() => {
-        const next = getNextScheduledDraw();
-        if (next) {
-          const now = new Date();
-          const [h, m] = next.time.split(":").map(Number);
-          const targetDate = new Date();
-          targetDate.setHours(h, m, 0, 0);
-          if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
-
-          const diffMs = targetDate.getTime() - now.getTime();
-
-          const isUrgent = diffMs < 600000;
-          const hh = Math.floor(diffMs / 3600000);
-          const mm = Math.floor((diffMs % 3600000) / 60000);
-          const ss = Math.floor((diffMs % 60000) / 1000);
-
-          setNextDraw({
-            name: next.name,
-            timeLeft: `${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`,
-            isUrgent,
-            time: next.time,
-            day: next.day,
-          });
-        }
-      }, 1000);
-
       // Auto-sync exactly ~30 mins after any draw time
       const syncTimer = setInterval(async () => {
         const now = new Date();
@@ -670,7 +691,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       }, 60 * 1000); // Verify conditions every minute
 
       return () => {
-        clearInterval(timer);
         clearInterval(syncTimer);
       };
     }, []);
@@ -740,6 +760,8 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
         showToast("Erreur lors de la génération du rapport.", "error");
       }
     }, [history, globalWeights, showToast]);
+
+    const nextDrawInfo = getNextScheduledDraw();
 
     return (
       <div className="space-y-8 md:space-y-12 animate-fade-in pb-24 w-full max-w-7xl mx-auto">
@@ -858,15 +880,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           <>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-10">
               {/* PROCHAIN TIRAGE WIDGET */}
-              {nextDraw && (
-                <NextDrawWidget
-                  isUrgent={nextDraw.isUrgent}
-                  timeLeft={nextDraw.timeLeft}
-                  day={nextDraw.day}
-                  time={nextDraw.time}
-                  name={nextDraw.name}
-                />
-              )}
+              <IsolatedNextDrawWidget />
             </div>
 
             {/* TAB SELECTOR FOR THE HOME CONSOLE */}
@@ -972,7 +986,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                       ))
                     : (summary as SummaryItem[]).map((item, idx) => {
                         const isCompleted = item.result !== null;
-                        const isNext = nextDraw?.name === item.name;
+                        const isNext = nextDrawInfo?.name === item.name;
                         const config = SLOT_CONFIG[item.time] || {
                           color: "text-slate-400",
                           icon: "⏱️",

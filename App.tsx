@@ -8,25 +8,24 @@ import { AppShell, ViewMode } from './components/layout/AppShell';
 import { GlobalErrorBoundary } from './components/ui/GlobalErrorBoundary';
 import { GlobalErrorListener } from './components/GlobalErrorListener';
 import { ToastProvider, useToast } from './components/ui/Toast';
-import { BootSequence } from './components/intro/BootSequence';
-import { TutorialOverlay } from './components/ui/TutorialOverlay';
-import { InstallPrompt } from './components/InstallPrompt';
-import { AuthScreen } from './components/auth/AuthScreen';
-import { ResetPasswordScreen } from './components/auth/ResetPasswordScreen';
-import { SubscriptionWall } from './components/auth/SubscriptionWall';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { queryClient, idbPersister } from './services/queryClient';
 import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
 import { getSettings, saveSettings } from './services/userPreferencesService';
-import { GlobalNumberHUD } from './components/ui/GlobalNumberHUD';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw } from './types';
 import { ALL_DRAWS } from './constants';
-
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Lazy loading des composants lourds pour optimiser le TTI (Time To Interactive)
+const BootSequence = lazy(() => import('./components/intro/BootSequence').then(m => ({ default: m.BootSequence })));
+const TutorialOverlay = lazy(() => import('./components/ui/TutorialOverlay').then(m => ({ default: m.TutorialOverlay })));
+const InstallPrompt = lazy(() => import('./components/InstallPrompt').then(m => ({ default: m.InstallPrompt })));
+const AuthScreen = lazy(() => import('./components/auth/AuthScreen').then(m => ({ default: m.AuthScreen })));
+const ResetPasswordScreen = lazy(() => import('./components/auth/ResetPasswordScreen').then(m => ({ default: m.ResetPasswordScreen })));
+const SubscriptionWall = lazy(() => import('./components/auth/SubscriptionWall').then(m => ({ default: m.SubscriptionWall })));
+const GlobalNumberHUD = lazy(() => import('./components/ui/GlobalNumberHUD').then(m => ({ default: m.GlobalNumberHUD })));
+
 const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m => ({ default: m.GlobalDashboard })));
 const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
@@ -72,7 +71,9 @@ const AppContent: React.FC = () => {
   
   const { session, isAdmin, loading: authLoading, subscription, refreshSubscription } = useAuth();
   
-  const [isBooted, setIsBooted] = useState(false);
+  const [isBooted, setIsBooted] = useState(() => {
+    return sessionStorage.getItem('nexus_booted') === 'true';
+  });
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
@@ -189,19 +190,35 @@ const AppContent: React.FC = () => {
   if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
   
   if (isResettingPassword) {
-    return <ResetPasswordScreen onSuccess={() => setIsResettingPassword(false)} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <ResetPasswordScreen onSuccess={() => setIsResettingPassword(false)} />
+      </Suspense>
+    );
   }
 
   if (!session) {
-    return <AuthScreen onSuccess={() => {}} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <AuthScreen onSuccess={() => {}} />
+      </Suspense>
+    );
   }
 
   if (!isAdmin && subscription?.status === 'expired') {
-      return <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />;
+      return (
+        <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+          <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />
+        </Suspense>
+      );
   }
 
   if (!isBooted) {
-    return <BootSequence onComplete={() => setIsBooted(true)} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <BootSequence onComplete={() => setIsBooted(true)} />
+      </Suspense>
+    );
   }
 
     const renderContent = () => {
@@ -261,9 +278,11 @@ const AppContent: React.FC = () => {
       >
         {renderContent()}
       </AppShell>
-      <GlobalNumberHUD />
-      <TutorialOverlay />
-      <InstallPrompt />
+      <Suspense fallback={null}>
+        <GlobalNumberHUD />
+        <TutorialOverlay />
+        <InstallPrompt />
+      </Suspense>
     </>
   );
 };

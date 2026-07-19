@@ -151,7 +151,11 @@ export const NexusEngine: React.FC = () => {
                     let historyChanged = false;
                     let forensicGenerated = false;
                     let hasTriggerableLearning = false;
-                    for (const item of preds) {
+                    
+                    // Chunk the processing to avoid blocking main thread
+                    for (let i = 0; i < preds.length; i++) {
+                        if (!mounted) break;
+                        const item = preds[i];
                         let match = item.drawResultId ? history.find(r => r.id === item.drawResultId) : null;
                         
                         if (!item.drawResultId) {
@@ -178,7 +182,7 @@ export const NexusEngine: React.FC = () => {
                                     );
                                     saveForensicReport(report);
                                     forensicGenerated = true;
-
+                                    
                                     // AUTO-TUNING: Self-Learning based on Forensic Reports
                                     // PROTECTION CYGNE NOIR: On ne s'optimise pas sur le bruit statistique pur
                                     if (report.isBlackSwan) {
@@ -187,8 +191,10 @@ export const NexusEngine: React.FC = () => {
                                         hasTriggerableLearning = true;
                                     }
 
-                                } catch (error) {
-                                    console.error("Failed to automate forensic analysis for prediction", item.id, error);
+                                    // Heavy calculation, yield to event loop
+                                    await new Promise(r => setTimeout(r, 10));
+                                } catch (e) {
+                                    console.warn("Auto-Forensic failed for", item.id, e);
                                 }
                             }
                         }
@@ -231,8 +237,13 @@ export const NexusEngine: React.FC = () => {
             }
         };
 
-        runEngine();
-        return () => { mounted = false; };
+        const t = setTimeout(() => {
+            runEngine();
+        }, 100);
+        return () => { 
+            mounted = false; 
+            clearTimeout(t);
+        };
     }, [drawName, history, analytics, globalWeights, setLastPrediction, setSmartInsights, setCalibration]);
 
     // Override refresh in store to use React Query refetch

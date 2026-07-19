@@ -4,7 +4,7 @@ import { deletePrediction } from "../../services/predictionHistoryService";
 import { deleteForensicReportLocal, syncForensicReportsWithCloud } from "../../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../../services/syncService";
 import { PredictionForensics } from "../PredictionForensics";
-import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, Activity, ShieldAlert, CheckCircle2, TrendingUp, Gauge, BrainCircuit } from "lucide-react";
+import { Target, Trash2, RefreshCw, Cloud, History, Clock, ShieldAlert, CheckCircle2, TrendingUp, Gauge } from "lucide-react";
 import { ForensicReport, PredictionHistoryItem } from "../../types";
 import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";
@@ -12,7 +12,6 @@ import { audioEngine } from "../../utils/audioEngine";
 import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
-import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
 import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
 
 type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrift" | "neuralfeedback";
@@ -33,31 +32,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
   const [syncing, setSyncing] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
   const [mode, setMode] = useState<ForensicMode>("prediction");
-
-  const [auditResult, setAuditResult] = useState<any>(null);
-  const [auditing, setAuditing] = useState(false);
-
-  const runAudit = async () => {
-    setAuditing(true);
-    try {
-      const { runHistoricalShrinkageBacktest } = await import("../../services/prediction/shrinkageVerificationService");
-      const report = await runHistoricalShrinkageBacktest(drawName, history, globalWeights);
-      setAuditResult(report);
-      try { audioEngine.play("success"); } catch(e) {}
-    } catch (err) {
-      console.error(err);
-      try { audioEngine.play("error"); } catch(e) {}
-      showToast("Erreur lors de l'exécution de l'audit arithmétique.", "error");
-    } finally {
-      setAuditing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (mode === "shrinkagedrift" && !auditResult && !auditing) {
-      runAudit();
-    }
-  }, [mode, auditResult, auditing]);
 
   // SYMBIOSE : Écouteur d'événements pour navigation croisée
   useEffect(() => {
@@ -164,11 +138,9 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
         <div className="overflow-x-auto scrollbar-hide pb-2 mask-fade-right">
           <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-2xl w-max border border-slate-200 dark:border-slate-700 shadow-inner">
             {[
-              { id: "prediction", label: "Rapports", icon: Target, color: "text-slate-900 dark:text-white" },
+              { id: "prediction", label: "Rapports & Audit", icon: Target, color: "text-slate-900 dark:text-white" },
               { id: "historique", label: "Historique", icon: History, color: "text-indigo-500" },
-              { id: "timemachine", label: "Time Machine", icon: Clock, color: "text-fuchsia-500" },
-              { id: "shrinkagedrift", label: "Audit Arithmétique", icon: Activity, color: "text-emerald-500" },
-              { id: "neuralfeedback", label: "Neural Feedback", icon: BrainCircuit, color: "text-amber-500" }
+              { id: "timemachine", label: "Time Machine", icon: Clock, color: "text-fuchsia-500" }
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -191,12 +163,6 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
       </div>
 
       <div className="flex-1 min-w-0 w-full space-y-8">
-        {mode === "neuralfeedback" && (
-          <div className="space-y-8 animate-slide-up">
-            <NeuralFeedbackPanel />
-          </div>
-        )}
-
         {mode === "historique" && (
           <div className="space-y-8 animate-slide-up">
             <PredictionHistory drawName={drawName} />
@@ -385,174 +351,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
           </div>
         )}
 
-        {mode === "shrinkagedrift" && (
-          <div className="space-y-8 animate-slide-up">
-            <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-6 md:p-10 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-                <div>
-                  <h3 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                    <Activity className="text-emerald-500" size={24} />
-                    Audit de Dérive Arithmétique Bayésienne
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Analyse continue de l'estimateur James-Stein et recherche de dérives silencieuses sur les données réelles du passé.
-                  </p>
-                </div>
-                <button
-                  onClick={runAudit}
-                  disabled={auditing}
-                  className="px-5 py-2.5 bg-slate-900 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 disabled:opacity-55 shadow-md active:scale-95 transition-all cursor-pointer animate-fade-in"
-                >
-                  <RefreshCw size={14} className={auditing ? "animate-spin" : ""} />
-                  <span>{auditing ? "Analyse en cours..." : "Lancer l'Audit"}</span>
-                </button>
-              </div>
 
-              {auditing && (
-                <div className="p-8 text-center space-y-4">
-                  <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                  <p className="text-sm font-bold text-slate-600 dark:text-slate-400 animate-pulse">
-                    Reconstitution chronologique des tirages passés et calcul continu de l'estimateur James-Stein...
-                  </p>
-                </div>
-              )}
-
-              {!auditing && auditResult && (
-                <div className="space-y-8 animate-fade-in">
-                  
-                  {/* CARD DE L'INDICE GLOBAL */}
-                  <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-150 dark:border-slate-850 flex flex-col md:flex-row items-center justify-between gap-6">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-16 h-16 rounded-full flex items-center justify-center font-black text-xl border-4 ${
-                        auditResult.integrityIndex >= 85
-                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500 dark:text-emerald-400"
-                          : auditResult.integrityIndex >= 60
-                          ? "bg-amber-500/10 text-amber-600 border-amber-500 dark:text-amber-400"
-                          : "bg-rose-500/10 text-rose-600 border-rose-500 dark:text-rose-400"
-                      }`}>
-                        {auditResult.integrityIndex}%
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-black uppercase tracking-wider text-slate-400">Indice d'Intégrité Arithmétique</h4>
-                        <span className={`text-xl font-bold ${
-                          auditResult.integrityIndex >= 85
-                            ? "text-emerald-500"
-                            : auditResult.integrityIndex >= 60
-                            ? "text-amber-500"
-                            : "text-rose-500"
-                        }`}>
-                          {auditResult.integrityIndex >= 85
-                            ? "Excellent alignement bayésien"
-                            : auditResult.integrityIndex >= 60
-                            ? "Dérive arithmétique modérée"
-                            : "Ajustement mathématique urgent requis"}
-                        </span>
-                      </div>
-                    </div>
-                    {auditResult.remediationAction && (
-                      <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 md:max-w-md">
-                        💡 {auditResult.remediationAction}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* SECTION DES METRIQUES */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">James-Stein Gain</span>
-                        <TrendingUp className="text-indigo-500" size={16} />
-                      </div>
-                      <span className={`text-2xl font-black ${
-                        auditResult.relativeAccuracyGain >= 0
-                          ? "text-emerald-500"
-                          : "text-rose-500"
-                      }`}>
-                        {auditResult.relativeAccuracyGain >= 0 ? "+" : ""}{auditResult.relativeAccuracyGain.toFixed(2)} rangs
-                      </span>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
-                        {auditResult.relativeAccuracyGain >= 0
-                          ? "La réduction bayésienne améliore l'exactitude de classement des numéros gagnants."
-                          : "La réduction bayésienne dégrade les numéros gagnants (dérive d'exactitude active)."}
-                      </p>
-                    </div>
-
-                    <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Moyenne Facteur B</span>
-                        <Gauge className="text-amber-500" size={16} />
-                      </div>
-                      <span className="text-2xl font-black text-slate-800 dark:text-white">
-                        {(auditResult.shrinkageFactorStats.mean * 100).toFixed(1)}%
-                      </span>
-                      <span className="text-xs text-slate-400 block mt-1">
-                        Rang d'amplitude: [{ (auditResult.shrinkageFactorStats.min * 100).toFixed(1) }% - { (auditResult.shrinkageFactorStats.max * 100).toFixed(1) }%]
-                      </span>
-                    </div>
-
-                    <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Stabilité de Covariance</span>
-                        <Activity className="text-emerald-500" size={16} />
-                      </div>
-                      <span className="text-2xl font-black text-slate-800 dark:text-white">
-                        {auditResult.shrinkageFactorStats.variance.toFixed(4)}
-                      </span>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
-                        Variance du facteur B sur l'échantillon. Une valeur &lt; 0.08 garantit une transition saine sans chaos local.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* RAPPORT DE DÉRIVES SPÉCIFIQUES */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Détection d'anomalies spécifiques</h4>
-                    {auditResult.detectedDrifts.length === 0 ? (
-                      <div className="p-5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 dark:bg-emerald-500/5 rounded-2xl border border-emerald-500/20 flex items-center gap-3 text-sm font-medium">
-                        <CheckCircle2 size={18} />
-                        <span>Aucune anomalie d'inférence détectée sur le modèle James-Stein. L'ajustement de réduction bayésienne est sain et stabilisé.</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {auditResult.detectedDrifts.map((drift: any, index: number) => (
-                          <div key={index} className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex items-start gap-3">
-                            <ShieldAlert className={`mt-0.5 flex-shrink-0 ${
-                              drift.severity === "critical"
-                                ? "text-rose-500"
-                                : drift.severity === "warning"
-                                ? "text-amber-500"
-                                : "text-blue-500"
-                            }`} size={16} />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-xs text-slate-800 dark:text-slate-200 uppercase tracking-wide">
-                                  {drift.type}
-                                </span>
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
-                                  drift.severity === "critical"
-                                    ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
-                                    : drift.severity === "warning"
-                                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                                }`}>
-                                  {drift.severity}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
-                                {drift.description}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {selectedReport && (
           <PredictionForensics report={selectedReport} onClose={() => setSelectedReport(null)} />
