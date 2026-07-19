@@ -30,12 +30,36 @@ export const queryClient = new QueryClient({
   },
 });
 
-// Création du persisteur dans IndexedDB optimisé pour très grandes volumétries (Avec LZ-String)
+// Création d'un stockage ultra-sécurisé avec repli mémoire si IndexedDB est bloqué (ex: iframe sandbox)
+const memoryStorageMap = new Map<string, string>();
+
 export const idbPersister = createAsyncStoragePersister({
   storage: {
-    getItem: async (key) => await get(key),
-    setItem: async (key, value) => await set(key, value),
-    removeItem: async (key) => await del(key),
+    getItem: async (key) => {
+      try {
+        const val = await get(key);
+        return val !== undefined ? val : memoryStorageMap.get(key);
+      } catch (e) {
+        console.warn("IndexedDB getItem bloqué par l'environnement, repli mémoire:", e);
+        return memoryStorageMap.get(key);
+      }
+    },
+    setItem: async (key, value) => {
+      try {
+        await set(key, value);
+      } catch (e) {
+        console.warn("IndexedDB setItem bloqué par l'environnement, repli mémoire:", e);
+        memoryStorageMap.set(key, value);
+      }
+    },
+    removeItem: async (key) => {
+      try {
+        await del(key);
+      } catch (e) {
+        console.warn("IndexedDB removeItem bloqué par l'environnement, repli mémoire:", e);
+        memoryStorageMap.delete(key);
+      }
+    },
   },
   // Utilisation de LZ-String (compression LZ4-like) pour économiser l'espace disque
   serialize: (data) => LZString.compressToUTF16(JSON.stringify(data)),

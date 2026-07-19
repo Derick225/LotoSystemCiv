@@ -3,6 +3,65 @@ import { audioEngine } from '../utils/audioEngine';
 import type { SavedTicket } from '../types';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 
+// Shadowing local pour garantir la robustesse absolue dans les environnements restreints (ex: iframe sandbox)
+const localStorage = {
+    getItem: (key: string): string | null => {
+        try {
+            return typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+        } catch (e) {
+            console.warn(`[Storage] Échec de la lecture de localStorage pour ${key}:`, e);
+            return null;
+        }
+    },
+    setItem: (key: string, value: string): void => {
+        try {
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem(key, value);
+            }
+        } catch (e: unknown) {
+            console.warn(`[Storage] Échec de l'écriture dans localStorage pour ${key}:`, e);
+            if (e instanceof Error && (e.name === 'QuotaExceededError' || e.message?.includes('quota') || e.message?.includes('Quota'))) {
+                try {
+                    const keysToRemove: string[] = [];
+                    for (let i = 0; i < window.localStorage.length; i++) {
+                        const k = window.localStorage.key(i);
+                        if (k && (k.startsWith('gei_') || k.startsWith('spectral_') || k.startsWith('wavelet_') || k.startsWith('fractal_') || k.startsWith('correlation_'))) {
+                            keysToRemove.push(k);
+                        }
+                    }
+                    keysToRemove.forEach(k => window.localStorage.removeItem(k));
+                    window.localStorage.setItem(key, value);
+                } catch (retryErr) {
+                    console.error("[Storage] Impossible d'écrire après purge:", retryErr);
+                }
+            }
+        }
+    },
+    removeItem: (key: string): void => {
+        try {
+            if (typeof window !== 'undefined') {
+                window.localStorage.removeItem(key);
+            }
+        } catch (e) {
+            console.warn(`[Storage] Échec de la suppression de localStorage pour ${key}:`, e);
+        }
+    },
+    key: (index: number): string | null => {
+        try {
+            return typeof window !== 'undefined' ? window.localStorage.key(index) : null;
+        } catch (e) {
+            return null;
+        }
+    },
+    get length(): number {
+        try {
+            return typeof window !== 'undefined' ? window.localStorage.length : 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+};
+
 const WATCHLIST_KEY = 'lotopro_user_watchlist';
 const TICKETS_KEY = 'lotopro_user_tickets';
 const BANKROLL_KEY = 'lotopro_user_bankroll';
@@ -376,7 +435,11 @@ export const hydrateUserData = async (userId: string) => {
             if (s.custom_ui_states) {
                 for (const [key, val] of Object.entries(s.custom_ui_states)) {
                     if (key === 'nexus-storage') {
-                        await idbSet('nexus-storage', typeof val === 'object' ? JSON.stringify(val) : val);
+                        try {
+                            await idbSet('nexus-storage', typeof val === 'object' ? JSON.stringify(val) : val);
+                        } catch (e) {
+                            console.warn("Échec d'écriture idbSet pour 'nexus-storage':", e);
+                        }
                     } else {
                         localStorage.setItem(key, typeof val === 'object' ? JSON.stringify(val) : String(val));
                     }

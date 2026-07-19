@@ -92,13 +92,61 @@ class WorkerService {
         });
     }
 
+    private async runInMainThreadFallback<T>(task: string, payload: unknown, history: unknown[]): Promise<T> {
+        console.warn(`[Nexus Worker] Échec du Local Worker. Repli sur le thread principal (synchrone) pour la tâche ${task}...`);
+        try {
+            const mathCore = await import('./mathCore');
+            let result: unknown;
+            const p = payload as any;
+            const hist = history as any[];
+            switch (task) {
+                case 'full_analysis':
+                    result = {
+                        spectral: mathCore.runSpectral(hist),
+                        fractal: mathCore.runFractal(hist)
+                    };
+                    break;
+                case 'hurst_exponent':
+                    result = mathCore.runFractal(hist);
+                    break;
+                case 'DENOISE_PCA':
+                    result = mathCore.denoiseFeaturesPCA(p?.matrix, p?.variance);
+                    break;
+                case 'TRAIN_RIDGE':
+                    result = mathCore.trainRidgeRegression(p?.features, p?.labels, p?.lambda);
+                    break;
+                case 'GAP_EFFICIENCY':
+                    result = mathCore.runGapEfficiency(hist);
+                    break;
+                case 'SPECTRAL_METRICS':
+                    result = mathCore.runSpectral(hist);
+                    break;
+                case 'wavelet_analysis':
+                    result = mathCore.runContinuousWaveletTransformAnalysis(hist);
+                    break;
+                case 'TRANSFER_ENTROPY':
+                    result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
+                    break;
+                default:
+                    result = { status: 'OK' };
+            }
+            return result as T;
+        } catch (syncError: unknown) {
+            throw new AppError((syncError instanceof Error ? syncError.message : String(syncError)) || "Échec final du calcul synchrone de secours", "WORKER_FATAL_ERROR", "high");
+        }
+    }
+
     private edgeFailures: number = 0;
     private edgeCooldownUntil: number = 0;
 
     public async runTask<T>(task: string, payload: unknown = {}, history: unknown[] = []): Promise<T> {
         // Circuit Breaker: Si l'Edge a trop échoué, on passe directement au Local Worker pendant un temps (ex: 5 minutes)
         if (Date.now() < this.edgeCooldownUntil) {
-            return this.runInLocalWorker(task, payload, history) as Promise<T>;
+            try {
+                return await this.runInLocalWorker(task, payload, history) as T;
+            } catch (fallbackError: unknown) {
+                return await this.runInMainThreadFallback<T>(task, payload, history);
+            }
         }
 
         try {
@@ -130,7 +178,7 @@ class WorkerService {
                 const result = await this.runInLocalWorker(task, payload, history);
                 return result as T;
             } catch (fallbackError: unknown) {
-                throw new AppError((fallbackError instanceof Error ? fallbackError.message : String(fallbackError)) || "Echec du Worker Local", "WORKER_FALLBACK_ERROR", "high");
+                return await this.runInMainThreadFallback<T>(task, payload, history);
             }
         }
     }
