@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlgoRadar } from '../AlgoRadar';
 import { getAdaptiveRules, saveAdaptiveRules, getDefaultRules, normalizeWeights, saveAlgoWeights, getAlgoWeights, getStrategyName } from '../../services/predictionEngine';
 import { LearningService } from '../../services/learningService'; 
 import { runBayesianOptimization } from '../../services/bayesianOptimizer';
@@ -462,9 +461,27 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({ selectedDr
                                     </span>
                                 )}
                             </div>
-                            <div className="h-64 flex items-center justify-center relative">
-                                <div className="absolute inset-0 bg-indigo-500/5 rounded-full blur-3xl transform scale-75"></div>
-                                <AlgoRadar weights={localWeights} height={250} />
+                            <div className="w-full space-y-4 px-2 mt-4">
+                                {Object.entries(localWeights)
+                                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                                    .map(([key, val]) => (
+                                    <div key={key} className="w-full">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="text-[10px] font-bold text-slate-400 capitalize">
+                                                {key.replace(/([A-Z])/g, ' $1').trim()}
+                                            </span>
+                                            <span className="text-[10px] font-mono text-indigo-400 font-bold">
+                                                {((val as number) * 100).toFixed(1)}%
+                                            </span>
+                                        </div>
+                                        <div className="w-full h-1 bg-slate-800/50 rounded-full overflow-hidden relative">
+                                            <div 
+                                                className="absolute top-0 left-0 h-full bg-indigo-500 rounded-full transition-all duration-300" 
+                                                style={{ width: `${(val as number) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
 

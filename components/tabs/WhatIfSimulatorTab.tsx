@@ -10,7 +10,6 @@ import { useToast } from '../ui/Toast';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 import { audioEngine } from '../../utils/audioEngine';
 import { useAlgorithmSync } from '../../hooks/useAlgorithmSync';
-import { AlgoRadar } from '../AlgoRadar';
 
 export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const history = useNexusStore(state => state.history);
@@ -228,9 +227,41 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({ drawName })
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
                             Ce widget compare dynamiquement la configuration simulée ("Optimisé IA") ajustée par vos curseurs de gauche avec l'empreinte de base ("Standard") configurée au niveau de l'ADN Global de l'application.
                         </p>
-                        <div className="h-72">
-                            <AlgoRadar weights={customWeights} previousWeights={globalWeights} height={280} />
-                        </div>
+                            <div className="w-full space-y-4">
+                                {Object.entries(customWeights)
+                                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                                    .map(([key, val]) => {
+                                    const baseVal = globalWeights[key as keyof typeof globalWeights] || 0;
+                                    const diff = (val as number) - baseVal;
+                                    return (
+                                    <div key={key} className="w-full">
+                                        <div className="flex justify-between items-center mb-1.5">
+                                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 capitalize">
+                                                {LABELS[key as keyof typeof LABELS] || key}
+                                            </span>
+                                            <div className="flex gap-2 text-[10px] font-mono">
+                                                <span className="text-slate-400">{(baseVal * 100).toFixed(0)}%</span>
+                                                <span className="text-indigo-500 font-bold">{((val as number) * 100).toFixed(0)}%</span>
+                                                {diff !== 0 && (
+                                                    <span className={diff > 0 ? "text-emerald-500" : "text-rose-500"}>
+                                                        {diff > 0 ? "+" : ""}{(diff * 100).toFixed(0)}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden relative">
+                                            <div 
+                                                className="absolute top-0 left-0 h-full bg-slate-300 dark:bg-slate-600 opacity-50" 
+                                                style={{ width: `${baseVal * 100}%` }}
+                                            />
+                                            <div 
+                                                className="absolute top-0 left-0 h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-300" 
+                                                style={{ width: `${(val as number) * 100}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )})}
+                            </div>
                     </div>
                 </div>
             </div>

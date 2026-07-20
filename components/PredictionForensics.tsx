@@ -191,7 +191,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 key={tab.id}
                 onClick={() => {
                   audioEngine.play("click");
-                  setActiveTab(tab.id as any);
+                  setActiveTab(tab.id as "spatial" | "logic");
                 }}
                 className={`px-5 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap flex-1 sm:flex-initial text-center ${
                   activeTab === tab.id
@@ -367,7 +367,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                        <div className="grid grid-cols-2 gap-4">
                           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
                             <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Stabilité Topologique</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{(report as any).topologicalTensionIndex ? (100 - (report as any).topologicalTensionIndex).toFixed(1) : "85.0"}%</span>
+                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.topologicalTensionIndex ? (100 - report.topologicalTensionIndex).toFixed(1) : "85.0"}%</span>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
                             <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Divergence KL</span>
@@ -375,7 +375,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
                             <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Atypicité (Anomalie)</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{(report as any).drawAnomalyScore ? ((report as any).drawAnomalyScore * 100).toFixed(1) : "12.5"}%</span>
+                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.drawAnomalyScore ? (report.drawAnomalyScore * 100).toFixed(1) : "12.5"}%</span>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
                             <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Force de Résonance</span>
@@ -595,7 +595,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                               key={rate.id}
                               onClick={() => {
                                 audioEngine.play("click");
-                                setUserRating(rate.id as any);
+                                setUserRating(rate.id as PredictionFeedback["userRating"]);
                               }}
                               className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center justify-center gap-1 transition-all ${userRating === rate.id ? `${rate.color} text-white shadow` : "bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-750 border border-slate-200 dark:border-slate-750"}`}
                             >

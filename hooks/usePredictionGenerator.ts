@@ -16,9 +16,7 @@ export const usePredictionGenerator = (drawName: string) => {
     const { showToast } = useToast();
     const history = useNexusStore(state => state.history);
     const temporalDepth = useNexusStore(state => state.temporalDepth);
-    const lastPrediction = useNexusStore(state => state.lastPrediction);
     const setLastPrediction = useNexusStore(state => state.setLastPrediction);
-    const nexusLoading = useNexusStore(state => state.loading);
     const globalWeights = useNexusStore(state => state.globalWeights);
     const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
     const spectral = useNexusStore(state => state.spectral);
@@ -179,20 +177,7 @@ export const usePredictionGenerator = (drawName: string) => {
         }
     }, [drawName, history, spectral, correlationMatrix, regularity, volatility, fractal, symbioticContext, globalWeights, quantumMode, flags.adversarialMode, resolvedNoiseLevel, setLastPrediction, showToast]);
 
-    useEffect(() => {
-        let active = true;
-        const stateKey = `${drawName}_h${history?.length || 0}_q${quantumMode ? '1' : '0'}_a${flags.adversarialMode ? '1' : '0'}`;
 
-        const triggerInference = async () => {
-            if (active && !lastPrediction && !isComputing && history && history.length >= 5 && !nexusLoading) {
-                if (lastInferenceStateRef.current === stateKey) return;
-                lastInferenceStateRef.current = stateKey;
-                await runInference();
-            }
-        };
-        triggerInference();
-        return () => { active = false; };
-    }, [drawName, history, lastPrediction, isComputing, nexusLoading, runInference, quantumMode, flags.adversarialMode]);
 
     const runMonteCarlo = useCallback(async () => {
         if (history.length < 10) {

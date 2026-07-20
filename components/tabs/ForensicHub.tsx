@@ -14,7 +14,7 @@ import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
 
-type ForensicMode = "prediction" | "historique" | "timemachine" | "shrinkagedrift" | "neuralfeedback";
+type ForensicMode = "prediction" | "historique" | "timemachine";
 
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawName }) => {
   const history = useNexusStore((state) => state.history);
