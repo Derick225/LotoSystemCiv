@@ -313,7 +313,7 @@ const simulateInferenceWithHyperparameters = async (
   }
 
   // Fusionner les métriques avec compatibilité double-clés (ancien/nouveau code)
-  const mockMetrics: EnhancedMetrics = {
+  const computedMetrics: EnhancedMetrics = {
     poisson: base.poissonScores,
     bayes: bayesScores,
     temporal: base.temporalScores,
@@ -336,7 +336,7 @@ const simulateInferenceWithHyperparameters = async (
     statisticalBounds: calculateStatisticalBounds(history),
   };
 
-  return calculateScores(features, weights, mockMetrics, history);
+  return calculateScores(features, weights, computedMetrics, history);
 };
 
 /**

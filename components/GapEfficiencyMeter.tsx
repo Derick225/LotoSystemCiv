@@ -86,6 +86,19 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({ data }) 
                                     }`}>
                                         {item.zone}
                                     </span>
+                                    {/* Critères d'inclusion stochastiques explicites */}
+                                    <div className="flex flex-col gap-0.5 mt-1 items-center shrink-0 w-full">
+                                        {item.zScore > 0.5 && (
+                                            <span className="text-[7px] font-extrabold tracking-wide text-indigo-400 bg-indigo-950/40 border border-indigo-500/20 px-1 rounded uppercase scale-90" title="Inclus par anomalie de pression Z-score">
+                                                Z-score
+                                            </span>
+                                        )}
+                                        {(item.kaplanMeierProb ?? 0) > 50 && (
+                                            <span className="text-[7px] font-extrabold tracking-wide text-emerald-400 bg-emerald-950/40 border border-emerald-500/20 px-1 rounded uppercase scale-90" title="Inclus par probabilité de survie Kaplan-Meier">
+                                                KM Survie
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Métriques Principales */}
@@ -94,7 +107,7 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({ data }) 
                                     <div className="flex flex-col justify-center pl-2 border-l border-white/5 whitespace-nowrap">
                                         <span className="text-[10px] font-bold text-slate-500 uppercase mb-0.5" title="Probabilité de rupture avant l'écart actuel selon Kaplan-Meier">Rupture S(t)</span>
                                         <span className={`text-base xl:text-lg font-black font-mono ${(item.kaplanMeierProb || 0) > 85 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                                            {item.kaplanMeierProb || Math.round(item.breakoutProb)}%
+                                            {item.kaplanMeierProb ?? Math.round(item.breakoutProb)}%
                                         </span>
                                     </div>
                                     

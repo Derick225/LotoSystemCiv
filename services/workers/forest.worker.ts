@@ -219,6 +219,52 @@ function predict(node: TreeNode, row: number[]): number {
   return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
 
+function evaluateConfig(
+  prng: LCG, 
+  trainSet: Example[], 
+  valSet: Example[], 
+  numTrees: number, 
+  maxDepth: number, 
+  minSize: number, 
+  nFeatures: number
+): number {
+  const forest: TreeNode[] = [];
+  const sampleSizeRatio = 0.632;
+  const sampleSize = Math.max(2, Math.floor(trainSet.length * sampleSizeRatio));
+
+  for (let i = 0; i < numTrees; i++) {
+    const sample: Example[] = [];
+    for (let j = 0; j < sampleSize; j++) {
+      sample.push(trainSet[Math.floor(prng.next() * trainSet.length)]);
+    }
+
+    const rootSplit = getSplit(prng, sample, nFeatures);
+    if (rootSplit) {
+      const root: TreeNode = { 
+        featureIdx: rootSplit.featureIdx, 
+        threshold: rootSplit.threshold, 
+        stdDev: rootSplit.stdDev,
+        groups: rootSplit.groups 
+      };
+      split(prng, root, maxDepth, minSize, nFeatures, 1);
+      forest.push(root);
+    }
+  }
+
+  if (forest.length === 0) return 1.0;
+
+  let sumError = 0;
+  for (const example of valSet) {
+    let sumProb = 0;
+    forest.forEach(tree => {
+      sumProb += predict(tree, example.features);
+    });
+    const pred = sumProb / forest.length;
+    sumError += Math.pow(pred - example.label, 2);
+  }
+  return sumError / valSet.length;
+}
+
 ctx.onmessage = (e) => {
   const { dataset, candidates, config, timeSignature } = e.data;
   if (!dataset?.length || !dataset[0]?.features) {
@@ -231,9 +277,44 @@ ctx.onmessage = (e) => {
 
   const N = dataset.length;
   
-  // Zéro Nombre Magique : Fallbacks dérivés de la théorie de l'apprentissage statistique
-  const numTrees = config?.numTrees || Math.min(100, Math.max(20, Math.floor(Math.sqrt(N) * 5)));
-  const maxDepth = config?.maxDepth || Math.max(3, Math.floor(Math.log2(N)));
+  // --- WALK-FORWARD GRID SEARCH POUR L'HYPER-TUNING DÉTERMINISTE ---
+  // Split temporel de validation (25% plus récents pour la validation, 75% plus anciens pour l'entraînement)
+  const valCount = Math.max(5, Math.floor(N * 0.25));
+  const valSet = dataset.slice(0, valCount);
+  const trainSet = dataset.slice(valCount);
+
+  // Recherche par grille sur les hyperparamètres
+  const grid = [
+    { numTrees: 25, maxDepth: 4 },
+    { numTrees: 45, maxDepth: 6 },
+    { numTrees: 65, maxDepth: 8 }
+  ];
+
+  let bestMSE = Infinity;
+  let bestNumTrees = Math.min(100, Math.max(20, Math.floor(Math.sqrt(N) * 5)));
+  let bestMaxDepth = Math.max(3, Math.floor(Math.log2(N)));
+
+  // Utilisation d'une graine isolée dédiée à la recherche pour ne pas polluer l'entraînement final
+  const gridSearchPrng = new LCG(`grid_${timeSignature || dataset.length}`);
+
+  if (trainSet.length >= 10 && valSet.length >= 3) {
+    for (const gridConfig of grid) {
+      const minSizeCandidate = Math.max(2, Math.floor(Math.sqrt(trainSet.length)));
+      const totalFeatures = dataset[0].features.length;
+      const nFeaturesCandidate = Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
+      
+      const mse = evaluateConfig(gridSearchPrng, trainSet, valSet, gridConfig.numTrees, gridConfig.maxDepth, minSizeCandidate, nFeaturesCandidate);
+      if (mse < bestMSE) {
+        bestMSE = mse;
+        bestNumTrees = gridConfig.numTrees;
+        bestMaxDepth = gridConfig.maxDepth;
+      }
+    }
+  }
+
+  // Utiliser les paramètres optimaux du Grid Search (ou configuration utilisateur si forcée)
+  const numTrees = config?.numTrees || bestNumTrees;
+  const maxDepth = config?.maxDepth || bestMaxDepth;
   const minSize = config?.minSize || Math.max(2, Math.floor(Math.sqrt(N)));
   
   const totalFeatures = dataset[0].features.length;

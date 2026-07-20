@@ -34,15 +34,16 @@ serve(async (req) => {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const prompt = `En tant qu'expert en stochastique appliquée et théorie du chaos pour les loteries 5/90 (notamment ${drawName}), votre mission est de configurer optimalement les poids de notre ensemble d'algorithmes mathématiques de prédiction.
+    // --- CONSIGNES STRICTES DE NON-INVENTION DES MÉTRIQUES ---
+    const prompt = `En tant qu'expert en stochastique appliquée, théorie de la mesure et cybernétique pour les loteries 5/90 (notamment ${drawName}), votre rôle est de configurer optimalement les poids de notre ensemble d'algorithmes mathématiques de prédiction.
 
-Données du tirage actuel :
+Données du tirage actuel (CALCULÉES EMPIRIQUEMENT PAR LE CŒUR STATISTIQUE LOCAL) :
 - Jeu : ${drawName}
-- Régime global détecté : ${regime || "Indéterminé"}
-- Exposant de Hurst calculé : ${hurst !== undefined ? hurst : "0.5"}
+- Régime thermodynamique global détecté : ${regime || "Indéterminé"}
+- Exposant de Hurst : ${hurst !== undefined ? hurst : "0.5"}
 - Entropie de Shannon : ${entropy !== undefined ? entropy : "Inconnue"}
 
-Historique récent (les 15 derniers tirages) :
+Historique récent (les 15 derniers tirages réels) :
 ${JSON.stringify(history.slice(0, 15).map((h: any) => ({ date: h.date, gagnants: h.gagnants })), null, 2)}
 
 Liste des 19 algorithmes disponibles pour lesquels vous devez attribuer des poids relatifs continus (de 0.1 à 10.0) :
@@ -66,7 +67,10 @@ Liste des 19 algorithmes disponibles pour lesquels vous devez attribuer des poid
 18. gap_cadence (rythme et cadence harmonique des écarts)
 19. gap_trend (tendance de dérive locale)
 
-Ajustez les poids de manière différentiable et continue selon l'exposant de Hurst et l'entropie. Par exemple, si le régime est chaotique et Hurst est bas (< 0.5, régime anti-persistant), augmentez les poids des algorithmes de transition (markov, bayes, shadow, fractal) et réduisez la fréquence linéaire. Si Hurst est élevé (> 0.5, régime persistant), favorisez la tendance et la cadence (gap_trend, gap_cadence, frequency, momentum).
+DIRECTIVES DE QUANTIFICATION ET DE NARRATION (NON NÉGOCIABLES) :
+1. RIGUEUR DES MÉTRIQUES : Le champ 'rationale' et 'strategicAdvice' doivent s'appuyer UNIQUEMENT et EXCLUSIVEMENT sur les indicateurs chiffrés locaux fournis ci-dessus (Exposant de Hurst, Entropie de Shannon). Il vous est STRICTEMENT INTERDIT d'inventer, d'estimer ou d'halluciner d'autres métriques spéculatives non calculées par notre moteur.
+2. CONTINUITÉ ET CYBERNÉTIQUE : Ajustez les poids de façon différentiable et continue. Si l'exposant de Hurst est bas (H < 0.5, régime anti-persistant), augmentez les poids des algorithmes de transition (markov, bayes, shadow, fractal) et réduisez la fréquence linéaire. Si Hurst est élevé (H > 0.5, régime persistant), favorisez la tendance et la cadence (gap_trend, gap_cadence, frequency, momentum).
+3. EXPLICATION SCIENTIFIQUE : Évitez toute métaphore ésotérique, jargon marketing ou discours flou. Utilisez un ton académique, rigoureux et précis centré sur la dynamique des systèmes chaotiques et les transitions de phase stochastiques.
 
 Générez la meilleure configuration de poids dans le schéma JSON spécifié.`;
 

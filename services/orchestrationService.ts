@@ -488,9 +488,10 @@ export const runOrchestrationPipeline = (
 
     // Calcul de la médiane et de l'écart-type robustes
     const sortedVals = [...values].sort((a, b) => a - b);
-    const median = sortedVals[45];
-    const mean = values.reduce((a, b) => a + b, 0) / 90;
-    const stdDev = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / 90) || 1.0;
+    const nValsCount = values.length || 90;
+    const median = sortedVals[Math.floor(sortedVals.length / 2)];
+    const mean = values.reduce((a, b) => a + b, 0) / nValsCount;
+    const stdDev = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / nValsCount) || 1.0;
 
     // Normalisation continue via la sigmoïde logistique centrée sur la médiane
     for (let num = 1; num <= 90; num++) {
@@ -645,96 +646,78 @@ export const runOrchestrationPipeline = (
     calibratedScores[num] = rawCalibrated * shrinkage;
   }
 
-  // --- ÉTAGE 5 : SÉLECTION DIVERSIFIÉE ---
-  const selected: number[] = [];
-  const familyCounts: Record<string, number> = {
-    inertia: 0,
-    structure: 0,
-    transition: 0,
-    seasonal: 0
-  };
+  // --- ÉTAGE 5 : SÉLECTION DIVERSIFIÉE (BEAM SEARCH + EMPIRICAL ADAPTIVE PENALTIES) ---
+  let realConsecutivePairs = 0;
+  let realMirrorPairs = 0;
+  let realDecadePairs = 0;
+  let realLastDigitPairs = 0;
+  let realT1Repeats = 0;
+  let totalDrawsAnalyzed = 0;
+  let totalPairsAnalyzed = 0;
 
-  for (let step = 0; step < 5; step++) {
-    let bestNum = 1;
-    let bestSelectionScore = -Infinity;
+  const depthLimit = Math.min(history.length - 1, 50);
+  for (let i = 0; i < depthLimit; i++) {
+    const draw = history[i];
+    const prev = history[i + 1];
+    totalDrawsAnalyzed++;
 
-    const t1Count = selected.filter(sel => history[0].gagnants.includes(sel)).length;
-    const neighborsCount = selected.filter(sel => 
-      selected.some(other => other !== sel && Math.abs(sel - other) === 1)
-    ).length / 2;
-
-    for (let num = 1; num <= 90; num++) {
-      if (selected.includes(num)) continue;
-
-      const score = calibratedScores[num];
-
-      // Famille dominante du candidat
-      const f = normalizedFeatures[num];
-      const famInertia = (f.repeatShort + f.trend) / 2.0;
-      const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
-      const famTransition = (f.markov + f.machineTransfer) / 2.0;
-      const famSeasonal = f.seasonal;
-
-      const famVals = [famInertia, famStructure, famTransition, famSeasonal];
-      const maxIdx = famVals.indexOf(Math.max(...famVals));
-      const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
-
-      let familyPenalty = 1.0;
-      if (familyCounts[dominantFamily] >= 2) {
-        familyPenalty = 0.35; // Éviter la concentration excessive dans une seule famille
-      }
-
-      // Pénalités géométriques et spatiales continues
-      let decadePenalty = 1.0;
-      let lastDigitPenalty = 1.0;
-      let consecutivePenalty = 1.0;
-      let mirrorPenalty = 1.0;
-
-      const numDecade = Math.floor((num - 1) / 10);
-      const numLastDigit = num % 10;
-
-      selected.forEach(sel => {
-        const selDecade = Math.floor((sel - 1) / 10);
-        const selLastDigit = sel % 10;
-
-        if (numDecade === selDecade) {
-          decadePenalty -= 0.25;
-        }
-        if (numLastDigit === selLastDigit) {
-          lastDigitPenalty -= 0.15;
-        }
-        if (Math.abs(num - sel) === 1) {
-          consecutivePenalty *= (neighborsCount > 0 ? 0.2 : 0.4);
-        }
-        if (num === 91 - sel) {
-          mirrorPenalty *= 0.6;
-        }
-      });
-
-      decadePenalty = Math.max(0.2, decadePenalty);
-      lastDigitPenalty = Math.max(0.2, lastDigitPenalty);
-
-      // Limiter le nombre de candidats issus uniquement du tirage T-1
-      let t1Penalty = 1.0;
-      if (history[0].gagnants.includes(num)) {
-        if (t1Count >= 2) {
-          t1Penalty = 0.4;
-        }
-      }
-
-      const totalPenalty = familyPenalty * decadePenalty * lastDigitPenalty * consecutivePenalty * mirrorPenalty * t1Penalty;
-      const selectionScore = score * totalPenalty;
-
-      if (selectionScore > bestSelectionScore) {
-        bestSelectionScore = selectionScore;
-        bestNum = num;
-      }
+    if (prev) {
+      realT1Repeats += draw.gagnants.filter(n => prev.gagnants.includes(n)).length;
     }
 
-    selected.push(bestNum);
+    const g = [...draw.gagnants].sort((a, b) => a - b);
+    for (let x = 0; x < g.length; x++) {
+      for (let y = x + 1; y < g.length; y++) {
+        totalPairsAnalyzed++;
+        if (Math.abs(g[x] - g[y]) === 1) realConsecutivePairs++;
+        if (g[x] + g[y] === 91) realMirrorPairs++;
+        if (Math.floor((g[x] - 1) / 10) === Math.floor((g[y] - 1) / 10)) realDecadePairs++;
+        if (g[x] % 10 === g[y] % 10) realLastDigitPairs++;
+      }
+    }
+  }
 
-    // Mettre à jour les comptes des familles dominantes
-    const f = normalizedFeatures[bestNum];
+  const safeDraws = Math.max(1, totalDrawsAnalyzed);
+  const safePairs = Math.max(1, totalPairsAnalyzed);
+
+  const computePenaltyMultiplier = (empiricalRate: number, expectedTheoreticalRate: number, minPenalty = 0.2, maxPenalty = 0.8) => {
+    const ratio = empiricalRate / (expectedTheoreticalRate || 1e-9);
+    const sig = 1.0 / (1.0 + Math.exp(-4.0 * (ratio - 1.0)));
+    return parseFloat((minPenalty + (maxPenalty - minPenalty) * sig).toFixed(4));
+  };
+
+  const pT1Repeats = realT1Repeats / (safeDraws * 5);
+  const expT1 = 5.0 / 90.0;
+  const pT1PenaltyCoeff = computePenaltyMultiplier(pT1Repeats, expT1, 0.3, 0.7);
+
+  const pConsecutive = realConsecutivePairs / safePairs;
+  const expConsecutive = 0.044;
+  const pConsecutiveCoeff = computePenaltyMultiplier(pConsecutive, expConsecutive, 0.2, 0.6);
+
+  const pMirror = realMirrorPairs / safePairs;
+  const expMirror = 0.0112;
+  const pMirrorCoeff = computePenaltyMultiplier(pMirror, expMirror, 0.4, 0.8);
+
+  const pDecade = realDecadePairs / safePairs;
+  const expDecade = 0.09;
+  const pDecadePenaltyCoeff = computePenaltyMultiplier(pDecade, expDecade, 0.15, 0.5);
+
+  const pLastDigit = realLastDigitPairs / safePairs;
+  const expLastDigit = 0.1;
+  const pLastDigitPenaltyCoeff = computePenaltyMultiplier(pLastDigit, expLastDigit, 0.1, 0.4);
+
+  interface BeamBranch {
+    selected: number[];
+    score: number;
+    familyCounts: Record<string, number>;
+  }
+
+  let beams: BeamBranch[] = [];
+  const firstStepScores: { num: number; score: number; dominantFamily: string }[] = [];
+
+  for (let num = 1; num <= 90; num++) {
+    const score = calibratedScores[num];
+    const f = normalizedFeatures[num];
     const famInertia = (f.repeatShort + f.trend) / 2.0;
     const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
     const famTransition = (f.markov + f.machineTransfer) / 2.0;
@@ -742,8 +725,129 @@ export const runOrchestrationPipeline = (
     const famVals = [famInertia, famStructure, famTransition, famSeasonal];
     const maxIdx = famVals.indexOf(Math.max(...famVals));
     const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
-    familyCounts[dominantFamily] = (familyCounts[dominantFamily] || 0) + 1;
+
+    firstStepScores.push({ num, score, dominantFamily });
   }
+
+  firstStepScores.sort((a, b) => b.score - a.score);
+  const beamSize = 3;
+  for (let i = 0; i < Math.min(beamSize, firstStepScores.length); i++) {
+    const item = firstStepScores[i];
+    beams.push({
+      selected: [item.num],
+      score: item.score,
+      familyCounts: {
+        inertia: item.dominantFamily === "inertia" ? 1 : 0,
+        structure: item.dominantFamily === "structure" ? 1 : 0,
+        transition: item.dominantFamily === "transition" ? 1 : 0,
+        seasonal: item.dominantFamily === "seasonal" ? 1 : 0
+      }
+    });
+  }
+
+  for (let step = 1; step < 5; step++) {
+    const nextCandidates: { branch: BeamBranch; num: number; newScore: number; dominantFamily: string }[] = [];
+
+    for (const b of beams) {
+      const t1Count = b.selected.filter(sel => history[0].gagnants.includes(sel)).length;
+      const neighborsCount = b.selected.filter(sel => 
+        b.selected.some(other => other !== sel && Math.abs(sel - other) === 1)
+      ).length / 2;
+
+      for (let num = 1; num <= 90; num++) {
+        if (b.selected.includes(num)) continue;
+
+        const score = calibratedScores[num];
+        const f = normalizedFeatures[num];
+        const famInertia = (f.repeatShort + f.trend) / 2.0;
+        const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
+        const famTransition = (f.markov + f.machineTransfer) / 2.0;
+        const famSeasonal = f.seasonal;
+        const famVals = [famInertia, famStructure, famTransition, famSeasonal];
+        const maxIdx = famVals.indexOf(Math.max(...famVals));
+        const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
+
+        let familyPenalty = 1.0;
+        if (b.familyCounts[dominantFamily] >= 2) {
+          familyPenalty = 0.35;
+        }
+
+        let decadePenalty = 1.0;
+        let lastDigitPenalty = 1.0;
+        let consecutivePenalty = 1.0;
+        let mirrorPenalty = 1.0;
+
+        const numDecade = Math.floor((num - 1) / 10);
+        const numLastDigit = num % 10;
+
+        b.selected.forEach(sel => {
+          const selDecade = Math.floor((sel - 1) / 10);
+          const selLastDigit = sel % 10;
+
+          if (numDecade === selDecade) {
+            decadePenalty -= pDecadePenaltyCoeff;
+          }
+          if (numLastDigit === selLastDigit) {
+            lastDigitPenalty -= pLastDigitPenaltyCoeff;
+          }
+          if (Math.abs(num - sel) === 1) {
+            consecutivePenalty *= (neighborsCount > 0 ? pConsecutiveCoeff * 0.5 : pConsecutiveCoeff);
+          }
+          if (num === 91 - sel) {
+            mirrorPenalty *= pMirrorCoeff;
+          }
+        });
+
+        decadePenalty = Math.max(0.15, decadePenalty);
+        lastDigitPenalty = Math.max(0.15, lastDigitPenalty);
+
+        let t1Penalty = 1.0;
+        if (history[0].gagnants.includes(num)) {
+          if (t1Count >= 2) {
+            t1Penalty = pT1PenaltyCoeff;
+          }
+        }
+
+        const totalPenalty = familyPenalty * decadePenalty * lastDigitPenalty * consecutivePenalty * mirrorPenalty * t1Penalty;
+        const candidateScore = score * totalPenalty;
+
+        nextCandidates.push({
+          branch: b,
+          num,
+          newScore: b.score + candidateScore,
+          dominantFamily
+        });
+      }
+    }
+
+    nextCandidates.sort((a, b) => b.newScore - a.newScore);
+
+    const nextBeams: BeamBranch[] = [];
+    const seenCombos = new Set<string>();
+
+    for (const cand of nextCandidates) {
+      const nextSelected = [...cand.branch.selected, cand.num].sort((x, y) => x - y);
+      const comboKey = nextSelected.join(",");
+      if (seenCombos.has(comboKey)) continue;
+      seenCombos.add(comboKey);
+
+      const updatedFamilyCounts = { ...cand.branch.familyCounts };
+      updatedFamilyCounts[cand.dominantFamily] = (updatedFamilyCounts[cand.dominantFamily] || 0) + 1;
+
+      nextBeams.push({
+        selected: [...cand.branch.selected, cand.num],
+        score: cand.newScore,
+        familyCounts: updatedFamilyCounts
+      });
+
+      if (nextBeams.length >= beamSize) break;
+    }
+
+    beams = nextBeams;
+  }
+
+  beams.sort((a, b) => b.score - a.score);
+  const selected = beams[0] ? beams[0].selected : [];
 
   // Sélection des candidats complémentaires de réserve
   const candidatesList = Object.entries(calibratedScores)

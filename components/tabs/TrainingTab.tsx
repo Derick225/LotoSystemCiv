@@ -593,6 +593,10 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 if (result.isGeneralizable === false) {
                     addLog(`⚖️ SURAPPRENTISSAGE COULÉ (Ratio: ${result.overfittingRatio?.toFixed(2)}). Blending d'atténuation appliqué continûment.`);
                     showToast("Atténuation de surapprentissage appliquée.", "info");
+                } else if (result.isGeneralizable === 'unverifiable') {
+                    addLog(`ℹ️ VALIDATION INSUFFISANTE : Historique trop court pour tester la généralisation de façon robuste. Mode confiance neutre actif.`);
+                    showToast("Validation non vérifiable (historique court).", "info");
+                    audioEngine.play('success');
                 } else {
                     audioEngine.play('success');
                     showToast("Optimisation terminée avec succès.", "success");

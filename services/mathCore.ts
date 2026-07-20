@@ -13,20 +13,85 @@ export const stdDev = (data: number[]) => {
 };
 
 export function computeDFT(signal: number[]): { frequency: number, power: number, period: number }[] {
-    const N = signal.length;
-    const spectrum = [];
-    for (let k = 1; k < N / 2; k++) {
-        let re = 0;
-        let im = 0;
-        for (let n = 0; n < N; n++) {
-            const window = 0.5 * (1 - Math.cos((2 * Math.PI * n) / (N - 1)));
-            const val = signal[n] * window;
-            const angle = (2 * Math.PI * k * n) / N;
-            re += val * Math.cos(angle);
-            im -= val * Math.sin(angle);
+    const originalN = signal.length;
+    if (originalN < 4) {
+        // Fallback simple si le signal est trop court
+        const spectrum = [];
+        for (let k = 1; k < originalN / 2; k++) {
+            let re = 0;
+            let im = 0;
+            for (let n = 0; n < originalN; n++) {
+                const angle = (2 * Math.PI * k * n) / originalN;
+                re += signal[n] * Math.cos(angle);
+                im -= signal[n] * Math.sin(angle);
+            }
+            spectrum.push({ frequency: k, power: Math.sqrt(re * re + im * im), period: originalN / k });
         }
-        const magnitude = Math.sqrt(re * re + im * im);
-        spectrum.push({ frequency: k, power: magnitude, period: N / k });
+        return spectrum;
+    }
+
+    // Trouver la puissance de 2 supérieure ou égale à originalN (padding)
+    let N = 1;
+    while (N < originalN) {
+        N *= 2;
+    }
+
+    // Windowing (seulement sur les originalN échantillons réels, puis rembourré de zéros)
+    const rex = new Float64Array(N);
+    const imx = new Float64Array(N);
+    for (let n = 0; n < originalN; n++) {
+        const window = 0.5 * (1 - Math.cos((2 * Math.PI * n) / (originalN - 1)));
+        rex[n] = signal[n] * window;
+    }
+
+    // Bit-reversal permutation
+    let j = 0;
+    for (let i = 0; i < N - 1; i++) {
+        if (i < j) {
+            const temp = rex[i];
+            rex[i] = rex[j];
+            rex[j] = temp;
+        }
+        let k = N / 2;
+        while (k <= j) {
+            j -= k;
+            k /= 2;
+        }
+        j += k;
+    }
+
+    // Boucles FFT (Cooley-Tukey Radix-2)
+    for (let stage = 1; stage <= Math.log2(N); stage++) {
+        const le = 1 << stage;
+        const le2 = le >> 1;
+        let ur = 1.0;
+        let ui = 0.0;
+        const sr = Math.cos(Math.PI / le2);
+        const si = -Math.sin(Math.PI / le2);
+        for (let s = 0; s < le2; s++) {
+            for (let i = s; i < N; i += le) {
+                const ip = i + le2;
+                const tempRe = rex[ip] * ur - imx[ip] * ui;
+                const tempIm = rex[ip] * ui + imx[ip] * ur;
+                rex[ip] = rex[i] - tempRe;
+                imx[ip] = imx[i] - tempIm;
+                rex[i] += tempRe;
+                imx[i] += tempIm;
+            }
+            const tempUr = ur * sr - ui * si;
+            ui = ur * si + ui * sr;
+            ur = tempUr;
+        }
+    }
+
+    // Extraction du spectre de puissance
+    const spectrum = [];
+    for (let k = 1; k < originalN / 2; k++) {
+        const ratio = k / originalN;
+        const indexInFFT = Math.round(ratio * N);
+        const safeIndex = Math.min(N - 1, Math.max(0, indexInFFT));
+        const magnitude = Math.sqrt(rex[safeIndex] * rex[safeIndex] + imx[safeIndex] * imx[safeIndex]);
+        spectrum.push({ frequency: k, power: magnitude, period: originalN / k });
     }
     return spectrum;
 }
@@ -504,6 +569,7 @@ export function runGapEfficiency(history: { gagnants: number[] }[]) {
         // --- Kaplan-Meier Survival Analysis ---
         let kaplanMeierProb = 0; 
         let hazardRate = 0;
+        let kmVariance = 10000;
         
         if (gaps.length > 0) {
             maxGap = Math.max(Math.max(...gaps), currentGap);
@@ -524,6 +590,7 @@ export function runGapEfficiency(history: { gagnants: number[] }[]) {
             let nRisk = gaps.length; 
             let S_t = 1.0; 
             let S_current = 1.0;
+            let greenwoodSum = 0;
             
             for (const t of uniqueGaps) {
                 if (t > currentGap) break; 
@@ -535,6 +602,9 @@ export function runGapEfficiency(history: { gagnants: number[] }[]) {
                     if (t === currentGap) {
                         hazardRate = hazard_t;
                     }
+                    if (nRisk > d_t) {
+                        greenwoodSum += d_t / (nRisk * (nRisk - d_t));
+                    }
                 }
                 nRisk -= d_t; 
             }
@@ -542,21 +612,33 @@ export function runGapEfficiency(history: { gagnants: number[] }[]) {
             
             // kaplanMeierProb: Probability that a gap normally breaks BEFORE reaching currentGap
             kaplanMeierProb = (1 - S_current) * 100;
+            
+            // Variance de Greenwood pour S_current
+            kmVariance = Math.pow(S_current, 2) * greenwoodSum * 10000;
+            if (kmVariance <= 1e-4) {
+                kmVariance = 1.0; // Plancher
+            }
         }
 
         const zScore = (currentGap - avgGap) / sigma;
-        
-        // CORRECTION : Sigmoïde centrée sur 0 avec pente standard (0.5), pas de décalage arbitraire de 0.5 et 1.5
-        const breakoutProb = (1 / (1 + Math.exp(-0.5 * zScore))) * 50 + (kaplanMeierProb / 2);
+        const zScoreProb = (1.0 / (1.0 + Math.exp(-0.5 * zScore))) * 100;
+        let zScoreVariance = 10000 / Math.max(1, gaps.length);
+
+        // --- FUSION PAR INVERSE DE LA VARIANCE ---
+        const w_km_raw = 1.0 / kmVariance;
+        const w_z_raw = 1.0 / zScoreVariance;
+        const totalW = w_km_raw + w_z_raw;
+        const weightKM = w_km_raw / totalW;
+        const weightZ = w_z_raw / totalW;
+
+        const breakoutProb = weightZ * zScoreProb + weightKM * kaplanMeierProb;
         
         const fatigueIndex = avgGap > 0 ? (maxGap / avgGap) : 1;
         const positionScore = maxGap > 0 ? (currentGap / maxGap) * 100 : 0;
         const pressureScore = Math.min(100, Math.max(0, (zScore + 1) * 33));
         
-        // CORRECTION : Suppression des coefficients magiques (0.3, 0.4, 0.3). 
-        // Pondération équiprobable (1/3) ou dérivée de l'inverse de la variance. Ici, équiprobable pour la neutralité.
-        const w_pos = 1/3, w_pres = 1/3, w_km = 1/3;
-        const maturityScore = Math.round((positionScore * w_pos) + (pressureScore * w_pres) + (kaplanMeierProb * w_km));
+        const w_pos = 1/3, w_pres = 1/3, w_km_score = 1/3;
+        const maturityScore = Math.round((positionScore * w_pos) + (pressureScore * w_pres) + (kaplanMeierProb * w_km_score));
         
         let zone = 'COLD';
         if (zScore > 2.5 || maturityScore > 90 || kaplanMeierProb > 95) zone = 'CRITICAL';
@@ -605,15 +687,47 @@ export function runSpectral(history: { gagnants: number[] }[]) {
         
         let maxP = 0;
         spectrum.forEach(s => {
-            // Amplification continue des amplitudes harmoniques congruentes (suppression de 0.3 + 1.7 * resFactor)
-            // L'amplification doit être linéairement proportionnelle au facteur de résonance (1 + resFactor).
             const resFactor = s.frequency < globalResonance.length ? globalResonance[s.frequency] : 0;
             const adjustedPower = s.power * (1.0 + resFactor);
             if (adjustedPower > maxP) maxP = adjustedPower;
         });
+
+        // --- SIGNIFICANCE PERMUTATION TEST ---
+        // On effectue 5 permutations déterministes du signal pour estimer le seuil de significativité du bruit
+        let nullMaxSum = 0;
+        let lcgSeed = (num * 12345 + N) >>> 0;
+        const lcg = () => {
+            lcgSeed = (lcgSeed * 1664525 + 1013904223) >>> 0;
+            return lcgSeed / 4294967296;
+        };
+
+        const permutationsCount = 5;
+        for (let pIdx = 0; pIdx < permutationsCount; pIdx++) {
+            const permutedSignal = [...signal];
+            // Fisher-Yates déterministe
+            for (let i = permutedSignal.length - 1; i > 0; i--) {
+                const j = Math.floor(lcg() * (i + 1));
+                const temp = permutedSignal[i];
+                permutedSignal[i] = permutedSignal[j];
+                permutedSignal[j] = temp;
+            }
+            const nullSpectrum = computeDFT(permutedSignal);
+            let nullMax = 0;
+            nullSpectrum.forEach(ns => {
+                if (ns.power > nullMax) nullMax = ns.power;
+            });
+            nullMaxSum += nullMax;
+        }
+        const nullThreshold = nullMaxSum / permutationsCount;
+
+        // Si la puissance observée est inférieure ou proche du seuil nul, on la pénalise continûment
+        const signalToNoiseRatio = maxP / Math.max(1e-6, nullThreshold);
+        const significanceMultiplier = 1.0 / (1.0 + Math.exp(-4.0 * (signalToNoiseRatio - 1.1))); // Transition fluide continue
+
+        const finalMaxP = maxP * significanceMultiplier;
         
-        if (maxP > globalMax) globalMax = maxP;
-        results.push({ number: num, raw: maxP });
+        if (finalMaxP > globalMax) globalMax = finalMaxP;
+        results.push({ number: num, raw: finalMaxP });
     }
     
     return results.map(r => ({
@@ -1158,9 +1272,20 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
         }
     }
 
-    // Inverse Scale Transform
+    // Inverse Scale Transform with continuous, bounded pre-image manifold constraint (monotonic differentiable smoothing)
+    const smoothClip = (x: number): number => {
+        if (x >= 5 && x <= 95) return x;
+        if (x < 5) {
+            return 5 * Math.exp((x - 5) / 5);
+        }
+        return 100 - 5 * Math.exp((95 - x) / 5);
+    };
+
     const reconstructed = reconstructedScaled.map((row) =>
-        row.map((val, j) => (val * stdDevs[j]) + means[j])
+        row.map((val, j) => {
+            const rawVal = (val * stdDevs[j]) + means[j];
+            return smoothClip(rawVal);
+        })
     );
 
     return reconstructed;

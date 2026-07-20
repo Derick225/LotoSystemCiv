@@ -181,10 +181,38 @@ export const evaluateGenomeFitness = (
     totalHits += hits;
     hitsPerDraw.push(hits);
 
-    // Brier Score (Mesure d'incertitude et de calibration de probabilité)
+    // --- CALIBRATION DU LOGIT POUR LE SCORE DE BRIER ---
+    // Résolution par dichotomie pour trouver C tel que sum(1 / (1 + exp(-(scores[n]*temp - C)))) = 5.0
+    let low = -100.0;
+    let high = 100.0;
+    let scaleC = 0.0;
+    
+    // Mise à l'échelle des scores pour une variance numérique saine
+    const maxScore = Math.max(...Array.from(scores)) || 1.0;
+    const scaledScores = Array.from({ length: 90 }, (_, i) => (scores[i + 1] / maxScore) * 10.0);
+    
+    for (let iter = 0; iter < 15; iter++) {
+      scaleC = (low + high) / 2.0;
+      let sumP = 0;
+      for (let i = 0; i < 90; i++) {
+        sumP += 1.0 / (1.0 + Math.exp(-(scaledScores[i] - scaleC)));
+      }
+      if (sumP > 5.0) {
+        low = scaleC;
+      } else {
+        high = scaleC;
+      }
+    }
+    
+    const calibratedP = new Float64Array(91);
+    for (let n = 1; n <= 90; n++) {
+      calibratedP[n] = 1.0 / (1.0 + Math.exp(-(scaledScores[n - 1] - scaleC)));
+    }
+
+    // Brier Score (Mesure d'incertitude et de calibration de probabilité saine [0, 1])
     let brierSum = 0;
     for (let n = 1; n <= 90; n++) {
-      const p = (scores[n] / sumScore) * 5.0; // Espérance normalisée sur 5 gagnants
+      const p = calibratedP[n];
       const y = winners.includes(n) ? 1.0 : 0.0;
       const err = p - y;
       brierSum += err * err;

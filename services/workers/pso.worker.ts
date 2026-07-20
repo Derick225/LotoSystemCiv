@@ -52,7 +52,19 @@ const normalizeWeights = (w: AlgoWeights, entropy: number): AlgoWeights => {
   return normalized;
 };
 
-const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
+interface AdaptiveCoeffs {
+  cLinear: number;
+  cGrid: number;
+  cMirror: number;
+  cHarmonic: number;
+  cDecade: number;
+}
+
+const evaluateTensorForSubset = (
+  w: AlgoWeights,
+  tensors: TensorContext[],
+  coeffs: AdaptiveCoeffs
+): number => {
   let totalHits = 0;
   for (const tensor of tensors) {
     const scores: { num: number; score: number }[] = [];
@@ -81,7 +93,6 @@ const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
 
     scores.forEach(s => {
       const zScore = (s.score - median) / stdDev;
-      // CDF Logistique centrée sur la médiane, échelonnée par l'écart-type
       s.score = 100 / (1 + Math.exp(-slope * zScore));
     });
 
@@ -96,30 +107,30 @@ const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
     };
 
     let totalContinLoss = 0;
-    tensor.targetWinners.forEach((w) => {
+    tensor.targetWinners.forEach((wVal) => {
       let maxSimForWinner = 1e-9;
       top5.forEach((p) => {
         let sim = 0.0;
-        if (p === w) {
+        if (p === wVal) {
           sim = 1.0;
         } else {
-          const linSim = Math.exp(-0.25 * Math.abs(p - w));
+          const linSim = Math.exp(-0.25 * Math.abs(p - wVal)) * (coeffs.cLinear / 0.25);
           const posP = getGridPos(p);
-          const posW = getGridPos(w);
+          const posW = getGridPos(wVal);
           const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-          const gridSim = Math.exp(-0.35 * gridDist);
+          const gridSim = Math.exp(-0.35 * gridDist) * (coeffs.cGrid / 0.35);
 
           let mirrorSim = 0.0;
-          if (p + w === 91) mirrorSim = 0.45;
+          if (p + wVal === 91) mirrorSim = coeffs.cMirror;
           const strP = p.toString();
           const revP = parseInt(strP.split("").reverse().join(""), 10);
-          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
+          if (revP >= 1 && revP <= 90 && revP === wVal) mirrorSim = Math.max(mirrorSim, coeffs.cMirror * 0.9);
 
           let harmonicSim = 0.0;
-          if (p % 10 === w % 10) harmonicSim = 0.35;
+          if (p % 10 === wVal % 10) harmonicSim = coeffs.cHarmonic;
 
           let decadeSim = 0.0;
-          if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
+          if (Math.floor((p - 1) / 10) === Math.floor((wVal - 1) / 10)) decadeSim = coeffs.cDecade;
 
           sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
         }
@@ -144,12 +155,12 @@ const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
         });
     } else {
         // Fallback pour les anciens caches de tenseurs
-        tensor.targetWinners.forEach(w => {
+        tensor.targetWinners.forEach(wVal => {
           let nodeEnergy = 0;
           top10.forEach((p, idx) => {
             // Décroissance exponentielle de l'impact en fonction du rang dans le Top 10
             const rankWeight = Math.exp(-0.2 * idx); 
-            const proximity = Math.exp(-0.15 * Math.abs(p - w)); // Basic proximity fallback
+            const proximity = Math.exp(-0.15 * Math.abs(p - wVal)); // Basic proximity fallback
             nodeEnergy += proximity * rankWeight;
           });
           top10Energy += Math.tanh(nodeEnergy);
@@ -164,6 +175,32 @@ const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
   return totalHits;
 };
 
+const evaluateTensor = (
+  w: AlgoWeights,
+  tensors: TensorContext[],
+  coeffs: AdaptiveCoeffs
+): number => {
+  const numTensors = tensors.length;
+  // Train/Val split (75% / 25%) si on a assez de tirages historiques pour prévenir le surapprentissage de façon cybernétique
+  const trainRatio = numTensors >= 8 ? 0.75 : 1.0;
+  const splitIndex = Math.floor(numTensors * trainRatio);
+
+  if (splitIndex > 0 && splitIndex < numTensors) {
+    const trainTensors = tensors.slice(0, splitIndex);
+    const valTensors = tensors.slice(splitIndex);
+
+    const fitnessTrain = evaluateTensorForSubset(w, trainTensors, coeffs);
+    const fitnessVal = evaluateTensorForSubset(w, valTensors, coeffs);
+
+    // Pénalisation continue d'overfitting : plus l'erreur/l'écart entre l'entraînement et la validation est grand,
+    // plus on pénalise la fitness globale.
+    const overfittingPenalty = 0.15 * Math.abs(fitnessTrain - fitnessVal);
+    return fitnessTrain + 0.3 * fitnessVal - overfittingPenalty;
+  }
+
+  return evaluateTensorForSubset(w, tensors, coeffs);
+};
+
 ctx.onmessage = (e) => {
   const { type, payload } = e.data;
   if (type === 'start') {
@@ -172,6 +209,60 @@ ctx.onmessage = (e) => {
       baseWeights: AlgoWeights;
       config: WorkerConfig;
       timeSignature: string;
+    };
+
+    // --- CALCUL DES COEFFICIENTS DE SIMILARITÉ ADAPTATIFS ---
+    let empiricalLinearCount = 0;
+    let empiricalGridCount = 0;
+    let empiricalMirrorCount = 0;
+    let empiricalHarmonicCount = 0;
+    let empiricalDecadeCount = 0;
+    let totalPairsEvaluated = 0;
+
+    tensors.forEach(tensor => {
+      const winners = tensor.targetWinners;
+      if (winners.length < 2) return;
+      for (let i = 0; i < winners.length; i++) {
+        for (let j = i + 1; j < winners.length; j++) {
+          const w1 = winners[i];
+          const w2 = winners[j];
+          totalPairsEvaluated++;
+
+          if (Math.abs(w1 - w2) === 1) empiricalLinearCount++;
+          const row1 = Math.floor((w1 - 1) / 10);
+          const col1 = (w1 - 1) % 10;
+          const row2 = Math.floor((w2 - 1) / 10);
+          const col2 = (w2 - 1) % 10;
+          const dist = Math.sqrt(Math.pow(row1 - row2, 2) + Math.pow(col1 - col2, 2));
+          if (dist <= 1.5) empiricalGridCount++;
+          if (w1 + w2 === 91) empiricalMirrorCount++;
+          
+          const str1 = w1.toString();
+          const rev1 = parseInt(str1.split("").reverse().join(""), 10);
+          if (rev1 >= 1 && rev1 <= 90 && rev1 === w2) empiricalMirrorCount++;
+          
+          if (w1 % 10 === w2 % 10) empiricalHarmonicCount++;
+          if (row1 === row2) empiricalDecadeCount++;
+        }
+      }
+    });
+
+    const safePairs = Math.max(1, totalPairsEvaluated);
+    
+    // Mapping continu sigmoïdal sans nombre magique
+    const computeAdaptiveCoeff = (count: number, baseDefault: number) => {
+      const rate = count / safePairs;
+      // Soft-clamping continu centré sur un taux attendu théorique (0.05)
+      const sig = 1.0 / (1.0 + Math.exp(-25.0 * (rate - 0.05)));
+      return parseFloat((0.15 + 0.45 * sig).toFixed(4));
+    };
+
+    const coeffs: AdaptiveCoeffs = {
+      cLinear: computeAdaptiveCoeff(empiricalLinearCount, 0.25),
+      cGrid: computeAdaptiveCoeff(empiricalGridCount, 0.35),
+      cMirror: computeAdaptiveCoeff(empiricalMirrorCount, 0.45),
+      cHarmonic: computeAdaptiveCoeff(empiricalHarmonicCount, 0.35),
+      cDecade: computeAdaptiveCoeff(empiricalDecadeCount, 0.25)
     };
 
     // Seed déterministe absolu synchronisé sur la signature temporelle (La taille d'historique)
@@ -195,7 +286,7 @@ ctx.onmessage = (e) => {
 
     const particles: Particle[] = [];
     let globalBestPosition = normalizeWeights(baseWeights, Entropy);
-    let globalBestFitness = evaluateTensor(globalBestPosition, tensors);
+    let globalBestFitness = evaluateTensor(globalBestPosition, tensors, coeffs);
 
     for (let i = 0; i < config.populationSize; i++) {
       let pos = i === 0 ? { ...globalBestPosition } : { ...baseWeights };
@@ -215,7 +306,7 @@ ctx.onmessage = (e) => {
         vel[k] = (prng.next() - 0.5) * (1.0 / M) * 0.1 * (1.0 - Hurst); // Vitesse initiale plus faible si forte tendance
       });
 
-      const fit = evaluateTensor(pos, tensors);
+      const fit = evaluateTensor(pos, tensors, coeffs);
       particles.push({ position: pos, velocity: vel, bestPosition: { ...pos }, bestFitness: fit, fitness: fit });
 
       if (fit > globalBestFitness) {
@@ -266,7 +357,7 @@ ctx.onmessage = (e) => {
         p.position = normalizeWeights(newPos, Entropy);
         p.velocity = newVel;
 
-        const fit = evaluateTensor(p.position, tensors);
+        const fit = evaluateTensor(p.position, tensors, coeffs);
         p.fitness = fit;
 
         if (fit > generationBestFitness) generationBestFitness = fit;

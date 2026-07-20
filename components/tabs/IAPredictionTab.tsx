@@ -184,31 +184,37 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             normalizedWeights[key] = (adjustedWeights[key] / sum) * 19.0;
         }
 
+        const persistenceProb = 1.0 / (1.0 + Math.exp(-35.0 * hDiff)); 
+        const antipersistenceProb = 1.0 - persistenceProb;
+        const neutralityProb = Math.exp(-150.0 * Math.pow(hDiff, 2)); // Cloche gaussienne centrée sur 0
+        
         let rationale = `[CONVERGENCE CYBERNÉTIQUE LOCALE] L'analyse du tirage ${drawName} (Régime: ${regime}) montre un exposant de Hurst de ${hurst.toFixed(4)} et une entropie de ${entropy.toFixed(4)}. `;
-        if (hDiff > 0.05) {
-            rationale += `La persistance temporelle est forte (Hurst > 0.5), confirmant une stabilité d'inertie. `;
-        } else if (hDiff < -0.05) {
-            rationale += `La signature stochastique est anti-persistante (Hurst < 0.5), favorisant les dynamiques de transition. `;
+        
+        // Composition narrative continue et interpolée
+        if (neutralityProb > 0.5) {
+          rationale += `Le régime présente une dérive stochastique neutre (mélange équilibré de ${(persistenceProb * 100).toFixed(1)}% d'inertie et ${(antipersistenceProb * 100).toFixed(1)}% de transition). `;
         } else {
-            rationale += `Le régime présente une dérive neutre (Hurst proche de 0.5). `;
+          rationale += `Le paysage d'inférence est dominé par une composante de ${(persistenceProb * 100).toFixed(1)}% de stabilité d'inertie persistante et ${(antipersistenceProb * 100).toFixed(1)}% de transition stochastique. `;
         }
 
-        if (eDiff > 0.1) {
-            rationale += `L'entropie élevée (${entropy.toFixed(3)}) indique une distribution spectrale élargie (chaos). `;
-        } else if (eDiff < -0.1) {
-            rationale += `L'entropie basse (${entropy.toFixed(3)}) traduit des motifs géométriques structurés. `;
+        const chaosProb = 1.0 / (1.0 + Math.exp(-20.0 * eDiff));
+        const orderProb = 1.0 - chaosProb;
+        const eNeutralityProb = Math.exp(-50.0 * Math.pow(eDiff, 2));
+
+        if (eNeutralityProb > 0.6) {
+          rationale += `L'entropie se maintient à un équilibre thermodynamique stable. `;
+        } else {
+          rationale += `L'empreinte entropique indique un niveau de désordre structurel de ${(chaosProb * 100).toFixed(1)}% (chaos spectral) vs ${(orderProb * 100).toFixed(1)}% de motifs géométriques ordonnés. `;
         }
 
-        if (volatility > 20) {
-            rationale += `La volatilité forte a amplifié les modèles spectraux et de transition. `;
-        }
+        const volProb = 1.0 / (1.0 + Math.exp(-0.2 * (volatility - 20.0)));
+        rationale += `La volatilité mesurée contribue continûment à hauteur de ${(volProb * 100).toFixed(1)}% à l'amplification spectrale globale. `;
 
         const confidence = Math.round(100.0 / (1.0 + Math.exp(-0.1 * (hDiff * 200 - eDiff * 50 - volMod * 50)))); // Sigmoid instead of min/max clamping
         const boundedConfidence = Math.max(65, Math.min(95, 65 + 30 * confidence / 100));
 
-        const strategicAdvice = hDiff > 0 
-            ? "Favoriser les numéros chauds de l'historique récent et les motifs géométriques d'inertie de dérive continue."
-            : "Privilégier les écarts longs parvenus à maturité stochastique et les combinaisons à forte rupture de phase.";
+        // Strategic advice interpolé de façon continue
+        const strategicAdvice = `Favoriser continûment un ratio d'exposition de ${(persistenceProb * 100).toFixed(0)}% de numéros chauds d'inertie (historique récent) et ${(antipersistenceProb * 100).toFixed(0)}% d'écarts longs parvenus à maturité (rupture de phase).`;
 
         return {
             weights: normalizedWeights,

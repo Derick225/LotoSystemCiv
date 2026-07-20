@@ -3,21 +3,74 @@ import { AlgoKey } from "../../shared/prediction.types";
 import { evaluateGenomeFitness } from "./trainingEvaluation";
 import { normalizeWeights } from "../prediction/weightsManager";
 
+// Résolveur de système linéaire robuste via Élimination de Gauss avec pivotement partiel
+function solveLinearSystem(A: number[][], B: number[]): number[] {
+  const n = B.length;
+  const a = A.map(row => [...row]);
+  const b = [...B];
+
+  for (let i = 0; i < n; i++) {
+    let maxEl = Math.abs(a[i][i]);
+    let maxRow = i;
+    for (let k = i + 1; k < n; k++) {
+      if (Math.abs(a[k][i]) > maxEl) {
+        maxEl = Math.abs(a[k][i]);
+        maxRow = k;
+      }
+    }
+
+    // Permutation des lignes
+    const tempRow = a[maxRow];
+    a[maxRow] = a[i];
+    a[i] = tempRow;
+    const tempVal = b[maxRow];
+    b[maxRow] = b[i];
+    b[i] = tempVal;
+
+    // Élimination des coefficients inférieurs
+    for (let k = i + 1; k < n; k++) {
+      const factor = a[k][i] / (a[i][i] || 1e-9);
+      for (let j = i; j < n; j++) {
+        a[k][j] -= factor * a[i][j];
+      }
+      b[k] -= factor * b[i];
+    }
+  }
+
+  // Substitution inverse
+  const x = new Array(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    let sum = 0;
+    for (let k = i + 1; k < n; k++) {
+      sum += a[i][k] * x[k];
+    }
+    x[i] = (b[i] - sum) / (a[i][i] || 1e-9);
+  }
+  return x;
+}
+
 /**
- * Algorithme Évolutif de Convergence Darwinienne.
- * Sélection élitiste, crossover arithmétique continu et mutation adaptative déterministe.
+ * Algorithme Évolutif de Convergence Darwinienne Adaptatif.
+ * Paramètres dérivés continûment de la persistance (Hurst) et du chaos (Entropie).
  */
 export const runGeneticOptimizer = async (
   currentWeights: AlgoWeights,
   breakdownsByDraw: Record<number, Record<number, Partial<Record<AlgoKey, number>>>>,
   actualWinnersByDraw: Record<number, number[]>,
   hurstExponent: number,
+  entropy: number,
   algoKeys: AlgoKey[],
   generations: number,
   rand: () => number,
   onTelemetry?: (data: any) => void
 ): Promise<AlgoWeights> => {
-  const popSize = 30;
+  // Taille de population modulée de façon continue selon le chaos
+  const popSize = Math.round(20 + 20 * entropy);
+  
+  // Taux et amplitude de mutation continûment adaptés (AGENTS.md)
+  const mutationRate = 0.1 * (1.0 + entropy);
+  const mutationAmplitude = 0.05 * (1.5 - hurstExponent);
+  const elitistsCount = Math.max(2, Math.round(popSize * 0.2 * hurstExponent));
 
   const generateRandomWeights = (): AlgoWeights => {
     const w: any = {};
@@ -77,24 +130,24 @@ export const runGeneticOptimizer = async (
       });
     }
 
-    // Sélection élitiste
-    const survivors = evaluated.slice(0, 6).map((x) => x.genome);
+    // Sélection élitiste adaptative
+    const survivors = evaluated.slice(0, elitistsCount).map((x) => x.genome);
     const nextPop: AlgoWeights[] = [...survivors];
 
     while (nextPop.length < popSize) {
       // Parents probabilistes mais déterministes (via LCG seedée)
-      const idx1 = Math.floor(rand() * 10) % 10;
-      const idx2 = Math.floor(rand() * 10) % 10;
-      const parent1 = evaluated[idx1]?.genome || bestGenome;
-      const parent2 = evaluated[idx2]?.genome || bestGenome;
+      const idx1 = Math.floor(rand() * survivors.length) % survivors.length;
+      const idx2 = Math.floor(rand() * survivors.length) % survivors.length;
+      const parent1 = survivors[idx1] || bestGenome;
+      const parent2 = survivors[idx2] || bestGenome;
 
       const child: any = {};
       const beta = rand(); // Croisement continu arithmétique
       algoKeys.forEach((k) => {
         child[k] = parent1[k] * beta + parent2[k] * (1.0 - beta);
-        // Mutation stochastique déterministe
-        if (rand() < 0.15) {
-          child[k] += (rand() - 0.5) * 0.1;
+        // Mutation adaptative continue
+        if (rand() < mutationRate) {
+          child[k] += (rand() - 0.5) * mutationAmplitude;
         }
         child[k] = Math.max(0.001, child[k]);
       });
@@ -109,20 +162,22 @@ export const runGeneticOptimizer = async (
 };
 
 /**
- * Particle Swarm Optimization (Swarm Cybernétique sur Simplexe de Probabilité).
- * Partages d'informations inter-particules avec facteurs cognitifs et sociaux.
+ * Particle Swarm Optimization Adaptatif (Swarm Cybernétique de Simplexe).
+ * Paramètres dérivés continûment de la persistance (Hurst) et du chaos (Entropie).
  */
 export const runPSOOptimizer = async (
   currentWeights: AlgoWeights,
   breakdownsByDraw: Record<number, Record<number, Partial<Record<AlgoKey, number>>>>,
   actualWinnersByDraw: Record<number, number[]>,
   hurstExponent: number,
+  entropy: number,
   algoKeys: AlgoKey[],
   generations: number,
   rand: () => number,
   onTelemetry?: (data: any) => void
 ): Promise<AlgoWeights> => {
-  const swarmSize = 30;
+  const swarmSize = Math.round(20 + 20 * entropy);
+  const M = algoKeys.length;
 
   const generateRandomWeights = (): AlgoWeights => {
     const w: any = {};
@@ -142,7 +197,7 @@ export const runPSOOptimizer = async (
     const pos = generateRandomWeights();
     const vel: any = {};
     algoKeys.forEach((k) => {
-      vel[k] = (rand() - 0.5) * 0.05;
+      vel[k] = (rand() - 0.5) * (1.0 / M) * 0.1 * (1.0 - hurstExponent);
     });
     return {
       position: pos,
@@ -155,11 +210,11 @@ export const runPSOOptimizer = async (
   let gBestPosition = normalizeWeights(currentWeights);
   let gBestFitness = -Infinity;
 
-  const wInertia = 0.6;
-  const c1 = 1.2; // Coefficient cognitif individuel
-  const c2 = 1.2; // Coefficient social global
+  // Inertie de base dérivée de la persistance (Hurst)
+  const w_base = Math.tanh(hurstExponent);
 
   for (let gen = 1; gen <= generations; gen++) {
+    const ratioProgress = gen / generations;
     let fitnessSum = 0;
 
     for (let i = 0; i < swarmSize; i++) {
@@ -184,7 +239,11 @@ export const runPSOOptimizer = async (
       }
     }
 
-    // Mise à jour cinématique des vitesses de translation
+    // Amortissement de l'inertie et calcul cinématique continu des accélérations cognitive et sociale
+    const omega = w_base * Math.exp(-entropy * ratioProgress);
+    const c1 = 2.0 * (1.0 - hurstExponent) * (1.0 + Math.tanh(entropy));
+    const c2 = 2.0 * hurstExponent * (2.0 - Math.tanh(entropy));
+
     for (let i = 0; i < swarmSize; i++) {
       const p = particles[i];
       const nextPos: any = {};
@@ -192,9 +251,13 @@ export const runPSOOptimizer = async (
         const r1 = rand();
         const r2 = rand();
         p.velocity[k] =
-          wInertia * p.velocity[k] +
+          omega * p.velocity[k] +
           c1 * r1 * (p.bestPosition[k] - p.position[k]) +
           c2 * r2 * (gBestPosition[k] - p.position[k]);
+
+        // Borne maximale cinématique
+        const maxV = (1.0 / M) * (1.0 + entropy);
+        p.velocity[k] = Math.max(-maxV, Math.min(maxV, p.velocity[k]));
 
         nextPos[k] = Math.max(0.001, p.position[k] + p.velocity[k]);
       });
@@ -223,96 +286,177 @@ export const runPSOOptimizer = async (
 };
 
 /**
- * Recherche de coordonnées séquentielle amortie (Inférence Bayésienne logique).
- * Exploration locale le long des axes du simplexe de probabilité.
+ * Optimiseur Bayésien par Surrogate Model RBF et Fonction d'Acquisition UCB.
+ * Construit un émulateur stochastique par Processus Gaussien (Kriging déterministe)
+ * et sélectionne analytiquement les points à évaluer pour maximiser le gain.
  */
 export const runBayesianOptimizer = async (
   currentWeights: AlgoWeights,
   breakdownsByDraw: Record<number, Record<number, Partial<Record<AlgoKey, number>>>>,
   actualWinnersByDraw: Record<number, number[]>,
   hurstExponent: number,
+  entropy: number,
   algoKeys: AlgoKey[],
   generations: number,
+  rand: () => number,
   onTelemetry?: (data: any) => void
 ): Promise<AlgoWeights> => {
-  let currentBest = normalizeWeights(currentWeights);
-  let currentBestEval = evaluateGenomeFitness(
-    currentBest,
-    breakdownsByDraw,
-    actualWinnersByDraw,
-    hurstExponent,
-    algoKeys
-  );
+  const normCurrent = normalizeWeights(currentWeights);
+  const samples: { x: AlgoWeights; y: number }[] = [];
 
-  for (let gen = 1; gen <= generations; gen++) {
-    const stepScale = 0.05 / gen; // Amortissement continu de l'étape de saut
+  const evalPoint = (w: AlgoWeights) => {
+    const ev = evaluateGenomeFitness(
+      w,
+      breakdownsByDraw,
+      actualWinnersByDraw,
+      hurstExponent,
+      algoKeys
+    );
+    return ev.fitness;
+  };
 
-    for (const k of algoKeys) {
-      const wPlus = { ...currentBest };
-      wPlus[k] = Math.min(1.0, (wPlus[k] || 0) + stepScale);
-      const normPlus = normalizeWeights(wPlus);
-      const evalPlus = evaluateGenomeFitness(
-        normPlus,
-        breakdownsByDraw,
-        actualWinnersByDraw,
-        hurstExponent,
-        algoKeys
-      );
+  // Échantillonnage de départ : le point courant + perturbations déterministes
+  samples.push({ x: normCurrent, y: evalPoint(normCurrent) });
 
-      const wMinus = { ...currentBest };
-      wMinus[k] = Math.max(0.001, (wMinus[k] || 0) - stepScale);
-      const normMinus = normalizeWeights(wMinus);
-      const evalMinus = evaluateGenomeFitness(
-        normMinus,
-        breakdownsByDraw,
-        actualWinnersByDraw,
-        hurstExponent,
-        algoKeys
-      );
+  const numInitialSamples = 6;
+  for (let sIdx = 1; sIdx < numInitialSamples; sIdx++) {
+    const perturbed: any = {};
+    algoKeys.forEach((k) => {
+      const noise = (rand() - 0.5) * 0.15 * (1.0 + entropy);
+      perturbed[k] = Math.max(0.001, (normCurrent[k] || 0) + noise);
+    });
+    const normP = normalizeWeights(perturbed);
+    samples.push({ x: normP, y: evalPoint(normP) });
+  }
 
-      if (
-        evalPlus.fitness > currentBestEval.fitness &&
-        evalPlus.fitness > evalMinus.fitness
-      ) {
-        currentBest = normPlus;
-        currentBestEval = evalPlus;
-      } else if (evalMinus.fitness > currentBestEval.fitness) {
-        currentBest = normMinus;
-        currentBestEval = evalMinus;
+  let bestGenome = { ...normCurrent };
+  let bestFitness = samples[0].y;
+  samples.forEach(s => {
+    if (s.y > bestFitness) {
+      bestFitness = s.y;
+      bestGenome = s.x;
+    }
+  });
+
+  const gamma = 1.0;
+  const lambda = 1e-4; // Régularisation stable
+
+  for (let iter = 1; iter <= generations; iter++) {
+    const numSamples = samples.length;
+
+    // Matrice de covariance augmentée pour inclure le terme de dérive constante (Kriging simple)
+    const Phi: number[][] = Array.from({ length: numSamples + 1 }, () => new Array(numSamples + 1).fill(0));
+    const targetY = new Array(numSamples + 1).fill(0);
+
+    for (let i = 0; i < numSamples; i++) {
+      for (let j = 0; j < numSamples; j++) {
+        let distSq = 0;
+        for (const k of algoKeys) {
+          distSq += Math.pow(samples[i].x[k] - samples[j].x[k], 2);
+        }
+        Phi[i][j] = Math.exp(-gamma * distSq);
+        if (i === j) {
+          Phi[i][j] += lambda;
+        }
+      }
+      Phi[i][numSamples] = 1.0;
+      Phi[numSamples][i] = 1.0;
+      targetY[i] = samples[i].y;
+    }
+    Phi[numSamples][numSamples] = 0.0;
+    targetY[numSamples] = 0.0;
+
+    const coefs = solveLinearSystem(Phi, targetY);
+
+    const getPrediction = (x: AlgoWeights): { mean: number; std: number } => {
+      let mean = coefs[numSamples];
+      const kVector = new Array(numSamples).fill(0);
+      for (let i = 0; i < numSamples; i++) {
+        let distSq = 0;
+        for (const k of algoKeys) {
+          distSq += Math.pow(x[k] - samples[i].x[k], 2);
+        }
+        const phiVal = Math.exp(-gamma * distSq);
+        kVector[i] = phiVal;
+        mean += coefs[i] * phiVal;
+      }
+
+      // v = Phi^-1 * k
+      const Phiv = Phi.map(row => [...row]);
+      const rhs = [...kVector, 0];
+      const v = solveLinearSystem(Phiv, rhs);
+      
+      let kTv = 0;
+      for (let i = 0; i < numSamples; i++) {
+        kTv += kVector[i] * v[i];
+      }
+      const variance = Math.max(0.001, 1.0 - kTv);
+      return { mean, std: Math.sqrt(variance) };
+    };
+
+    // Maximisation de la fonction d'acquisition UCB (Upper Confidence Bound)
+    let bestUCB = -Infinity;
+    let bestCandidate = { ...normCurrent };
+    const numCandidates = 100;
+    // Décroissance exponentielle continue de la force d'exploration
+    const betaAcquisition = 2.0 * Math.exp(-iter / generations);
+
+    for (let c = 0; c < numCandidates; c++) {
+      const candidate: any = {};
+      algoKeys.forEach((k) => {
+        const noise = (rand() - 0.5) * 0.3 * (1.5 - hurstExponent);
+        candidate[k] = Math.max(0.001, (bestGenome[k] || 0) + noise);
+      });
+      const normC = normalizeWeights(candidate);
+      const pred = getPrediction(normC);
+      const ucbVal = pred.mean + betaAcquisition * pred.std;
+
+      if (ucbVal > bestUCB) {
+        bestUCB = ucbVal;
+        bestCandidate = normC;
       }
     }
 
+    // Évaluation réelle du meilleur candidat identifié par l'acquisition
+    const realFitness = evalPoint(bestCandidate);
+    samples.push({ x: bestCandidate, y: realFitness });
+
+    if (realFitness > bestFitness) {
+      bestFitness = realFitness;
+      bestGenome = { ...bestCandidate };
+    }
+
     if (onTelemetry) {
-      const sumSquaredWeights = Object.values(currentBest).reduce(
+      const sumSquaredWeights = Object.values(bestGenome).reduce(
         (sum, w) => sum + w * w,
         0
       );
       const diversity = Math.max(0.01, 1.0 - sumSquaredWeights);
       onTelemetry({
-        gen,
-        bestFitness: parseFloat(currentBestEval.fitness.toFixed(3)),
-        avgFitness: parseFloat((currentBestEval.fitness * 0.95).toFixed(3)),
+        gen: iter,
+        bestFitness: parseFloat(bestFitness.toFixed(3)),
+        avgFitness: parseFloat((samples.reduce((sum, s) => sum + s.y, 0) / samples.length).toFixed(3)),
         diversity,
-        bestGenome: currentBest,
+        bestGenome: bestGenome,
         source: "bayesian",
       });
     }
-    await new Promise((resolve) => setTimeout(resolve, 0)); // Non-blocking yield
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  return normalizeWeights(currentBest);
+  return normalizeWeights(bestGenome);
 };
 
 /**
- * Omni-Méta Blending (PSO + Darwin + Bayes Blended via Softargmax).
- * Exécute parallèlement les optimiseurs découplés sur moins de générations
- * et combine les résultats de façon proportionnelle à leurs performances.
+ * Omni-Méta Blending (PSO + Darwin + Kriging Blended via Softargmax).
  */
 export const runMetaOptimizer = async (
   currentWeights: AlgoWeights,
   breakdownsByDraw: Record<number, Record<number, Partial<Record<AlgoKey, number>>>>,
   actualWinnersByDraw: Record<number, number[]>,
   hurstExponent: number,
+  entropy: number,
   algoKeys: AlgoKey[],
   generations: number,
   rand: () => number,
@@ -320,12 +464,13 @@ export const runMetaOptimizer = async (
 ): Promise<AlgoWeights> => {
   const metaGenerations = Math.max(3, Math.floor(generations / 3));
 
-  // Exécution découplée des trois algorithmes
+  // Exécutions parallèles découplées
   const geneticWeights = await runGeneticOptimizer(
     currentWeights,
     breakdownsByDraw,
     actualWinnersByDraw,
     hurstExponent,
+    entropy,
     algoKeys,
     metaGenerations,
     rand
@@ -336,6 +481,7 @@ export const runMetaOptimizer = async (
     breakdownsByDraw,
     actualWinnersByDraw,
     hurstExponent,
+    entropy,
     algoKeys,
     metaGenerations,
     rand
@@ -346,8 +492,10 @@ export const runMetaOptimizer = async (
     breakdownsByDraw,
     actualWinnersByDraw,
     hurstExponent,
+    entropy,
     algoKeys,
-    metaGenerations
+    metaGenerations,
+    rand
   );
 
   const evalGen = evaluateGenomeFitness(
@@ -372,7 +520,7 @@ export const runMetaOptimizer = async (
     algoKeys
   );
 
-  // Pondération continue de Softargmax pour fusionner les génomes
+  // Softargmax pour fusionner de façon continue selon les fitness relatives
   const maxFitness = Math.max(evalGen.fitness, evalPso.fitness, evalBayes.fitness);
   const expGen = Math.exp(evalGen.fitness - maxFitness);
   const expPso = Math.exp(evalPso.fitness - maxFitness);
@@ -391,7 +539,6 @@ export const runMetaOptimizer = async (
 
   const bestWeights = normalizeWeights(blended);
 
-  // Émulation progressive de la télémétrie de fusion pour garder une UI fluide
   for (let gen = 1; gen <= generations; gen++) {
     if (onTelemetry) {
       const bestEval = evaluateGenomeFitness(

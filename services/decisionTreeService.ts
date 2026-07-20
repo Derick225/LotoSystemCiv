@@ -10,6 +10,17 @@ export const FEATURES_LABELS = [
 
 // Cache stable basé sur une clé string unique (drawName + historique + head draw id)
 const consensusCache = new Map<string, Record<number, number>>();
+const MAX_CACHE_SIZE = 100;
+
+const addToConsensusCache = (key: string, value: Record<number, number>) => {
+  if (consensusCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = consensusCache.keys().next().value;
+    if (firstKey !== undefined) {
+      consensusCache.delete(firstKey);
+    }
+  }
+  consensusCache.set(key, value);
+};
 
 const getConsensusCacheKey = (drawName: string, historyLength: number, headDrawId: string): string => {
   return `${drawName}_${historyLength}_${headDrawId}`;
@@ -17,6 +28,27 @@ const getConsensusCacheKey = (drawName: string, historyLength: number, headDrawI
 
 // Constante topologique dérivée du domaine (couvre 99.7% des distances spatiales dans un domaine de 90)
 const SIGMA_TOPOLOGY = 90 / 6.0; 
+
+/**
+ * Calcule empiriquement le sigma topologique à partir des distances réelles gagnant-à-gagnant.
+ */
+const computeEmpiricalSigmaTopology = (history: DrawResult[]): number => {
+  if (history.length === 0) return SIGMA_TOPOLOGY;
+  const distances: number[] = [];
+  const limit = Math.min(history.length, 50);
+  for (let i = 0; i < limit; i++) {
+    const winners = history[i].gagnants || [];
+    for (let j = 0; j < winners.length; j++) {
+      for (let k = j + 1; k < winners.length; k++) {
+        distances.push(Math.abs(winners[j] - winners[k]));
+      }
+    }
+  }
+  if (distances.length === 0) return SIGMA_TOPOLOGY;
+  const meanDist = distances.reduce((a, b) => a + b, 0) / distances.length;
+  const variance = distances.reduce((sum, d) => sum + Math.pow(d - meanDist, 2), 0) / distances.length;
+  return Math.sqrt(variance) || SIGMA_TOPOLOGY;
+}; 
 
 // Diagnostics de la forêt de décision
 export interface DecisionForestDiagnostics {
@@ -133,6 +165,7 @@ const extractNumericFeatures = (
     medianConsensus: number;
     iqrConsensus: number;
     trapThresholdZ: number;
+    sigmaTopology: number;
   }
 ): number[] => {
   if (resultsLength < 5 || num < 1 || num > 90) {
@@ -144,11 +177,13 @@ const extractNumericFeatures = (
   const consensus = globalConsensusMap[num] || 0;
 
   // --- DISTANCES TOPOLOGIQUES AVEC DÉCRUE GAUSSIENNE CONTINUE ---
+  const currentSigmaTopology = datasetStats.sigmaTopology || SIGMA_TOPOLOGY;
+
   // Voisins récents
   let neighborSum = 0;
   for (const w of contextState.lastDrawWinners) {
     const dist = Math.abs(num - w);
-    neighborSum += Math.exp(-0.5 * Math.pow(dist / SIGMA_TOPOLOGY, 2));
+    neighborSum += Math.exp(-0.5 * Math.pow(dist / currentSigmaTopology, 2));
   }
   const neighborFeature = Math.min(1.0, neighborSum);
 
@@ -156,7 +191,7 @@ const extractNumericFeatures = (
   let machineSum = 0;
   for (const m of contextState.lastDrawMachine) {
     const dist = Math.abs(num - m);
-    machineSum += Math.exp(-0.5 * Math.pow(dist / SIGMA_TOPOLOGY, 2));
+    machineSum += Math.exp(-0.5 * Math.pow(dist / currentSigmaTopology, 2));
   }
   const machineFeature = Math.min(1.0, machineSum);
 
@@ -231,6 +266,7 @@ export const computeDatasetStats = (
 ) => {
   const freqsArr: number[] = [];
   const gapsArr: number[] = [];
+  const validGapsArr: number[] = [];
   
   const tempGaps: Record<number, number> = {};
   for (let n = 1; n <= 90; n++) {
@@ -248,10 +284,15 @@ export const computeDatasetStats = (
   for (let i = 1; i <= 90; i++) {
     freqsArr.push(consensusMap[i] || 0);
     gapsArr.push(tempGaps[i]);
+    if (tempGaps[i] !== history.length) {
+      validGapsArr.push(tempGaps[i]);
+    }
   }
 
   const sortedFreqs = [...freqsArr].sort((a, b) => a - b);
-  const sortedGaps = [...gapsArr].sort((a, b) => a - b);
+  // Exclure les valeurs sentinelles tempGaps[i] = history.length de la distribution des gaps
+  const gapsForStats = validGapsArr.length > 0 ? validGapsArr : gapsArr;
+  const sortedGaps = [...gapsForStats].sort((a, b) => a - b);
 
   const medianFreq = sortedFreqs[Math.floor(sortedFreqs.length / 2)] || 0;
   const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)] || 0;
@@ -270,6 +311,8 @@ export const computeDatasetStats = (
   }
   const trapThresholdZ = 1.0 + Math.max(0.2, Math.min(2.0, Math.abs(skewFreq)));
 
+  const sigmaTopology = computeEmpiricalSigmaTopology(history);
+
   return {
     medianGap,
     iqrGap,
@@ -277,7 +320,8 @@ export const computeDatasetStats = (
     stdFreq,
     medianConsensus,
     iqrConsensus,
-    trapThresholdZ
+    trapThresholdZ,
+    sigmaTopology
   };
 };
 
@@ -315,7 +359,7 @@ export const runDecisionForest = async (
   let consensusMap = consensusCache.get(cacheKey);
   if (!consensusMap) {
     consensusMap = buildConsensusMap(history);
-    consensusCache.set(cacheKey, consensusMap);
+    addToConsensusCache(cacheKey, consensusMap);
   }
 
   // 2. Calcul des Statistiques Dynamiques Rigoureuses

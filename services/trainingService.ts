@@ -96,7 +96,7 @@ export const evolveNeuralDNACore = async (
   bestWeights: AlgoWeights;
   improvement: number;
   report: TrainingReport;
-  isGeneralizable?: boolean;
+  isGeneralizable?: boolean | "unverifiable";
   overfittingRatio?: number;
   firstPredictionDNASnapshot?: any;
 }> => {
@@ -106,15 +106,54 @@ export const evolveNeuralDNACore = async (
   const regimeMatch = detectGameRegime(fullHistory);
   const hurstExponent = regimeMatch.hurst ? parseFloat(regimeMatch.hurst.toString()) : 0.5;
 
+  // Calcul de l'entropie de Shannon de l'historique des tirages
+  const computeHistoryEntropy = (hist: DrawResult[]) => {
+    const counts = new Map<number, number>();
+    let total = 0;
+    hist.forEach(h => {
+      h.gagnants.forEach(num => {
+        counts.set(num, (counts.get(num) || 0) + 1);
+        total++;
+      });
+    });
+    if (total === 0) return 0.5;
+    let ent = 0;
+    counts.forEach((cnt) => {
+      const p = cnt / total;
+      ent -= p * Math.log2(p);
+    });
+    const maxEnt = Math.log2(90);
+    return Math.max(0.1, Math.min(1.0, ent / maxEnt));
+  };
+  const entropyVal = computeHistoryEntropy(fullHistory);
+
   logger.info(`[Sequential Training] Démarrage de l'apprentissage cybernétique type: ${optType}`);
 
-  const actualSampleSize = fullHistory.length >= 30
-    ? Math.max(30, Math.min(options.sampleSize, fullHistory.length))
-    : fullHistory.length;
-  const trainingSlice = fullHistory.slice(0, actualSampleSize);
+  // Détermination robuste de la taille du holdout (minimum 20 tirages pour puissance statistique, borné à 30% max de l'historique)
+  const totalLength = fullHistory.length;
+  let holdoutSize = Math.max(20, Math.min(Math.ceil(totalLength * 0.25), 45));
+  let isHoldoutVerifiable = true;
+
+  if (totalLength - holdoutSize < 10) {
+    // Si l'historique est trop petit pour un holdout robuste, on réduit le holdout proportionnellement
+    holdoutSize = Math.max(5, Math.floor(totalLength * 0.2));
+  }
+  if (holdoutSize < 5 || totalLength - holdoutSize < 5) {
+    isHoldoutVerifiable = false;
+  }
+
+  // Holdout et Train historiquement disjoints (ZÉRO FUITE DE DONNÉES)
+  const holdoutHistory = fullHistory.slice(0, holdoutSize);
+  const trainHistory = fullHistory.slice(holdoutSize);
+
+  // Pour l'optimisation, on utilise exclusivement trainHistory
+  const actualSampleSize = trainHistory.length >= 25
+    ? Math.max(25, Math.min(options.sampleSize, trainHistory.length))
+    : trainHistory.length;
+  const trainingSlice = trainHistory.slice(0, actualSampleSize);
 
   if (trainingSlice.length < 5) {
-    throw new Error(`Historique insuffisant pour l'apprentissage (minimum absolu de 5 tirages).`);
+    throw new Error(`Historique d'entraînement insuffisant pour l'apprentissage (minimum de 5 tirages après holdout).`);
   }
 
   const algoKeys = Object.keys(currentWeights) as AlgoKey[];
@@ -186,6 +225,7 @@ export const evolveNeuralDNACore = async (
         breakdownsByDraw,
         actualWinnersByDraw,
         hurstExponent,
+        entropyVal,
         algoKeys,
         totalGenerations,
         rand,
@@ -198,6 +238,7 @@ export const evolveNeuralDNACore = async (
         breakdownsByDraw,
         actualWinnersByDraw,
         hurstExponent,
+        entropyVal,
         algoKeys,
         totalGenerations,
         rand,
@@ -210,8 +251,10 @@ export const evolveNeuralDNACore = async (
         breakdownsByDraw,
         actualWinnersByDraw,
         hurstExponent,
+        entropyVal,
         algoKeys,
         totalGenerations,
+        rand,
         onTelemetry
       );
       break;
@@ -222,6 +265,7 @@ export const evolveNeuralDNACore = async (
         breakdownsByDraw,
         actualWinnersByDraw,
         hurstExponent,
+        entropyVal,
         algoKeys,
         totalGenerations,
         rand,
@@ -233,16 +277,12 @@ export const evolveNeuralDNACore = async (
   const finalWeightsBeforeVerification = normalizeWeights(bestGenome);
 
   // Vérification de généralisation stricte (disjointe, sans fuite de données)
-  const holdoutSize = Math.max(Math.ceil(fullHistory.length * (1 - hurstExponent)), 10);
   let rejectionProbability = 0;
   let finalWeights = finalWeightsBeforeVerification;
   let overfittingRatio = 1;
+  let isGeneralizable: boolean | "unverifiable" = "unverifiable";
 
-  if (holdoutSize > 10 && fullHistory.length > holdoutSize) {
-    // Holdout et Train historiquement disjoints
-    const holdoutHistory = fullHistory.slice(0, holdoutSize);
-    const trainHistory = fullHistory.slice(holdoutSize);
-
+  if (isHoldoutVerifiable) {
     const holdoutReport = await runBacktestTraining(
       drawName,
       holdoutHistory,
@@ -265,8 +305,14 @@ export const evolveNeuralDNACore = async (
 
     const bootstrapTest = runBootstrapOverfittingTest(trainErrors, holdoutErrors);
 
-    // Transition continue sigmoïdale de la probabilité de rejet
-    rejectionProbability = 1.0 / (1.0 + Math.exp(-4.0 * bootstrapTest.ciLower));
+    if (trainErrors.length < 5 || holdoutErrors.length < 5) {
+      isGeneralizable = "unverifiable";
+      rejectionProbability = 0.0;
+    } else {
+      // Transition continue sigmoïdale de la probabilité de rejet
+      rejectionProbability = 1.0 / (1.0 + Math.exp(-4.0 * bootstrapTest.ciLower));
+      isGeneralizable = rejectionProbability < 0.5;
+    }
 
     // Blending adaptatif
     const blendedWeights: any = {};
@@ -276,6 +322,9 @@ export const evolveNeuralDNACore = async (
       blendedWeights[k] = cW * rejectionProbability + nW * (1.0 - rejectionProbability);
     });
     finalWeights = blendedWeights;
+  } else {
+    isGeneralizable = "unverifiable";
+    rejectionProbability = 0.0;
   }
 
   const safeFinalWeights = normalizeWeights(finalWeights);
@@ -288,7 +337,7 @@ export const evolveNeuralDNACore = async (
     bestWeights: safeFinalWeights,
     improvement: continuousImprovement,
     report: newReport,
-    isGeneralizable: rejectionProbability < 0.5,
+    isGeneralizable,
     overfittingRatio: parseFloat(overfittingRatio.toFixed(3)),
     firstPredictionDNASnapshot,
   };
@@ -306,7 +355,7 @@ export const evolveNeuralDNA = async (
   bestWeights: any;
   improvement: number;
   report: TrainingReport;
-  isGeneralizable?: boolean;
+  isGeneralizable?: boolean | "unverifiable";
   overfittingRatio?: number;
   firstPredictionDNASnapshot?: any;
 }> => {
