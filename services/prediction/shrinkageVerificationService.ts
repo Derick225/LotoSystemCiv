@@ -1,6 +1,6 @@
 import { DrawResult, AlgoWeights } from "../../types";
 import { logger } from "../../utils/logger";
-import { detectGameRegime } from "../mathService";
+import { detectGameRegime, calculateStatisticalBounds } from "../mathService";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures } from "./featureExtractor";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
@@ -299,11 +299,12 @@ export const runHistoricalShrinkageBacktest = async (
     try {
       const features = await extractFeatures(drawName, subHistory);
       
-      const mockMetrics = {
-        statisticalBounds: { median: 50, q1: 25, q3: 75, variance: 100, kurtosis: 0, skewness: 0, shannonEntropy: 0.8, hurstExponent: 0.5 },
+      const statisticalBounds = calculateStatisticalBounds(subHistory);
+      const metrics = {
+        statisticalBounds,
       };
 
-      const scoredList = calculateScores(features, weights, mockMetrics as any, subHistory);
+      const scoredList = calculateScores(features, weights, metrics as any, subHistory);
 
       // Simulation du James-Stein Shrinkage
       const localScoresArr = scoredList.map(s => s.score);

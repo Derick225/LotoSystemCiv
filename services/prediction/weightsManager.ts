@@ -148,18 +148,35 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
       // Chargement passif de l'historique de feedback humain pour RLHF (Phase 3)
       const predictionsMap = new Map<string, any>();
       try {
-        const { keys: idbKeys } = await import('idb-keyval');
-        const allKeys = await idbKeys();
-        const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('pred_'));
-        for (const k of histKeys) {
-          const itemStr = await get(k as string);
-          if (itemStr) {
-            try {
-              const item = typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr;
-              if (item && item.id) {
-                predictionsMap.set(item.id, item);
-              }
-            } catch (_) {}
+        // Tenter de charger depuis l'index centralisé rapide pour éviter d'analyser toutes les clés IndexedDB
+        const feedbackIndexStr = await get('feedback_index_map');
+        if (feedbackIndexStr) {
+          const indexObj = typeof feedbackIndexStr === 'string' ? JSON.parse(feedbackIndexStr) : feedbackIndexStr;
+          Object.keys(indexObj).forEach(id => {
+            predictionsMap.set(id, indexObj[id]);
+          });
+        } else {
+          // Fallback sur le scan complet et création de l'index pour optimiser les appels futurs
+          const { keys: idbKeys } = await import('idb-keyval');
+          const allKeys = await idbKeys();
+          const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('pred_'));
+          const newIndexObj: Record<string, any> = {};
+          for (const k of histKeys) {
+            const itemStr = await get(k as string);
+            if (itemStr) {
+              try {
+                const item = typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr;
+                if (item && item.id) {
+                  predictionsMap.set(item.id, item);
+                  if (item.feedback) {
+                    newIndexObj[item.id] = { id: item.id, feedback: item.feedback };
+                  }
+                }
+              } catch (_) {}
+            }
+          }
+          if (Object.keys(newIndexObj).length > 0) {
+            await set('feedback_index_map', JSON.stringify(newIndexObj));
           }
         }
       } catch (_) {}

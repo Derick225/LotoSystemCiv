@@ -743,7 +743,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           globalWeights,
         );
 
-        generateTacticalReport({
+        await generateTacticalReport({
           drawName: currentDrawName,
           prediction: prediction,
           weights: globalWeights,

@@ -212,6 +212,19 @@ export const updatePredictionFeedback = async (id: string, feedback: PredictionF
         const item: PredictionHistoryItem = (typeof raw === 'string' ? JSON.parse(raw) : raw);
         const updatedItem = { ...item, feedback };
         await set(key, JSON.stringify(updatedItem));
+
+        // Mettre à jour l'index centralisé de feedback pour optimiser weightsManager / applyMetaLearning
+        try {
+            const feedbackIndexStr = await get('feedback_index_map');
+            const indexObj = feedbackIndexStr 
+                ? (typeof feedbackIndexStr === 'string' ? JSON.parse(feedbackIndexStr) : feedbackIndexStr)
+                : {};
+            indexObj[id] = { id, feedback };
+            await set('feedback_index_map', JSON.stringify(indexObj));
+        } catch (err) {
+            console.error("Failed to update feedback_index_map:", err);
+        }
+
         // Automate sync in background
         syncAllHistory(item.drawName).catch(e => console.error("Auto-sync prediction feedback failed", e));
     }

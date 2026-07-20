@@ -1,6 +1,4 @@
 
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import {  Prediction, AlgoWeights, ForensicReport } from '../types';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -12,7 +10,9 @@ interface ReportData {
     weights: AlgoWeights;
 }
 
-export const generateTacticalReport = (data: ReportData) => {
+export const generateTacticalReport = async (data: ReportData) => {
+    const { default: jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;

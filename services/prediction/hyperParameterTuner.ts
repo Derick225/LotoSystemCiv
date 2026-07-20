@@ -1,4 +1,5 @@
 import { DrawResult, AlgoWeights } from "../../types";
+import { calculateStatisticalBounds } from "../mathService";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
@@ -332,6 +333,7 @@ const simulateInferenceWithHyperparameters = async (
     lyapunov: topologicalLyapunovScores,
     topologicalLyapunov: topologicalLyapunovScores,
     pcaVarianceThreshold: params.pcaVarianceThreshold,
+    statisticalBounds: calculateStatisticalBounds(history),
   };
 
   return calculateScores(features, weights, mockMetrics, history);

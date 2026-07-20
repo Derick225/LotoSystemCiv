@@ -20,8 +20,32 @@ self.onmessage = (event: MessageEvent) => {
     try {
         const { dynamicWeights, history } = event.data as { dynamicWeights: AlgoWeights, history: DrawResult[] };
         
-        // MICRO-BACKTEST INTRA-DRAW (Simulated Annealing Amélioré)
-        const recentDraws = history.slice(0, 5);
+        // Calcul adaptatif de la taille de fenêtre (entre 8 et 18 tirages)
+        // basé sur l'entropie de Shannon globale de l'historique disponible.
+        const entropyHistoryDepth = Math.min(30, history.length);
+        const countsAll: Record<number, number> = {};
+        let totalCountAll = 0;
+        for (let idx = 0; idx < entropyHistoryDepth; idx++) {
+          if (history[idx] && history[idx].gagnants) {
+            history[idx].gagnants.forEach(n => {
+              countsAll[n] = (countsAll[n] || 0) + 1;
+              totalCountAll++;
+            });
+          }
+        }
+        let totalEntropy = 0;
+        Object.values(countsAll).forEach(c => {
+          const p = c / totalCountAll;
+          if (p > 0) totalEntropy -= p * Math.log2(p);
+        });
+        const maxPossibleEntropy = Math.log2(90);
+        const globalChaosRatio = Math.max(Number.EPSILON, totalEntropy / maxPossibleEntropy);
+
+        // Plus le chaos est élevé (proche de 1), plus on a besoin d'une grande fenêtre historique
+        // pour filtrer le bruit stochastique (entre 8 et 18 tirages pour plus de robustesse statistique).
+        // On s'assure de ne pas dépasser (history.length - 11) pour préserver au moins 11 éléments pour histSlice.
+        const adaptiveWindowSize = Math.max(8, Math.min(18, Math.round(8 + (10 * globalChaosRatio))));
+        const recentDraws = history.slice(0, Math.max(1, Math.min(adaptiveWindowSize, history.length - 11)));
         
         const lcg = new LCG(`meta_${history.length}_${history[0]?.date || Date.now()}`);
 

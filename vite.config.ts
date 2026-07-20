@@ -72,6 +72,50 @@ export default defineConfig(({ mode }) => {
                   },
                 },
               },
+              {
+                urlPattern: /\/rest\/v1\/.*/i,
+                handler: 'StaleWhileRevalidate',
+                method: 'GET',
+                options: {
+                  cacheName: 'supabase-rest-cache',
+                  expiration: {
+                    maxEntries: 100,
+                    maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200],
+                  },
+                },
+              },
+              {
+                urlPattern: /\/functions\/v1\/.*/i,
+                handler: 'StaleWhileRevalidate',
+                method: 'GET',
+                options: {
+                  cacheName: 'supabase-functions-cache',
+                  expiration: {
+                    maxEntries: 50,
+                    maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200],
+                  },
+                },
+              },
+              {
+                urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)(?:\?.*)?$/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'images-cache',
+                  expiration: {
+                    maxEntries: 60,
+                    maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200],
+                  },
+                },
+              },
             ],
           },
           manifestFilename: 'manifest.json',
@@ -143,8 +187,7 @@ export default defineConfig(({ mode }) => {
             'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
             'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
             'vendor-utils': ['jspdf', 'html2canvas'],
-            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query'],
-            'vendor-heavy': ['@tensorflow/tfjs', 'three', '@react-three/fiber']
+            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query']
           }
         }
       }

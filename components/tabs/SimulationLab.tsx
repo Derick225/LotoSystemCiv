@@ -1,7 +1,29 @@
 import { useNexusStore } from "../../store/useNexusStore";
-import React, { useState, useRef } from 'react';
-import * as tf from '@tensorflow/tfjs';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Play, Square, Activity, Database, Sparkles, Sliders, CheckCircle, AlertTriangle } from 'lucide-react';
+
+let tfInstance: any = null;
+async function loadTensorFlow() {
+  if (!tfInstance) {
+    const tf = await import('@tensorflow/tfjs');
+    try {
+      // Force le backend WebGL s'il est disponible pour des calculs accélérés par GPU
+      await tf.setBackend('webgl');
+      await tf.ready();
+      console.log("[SimulationLab] TensorFlow.js backend initialisé avec succès : WebGL");
+    } catch (e) {
+      console.warn("[SimulationLab] Impossible d'activer le backend WebGL, repli sur CPU.", e);
+      try {
+        await tf.setBackend('cpu');
+        await tf.ready();
+      } catch (err) {
+        console.error("[SimulationLab] Échec critique de l'initialisation du backend CPU", err);
+      }
+    }
+    tfInstance = tf;
+  }
+  return tfInstance;
+}
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { audioEngine } from '../../utils/audioEngine';
 import { useToast } from '../ui/Toast';
@@ -68,6 +90,25 @@ const isValidDraw = (nums: number[] | null): nums is number[] => {
 
 export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
+  const [tf, setTf] = useState<any>(tfInstance);
+  const [isTfLoading, setIsTfLoading] = useState(!tfInstance);
+
+  useEffect(() => {
+    if (!tf) {
+      setIsTfLoading(true);
+      loadTensorFlow()
+        .then((instance) => {
+          setTf(instance);
+          setIsTfLoading(false);
+        })
+        .catch((err) => {
+          console.error("Failed to load TensorFlow.js", err);
+          showToast("Impossible de charger le moteur TensorFlow.js.", "error");
+          setIsTfLoading(false);
+        });
+    }
+  }, [tf, showToast]);
+
   const [fileData, setFileData] = useState<any[] | null>(null);
   const [fileDraws, setFileDraws] = useState<{ gagnants: number[] }[] | null>(null);
   const [fileParseWarning, setFileParseWarning] = useState<string | null>(null);
@@ -91,7 +132,7 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
     parity: false
   });
 
-  const modelRef = useRef<tf.Sequential | null>(null);
+  const modelRef = useRef<any>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -200,7 +241,7 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
   // Retourne les tenseurs d'entraînement à partir de vraies données uniquement.
   // Ne génère JAMAIS de données synthétiques : si rien d'exploitable n'est disponible,
   // retourne null et l'appelant doit refuser l'entraînement plutôt que d'entraîner sur du bruit.
-  const prepareData = (): { X: tf.Tensor2D; Y: tf.Tensor2D; inputDim: number; source: 'history' | 'file'; sampleCount: number } | null => {
+  const prepareData = (): { X: any; Y: any; inputDim: number; source: 'history' | 'file'; sampleCount: number } | null => {
     if (fileDraws && fileDraws.length >= 20) {
       const built = buildTensorsFromDraws(fileDraws);
       if (!built) return null;
@@ -221,6 +262,11 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const startTraining = async () => {
     if (trainingState === 'training') return;
     audioEngine.play('click');
+
+    if (!tf) {
+      showToast("Le moteur TensorFlow.js n'est pas encore initialisé. Veuillez patienter.", "error");
+      return;
+    }
 
     const prepared = prepareData();
     if (!prepared) {
@@ -274,7 +320,7 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         validationSplit: 0.2,
         batchSize: 32,
         callbacks: {
-          onEpochEnd: (epoch, logs) => {
+          onEpochEnd: (epoch: number, logs: any) => {
             // Proxy continu dérivé du MSE (pas une "accuracy" de classification au sens strict,
             // mais un indicateur de qualité d'ajustement borné [0,1] cohérent pour une régression).
             const mseProxyAccuracy = 1.0 - (logs?.mse || 0.5);
@@ -316,10 +362,10 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
 
         const inputTensor = tf.tensor2d([features], [1, features.length]);
-        const predTensor = model.predict(inputTensor) as tf.Tensor;
+        const predTensor = model.predict(inputTensor) as any;
         const predArray = await predTensor.data();
         
-        const finalNumbers = Array.from(predArray).map(n => {
+        const finalNumbers = Array.from(predArray).map((n: any) => {
            let val = Math.round(n * 90);
            return Math.max(1, Math.min(90, val));
         });
@@ -630,13 +676,31 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
           </div>
 
           <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800/80 flex flex-col justify-center">
-             <h4 className="text-xs font-bold uppercase text-slate-500 mb-4 flex items-center gap-2">
-               <Activity size={14} className="text-slate-400" />
-               3. Contrôles Moteur
+             <h4 className="text-xs font-bold uppercase text-slate-500 mb-4 flex items-center justify-between">
+               <span className="flex items-center gap-2">
+                 <Activity size={14} className="text-slate-400" />
+                 3. Contrôles Moteur
+               </span>
+               {tf && (
+                 <span className={`text-[9px] font-mono px-2 py-0.5 rounded border ${
+                   tf.getBackend() === 'webgl' 
+                     ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/30' 
+                     : 'bg-amber-950/40 text-amber-400 border-amber-800/30'
+                 }`}>
+                   {tf.getBackend() === 'webgl' ? 'WebGL GPU' : 'CPU Repli'}
+                 </span>
+               )}
              </h4>
-             {trainingState === 'training' ? (
+             {isTfLoading ? (
+                <button
+                  disabled
+                  className="w-full py-4 bg-slate-800/50 text-slate-500 cursor-not-allowed rounded-xl flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest border border-slate-800 transition-all animate-pulse"
+                >
+                  <Activity size={16} className="animate-spin text-fuchsia-500" /> Initialisation TensorFlow...
+                </button>
+             ) : trainingState === 'training' ? (
                 <button onClick={stopTraining} className="w-full py-4 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-xl flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest transition-all">
-                  <Square size={16} /> Interrompre
+                   <Square size={16} /> Interrompre
                 </button>
              ) : (
                 <button

@@ -153,13 +153,14 @@ export class ConceptDriftDetector {
 
     /**
      * Analyse structurelle de dérive de concept basée sur la KL-Divergence normalisée.
-     * Compare de façon hermétique l'historique récent et l'historique ancien du tirage actif.
+     * Combine un audit global binarisé (milieu d'historique) avec un test de Page-Hinkley séquentiel glissant.
      */
     public evaluateStructuralDrift(history: { gagnants: number[]; drawName?: string }[]): { 
         driftDetected: boolean; 
         divergence: number; 
         severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
         confidence: number;
+        driftIndex?: number;
     } {
         const activeDraw = useNexusStore.getState().drawName || "Reveil";
         const purifiedHistory = purifyHistoryForDraw(activeDraw, history);
@@ -169,6 +170,7 @@ export class ConceptDriftDetector {
             return { driftDetected: false, divergence: 0, severity: 'LOW', confidence: 0 };
         }
 
+        // --- 1. ÉVALUATION GLOBALE (Binaire traditionnel pour rétro-compatibilité et baseline) ---
         const mid = Math.floor(purifiedHistory.length / 2);
         const recent = purifiedHistory.slice(0, mid);
         const old = purifiedHistory.slice(mid);
@@ -179,9 +181,7 @@ export class ConceptDriftDetector {
         recent.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqRecent[n]++; }));
         old.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqOld[n]++; }));
 
-        // Normalisation continue des distributions de probabilité
-        let sumR = 0;
-        let sumO = 0;
+        let sumR = 0, sumO = 0;
         for (let i = 1; i <= 90; i++) { 
             sumR += freqRecent[i]; 
             sumO += freqOld[i]; 
@@ -192,33 +192,78 @@ export class ConceptDriftDetector {
         }
 
         const klDiv = this.computeKLDivergence(freqRecent, freqOld);
-
-        // 1. Calcul de la dérive théorique attendue par pur bruit d'échantillonnage multinomial (Zéro Nombre Magique)
-        // Pour M classes (90 numéros) et N_tirages (5 numéros par tirage), le bruit d'échantillonnage de KL s'écrit :
-        // KL_noise = (M - 1) / (2 * N_samples)
         const sampleSizeRecent = recent.length * 5;
         const expectedKLSampleNoise = 89.0 / (2.0 * sampleSizeRecent);
-
-        // 2. Calcul du ratio d'écart par rapport au bruit attendu
         const deviationRatio = klDiv / (expectedKLSampleNoise || 1e-4);
 
-        // 3. Mapping continu de sévérité basé sur des déviations statistiques du bruit
-        let severity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'LOW';
+        let globalSeverity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'LOW';
         if (deviationRatio >= 3.0) {
-            severity = 'CRITICAL'; // Déviation majeure de 3x le bruit attendu
+            globalSeverity = 'CRITICAL';
         } else if (deviationRatio >= 1.5) {
-            severity = 'MEDIUM'; // Déviation intermédiaire de 1.5x le bruit attendu
+            globalSeverity = 'MEDIUM';
         }
 
-        // 4. Calcul de la confiance globale via un mapping sigmoïdal lisse centré sur 1.5x le bruit
-        const confidenceProbability = 1.0 / (1.0 + Math.exp(-2.5 * (deviationRatio - 1.5)));
-        const confidence = parseFloat((confidenceProbability * 100).toFixed(2));
+        const globalConfidenceProb = 1.0 / (1.0 + Math.exp(-2.5 * (deviationRatio - 1.5)));
+        const globalConfidence = parseFloat((globalConfidenceProb * 100).toFixed(2));
+        const globalDriftDetected = deviationRatio >= 1.5;
+
+        // --- 2. ÉVALUATION SÉQUENTIELLE GLISSANTE (Page-Hinkley sur KL-Divergence) ---
+        const chronologicalHistory = [...purifiedHistory].reverse();
+        const N_chrono = chronologicalHistory.length;
+        // Taille de la fenêtre glissante : 15% de l'historique
+        const W = Math.max(6, Math.floor(N_chrono * 0.15));
+
+        const klStream: number[] = [];
+        const klIndices: number[] = [];
+
+        for (let t = W; t < N_chrono; t++) {
+            const recentSlice = chronologicalHistory.slice(t - W + 1, t + 1);
+            const baselineSlice = chronologicalHistory.slice(0, t - W + 1);
+            if (baselineSlice.length < 5) continue;
+
+            const freqR = new Float64Array(91);
+            const freqB = new Float64Array(91);
+
+            recentSlice.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqR[n]++; }));
+            baselineSlice.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqB[n]++; }));
+
+            let sumR_t = 0, sumB_t = 0;
+            for (let i = 1; i <= 90; i++) {
+                sumR_t += freqR[i];
+                sumB_t += freqB[i];
+            }
+            for (let i = 1; i <= 90; i++) {
+                freqR[i] /= (sumR_t || 1);
+                freqB[i] /= (sumB_t || 1);
+            }
+
+            const kl = this.computeKLDivergence(freqR, freqB);
+            klStream.push(kl);
+            // Indice original inversé correspondant dans purifiedHistory (0 est le plus récent)
+            klIndices.push(N_chrono - 1 - t);
+        }
+
+        const phResult = this.detectDriftPageHinkley(klStream);
+
+        // Fusionner les signaux
+        const driftDetected = globalDriftDetected || phResult.hasDrift;
+        const confidence = parseFloat(Math.max(globalConfidence, phResult.confidence).toFixed(2));
+        
+        let severity = globalSeverity;
+        if (phResult.hasDrift && phResult.confidence > 80 && severity === 'LOW') {
+            severity = 'MEDIUM';
+        }
+
+        const driftIndex = phResult.hasDrift && phResult.driftIndex !== -1 
+            ? klIndices[phResult.driftIndex] 
+            : undefined;
 
         return {
-            driftDetected: deviationRatio >= 1.5,
+            driftDetected,
             divergence: klDiv,
             severity,
-            confidence
+            confidence,
+            driftIndex
         };
     }
 }

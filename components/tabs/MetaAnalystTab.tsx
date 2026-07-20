@@ -21,7 +21,6 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { audioEngine } from '../../utils/audioEngine';
-import html2canvas from 'html2canvas';
 
 interface MetaAnalystTabProps {
     drawName: string;
@@ -341,6 +340,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         if (!ticketElement) return;
         
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(ticketElement, {
                 backgroundColor: '#0f172a', // slate-900
                 scale: 2,

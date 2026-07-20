@@ -11,7 +11,6 @@ import { saveTicket } from '../../services/userPreferencesService';
 import { useToast } from '../ui/Toast';
 import { TicketXRay } from '../TicketXRay';
 import { audioEngine } from '../../utils/audioEngine';
-import html2canvas from 'html2canvas';
 
 interface OrchestrationTabProps { drawName: string; }
 
@@ -320,6 +319,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({ drawName }) 
         if (!ticketElement) return;
         
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(ticketElement, {
                 backgroundColor: '#020617', // nexus-950
                 scale: 2,

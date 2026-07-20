@@ -139,10 +139,55 @@ export const calculateGeneticDiversityIndex = (
   const baseDiversity = 1.0 - meanSimilarity;
   const diversityScore = baseDiversity * klDivergenceBonus;
 
-  // 6. Pénalisation continue
-  const MONOCULTURE_THRESHOLD = 0.75;
-  const MAX_DIVERSITY_PENALTY = 25.0; // Budget de pénalité maximal (sur un score de 100)
+  // 6. Pénalisation continue adaptative
+  let MONOCULTURE_THRESHOLD = 0.75; // Valeur par défaut
+  let MAX_DIVERSITY_PENALTY = 25.0; // Budget de pénalité maximal par défaut
   
+  if (breakdowns && Object.keys(breakdowns).length >= 45) {
+    const sampleSimilarities: number[] = [];
+    const allNums = Object.keys(breakdowns).map(Number).filter(n => !isNaN(n) && n >= 1 && n <= 90);
+    
+    // Pour des raisons de performance et de déterminisme strict, on échantillonne avec un pas fixe
+    // qui couvre tout l'univers de façon déterministe (environ 150-200 comparaisons)
+    const step = Math.max(1, Math.floor(allNums.length / 15));
+    for (let i = 0; i < allNums.length; i += step) {
+      for (let j = i + step; j < allNums.length; j += step) {
+        const numA = allNums[i];
+        const numB = allNums[j];
+        if (numA === numB) continue;
+        
+        const bdA = breakdowns[numA] || {};
+        const bdB = breakdowns[numB] || {};
+        const vecA = algoKeys.map(key => Math.max(0, Number((bdA as any)[key]) || 0));
+        const vecB = algoKeys.map(key => Math.max(0, Number((bdB as any)[key]) || 0));
+        
+        const magA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0)) || Number.EPSILON;
+        const magB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0)) || Number.EPSILON;
+        
+        const dot = vecA.reduce((sum, val, idx) => sum + (val / magA) * (vecB[idx] / magB), 0);
+        sampleSimilarities.push(Math.max(-1.0, Math.min(1.0, dot)));
+      }
+    }
+
+    if (sampleSimilarities.length > 0) {
+      // Calculer la moyenne et l'écart-type de cette distribution empirique de similarités inter-numéros
+      const mean = sampleSimilarities.reduce((a, b) => a + b, 0) / sampleSimilarities.length;
+      const variance = sampleSimilarities.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / sampleSimilarities.length;
+      const stdDev = Math.sqrt(variance);
+
+      // Le seuil de monoculture est défini comme la moyenne + 1.5 écart-type.
+      // Tout ticket dont la similarité moyenne des numéros dépasse cette borne supérieure est considéré
+      // comme anormalement redondant par rapport à l'arrière-plan de l'inférence courante.
+      // On encadre le seuil dans [0.60, 0.85] pour conserver des garanties d'adaptation saines.
+      MONOCULTURE_THRESHOLD = Math.max(0.60, Math.min(0.85, mean + 1.5 * stdDev));
+
+      // La pénalité maximale s'ajuste continuellement en fonction de la dispersion (stdDev) de l'univers :
+      // Si l'univers est très homogène (stdDev faible), on augmente la sévérité de la pénalité pour forcer la diversité.
+      // Si l'univers est déjà très hétérogène, on adoucit la pénalité.
+      MAX_DIVERSITY_PENALTY = Math.max(15.0, Math.min(35.0, 25.0 * (0.25 / (stdDev + 1e-4))));
+    }
+  }
+
   let penalty = 0;
   let isMonoculture = false;
 
@@ -150,7 +195,7 @@ export const calculateGeneticDiversityIndex = (
   if (meanSimilarity > MONOCULTURE_THRESHOLD) {
     isMonoculture = true;
     const excessSimilarity = meanSimilarity - MONOCULTURE_THRESHOLD;
-    const maxExcess = 1.0 - MONOCULTURE_THRESHOLD; // 0.25
+    const maxExcess = Math.max(1e-4, 1.0 - MONOCULTURE_THRESHOLD);
     penalty += MAX_DIVERSITY_PENALTY * Math.pow(excessSimilarity / maxExcess, 2);
   }
 

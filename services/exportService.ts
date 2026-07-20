@@ -1,5 +1,4 @@
 
-import { jsPDF } from "jspdf";
 import type { DrawResult, Prediction, AlgoWeights } from '../types';
 
 const PDF_LAYOUT = {
@@ -122,7 +121,8 @@ export const ExportService = {
     /**
      * Génère un rapport PDF haute fidélité pour une prédiction
      */
-    generatePredictionPDF: (drawName: string, prediction: Prediction) => {
+    generatePredictionPDF: async (drawName: string, prediction: Prediction) => {
+        const { jsPDF } = await import("jspdf");
         const doc = new jsPDF();
         const dateStr = new Date().toLocaleDateString('fr-FR', { dateStyle: 'full' });
 
