@@ -8,6 +8,7 @@ import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters } from "./hyperParameterTuner";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { logger } from "../../utils/logger";
+import PredictionWorker from "../workers/prediction.worker?worker";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { getLocalForensicReports } from "../postPredictionAnalysisService";
@@ -1036,10 +1037,7 @@ const runLocalPredictionViaWorker = async (
   if (typeof Worker !== "undefined") {
     return new Promise<Prediction>((resolve, reject) => {
       try {
-        const worker = new Worker(
-          new URL("../workers/prediction.worker.ts", import.meta.url),
-          { type: "module" }
-        );
+        const worker = new PredictionWorker();
 
         const timeoutId = setTimeout(() => {
           worker.terminate();

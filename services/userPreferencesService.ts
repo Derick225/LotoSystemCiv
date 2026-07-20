@@ -350,7 +350,7 @@ export const hydrateUserData = async (userId: string) => {
             .eq('user_id', userId)
             .single();
             
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 10000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 25000));
         const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as { 
             data: { watchlist?: string[], saved_tickets?: SavedTicket[], settings?: Record<string, any> }, 
             error?: Error 

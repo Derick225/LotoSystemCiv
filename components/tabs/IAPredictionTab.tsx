@@ -8,6 +8,7 @@ import {
     History, Trash2, Clock, ChevronDown, Microscope, Link as LinkIcon
 } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
+import { supabase } from '../../services/supabaseClient';
 import { useToast } from '../ui/Toast';
 import { 
     ResponsiveContainer, LineChart, Line, XAxis, YAxis, 
@@ -240,28 +241,32 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
             const regimeStr = globalRegime?.regime || "STABLE (Harmonisé)";
 
             try {
-                const response = await fetch('/api/gemini/hybrid-prediction', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
+                const { data, error } = await supabase.functions.invoke('hybrid-prediction', {
+                    body: {
                         drawName,
                         history,
                         regime: regimeStr,
                         hurst: hurstVal,
                         entropy: entropyVal,
                         volatility: volatilityVal
-                    })
+                    }
                 });
 
-                if (response.ok) {
-                    const aiData = await response.json();
-                    aiWeights = aiData.weights;
-                    aiRationale = aiData.rationale;
-                    aiConfidence = aiData.confidence;
-                    aiStrategicAdvice = aiData.strategicAdvice;
-                } else if (response.status === 412) {
+                if (error) {
+                    throw error;
+                }
+
+                if (data) {
+                    aiWeights = data.weights;
+                    aiRationale = data.rationale;
+                    aiConfidence = data.confidence;
+                    aiStrategicAdvice = data.strategicAdvice;
+                } else {
+                    throw new Error("No data returned");
+                }
+            } catch (e: any) {
+                // If it's a 412 or missing key, fallback
+                if (e.message?.includes('412') || e.status === 412 || e.message?.includes('GEMINI_NOT_CONFIGURED')) {
                     // Gemini not configured - fallback to high-fidelity math optimizer
                     const localFb = generateSmartLocalWeightsFallback(drawName, regimeStr, hurstVal, entropyVal, volatilityVal);
                     aiWeights = localFb.weights;
@@ -271,16 +276,14 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({ drawName }) =>
                     isLocalFallback = true;
                     showToast("Oracle IA non configuré. Recours à la convergence mathématique locale.", "info");
                 } else {
-                    throw new Error("HTTP " + response.status);
+                    console.warn("Could not fetch Gemini hybrid weights, falling back to local stochastics:", e);
+                    const localFb = generateSmartLocalWeightsFallback(drawName, regimeStr, hurstVal, entropyVal, volatilityVal);
+                    aiWeights = localFb.weights;
+                    aiRationale = localFb.rationale;
+                    aiConfidence = localFb.confidence;
+                    aiStrategicAdvice = localFb.strategicAdvice;
+                    isLocalFallback = true;
                 }
-            } catch (e) {
-                console.warn("Could not fetch Gemini hybrid weights, falling back to local stochastics:", e);
-                const localFb = generateSmartLocalWeightsFallback(drawName, regimeStr, hurstVal, entropyVal, volatilityVal);
-                aiWeights = localFb.weights;
-                aiRationale = localFb.rationale;
-                aiConfidence = localFb.confidence;
-                aiStrategicAdvice = localFb.strategicAdvice;
-                isLocalFallback = true;
             }
 
             const { generateMasterPrediction } = await import('../../services/prediction/predictionFacade');
