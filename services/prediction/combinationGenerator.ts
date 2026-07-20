@@ -557,9 +557,15 @@ export const generateCombination = (
   const iterationsPerTemp = Math.max(8, Math.floor(Math.log(stateSpaceSize) * 3.5 * Math.exp(regimeStateNormalized)));
 
   let stagnationCounter = 0;
+  
+  // Limite mathématique du nombre d'itérations externes (pire cas refroidissement 0.99 avec marge x2)
+  const maxCoolingRate = 0.99;
+  const maxExternalIterations = Math.ceil(Math.abs(Math.log(1e-4) / Math.log(maxCoolingRate))) * 2;
+  let externalIterations = 0;
 
   // --- ÉTAPE 4 : RECUIT SIMULÉ ULTRA ROBUSTE ---
-  while (temperature > minTemperature) {
+  while (temperature > minTemperature && externalIterations < maxExternalIterations) {
+    externalIterations++;
     const energyVariances: number[] = [];
     
     for (let i = 0; i < iterationsPerTemp; i++) {
