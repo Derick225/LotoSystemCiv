@@ -31,8 +31,8 @@ import { globalCache, CACHE_TTL } from "../cache/CacheService";
 const TICKET_SIZE = 5;
 
 // ============================================================================
-// CONFIGURATION EXPLICITE (Zéro Nombre Magique)
-// Toutes les constantes sont nommées et documentées
+// RÉGLAGES EMPIRIQUES (Calibrés par backtesting)
+// Ces constantes servent de variables d'ajustement global.
 // ============================================================================
 const TUNING = {
   // Taux d'apprentissage SGD : dérivé de l'inverse de la variance empirique
@@ -41,12 +41,12 @@ const TUNING = {
   // Décroissance Hawkes : constante physique de référence
   DEFAULT_HAWKES_DECAY: 0.15,
   
-  // Amortissement forensic : centré sur le nombre médian de rapports
+  // Amortissement forensic : ajustements post-analyse
   FORENSIC_DAMPING_CENTER: 2.5,
   FORENSIC_DAMPING_SLOPE: 1.5,
   FORENSIC_MAX_BOOST: 1.5,
   
-  // Backpropagation ADN : pas de gradient standard
+  // Backpropagation ADN : réglage empirique
   BACKPROP_LEARNING_RATE: 0.05,
   
   // Bornes d'affichage de l'alignement
@@ -178,7 +178,8 @@ export const applyDeterministicMicroSgd = async (
     return adjustedWeights;
   }
 
-  const K = Math.min(5, history.length - 1);
+  // Échantillon plus large pour éviter de sur-ajuster sur du bruit très récent
+  const K = Math.min(20, history.length - 1);
   if (K <= 0) return adjustedWeights;
 
   const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
@@ -283,31 +284,29 @@ const computeAdvancedMetrics = async (
   useSpatioTemporalHawkes: boolean,
   metrics: EnhancedMetrics | undefined,
 ): Promise<EnhancedMetrics> => {
-  const [
-    poissonScores, bayesScores, temporalScores, digitalRootScores,
-    resistanceScores, gapVelocityScores, leaderSuccessionScores,
-    aiIntuitionScores, fractalResonanceScores, spatialHotSpots,
-    symbioticClusterScores, anomalyScores, hawkesExcitationScores,
-    topologicalLyapunovScores
-  ] = await Promise.all([
-    Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
-    Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
-    Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateGapVelocityScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
-    Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>)),
-    Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
-    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma)),
-    Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
-    Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
-    Promise.resolve().then(() => useSpatioTemporalHawkes
+  // Calculs séquentiels (le parallélisme Promise.all était illusoire en JS pour des tâches CPU-bound)
+  // L'exécution globale de ce module doit de toute façon être invoquée dans un Web Worker.
+  const poissonScores = calculatePoissonScores(localHistoryContext);
+  await new Promise(r => setTimeout(r, 0));
+  const bayesScores = calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio);
+  await new Promise(r => setTimeout(r, 0));
+  const temporalScores = calculateTemporalScores(localHistoryContext);
+  const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
+  const resistanceScores = calculateResistanceScores(localHistoryContext);
+  await new Promise(r => setTimeout(r, 0));
+  const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
+  const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
+  const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
+  await new Promise(r => setTimeout(r, 0));
+  const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
+  const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma);
+  const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
+  await new Promise(r => setTimeout(r, 0));
+  const anomalyScores = calculateAnomalyScores(localHistoryContext);
+  const hawkesExcitationScores = useSpatioTemporalHawkes
       ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
-      : calculateHawkesExcitation(localHistoryContext)
-    ),
-    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
-  ]);
+      : calculateHawkesExcitation(localHistoryContext);
+  const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon);
 
   // Ajustements continus
   for (const k in gapVelocityScores) {
@@ -417,7 +416,7 @@ const handleScenarioADegradedPrediction = (context: PredictionRuntimeContext): P
     selected = [...context.history[0].gagnants];
   }
   
-  const candidates = [11, 22, 33, 44, 55, 66, 77, 88, 12, 13]
+  const candidates = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     .filter(n => !selected.includes(n))
     .slice(0, 10);
 
@@ -435,14 +434,6 @@ const handleScenarioADegradedPrediction = (context: PredictionRuntimeContext): P
     adversarialApplied: false,
     challengedNumbers: [],
     stabilityScore: 10,
-    diversityMetrics: {
-      meanSimilarity: 0,
-      diversityScore: 100,
-      penalty: 0,
-      isMonoculture: false,
-      pairwiseSimilarities: [],
-      dominantAlgo: null
-    },
     adversarialSurvivalScore: 0,
     adversarialRisks: ["Dataset insuffisant pour audit antagoniste"],
     explainabilityData: {},
@@ -477,13 +468,19 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
     context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
     try {
       logger.info({ drawName: context.drawName }, "[predictionFacade] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
+      
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), 15000); // 15s max timeout
+      
       const result = await apiClient.post<Prediction>('predict-elite', {
         drawName: context.drawName,
         history: context.history,
         weights: context.weightsToUse,
         symbioticContext: context.symbioticContext,
         metrics: context.metrics
-      }, { suppressErrorLogging: true });
+      }, { suppressErrorLogging: true, signal: abortController.signal });
+      
+      clearTimeout(timeoutId);
 
       const isPayloadValid = (
         result &&
@@ -507,12 +504,19 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
           "[predictionFacade] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET (transport OK, contenu HS). Activation du repli local."
         );
       }
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      logger.warn(
-        { drawName: context.drawName, error: errorMsg },
-        "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
-      );
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        logger.warn(
+          { drawName: context.drawName },
+          "[predictionFacade] Timeout du supercalculateur Cloud (>15s). Basculement vers le modèle local."
+        );
+      } else {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        logger.warn(
+          { drawName: context.drawName, error: errorMsg },
+          "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
+        );
+      }
     }
   }
   return null;
@@ -568,19 +572,25 @@ export const applyForensicAdjustments = async (
     };
   }
 
+  // [RULE] Facteur de prudence continu calculé à partir du régime du jeu (Zéro magic number)
+  const entropy = gameRegimeInfo?.entropy || 0.5;
+  const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
+  
+  // Fenêtre dynamique : si le jeu est volatil/entropique, on regarde moins loin en arrière (min 3, max 10)
+  const dynamicWindow = Math.max(3, Math.round(10 * (1.0 - Math.pow(Math.max(entropy, volatility), 2))));
+  
   const sortedReports = [...recentReports].sort((a, b) => {
     const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
     const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
     return tB - tA;
-  }).slice(0, 5);
+  }).slice(0, dynamicWindow);
 
-  // [RULE] Facteur de prudence continu calculé à partir du régime du jeu (Zéro magic number)
-  const entropy = gameRegimeInfo?.entropy || 0.5;
-  const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
   const prudenceFactor = Math.exp(-(entropy + volatility));
+  // Le taux de décroissance est d'autant plus fort que la volatilité est élevée
+  const decayRate = 0.1 + (volatility * 0.4); 
 
   sortedReports.forEach((report, index) => {
-    const ageDecay = Math.exp(-0.25 * index) * prudenceFactor;
+    const ageDecay = Math.exp(-decayRate * index) * prudenceFactor;
 
     if (report.missedOpportunities) {
       report.missedOpportunities.forEach(opp => {

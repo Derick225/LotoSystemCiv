@@ -76,9 +76,11 @@ export const usePredictionGenerator = (drawName: string) => {
                 const rawReports = await getLocalForensicReports();
                 if (!rawReports) return;
                 const reports = rawReports.filter(r => r.drawName === drawName);
-                if (reports.length >= 3 && active) {
-                    const swans = reports.slice(0, 3).filter(r => r.isBlackSwan).length;
-                    setIsChaotic(swans >= 2 || (volatility?.score ?? 0) > 85);
+                if (reports.length > 0 && active) {
+                    const windowSize = Math.min(10, reports.length);
+                    const swans = reports.slice(0, windowSize).filter(r => r.isBlackSwan).length;
+                    const chaoticRatio = swans / windowSize;
+                    setIsChaotic(chaoticRatio >= 0.25 || (volatility?.score ?? 0) > 85);
                 }
             } catch (err) {
                 console.warn("[Oracle Base] Reports validation bypassed (local fallback mode active):", err);
@@ -97,6 +99,19 @@ export const usePredictionGenerator = (drawName: string) => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));
     }, [globalWeights]);
 
+    const resolveWeights = async (forcedWeights?: AlgoWeights | null) => {
+        let specificWeights = forcedWeights || (Object.keys(globalWeights || {}).length > 0 ? { ...globalWeights } as AlgoWeights : null);
+        if (!specificWeights) {
+            try {
+                specificWeights = await getAlgoWeights(drawName);
+            } catch (err) {
+                console.warn("[Oracle Base] Using local weights library because server was unreachable:", err);
+                specificWeights = DEFAULT_ALGO_WEIGHTS;
+            }
+        }
+        return specificWeights;
+    };
+
     const runInference = useCallback(async (forcedWeights?: AlgoWeights) => {
         if (history.length < 5) {
             audioEngine.play('error');
@@ -107,26 +122,24 @@ export const usePredictionGenerator = (drawName: string) => {
         setIsComputing(true);
         setComputingStep("Convergence Vectorielle en cours...");
 
-        let specificWeights = forcedWeights || (Object.keys(globalWeights || {}).length > 0 ? { ...globalWeights } as AlgoWeights : null);
-        
-        if (!specificWeights) {
-            try {
-                specificWeights = await getAlgoWeights(drawName);
-            } catch (err) {
-                console.warn("[Oracle Base Sync] Defaulting weights due to unreachable server database:", err);
-                specificWeights = DEFAULT_ALGO_WEIGHTS;
-            }
-        }
-        
+        let specificWeights = await resolveWeights(forcedWeights);
+
         if (quantumMode) {
-            const spinFactor = 1.0 + resolvedNoiseLevel * 0.5;
-            specificWeights = normalizeWeights({
-                ...specificWeights,
-                fractal: (specificWeights.fractal || 0) * spinFactor,
-                spatial: (specificWeights.spatial || 0) * spinFactor,
-                bayes: (specificWeights.bayes || 0) * spinFactor,
-                temporal: (specificWeights.temporal || 0) * spinFactor
+            // Mode Quantique (Exploratoire) : au lieu de booster arbitrairement 4 algorithmes,
+            // on augmente l'entropie globale de la distribution des poids (relaxation thermique).
+            // Les poids se rapprochent de l'uniformité proportionnellement à la volatilité (resolvedNoiseLevel).
+            const mixingFactor = Math.min(0.8, resolvedNoiseLevel * 0.15); 
+            const numAlgos = Object.keys(specificWeights).length;
+            const uniformWeight = 1.0 / (numAlgos || 1);
+            
+            const smoothedWeights = {} as AlgoWeights;
+            Object.keys(specificWeights).forEach((k) => {
+                const key = k as keyof AlgoWeights;
+                const original = specificWeights![key] || 0;
+                // Combinaison convexe entre le poids optimisé et le poids uniforme
+                smoothedWeights[key] = original * (1 - mixingFactor) + uniformWeight * mixingFactor;
             });
+            specificWeights = normalizeWeights(smoothedWeights);
         }
 
         if (!forcedWeights) {
@@ -189,77 +202,106 @@ export const usePredictionGenerator = (drawName: string) => {
         setComputingStep(`Monte-Carlo Déterministe (${resolvedMcIterations} runs)...`);
 
         try {
-            const results = [];
-            let specificWeights;
-            try {
-                specificWeights = await getAlgoWeights(drawName);
-            } catch (err) {
-                console.warn("[Oracle Base MC] Using local weights library because server was unreachable:", err);
-                specificWeights = DEFAULT_ALGO_WEIGHTS;
-            }
+            let specificWeights = await resolveWeights();
             const metrics = { spectral, correlationMatrix, regularity, volatility, fractal };
             
             const histSum = history.slice(0, 10).reduce((acc, curr) => acc + curr.gagnants.reduce((a, b) => a + b, 0), 0);
+            
+            // Linear Congruential Generator (LCG) pour un tirage déterministe et statistiquement indépendant
+            const LCG_M = 0x80000000;
+            const LCG_A = 1103515245;
+            const LCG_C = 12345;
+            let lcgSeed = (histSum + history.length) % LCG_M;
+            const nextRandom = () => {
+                lcgSeed = (LCG_A * lcgSeed + LCG_C) % LCG_M;
+                return lcgSeed / LCG_M;
+            };
             
             let currentStateVector = new Float32Array(Object.keys(specificWeights).length);
             Object.keys(specificWeights).forEach((k, idx) => {
                 currentStateVector[idx] = (specificWeights as any)[k] || 0;
             });
-            let currentEnergy = 0.5;
+            let currentEnergy = -Infinity; // Sera initialisé à la première itération
+            let currentPred: Prediction | null = null;
+            
+            const counts: Record<number, number> = {};
+            const breakdownAcc: Record<number, Record<string, number>> = {};
 
             for (let i = 0; i < resolvedMcIterations; i++) {
                 if (i % 5 === 0) setComputingStep(`MCMC Metropolis-Hastings (${i}/${resolvedMcIterations})...`);
                 
-                const pseudoRandom1 = Math.abs(Math.sin((histSum + i) * 3));
-                const pseudoRandom2 = Math.abs(Math.cos((histSum + i) * 7));
-                
                 const proposedVector = new Float32Array(currentStateVector.length);
                 let sumWeights = 0;
                 Object.keys(specificWeights).forEach((_, idx) => {
-                    const noise = (pseudoRandom1 * 0.2 - 0.1) * resolvedNoiseLevel;
+                    // Bruit gaussien approché
+                    const u1 = Math.max(Number.EPSILON, nextRandom());
+                    const u2 = Math.max(Number.EPSILON, nextRandom());
+                    const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+                    
+                    const noise = z0 * 0.1 * resolvedNoiseLevel;
                     proposedVector[idx] = Math.max(0.01, currentStateVector[idx] * (1.0 + noise));
                     sumWeights += proposedVector[idx];
                 });
                 for(let j=0; j<proposedVector.length; j++) proposedVector[j] /= sumWeights;
 
-                const spatialPhase = (pseudoRandom2 * Math.PI * 2);
-                const proposedEnergy = 0.5 + 0.5 * Math.cos(spatialPhase + (i * 0.1));
-
-                const beta = 1.0 / (resolvedLearningRate + 0.01);
-                const acceptanceRatio = Math.exp(beta * (proposedEnergy - currentEnergy));
-                const transitionProb = pseudoRandom1;
-
-                let acceptedWeights = currentStateVector;
-                if (transitionProb < acceptanceRatio) {
-                    currentStateVector = proposedVector;
-                    currentEnergy = proposedEnergy;
-                    acceptedWeights = proposedVector;
-                }
-
                 const perturbedWeights = {} as AlgoWeights;
                 Object.keys(specificWeights).forEach((k, idx) => {
-                    (perturbedWeights as any)[k] = acceptedWeights[idx];
+                    (perturbedWeights as any)[k] = proposedVector[idx];
                 });
 
+                // On génère la prédiction pour le vecteur proposé (ceci est la fonction d'évaluation la plus précise possible)
                 const pred = await generateMasterPrediction(drawName, history, temporalDepth, perturbedWeights, metrics, symbioticContext || undefined, false, flags.adversarialMode, undefined, isForensicOptimized);
-                results.push(pred);
                 
-                if (i % 10 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, i % 50 === 0 ? 1 : 0));
+                // L'énergie est la "netteté" (sharpness) de la prédiction : écart entre le top 5 et le bruit de fond
+                let topScores = [];
+                for (let n = 1; n <= 90; n++) {
+                    let s = 0;
+                    if (pred.breakdown[n]) {
+                       Object.values(pred.breakdown[n]).forEach(v => s += v);
+                    }
+                    topScores.push(s);
+                }
+                topScores.sort((a,b) => b - a);
+                const top5Avg = topScores.slice(0, 5).reduce((a,b)=>a+b, 0) / 5;
+                const next15Avg = topScores.slice(5, 20).reduce((a,b)=>a+b, 0) / 15;
+                // Plus ce ratio est élevé, plus la prédiction est confiante/nette (moins d'entropie)
+                const proposedEnergy = (top5Avg - next15Avg) / (top5Avg || 1);
+
+                if (i === 0) {
+                    currentStateVector = proposedVector;
+                    currentEnergy = proposedEnergy;
+                    currentPred = pred;
+                } else {
+                    const beta = 1.0 / (resolvedLearningRate + 0.01);
+                    // Critère de Metropolis : on veut maximiser l'énergie (la netteté de la prédiction)
+                    // clamp ratio à [0, 1]
+                    const acceptanceRatio = Math.min(1.0, Math.exp(beta * (proposedEnergy - currentEnergy)));
+                    const transitionProb = nextRandom();
+
+                    if (transitionProb < acceptanceRatio) {
+                        currentStateVector = proposedVector;
+                        currentEnergy = proposedEnergy;
+                        currentPred = pred;
+                    }
+                }
+
+                // On agrège directement l'état courant (accepté ou précédent maintenu) pour éviter les fuites mémoire
+                if (currentPred) {
+                    currentPred.suggestedNumbers.forEach(n => {
+                        counts[n] = (counts[n] || 0) + 1;
+                        if (!breakdownAcc[n] && currentPred!.breakdown[n]) {
+                            breakdownAcc[n] = { ...currentPred!.breakdown[n] };
+                        }
+                    });
+                }
+                
+                // Yield thread
+                if (i % 2 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
                 }
             }
 
             setComputingStep("Convergence Globale...");
-
-            const counts: Record<number, number> = {};
-            const breakdownAcc: Record<number, Record<string, number>> = {};
-            
-            results.forEach(r => {
-                r.suggestedNumbers.forEach(n => {
-                    counts[n] = (counts[n] || 0) + 1;
-                    if (!breakdownAcc[n]) breakdownAcc[n] = { ...r.breakdown[n] };
-                });
-            });
 
             const topCands = Object.entries(counts)
                 .sort((a, b) => b[1] - a[1])
@@ -289,23 +331,28 @@ export const usePredictionGenerator = (drawName: string) => {
                 });
             }
 
-            let calculatedAlignment = 85; 
+            let calculatedAlignment: number | undefined; 
             if (historicalVectors.length > 0 && dnaMatrix.length > 0) {
                 try {
                     const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, 30);
                     const evaluation = optimizer.evaluateCandidate(dnaMatrix, targetProfile, top5, history.map(h => h.gagnants || []));
-                    calculatedAlignment = Math.min(99, Math.max(10, Math.round((1.0 / (1.0 + evaluation.distance)) * 105)));
+                    // L'alignement est fonction exponentielle inverse de la distance euclidienne (plus rigoureux que 105 / (1+d))
+                    calculatedAlignment = Math.round(100 * Math.exp(-evaluation.distance));
                 } catch(e) {
                     console.warn("[MC] DNA Evaluation bypassed:", e);
                 }
             }
 
+            // Consensus MCMC : pourcentage moyen d'apparition des 5 meilleurs numéros au fil des itérations
+            const top5Consensus = top5.reduce((sum, n) => sum + counts[n], 0) / (5 * resolvedMcIterations);
+            const dynamicConfidence = Math.round(Math.min(99, Math.max(10, top5Consensus * 100)));
+
             const aggregatedPred: Prediction = {
                 suggestedNumbers: top5,
                 candidates: candidates,
                 breakdown: breakdownAcc as any,
-                confidence: Math.round(Math.min(99, Math.max(10, 80 + (currentEntropy * 15)))),
-                analysis: `Convergence MCMC Metropolis-Hastings avec alignement historique de ${calculatedAlignment}%. Moteur cybernétique optimisé.`,
+                confidence: dynamicConfidence,
+                analysis: `Convergence MCMC Metropolis-Hastings avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique optimisé.`,
                 timestamp: Date.now(),
                 realityAlignment: calculatedAlignment,
                 diversityMetrics: {

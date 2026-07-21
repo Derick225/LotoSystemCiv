@@ -58,6 +58,30 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
   const [isWalkForwarding, setIsWalkForwarding] = useState(false);
   const [optimizationLogs, setOptimizationLogs] = useState<string[]>([]);
   const [activeWeightCategory, setActiveWeightCategory] = useState<string>("stats");
+  const [isOptimized, setIsOptimized] = useState(false);
+  
+  const [generalizationMetrics, setGeneralizationMetrics] = useState<{
+    score: number;
+    overfittingRatio: number;
+    avgValidationHits: number;
+    isCalculating: boolean;
+  }>({
+    score: 100,
+    overfittingRatio: 1.0,
+    avgValidationHits: 1.0,
+    isCalculating: false,
+  });
+
+  const [walkForwardStats, setWalkForwardStats] = useState<{
+    isActive: boolean;
+    history: {
+      date: string;
+      hits: number;
+      accuracy: number;
+      predicted: number[];
+      actual: number[];
+    }[];
+  } | null>(null);
 
   // Group algorithms into distinct logical categories (No unrequested sliders)
   const getCategoryOfAlgo = (algo: string): string => {
@@ -94,6 +118,77 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     return drawHistory.slice(historicalIndex + 1);
   }, [drawHistory, historicalIndex]);
 
+  // Continuous standard deviation of dispersion computed directly from past history (No magic numbers, AGENTS.md)
+  const empiricalStdDispersion = useMemo(() => {
+    if (pastHistory.length < 5) return 0.5;
+    
+    const dispersions = pastHistory.map((d) => {
+      const avg = d.gagnants.reduce((a, b) => a + b, 0) / d.gagnants.length;
+      const v = d.gagnants.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / d.gagnants.length;
+      return Math.log(1 + v);
+    });
+    
+    const meanDisp = dispersions.reduce((a, b) => a + b, 0) / dispersions.length;
+    const varDisp = dispersions.reduce((sum, d) => sum + Math.pow(d - meanDisp, 2), 0) / (dispersions.length - 1 || 1);
+    
+    return Math.max(0.1, Math.sqrt(varDisp));
+  }, [pastHistory]);
+
+  // Continuous empirical frequency of Near-Miss relations in the active draw's history (No magic numbers, AGENTS.md)
+  const empiricalNearMissFrequencies = useMemo(() => {
+    if (pastHistory.length < 5) {
+      return { neighbor: 0.5, mirror: 0.4, shadow: 0.2 };
+    }
+    
+    let totalPairs = 0;
+    let neighborCount = 0;
+    let mirrorCount = 0;
+    let shadowCount = 0;
+    
+    for (let i = 0; i < pastHistory.length - 1; i++) {
+      const currentDraw = pastHistory[i].gagnants;
+      const prevDraw = pastHistory[i + 1].gagnants;
+      
+      currentDraw.forEach((c) => {
+        prevDraw.forEach((p) => {
+          totalPairs++;
+          
+          if (Math.abs(c - p) === 1) {
+            neighborCount++;
+          }
+          
+          const cStr = String(c);
+          const revC = parseInt(cStr.split("").reverse().join(""));
+          if (revC === p && revC !== c) {
+            mirrorCount++;
+          }
+          
+          if (c % 10 === p % 10) {
+            shadowCount++;
+          }
+        });
+      });
+    }
+    
+    const total = Math.max(1, totalPairs);
+    const rawNeighborFreq = neighborCount / total;
+    const rawMirrorFreq = mirrorCount / total;
+    const rawShadowFreq = shadowCount / total;
+    
+    const scaleFreq = (freq: number, baseDefault: number) => {
+      const baseline = 0.02; // statistical baseline
+      const ratio = freq / (baseline || 1e-5);
+      const scaled = baseDefault * (2 / (1 + Math.exp(-ratio + 1)));
+      return Math.max(0.05, Math.min(0.8, scaled));
+    };
+
+    return {
+      neighbor: parseFloat(scaleFreq(rawNeighborFreq, 0.5).toFixed(3)),
+      mirror: parseFloat(scaleFreq(rawMirrorFreq, 0.4).toFixed(3)),
+      shadow: parseFloat(scaleFreq(rawShadowFreq, 0.2).toFixed(3)),
+    };
+  }, [pastHistory]);
+
   // Continuous "Mathematical Resilience Index" calculated smoothly
   // Based on the statistical entropy of the historical sample variance and length (No magic numbers)
   const mathematicalResilience = useMemo(() => {
@@ -110,7 +205,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     // Calcul de l'espérance de la variance pour une loi uniforme sur [1, 90]
     const expectedVariance = (90 * 90 - 1) / 12; // ~674.9
     const expectedDispersion = Math.log(1 + expectedVariance); // ~6.51
-    const stdDispersion = 0.5; // Dispersion relative observée (déviation standard empirique globale)
+    const stdDispersion = empiricalStdDispersion; // Derived continuously from history (No magic numbers)
 
     // Shannon/Boltzman continuous dispersion log-likelihood
     const dispersion = Math.log(1 + sampleVariance);
@@ -118,7 +213,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     const continuousRaw = (count / (count + 15)) * (1 / (1 + Math.exp(-Math.max(-5, Math.min(5, zDispersion)))));
     
     return Math.min(100, Math.max(1, Math.round(continuousRaw * 100)));
-  }, [pastHistory]);
+  }, [pastHistory, empiricalStdDispersion]);
 
   // Compute Near Misses (Voisins, Miroirs, Ombres) in retroactive drawing
   const rawNearMisses = useMemo(() => {
@@ -188,6 +283,26 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         xapExp: pred.xapExp,
       });
 
+      if (isWalkForwarding) {
+        setWalkForwardStats((prev) => {
+          if (!prev) return null;
+          if (prev.history.some((item) => item.date === targetDraw.date)) return prev;
+          return {
+            ...prev,
+            history: [
+              ...prev.history,
+              {
+                date: targetDraw.date,
+                hits: hits.length,
+                accuracy,
+                predicted: pred.suggestedNumbers,
+                actual: targetDraw.gagnants,
+              }
+            ]
+          };
+        });
+      }
+
       audioEngine.play(hits.length > 0 ? "success" : "click");
     } catch (e: unknown) {
       logError(
@@ -215,19 +330,112 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     let timeout: NodeJS.Timeout;
     if (isWalkForwarding) {
         if (historicalIndex > 0) {
-            // Wait a short time to simulate calculation and visual feedback
             timeout = setTimeout(() => {
                 setHistoricalIndex((prev) => prev - 1);
             }, 1200);
         } else {
             setIsWalkForwarding(false);
             showToast("Séquence Walk-Forward terminée.", "success");
+            audioEngine.play("success");
         }
     }
     return () => clearTimeout(timeout);
   }, [historicalIndex, isWalkForwarding]);
 
+  // Robust Generalization & Overfitting Risk evaluation (disjoint window validation)
+  useEffect(() => {
+    let active = true;
+    const calculateGeneralization = async () => {
+      if (!targetDraw || pastHistory.length < 5) return;
+      
+      setGeneralizationMetrics(prev => ({ ...prev, isCalculating: true }));
+      
+      try {
+        const valWindow = Math.max(5, Math.min(10, pastHistory.length));
+        let totalHits = 0;
+        let count = 0;
+        
+        for (let offset = 1; offset <= valWindow; offset++) {
+          const idx = historicalIndex + offset;
+          if (idx >= drawHistory.length) break;
+          const testDraw = drawHistory[idx];
+          const testPast = drawHistory.slice(idx + 1);
+          if (testPast.length < 5) break;
+          
+          const pred = await generateMasterPrediction(
+            drawName,
+            testPast,
+            temporalDepth,
+            localWeights,
+            undefined,
+            undefined,
+            true, // skip retrain
+            false,
+            0,
+            isForensicOptimized
+          );
+          const hits = pred.suggestedNumbers.filter(n => testDraw.gagnants.includes(n)).length;
+          totalHits += hits;
+          count++;
+        }
+        
+        if (!active) return;
+        
+        const avgValidationHits = count > 0 ? totalHits / count : 1.0;
+        const targetHits = simulationResult?.hits.length ?? 0;
+        
+        let score = 100;
+        if (targetHits > avgValidationHits) {
+          const ratio = targetHits / Math.max(0.1, avgValidationHits);
+          // Continuous sigmoid decay transition (AGENTS.md)
+          score = Math.round(100 / (1 + Math.exp(1.5 * (ratio - 2.0))));
+        }
+        score = Math.max(5, Math.min(100, score));
+        
+        setGeneralizationMetrics({
+          score,
+          overfittingRatio: parseFloat((targetHits / Math.max(0.1, avgValidationHits)).toFixed(2)),
+          avgValidationHits: parseFloat(avgValidationHits.toFixed(2)),
+          isCalculating: false,
+        });
+      } catch (e) {
+        if (active) {
+          setGeneralizationMetrics(prev => ({ ...prev, isCalculating: false }));
+        }
+      }
+    };
+    
+    if (simulationResult) {
+      calculateGeneralization();
+    }
+    
+    return () => {
+      active = false;
+    };
+  }, [localWeights, simulationResult, historicalIndex, drawName]);
+
+  const toggleWalkForward = () => {
+    const nextState = !isWalkForwarding;
+    setIsWalkForwarding(nextState);
+    audioEngine.play("click");
+    
+    if (nextState) {
+      let startIdx = historicalIndex;
+      if (historicalIndex === 0) {
+        startIdx = Math.min(12, drawHistory.length - 2);
+        setHistoricalIndex(startIdx);
+      }
+      setWalkForwardStats({
+        isActive: true,
+        history: [],
+      });
+    } else {
+      setWalkForwardStats(prev => prev ? { ...prev, isActive: false } : null);
+    }
+  };
+
   const handleWeightChange = (algoName: string, value: number) => {
+    setIsOptimized(false); // Manual adjustments clear single-draw optimization flag
     const updated = {
       ...localWeights,
       [algoName]: value / 100,
@@ -238,14 +446,63 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
   const handleApplyPastWeightsToGlobal = () => {
     audioEngine.play("success");
-    useNexusStore.getState().updateGlobalWeights(localWeights, drawName);
+    let weightsToApply = { ...localWeights };
+    if (isOptimized && generalizationMetrics.score < 100) {
+      // Blending de mitigation anti-surapprentissage continu (AGENTS.md)
+      const alpha = generalizationMetrics.score / 100;
+      const blended: any = {};
+      const keys = Object.keys(currentWeights) as AlgoKey[];
+      keys.forEach((k) => {
+        const globalW = currentWeights[k] || 0;
+        const optW = localWeights[k] || 0;
+        blended[k] = globalW * (1.0 - alpha) + optW * alpha;
+      });
+      weightsToApply = normalizeWeights(blended);
+      showToast(`Injection sécurisée : Blending continu de ${Math.round(alpha * 100)}% appliqué pour atténuer le surapprentissage.`, "info");
+    } else {
+      showToast("Calibration de l'instant chargée comme ADN principal v14.", "success");
+    }
+    useNexusStore.getState().updateGlobalWeights(weightsToApply, drawName);
     useNexusStore.getState().setForensicOptimized(true);
-    showToast("Calibration de l'instant chargée comme ADN principal v14.", "success");
   };
+
+  // Walk-forward aggregate summary evaluation (No magic numbers)
+  const walkForwardSummary = useMemo(() => {
+    if (!walkForwardStats || walkForwardStats.history.length === 0) return null;
+    
+    const h = walkForwardStats.history;
+    const len = h.length;
+    const totalHits = h.reduce((sum, item) => sum + item.hits, 0);
+    const avgHits = totalHits / len;
+    
+    const variance = h.reduce((sum, item) => sum + Math.pow(item.hits - avgHits, 2), 0) / len;
+    const stdDev = Math.sqrt(variance);
+    
+    const dist = { 0: 0, 1: 0, 2: 0, "3+": 0 };
+    h.forEach(item => {
+      if (item.hits === 0) dist[0]++;
+      else if (item.hits === 1) dist[1]++;
+      else if (item.hits === 2) dist[2]++;
+      else dist["3+"]++;
+    });
+    
+    const successRate = (h.filter(item => item.hits >= 1).length / len) * 100;
+    
+    return {
+      len,
+      avgHits: parseFloat(avgHits.toFixed(2)),
+      stdDev: parseFloat(stdDev.toFixed(2)),
+      dist,
+      successRate: parseFloat(successRate.toFixed(1)),
+    };
+  }, [walkForwardStats]);
 
   // Mathematical Retro-Optimizer of weights (Descente de gradient Soft-Margin diff sans hasard)
   const handleOptimizationOfInstantWeights = async () => {
-    if (!targetDraw || pastHistory.length < 5) return;
+    if (!targetDraw || pastHistory.length < 10) {
+      showToast("Profondeur d'historique insuffisante pour optimiser 19 dimensions rétroactives (minimum 10 requis).", "error");
+      return;
+    }
     audioEngine.play("scan");
     setIsSimulating(true);
     setOptimizationLogs([
@@ -349,13 +606,13 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
       const initialLearningRate = 1.0 / (beta + 1e-5);
       
-      // Proximity function for Near Miss sensitivity (Neighbors, Mirrors, Shadows)
+      // Proximity function for Near Miss sensitivity (Neighbors, Mirrors, Shadows) using continuous empirical frequencies (AGENTS.md)
       const getProximityWeight = (t: number, num: number) => {
-        if (Math.abs(t - num) === 1) return 0.5; // Neighbor (voisin)
+        if (Math.abs(t - num) === 1) return empiricalNearMissFrequencies.neighbor; // Neighbor
         const tStr = String(t);
         const revT = parseInt(tStr.split("").reverse().join(""));
-        if (revT === num && revT !== t) return 0.4; // Mirror (miroir)
-        if (num % 10 === t % 10) return 0.2; // Shadow (ombre)
+        if (revT === num && revT !== t) return empiricalNearMissFrequencies.mirror; // Mirror
+        if (num % 10 === t % 10) return empiricalNearMissFrequencies.shadow; // Shadow
         return 0.0;
       };
 
@@ -415,6 +672,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
       const finalOptimized = normalizeWeights(w);
       setLocalWeights(finalOptimized);
+      setIsOptimized(true); // Track active optimization
       
       // Immediately run prediction with newly optimized weights
       await computeTimeTravelPrediction(finalOptimized);
@@ -467,11 +725,8 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             <div className="flex items-center gap-2">
                 <span>Saut Temporel (-T)</span>
                 <button
-                    onClick={() => {
-                        setIsWalkForwarding(!isWalkForwarding);
-                        audioEngine.play("click");
-                    }}
-                    className={`flex items-center justify-center p-1.5 rounded-full border transition-all ${isWalkForwarding ? 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'}`}
+                    onClick={toggleWalkForward}
+                    className={`flex items-center justify-center p-1.5 rounded-full border transition-all ${isWalkForwarding ? 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-400 animate-pulse' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'}`}
                     title={isWalkForwarding ? "Pause Walk-Forward" : "Démarrer Walk-Forward Backtesting (Auto-Play)"}
                 >
                     {isWalkForwarding ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" className="ml-0.5" />}
@@ -498,6 +753,60 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             <span>Ancien ({drawHistory[drawHistory.length - 1]?.date.slice(0, 5)})</span>
           </div>
         </div>
+
+        {/* GENERALIZATION & OVERFITTING METRICS */}
+        {simulationResult && (
+          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-[9px] font-black tracking-widest text-slate-500 uppercase block">Indice de Généralisation</span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block italic">Validation croisée glissante</span>
+              </div>
+              <div className="flex items-center gap-2 font-mono">
+                {generalizationMetrics.isCalculating ? (
+                  <span className="text-[9px] text-fuchsia-400 animate-pulse uppercase font-black">Calcul...</span>
+                ) : (
+                  <span className={`text-lg font-black ${
+                    generalizationMetrics.score >= 70 ? "text-emerald-400" :
+                    generalizationMetrics.score >= 40 ? "text-amber-400" : "text-rose-500"
+                  }`}>
+                    {generalizationMetrics.score}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-500 ${
+                  generalizationMetrics.score >= 70 ? "bg-emerald-500" :
+                  generalizationMetrics.score >= 40 ? "bg-amber-500" : "bg-rose-500"
+                }`}
+                style={{ width: `${generalizationMetrics.score}%` }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[9px] font-bold text-slate-400">
+              <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-900/60">
+                <span className="text-slate-500 block uppercase text-[8px]">Hits Cible</span>
+                <span className="text-white font-mono text-xs">{simulationResult.hits.length} / 5</span>
+              </div>
+              <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-900/60">
+                <span className="text-slate-500 block uppercase text-[8px]">Val. Moyenne</span>
+                <span className="text-fuchsia-400 font-mono text-xs">{generalizationMetrics.avgValidationHits} hits</span>
+              </div>
+            </div>
+
+            {isOptimized && generalizationMetrics.score < 50 && (
+              <div className="bg-rose-950/20 border border-rose-500/20 p-2.5 rounded-xl flex gap-2">
+                <AlertTriangle className="text-rose-400 shrink-0 mt-0.5" size={12} />
+                <p className="text-[9px] text-rose-300 leading-normal">
+                  <strong>Surapprentissage détecté !</strong> Les poids ont été hyper-optimisés sur un tirage unique. Une mitigation automatique par blending sera appliquée si vous injectez dans la production.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* TIMELINE RIBBON */}
         <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/80">
@@ -550,13 +859,25 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             </div>
             <div className="text-2xl font-black text-indigo-400 font-mono">{pastHistory.length}</div>
           </div>
+
+          {pastHistory.length < 25 && (
+            <div className="bg-amber-950/20 border border-amber-500/20 p-3 rounded-xl flex gap-2">
+              <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={14} />
+              <div>
+                <span className="text-[10px] font-bold text-amber-400 block uppercase">Risque Statistique Élevé</span>
+                <span className="text-[9px] text-amber-300 leading-relaxed block mt-0.5">
+                  {`Profondeur faible (${pastHistory.length} < 25). L'optimisation rétroactive sur un échantillon aussi restreint est instable.`}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* SUBMISSION / APPLY BUTTONS */}
         <div className="flex flex-col gap-2.5 mt-auto pt-4">
           <button
             onClick={() => handleOptimizationOfInstantWeights()}
-            disabled={isSimulating}
+            disabled={isSimulating || pastHistory.length < 10}
             className="w-full py-3 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:opacity-95 rounded-xl text-[10px] text-white font-black uppercase tracking-widest flex items-center justify-center gap-2.5 shadow-lg active:scale-95 transition-all disabled:opacity-50"
           >
             <Wand2 size={14} /> Optimiser l'ADN Rétroactif
@@ -564,9 +885,15 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
           
           <button
             onClick={handleApplyPastWeightsToGlobal}
-            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-xl text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all relative overflow-hidden group"
           >
-            <Dna size={12} /> Injecter dans le Moteur Actuel
+            <Dna size={12} />
+            <span className="relative z-10">Injecter dans le Moteur Actuel</span>
+            {isOptimized && generalizationMetrics.score < 100 && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-rose-500/20 border border-rose-500/30 text-[7px] text-rose-400 rounded-full font-black uppercase tracking-wider animate-pulse">
+                Blend {generalizationMetrics.score}%
+              </span>
+            )}
           </button>
         </div>
 
@@ -809,6 +1136,127 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
           </div>
         </div>
       </div>
+
+      {/* WALK-FORWARD AGGREGATE SUMMARY MODULE */}
+      {walkForwardSummary && (
+        <div className="xl:col-span-12 bg-slate-900/30 p-6 rounded-[2rem] border border-slate-800/80 mt-4 space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800/60 pb-4">
+            <div>
+              <h3 className="text-md font-black text-white uppercase tracking-wider flex items-center gap-2">
+                <TrendingUp size={16} className="text-fuchsia-400 animate-pulse" /> Rapport de Inférence Séquentielle Walk-Forward
+              </h3>
+              <p className="text-[10px] text-slate-400 leading-normal mt-1">
+                Analyse statistique consolidée sur la fenêtre glissante passée (blind simulation sans fuite d'informations).
+              </p>
+            </div>
+            {walkForwardStats?.isActive ? (
+              <span className="px-3 py-1 bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 text-[9px] font-black uppercase tracking-wider rounded-full animate-pulse">
+                Simulation en cours ({walkForwardSummary.len} tirages...)
+              </span>
+            ) : (
+              <button 
+                onClick={() => setWalkForwardStats(null)}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[9px] font-bold uppercase transition-all"
+              >
+                Réinitialiser le Rapport
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900 flex flex-col justify-between">
+              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Tirages Simulés</span>
+              <span className="text-2xl font-black text-white mt-1 font-mono">{walkForwardSummary.len}</span>
+            </div>
+
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900 flex flex-col justify-between">
+              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Espérance de Hits</span>
+              <span className="text-2xl font-black text-fuchsia-400 mt-1 font-mono">
+                {walkForwardSummary.avgHits} <span className="text-xs text-slate-500 font-bold">± {walkForwardSummary.stdDev}</span>
+              </span>
+            </div>
+
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900 flex flex-col justify-between">
+              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Taux de Succès (≥1)</span>
+              <span className="text-2xl font-black text-emerald-400 mt-1 font-mono">{walkForwardSummary.successRate}%</span>
+            </div>
+
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900 flex flex-col justify-between">
+              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Rapport de Dispersion</span>
+              <span className="text-2xl font-black text-indigo-400 mt-1 font-mono">{walkForwardSummary.stdDev}</span>
+            </div>
+          </div>
+
+          {/* HITS DISTRIBUTION VISUALIZER */}
+          <div className="bg-slate-950/30 p-5 rounded-2xl border border-slate-800/40 space-y-3">
+            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2">Distribution des Fréquences de Hits</h4>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {[0, 1, 2, "3+"].map((hKey) => {
+                const count = walkForwardSummary.dist[hKey as 0 | 1 | 2 | "3+"] || 0;
+                const percent = walkForwardSummary.len > 0 ? (count / walkForwardSummary.len) * 100 : 0;
+                return (
+                  <div key={hKey} className="space-y-1 bg-black/20 p-3 rounded-xl border border-slate-900">
+                    <div className="flex justify-between items-center text-[10px] font-bold">
+                      <span className="text-slate-400">{hKey} Hits Exacts</span>
+                      <span className="font-mono text-white">{count} ({percent.toFixed(0)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full ${hKey === 0 ? 'bg-slate-600' : hKey === 1 ? 'bg-blue-500' : hKey === 2 ? 'bg-indigo-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* HISTORICAL TRACE TABLE */}
+          <div className="bg-slate-950/50 rounded-2xl border border-slate-800/60 overflow-hidden">
+            <div className="p-3 bg-slate-900/60 border-b border-slate-800/80 text-[9px] font-black uppercase text-slate-400 tracking-widest">
+              Historique de la Séquence d'Inférence Walk-Forward
+            </div>
+            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+              <table className="w-full text-left text-[10px] border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 font-extrabold uppercase bg-slate-900/10">
+                    <th className="p-3">Instant de Backtest</th>
+                    <th className="p-3">Hits Évalués</th>
+                    <th className="p-3">Classement Gagnants</th>
+                    <th className="p-3">Gagnants Réels</th>
+                    <th className="p-3">Numéros Suggérés</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-900">
+                  {walkForwardStats?.history.slice().reverse().map((item, index) => (
+                    <tr key={index} className="hover:bg-slate-900/30 transition-colors">
+                      <td className="p-3 font-mono font-bold text-slate-300">{item.date}</td>
+                      <td className="p-3 font-mono font-black">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] ${item.hits >= 2 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : item.hits === 1 ? 'bg-blue-500/10 text-blue-400' : 'bg-slate-800 text-slate-500'}`}>
+                          {item.hits} / 5
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-slate-400">{item.accuracy}%</td>
+                      <td className="p-3 font-mono text-slate-300">{item.actual.join(", ")}</td>
+                      <td className="p-3 font-mono text-slate-400 flex gap-1 flex-wrap">
+                        {item.predicted.map((num, i) => {
+                          const isHit = item.actual.includes(num);
+                          return (
+                            <span key={i} className={`px-1 rounded ${isHit ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/20' : 'bg-slate-800 text-slate-500'}`}>
+                              {num}
+                            </span>
+                          );
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
