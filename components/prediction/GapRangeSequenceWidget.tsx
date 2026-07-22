@@ -34,7 +34,7 @@ interface GapRangeSequenceWidgetProps {
 
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ drawName }) => {
   const history = useNexusStore(state => state.history);
-  const [step, setStep] = useState<GapRangeStep>(10);
+  const [step, setStep] = useState<GapRangeStep>('combined');
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
 
   // Compute Gap Range Sequence analysis dynamically
@@ -88,11 +88,21 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
         </div>
 
         {/* Granularity Switcher */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-800 self-start md:self-auto">
+        <div className="flex flex-wrap items-center bg-slate-950 p-1 rounded-2xl border border-slate-800 self-start md:self-auto gap-1">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 flex items-center gap-1">
             <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
             Tranches
           </span>
+          <button
+            onClick={() => handleStepChange('combined')}
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
+              step === 'combined'
+                ? 'bg-gradient-to-r from-indigo-600 to-emerald-600 text-white shadow-lg shadow-indigo-600/30'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Multi-Res (5 & 10)
+          </button>
           <button
             onClick={() => handleStepChange(10)}
             className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
@@ -115,6 +125,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
           </button>
         </div>
       </div>
+
+      {/* Multi-Resolution Weight Info Badge */}
+      {report.resolutionWeights && (
+        <div className="bg-indigo-950/40 border border-indigo-500/20 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between text-xs font-mono text-slate-300">
+          <span className="text-indigo-400 font-bold flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" /> Fusion Multi-Résolution Entropique :
+          </span>
+          <div className="flex items-center gap-4">
+            <span>Poids Tranches de 5 : <strong className="text-emerald-400">{(report.resolutionWeights.step5Weight * 100).toFixed(1)}%</strong></span>
+            <span>Poids Tranches de 10 : <strong className="text-indigo-400">{(report.resolutionWeights.step10Weight * 100).toFixed(1)}%</strong></span>
+          </div>
+        </div>
+      )}
 
       {/* Last Draw Signature Banner */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
@@ -328,6 +351,51 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
           </div>
         )}
       </div>
+
+      {/* Historical Sequence Pattern Transitions Section */}
+      {report.sequenceMatches && report.sequenceMatches.length > 0 && (
+        <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 space-y-4 relative z-10">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                Analogie Historique : Patterns de Séquences Similaires & Transitions
+              </h4>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">
+              Top {report.sequenceMatches.length} séquences historiques analogues
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {report.sequenceMatches.slice(0, 4).map((match, idx) => (
+              <div
+                key={idx}
+                className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-slate-400 font-bold">
+                    Tirage Historique #{match.historicalDrawIndex}
+                  </span>
+                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full font-bold border border-emerald-500/20">
+                    Similarité Jaccard : {(match.similarityScore * 100).toFixed(0)}%
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-[10px] font-mono">
+                  <span className="text-slate-400">Signature :</span>
+                  <span className="text-indigo-300">{match.historicalGapsSignature.join(', ')}</span>
+                </div>
+
+                <div className="flex items-center gap-2 text-[10px] font-mono">
+                  <span className="text-slate-400">Transition Suivante :</span>
+                  <span className="text-emerald-400 font-bold">{match.subsequentGapsSignature.join(' ➔ ')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

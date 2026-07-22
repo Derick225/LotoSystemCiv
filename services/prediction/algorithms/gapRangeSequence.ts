@@ -26,7 +26,7 @@ export const gapRangeSequencePlugin: AlgorithmPlugin = {
   precompute(ctx: AlgorithmContext) {
     const drawName = ctx.drawName || '';
     const history = ctx.history;
-    const step: GapRangeStep = 10; // Tranches de 10 par défaut pour la modélisation globale
+    const step: GapRangeStep = 'combined'; // Multi-resolution fusion (5 & 10)
 
     const report = gapRangeSequenceService.analyzeGapRangePatterns(drawName, history, step, 90);
 

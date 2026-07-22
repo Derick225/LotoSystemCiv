@@ -97,6 +97,50 @@ const parseDateStrict = (dateStr: string): Date | null => {
   return Number.isNaN(iso.getTime()) ? null : iso;
 };
 
+/**
+ * Computes day of year (1-366).
+ */
+const getDayOfYear = (d: Date): number => {
+  const start = new Date(d.getFullYear(), 0, 0);
+  const diff = d.getTime() - start.getTime() + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60 * 1000;
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+};
+
+/**
+ * Converts date to circular seasonal phase angle theta in [0, 2*pi).
+ */
+const getSeasonalAngle = (d: Date): number => {
+  const doy = getDayOfYear(d);
+  return (2.0 * Math.PI * doy) / 365.25;
+};
+
+/**
+ * Calculates circular distance between two angles in [0, 2*pi).
+ */
+const getCircularAngleDistance = (a1: number, a2: number): number => {
+  const diff = Math.abs(a1 - a2) % (2.0 * Math.PI);
+  return Math.min(diff, 2.0 * Math.PI - diff);
+};
+
+// Continuous Gaussian circular seasonal resonance (sigma = ~14 days in radians)
+const SIGMA_SEASONAL_RAD = (2.0 * Math.PI * 14.0) / 365.25;
+
+/**
+ * Calculates continuous seasonal resonance combining circular phase & day-of-week harmonic alignment.
+ */
+const calculateSeasonalResonance = (targetDate: Date, drawDate: Date): number => {
+  const a1 = getSeasonalAngle(targetDate);
+  const a2 = getSeasonalAngle(drawDate);
+  const distAngle = getCircularAngleDistance(a1, a2);
+  const seasonalWeight = Math.exp(-0.5 * Math.pow(distAngle / SIGMA_SEASONAL_RAD, 2));
+
+  // Day of week harmonic alignment (0..6)
+  const dowDiff = Math.abs(targetDate.getDay() - drawDate.getDay());
+  const dowWeight = Math.pow(Math.cos((Math.PI * dowDiff) / 7.0), 2);
+
+  return seasonalWeight * (0.7 + 0.3 * dowWeight);
+};
+
 const buildDrawNumberSet = (draw: HistoryDraw): Set<number> =>
   new Set([
     ...uniqueValidNumbers(draw.gagnants),
@@ -110,15 +154,14 @@ const buildDrawNumberSet = (draw: HistoryDraw): Set<number> =>
 const findTwinDrawCandidates = (
   history: HistoryDraw[],
   currentDate: Date,
-  maxYearsToScan: number
+  maxYearsToScan: number,
+  hurst: number
 ): TwinCandidate[] => {
-  const targetMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
   const candidates: TwinCandidate[] = [];
 
-  // Continuous bandwidth parameters derived from calendar properties
-  const sigmaDay = 4.0; // Day difference standard deviation (~4 days smooth window)
-  const lambdaYear = 5.0; // Half-life decay scale for multi-year distance
+  // Half-life scale derived dynamically from Hurst persistence
+  const lambdaYear = 3.0 + 4.0 * clamp(hurst, 0.1, 0.9);
 
   for (let i = 1; i < history.length; i++) {
     const draw = history[i];
@@ -128,27 +171,19 @@ const findTwinDrawCandidates = (
     const yearDiff = currentYear - drawDate.getFullYear();
     if (yearDiff < 1 || yearDiff > maxYearsToScan) continue;
 
-    // Month proximity check (same month or adjacent month boundary within 15 days)
-    const monthDiff = Math.abs(drawDate.getMonth() - targetMonth);
-    const isAdjacentMonth = monthDiff === 0 || monthDiff === 1 || monthDiff === 11;
-    if (!isAdjacentMonth) continue;
-
-    // Day difference within month/calendar cycle
-    const dayDistance = Math.abs(drawDate.getDate() - currentDate.getDate());
-    if (dayDistance > 14) continue; // Keep within two weeks window
-
-    // Continuous Gaussian temporal quality
-    const dayResonance = Math.exp(-0.5 * Math.pow(dayDistance / sigmaDay, 2));
+    // Continuous seasonal resonance (no hard binary cuts)
+    const seasonalRes = calculateSeasonalResonance(currentDate, drawDate);
     const yearDecay = Math.exp(-yearDiff / lambdaYear);
 
     // Number richness (density of complete draw records)
-    const richness =
-      (uniqueValidNumbers(draw.gagnants).length / 5.0) * 0.7 +
-      (uniqueValidNumbers(draw.machine).length / 5.0) * 0.3;
+    const gagnantsCount = uniqueValidNumbers(draw.gagnants).length;
+    const machineCount = uniqueValidNumbers(draw.machine).length;
+    const richness = (gagnantsCount / 5.0) * 0.7 + (machineCount / 5.0) * 0.3;
 
-    const quality = clamp(dayResonance * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
+    const quality = clamp(seasonalRes * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
 
-    if (quality > 0.05) {
+    if (quality > 0.01) {
+      const dayDistance = Math.abs(currentDate.getDate() - drawDate.getDate());
       candidates.push({
         draw,
         index: i,
@@ -235,22 +270,22 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       return;
     }
 
+    let hurst = Number(ctx.statisticalBounds?.hurstExponent);
+    if (!Number.isFinite(hurst)) hurst = 0.5;
+    hurst = clamp(hurst, 0.1, 0.9);
+
     // Dynamic scan depth based on total available history
     const maxYearsToScan = Math.max(1, Math.min(10, Math.floor(history.length / 52)));
-    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan);
+    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst);
 
     if (twinCandidates.length === 0) {
       ctx.pluginCache[cacheKey] = defaultCache;
       return;
     }
 
-    // Select top multi-year twin draws (up to top 3) to blend multi-season signals
-    const activeTwins = twinCandidates.slice(0, 3);
+    // Select top multi-year twin draws (up to top 5) to blend multi-season signals
+    const activeTwins = twinCandidates.slice(0, 5);
     const topTwin = activeTwins[0];
-
-    let hurst = Number(ctx.statisticalBounds?.hurstExponent);
-    if (!Number.isFinite(hurst)) hurst = 0.5;
-    hurst = clamp(hurst, 0.1, 0.9);
 
     // Continuous damping gamma derived from Hurst persistence
     const decayGamma = 0.05 / (hurst * 2.0);
@@ -388,11 +423,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       const slope = 1.0 + clamp(hurst, 0.1, 0.9) * 2.0;
 
       // Continuous sigmoid transformation mapped to [0, 100]
-      const rawScore = 100.0 / (1.0 + Math.exp(-slope * zRobust));
-
-      // Continuous activation multiplier based on raw value vs median
-      const activationRatio = rawVal / (rawVal + median + 1e-6);
-      score = rawScore * (0.3 + 0.7 * activationRatio);
+      score = 100.0 / (1.0 + Math.exp(-slope * zRobust));
     }
 
     score = clamp(score, 0.0, 100.0);

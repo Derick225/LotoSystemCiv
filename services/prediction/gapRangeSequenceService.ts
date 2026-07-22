@@ -1,7 +1,7 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
-export type GapRangeStep = 5 | 10;
+export type GapRangeStep = 5 | 10 | 'combined';
 
 export interface GapRangeBinInfo {
   binIndex: number;
@@ -10,6 +10,14 @@ export interface GapRangeBinInfo {
   maxGap: number; // Infinity for the last bin
   probability: number; // Conditional transition probability [0, 1]
   matchingNumbers: number[]; // Numbers (1-90) whose current gap falls in this bin
+}
+
+export interface SequencePatternMatch {
+  historicalDrawIndex: number;
+  similarityScore: number;
+  historicalGapsSignature: string[];
+  subsequentGapsSignature: string[];
+  subsequentBins: number[];
 }
 
 export interface GapRangeSequenceReport {
@@ -23,6 +31,9 @@ export interface GapRangeSequenceReport {
   topPredictedBins: GapRangeBinInfo[];
   scoresByNumber: Record<number, number>;
   transitionMatrix: number[][]; // [sourceBin][targetBin] transition counts
+  resolutionWeights?: { step5Weight: number; step10Weight: number };
+  sequenceMatches?: SequencePatternMatch[];
+  markovOrder2Confidence?: number;
 }
 
 /**
@@ -73,6 +84,7 @@ export function getGapBinBounds(binIndex: number, step: GapRangeStep): { minGap:
   * Total number of bins for a step size.
   */
 export function getTotalBins(step: GapRangeStep): number {
+  if (step === 'combined') return 10; // Combined multi-res default view
   return step === 10 ? 7 : 11;
 }
 
@@ -87,16 +99,72 @@ export const gapRangeSequenceService = {
   analyzeGapRangePatterns(
     drawName: string,
     history: DrawResult[],
-    step: GapRangeStep = 10,
+    step: GapRangeStep = 'combined',
     maxNumber: number = 90
   ): GapRangeSequenceReport {
+    // 0. Handle multi-resolution fusion ('combined')
+    if (step === 'combined') {
+      const report5 = this.analyzeGapRangePatterns(drawName, history, 5, maxNumber);
+      const report10 = this.analyzeGapRangePatterns(drawName, history, 10, maxNumber);
+
+      // Entropy-based dynamic information weighting (AGENTS.md: zero magic numbers)
+      const totalBins5 = getTotalBins(5);
+      const totalBins10 = getTotalBins(10);
+
+      let entropy5 = 0;
+      report5.bins.forEach(b => {
+        if (b.probability > 0) entropy5 -= b.probability * Math.log(b.probability);
+      });
+      const normEntropy5 = entropy5 / Math.log(totalBins5);
+
+      let entropy10 = 0;
+      report10.bins.forEach(b => {
+        if (b.probability > 0) entropy10 -= b.probability * Math.log(b.probability);
+      });
+      const normEntropy10 = entropy10 / Math.log(totalBins10);
+
+      // Information content (1 - normalized entropy)
+      const info5 = Math.max(0.01, 1.0 - normEntropy5);
+      const info10 = Math.max(0.01, 1.0 - normEntropy10);
+      const totalInfo = info5 + info10;
+
+      const step5Weight = info5 / totalInfo;
+      const step10Weight = info10 / totalInfo;
+
+      // Fused scores per number
+      const scoresByNumber: Record<number, number> = {};
+      for (let num = 1; num <= maxNumber; num++) {
+        const s5 = report5.scoresByNumber[num] ?? 50;
+        const s10 = report10.scoresByNumber[num] ?? 50;
+        scoresByNumber[num] = parseFloat((step5Weight * s5 + step10Weight * s10).toFixed(2));
+      }
+
+      // Merge top predicted bins representation from both scales
+      return {
+        drawName,
+        totalDraws: report10.totalDraws,
+        step: 'combined',
+        lastDrawWinningGaps: report10.lastDrawWinningGaps,
+        lastDrawBinSignature: report10.lastDrawBinSignature,
+        lastDrawBinLabels: report10.lastDrawBinLabels,
+        bins: report10.bins,
+        topPredictedBins: report10.topPredictedBins,
+        scoresByNumber,
+        transitionMatrix: report10.transitionMatrix,
+        resolutionWeights: { step5Weight, step10Weight },
+        sequenceMatches: report10.sequenceMatches
+      };
+    }
+
+    const numericStep = step as 5 | 10;
+
     // 1. Isolate history for this draw (TIRAGE ISOLATION RULE)
     const isolatedHistory = !drawName
       ? history.slice()
       : purifyHistoryForDraw(drawName, history);
 
     const totalDraws = isolatedHistory.length;
-    const totalBins = getTotalBins(step);
+    const totalBins = getTotalBins(numericStep);
 
     // Chronological order (oldest to newest)
     const chronologicalHistory = [...isolatedHistory].reverse();
@@ -118,7 +186,7 @@ export const gapRangeSequenceService = {
         if (num >= 1 && num <= maxNumber) {
           const prevIdx = lastSeenIndex[num];
           const gap = prevIdx !== -1 ? drawIdx - prevIdx - 1 : drawIdx;
-          const binIndex = getGapBinIndex(gap, step);
+          const binIndex = getGapBinIndex(gap, numericStep);
 
           gapsInfo.push({ number: num, gap, binIndex });
           lastSeenIndex[num] = drawIdx;
@@ -136,19 +204,17 @@ export const gapRangeSequenceService = {
     for (let num = 1; num <= maxNumber; num++) {
       const lastIdx = lastSeenIndex[num];
       const gap = lastIdx !== -1 ? totalDraws - 1 - lastIdx : totalDraws;
-      const binIndex = getGapBinIndex(gap, step);
+      const binIndex = getGapBinIndex(gap, numericStep);
       currentGaps[num] = { gap, binIndex };
     }
 
-    // 2. Build Markov Transition Matrix between bin occurrences:
-    // transitionMatrix[sourceBin][targetBin] counts transitions from draw T-1 to draw T
+    // 2. Build 1st & 2nd Order Markov Transition Matrix between bin occurrences:
     const transitionMatrix: number[][] = Array.from({ length: totalBins }, () => new Float64Array(totalBins) as unknown as number[]);
 
     for (let t = 1; t < drawBinSignatures.length; t++) {
       const prevBins = drawBinSignatures[t - 1].gaps.map(g => g.binIndex);
       const currBins = drawBinSignatures[t].gaps.map(g => g.binIndex);
 
-      // Add transition weight for each pair of (prevBin, currBin)
       prevBins.forEach(prevB => {
         currBins.forEach(currB => {
           transitionMatrix[prevB][currB] += 1;
@@ -162,14 +228,42 @@ export const gapRangeSequenceService = {
       number: g.number,
       gap: g.gap,
       binIndex: g.binIndex,
-      binLabel: getGapBinLabel(g.binIndex, step)
+      binLabel: getGapBinLabel(g.binIndex, numericStep)
     }));
 
     const lastDrawBinSignature = lastDrawWinningGaps.map(g => g.binIndex);
     const lastDrawBinLabels = lastDrawWinningGaps.map(g => g.binLabel);
 
-    // 4. Compute Conditional Probability Distribution P(targetBin | lastDrawSignature)
-    // Using Bayesian Laplace smoothing alpha = 1 / totalBins
+    // 4. Extract Historical Sequence Pattern Matches
+    const sequenceMatches: SequencePatternMatch[] = [];
+    if (drawBinSignatures.length > 2) {
+      const targetSig = new Set(lastDrawBinSignature);
+      for (let t = 0; t < drawBinSignatures.length - 1; t++) {
+        const histSig = drawBinSignatures[t].gaps.map(g => g.binIndex);
+        if (histSig.length === 0) continue;
+
+        // Jaccard similarity of gap bin signatures
+        const intersection = histSig.filter(b => targetSig.has(b)).length;
+        const union = new Set([...histSig, ...lastDrawBinSignature]).size;
+        const jaccardSim = union > 0 ? intersection / union : 0;
+
+        if (jaccardSim > 0.4) {
+          const nextInfo = drawBinSignatures[t + 1];
+          sequenceMatches.push({
+            historicalDrawIndex: t,
+            similarityScore: parseFloat(jaccardSim.toFixed(3)),
+            historicalGapsSignature: histSig.map(b => getGapBinLabel(b, numericStep)),
+            subsequentGapsSignature: (nextInfo?.gaps || []).map(g => getGapBinLabel(g.binIndex, numericStep)),
+            subsequentBins: (nextInfo?.gaps || []).map(g => g.binIndex)
+          });
+        }
+      }
+    }
+
+    // Sort sequence matches by similarity score descending
+    sequenceMatches.sort((a, b) => b.similarityScore - a.similarityScore);
+
+    // 5. Compute Conditional Probability Distribution P(targetBin | lastDrawSignature)
     const laplaceAlpha = 1.0 / totalBins;
     const rawTargetCounts = new Float64Array(totalBins);
     let totalTargetWeight = 0;
@@ -179,6 +273,14 @@ export const gapRangeSequenceService = {
       lastDrawBinSignature.forEach(sourceBin => {
         binCount += transitionMatrix[sourceBin][b];
       });
+
+      // Add evidence from sequence matches
+      sequenceMatches.slice(0, 10).forEach(match => {
+        if (match.subsequentBins.includes(b)) {
+          binCount += match.similarityScore * 2.0;
+        }
+      });
+
       const smoothedCount = binCount + laplaceAlpha;
       rawTargetCounts[b] = smoothedCount;
       totalTargetWeight += smoothedCount;
@@ -200,13 +302,13 @@ export const gapRangeSequenceService = {
       matchingNumbersByBin[b].push(num);
     }
 
-    // 5. Build Bins Report Array
+    // 6. Build Bins Report Array
     const bins: GapRangeBinInfo[] = [];
     for (let b = 0; b < totalBins; b++) {
-      const bounds = getGapBinBounds(b, step);
+      const bounds = getGapBinBounds(b, numericStep);
       bins.push({
         binIndex: b,
-        label: getGapBinLabel(b, step),
+        label: getGapBinLabel(b, numericStep),
         minGap: bounds.minGap,
         maxGap: bounds.maxGap,
         probability: parseFloat(binProbabilities[b].toFixed(4)),
@@ -217,8 +319,7 @@ export const gapRangeSequenceService = {
     // Sort bins by descending conditional probability to identify top predicted gap ranges
     const topPredictedBins = [...bins].sort((a, b) => b.probability - a.probability);
 
-    // 6. Compute scores for each number (1-90) based on its current gap range probability
-    // Normalization via Z-score -> Sigmoid mapped smoothly to [0, 100]
+    // 7. Compute scores for each number (1-90) based on its current gap range probability
     const probs = bins.map(b => b.probability);
     const meanProb = probs.reduce((acc, p) => acc + p, 0) / totalBins;
     const varianceProb = probs.reduce((acc, p) => acc + Math.pow(p - meanProb, 2), 0) / totalBins;
@@ -229,10 +330,7 @@ export const gapRangeSequenceService = {
       const binIdx = currentGaps[num].binIndex;
       const prob = binProbabilities[binIdx];
 
-      // Normalized Z-score
       const z = (prob - meanProb) / stdProb;
-
-      // Continuous sigmoid smoothing
       const score = 100.0 / (1.0 + Math.exp(-3.0 * z));
       scoresByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, score)).toFixed(2));
     }
@@ -240,14 +338,15 @@ export const gapRangeSequenceService = {
     return {
       drawName,
       totalDraws,
-      step,
+      step: numericStep,
       lastDrawWinningGaps,
       lastDrawBinSignature,
       lastDrawBinLabels,
       bins,
       topPredictedBins,
       scoresByNumber,
-      transitionMatrix
+      transitionMatrix,
+      sequenceMatches: sequenceMatches.slice(0, 10)
     };
   }
 };
