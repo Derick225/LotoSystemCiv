@@ -198,8 +198,8 @@ const calculateTrajectoryPoints = (draws: DrawResult[]) => {
     });
 };
 
-self.onmessage = (e: MessageEvent<FluxMathAction>) => {
-  const { type, payload } = e.data;
+self.onmessage = (e: MessageEvent) => {
+  const { type, payload, reqId } = e.data;
   if (type === 'CALCULATE_METRICS') {
     const { draws } = payload;
     const result: FluxMathResult = {
@@ -210,6 +210,6 @@ self.onmessage = (e: MessageEvent<FluxMathAction>) => {
       topCorrelations: extractTopCorrelations(draws),
       trajectoryPoints: calculateTrajectoryPoints(draws)
     };
-    self.postMessage({ type: 'METRICS_RESULT', payload: result });
+    self.postMessage({ type: 'METRICS_RESULT', reqId, payload: result });
   }
 };

@@ -100,7 +100,11 @@ function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureId
   }
 
   for (const index of featuresToCheck) {
-    const uniqueValues = new Float64Array(dataset.map(row => row.features[index])).filter((val, i, arr) => arr.indexOf(val) === i);
+    const valSet = new Set<number>();
+    for (let k = 0; k < dataset.length; k++) {
+      valSet.add(dataset[k].features[index]);
+    }
+    const uniqueValues = Array.from(valSet);
 
     for (let i = 0; i < uniqueValues.length; i++) {
       const val = uniqueValues[i];

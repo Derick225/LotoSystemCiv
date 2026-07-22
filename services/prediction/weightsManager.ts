@@ -321,7 +321,15 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
   return new Promise((resolve) => {
     try {
       const worker = new Worker(new URL('../../workers/metaLearning.worker.ts?worker', import.meta.url), { type: 'module' });
+      const timeoutMs = 15000;
+      const timer = setTimeout(() => {
+        logger.warn(`Meta-Learning Worker Timeout (${timeoutMs}ms), falling back`);
+        worker.terminate();
+        resolve(normalizeWeights(dynamicWeights));
+      }, timeoutMs);
+
       worker.onmessage = (event) => {
+        clearTimeout(timer);
         const { type, bestConfig, error } = event.data;
         if (type === 'SUCCESS' && bestConfig) resolve(bestConfig);
         else {
@@ -331,14 +339,23 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
         worker.terminate();
       };
       worker.onerror = (e) => {
+        clearTimeout(timer);
         logger.warn({ err: e.message }, "Worker execution error");
         resolve(normalizeWeights(dynamicWeights));
         worker.terminate();
       };
-      worker.postMessage({ dynamicWeights, history });
+
+      const historyLite = history.map(h => ({
+        gagnants: h.gagnants,
+        machine: h.machine || [],
+        date: h.date || ""
+      }));
+
+      worker.postMessage({ dynamicWeights, history: historyLite });
     } catch (err) {
       logger.warn({ err }, "Failed to spawn meta-learning worker");
-      resolve(normalizeWeights(dynamicWeights));    }
+      resolve(normalizeWeights(dynamicWeights));
+    }
   });
 };
 

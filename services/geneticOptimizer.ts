@@ -109,24 +109,32 @@ export const runGeneticOptimization = async (
     // Note: Assurez-vous que le chemin du worker correspond à votre structure de projet
     const worker = new Worker(new URL('./workers/genetic.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
 
+    const timeoutMs = 45000;
+    const timeoutTimer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error(`Genetic Worker Timeout (${timeoutMs}ms)`));
+    }, timeoutMs);
+
     worker.onmessage = (e) => {
       const { type, data, message } = e.data;
       if (type === 'progress') {
         if (onRawProgress) onRawProgress(data);
       } else if (type === 'result') {
+        clearTimeout(timeoutTimer);
         worker.terminate();
         resolve({ 
           ...data, 
           timeElapsed: Date.now() - startTime, 
-          // Le nombre total d'évaluations est une borne supérieure théorique basée sur la config
           totalEvaluations: config.populationSize * (data.generations || config.maxGenerations) 
         });
       } else if (type === 'error') {
+        clearTimeout(timeoutTimer);
         worker.terminate();
         reject(new Error(message || "Erreur inconnue dans le Genetic Worker"));
       }
     };
     worker.onerror = (err) => {
+      clearTimeout(timeoutTimer);
       worker.terminate();
       reject(new Error(`Échec de l'exécution du Worker Génétique: ${err.message}`));
     };

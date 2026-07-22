@@ -15,6 +15,7 @@ export const useFluxMath = (filteredHistory: DrawResult[]) => {
   const [metrics, setMetrics] = useState<FluxMathResult>(initialMetrics);
   const [isCalculating, setIsCalculating] = useState(false);
   const workerRef = useRef<Worker | null>(null);
+  const currentReqIdRef = useRef<number>(0);
 
   useEffect(() => {
     // Initialize worker
@@ -24,7 +25,7 @@ export const useFluxMath = (filteredHistory: DrawResult[]) => {
     );
 
     workerRef.current.onmessage = (e) => {
-      if (e.data.type === 'METRICS_RESULT') {
+      if (e.data.type === 'METRICS_RESULT' && e.data.reqId === currentReqIdRef.current) {
         setMetrics(e.data.payload);
         setIsCalculating(false);
       }
@@ -38,13 +39,21 @@ export const useFluxMath = (filteredHistory: DrawResult[]) => {
   useEffect(() => {
     if (workerRef.current && filteredHistory.length > 0) {
       setIsCalculating(true);
+      const reqId = ++currentReqIdRef.current;
+      const drawsLite = filteredHistory.map(d => ({
+        gagnants: d.gagnants || [],
+        date: d.date || ""
+      }));
+
       workerRef.current.postMessage({
         type: 'CALCULATE_METRICS',
-        payload: { draws: filteredHistory }
+        reqId,
+        payload: { draws: drawsLite }
       });
     } else if (filteredHistory.length === 0) {
-        setMetrics(initialMetrics);
-        setIsCalculating(false);
+      currentReqIdRef.current++;
+      setMetrics(initialMetrics);
+      setIsCalculating(false);
     }
   }, [filteredHistory]);
 

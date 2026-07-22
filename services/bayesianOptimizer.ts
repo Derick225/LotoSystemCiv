@@ -61,12 +61,19 @@ export const runBayesianOptimization = async (
 
         const worker = new Worker(new URL('./workers/bayesian.worker.ts?worker', import.meta.url), { type: 'module' });
 
+        const timeoutMs = 45000;
+        const timeoutTimer = setTimeout(() => {
+            worker.terminate();
+            reject(new Error(`Bayesian Optimizer Timeout (${timeoutMs}ms)`));
+        }, timeoutMs);
+
         worker.onmessage = (e) => {
             const { type, data, message } = e.data;
 
             if (type === 'progress') {
                 if (onProgress) onProgress(data.progress, data.bestScore);
             } else if (type === 'result') {
+                clearTimeout(timeoutTimer);
                 worker.terminate();
                 if (data.observations) {
                     saveBayesianMemoryAsync(drawName, data.observations).then(() => {
@@ -79,28 +86,39 @@ export const runBayesianOptimization = async (
                     resolve(data);
                 }
             } else if (type === 'error') {
+                clearTimeout(timeoutTimer);
                 worker.terminate();
                 reject(new Error(message));
             }
         };
 
         worker.onerror = (err: any) => {
+            clearTimeout(timeoutTimer);
             worker.terminate();
             reject(new Error(err?.message || "Échec de l'optimiseur Bayésien"));
         };
+
+        const historyLite = fullHistory.map(h => ({
+            gagnants: h.gagnants,
+            machine: h.machine || [],
+            date: h.date || ""
+        }));
 
         getBayesianMemoryAsync(drawName).then((memoryObservations) => {
             worker.postMessage({
                 type: 'start',
                 payload: {
                     drawName,
-                    history: fullHistory,
+                    history: historyLite,
                     currentWeights,
                     config,
-                    memoryObservations
+                    memoryObservations,
+                    timeSignature: `${drawName}_${fullHistory.length}`
                 }
             });
         }).catch((err) => {
+            clearTimeout(timeoutTimer);
+            worker.terminate();
             reject(new Error(`Failed to load bayesian memory: ${err.message}`));
         });
     });
