@@ -5,12 +5,37 @@ import type { ForestVote } from '../../types';
 import { NumberBall } from '../NumberBall';
 import { useToast } from '../ui/Toast';
 import { useNexusStore } from '../../store/useNexusStore';
-import { Vote, Users, BrainCircuit, Ghost, EyeOff, ShieldCheck, Check, Sparkles, HelpCircle, Scale } from 'lucide-react';
+import { Vote, Users, BrainCircuit, Ghost, EyeOff, ShieldCheck, Check, Sparkles, HelpCircle, Scale, GitBranch, Network, Layers } from 'lucide-react';
 import { audioEngine } from '../../utils/audioEngine';
 
 interface DecisionTreeTabProps { drawName: string; }
 
 type FilterMode = 'consensus' | 'average' | 'shadow';
+
+const DecisionPathNodeView: React.FC<{ node: any }> = ({ node }) => {
+    if (!node) return null;
+    if (node.type === 'outcome') {
+        return (
+            <div className="flex items-center gap-2 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1.5 rounded-xl font-mono text-xs text-emerald-300">
+                <Sparkles size={13} className="text-emerald-400 shrink-0" />
+                <span>{node.label}</span>
+            </div>
+        );
+    }
+    return (
+        <div className="space-y-2 font-mono text-xs">
+            <div className="flex items-center gap-2 bg-slate-900 border border-indigo-500/30 px-3 py-2 rounded-xl text-indigo-300">
+                <GitBranch size={14} className="text-indigo-400 shrink-0" />
+                <span>{node.label}</span>
+            </div>
+            {node.children && node.children.map((child: any, i: number) => (
+                <div key={i} className="pl-4 border-l-2 border-indigo-500/30">
+                    <DecisionPathNodeView node={child} />
+                </div>
+            ))}
+        </div>
+    );
+};
 
 export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) => {
     const { showToast } = useToast();
@@ -224,6 +249,19 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({ drawName }) =>
                                 </div>
                             </div>
                         </div>
+
+                        {/* Chemin de Décision & Arbre d'Inférence Trace */}
+                        {selectedCandidate.decisionPath && (
+                            <div className="bg-slate-900/80 p-6 rounded-3xl border border-indigo-500/30 backdrop-blur-md space-y-3">
+                                <h4 className="text-xs font-black uppercase tracking-[0.2em] text-indigo-400 flex items-center gap-2">
+                                    <GitBranch size={15} /> Chemin de Décision &amp; Arbre d'Inférence (N°{selectedCandidate.candidate})
+                                </h4>
+                                <p className="text-[10px] text-slate-400">Trace exacte du parcours à travers les sous-arbres avec bifurcations floues continues</p>
+                                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                                    <DecisionPathNodeView node={selectedCandidate.decisionPath} />
+                                </div>
+                            </div>
+                        )}
 
                         {/* Empreinte de Bifurcation */}
                         <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800 backdrop-blur-md">

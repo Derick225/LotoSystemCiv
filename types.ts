@@ -520,8 +520,9 @@ export interface ForestVote {
 
 export interface DecisionNode {
   id: string;
-  type: "condition" | "leaf";
+  type: "condition" | "leaf" | "outcome";
   label: string;
+  prob?: number;
   children?: DecisionNode[];
 }
 
@@ -584,6 +585,8 @@ export interface GeminiReasoning {
   strategicAdvice: string;
   suggestedFocus: number[];
   intuitionScore: number;
+  counterfactualExplanation?: string;
+  bayesianRecurrenceScore?: number;
 }
 
 export interface NarrativeReport {
@@ -648,6 +651,16 @@ export interface AntColonyPath {
 
 export interface OracleVocalContext {
   targets: number[];
+  drawName?: string;
+  lastDrawDate?: string;
+  regime?: string;
+  hurst?: number;
+  spectralEntropy?: number;
+  volatility?: number;
+  affinityTop3?: { num1: number; num2: number; affinity: number }[];
+  conceptDrift?: number;
+  brierScore?: number;
+  bayesianRecurrenceScore?: number;
 }
 
 export interface MonthStats {

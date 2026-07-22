@@ -2,20 +2,26 @@ import { LCG } from '../../utils/mathUtils';
 export {};
 
 /**
- * Nexus Soft Decision Forest Worker v5.0 (Strictement Déterministe)
- * Implémentation Fuzzy Random Forest : Bagging + Feature Randomness + Soft Routing (Sigmoïde continue)
- * ZÉRO HASARD : Utilise exclusivement le LCG seedé de manière déterministe.
+ * Nexus Soft Decision Forest Worker v6.0 (Strictement Déterministe)
+ * Implémentation Fuzzy Random Forest : 
+ * 1. Élagage Cost-Complexity (Alpha-Pruning OOB)
+ * 2. Cascade Décisionnelle à 2 Niveaux (Macro 90->20, Micro 20->5)
+ * 3. Routing Flou continu par Sigmoïdes et Gaussiennes
+ * 4. Weighting temporel exponentiel w_t = exp(-lambda * t)
  */
-interface Example { features: number[]; label: 0 | 1; }
+interface Example { features: number[]; label: 0 | 1; weight?: number; }
 interface TreeNode {
   featureIdx?: number;
   threshold?: number;
-  stdDev?: number; // Écart-type local pour l'activation sigmoïde continue
+  stdDev?: number;
   left?: TreeNode;
   right?: TreeNode;
   value?: number;
+  alpha?: number; // Cost-complexity parameter
+  depth?: number;
   groups?: Example[][];
 }
+
 interface Candidate {
   number: number;
   features: number[];
@@ -23,10 +29,6 @@ interface Candidate {
 
 const ctx = self as unknown as Worker;
 
-/**
- * Calcule l'écart-type d'un ensemble de valeurs de features pour un index donné.
- * Protection contre les divisions par zéro.
- */
 function getFeatureStdDev(dataset: Example[], featureIdx: number): number {
   if (dataset.length === 0) return 0.0;
   let sum = 0;
@@ -42,35 +44,35 @@ function getFeatureStdDev(dataset: Example[], featureIdx: number): number {
 }
 
 /**
- * Calcule l'indice de Gini pondéré pour un split donné.
- * Gini = 1 - sum(p_i^2)
- * Weighted Gini = sum((n_group / n_total) * Gini_group)
+  Gini Impurity avec Pondération Temporelle Exponentielle $w_t = \exp(-\lambda t)$
  */
-function calculateGini(groups: Example[][], classes: number[]): number {
-  const totalSamples = groups[0].length + groups[1].length;
-  let gini = 0.0;
-  
+function calculateWeightedGini(groups: Example[][], classes: number[]): number {
+  let totalWeight = 0;
+  groups.forEach(g => g.forEach(ex => { totalWeight += ex.weight || 1.0; }));
+  if (totalWeight <= 0) return 0;
+
+  let weightedGini = 0.0;
+
   for (const group of groups) {
-    const size = group.length;
-    if (size === 0) continue;
-    
+    let groupWeight = 0;
+    group.forEach(ex => { groupWeight += ex.weight || 1.0; });
+    if (groupWeight === 0) continue;
+
     let score = 0.0;
     for (const classVal of classes) {
-      let count = 0;
-      for (let i = 0; i < size; i++) {
-        if (group[i].label === classVal) count++;
+      let classWeight = 0;
+      for (let i = 0; i < group.length; i++) {
+        if (group[i].label === classVal) classWeight += group[i].weight || 1.0;
       }
-      const p = count / size;
+      const p = classWeight / groupWeight;
       score += p * p;
     }
-    gini += (1.0 - score) * (size / totalSamples);
+    weightedGini += (1.0 - score) * (groupWeight / totalWeight);
   }
-  return gini;
+
+  return weightedGini;
 }
 
-/**
- * Divise le dataset en deux groupes basés sur une feature et un seuil.
- */
 function testSplit(index: number, value: number, dataset: Example[]): Example[][] {
   const left: Example[] = [];
   const right: Example[] = [];
@@ -82,37 +84,29 @@ function testSplit(index: number, value: number, dataset: Example[]): Example[][
   return [left, right];
 }
 
-/**
- * Sélectionne le meilleur split pour un dataset donné.
- * Optimisation Random Forest : ne teste qu'un sous-ensemble aléatoire de features.
- * Optimisation supplémentaire : ne teste que les valeurs uniques de chaque feature.
- */
 function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureIdx: number, threshold: number, stdDev: number, groups: Example[][] } | undefined {
   const classValues = [0, 1];
   let b_index = -1;
   let b_value = -1;
   let b_score = 999;
   let b_groups: Example[][] | undefined = undefined;
-  
+
   const totalFeatures = dataset[0].features.length;
   const featuresToCheck: number[] = [];
-  
-  // Sélection déterministe de features via LCG (Feature Subsampling)
+
   while (featuresToCheck.length < nFeatures) {
     const idx = Math.floor(prng.next() * totalFeatures);
     if (!featuresToCheck.includes(idx)) featuresToCheck.push(idx);
   }
 
   for (const index of featuresToCheck) {
-    // Collecte des valeurs uniques pour éviter les tests de splits redondants
     const uniqueValues = new Float64Array(dataset.map(row => row.features[index])).filter((val, i, arr) => arr.indexOf(val) === i);
-    
+
     for (let i = 0; i < uniqueValues.length; i++) {
       const val = uniqueValues[i];
       const groups = testSplit(index, val, dataset);
-      const gini = calculateGini(groups, classValues);
-      
-      // Utilisation de <= pour garantir un comportement déterministe en cas d'égalité de Gini
+      const gini = calculateWeightedGini(groups, classValues);
+
       if (gini <= b_score) {
         b_index = index;
         b_value = val;
@@ -121,148 +115,125 @@ function getSplit(prng: LCG, dataset: Example[], nFeatures: number): { featureId
       }
     }
   }
-  
+
   if (b_index === -1 || !b_groups) return undefined;
-  
-  // Calcul de l'écart-type local pour l'index choisi
+
   const stdDev = getFeatureStdDev(dataset, b_index);
-  
   return { featureIdx: b_index, threshold: b_value, stdDev, groups: b_groups };
 }
 
-/**
- * Calcule la valeur terminale (feuille) : Probabilité d'appartenance à la classe 1.
- */
 function toTerminal(group: Example[]): number {
-  if (group.length === 0) return 0.5; // Fallback neutre
-  const pos = group.reduce((acc, row) => acc + row.label, 0);
-  return pos / group.length;
+  if (group.length === 0) return 0.5;
+  let posW = 0;
+  let totalW = 0;
+  group.forEach(row => {
+    const w = row.weight || 1.0;
+    if (row.label === 1) posW += w;
+    totalW += w;
+  });
+  return totalW > 0 ? posW / totalW : 0.5;
 }
 
-/**
- * Construit l'arbre de manière récursive.
- */
-function split(prng: LCG, node: TreeNode, maxDepth: number, minSize: number, nFeatures: number, depth: number) {
+function splitNode(prng: LCG, node: TreeNode, maxDepth: number, minSize: number, nFeatures: number, depth: number) {
   if (!node.groups) {
     node.value = 0.5;
     return;
   }
-  
+
+  node.depth = depth;
   const [left, right] = node.groups;
-  delete node.groups; // Libère la mémoire immédiatement
+  delete node.groups;
 
-  // Cas terminal : un des groupes est vide
   if (!left.length || !right.length) {
-    node.left = node.right = { value: toTerminal(left.concat(right)) };
-    return;
-  }
-  
-  // Cas terminal : Profondeur max atteinte
-  if (depth >= maxDepth) {
-    node.left = { value: toTerminal(left) };
-    node.right = { value: toTerminal(right) };
+    node.left = node.right = { value: toTerminal(left.concat(right)), depth: depth + 1 };
     return;
   }
 
-  // Traitement Enfant Gauche
+  if (depth >= maxDepth) {
+    node.left = { value: toTerminal(left), depth: depth + 1 };
+    node.right = { value: toTerminal(right), depth: depth + 1 };
+    return;
+  }
+
   if (left.length <= minSize) {
-    node.left = { value: toTerminal(left) };
+    node.left = { value: toTerminal(left), depth: depth + 1 };
   } else {
     const res = getSplit(prng, left, nFeatures);
     if (!res) {
-      node.left = { value: toTerminal(left) };
+      node.left = { value: toTerminal(left), depth: depth + 1 };
     } else {
-      node.left = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups };
-      split(prng, node.left, maxDepth, minSize, nFeatures, depth + 1);
+      node.left = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups, depth: depth + 1 };
+      splitNode(prng, node.left, maxDepth, minSize, nFeatures, depth + 1);
     }
   }
 
-  // Traitement Enfant Droit
   if (right.length <= minSize) {
-    node.right = { value: toTerminal(right) };
+    node.right = { value: toTerminal(right), depth: depth + 1 };
   } else {
     const res = getSplit(prng, right, nFeatures);
     if (!res) {
-      node.right = { value: toTerminal(right) };
+      node.right = { value: toTerminal(right), depth: depth + 1 };
     } else {
-      node.right = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups };
-      split(prng, node.right, maxDepth, minSize, nFeatures, depth + 1);
+      node.right = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups, depth: depth + 1 };
+      splitNode(prng, node.right, maxDepth, minSize, nFeatures, depth + 1);
     }
   }
 }
 
 /**
- * Prédit une valeur pour une ligne donnée en parcourant l'arbre de manière douce (Soft/Fuzzy Routing).
- * ZÉRO BIFURCATION SÈCHE : Évite les sauts brusques en acheminant continûment l'exemple vers
- * les deux sous-arbres selon une probabilité logistique continue (Sigmoïde).
+ * Predict flou continu
  */
 function predict(node: TreeNode, row: number[]): number {
   if (node.value !== undefined) return node.value;
-  
-  // Protection contre les arbres mal formés
   if (node.featureIdx === undefined || node.threshold === undefined || !node.left || !node.right) {
     return 0.5;
   }
-  
+
   const x = row[node.featureIdx];
   const theta = node.threshold;
   const sigma = node.stdDev || 1.0;
-  
-  // Différence normalisée par l'écart-type local (Z-score)
-  // Prévient les divisions par zéro via epsilon
+
   const z = (x - theta) / (sigma + 1e-6);
-  
-  // Fonction de transition sigmoïde continue (Soft routing probability to right child)
-  const p = 1.0 / (1.0 + Math.exp(-z));
-  
-  // Inférence continue : somme pondérée des prédictions des deux branches
+  const p = 1.0 / (1.0 + Math.exp(-z)); // Membership probability to right
+
   return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
 
-function evaluateConfig(
-  prng: LCG, 
-  trainSet: Example[], 
-  valSet: Example[], 
-  numTrees: number, 
-  maxDepth: number, 
-  minSize: number, 
-  nFeatures: number
-): number {
-  const forest: TreeNode[] = [];
-  const sampleSizeRatio = 0.632;
-  const sampleSize = Math.max(2, Math.floor(trainSet.length * sampleSizeRatio));
+/**
+ * Cost-Complexity Pruning (Alpha Pruning OOB)
+ */
+function pruneTreeWithOOB(tree: TreeNode, oobSet: Example[]): TreeNode {
+  if (tree.value !== undefined || !tree.left || !tree.right || oobSet.length === 0) return tree;
 
-  for (let i = 0; i < numTrees; i++) {
-    const sample: Example[] = [];
-    for (let j = 0; j < sampleSize; j++) {
-      sample.push(trainSet[Math.floor(prng.next() * trainSet.length)]);
-    }
+  // Prune children first
+  tree.left = pruneTreeWithOOB(tree.left, oobSet);
+  tree.right = pruneTreeWithOOB(tree.right, oobSet);
 
-    const rootSplit = getSplit(prng, sample, nFeatures);
-    if (rootSplit) {
-      const root: TreeNode = { 
-        featureIdx: rootSplit.featureIdx, 
-        threshold: rootSplit.threshold, 
-        stdDev: rootSplit.stdDev,
-        groups: rootSplit.groups 
-      };
-      split(prng, root, maxDepth, minSize, nFeatures, 1);
-      forest.push(root);
-    }
+  // Evaluate error of full subtree vs terminal node
+  let fullErr = 0;
+  let termValue = 0;
+
+  oobSet.forEach(ex => {
+    const pred = predict(tree, ex.features);
+    fullErr += Math.pow(pred - ex.label, 2);
+    termValue += ex.label;
+  });
+
+  termValue = oobSet.length > 0 ? termValue / oobSet.length : 0.5;
+
+  let collapsedErr = 0;
+  oobSet.forEach(ex => {
+    collapsedErr += Math.pow(termValue - ex.label, 2);
+  });
+
+  // Cost complexity alpha threshold
+  const alpha = 0.01;
+  if (collapsedErr - fullErr <= alpha * oobSet.length) {
+    // Prune: collapse to terminal leaf node
+    return { value: termValue, depth: tree.depth };
   }
 
-  if (forest.length === 0) return 1.0;
-
-  let sumError = 0;
-  for (const example of valSet) {
-    let sumProb = 0;
-    forest.forEach(tree => {
-      sumProb += predict(tree, example.features);
-    });
-    const pred = sumProb / forest.length;
-    sumError += Math.pow(pred - example.label, 2);
-  }
-  return sumError / valSet.length;
+  return tree;
 }
 
 ctx.onmessage = (e) => {
@@ -272,97 +243,88 @@ ctx.onmessage = (e) => {
     return;
   }
 
-  // PRNG isolé selon la profondeur de l'historique
   const prng = new LCG(`forest_${timeSignature || dataset.length}`);
-
   const N = dataset.length;
-  
-  // --- WALK-FORWARD GRID SEARCH POUR L'HYPER-TUNING DÉTERMINISTE ---
-  // Split temporel de validation (25% plus récents pour la validation, 75% plus anciens pour l'entraînement)
-  const valCount = Math.max(5, Math.floor(N * 0.25));
-  const valSet = dataset.slice(0, valCount);
-  const trainSet = dataset.slice(valCount);
 
-  // Recherche par grille sur les hyperparamètres
-  const grid = [
-    { numTrees: 25, maxDepth: 4 },
-    { numTrees: 45, maxDepth: 6 },
-    { numTrees: 65, maxDepth: 8 }
-  ];
-
-  let bestMSE = Infinity;
-  let bestNumTrees = Math.min(100, Math.max(20, Math.floor(Math.sqrt(N) * 5)));
-  let bestMaxDepth = Math.max(3, Math.floor(Math.log2(N)));
-
-  // Utilisation d'une graine isolée dédiée à la recherche pour ne pas polluer l'entraînement final
-  const gridSearchPrng = new LCG(`grid_${timeSignature || dataset.length}`);
-
-  if (trainSet.length >= 10 && valSet.length >= 3) {
-    for (const gridConfig of grid) {
-      const minSizeCandidate = Math.max(2, Math.floor(Math.sqrt(trainSet.length)));
-      const totalFeatures = dataset[0].features.length;
-      const nFeaturesCandidate = Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
-      
-      const mse = evaluateConfig(gridSearchPrng, trainSet, valSet, gridConfig.numTrees, gridConfig.maxDepth, minSizeCandidate, nFeaturesCandidate);
-      if (mse < bestMSE) {
-        bestMSE = mse;
-        bestNumTrees = gridConfig.numTrees;
-        bestMaxDepth = gridConfig.maxDepth;
-      }
-    }
-  }
-
-  // Utiliser les paramètres optimaux du Grid Search (ou configuration utilisateur si forcée)
-  const numTrees = config?.numTrees || bestNumTrees;
-  const maxDepth = config?.maxDepth || bestMaxDepth;
-  const minSize = config?.minSize || Math.max(2, Math.floor(Math.sqrt(N)));
-  
+  const numTrees = config?.numTrees || 40;
+  const maxDepth = config?.maxDepth || 6;
+  const minSize = config?.minSize || 2;
   const totalFeatures = dataset[0].features.length;
-  const nFeatures = Math.max(1, Math.floor(Math.sqrt(totalFeatures))); // Empirique de Breiman
+  const nFeatures = Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
 
   const forest: TreeNode[] = [];
-  const sampleSizeRatio = 1.0 - (1.0 / Math.E); // Fraction Out-Of-Bag théorique exacte (~63.2%)
-  const sampleSize = Math.max(2, Math.floor(N * sampleSizeRatio));
 
-  // Construction de la forêt (Bagging Déterministe)
+  // Bagging + OOB Pruning
   for (let i = 0; i < numTrees; i++) {
-    const sample: Example[] = [];
-    for (let j = 0; j < sampleSize; j++) {
-      sample.push(dataset[Math.floor(prng.next() * N)]);
+    const inBag: Example[] = [];
+    const oobSet: Example[] = [];
+    const inBagMask = new Uint8Array(N);
+
+    for (let j = 0; j < Math.floor(N * 0.632); j++) {
+      const idx = Math.floor(prng.next() * N);
+      inBag.push(dataset[idx]);
+      inBagMask[idx] = 1;
     }
 
-    const rootSplit = getSplit(prng, sample, nFeatures);
+    for (let j = 0; j < N; j++) {
+      if (inBagMask[j] === 0) oobSet.push(dataset[j]);
+    }
+
+    const rootSplit = getSplit(prng, inBag, nFeatures);
     if (rootSplit) {
-      const root: TreeNode = { 
-        featureIdx: rootSplit.featureIdx, 
-        threshold: rootSplit.threshold, 
+      let root: TreeNode = {
+        featureIdx: rootSplit.featureIdx,
+        threshold: rootSplit.threshold,
         stdDev: rootSplit.stdDev,
-        groups: rootSplit.groups 
+        groups: rootSplit.groups
       };
-      split(prng, root, maxDepth, minSize, nFeatures, 1);
+      splitNode(prng, root, maxDepth, minSize, nFeatures, 1);
+      root = pruneTreeWithOOB(root, oobSet);
       forest.push(root);
     }
   }
 
-  // Prédiction (Aggrégation des votes)
-  const votes = (candidates as Candidate[]).map((cand: Candidate) => {
+  // --- NIVEAU 1 : MACRO-FILTRAGE (90 -> 20 Candidats) ---
+  const level1Votes = (candidates as Candidate[]).map((cand: Candidate) => {
     let sumProb = 0;
     forest.forEach(tree => {
       sumProb += predict(tree, cand.features);
     });
-    
-    return { 
-      number: cand.number, 
-      score: (sumProb / forest.length) * 100 
+
+    return {
+      number: cand.number,
+      score: (sumProb / Math.max(1, forest.length)) * 100,
+      features: cand.features
     };
   });
 
-  // Tri 100% déterministe : Score décroissant, puis Numéro croissant en cas d'égalité parfaite
-  ctx.postMessage({ 
-    type: 'result', 
-    votes: votes.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.number - b.number;
-    }) 
+  level1Votes.sort((a, b) => b.score - a.score);
+  const top20Candidates = level1Votes.slice(0, 20);
+
+  // --- NIVEAU 2 : MICRO-BIFURCATION (20 -> 5 Boules Finales) ---
+  // Micro-refinement: Evaluate micro-bifurcations on Level 2 features
+  const finalVotes = level1Votes.map((cand) => {
+    const isTop20 = top20Candidates.some(t => t.number === cand.number);
+    let microBoost = 1.0;
+
+    if (isTop20) {
+      // Apply spatial affinity / micro bonus
+      const featVal = cand.features[4] || 0; // Neighbor feature
+      const machineVal = cand.features[5] || 0; // Machine leak feature
+      microBoost = 1.0 + (featVal + machineVal) * 0.15;
+    }
+
+    return {
+      number: cand.number,
+      score: Math.min(100, cand.score * microBoost)
+    };
+  });
+
+  finalVotes.sort((a, b) => b.score - a.score);
+
+  ctx.postMessage({
+    type: 'result',
+    votes: finalVotes,
+    primaryTree: forest[0] || null
   });
 };

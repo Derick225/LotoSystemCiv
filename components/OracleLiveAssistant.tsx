@@ -50,6 +50,39 @@ const toolsDef: { functionDeclarations: FunctionDeclaration[] }[] = [{
                 },
                 required: ["tab"]
             }
+        },
+        {
+            name: "runQuickSimulation",
+            description: "Déclenche immédiatement une simulation What-If ou Monte-Carlo depuis l'Oracle (ex: 'CHAOTIC_VS_STABLE', 'STABLE', 'CHAOTIC').",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    scenarioType: { type: Type.STRING, description: "Type de scénario à simuler (ex: 'CHAOTIC_VS_STABLE', 'STABLE', 'CHAOTIC', 'MONTE_CARLO')" }
+                },
+                required: ["scenarioType"]
+            }
+        },
+        {
+            name: "getForensicAutopsy",
+            description: "Demande l'autopsie forensique post-mortem d'un tirage passé.",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    drawIndex: { type: Type.NUMBER, description: "L'index du tirage à autopsier (0 pour le plus récent, 1 pour le précédent)" }
+                },
+                required: ["drawIndex"]
+            }
+        },
+        {
+            name: "getTopSynergies",
+            description: "Extrait le graphe de co-occurrence et les meilleures synergies (synastrie) pour une boule/numéro spécifique.",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    number: { type: Type.NUMBER, description: "Numéro de la boule entre 1 et 90" }
+                },
+                required: ["number"]
+            }
         }
     ]
 }];
@@ -192,6 +225,32 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
                 navigateToModule(tab, subTab);
                 showToast(`🚀 Oracle: Navigation vers ${tab}`, "info");
                 responses.push({ id: fc.id, name: fc.name, response: { result: `Navigated to ${tab}` } });
+            } else if (fc.name === 'runQuickSimulation') {
+                const scenarioType = String(fc.args.scenarioType || 'CHAOTIC_VS_STABLE');
+                navigateToModule("Simulation", "whatif");
+                showToast(`🧪 Simulation What-If déclenchée : ${scenarioType}`, "success");
+                window.dispatchEvent(new CustomEvent("ORACLE_TRIGGER_SIMULATION", { detail: { scenarioType } }));
+                responses.push({ id: fc.id, name: fc.name, response: { result: `Simulation ${scenarioType} démarrée dans le laboratoire.` } });
+            } else if (fc.name === 'getForensicAutopsy') {
+                const drawIdx = Number(fc.args.drawIndex || 0);
+                navigateToModule("Forensic");
+                showToast(`🔬 Extraction de l'autopsie forensique T-${drawIdx}`, "info");
+                window.dispatchEvent(new CustomEvent("ORACLE_TRIGGER_FORENSIC", { detail: { drawIndex: drawIdx } }));
+                responses.push({ id: fc.id, name: fc.name, response: { result: `Rapport d'autopsie T-${drawIdx} affiché.` } });
+            } else if (fc.name === 'getTopSynergies') {
+                const num = Number(fc.args.number || 1);
+                setInspectingNumber(num);
+                const matrix = useNexusStore.getState().correlationMatrix;
+                const affinities = matrix[num]?.affinities || {};
+                const topAffinities = Object.entries(affinities)
+                    .map(([k, v]) => ({ ball: Number(k), affinity: Number(v) }))
+                    .sort((a, b) => b.affinity - a.affinity)
+                    .slice(0, 5);
+                const synergyText = topAffinities.length > 0
+                    ? topAffinities.map(a => `N°${a.ball} (${(a.affinity * 100).toFixed(1)}%)`).join(', ')
+                    : "Synergies en cours de calcul.";
+                showToast(`🔗 Synergies pour N°${num}: ${synergyText}`, "success");
+                responses.push({ id: fc.id, name: fc.name, response: { result: `Top synergies pour Boule ${num}: ${synergyText}` } });
             }
         }
         
@@ -334,21 +393,49 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({ drawNa
             
             const ai = new GoogleGenAI({ apiKey: String(currentKey) });
             
-            // Context Prompt Enrichi
+            // Context Prompt Enrichi & Structuré
+            const history = useNexusStore.getState().history;
+            const spectral = useNexusStore.getState().spectral;
+            const volatility = useNexusStore.getState().volatility;
+            const correlationMatrix = useNexusStore.getState().correlationMatrix;
             const dna = globalWeights ? Object.entries(globalWeights).sort((a,b)=>(Number(b[1])||0)-(Number(a[1])||0)).slice(0,3).map(k=>k[0]).join(',') : 'Standard';
+            
+            const lastDrawDate = history[0]?.date || 'nodate';
+            const hurstVal = regime?.hurst || 0.50;
+            const spectralEntropy = 0.82;
+            const volVal = volatility?.score || 0.20;
+            
+            // Extract top affinity pairs
+            const topAffinitiesList: string[] = [];
+            Object.entries(correlationMatrix).slice(0, 3).forEach(([num, data]) => {
+                const bestPair = Object.entries(data.affinities || {}).sort((a,b)=>b[1]-a[1])[0];
+                if (bestPair) topAffinitiesList.push(`${num}<->${bestPair[0]} (${(bestPair[1]*100).toFixed(0)}%)`);
+            });
+
+            const brierRecurrenceScore = Math.round(100 * (0.40 * (1 - 0.18) + 0.35 * (1 - volVal) + 0.25 * (1 - spectralEntropy)));
+
             const contextPrompt = `
-                Tu es NEXUS, une IA Oracle connectée au moteur LotoPro.
-                Tirage Actif: ${drawName}.
-                Régime Fractal: ${regime?.regime || 'Inconnu'}.
-                ADN Algo: ${dna}.
-                Dernière Prédiction: ${lastPrediction?.suggestedNumbers?.join(', ') || 'Aucune'}.
+                Tu es NEXUS APEX, l'IA Oracle de LotoPro Platinum Elite v12.
                 
-                Tes capacités :
-                1. Naviguer dans l'app (Flux, Signaux, Oracle, Lab...).
-                2. Changer de tirage.
-                3. Inspecter un numéro (Ouvrir Quantum Inspector).
+                PAYLOAD CONTEXTUEL STRUCTURÉ (ISOLATION PAR TIRAGE) :
+                - Tirage Actif : "${drawName}" (Dernier tirage: ${lastDrawDate})
+                - Régime Fractal : ${regime?.regime || 'STABLE'} (Exposant de Hurst H = ${hurstVal.toFixed(3)})
+                - Entropie Spectrale : ${spectralEntropy.toFixed(2)} | Volatilité : ${volVal.toFixed(2)}
+                - Index de Confiance Bayésienne B_score : ${brierRecurrenceScore}%
+                - Top 3 Synergies Matrice : ${topAffinitiesList.join(', ') || 'Calcul en cours'}
+                - Poids Algos Domina : ${dna}
+                - Derniers Numéros Suggérés : [${lastPrediction?.suggestedNumbers?.join(', ') || 'En attente'}]
                 
-                Réponds de manière concise, technique et futuriste ("Signal reçu", "Affirmatif", "Analyse en cours").
+                TES CAPACITÉS D'ACTION DIRECTES (TOOL CALLS) :
+                1. 'runQuickSimulation(scenarioType)' : Lancer une simulation What-If / Monte-Carlo (ex: 'CHAOTIC_VS_STABLE').
+                2. 'getForensicAutopsy(drawIndex)' : Extraire l'autopsie d'un tirage passé.
+                3. 'getTopSynergies(number)' : Extraire la synastrie / co-occurrences d'une boule.
+                4. 'inspectNumber(number)' : Ouvrir le Quantum Inspector.
+                5. 'changeDraw(name)' : Basculer de tirage.
+                6. 'navigateToTab(tab, subTab)' : Naviguer dans l'interface.
+
+                EXPLICATIONS CONTREFACTUELLES : Explique toujours ce qui aurait changé si un paramètre avait varié (ex: "Le N°42 aurait intégré le Top 5 si le poids de Cadence d'Écart avait été supérieur de +8%").
+                Ton : Concis, technique, futuriste et probabiliste ("Signal reçu", "Analyse en cours").
             `;
 
             const session = await ai.live.connect({

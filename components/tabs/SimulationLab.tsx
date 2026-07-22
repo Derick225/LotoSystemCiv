@@ -29,6 +29,7 @@ import { audioEngine } from '../../utils/audioEngine';
 import { useToast } from '../ui/Toast';
 import { LCG } from '../../utils/mathUtils';
 import { AlgoKey } from "../../shared/prediction.types";
+import { applyDirichletClosedLoopInjection } from '../../services/training/multiHeadNeuralCore';
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
@@ -467,23 +468,23 @@ export const SimulationLab: React.FC<{ drawName: string }> = ({ drawName }) => {
           updated[key] = typeof oldWeights[key] === 'number' ? oldWeights[key] : (100.0 / validKeys.length);
         });
         
-        // Boost Echo State (ESN) neural algorithm
-        const echoStateKey = AlgoKey.ECHO_STATE;
-        const currentEchoState = updated[echoStateKey] || (100.0 / validKeys.length);
-        
-        // Max boost of up to 40% based on VALIDATED learning improvement
-        const boostAmount = currentEchoState * (improvementRatio * 0.40);
-        updated[echoStateKey] = parseFloat((currentEchoState + boostAmount).toFixed(4));
+        // Construction du vecteur de gradients pour les 20 algorithmes
+        const gradients: Record<AlgoKey, number> = {} as any;
+        validKeys.forEach(k => {
+          gradients[k] = (improvementRatio * 0.20);
+        });
 
-        // Normalize weights to sum back to exactly 100
-        const total = Object.values(updated).reduce((a, b) => a + b, 0);
-        for (const key in updated) {
-          updated[key] = parseFloat(((updated[key] / total) * 100).toFixed(4));
-        }
+        // Distribution lissée par tirage/lissage Dirichlet continu
+        const newDirichletWeights = applyDirichletClosedLoopInjection(
+          updated as any,
+          gradients,
+          0.05,
+          0.8
+        );
 
-        await updateGlobalWeights(updated as any, drawNameKey);
+        await updateGlobalWeights(newDirichletWeights as any, drawNameKey);
         showToast(
-          `Succès : L'Echo State (ESN) a été boosté de +${boostAmount.toFixed(1)}% ` +
+          `Succès : Injection fermée Dirichlet appliquée sur l'ensemble des 20 algorithmes ` +
           `(validé sur ${trainingDataSource.sampleCount} échantillons réels, source : ` +
           `${trainingDataSource.type === 'file' ? 'fichier importé' : 'historique du tirage'}).`,
           "success"

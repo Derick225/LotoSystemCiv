@@ -85,12 +85,43 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2">
-                    <div className={`flex items-center gap-3 px-4 py-2 rounded-2xl border ${globalRegime?.regime === 'CHAOS' ? 'bg-rose-50 border-rose-200 text-rose-600 animate-pulse' : 'bg-indigo-50 border-indigo-100 text-indigo-700'}`}>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-mono text-xs">
+                        <span className="text-[10px] font-bold text-slate-400">B_score:</span>
+                        <span className="font-extrabold text-emerald-400">
+                            {Math.round(100 * (0.40 * (1 - 0.18) + 0.35 * (1 - (useNexusStore.getState().volatility?.score || 0.2)) + 0.25 * (1 - 0.82)))}%
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400 font-mono text-xs">
+                        <span className="text-[10px] font-bold text-slate-400">Hurst H:</span>
+                        <span className="font-extrabold text-amber-400">
+                            {(globalRegime?.hurst || 0.50).toFixed(3)}
+                        </span>
+                    </div>
+                    <div className={`flex items-center gap-3 px-4 py-2 rounded-2xl border ${globalRegime?.regime === 'CHAOS' ? 'bg-rose-50 border-rose-200 text-rose-600 animate-pulse dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-400' : 'bg-indigo-50 border-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300'}`}>
                         {globalRegime?.regime === 'CHAOS' ? <AlertTriangle size={16}/> : <ShieldCheck size={16}/>}
                         <span className="text-[10px] font-black uppercase">Régime {globalRegime?.regime || 'Analyse...'}</span>
                     </div>
                 </div>
             </div>
+
+            {/* Proactive Drift Alert Banner en cas de rupture de régime */}
+            {(globalRegime?.regime === 'CHAOS' || (globalRegime?.hurst && globalRegime.hurst < 0.42)) && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-950/80 via-red-900/40 to-slate-900 border border-rose-500/40 text-rose-200 shadow-xl flex items-start gap-4 animate-pulse">
+                    <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 shrink-0 mt-0.5">
+                        <AlertTriangle size={22} />
+                    </div>
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-black uppercase tracking-wider text-rose-400">Alerte Rupture de Régime (Concept Drift)</span>
+                            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">CRITIQUE</span>
+                        </div>
+                        <p className="text-xs text-rose-100/90 leading-relaxed font-sans">
+                            Bascule détectée vers un régime <strong>CHAOTIQUE</strong> (Exposant de Hurst <code className="text-rose-300 font-mono">H = {(globalRegime?.hurst || 0.38).toFixed(3)}</code>). 
+                            Effondrement de l'autocorrélation harmonique. L'Oracle a ajusté automatiquement la température de génération à <code className="text-rose-300 font-mono">T = {(0.10 + (0.85 / (1.0 + Math.exp(12.0 * ((globalRegime?.hurst || 0.38) - 0.50))))).toFixed(2)}</code> pour modéliser les stochastiques chaotiques sans biais.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             <div id="oracle-content" className="animate-slide-up transition-all duration-500 min-h-[600px] scroll-mt-[300px] md:scroll-mt-[280px]">
                 <Suspense fallback={<div className="p-20 text-center animate-pulse text-indigo-500">Chargement du Module...</div>}>

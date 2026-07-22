@@ -50,6 +50,89 @@ const computeEmpiricalSigmaTopology = (history: DrawResult[]): number => {
   return Math.sqrt(variance) || SIGMA_TOPOLOGY;
 }; 
 
+/**
+ * Distance de Mahalanobis D_M(x) pour formalisation mathématique du mode Ombre
+ * D_M(x) = sqrt( sum( (x_i - mu_i)^2 / sigma_i^2 ) )
+ */
+export const computeMahalanobisDistances = (
+  candidates: { number: number; features: number[] }[],
+  dataset: { features: number[]; label?: 0 | 1; class?: number }[]
+): Record<number, number> => {
+  if (candidates.length === 0 || dataset.length === 0) return {};
+  const numFeatures = candidates[0].features.length;
+
+  const mu = new Array(numFeatures).fill(0);
+  let posCount = 0;
+  dataset.forEach(d => {
+    const label = d.label !== undefined ? d.label : d.class;
+    if (label === 1) {
+      posCount++;
+      for (let i = 0; i < numFeatures; i++) mu[i] += d.features[i] || 0;
+    }
+  });
+  if (posCount > 0) {
+    for (let i = 0; i < numFeatures; i++) mu[i] /= posCount;
+  }
+
+  const variance = new Array(numFeatures).fill(0);
+  dataset.forEach(d => {
+    const label = d.label !== undefined ? d.label : d.class;
+    if (label === 1) {
+      for (let i = 0; i < numFeatures; i++) {
+        variance[i] += Math.pow((d.features[i] || 0) - mu[i], 2);
+      }
+    }
+  });
+  for (let i = 0; i < numFeatures; i++) {
+    variance[i] = Math.max(1e-4, variance[i] / Math.max(1, posCount));
+  }
+
+  const distMap: Record<number, number> = {};
+  candidates.forEach(c => {
+    let distSq = 0;
+    for (let i = 0; i < numFeatures; i++) {
+      const val = c.features[i] || 0;
+      distSq += Math.pow(val - mu[i], 2) / variance[i];
+    }
+    distMap[c.number] = Math.sqrt(distSq);
+  });
+
+  return distMap;
+};
+
+/**
+ * Reconstruit la trace exacte du chemin de décision sur l'arbre de décision primaire
+ */
+export const buildTreeDecisionPath = (
+  node: any,
+  row: number[],
+  featureLabels: string[]
+): DecisionNode => {
+  if (!node || node.value !== undefined) {
+    return {
+      id: 'leaf',
+      type: 'outcome',
+      label: `Proba Terminale: ${Math.round((node?.value || 0.5) * 100)}%`,
+      prob: node?.value || 0.5
+    } as DecisionNode;
+  }
+
+  const featIdx = node.featureIdx ?? 0;
+  const featName = featureLabels[featIdx] || `Feature ${featIdx}`;
+  const val = row[featIdx] ?? 0;
+  const thresh = node.threshold ?? 0.5;
+
+  const goesRight = val >= thresh;
+  const childNode = goesRight ? node.right : node.left;
+
+  return {
+    id: `node_${featIdx}`,
+    type: 'condition',
+    label: `${featName} (${(val * 100).toFixed(1)}% vs ${(thresh * 100).toFixed(1)}%)`,
+    children: [buildTreeDecisionPath(childNode, row, featureLabels)]
+  } as DecisionNode;
+};
+
 // Diagnostics de la forêt de décision
 export interface DecisionForestDiagnostics {
   datasetSize: number;
@@ -501,7 +584,7 @@ export const runDecisionForest = async (
 
     worker.onmessage = (e) => {
       clearTimeout(timeout);
-      const { votes: workerVotes } = e.data;
+      const { votes: workerVotes, primaryTree } = e.data;
       worker.terminate();
 
       if (!workerVotes) {
@@ -509,14 +592,22 @@ export const runDecisionForest = async (
         return;
       }
 
+      // Calcul des distances de Mahalanobis pour le Mode Ombre
+      const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);
+
       const finalVotes: ForestVote[] = workerVotes.map((v: any) => {
         const num = v.number !== undefined ? v.number : v.class;
         const cand = candidates.find(c => c.number === num);
+        const mDist = mahalanobisMap[num] || 0;
+
+        // Génération du chemin de décision sur l'arbre primaire
+        const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], activeFeatures);
+
         return {
           candidate: num,
           score: Math.round(v.score),
-          votes: { temporal: 0, spatial: 0, structural: 0 },
-          decisionPath: { id: 'root', type: 'condition', label: 'Forest Consensus', children: [] } as DecisionNode,
+          votes: { temporal: Math.round(mDist * 10), spatial: 0, structural: 0 },
+          decisionPath: pathTrace,
           features: { 
             isConsensusTrap: v.score > (datasetStats.medianConsensus + datasetStats.trapThresholdZ * (datasetStats.iqrConsensus / 1.349)),
             values: cand ? cand.features : []
@@ -524,7 +615,7 @@ export const runDecisionForest = async (
         };
       });
 
-      // Mappage d'affinité continue basé sur le Z-score
+      // Mappage d'affinité continue basé sur le Z-score et Mahalanobis
       const scores = finalVotes.map(v => v.score / 100.0);
       const meanScore = calculateMean(scores);
       const stdScore = calculateStdDev(scores, meanScore);
@@ -539,7 +630,9 @@ export const runDecisionForest = async (
         } else if (mode === 'average') {
           affinity = Math.exp(-0.5 * Math.pow(zScore, 2));
         } else {
-          affinity = Math.exp(-0.5 * Math.pow(zScore + 1.0, 2)); 
+          // Mode Ombre : Pondération par la distance de Mahalanobis D_M(x)
+          const mDist = mahalanobisMap[v.candidate] || 1.0;
+          affinity = (1.0 / (1.0 + Math.exp(-0.5 * zScore))) * (1.0 + Math.log1p(mDist)); 
         }
         return { vote: v, affinity };
       });

@@ -107,22 +107,38 @@ Deno.serve(async (req) => {
         let result: unknown;
 
         if (task === 'analyzeDrawLogic') {
-            const { drawName, historyPayload, metrics } = payload;
+            const { drawName, historyPayload, metrics, structuredContext } = payload;
+            const hurstVal = typeof metrics?.hurst === 'number' ? metrics.hurst : (typeof structuredContext?.hurst === 'number' ? structuredContext.hurst : 0.50);
+            const brierScore = typeof metrics?.brierScore === 'number' ? metrics.brierScore : 0.18;
+            const volatility = typeof metrics?.volatility === 'number' ? metrics.volatility : 0.20;
+            const spectralEntropy = typeof metrics?.spectralEntropy === 'number' ? metrics.spectralEntropy : 0.82;
+
+            const temp = Math.max(0.10, Math.min(0.95, 0.10 + (0.85 / (1.0 + Math.exp(12.0 * (hurstVal - 0.50))))));
+            const calculatedBayesianScore = Math.round(Math.max(1, Math.min(99, 100 * (0.40 * (1 - Math.min(1, brierScore)) + 0.35 * (1 - Math.min(1, volatility)) + 0.25 * (1 - Math.min(1, spectralEntropy))))));
+
             const prompt = `Agis comme l'Agent Tactique Nexus Apex v14.0, une IA experte en analyse stochastique pour la loterie (5/90).
             Analyse les 15 derniers tirages de "${drawName}" :
             ${JSON.stringify(historyPayload)}
             
-            Métriques mathématiques calculées par le moteur déterministe :
-            ${JSON.stringify(metrics || {})}
+            Contextuel Structuré & Métriques Déterministes :
+            ${JSON.stringify(structuredContext || metrics || {})}
 
             CRITIQUE : Tu es un LLM, tu es mauvais en mathématiques pures. Tu ne dois SOUS AUCUN PRÉTEXTE essayer de deviner ou de prédire les prochains numéros.
-            Ta seule tâche est de fournir une analyse sémantique et narrative basée sur les métriques qu'on te fournit.
+            Ta seule tâche est de fournir une analyse sémantique, narrative et contrefactuelle basée sur les métriques qu'on te fournit.
 
-            Fournis une analyse logique détaillée, identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne), liste les anomalies détectées (écarts types, ruptures de symétrie), donne un conseil stratégique froid et technique, et un score d'intuition (0-100).`;
+            TÂCHE REQUISE :
+            1. Fournis une analyse logique détaillée du comportement de la grille.
+            2. Identifie le type de pattern dominant (ex: Haute Entropie, Retour à la moyenne, Résonance Harmonique).
+            3. Liste les anomalies détectées (écarts-types, ruptures de symétrie, dérives).
+            4. Donne un conseil stratégique froid et technique.
+            5. Fournis un Score d'Intuition (0-100).
+            6. "counterfactualExplanation" : Une explication contrefactuelle narrative obligatoire expliquant ce qui aurait changé si un paramètre avait varié (ex: "Le N°42 aurait intégré le Top 5 si le poids de Cadence d'Écart avait été supérieur de +8% en raison de son cycle de sortie de 3 tirages.").
+            7. "bayesianRecurrenceScore" : Renvoie le score de récurrence bayésienne calculé (${calculatedBayesianScore}).`;
 
             const response = await generateWithFallback(ai, "gemini-3.5-flash", {
                 contents: prompt,
                 config: {
+                    temperature: temp,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.OBJECT,
@@ -133,14 +149,19 @@ Deno.serve(async (req) => {
                             anomalies: { type: Type.ARRAY, items: { type: Type.STRING } },
                             strategicAdvice: { type: Type.STRING },
                             suggestedFocus: { type: Type.ARRAY, items: { type: Type.NUMBER } },
-                            intuitionScore: { type: Type.NUMBER }
+                            intuitionScore: { type: Type.NUMBER },
+                            counterfactualExplanation: { type: Type.STRING },
+                            bayesianRecurrenceScore: { type: Type.NUMBER }
                         },
-                        required: ["logicalAnalysis", "patternType", "nextSequence", "anomalies", "strategicAdvice", "suggestedFocus", "intuitionScore"]
+                        required: ["logicalAnalysis", "patternType", "nextSequence", "anomalies", "strategicAdvice", "suggestedFocus", "intuitionScore", "counterfactualExplanation", "bayesianRecurrenceScore"]
                     }
                 }
             });
             result = JSON.parse(response.text);
             result.suggestedFocus = []; // Force empty focus array
+            if (!result.bayesianRecurrenceScore) {
+                result.bayesianRecurrenceScore = calculatedBayesianScore;
+            }
         }
         else if (task === 'getNarrativeAnalysis') {
             const { drawName, historyPayload, metrics } = payload;

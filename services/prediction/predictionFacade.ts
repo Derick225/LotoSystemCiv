@@ -897,15 +897,20 @@ export const selectPredictionNumbers = (
   const top10Scores = sortedScores.slice(0, 10).map(s => s.score);
   const gap = top10Scores[0] - top10Scores[9];
   
-  let shrinkageApplied = false;
-  let shrinkageFactor = 1.0;
+  // Transformation de Shrinkage continu par Sigmoïde (AGENTS.md: Zéro transition binaire)
+  const meanScore = sortedScores.reduce((acc, s) => acc + s.score, 0) / sortedScores.length;
+  const stdScore = getStdDev(sortedScores.map(s => s.score), meanScore);
+  const normalizedGap = gap / (stdScore + Number.EPSILON);
   
-  if (gap < 8.0) {
-    shrinkageApplied = true;
-    shrinkageFactor = Math.max(0.7, 0.7 + 0.3 * (gap / 8.0));
+  // Gate sigmoïdal continu: décroît de façon fluide quand le gap est serré par rapport à l'écart-type
+  const sigmoidGate = 1.0 / (1.0 + Math.exp(2.0 * (normalizedGap - 1.5)));
+  const shrinkageFactor = 1.0 - 0.25 * sigmoidGate;
+  const shrinkageApplied = sigmoidGate > 0.15;
+
+  if (shrinkageApplied) {
     logger.info(
-      { gap, shrinkageFactor },
-      "[predictionFacade] Scenario E : Instabilité des scores détectée. Application d'un shrinkage continu."
+      { gap, stdScore, normalizedGap, shrinkageFactor },
+      "[predictionFacade] Tension algorithmique détectée. Application d'un shrinkage continu par sigmoïde."
     );
     sortedScores.forEach(s => {
       s.score = s.score * shrinkageFactor;
@@ -961,6 +966,7 @@ export const finalizePredictionPayload = async (
 
   const currentEntropyResult = calculateShannonEntropy(context.history);
   const currentEntropy = currentEntropyResult.normalized;
+  const gameRegimeInfo = detectGameRegime(context.history);
   
   // Load calibrated hyperparameters from adaptive model weights config (post-mortem learning)
   const calibratedParams = await getCalibratedHyperparameters(context.drawName, currentEntropy);
@@ -984,7 +990,7 @@ export const finalizePredictionPayload = async (
   } else if (calibratedParams.prudence_mode_active) {
     analysisText = `Mode Prudence activé : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
   } else if (shrinkageApplied) {
-    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
+    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage continu a été appliqué pour régulariser les probabilités.`;
   } else {
     analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
   }
@@ -1001,6 +1007,30 @@ export const finalizePredictionPayload = async (
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
 
+  // Construction des données d'explicabilité détaillées (Explicabilité SHAP-like)
+  const topContributions: Record<string, number> = {};
+  selection.forEach(num => {
+    const bd = breakdownRecord[num] || {};
+    Object.entries(bd).forEach(([algo, scoreVal]) => {
+      if (typeof scoreVal === 'number') {
+        topContributions[algo] = (topContributions[algo] || 0) + scoreVal;
+      }
+    });
+  });
+
+  const sortedContributions = Object.entries(topContributions)
+    .sort((a, b) => b[1] - a[1])
+    .map(([algo, scoreVal]) => ({ algo, weight: Math.round(scoreVal) }));
+
+  const explainabilityData = {
+    topContributions: sortedContributions,
+    plattParameters: { plattA, plattB, plattCalibratedProbability },
+    shrinkageInfo: { shrinkageApplied, shrinkageFactor },
+    stabilityScore,
+    diversityScore: diversityMetrics?.diversityScore || 0,
+    regimeInfo: gameRegimeInfo
+  };
+
   return {
     suggestedNumbers: selection,
     candidates,
@@ -1010,7 +1040,7 @@ export const finalizePredictionPayload = async (
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
-    realityAlignment: 82,
+    realityAlignment: Math.round(Math.max(10, Math.min(99, 82 * (1.0 - gameRegimeInfo.entropy * 0.15)))),
     realityAlignmentNote: HONEST_NOTE,
     adversarialApplied: context.adversarialMode,
     challengedNumbers: [],
@@ -1018,7 +1048,7 @@ export const finalizePredictionPayload = async (
     diversityMetrics,
     adversarialSurvivalScore: adversarialResult.survivalScore,
     adversarialRisks: adversarialResult.risks,
-    explainabilityData: {},
+    explainabilityData,
     shrinkageApplied,
     shrinkageFactor,
     shrinkageFactorMap: undefined,
@@ -1032,7 +1062,7 @@ export const finalizePredictionPayload = async (
       lyapunovHorizon: 15,
       ...calibratedParams
     },
-    hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],
+    hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage Sigmoïdal continu."] : [],
     hyperAccuracyGain: 0
   } as Prediction;
 };

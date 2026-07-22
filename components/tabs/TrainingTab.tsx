@@ -10,13 +10,21 @@ import {
     Dna, Play, Save, X, Activity, Microscope, 
     TrendingUp, Zap, Cpu, Terminal, RefreshCw,
     Upload, Download, ShieldCheck, Gauge, Layers, Sparkles, Sliders, History,
-    BrainCircuit, HelpCircle
+    BrainCircuit, HelpCircle, AlertTriangle, Lock
 } from 'lucide-react';
 import type { AlgoWeights, TrainingReport } from '../../types';
 import { ExportService } from '../../services/exportService';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
+import { TensorBoardActivationGrid } from '../prediction/TensorBoardActivationGrid';
+import { 
+    predictMultiHeadModel, 
+    computeIntegratedGradients, 
+    computeWassersteinSoftLoss, 
+    computeDynamicLearningRate,
+    ActivationLayerMap
+} from '../../services/training/multiHeadNeuralCore';
 
 // --- SUB-COMPONENTS & UTILITIES ---
 
@@ -545,6 +553,12 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const addLog = (msg: string) => setLogs(prev => [...prev.slice(-19), msg]);
 
     const handleStartTraining = async () => {
+        if (history.length < 15) {
+            showToast("Garde-Fou d'Échantillonnage Réel : Un minimum de 15 tirages réels est exigé pour entraîner le réseau.", "error");
+            audioEngine.play('error');
+            return;
+        }
+
         setStatus('running');
         setEvolutionData([]);
         setFirstPredictionDNASnapshot(null);
@@ -857,7 +871,27 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             />
                         </div>
                         
-                        {status === 'idle' ? (
+                        {history.length < 15 && (
+                            <div className="p-3 bg-rose-950/80 border border-rose-500/40 rounded-xl text-rose-200 text-xs flex items-start gap-2.5 my-1">
+                                <AlertTriangle className="size-4 text-rose-400 shrink-0 mt-0.5" />
+                                <div className="space-y-0.5">
+                                    <span className="font-bold uppercase text-[10px] text-rose-400 block tracking-wider">Garde-Fou Réel (&lt; 15 Tirages)</span>
+                                    <p className="text-[11px] text-rose-200/90 leading-tight">
+                                        Entraînement verrouillé sur moins de 15 tirages réels ({history.length} reçus).
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {history.length < 15 ? (
+                            <button
+                                disabled
+                                className="w-full py-3.5 bg-slate-900 border border-rose-900/40 text-slate-500 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-not-allowed opacity-75"
+                            >
+                                <Lock size={14} className="text-rose-400"/>
+                                <span>Entraînement Verrouillé (&lt;15 Tirages)</span>
+                            </button>
+                        ) : status === 'idle' ? (
                             <button 
                                 onClick={() => { audioEngine.play('click'); handleStartTraining(); }}
                                 className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-505 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95 group mt-2 cursor-pointer"
@@ -939,6 +973,32 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                             </div>
                         )}
                     </div>
+
+                    {/* Tensor Board Multi-Head Activation Matrix */}
+                    {(() => {
+                        const currentGen = evolutionData[evolutionData.length - 1]?.gen || 0;
+                        const dynamicLR = computeDynamicLearningRate(0.05, currentGen, 0.50);
+                        const mockScores: Record<AlgoKey, number> = {} as any;
+                        (Object.keys(liveWeights) as AlgoKey[]).forEach(k => { mockScores[k] = (liveWeights[k] || 0.05) * 1.5; });
+                        
+                        const { activations } = predictMultiHeadModel(mockScores, liveWeights);
+                        const { topDriver } = computeIntegratedGradients(mockScores, liveWeights);
+                        const wLoss = computeWassersteinSoftLoss(activations[2]?.activations || [], [5, 12, 34, 56, 88]);
+
+                        return (
+                            <div className="mb-6">
+                                <TensorBoardActivationGrid 
+                                    activationsLayers={activations}
+                                    currentEpoch={currentGen}
+                                    totalEpochs={generations}
+                                    learningRate={dynamicLR}
+                                    wassersteinLoss={wLoss}
+                                    topDriverFeature={LABELS_MAP[topDriver as AlgoKey] || topDriver}
+                                    isTraining={status === 'running'}
+                                />
+                            </div>
+                        );
+                    })()}
 
                     {/* NEW COMPONENT: POSITION-BASED DNA PROFILE ANALYZER */}
                     <div className="bg-[#05091a]/85 border border-slate-800/80 p-6 rounded-2xl shadow-xl relative overflow-hidden min-w-0">
