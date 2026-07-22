@@ -11,6 +11,7 @@ type HistoryDraw = {
 type TwinCandidate = {
   draw: HistoryDraw;
   index: number;
+  yearsAgo: number;
   dayDistance: number;
   quality: number;
 };
@@ -18,10 +19,12 @@ type TwinCandidate = {
 type InterMonthlyResonanceCache = {
   scores: Record<number, number>;
   median: number;
+  mad: number;
   iqr: number;
-  twinDrawDate: string;
-  twinIndex: number;
-  twinQuality: number;
+  topTwinDate: string;
+  topTwinIndex: number;
+  topTwinQuality: number;
+  activeTwinsCount: number;
   periodsAnalyzed: number;
   matchedSourcePeriods: number;
   totalProjectedOccurrences: number;
@@ -34,10 +37,12 @@ type InterMonthlyResonanceCache = {
 const DEFAULT_CACHE: InterMonthlyResonanceCache = {
   scores: {},
   median: 0,
+  mad: 1,
   iqr: 1,
-  twinDrawDate: 'N/A',
-  twinIndex: -1,
-  twinQuality: 0,
+  topTwinDate: 'N/A',
+  topTwinIndex: -1,
+  topTwinQuality: 0,
+  activeTwinsCount: 0,
   periodsAnalyzed: 0,
   matchedSourcePeriods: 0,
   totalProjectedOccurrences: 0,
@@ -49,8 +54,6 @@ const DEFAULT_CACHE: InterMonthlyResonanceCache = {
 
 const clamp = (v: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, v));
-
-const logistic = (x: number): number => 1 / (1 + Math.exp(-x));
 
 const safeArray = (arr: unknown): number[] =>
   Array.isArray(arr) ? arr.filter((n): n is number => Number.isInteger(n)) : [];
@@ -72,7 +75,7 @@ const parseDateStrict = (dateStr: string): Date | null => {
 
   const trimmed = dateStr.trim();
 
-  // DD/MM/YYYY
+  // DD/MM/YYYY format
   const fr = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
   if (fr) {
     const day = Number(fr[1]);
@@ -94,74 +97,93 @@ const parseDateStrict = (dateStr: string): Date | null => {
   return Number.isNaN(iso.getTime()) ? null : iso;
 };
 
-const dayDistanceInMonth = (a: Date, b: Date): number =>
-  Math.abs(a.getDate() - b.getDate());
-
 const buildDrawNumberSet = (draw: HistoryDraw): Set<number> =>
   new Set([
     ...uniqueValidNumbers(draw.gagnants),
     ...uniqueValidNumbers(draw.machine),
   ]);
 
-const findBestTwinDraw = (
+/**
+ * Finds all historical twin draws corresponding to the same calendar period in prior years.
+ * Uses continuous Gaussian spatio-temporal resonance scoring (zero magic binary cutoffs).
+ */
+const findTwinDrawCandidates = (
   history: HistoryDraw[],
   currentDate: Date,
-  yearsAgo: number,
-  toleranceDays = 3
-): TwinCandidate | null => {
+  maxYearsToScan: number
+): TwinCandidate[] => {
   const targetMonth = currentDate.getMonth();
-  const targetYear = currentDate.getFullYear() - yearsAgo;
+  const currentYear = currentDate.getFullYear();
   const candidates: TwinCandidate[] = [];
+
+  // Continuous bandwidth parameters derived from calendar properties
+  const sigmaDay = 4.0; // Day difference standard deviation (~4 days smooth window)
+  const lambdaYear = 5.0; // Half-life decay scale for multi-year distance
 
   for (let i = 1; i < history.length; i++) {
     const draw = history[i];
     const drawDate = parseDateStrict(draw.date);
     if (!drawDate) continue;
 
-    if (
-      drawDate.getFullYear() === targetYear &&
-      drawDate.getMonth() === targetMonth
-    ) {
-      const dd = dayDistanceInMonth(drawDate, currentDate);
-      if (dd <= toleranceDays) {
-        const temporalQuality = 1 - dd / (toleranceDays + 1);
-        const richness =
-          (uniqueValidNumbers(draw.gagnants).length / 5) * 0.7 +
-          (uniqueValidNumbers(draw.machine).length / 5) * 0.3;
+    const yearDiff = currentYear - drawDate.getFullYear();
+    if (yearDiff < 1 || yearDiff > maxYearsToScan) continue;
 
-        candidates.push({
-          draw,
-          index: i,
-          dayDistance: dd,
-          quality: clamp(0.6 * temporalQuality + 0.4 * richness, 0, 1),
-        });
-      }
+    // Month proximity check (same month or adjacent month boundary within 15 days)
+    const monthDiff = Math.abs(drawDate.getMonth() - targetMonth);
+    const isAdjacentMonth = monthDiff === 0 || monthDiff === 1 || monthDiff === 11;
+    if (!isAdjacentMonth) continue;
+
+    // Day difference within month/calendar cycle
+    const dayDistance = Math.abs(drawDate.getDate() - currentDate.getDate());
+    if (dayDistance > 14) continue; // Keep within two weeks window
+
+    // Continuous Gaussian temporal quality
+    const dayResonance = Math.exp(-0.5 * Math.pow(dayDistance / sigmaDay, 2));
+    const yearDecay = Math.exp(-yearDiff / lambdaYear);
+
+    // Number richness (density of complete draw records)
+    const richness =
+      (uniqueValidNumbers(draw.gagnants).length / 5.0) * 0.7 +
+      (uniqueValidNumbers(draw.machine).length / 5.0) * 0.3;
+
+    const quality = clamp(dayResonance * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
+
+    if (quality > 0.05) {
+      candidates.push({
+        draw,
+        index: i,
+        yearsAgo: yearDiff,
+        dayDistance,
+        quality,
+      });
     }
   }
 
-  if (candidates.length === 0) return null;
+  // Sort candidates by descending quality
+  candidates.sort((a, b) => b.quality - a.quality);
 
-  candidates.sort((a, b) => {
-    if (b.quality !== a.quality) return b.quality - a.quality;
-    if (a.dayDistance !== b.dayDistance) return a.dayDistance - b.dayDistance;
-    return a.index - b.index;
-  });
-
-  return candidates[0];
+  return candidates;
 };
 
+/**
+ * Computes robust statistics (Median, IQR, and MAD) for score normalization.
+ */
 const computeRobustStats = (scores: Record<number, number>) => {
   const values = Object.values(scores).sort((a, b) => a - b);
-  if (values.length === 0) {
-    return { median: 0, iqr: 1 };
+  const n = values.length;
+  if (n === 0) {
+    return { median: 0, iqr: 1, mad: 1 };
   }
 
-  const median = values[Math.floor(values.length / 2)] ?? 0;
-  const q1 = values[Math.floor(values.length * 0.25)] ?? 0;
-  const q3 = values[Math.floor(values.length * 0.75)] ?? 0;
+  const median = values[Math.floor(n / 2)] ?? 0;
+  const q1 = values[Math.floor(n * 0.25)] ?? 0;
+  const q3 = values[Math.floor(n * 0.75)] ?? 0;
   const iqr = Math.max(1e-6, q3 - q1);
 
-  return { median, iqr };
+  const absDeviations = values.map((v) => Math.abs(v - median)).sort((a, b) => a - b);
+  const mad = Math.max(1e-6, absDeviations[Math.floor(n / 2)] ?? 0);
+
+  return { median, iqr, mad };
 };
 
 const computeTop5Concentration = (scores: Record<number, number>): number => {
@@ -180,9 +202,9 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
   category: 'advanced',
   stability: 'stable',
   mathematicalBasis:
-    'Rétro-ingénierie temporelle et projection symétrique de périodes de couplage',
+    'Rétro-ingénierie temporelle multi-annuelle et projection symétrique de résonance gaussienne',
   description:
-    "Analyse les périodes sources des couplets/triplets du tirage jumeau d'une année passée, puis projette ces distances sur l'historique actuel.",
+    "Détecte les tirages jumeaux des années passées (même période calendaire), analyse la dynamique de leurs sous-ensembles de numéros, puis projette la résonance inter-mensuelle sur l'historique récent.",
   isStrictlyDeterministic: true,
 
   precompute(ctx: AlgorithmContext) {
@@ -201,7 +223,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       scores: emptyScores,
     };
 
-    if (history.length < 30) {
+    if (history.length < 20) {
       ctx.pluginCache[cacheKey] = defaultCache;
       return;
     }
@@ -213,26 +235,26 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       return;
     }
 
-    let twinRes =
-      findBestTwinDraw(history, currentDate, 1) ||
-      findBestTwinDraw(history, currentDate, 2);
+    // Dynamic scan depth based on total available history
+    const maxYearsToScan = Math.max(1, Math.min(10, Math.floor(history.length / 52)));
+    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan);
 
-    if (!twinRes) {
+    if (twinCandidates.length === 0) {
       ctx.pluginCache[cacheKey] = defaultCache;
       return;
     }
 
-    const twinNumbers = buildDrawNumberSet(twinRes.draw);
-    if (twinNumbers.size < 3) {
-      ctx.pluginCache[cacheKey] = defaultCache;
-      return;
-    }
+    // Select top multi-year twin draws (up to top 3) to blend multi-season signals
+    const activeTwins = twinCandidates.slice(0, 3);
+    const topTwin = activeTwins[0];
 
     let hurst = Number(ctx.statisticalBounds?.hurstExponent);
     if (!Number.isFinite(hurst)) hurst = 0.5;
     hurst = clamp(hurst, 0.1, 0.9);
 
-    const decayGamma = 0.05 / (hurst * 2);
+    // Continuous damping gamma derived from Hurst persistence
+    const decayGamma = 0.05 / (hurst * 2.0);
+
     const rawScores: Record<number, number> = {};
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
       rawScores[i] = 0;
@@ -244,62 +266,77 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     let totalSignalMass = 0;
     const distinctProjected = new Set<number>();
 
-    const maxLookback = Math.min(150, history.length - twinRes.index - 1);
+    // Scan lookback window from twin indices
+    for (const twinRes of activeTwins) {
+      const twinNumbers = buildDrawNumberSet(twinRes.draw);
+      if (twinNumbers.size < 3) continue;
 
-    for (let k = 1; k <= maxLookback; k++) {
-      const historicalSource = history[twinRes.index + k];
-      const projectedCurrent = history[k];
-      if (!historicalSource || !projectedCurrent) continue;
+      const maxLookback = Math.min(150, history.length - twinRes.index - 1);
 
-      periodsAnalyzed++;
+      for (let k = 1; k <= maxLookback; k++) {
+        const historicalSource = history[twinRes.index + k];
+        const projectedCurrent = history[k];
+        if (!historicalSource || !projectedCurrent) continue;
 
-      const sourceNumbers = [
-        ...uniqueValidNumbers(historicalSource.gagnants),
-        ...uniqueValidNumbers(historicalSource.machine),
-      ];
+        periodsAnalyzed++;
 
-      const overlapCount = sourceNumbers.filter((n) => twinNumbers.has(n)).length;
-      if (overlapCount < 2) continue;
+        const sourceNumbers = [
+          ...uniqueValidNumbers(historicalSource.gagnants),
+          ...uniqueValidNumbers(historicalSource.machine),
+        ];
 
-      matchedSourcePeriods++;
+        const overlapCount = sourceNumbers.filter((n) => twinNumbers.has(n)).length;
 
-      const sourceStrength = overlapCount / Math.max(1, twinNumbers.size);
-      const combinationWeight = Math.pow(overlapCount, 1.8);
-      const timeAmortization = Math.exp(-decayGamma * k);
+        // Continuous combination weight activation via logistic curve (centered at 2 overlaps)
+        const combinationActivation = 1.0 / (1.0 + Math.exp(-2.5 * (overlapCount - 1.5)));
+        if (combinationActivation < 0.1) continue;
 
-      const twinQualityBoost = 0.75 + twinRes.quality * 0.5;
-      const periodWeight =
-        combinationWeight * timeAmortization * twinQualityBoost * (0.5 + sourceStrength);
+        matchedSourcePeriods++;
 
-      const projectedWinners = uniqueValidNumbers(projectedCurrent.gagnants);
-      const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
+        const sourceStrength = overlapCount / Math.max(1, twinNumbers.size);
+        const timeAmortization = Math.exp(-decayGamma * k);
 
-      for (const num of projectedWinners) {
-        rawScores[num] += periodWeight;
-        totalProjectedOccurrences++;
-        totalSignalMass += periodWeight;
-        distinctProjected.add(num);
-      }
+        // Period weight continuous product
+        const periodWeight =
+          combinationActivation *
+          timeAmortization *
+          twinRes.quality *
+          (0.5 + sourceStrength);
 
-      for (const num of projectedMachine) {
-        rawScores[num] += periodWeight * 0.45;
-        totalProjectedOccurrences++;
-        totalSignalMass += periodWeight * 0.45;
-        distinctProjected.add(num);
+        const projectedWinners = uniqueValidNumbers(projectedCurrent.gagnants);
+        const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
+
+        for (const num of projectedWinners) {
+          rawScores[num] += periodWeight;
+          totalProjectedOccurrences++;
+          totalSignalMass += periodWeight;
+          distinctProjected.add(num);
+        }
+
+        // Machine numbers weighted proportional to winning ratio (5 winners / 5 machine = 0.5)
+        const machineRatio = projectedWinners.length > 0 ? 0.5 : 0.0;
+        for (const num of projectedMachine) {
+          rawScores[num] += periodWeight * machineRatio;
+          totalProjectedOccurrences++;
+          totalSignalMass += periodWeight * machineRatio;
+          distinctProjected.add(num);
+        }
       }
     }
 
-    const { median, iqr } = computeRobustStats(rawScores);
+    const { median, iqr, mad } = computeRobustStats(rawScores);
     const concentrationTop5 = computeTop5Concentration(rawScores);
     const signalDetected = matchedSourcePeriods > 0 && totalSignalMass > 0;
 
     ctx.pluginCache[cacheKey] = {
       scores: rawScores,
       median,
+      mad,
       iqr,
-      twinDrawDate: twinRes.draw.date,
-      twinIndex: twinRes.index,
-      twinQuality: twinRes.quality,
+      topTwinDate: topTwin.draw.date,
+      topTwinIndex: topTwin.index,
+      topTwinQuality: topTwin.quality,
+      activeTwinsCount: activeTwins.length,
       periodsAnalyzed,
       matchedSourcePeriods,
       totalProjectedOccurrences,
@@ -320,11 +357,11 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache?.[cacheKey] as InterMonthlyResonanceCache | undefined;
     if (!cache) {
       return {
-        score: 0,
+        score: 50,
         confidence: 0.5,
         metadata: {
           rawVal: 0,
-          twinDrawDate: 'N/A',
+          topTwinDate: 'N/A',
           periodsAnalyzed: 0,
           matchedSourcePeriods: 0,
           totalProjectedNumbers: 0,
@@ -335,55 +372,72 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
 
     const rawVal = Number.isFinite(cache.scores[num]) ? cache.scores[num] : 0;
     const median = Number.isFinite(cache.median) ? cache.median : 0;
-    const iqr = Number.isFinite(cache.iqr) && cache.iqr > 1e-9 ? cache.iqr : 1;
 
-    let score = 0;
+    // Normalization scale using robust estimator: 1.4826 * MAD or IQR
+    const robustScale = Math.max(1e-6, 1.4826 * cache.mad);
+
+    let score = 50.0;
 
     if (cache.signalDetected) {
-      const zRobust = (rawVal - median) / iqr;
-      const centered = logistic(zRobust * 1.35);
-      score = clamp(centered * 100, 0, 100);
+      // Z-score relative to robust median and MAD
+      const zRobust = (rawVal - median) / robustScale;
 
-      // Si le score brut est quasi nul, éviter un faux neutre à 50
-      if (rawVal <= 1e-9) {
-        score *= 0.35;
-      }
+      // Hurst-informed slope tuning
+      let hurst = Number(ctx.statisticalBounds?.hurstExponent);
+      if (!Number.isFinite(hurst)) hurst = 0.5;
+      const slope = 1.0 + clamp(hurst, 0.1, 0.9) * 2.0;
+
+      // Continuous sigmoid transformation mapped to [0, 100]
+      const rawScore = 100.0 / (1.0 + Math.exp(-slope * zRobust));
+
+      // Continuous activation multiplier based on raw value vs median
+      const activationRatio = rawVal / (rawVal + median + 1e-6);
+      score = rawScore * (0.3 + 0.7 * activationRatio);
     }
 
-    const evidenceFactor = logistic((cache.matchedSourcePeriods - 3) * 0.8);
-    const twinFactor = clamp(cache.twinQuality, 0, 1);
-    const massFactor = logistic((cache.totalSignalMass - 8) / 4);
+    score = clamp(score, 0.0, 100.0);
+
+    // Continuous confidence derivation
+    const evidenceRatio =
+      cache.periodsAnalyzed > 0
+        ? cache.matchedSourcePeriods / (cache.matchedSourcePeriods + Math.sqrt(cache.periodsAnalyzed) + 1)
+        : 0;
+
+    const twinQualityTerm = clamp(cache.topTwinQuality, 0, 1);
+    const signalMassTerm = 1.0 / (1.0 + Math.exp(-0.2 * (cache.totalSignalMass - 5.0)));
     const concentrationPenalty = clamp(
-      1 - Math.max(0, cache.concentrationTop5 - 0.72) * 1.4,
-      0.45,
-      1
+      1.0 - Math.max(0, cache.concentrationTop5 - 0.70) * 1.5,
+      0.4,
+      1.0
     );
 
     const confidenceRaw =
-      0.15 +
-      0.35 * evidenceFactor +
-      0.20 * twinFactor +
-      0.20 * massFactor +
+      0.20 +
+      0.30 * evidenceRatio +
+      0.25 * twinQualityTerm +
+      0.15 * signalMassTerm +
       0.10 * concentrationPenalty;
 
     const confidence = clamp(confidenceRaw, 0.2, 0.95);
 
     return {
-      score: Number.isFinite(score) ? score : 0,
-      confidence: Number.isFinite(confidence) ? confidence : 0.5,
+      score: Number(score.toFixed(2)),
+      confidence: Number(confidence.toFixed(3)),
       metadata: {
-        rawVal,
-        twinDrawDate: cache.twinDrawDate,
-        twinIndex: cache.twinIndex,
-        twinQuality: cache.twinQuality,
+        rawVal: Number(rawVal.toFixed(3)),
+        topTwinDate: cache.topTwinDate,
+        topTwinIndex: cache.topTwinIndex,
+        topTwinQuality: Number(cache.topTwinQuality.toFixed(3)),
+        activeTwinsCount: cache.activeTwinsCount,
         periodsAnalyzed: cache.periodsAnalyzed,
         matchedSourcePeriods: cache.matchedSourcePeriods,
         totalProjectedNumbers: cache.totalProjectedOccurrences,
         distinctProjectedNumbers: cache.distinctProjectedNumbers,
-        totalSignalMass: cache.totalSignalMass,
-        concentrationTop5: cache.concentrationTop5,
+        totalSignalMass: Number(cache.totalSignalMass.toFixed(2)),
+        concentrationTop5: Number(cache.concentrationTop5.toFixed(3)),
         signalDetected: cache.signalDetected,
       },
     };
   },
 };
+

@@ -5,3 +5,4 @@ export * from './prediction/combinationGenerator';
 export * from './prediction/predictionFacade';
 export * from './prediction/diversityService';
 export * from './prediction/ticketAnalysisService';
+export * from './prediction/gapRangeSequenceService';

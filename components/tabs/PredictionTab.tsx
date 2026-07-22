@@ -11,6 +11,7 @@ import { TrainingEvolutionDrawer } from "../TrainingEvolutionDrawer";
 import { PredictionFeatureLab } from "../prediction/PredictionFeatureLab";
 import { PredictionNetworkDiagnostic } from "../prediction/PredictionNetworkDiagnostic";
 import { PredictionComputationOverlay } from "../prediction/PredictionComputationOverlay";
+import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import {
   Activity,
   Target,
@@ -774,6 +775,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 breakdown={lastPrediction.breakdown}
                 suggestedNumbers={lastPrediction.suggestedNumbers}
               />
+            </div>
+
+            {/* Gap Range Sequence Pattern Module */}
+            <div className="lg:col-span-12 mt-4">
+              <GapRangeSequenceWidget drawName={drawName} />
             </div>
           </div>
         )}
