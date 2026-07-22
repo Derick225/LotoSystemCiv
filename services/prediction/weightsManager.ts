@@ -84,7 +84,9 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   const { hurst, entropy, volatility } = regimeInfo;
   const adjusted = { ...weights };
 
-  const persistenceFactor = Math.max(0, Math.min(1, hurst));
+  // Amortissement Dynamique de Hurst (H) : Sigmoïde continue
+  const w_hurst = 0.5 * (1.0 + Math.tanh(4.0 * (hurst - 0.5)));
+  const persistenceFactor = w_hurst;
   const meanReversionFactor = 1.0 - persistenceFactor;
   
   // Entropie maximale théorique pour un domaine de 90 éléments (base 2)
@@ -100,12 +102,15 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   // Si mean-reversion = 1, le poids est doublé.
   adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor);
   
-  // Les algos de chaos sont amplifiés par le produit du chaos et de la volatilité
-  const chaosVolatilityIndex = chaosFactor * volFactor;
+  // Pondération du module de mémoire chaotique
+  const chaosVolatilityIndex = chaosFactor * volFactor * w_hurst;
   adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * (1.0 + chaosVolatilityIndex);
   adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + chaosFactor);
   adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaosFactor);
   adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * (1.0 + chaosFactor);
+  
+  // L'algorithme Echo State Network agit comme une mémoire chaotique
+  adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + chaosVolatilityIndex);
 
   // AMPLIFICATION CONTINUE DU POIDS DE LA TENDANCE (Requirement 4)
   // Injection continue d'un multiplicateur de gain proportionnel à max(0, hurst - 0.5).

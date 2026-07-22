@@ -56,8 +56,8 @@ export const runAntColonyOptimization = async (
     const alpha = 1.0 + (2.0 * Math.max(0, h - 0.5));
     // Beta (Heuristique) : Plus le système est chaotique, plus on se fie à l'heuristique locale (gaps, etc.)
     const beta = 1.0 + (3.0 * entropy);
-    // Rho (Évaporation) : Plus l'entropie est haute, plus l'évaporation doit être rapide pour oublier les vieux chemins
-    const rho = 0.05 + (0.25 * entropy);
+    // Rho (Évaporation) : Calibré en fonction de la taille de l'historique
+    const rho = 0.05 + 0.15 * Math.exp(-purifiedHistory.length / 250.0);
     // q0 (Exploitation) : Inversement proportionnel à l'incertitude
     const q0 = Math.max(0.1, 1.0 - entropy);
 

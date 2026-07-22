@@ -65,7 +65,7 @@ ctx.onmessage = (e: MessageEvent) => {
         generations: config?.generations || Math.floor(Math.log(history.length + 1) * 20),
         alpha: 1.0 + persistence,                   // Influence de la trace: monte avec la persistance
         beta: 1.0 + normalizedEntropy,              // Influence heuristique: monte avec l'entropie
-        rho: normalizedEntropy / 2.0,               // Évaporation Globale
+        rho: 0.05 + 0.15 * Math.exp(-history.length / 250.0), // Évaporation dynamique sur la taille de l'historique
         xi: normalizedEntropy / 2.0,                // Évaporation Locale
         q0: persistence,                            // Exploitation monte avec la certitude
         ...config 

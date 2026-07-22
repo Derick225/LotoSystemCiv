@@ -66,7 +66,28 @@ export const extractFeatures = async (
   return globalCache.getOrCompute(
     cacheKey,
     async () => {
-      const recentHistory = filteredHistory.slice(0, Math.min(sampleSize, filteredHistory.length));
+      // ============================================================================
+      // 0. FENÊTRE GLISSANTE ADAPTATIVE (N_eval) POUR HISTORIQUES COURTS (< 200 tirages)
+      // ============================================================================
+      let evalWindow = sampleSize;
+      if (filteredHistory.length > 0 && filteredHistory.length < 200) {
+        const tempH = calculateFractalIndex(filteredHistory);
+        const tempE = calculateShannonEntropy(filteredHistory).normalized;
+        const tempGapsMap = new Int32Array(DOMAIN_MAX + 1).fill(-1);
+        for (let i = 0; i < Math.min(50, filteredHistory.length); i++) {
+          const { winners } = extractDrawNumbers(filteredHistory[i]);
+          for (const w of winners) {
+            if (tempGapsMap[w] === -1) tempGapsMap[w] = i;
+          }
+        }
+        const validG = Array.from(tempGapsMap).filter(g => g !== -1);
+        const medG = validG.length > 0 ? calculateMedian(validG) : DOMAIN_SIZE / 6;
+        const halfLife = Math.max(6, medG * (1.0 + (tempH - 0.5) + (1.0 - tempE)));
+        const adaptiveDepth = Math.round(halfLife * (3.0 + 2.0 * tempH));
+        evalWindow = Math.min(filteredHistory.length, Math.max(25, adaptiveDepth));
+      }
+
+      const recentHistory = filteredHistory.slice(0, Math.min(evalWindow, filteredHistory.length));
       
       // Initialisation des matrices avec des tailles strictement dérivées du domaine
       const freqMap = new Float32Array(DOMAIN_MAX + 1);
@@ -126,8 +147,24 @@ export const extractFeatures = async (
       const momentumWindow = Math.floor(adaptiveHalfLife);
 
       // ============================================================================
-      // 2. PARCOURS TEMPorel AVEC DÉCROISSANCE EXPONENTIELLE
+      // 2. MODULE DE SYMBIOSE EXPLICITE (Machine <-> Gagnants) & PARCOURS TEMPOREL
       // ============================================================================
+      // Matrice de transfert croisé Machine -> Gagnants (t+1 -> t)
+      const machineToWinnersMatrix: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      
+      for (let i = 0; i < recentHistory.length - 1; i++) {
+        const { machine: prevMachine } = extractDrawNumbers(recentHistory[i + 1]);
+        const { winners: currWinners } = extractDrawNumbers(recentHistory[i]);
+        if (prevMachine.length > 0 && currWinners.length > 0) {
+          const decay = Math.pow(TIME_DECAY, i);
+          for (const m of prevMachine) {
+            for (const w of currWinners) {
+              machineToWinnersMatrix[m][w] += decay;
+            }
+          }
+        }
+      }
+
       for (let i = 0; i < recentHistory.length; i++) {
         const draw = recentHistory[i];
         const { winners, machine } = extractDrawNumbers(draw);
@@ -139,8 +176,17 @@ export const extractFeatures = async (
           if (i < momentumWindow) momentumMap[n] += decayWeight;
         }
 
+        // Injection continue d'énergie stochastique issue de la Symbiose Machine
         for (const m of machine) {
-          machineTransferMap[m] += decayWeight;
+          let crossEnergy = 0;
+          const row = machineToWinnersMatrix[m];
+          if (row) {
+            for (let w = DOMAIN_MIN; w <= DOMAIN_MAX; w++) {
+              crossEnergy += row[w];
+            }
+          }
+          const transferRatio = crossEnergy / (winners.length || 5);
+          machineTransferMap[m] += decayWeight * (1.0 + Math.tanh(transferRatio));
         }
       }
 
@@ -203,6 +249,7 @@ export const extractFeatures = async (
       // Calcul des probabilités Markov pour le prochain tirage
       const lastDraw = recentHistory[0] ? extractDrawNumbers(recentHistory[0]).winners : [];
       if (lastDraw.length > 0) {
+        let maxMarkov = -Infinity;
         for (const lastNum of lastDraw) {
           for (let nextNum = DOMAIN_MIN; nextNum <= DOMAIN_MAX; nextNum++) {
             markovMap[nextNum] += markovTransitionMap[lastNum][nextNum];
@@ -210,6 +257,21 @@ export const extractFeatures = async (
         }
         for (let nextNum = DOMAIN_MIN; nextNum <= DOMAIN_MAX; nextNum++) {
           markovMap[nextNum] = markovMap[nextNum] / lastDraw.length;
+          if (markovMap[nextNum] > maxMarkov) maxMarkov = markovMap[nextNum];
+        }
+
+        // ============================================================================
+        // Température Softmax de la Matrice de Markov (T = 1.3)
+        // Accentue le contraste entre les transitions à haute probabilité et le bruit
+        // ============================================================================
+        const MARKOV_TEMPERATURE = 1.3;
+        let sumSoftmax = 0;
+        for (let nextNum = DOMAIN_MIN; nextNum <= DOMAIN_MAX; nextNum++) {
+          markovMap[nextNum] = Math.exp((markovMap[nextNum] - maxMarkov) / MARKOV_TEMPERATURE);
+          sumSoftmax += markovMap[nextNum];
+        }
+        for (let nextNum = DOMAIN_MIN; nextNum <= DOMAIN_MAX; nextNum++) {
+          markovMap[nextNum] /= sumSoftmax;
         }
       }
 

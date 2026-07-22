@@ -187,6 +187,15 @@ export const calculateScores = (
       }
     });
 
+    // Multiplicateur de Symbiose Machine <-> Gagnants (Transfert stochastique continu)
+    const machineTransferVal = context.features.machineTransferMap?.[num] || 0;
+    const maxMachineTransfer = context.maxMachineTransfer || 1.0;
+    const machineSymbiosisBoost = maxMachineTransfer > 0.001 
+      ? 1.0 + 0.15 * Math.tanh(machineTransferVal / maxMachineTransfer)
+      : 1.0;
+
+    finalScore *= machineSymbiosisBoost;
+
     // Extract topology tension and dna index (placeholder or calculated)
     const dnaOrbitingIndex = microDnaCache[num] || 0;
     const topologicalTension = context.advancedMetrics?.topologicalTension?.[num] || 0;
