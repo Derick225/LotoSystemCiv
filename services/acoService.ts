@@ -147,6 +147,13 @@ export const runAntColonyOptimization = async (
             }
         };
 
+        worker.onerror = (err) => {
+            clearTimeout(timeout);
+            worker.terminate();
+            console.error("ACO Worker Error Event:", err);
+            resolve(fallbackHeuristic(purifiedHistory));
+        };
+
         // Configuration ACS (Ant Colony System) envoyée au worker
         worker.postMessage({ 
             history: purifiedHistory.map(h => ({ gagnants: h.gagnants })),

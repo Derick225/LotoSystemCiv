@@ -6,6 +6,7 @@ import { useAuth } from './hooks/useAuth';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { AppShell, ViewMode } from './components/layout/AppShell';
 import { GlobalErrorBoundary } from './components/ui/GlobalErrorBoundary';
+import { LocalErrorBoundary } from './components/ui/LocalErrorBoundary';
 import { GlobalErrorListener } from './components/GlobalErrorListener';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -238,14 +239,16 @@ const AppContent: React.FC = () => {
         <AnimatePresence mode="wait">
             <motion.div
                 key={key}
-                initial={{ opacity: 0, x: -20, filter: 'blur(10px)' }}
-                animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
             >
-                <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
-                    {content}
-                </Suspense>
+                <LocalErrorBoundary key={key}>
+                    <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                        {content}
+                    </Suspense>
+                </LocalErrorBoundary>
             </motion.div>
         </AnimatePresence>
     );

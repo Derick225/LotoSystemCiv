@@ -51,27 +51,46 @@ const decompressStructure = (stateString: string): string => {
 };
 // ---------------------------------------
 
+const inMemoryStore = new Map<string, string>();
+
 export const idbStorage: StateStorage = {
   getItem: async (name: string): Promise<string | null> => {
-    const data = await get(name);
-    if (!data) return null;
     try {
-      const decompressed = LZString.decompressFromUTF16(data);
-      if (decompressed) return decompressStructure(decompressed);
-      return decompressStructure(data); // Fallback
-    } catch {
-      return data;
+      const data = await get(name);
+      if (!data) return inMemoryStore.get(name) || null;
+      try {
+        const decompressed = LZString.decompressFromUTF16(data);
+        if (decompressed) return decompressStructure(decompressed);
+        return decompressStructure(data); // Fallback
+      } catch {
+        return data;
+      }
+    } catch (e) {
+      console.warn("IndexedDB getItem blocked or failed, falling back to memory storage:", e);
+      return inMemoryStore.get(name) || null;
     }
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    const structurallyCompressed = compressStructure(value);
-    const compressed = LZString.compressToUTF16(structurallyCompressed);
-    await set(name, compressed);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('PREFERENCES_TRIGGER_SYNC'));
+    try {
+      const structurallyCompressed = compressStructure(value);
+      const compressed = LZString.compressToUTF16(structurallyCompressed);
+      await set(name, compressed);
+      inMemoryStore.set(name, value);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('PREFERENCES_TRIGGER_SYNC'));
+      }
+    } catch (e) {
+      console.warn("IndexedDB setItem blocked or failed, falling back to memory storage:", e);
+      inMemoryStore.set(name, value);
     }
   },
   removeItem: async (name: string): Promise<void> => {
-    await del(name);
+    try {
+      await del(name);
+      inMemoryStore.delete(name);
+    } catch (e) {
+      console.warn("IndexedDB removeItem blocked or failed:", e);
+      inMemoryStore.delete(name);
+    }
   },
 };

@@ -79,7 +79,7 @@ export const useDrawHistory = (drawName: string) => {
     queryKey: lotteryKeys.draw(drawName),
     queryFn: () => fetchHistory(drawName),
     enabled: !!drawName,
-    staleTime: 0, // Always consider history stale to fetch latest if needed
+    staleTime: 1000 * 60 * 5, // Fresh for 5 minutes; invalidated automatically via Supabase real-time
   });
 };
 
@@ -149,7 +149,7 @@ export const useDeleteDrawMutation = (drawName: string) => {
 // --- NOUVEAU : HOOK ANALYTIQUE HPC ---
 // Encapsule tous les calculs lourds dans un Worker Query
 export const useNexusAnalytics = (drawName: string, history: DrawResult[] | undefined) => {
-    const historyHash = history && history.length > 0 ? history[0].id : 'empty';
+    const historyHash = history && history.length > 0 ? `${history[0].id}_${history.length}_${history[0].date}` : 'empty';
 
     return useQuery({
         queryKey: lotteryKeys.analytics(drawName, historyHash),
