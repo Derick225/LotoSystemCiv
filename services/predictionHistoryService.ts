@@ -30,10 +30,14 @@ const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
         try {
           const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
           if (item && item.timestamp) items.push(item);
-        } catch (e) {}
+        } catch (e) {
+          console.warn("Error parsing history item", e);
+        }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Error getting local history", e);
+  }
   // Tri déterministe : timestamp décroissant, puis ID croissant en cas d'égalité
   return items.sort((a, b) => {
     if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
@@ -53,7 +57,7 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
 
   for (const d of historyUpdates) {
     if (!d.date) continue;
-    const resultDrawName = d.drawName || (d as any).draw_name;
+    const resultDrawName = d.drawName || (d as Record<string, unknown>).draw_name as string;
     if (resultDrawName && prediction.drawName && resultDrawName.trim().toLowerCase() !== prediction.drawName.trim().toLowerCase()) {
       continue;
     }
@@ -264,10 +268,14 @@ export const getAllLearningSessions = async (): Promise<LearningSession[]> => {
         try {
           const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
           if (item && item.timestamp) sessions.push(item);
-        } catch (e) {}
+        } catch (e) {
+          console.warn("Error parsing session item", e);
+        }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn("Error getting learning sessions", e);
+  }
   return sessions.sort((a, b) => {
     if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
     return a.id.localeCompare(b.id);

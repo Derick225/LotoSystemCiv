@@ -113,7 +113,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
               <Layers className="w-5 h-5" />
             </span>
             <h3 className="text-lg font-black text-white tracking-wide uppercase">
-              Séquences & Pattern des Écarts par Tranches
+              Séquences & Patterns des Écarts par Tranches
             </h3>
           </div>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">

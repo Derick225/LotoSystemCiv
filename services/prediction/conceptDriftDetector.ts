@@ -42,6 +42,7 @@ export class ConceptDriftDetector {
         let runningSum = 0;
         let mt = 0; // Somme cumulée de déviation
         let minMt = Number.MAX_VALUE;
+        let minIndex = 0;
         
         let driftIndex = -1;
         let peakStatistic = 0;
@@ -56,12 +57,13 @@ export class ConceptDriftDetector {
             
             if (mt < minMt) {
                 minMt = mt;
+                minIndex = i;
             }
 
             const phStatistic = mt - minMt;
             if (phStatistic > peakStatistic) {
                 peakStatistic = phStatistic;
-                driftIndex = i;
+                driftIndex = minIndex;
             }
         }
 
@@ -103,7 +105,8 @@ export class ConceptDriftDetector {
      * @param tStatistic Statistique de test t (ou score z) calculée.
      */
     public computePValueApprox(tStatistic: number): number {
-        return 1.0 - 1.0 / (1.0 + Math.exp(-1.702 * tStatistic));
+        const absT = Math.abs(tStatistic);
+        return 1.0 - 1.0 / (1.0 + Math.exp(-1.702 * absT));
     }
 
     /**

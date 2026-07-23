@@ -223,7 +223,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
 
   // 1-Click Apply Weight Adjustments
   const handleApplyAdjustments = async () => {
-    try { audioEngine.play("click"); } catch (e) {}
+    try { audioEngine.play("click"); } catch (e) { console.warn("Audio play failed"); }
     setApplyingAdjustments(true);
 
     try {
@@ -244,10 +244,10 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
       }
 
       await updateGlobalWeights(updatedWeights as unknown as AlgoWeights, drawName);
-      try { audioEngine.play("success"); } catch (e) {}
+      try { audioEngine.play("success"); } catch (e) { console.warn("Audio play failed"); }
       showToast("Ajustements de poids appliqués au modèle continu avec succès !", "success");
     } catch (e) {
-      try { audioEngine.play("error"); } catch (e) {}
+      try { audioEngine.play("error"); } catch (e) { console.warn("Audio play failed"); }
       showToast("Échec de l'application des ajustements.", "error");
     } finally {
       setApplyingAdjustments(false);
