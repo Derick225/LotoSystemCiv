@@ -1,6 +1,6 @@
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters } from "./weightsManager";
+import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters, adjustWeightsForRegime } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
@@ -8,7 +8,6 @@ import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters } from "./hyperParameterTuner";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { logger } from "../../utils/logger";
-import PredictionWorker from "../workers/prediction.worker?worker";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { getLocalForensicReports } from "../postPredictionAnalysisService";
@@ -767,6 +766,13 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
       context.useSpatioTemporalHawkes
     );
   }
+
+  // Application de la pondération par régime Markovien adaptatif (Déterministe vs Chaotique)
+  if (context.history.length >= 5) {
+    const gameRegimeInfo = detectGameRegime(context.history);
+    weights = adjustWeightsForRegime(weights, gameRegimeInfo);
+  }
+
   return weights;
 };
 
@@ -1077,7 +1083,7 @@ const runLocalPredictionViaWorker = async (
   if (typeof Worker !== "undefined") {
     return new Promise<Prediction>((resolve, reject) => {
       try {
-        const worker = new PredictionWorker();
+        const worker = new Worker(new URL("../workers/prediction.worker.ts", import.meta.url), { type: "module" });
 
         const timeoutId = setTimeout(() => {
           worker.terminate();

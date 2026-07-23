@@ -9,6 +9,7 @@ import { useNexusStore } from "../store/useNexusStore";
 import { apiClient } from "../core/api/apiClient";
 import { calculateFractalIndex } from "./mathService";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
+import { packHistory } from "./workers/zeroCopy";
 
 // ============================================================================
 // CONFIGURATION DE SIMULATION PAR DÉFAUT (Zéro Nombre Magique)
@@ -168,16 +169,24 @@ export const runSurvivalSimulation = async (
       reject(new Error(`Worker Critical Error: ${e.message}`));
     };
 
-    worker.postMessage({
-      drawName,
-      history: history,
-      weights,
-      depth: safeDepth,
-      strategy,
-      initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
-      unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
-      payoutModel,
-    });
+    const packed = packHistory(history);
+
+    worker.postMessage(
+      {
+        drawName,
+        historyBuffer: packed.historyBuffer,
+        drawCount: packed.drawCount,
+        winningCount: packed.winningCount,
+        totalCols: packed.totalCols,
+        weights,
+        depth: safeDepth,
+        strategy,
+        initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
+        unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
+        payoutModel,
+      },
+      [packed.historyBuffer]
+    );
   });
 };
 

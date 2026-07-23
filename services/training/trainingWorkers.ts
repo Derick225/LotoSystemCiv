@@ -1,5 +1,6 @@
 import type { DrawResult, ForensicReport } from "../../types";
 import { logger } from "../../utils/logger";
+import { packHistory } from "../workers/zeroCopy";
 
 // Processus Parallèles : Gestionnaire Global de Workers
 const activeWorkersMap = new Map<string, Set<Worker>>();
@@ -98,7 +99,14 @@ export const runForensicWorker = async (
       resolve(fallbackReport("error-runtime"));
     };
 
-    worker.postMessage({ actualWinners, history });
+    const packed = packHistory(history);
+    worker.postMessage({ 
+      actualWinners, 
+      historyBuffer: packed.historyBuffer,
+      drawCount: packed.drawCount,
+      winningCount: packed.winningCount,
+      totalCols: packed.totalCols 
+    }, [packed.historyBuffer]);
   });
 };
 
@@ -145,6 +153,15 @@ export const runBacktestWorker = async <T = unknown>(
       reject(err);
     };
 
-    worker.postMessage({ drawName, history: purifiedHistory, sampleSize, customWeights });
+    const packed = packHistory(purifiedHistory);
+    worker.postMessage({ 
+      drawName, 
+      historyBuffer: packed.historyBuffer,
+      drawCount: packed.drawCount,
+      winningCount: packed.winningCount,
+      totalCols: packed.totalCols,
+      sampleSize, 
+      customWeights 
+    }, [packed.historyBuffer]);
   });
 };

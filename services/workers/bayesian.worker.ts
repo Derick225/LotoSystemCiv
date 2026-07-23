@@ -1,5 +1,6 @@
 import { AlgoWeights, AlgoKey } from '../../shared/prediction.types';
 import { LCG } from '../../utils/mathUtils';
+import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
 
 export {};
 
@@ -47,8 +48,10 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
 };
 
 // Évaluation tensorielle déterministe (micro-secondes)
-const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
+const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[], coeffs?: AdaptiveCoeffs): number => {
   let totalHits = 0;
+  const coeffsToUse = coeffs || computeAdaptiveCoeffs(tensors);
+
   for (const tensor of tensors) {
     const scores: { num: number; score: number }[] = [];
     const allScores: number[] = [];
@@ -90,30 +93,30 @@ const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
     };
 
     let totalContinLoss = 0;
-    tensor.targetWinners.forEach((w) => {
+    tensor.targetWinners.forEach((wVal) => {
       let maxSimForWinner = 1e-9;
       top5.forEach((p) => {
         let sim = 0.0;
-        if (p === w) {
+        if (p === wVal) {
           sim = 1.0;
         } else {
-          const linSim = Math.exp(-0.25 * Math.abs(p - w));
+          const linSim = Math.exp(-0.25 * Math.abs(p - wVal)) * (coeffsToUse.cLinear / 0.25);
           const posP = getGridPos(p);
-          const posW = getGridPos(w);
+          const posW = getGridPos(wVal);
           const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-          const gridSim = Math.exp(-0.35 * gridDist);
+          const gridSim = Math.exp(-0.35 * gridDist) * (coeffsToUse.cGrid / 0.35);
 
           let mirrorSim = 0.0;
-          if (p + w === 91) mirrorSim = 0.45;
+          if (p + wVal === 91) mirrorSim = coeffsToUse.cMirror;
           const strP = p.toString();
           const revP = parseInt(strP.split("").reverse().join(""), 10);
-          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
+          if (revP >= 1 && revP <= 90 && revP === wVal) mirrorSim = Math.max(mirrorSim, coeffsToUse.cMirror * 0.9);
 
           let harmonicSim = 0.0;
-          if (p % 10 === w % 10) harmonicSim = 0.35;
+          if (p % 10 === wVal % 10) harmonicSim = coeffsToUse.cHarmonic;
 
           let decadeSim = 0.0;
-          if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
+          if (Math.floor((p - 1) / 10) === Math.floor((wVal - 1) / 10)) decadeSim = coeffsToUse.cDecade;
 
           sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
         }
@@ -303,13 +306,21 @@ ctx.onmessage = async (e) => {
         const { type, payload } = e.data;
         
         if (type === 'start') {
-            const { tensors, currentWeights, config, memoryObservations, timeSignature } = payload as {
-                tensors: TensorContext[];
+            const { tensors, history, historyBuffer, drawCount, winningCount, totalCols, currentWeights, config, memoryObservations, timeSignature } = payload as {
+                tensors?: TensorContext[];
+                history?: any[];
+                historyBuffer?: ArrayBuffer;
+                drawCount?: number;
+                winningCount?: number;
+                totalCols?: number;
                 currentWeights: AlgoWeights;
                 config: BayesianWorkerConfig;
                 memoryObservations?: { weights: AlgoWeights; score: number }[];
                 timeSignature: string;
             };
+            const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : (history ? unpackHistory(history) : []);
+            
+            const activeTensors = tensors || [];
             
             const prng = new LCG(`bayesian_${timeSignature}_${config.initialSamples}`);
             const typedConfig = config as BayesianWorkerConfig;
@@ -319,7 +330,7 @@ ctx.onmessage = async (e) => {
             const totalSteps = typedConfig.initialSamples + typedConfig.bayesianIterations;
             
             // Calcul du score de base déterministe via la méthode d'évaluation tensorielle rapide
-            const baselineScore = evaluateTensor(currentWeights, tensors);
+            const baselineScore = evaluateTensor(currentWeights, activeTensors);
             
             const updateProgress = (best: number) => {
                 progressCount++;
@@ -330,7 +341,7 @@ ctx.onmessage = async (e) => {
             const observations: { weights: AlgoWeights; score: number }[] = memoryObservations 
                 ? memoryObservations.map(o => ({
                     weights: o.weights,
-                    score: evaluateTensor(o.weights, tensors)
+                    score: evaluateTensor(o.weights, activeTensors)
                 }))
                 : [];
             
@@ -346,7 +357,7 @@ ctx.onmessage = async (e) => {
                 }
                 
                 const normWeights = normalizeWeights(randomWeights);
-                const score = evaluateTensor(normWeights, tensors);
+                const score = evaluateTensor(normWeights, activeTensors);
                 observations.push({ weights: normWeights, score });
                 
                 const currentBest = Math.max(...observations.map(o => o.score), baselineScore);
@@ -382,7 +393,7 @@ ctx.onmessage = async (e) => {
 
                 if (bestCandidate) {
                     const normCandidate = normalizeWeights(bestCandidate);
-                    const score = evaluateTensor(normCandidate, tensors);
+                    const score = evaluateTensor(normCandidate, activeTensors);
                     observations.push({ weights: normCandidate, score });
                 }
                 

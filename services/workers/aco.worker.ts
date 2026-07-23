@@ -4,6 +4,7 @@
 
 export {};
 import { LCG } from '../../utils/mathUtils';
+import { unpackHistory } from './zeroCopy';
 
 /**
  * Nexus ACS Worker v6.0 (Ant Colony System)
@@ -29,20 +30,21 @@ const getIdx = (u: number, v: number) => u * 91 + v;
 
 ctx.onmessage = (e: MessageEvent) => {
     const startTime = Date.now();
-    const { history, config } = e.data;
+    const { history, historyBuffer, drawCount, winningCount, totalCols, config } = e.data;
+    const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
     
-    if (!history || history.length < 10) {
+    if (!hist || hist.length < 10) {
         ctx.postMessage({ error: "Historique insuffisant" });
         return;
     }
 
     // Seed déterministe absolu synchronisé sur la signature temporelle
-    const prng = new LCG(`aco_${history.length}_${history[0]?.date || 'default'}`);
+    const prng = new LCG(`aco_${hist.length}_${(hist[0] as any)?.date || 'default'}`);
 
     // Initialisation des compteurs pour métriques
     const counts: Float32Array = new Float32Array(91).fill(0);
     let totalCount = 0;
-    history.forEach((draw: { gagnants: number[] }) => {
+    hist.forEach((draw: { gagnants: number[] }) => {
         draw.gagnants.forEach(n => {
             counts[n]++;
             totalCount++;
@@ -61,11 +63,11 @@ ctx.onmessage = (e: MessageEvent) => {
 
     // Configuration dynamique dérivée de l'histoire (Zéro Nombre Magique)
     const C = { 
-        antsCount: config?.antsCount || Math.floor(Math.sqrt(history.length) * 10),
-        generations: config?.generations || Math.floor(Math.log(history.length + 1) * 20),
+        antsCount: config?.antsCount || Math.floor(Math.sqrt(hist.length) * 10),
+        generations: config?.generations || Math.floor(Math.log(hist.length + 1) * 20),
         alpha: 1.0 + persistence,                   // Influence de la trace: monte avec la persistance
         beta: 1.0 + normalizedEntropy,              // Influence heuristique: monte avec l'entropie
-        rho: 0.05 + 0.15 * Math.exp(-history.length / 250.0), // Évaporation dynamique sur la taille de l'historique
+        rho: 0.05 + 0.15 * Math.exp(-hist.length / 250.0), // Évaporation dynamique sur la taille de l'historique
         xi: normalizedEntropy / 2.0,                // Évaporation Locale
         q0: persistence,                            // Exploitation monte avec la certitude
         ...config 
@@ -75,7 +77,7 @@ ctx.onmessage = (e: MessageEvent) => {
     // Basée sur la co-occurrence pondérée par la récence
     const eta = new Float32Array(91 * 91).fill(0.1);
     
-    history.slice(0, 100).forEach((draw: { gagnants: number[] }, idx: number) => {
+    hist.slice(0, 100).forEach((draw: { gagnants: number[] }, idx: number) => {
         // Poids exponentiel : les tirages récents comptent beaucoup plus
         // idx 0 = le plus récent.
         const recencyWeight = Math.exp(-0.03 * idx); 
@@ -247,9 +249,11 @@ ctx.onmessage = (e: MessageEvent) => {
         }
     }
 
-    // Calcul de confiance normalisé (0-100) pour l'affichage
-    // On compare le score au score "moyen" d'un ticket aléatoire
-    const confidence = Math.min(99, Math.round(Math.log(globalBestScore + 1) * 15));
+    // Calcul de confiance normalisé (0-100) via Sigmoïde continue basée sur l'espérance mathématique
+    const expectedBaseScore = (TICKET_SIZE * (TICKET_SIZE - 1) / 2) * (tau0 * Math.pow(0.5, C.beta));
+    const scoreRatio = globalBestScore / (expectedBaseScore || Number.EPSILON);
+    const confidenceSig = 1.0 / (1.0 + Math.exp(-0.1 * (scoreRatio - 1.0)));
+    const confidence = Math.max(1, Math.min(99, Math.round(confidenceSig * 100)));
 
     ctx.postMessage({ 
         type: 'result', 

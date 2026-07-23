@@ -1,10 +1,21 @@
 import { runSimulationCore, SimulationConfig } from "../simulationCore";
+import { unpackHistory } from "./zeroCopy";
 
 const ctx = self as unknown as Worker;
 
 ctx.onmessage = async (e: MessageEvent) => {
   try {
-    const config = e.data as SimulationConfig;
+    const rawData = e.data;
+    
+    // Support Zero-Copy binary buffer or fallback to array
+    const history = rawData.historyBuffer
+      ? unpackHistory(rawData.historyBuffer, rawData.drawCount, rawData.winningCount, rawData.totalCols)
+      : (Array.isArray(rawData.history) ? rawData.history : []);
+
+    const config: SimulationConfig = {
+      ...rawData,
+      history,
+    };
 
     // 1. Validation déterministe et stricte des paramètres d'entrée
     if (!config || !config.history || !Array.isArray(config.history) || config.history.length === 0) {

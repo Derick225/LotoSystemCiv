@@ -4,6 +4,7 @@ import { LCG } from '../utils/mathUtils';
 import { apiClient } from '../core/api/apiClient';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { packHistory } from './workers/zeroCopy';
 
 /**
  * Service ACO (Ant Colony Optimization) - Interface Client v3.0 (100% Déterministe & Continu)
@@ -154,11 +155,15 @@ export const runAntColonyOptimization = async (
             resolve(fallbackHeuristic(purifiedHistory));
         };
 
-        // Configuration ACS (Ant Colony System) envoyée au worker
+        // Configuration ACS (Ant Colony System) envoyée au worker avec transfert zero-copy
+        const packed = packHistory(purifiedHistory);
         worker.postMessage({ 
-            history: purifiedHistory.map(h => ({ gagnants: h.gagnants })),
+            historyBuffer: packed.historyBuffer,
+            drawCount: packed.drawCount,
+            winningCount: packed.winningCount,
+            totalCols: packed.totalCols,
             config
-        });
+        }, [packed.historyBuffer]);
     });
 };
 

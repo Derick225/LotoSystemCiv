@@ -196,27 +196,61 @@ export const extractFeatures = async (
       }
 
       // ============================================================================
-      // 3. MARKOV & AFFINITÉ (Probabilités Conditionnelles Rigoureuses)
+      // 3. MARKOV & AFFINITÉ À DOUBLE COUCHE (Probabilités Conditionnelles Rigoureuses)
+      // M_total = M_gagnants + alpha_cross * M_machine
+      // alpha_cross est calculé continûment par l'entropie de Shannon
       // ============================================================================
-      const markovTransitionMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      const alphaCross = 0.5 / (1.0 + Math.exp(10.0 * (e - 0.5)));
+
+      const markovWinnersMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      const markovMachineMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+
+      const affinityWinnersMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      const affinityMachineMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
 
       for (let i = 0; i < recentHistory.length - 1; i++) {
-        const { winners: current } = extractDrawNumbers(recentHistory[i]);
-        const { winners: prev } = extractDrawNumbers(recentHistory[i+1]);
+        const { winners: currentWinners, machine: currentMachine } = extractDrawNumbers(recentHistory[i]);
+        const { winners: prevWinners, machine: prevMachine } = extractDrawNumbers(recentHistory[i+1]);
         const decayWeight = Math.pow(TIME_DECAY, i);
         
-        for (const p of prev) {
-          for (const c of current) {
-            markovTransitionMap[p][c] += decayWeight;
+        // Couche Gagnants
+        for (const p of prevWinners) {
+          for (const c of currentWinners) {
+            markovWinnersMap[p][c] += decayWeight;
+          }
+        }
+        for (const c1 of currentWinners) {
+          for (const c2 of currentWinners) {
+            if (c1 !== c2) {
+              affinityWinnersMap[c1][c2] += decayWeight;
+            }
           }
         }
 
-        for (const c1 of current) {
-          for (const c2 of current) {
-            if (c1 !== c2) {
-              affinityMap[c1][c2] += decayWeight;
+        // Couche Machine
+        if (currentMachine.length > 0) {
+          const pMachineList = prevMachine.length > 0 ? prevMachine : prevWinners;
+          for (const p of pMachineList) {
+            for (const c of currentMachine) {
+              markovMachineMap[p][c] += decayWeight;
             }
           }
+          for (const c1 of currentMachine) {
+            for (const c2 of currentMachine) {
+              if (c1 !== c2) {
+                affinityMachineMap[c1][c2] += decayWeight;
+              }
+            }
+          }
+        }
+      }
+
+      // Fusion à Double Couche : M_total = M_gagnants + alpha_cross * M_machine
+      const markovTransitionMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      for (let p = DOMAIN_MIN; p <= DOMAIN_MAX; p++) {
+        for (let c = DOMAIN_MIN; c <= DOMAIN_MAX; c++) {
+          markovTransitionMap[p][c] = markovWinnersMap[p][c] + alphaCross * markovMachineMap[p][c];
+          affinityMap[p][c] = affinityWinnersMap[p][c] + alphaCross * affinityMachineMap[p][c];
         }
       }
 

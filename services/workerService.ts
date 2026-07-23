@@ -1,6 +1,7 @@
 
 import { AppError } from '../utils/AppError';
 import { apiClient } from '../core/api/apiClient';
+import { packHistory, packMatrix, packArray } from './workers/zeroCopy';
 
 /**
  * NEXUS WORKER SERVICE
@@ -96,12 +97,58 @@ class WorkerService {
 
             this.callbacks.set(taskId, { resolve: wrappedResolve, reject: wrappedReject });
             
+            const transferables: Transferable[] = [];
+            let msgPayload: any = payload;
+            let historyBuffer: ArrayBuffer | undefined;
+            let drawCount: number | undefined;
+            let winningCount: number | undefined;
+            let totalCols: number | undefined;
+
+            if (Array.isArray(history) && history.length > 0) {
+                const packed = packHistory(history as any);
+                historyBuffer = packed.historyBuffer;
+                drawCount = packed.drawCount;
+                winningCount = packed.winningCount;
+                totalCols = packed.totalCols;
+                transferables.push(historyBuffer);
+            }
+
+            if (payload && typeof payload === 'object') {
+                const p = { ...(payload as Record<string, any>) };
+                if (Array.isArray(p.matrix)) {
+                    const packed = packMatrix(p.matrix);
+                    p.matrixBuffer = packed.matrixBuffer;
+                    p.rows = packed.rows;
+                    p.cols = packed.cols;
+                    delete p.matrix;
+                    transferables.push(packed.matrixBuffer);
+                }
+                if (Array.isArray(p.features)) {
+                    const packed = packMatrix(p.features);
+                    p.featuresBuffer = packed.matrixBuffer;
+                    p.featRows = packed.rows;
+                    p.featCols = packed.cols;
+                    delete p.features;
+                    transferables.push(packed.matrixBuffer);
+                }
+                if (Array.isArray(p.labels)) {
+                    const packed = packArray(p.labels);
+                    p.labelsBuffer = packed.arrayBuffer;
+                    delete p.labels;
+                    transferables.push(packed.arrayBuffer);
+                }
+                msgPayload = p;
+            }
+
             this.localWorker.postMessage({
                 taskId,
                 task,
-                payload,
-                history
-            });
+                payload: msgPayload,
+                historyBuffer,
+                drawCount,
+                winningCount,
+                totalCols
+            }, transferables);
             
             // Timeout de sécurité pour le worker local (10 secondes maximum)
             timer = setTimeout(() => {

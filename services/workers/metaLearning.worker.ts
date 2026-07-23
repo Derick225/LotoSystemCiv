@@ -1,5 +1,6 @@
-import { AlgoWeights, DrawResult } from '../types';
-import {  LCG } from '../utils/mathUtils';
+import { AlgoWeights, DrawResult } from '../../types';
+import { LCG } from '../../utils/mathUtils';
+import { unpackHistory } from './zeroCopy';
 
 
 // Helper function to normalize weights (copied from weightsManager to keep worker isolated)
@@ -18,16 +19,17 @@ const normalizeWeights = (weights: AlgoWeights): AlgoWeights => {
 
 self.onmessage = (event: MessageEvent) => {
     try {
-        const { dynamicWeights, history } = event.data as { dynamicWeights: AlgoWeights, history: DrawResult[] };
+        const { dynamicWeights, history, historyBuffer, drawCount, winningCount, totalCols } = event.data as any;
+        const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
         
         // Calcul adaptatif de la taille de fenêtre (entre 8 et 18 tirages)
         // basé sur l'entropie de Shannon globale de l'historique disponible.
-        const entropyHistoryDepth = Math.min(30, history.length);
+        const entropyHistoryDepth = Math.min(30, hist.length);
         const countsAll: Record<number, number> = {};
         let totalCountAll = 0;
         for (let idx = 0; idx < entropyHistoryDepth; idx++) {
-          if (history[idx] && history[idx].gagnants) {
-            history[idx].gagnants.forEach(n => {
+          if (hist[idx] && hist[idx].gagnants) {
+            hist[idx].gagnants.forEach(n => {
               countsAll[n] = (countsAll[n] || 0) + 1;
               totalCountAll++;
             });
@@ -43,11 +45,11 @@ self.onmessage = (event: MessageEvent) => {
 
         // Plus le chaos est élevé (proche de 1), plus on a besoin d'une grande fenêtre historique
         // pour filtrer le bruit stochastique (entre 8 et 18 tirages pour plus de robustesse statistique).
-        // On s'assure de ne pas dépasser (history.length - 11) pour préserver au moins 11 éléments pour histSlice.
+        // On s'assure de ne pas dépasser (hist.length - 11) pour préserver au moins 11 éléments pour histSlice.
         const adaptiveWindowSize = Math.max(8, Math.min(18, Math.round(8 + (10 * globalChaosRatio))));
-        const recentDraws = history.slice(0, Math.max(1, Math.min(adaptiveWindowSize, history.length - 11)));
+        const recentDraws = hist.slice(0, Math.max(1, Math.min(adaptiveWindowSize, hist.length - 11)));
         
-        const lcg = new LCG(`meta_${history.length}_${history[0]?.date || Date.now()}`);
+        const lcg = new LCG(`meta_${hist.length}_${(hist[0] as any)?.date || Date.now()}`);
 
         let bestConfig = { ...dynamicWeights };
         let bestFitness = -Infinity;
@@ -89,7 +91,7 @@ self.onmessage = (event: MessageEvent) => {
             let fitnessScore = 0;
             
             recentDraws.forEach((actualDraw, idx) => {
-                const histSlice = history.slice(idx + 1, idx + 40); // Fenêtre plus large pour l'heuristique
+                const histSlice = hist.slice(idx + 1, idx + 40); // Fenêtre plus large pour l'heuristique
                 if (histSlice.length < 15) return;
                 
                 const testScores: Record<number, number> = {};

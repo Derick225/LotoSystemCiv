@@ -2,13 +2,18 @@
 
 import { generateMasterPredictionCore } from "../prediction/predictionFacade";
 import { generatePlatinumPredictionCore } from "../metaAnalystService";
+import { unpackHistory } from "./zeroCopy";
 
 self.onmessage = async (e: MessageEvent) => {
   const {
     taskId,
     type,
     drawName,
-    history,
+    history: rawHistory,
+    historyBuffer,
+    drawCount,
+    winningCount,
+    totalCols,
     temporalDepth,
     weightsToUse,
     metrics,
@@ -22,6 +27,10 @@ self.onmessage = async (e: MessageEvent) => {
     userOptions,
     _basePrediction
   } = e.data;
+
+  const history = historyBuffer
+    ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols)
+    : (Array.isArray(rawHistory) ? rawHistory : []);
 
   try {
     if (type === 'platinum') {

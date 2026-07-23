@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { generateAbbreviatedWheel, generateFullWheel } from '../../services/combinatoricsService';
 import { calculateACValue } from '../../services/mathService';
 import { runAntColonyOptimization } from '../../services/acoService';
+import { filterDiverseCombinations } from '../../services/prediction/diversityService';
 import { getUniqueSortedNumbers } from '../../utils/arrayUtils';
 import { saveTicket } from '../../services/userPreferencesService';
 import { savePredictionToHistory } from '../../services/predictionHistoryService';
@@ -199,13 +200,14 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({ drawName }) =>
                 await new Promise(resolve => requestAnimationFrame(resolve));
             }
 
-            // 3. Tri final par score Nexus
+            // 3. Tri final par score Nexus et application du filtre de diversité de Shannon
             output.sort((a, b) => b.nexusScore - a.nexusScore);
-            setGeneratedTickets(output);
+            const diverseOutput = filterDiverseCombinations(output);
+            setGeneratedTickets(diverseOutput);
             
-            addLog(`Optimisation terminée : ${output.length} tickets valides.`);
+            addLog(`Optimisation terminée : ${diverseOutput.length} tickets valides après filtre de diversité de Shannon.`);
             audioEngine.play('success');
-            showToast(`${output.length} tickets générés et classés.`, "success");
+            showToast(`${diverseOutput.length} tickets uniques générés et filtrés pour diversité de Shannon.`, "success");
 
         } catch (e: unknown) { 
             console.error(e);

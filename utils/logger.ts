@@ -1,6 +1,6 @@
 import pino from 'pino';
 
-const isDev = /* @ts-ignore */ import.meta.env.MODE !== 'production';
+const isDev = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.MODE !== 'production' : process.env.NODE_ENV !== 'production';
 
 export const logger = pino({
   level: isDev ? 'debug' : 'info',
@@ -14,6 +14,6 @@ export const logger = pino({
       }
     : undefined,
   base: {
-    env: /* @ts-ignore */ import.meta.env.MODE,
+    env: typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.MODE : process.env.NODE_ENV,
   },
 });

@@ -3,6 +3,7 @@ import type { AlgoWeights, AdaptiveRules, OptimizationResult, GeneticConfig, Dra
 // Assurez-vous que le chemin correspond à votre structure (ex: '../mathService' ou './mathService')
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService'; 
 import { purifyHistoryForDraw } from '../utils/arrayUtils'; 
+import { packHistory } from './workers/zeroCopy'; 
 
 /**
  * CALCUL DE LA CONFIGURATION GÉNÉTIQUE DÉTERMINISTE ET ADAPTATIVE
@@ -140,16 +141,20 @@ export const runGeneticOptimization = async (
     };
 
     // Envoi de la charge utile avec la configuration déterministe et les métriques de régime
+    const packed = packHistory(historyLite);
     worker.postMessage({ 
       type: 'start', 
       payload: { 
         drawName, 
-        history: historyLite, 
+        historyBuffer: packed.historyBuffer,
+        drawCount: packed.drawCount,
+        winningCount: packed.winningCount,
+        totalCols: packed.totalCols,
         baseWeights, 
         baseRules, 
         config,
         timeSignature: `${drawName}_${history.length}_${historyLite.length}`
       } 
-    });
+    }, [packed.historyBuffer]);
   });
 };

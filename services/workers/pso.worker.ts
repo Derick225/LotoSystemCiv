@@ -1,5 +1,6 @@
 import { AlgoWeights, AlgoKey } from '../../shared/prediction.types';
 import { LCG } from '../../utils/mathUtils';
+import { computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
 export {};
 
 interface TensorContext {
@@ -52,13 +53,6 @@ const normalizeWeights = (w: AlgoWeights, entropy: number): AlgoWeights => {
   return normalized;
 };
 
-interface AdaptiveCoeffs {
-  cLinear: number;
-  cGrid: number;
-  cMirror: number;
-  cHarmonic: number;
-  cDecade: number;
-}
 
 const evaluateTensorForSubset = (
   w: AlgoWeights,
@@ -212,58 +206,7 @@ ctx.onmessage = (e) => {
     };
 
     // --- CALCUL DES COEFFICIENTS DE SIMILARITÉ ADAPTATIFS ---
-    let empiricalLinearCount = 0;
-    let empiricalGridCount = 0;
-    let empiricalMirrorCount = 0;
-    let empiricalHarmonicCount = 0;
-    let empiricalDecadeCount = 0;
-    let totalPairsEvaluated = 0;
-
-    tensors.forEach(tensor => {
-      const winners = tensor.targetWinners;
-      if (winners.length < 2) return;
-      for (let i = 0; i < winners.length; i++) {
-        for (let j = i + 1; j < winners.length; j++) {
-          const w1 = winners[i];
-          const w2 = winners[j];
-          totalPairsEvaluated++;
-
-          if (Math.abs(w1 - w2) === 1) empiricalLinearCount++;
-          const row1 = Math.floor((w1 - 1) / 10);
-          const col1 = (w1 - 1) % 10;
-          const row2 = Math.floor((w2 - 1) / 10);
-          const col2 = (w2 - 1) % 10;
-          const dist = Math.sqrt(Math.pow(row1 - row2, 2) + Math.pow(col1 - col2, 2));
-          if (dist <= 1.5) empiricalGridCount++;
-          if (w1 + w2 === 91) empiricalMirrorCount++;
-          
-          const str1 = w1.toString();
-          const rev1 = parseInt(str1.split("").reverse().join(""), 10);
-          if (rev1 >= 1 && rev1 <= 90 && rev1 === w2) empiricalMirrorCount++;
-          
-          if (w1 % 10 === w2 % 10) empiricalHarmonicCount++;
-          if (row1 === row2) empiricalDecadeCount++;
-        }
-      }
-    });
-
-    const safePairs = Math.max(1, totalPairsEvaluated);
-    
-    // Mapping continu sigmoïdal sans nombre magique
-    const computeAdaptiveCoeff = (count: number, baseDefault: number) => {
-      const rate = count / safePairs;
-      // Soft-clamping continu centré sur un taux attendu théorique (0.05)
-      const sig = 1.0 / (1.0 + Math.exp(-25.0 * (rate - 0.05)));
-      return parseFloat((0.15 + 0.45 * sig).toFixed(4));
-    };
-
-    const coeffs: AdaptiveCoeffs = {
-      cLinear: computeAdaptiveCoeff(empiricalLinearCount, 0.25),
-      cGrid: computeAdaptiveCoeff(empiricalGridCount, 0.35),
-      cMirror: computeAdaptiveCoeff(empiricalMirrorCount, 0.45),
-      cHarmonic: computeAdaptiveCoeff(empiricalHarmonicCount, 0.35),
-      cDecade: computeAdaptiveCoeff(empiricalDecadeCount, 0.25)
-    };
+    const coeffs: AdaptiveCoeffs = computeAdaptiveCoeffs(tensors);
 
     // Seed déterministe absolu synchronisé sur la signature temporelle (La taille d'historique)
     const prng = new LCG(`pso_${timeSignature}_${config.populationSize}`);

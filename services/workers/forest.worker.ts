@@ -1,4 +1,5 @@
 import { LCG } from '../../utils/mathUtils';
+import { unpackMatrix, unpackArray } from './zeroCopy';
 export {};
 
 /**
@@ -241,7 +242,17 @@ function pruneTreeWithOOB(tree: TreeNode, oobSet: Example[]): TreeNode {
 }
 
 ctx.onmessage = (e) => {
-  const { dataset, candidates, config, timeSignature } = e.data;
+  let dataset = e.data.dataset;
+  if (e.data.featuresBuffer && e.data.labelsBuffer) {
+    const rawFeatures = unpackMatrix(e.data.featuresBuffer, e.data.rows, e.data.cols);
+    const rawLabels = unpackArray(e.data.labelsBuffer);
+    dataset = rawFeatures.map((feat, idx) => ({
+      features: feat,
+      label: (rawLabels[idx] || 0) as 0 | 1
+    }));
+  }
+
+  const { candidates, config, timeSignature } = e.data;
   if (!dataset?.length || !dataset[0]?.features) {
     ctx.postMessage({ type: 'error', message: 'Dataset invalide' });
     return;

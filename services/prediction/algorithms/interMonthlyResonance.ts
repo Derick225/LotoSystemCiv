@@ -283,8 +283,9 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       return;
     }
 
-    // Select top multi-year twin draws (up to top 5) to blend multi-season signals
-    const activeTwins = twinCandidates.slice(0, 5);
+    // Select top multi-year twin draws adaptively derived from Hurst persistence
+    const maxActiveTwins = Math.max(2, Math.min(10, Math.round(5 * (1.0 + (hurst - 0.5)))));
+    const activeTwins = twinCandidates.slice(0, maxActiveTwins);
     const topTwin = activeTwins[0];
 
     // Continuous damping gamma derived from Hurst persistence

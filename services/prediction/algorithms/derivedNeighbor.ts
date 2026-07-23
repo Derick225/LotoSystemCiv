@@ -47,9 +47,13 @@ export const derivedNeighborPlugin: AlgorithmPlugin = {
         proxyScores.push({ num: i, score: proxyScore });
     }
 
-    // Prendre les 10 meilleurs comme "choisis par les autres algos" (graines d'activation)
+    // Nombre de graines adaptatif dérivé de l'entropie de Shannon du domaine
+    const entropyVal = ctx.statisticalBounds?.shannonEntropy !== undefined ? ctx.statisticalBounds.shannonEntropy : 0.5;
+    const adaptiveSeedCount = Math.max(5, Math.min(20, Math.round(10 * (1.0 + (entropyVal - 0.5)))));
+
+    // Prendre les meilleurs numéros comme "choisis par les autres algos" (graines d'activation adaptatives)
     proxyScores.sort((a, b) => b.score - a.score);
-    const topChosen = proxyScores.slice(0, 10).map(p => p.num);
+    const topChosen = proxyScores.slice(0, adaptiveSeedCount).map(p => p.num);
 
     // 2. Calculer l'affinité historique des transformations
     const transformMap: Record<number, { type: string, source: number }[]> = {};

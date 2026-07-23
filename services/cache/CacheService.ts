@@ -70,7 +70,7 @@ export interface CacheEntry<T> {
 
 export const CACHE_FLAGS = {
   ENABLE_MEMORY: true,
-  ENABLE_IDB: true,
+  ENABLE_IDB: typeof indexedDB !== 'undefined',
   ENABLE_SUPABASE: false, // Cache partagé désactivé par défaut
 };
 

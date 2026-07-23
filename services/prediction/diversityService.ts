@@ -228,3 +228,63 @@ export const calculateGeneticDiversityIndex = (
     klDivergenceBonus: parseFloat(klDivergenceBonus.toFixed(4))
   };
 };
+
+/**
+ * FILTRE DE DIVERSITÉ GÉNÉTIQUE ET D'ENTROPIE DE SHANNON SUR TICKETS MULTIPLES
+ * Élimine la redondance excessive entre suggestions de combinaisons multiples en
+ * évaluant la matrice de corrélation / chevauchement et l'entropie globale du pool.
+ */
+export const filterDiverseCombinations = <T extends { numbers: number[]; score?: number; nexusScore?: number }>(
+  tickets: T[],
+  maxSelect?: number,
+  maxAllowedOverlap: number = 3
+): T[] => {
+  if (!tickets || tickets.length <= 1) return tickets || [];
+
+  const getScore = (t: T) => t.nexusScore ?? t.score ?? 0;
+  
+  // Trier par score décroissant initial
+  const sorted = [...tickets].sort((a, b) => getScore(b) - getScore(a));
+  const selected: T[] = [sorted[0]];
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (maxSelect && selected.length >= maxSelect) break;
+
+    const candidate = sorted[i];
+    const candSet = new Set(candidate.numbers);
+
+    let maxOverlap = 0;
+    for (const sel of selected) {
+      const overlap = sel.numbers.filter(n => candSet.has(n)).length;
+      if (overlap > maxOverlap) {
+        maxOverlap = overlap;
+      }
+    }
+
+    if (maxOverlap <= maxAllowedOverlap) {
+      selected.push(candidate);
+    } else {
+      // Calculer l'entropie de Shannon globale si l'on inclut ce ticket
+      const combinedNumbers = [...selected.flatMap(s => s.numbers), ...candidate.numbers];
+      const freqMap: Record<number, number> = {};
+      combinedNumbers.forEach(n => { freqMap[n] = (freqMap[n] || 0) + 1; });
+
+      const total = combinedNumbers.length;
+      let shannonEntropy = 0;
+      Object.values(freqMap).forEach(count => {
+        const p = count / total;
+        if (p > 0) shannonEntropy -= p * Math.log2(p);
+      });
+
+      const maxEntropy = Math.log2(Math.min(90, Object.keys(freqMap).length));
+      const normalizedEntropy = maxEntropy > 0 ? shannonEntropy / maxEntropy : 1.0;
+
+      // Si l'entropie de Shannon reste satisfaisante (> 0.70), le ticket est conservé
+      if (normalizedEntropy > 0.70 && maxOverlap < candidate.numbers.length) {
+        selected.push(candidate);
+      }
+    }
+  }
+
+  return selected;
+};

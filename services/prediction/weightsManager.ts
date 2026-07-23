@@ -1,5 +1,6 @@
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
+import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
@@ -84,40 +85,48 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   const { hurst, entropy, volatility } = regimeInfo;
   const adjusted = { ...weights };
 
+  // Entropie normalisée dans [0, 1]
+  const maxEntropy = Math.log2(90); 
+  const normalizedEntropy = entropy > 1.0 ? Math.min(1.0, entropy / maxEntropy) : Math.max(0.0, Math.min(1.0, entropy));
+
   // Amortissement Dynamique de Hurst (H) : Sigmoïde continue
   const w_hurst = 0.5 * (1.0 + Math.tanh(4.0 * (hurst - 0.5)));
   const persistenceFactor = w_hurst;
   const meanReversionFactor = 1.0 - persistenceFactor;
-  
-  // Entropie maximale théorique pour un domaine de 90 éléments (base 2)
-  const maxEntropy = Math.log2(90); 
-  const chaosFactor = Math.max(0, Math.min(1, entropy / maxEntropy));
-  const volFactor = Math.max(0, Math.min(1, volatility / 100.0)); // 100.0 est une borne physique de volatilité de somme
+  const volFactor = Math.max(0, Math.min(1, volatility / 100.0));
 
-  // CORRECTION : Multiplicateurs continus sans constantes arbitraires
-  // Si persistance = 1, le poids est doublé.
+  // ============================================================================
+  // PONDÉRATION PAR RÉGIME MARKOVIEN ADAPTATIF (ZÉRO SEUILS BINAIRES)
+  // - Régime Déterministe / Périodique (Faible Entropie) : Boost des cadences de gisements (gapCadence, gapPattern, gapSequence, etc.)
+  // - Régime Chaotique / Haut-Bruit (Haute Entropie) : Boost de la topologie avancée et des méthodes bayésiennes
+  // ============================================================================
+
+  const deterministicFactor = 1.0 / (1.0 + Math.exp(10.0 * (normalizedEntropy - 0.5)));
+  const chaoticFactor = 1.0 / (1.0 + Math.exp(-10.0 * (normalizedEntropy - 0.5)));
+
+  // 1. Amplification Déterministe / Périodique (Cadences de gisements)
+  const cadenceBoost = 1.0 + 1.8 * deterministicFactor;
+  adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * cadenceBoost;
+  adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * cadenceBoost;
+  adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
+  adjusted[AlgoKey.GAP_RANGE_SEQUENCE] = (adjusted[AlgoKey.GAP_RANGE_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
+
+  // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien)
+  const topologyBayesBoost = 1.0 + 1.8 * chaoticFactor;
+  adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * topologyBayesBoost;
+  adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * topologyBayesBoost;
+  adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * (1.0 + 1.2 * chaoticFactor * volFactor);
+  adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + 1.2 * chaoticFactor);
+  adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + 1.2 * chaoticFactor * volFactor);
+  adjusted[AlgoKey.DERIVED_NEIGHBOR] = (adjusted[AlgoKey.DERIVED_NEIGHBOR] || 0) * (1.0 + 1.0 * chaoticFactor);
+
+  // Multiplicateurs de persistance Hurst & Tendance
   adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor);
-  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + (persistenceFactor * (1.0 / 2.0)));
-  
-  // Si mean-reversion = 1, le poids est doublé.
+  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + (persistenceFactor * 0.5));
   adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor);
-  
-  // Pondération du module de mémoire chaotique
-  const chaosVolatilityIndex = chaosFactor * volFactor * w_hurst;
-  adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * (1.0 + chaosVolatilityIndex);
-  adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + chaosFactor);
-  adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaosFactor);
-  adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * (1.0 + chaosFactor);
-  
-  // L'algorithme Echo State Network agit comme une mémoire chaotique
-  adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + chaosVolatilityIndex);
 
-  // AMPLIFICATION CONTINUE DU POIDS DE LA TENDANCE (Requirement 4)
-  // Injection continue d'un multiplicateur de gain proportionnel à max(0, hurst - 0.5).
-  // Cela garantit que la force de la persistance détectée soit pleinement exploitée sans saut binaire.
   const persistencePremium = 1.0 + 4.0 * Math.max(0, hurst - 0.5);
   adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * persistencePremium;
-  adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * persistencePremium;
 
   return normalizeWeights(adjusted);
 };
@@ -325,7 +334,7 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
 
   return new Promise((resolve) => {
     try {
-      const worker = new Worker(new URL('../../workers/metaLearning.worker.ts?worker', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('../workers/metaLearning.worker.ts?worker', import.meta.url), { type: 'module' });
       const timeoutMs = 15000;
       const timer = setTimeout(() => {
         logger.warn(`Meta-Learning Worker Timeout (${timeoutMs}ms), falling back`);
@@ -356,7 +365,14 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
         date: h.date || ""
       }));
 
-      worker.postMessage({ dynamicWeights, history: historyLite });
+      const packed = packHistory(historyLite);
+      worker.postMessage({ 
+        dynamicWeights, 
+        historyBuffer: packed.historyBuffer,
+        drawCount: packed.drawCount,
+        winningCount: packed.winningCount,
+        totalCols: packed.totalCols 
+      }, [packed.historyBuffer]);
     } catch (err) {
       logger.warn({ err }, "Failed to spawn meta-learning worker");
       resolve(normalizeWeights(dynamicWeights));

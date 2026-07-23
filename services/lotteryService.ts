@@ -533,9 +533,12 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
     }
 
     if (autopsiesRun > 0) {
-       console.log(`[Auto-Learning] Déclenchement local après ${autopsiesRun} autopsies.`);
-       await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
+       console.log(`[Auto-Learning] Déclenchement automatique après ${autopsiesRun} autopsie(s) effectuée(s).`);
+    } else {
+       console.log(`[Auto-Learning] Déclenchement automatique suite à l'enregistrement d'un nouveau tirage.`);
     }
+    // Auto-apprentissage automatique via Edge Function Self-Learn (ou fallback local)
+    await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
   } catch (e) {
     console.error("Local automation trigger failed:", e);
   }

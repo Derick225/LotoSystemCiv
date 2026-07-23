@@ -1,4 +1,5 @@
 import { LCG } from '../../utils/mathUtils';
+import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
 
 export {};
 
@@ -101,6 +102,7 @@ const mutateGaussian = (prng: LCG, w: AlgoWeights, sigma: number, rate: number):
 const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], depth: number): number => {
   const limit = Math.min(history.length - 1, depth);
   let totalScore = 0;
+  const coeffs = computeAdaptiveCoeffs(history);
   
   // Poids extraits dynamiquement
   const weightsToUse = {
@@ -199,23 +201,23 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
         if (p === w) {
           sim = 1.0;
         } else {
-          const linSim = Math.exp(-0.25 * Math.abs(p - w));
+          const linSim = Math.exp(-0.25 * Math.abs(p - w)) * (coeffs.cLinear / 0.25);
           const posP = getGridPos(p);
           const posW = getGridPos(w);
           const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-          const gridSim = Math.exp(-0.35 * gridDist);
+          const gridSim = Math.exp(-0.35 * gridDist) * (coeffs.cGrid / 0.35);
 
           let mirrorSim = 0.0;
-          if (p + w === 91) mirrorSim = 0.45;
+          if (p + w === 91) mirrorSim = coeffs.cMirror;
           const strP = p.toString();
           const revP = parseInt(strP.split("").reverse().join(""), 10);
-          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
+          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, coeffs.cMirror * 0.9);
 
           let harmonicSim = 0.0;
-          if (p % 10 === w % 10) harmonicSim = 0.35;
+          if (p % 10 === w % 10) harmonicSim = coeffs.cHarmonic;
 
           let decadeSim = 0.0;
-          if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
+          if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = coeffs.cDecade;
 
           sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
         }
@@ -255,7 +257,8 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
 // --- WORKER HANDLER ---
 ctx.onmessage = (e) => {
   if (e.data.type === 'start') {
-    const { drawName, baseWeights, baseRules, config, history, timeSignature } = e.data.payload;
+    const { drawName, baseWeights, baseRules, config, history, historyBuffer, drawCount, winningCount, totalCols, timeSignature } = e.data.payload;
+    const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
     
     // Isolation du PRNG
     const prng = new LCG(`genetic_${timeSignature || drawName}_${config.populationSize || 40}`);
@@ -286,7 +289,7 @@ ctx.onmessage = (e) => {
     for (let gen = 0; gen < MAX_GENERATIONS; gen++) {
       population.forEach(ind => {
         if (ind.fitness === 0) { 
-          ind.fitness = evaluate(ind.weights, baseRules, history, config.historyDepth);
+          ind.fitness = evaluate(ind.weights, baseRules, hist, config.historyDepth);
         }
       });
 

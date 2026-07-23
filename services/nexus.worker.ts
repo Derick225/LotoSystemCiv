@@ -1,40 +1,49 @@
 /// <reference lib="webworker" />
 
 import * as mathCore from './mathCore';
+import { unpackHistory, unpackMatrix, unpackArray } from './workers/zeroCopy';
 
 self.onmessage = (e: MessageEvent) => {
-    const { taskId, task, payload, history } = e.data;
+    const { taskId, task, payload, history, historyBuffer, drawCount, winningCount, totalCols } = e.data;
     
     try {
+        const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
         let result: unknown;
+        const p = payload || {};
+
         switch (task) {
             case 'full_analysis':
                 result = {
-                    spectral: mathCore.runSpectral(history),
-                    fractal: mathCore.runFractal(history)
+                    spectral: mathCore.runSpectral(hist),
+                    fractal: mathCore.runFractal(hist)
                 };
                 break;
 
             case 'hurst_exponent':
-                result = mathCore.runFractal(history);
+                result = mathCore.runFractal(hist);
                 break;
-            case 'DENOISE_PCA':
-                result = mathCore.denoiseFeaturesPCA(payload.matrix, payload.variance);
+            case 'DENOISE_PCA': {
+                const matrix = p.matrixBuffer ? unpackMatrix(p.matrixBuffer, p.rows, p.cols) : p.matrix;
+                result = mathCore.denoiseFeaturesPCA(matrix, p.variance);
                 break;
-            case 'TRAIN_RIDGE':
-                result = mathCore.trainRidgeRegression(payload.features, payload.labels, payload.lambda);
+            }
+            case 'TRAIN_RIDGE': {
+                const features = p.featuresBuffer ? unpackMatrix(p.featuresBuffer, p.featRows, p.featCols) : p.features;
+                const labels = p.labelsBuffer ? unpackArray(p.labelsBuffer) : p.labels;
+                result = mathCore.trainRidgeRegression(features, labels, p.lambda);
                 break;
+            }
             case 'GAP_EFFICIENCY':
-                result = mathCore.runGapEfficiency(history);
+                result = mathCore.runGapEfficiency(hist);
                 break;
             case 'SPECTRAL_METRICS':
-                result = mathCore.runSpectral(history);
+                result = mathCore.runSpectral(hist);
                 break;
             case 'wavelet_analysis':
-                result = mathCore.runContinuousWaveletTransformAnalysis(history);
+                result = mathCore.runContinuousWaveletTransformAnalysis(hist);
                 break;
             case 'TRANSFER_ENTROPY':
-                result = mathCore.computeTransferEntropy(history, payload?.targetNumbers);
+                result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
                 break;
             default:
                 result = { status: 'OK' };

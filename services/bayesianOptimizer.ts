@@ -4,6 +4,7 @@ import { getAlgoWeights } from './predictionEngine';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { getBayesianMemoryAsync, saveBayesianMemoryAsync } from './prediction/bayesianMemory';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { packHistory } from './workers/zeroCopy';
 
 export interface BayesianConfig {
     initialSamples: number;
@@ -105,17 +106,21 @@ export const runBayesianOptimization = async (
         }));
 
         getBayesianMemoryAsync(drawName).then((memoryObservations) => {
+            const packed = packHistory(historyLite);
             worker.postMessage({
                 type: 'start',
                 payload: {
                     drawName,
-                    history: historyLite,
+                    historyBuffer: packed.historyBuffer,
+                    drawCount: packed.drawCount,
+                    winningCount: packed.winningCount,
+                    totalCols: packed.totalCols,
                     currentWeights,
                     config,
                     memoryObservations,
                     timeSignature: `${drawName}_${fullHistory.length}`
                 }
-            });
+            }, [packed.historyBuffer]);
         }).catch((err) => {
             clearTimeout(timeoutTimer);
             worker.terminate();

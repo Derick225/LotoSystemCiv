@@ -34,6 +34,9 @@ interface GapRangeSequenceWidgetProps {
 
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ drawName }) => {
   const history = useNexusStore(state => state.history);
+  const globalWeights = useNexusStore(state => state.globalWeights);
+  const lastPrediction = useNexusStore(state => state.lastPrediction);
+
   const [step, setStep] = useState<GapRangeStep>('combined');
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
 
@@ -48,6 +51,38 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
     }
     return report.topPredictedBins[0] || report.bins[0];
   }, [selectedBinIndex, report]);
+
+  const survivingNumbers = useMemo(() => {
+    // 1. Identifier les tranches favorisées (top 3)
+    const topBins = report.topPredictedBins.slice(0, 3);
+    const favoredNumbers = new Set<number>();
+    
+    topBins.forEach(bin => {
+      bin.matchingNumbers.forEach(num => favoredNumbers.add(num));
+    });
+
+    const results = Array.from(favoredNumbers).map(num => {
+      let score = 50;
+      if (lastPrediction?.breakdown?.[num]) {
+        let totalVal = 0;
+        let totalW = 0;
+        for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
+          const w = globalWeights[algo as keyof typeof globalWeights] || 1;
+          totalVal += (val || 0) * w;
+          totalW += w;
+        }
+        score = totalW > 0 ? totalVal / totalW : 50;
+      } else {
+        score = report.scoresByNumber[num] ?? 50;
+      }
+      return { num, score };
+    });
+
+    // Filtre des numéros ayant survécu à l'ADN actuel (Score >= 50) et tri par score décroissant
+    return results
+      .filter(item => item.score >= 50)
+      .sort((a, b) => b.score - a.score);
+  }, [report, globalWeights, lastPrediction]);
 
   const handleStepChange = (newStep: GapRangeStep) => {
     audioEngine.play('click');
@@ -297,36 +332,32 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
         </div>
       </div>
 
-      {/* Matching Numbers Section for the Selected Bin */}
+      {/* Surviving Numbers Section */}
       <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 space-y-4 relative z-10">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-indigo-400" />
             <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-              Numéros dans la Tranche d'Écart <span className="text-indigo-300 font-mono font-black">{activeBin.label}</span>
+              Survivants de l'ADN Algorithmique
             </h4>
-            <span className="px-2 py-0.5 text-[10px] bg-indigo-500/20 text-indigo-300 rounded-full font-bold border border-indigo-500/30">
-              {activeBin.matchingNumbers.length} Numéros
+            <span className="px-2 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-300 rounded-full font-bold border border-emerald-500/30">
+              {survivingNumbers.length} Numéros
             </span>
           </div>
 
           <div className="text-xs text-slate-400 font-mono">
-            Probabilité Conditionnelle de la Tranche :{' '}
-            <strong className="text-emerald-400 font-bold">
-              {(activeBin.probability * 100).toFixed(1)}%
-            </strong>
+            Issus des Top 3 Tranches Favorisées
           </div>
         </div>
 
         {/* Numbers Grid */}
-        {activeBin.matchingNumbers.length === 0 ? (
+        {survivingNumbers.length === 0 ? (
           <p className="text-xs text-slate-500 italic py-4 text-center">
-            Aucun numéro n'est actuellement dans cette tranche d'écart d'apparition.
+            Aucun numéro des tranches favorisées n'a survécu au filtrage algorithmique actuel.
           </p>
         ) : (
           <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-            {activeBin.matchingNumbers.map((num) => {
-              const score = report.scoresByNumber[num] ?? 50;
+            {survivingNumbers.map(({ num, score }) => {
               return (
                 <div
                   key={num}

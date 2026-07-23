@@ -2,6 +2,7 @@ import type { DrawResult, ForestVote, DecisionNode } from '../types';
 import { calculateFractalIndex } from './mathService';
 import { useNexusStore } from '../store/useNexusStore';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { packMatrix, packArray } from './workers/zeroCopy';
 
 export const FEATURES_LABELS = [
   'Critical Gap', 'Frequency', 'Shadow',
@@ -663,18 +664,21 @@ export const runDecisionForest = async (
     const numTrees = Math.min(100, Math.max(50, Math.floor(dataset.length / Math.log2(dataset.length + 1))));
     const maxDepth = Math.max(3, Math.floor(Math.log2(dataset.length / activeIndices.length)));
     
-    // Simplification pour le worker qui s'attend à "features" et "label"
-    const workerDataset = dataset.map(d => ({
-      features: d.features,
-      label: d.label
-    }));
+    // Simplification pour le worker avec transfert zero-copy des matrices de caractéristiques
+    const featureMatrix = dataset.map(d => d.features);
+    const labelArray = dataset.map(d => d.label);
+    const packedFeatures = packMatrix(featureMatrix);
+    const packedLabels = packArray(labelArray);
 
     worker.postMessage({ 
-      dataset: workerDataset, 
+      featuresBuffer: packedFeatures.matrixBuffer,
+      rows: packedFeatures.rows,
+      cols: packedFeatures.cols,
+      labelsBuffer: packedLabels.arrayBuffer,
       candidates, 
       config: { numTrees, maxDepth },
       timeSignature: history.length 
-    });
+    }, [packedFeatures.matrixBuffer, packedLabels.arrayBuffer]);
   });
 
   // Calcul du skewness de consensus global pour diagnostics
