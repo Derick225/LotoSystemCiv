@@ -1,5 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
+import { evaluateKDE } from '../../kdeService';
 
 /**
  * ANALYSEUR DE MOTIFS DE SÉQUENCES D'ÉCARTS (Gap Pattern Analyzer)
@@ -162,9 +163,13 @@ export const gapPatternPlugin: AlgorithmPlugin = {
     const SE = Math.sqrt(Math.max(Number.EPSILON, (1.0 - rho * rho) * variance));
     const zScore = (currentOpenGap - predictedGap) / (SE + Number.EPSILON);
 
-    // Sigmoid function mapped to Z-score
+    // Continuous KDE estimation of residual likelihood
+    const residualKde = evaluateKDE([predictedGap - SE, predictedGap, predictedGap + SE], currentOpenGap);
+
+    // Sigmoid function mapped to Z-score combined with KDE cumulative density
     const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * zScore));
+    const parametricScore = 100.0 / (1.0 + Math.exp(-slope * zScore));
+    const normalizedScore = 0.70 * parametricScore + 0.30 * (residualKde.cdf * 100.0);
 
     // La confiance croît avec le nombre d'écarts observés (fiabilité de l'autocorrélation)
     // et décroît lorsque l'erreur de prédiction SE est élevée par rapport à la moyenne.

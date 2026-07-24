@@ -1,5 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
+import { evaluateKDE } from '../../kdeService';
 
 interface GapCadenceCache {
   tukeyUpperFence: number;
@@ -178,7 +179,9 @@ export const gapCadencePlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache![AlgoKey.GAP_CADENCE] as GapCadenceCache;
     const currentGap = Number(ctx.features.gapsMap[num]) || 0;
 
-    const percentile = binarySearchPercentile(cache.sortedPooled, currentGap);
+    // Continuous KDE estimation replacing discrete step binary percentile search
+    const kdeRes = evaluateKDE(cache.sortedPooled, currentGap);
+    const percentile = kdeRes.cdf;
     const percentileScore = percentile * 100;
 
     // z-score robuste via médiane + IQR

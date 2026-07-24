@@ -313,7 +313,17 @@ ctx.onmessage = (e) => {
     };
   });
 
-  level1Votes.sort((a, b) => b.score - a.score);
+  level1Votes.sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+    // Tie-breaker 1 : Somme des features pour différencier les candidats
+    const sumA = a.features.reduce((s, f) => s + f, 0);
+    const sumB = b.features.reduce((s, f) => s + f, 0);
+    if (Math.abs(sumB - sumA) > 1e-6) return sumB - sumA;
+    // Tie-breaker 2 : Hachage LCG déterministe pour détruire l'ordre ordinal séquentiel (1,2,3,4...)
+    const hashA = (a.number * 2654435761) % 4294967296;
+    const hashB = (b.number * 2654435761) % 4294967296;
+    return hashB - hashA;
+  });
   const top20Candidates = level1Votes.slice(0, 20);
 
   // --- NIVEAU 2 : MICRO-BIFURCATION (20 -> 5 Boules Finales) ---
@@ -335,7 +345,12 @@ ctx.onmessage = (e) => {
     };
   });
 
-  finalVotes.sort((a, b) => b.score - a.score);
+  finalVotes.sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+    const hashA = (a.number * 2654435761) % 4294967296;
+    const hashB = (b.number * 2654435761) % 4294967296;
+    return hashB - hashA;
+  });
 
   ctx.postMessage({
     type: 'result',

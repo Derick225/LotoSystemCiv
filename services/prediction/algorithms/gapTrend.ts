@@ -1,6 +1,7 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { calculateShannonEntropy, calculateFractalIndex } from '../../mathService';
+import { evaluateKDE } from '../../kdeService';
 
 /**
  * PROJECTEUR DE TENDANCE DES ÉCARTS (Gap Trend Projector)
@@ -184,8 +185,12 @@ export const gapTrendPlugin: AlgorithmPlugin = {
     const hurstExponent = ctx.statisticalBounds?.hurstExponent || 0.5;
     const slope = 1.0 + (hurstExponent * 5.0); // 5.0 est une constante mathématique (approximation)
 
+    // Continuous KDE projection around Holt trend expectation
+    const kdeRes = evaluateKDE([projectedNextGap - scale, projectedNextGap, projectedNextGap + scale], currentOpenGap);
+
     // Score continu : plus l'écart courant dépasse la projection Holt, plus le numéro est "en retard"
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (currentOpenGap - projectedNextGap) / scale));
+    const parametricScore = 100.0 / (1.0 + Math.exp(-slope * (currentOpenGap - projectedNextGap) / scale));
+    const normalizedScore = 0.65 * parametricScore + 0.35 * (kdeRes.cdf * 100.0);
 
     // La confiance combine deux facteurs continus : taille d'échantillon et qualité d'ajustement
     const sampleReliability = 1.0 - 1.0 / Math.sqrt(numGaps + 1);

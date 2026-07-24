@@ -42,7 +42,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 if (isMounted.current) setCyclicData(cycles.slice(0, 6));
 
                 // 2. Saisonnalité
-                const seasonal = getSeasonalAffinity(history);
+                const seasonal = getSeasonalAffinity(history, drawName);
                 const monthsFr = [
                     "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
                     "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
@@ -53,13 +53,13 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 }
 
                 // 3. Tendance dynamique amortie
-                const dayAff = getDayAffinity(history);
+                const dayAff = getDayAffinity(history, drawName);
                 if (isMounted.current) {
                     setDecayTrendData(dayAff.slice(0, 6));
                 }
 
                 // 3.5 Résonance Inter-Mensuelle (Pilier 1)
-                const resonanceDetail = getCrossMonthResonanceAnalysis(history);
+                const resonanceDetail = getCrossMonthResonanceAnalysis(history, drawName);
                 if (isMounted.current) {
                     setCrossMonthResonance(resonanceDetail);
                 }

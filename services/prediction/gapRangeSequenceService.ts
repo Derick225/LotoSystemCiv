@@ -261,7 +261,10 @@ export const gapRangeSequenceService = {
     }
 
     // Sort sequence matches by similarity score descending
-    sequenceMatches.sort((a, b) => b.similarityScore - a.similarityScore);
+    sequenceMatches.sort((a, b) => {
+      if (Math.abs(b.similarityScore - a.similarityScore) > 1e-6) return b.similarityScore - a.similarityScore;
+      return b.historicalDrawIndex - a.historicalDrawIndex;
+    });
 
     // 5. Compute Conditional Probability Distribution P(targetBin | lastDrawSignature)
     const laplaceAlpha = 1.0 / totalBins;
@@ -317,7 +320,12 @@ export const gapRangeSequenceService = {
     }
 
     // Sort bins by descending conditional probability to identify top predicted gap ranges
-    const topPredictedBins = [...bins].sort((a, b) => b.probability - a.probability);
+    const topPredictedBins = [...bins].sort((a, b) => {
+      if (Math.abs(b.probability - a.probability) > 1e-6) return b.probability - a.probability;
+      const hashA = (a.binIndex * 2654435761) % 4294967296;
+      const hashB = (b.binIndex * 2654435761) % 4294967296;
+      return hashB - hashA;
+    });
 
     // 7. Compute scores for each number (1-90) based on its current gap range probability
     const probs = bins.map(b => b.probability);

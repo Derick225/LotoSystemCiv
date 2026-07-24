@@ -1,5 +1,6 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { calculateSilvermanBandwidth } from '../kdeService';
 
 export interface PatternMatch {
   pattern: number[];
@@ -79,15 +80,7 @@ const computeSquaredDistance = (a: number[], b: number[]): number => {
 
 const robustBandwidth = (seq: number[]): number => {
   if (seq.length <= 1) return 1.0;
-
-  const med = median(seq);
-  const absDev = seq.map(v => Math.abs(v - med));
-  const mad = median(absDev);
-
-  const sigma = stdDev(seq);
-  const robustScale = Math.max(1.0, mad * 1.4826, sigma * 0.5);
-
-  return robustScale;
+  return calculateSilvermanBandwidth(seq);
 };
 
 class SequencePatternAnalyzer {

@@ -1,5 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
+import { evaluateKDE, standardNormalCDF, gaussianKernel, calculateSilvermanBandwidth } from '../../kdeService';
 
 // Deterministic rescaled range Hurst Exponent helper for individual gap sequences
 function calculateHurstExponent(seq: number[]): number {
@@ -123,16 +124,15 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     
     const { currentGap, expectedNextGap, stdGap, meanGap, lag1Autocorrelation, hurstExponent, numGaps } = data;
     
-    // Normal CDF for fatigue
+    // Continuous Normal CDF for fatigue using standardNormalCDF
     const z = (currentGap - meanGap) / stdGap;
-    const t = 1 / (1 + 0.2316419 * Math.abs(z));
-    const d = 0.3989423 * Math.exp(-z * z / 2);
-    const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    const prob = standardNormalCDF(z);
     const fatigueScore = z > 0 ? 1 - prob : prob;
     
-    // Pattern Resonance Score : Gaussienne autour de l'écart attendu
-    const zScoreResonance = (currentGap - expectedNextGap) / (stdGap / 1.5 + Number.EPSILON);
-    const patternResonanceScore = Math.exp(-0.5 * Math.pow(zScoreResonance, 2));
+    // Pattern Resonance Score : Noyau de Gauss avec bande passante KDE dérivée de la séquence d'écarts
+    const bandwidth = calculateSilvermanBandwidth([meanGap, stdGap, expectedNextGap]);
+    const uResonance = (currentGap - expectedNextGap) / (bandwidth + Number.EPSILON);
+    const patternResonanceScore = Math.exp(-0.5 * Math.pow(uResonance, 2));
     
     /**
      * CONTINUITY & STATISTICAL SIGNIFICANCE MANDATES (AGENTS.md):

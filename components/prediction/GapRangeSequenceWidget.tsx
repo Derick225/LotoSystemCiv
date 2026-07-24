@@ -81,7 +81,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
     // Filtre des numéros ayant survécu à l'ADN actuel (Score >= 50) et tri par score décroissant
     return results
       .filter(item => item.score >= 50)
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => {
+        if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+        const hashA = (a.num * 2654435761) % 4294967296;
+        const hashB = (b.num * 2654435761) % 4294967296;
+        return hashB - hashA;
+      });
   }, [report, globalWeights, lastPrediction]);
 
   const handleStepChange = (newStep: GapRangeStep) => {

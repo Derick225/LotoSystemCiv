@@ -246,12 +246,22 @@ export const gapSequencePatternService = {
     
     // Top resonating & high fatigue indices
     const topResonatingNumbers = Object.values(stats)
-      .sort((a, b) => b.resonanceScore - a.resonanceScore)
+      .sort((a, b) => {
+        if (Math.abs(b.resonanceScore - a.resonanceScore) > 1e-6) return b.resonanceScore - a.resonanceScore;
+        const hashA = (a.number * 2654435761) % 4294967296;
+        const hashB = (b.number * 2654435761) % 4294967296;
+        return hashB - hashA;
+      })
       .slice(0, 10)
       .map(s => s.number);
       
     const topFatigueNumbers = Object.values(stats)
-      .sort((a, b) => b.fatigueScore - a.fatigueScore)
+      .sort((a, b) => {
+        if (Math.abs(b.fatigueScore - a.fatigueScore) > 1e-6) return b.fatigueScore - a.fatigueScore;
+        const hashA = (a.number * 2654435761) % 4294967296;
+        const hashB = (b.number * 2654435761) % 4294967296;
+        return hashB - hashA;
+      })
       .slice(0, 10)
       .map(s => s.number);
       

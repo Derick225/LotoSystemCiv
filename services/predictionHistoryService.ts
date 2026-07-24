@@ -57,7 +57,7 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
 
   for (const d of historyUpdates) {
     if (!d.date) continue;
-    const resultDrawName = d.drawName || (d as Record<string, unknown>).draw_name as string;
+    const resultDrawName = d.drawName || (d as unknown as Record<string, unknown>).draw_name as string;
     if (resultDrawName && prediction.drawName && resultDrawName.trim().toLowerCase() !== prediction.drawName.trim().toLowerCase()) {
       continue;
     }

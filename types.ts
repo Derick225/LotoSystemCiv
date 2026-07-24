@@ -170,6 +170,72 @@ export interface SpectralDeviation {
   delta: number;
 }
 
+export interface MissedOpportunity {
+  number: number;
+  reason: string;
+  zScore?: number;
+  continuousWeight?: number;
+  bestAlgo?: string;
+}
+
+export interface ScoreDivergence {
+  algo: string;
+  impact: number;
+}
+
+export interface AlgorithmicDrift {
+  algo: string;
+  driftScore: number;
+  direction: 'overestimating' | 'underestimating';
+}
+
+export interface NearMiss {
+  predicted: number;
+  actual: number;
+  distance: number;
+  algo?: string;
+  errorType?: string;
+}
+
+export interface MissedSignal {
+  pattern: string;
+  type: string;
+  significance: number;
+}
+
+export interface ZScoreItem {
+  number: number;
+  z: number;
+}
+
+export interface ForensicConfidence {
+  level: 'low' | 'medium' | 'high';
+  reasons: string[];
+}
+
+export interface CatastropheControlParams {
+  a: number;
+  b: number;
+  discriminant: number;
+  regime: string;
+}
+
+export interface ForensicMetrics {
+  sum: number;
+  amplitude: number;
+  ac: number;
+  consecutives: number;
+  odds: number;
+}
+
+export interface StatisticalDeviations {
+  sumZScore: number;
+  amplitudeZScore: number;
+  acZScore: number;
+  consecutivesPValue: number;
+  parityPValue: number;
+}
+
 export interface ForensicReport {
   id: string;
   drawName: string;
@@ -177,14 +243,8 @@ export interface ForensicReport {
   predictionId?: string;
   drawResultId?: string;
   matches: ForensicEvidence[];
-  missedOpportunities: {
-    number: number;
-    reason: string;
-    zScore?: number;
-    continuousWeight?: number;
-    bestAlgo?: string;
-  }[];
-  scoreDivergence: { algo: string; impact: number }[];
+  missedOpportunities: MissedOpportunity[];
+  scoreDivergence: ScoreDivergence[];
   suspicionScore?: number;
   indicators?: ForensicIndicator[];
   riggedProbability?: number;
@@ -205,27 +265,15 @@ export interface ForensicReport {
   timestamp?: string;
   combo?: number[];
   forensicScore?: number;
-  metrics?: {
-    sum: number;
-    amplitude: number;
-    ac: number;
-    consecutives: number;
-    odds: number;
-  };
-  statisticalDeviations?: {
-    sumZScore: number;
-    amplitudeZScore: number;
-    acZScore: number;
-    consecutivesPValue: number;
-    parityPValue: number;
-  };
+  metrics?: ForensicMetrics;
+  statisticalDeviations?: StatisticalDeviations;
   klDivergenceProxy?: number;
   // Injection Oraculaire (DNA)
-  algorithmicDrift?: { algo: string; driftScore: number; direction: 'overestimating' | 'underestimating' }[];
-  nearMisses?: { predicted: number; actual: number; distance: number; algo?: string; errorType?: string }[];
-  missedSignals?: { pattern: string; type: string; significance: number }[];
+  algorithmicDrift?: AlgorithmicDrift[];
+  nearMisses?: NearMiss[];
+  missedSignals?: MissedSignal[];
   shannon_entropy?: number; // Incertitude de la prédiction
-  z_scores?: { number: number; z: number }[]; // Anomalie statistique des gagnants
+  z_scores?: ZScoreItem[]; // Anomalie statistique des gagnants
   divergenceMetric?: number; // Divergence par rapport aux prévisions (0=parfait, 100=chaos total)
   // AI Analysis
   aiAnalysis?: string;
@@ -238,13 +286,13 @@ export interface ForensicReport {
   antiConsensusActive?: boolean; // Si l'Oracle Adversarial était actif pour corriger ce tirage
   challengedTargets?: number[]; // Cibles restreintes par l'Oracle Adversarial avant le tirage
   topologicalTensionIndex?: number; // Tension topologique globale sur la grille de jeu
-  catastropheControlParams?: { a: number; b: number; discriminant: number; regime: string }; // Paramètres d'écart catastrophe de René Thom
+  catastropheControlParams?: CatastropheControlParams; // Paramètres d'écart catastrophe de René Thom
   gravitationalDriftVelocity?: number; // Vitesse de dérive gravitationnelle
   // New action-oriented forensic fields
   failureMode?: ForensicFailureMode;
   verdict?: ForensicFailureMode;
   severity?: SeverityLevel;
-  forensicConfidence?: { level: 'low' | 'medium' | 'high'; reasons: string[] };
+  forensicConfidence?: ForensicConfidence;
   drawAnomalyScore?: number;
   modelMissScore?: number;
   structuralQualityScore?: number;

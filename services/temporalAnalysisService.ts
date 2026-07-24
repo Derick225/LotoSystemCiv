@@ -1,5 +1,6 @@
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } from './mathService';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -29,8 +30,10 @@ const calculateAutocorrelation = (data: number[], lag: number) => {
 
 // --- CORE SERVICES ---
 
-export const getSeasonalAffinity = (history: DrawResult[]): MonthStats => {
-    const currentMonth = new Date().getMonth();
+export const getSeasonalAffinity = (rawHistory: DrawResult[], drawName?: string): MonthStats => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
+    const targetMonth = history.length > 0 && history[0].date ? extractMonth(history[0].date) : -1;
+    const currentMonth = targetMonth !== -1 ? targetMonth : new Date().getMonth();
     const monthCounts = new Float32Array(91); 
 
     // Calcul de l'écart type empirique réel des mois dans l'historique pour Silverman
@@ -58,13 +61,19 @@ export const getSeasonalAffinity = (history: DrawResult[]): MonthStats => {
 
     const topNumbers = Array.from({length: 90}, (_, i) => i + 1)
         .map(n => ({ number: n, count: monthCounts[n] }))
-        .sort((a, b) => b.count - a.count)
+        .sort((a, b) => {
+            if (Math.abs(b.count - a.count) > 1e-6) return b.count - a.count;
+            const hashA = (a.number * 2654435761) % 4294967296;
+            const hashB = (b.number * 2654435761) % 4294967296;
+            return hashB - hashA;
+        })
         .slice(0, 10);
 
     return { monthIndex: currentMonth, topNumbers };
 };
 
-export const getDayAffinity = (history: DrawResult[]): { number: number, count: number, score: number }[] => {
+export const getDayAffinity = (rawHistory: DrawResult[], drawName?: string): { number: number, count: number, score: number }[] => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const scores = new Float32Array(91);
     
     // Calcul de l'exposant de Hurst et de l'entropie de Shannon sur l'historique
@@ -95,7 +104,12 @@ export const getDayAffinity = (history: DrawResult[]): { number: number, count: 
             count: 0, 
             score: Math.round((scores[n] / maxScore) * 100) 
         }))
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const hashA = (a.number * 2654435761) % 4294967296;
+            const hashB = (b.number * 2654435761) % 4294967296;
+            return hashB - hashA;
+        });
 };
 
 export interface CyclicCandidate {
@@ -109,7 +123,8 @@ export interface CyclicCandidate {
     cycleStrength: number;
 }
 
-export const getCyclicCandidates = async (_drawName: string, history: DrawResult[]): Promise<CyclicCandidate[]> => {
+export const getCyclicCandidates = async (drawName: string, rawHistory: DrawResult[]): Promise<CyclicCandidate[]> => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const regularity = calculateRegularity(history);
     const candidates: CyclicCandidate[] = [];
     const limit = Math.min(history.length, 120);
@@ -173,21 +188,27 @@ export const getCyclicCandidates = async (_drawName: string, history: DrawResult
         });
     });
 
-    return candidates.sort((a, b) => b.score - a.score);
+    return candidates.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const hashA = (a.number * 2654435761) % 4294967296;
+        const hashB = (b.number * 2654435761) % 4294967296;
+        return hashB - hashA;
+    });
 };
 
-export const getTemporalScores = async (drawName: string, history: DrawResult[]): Promise<Record<number, number>> => {
+export const getTemporalScores = async (drawName: string, rawHistory: DrawResult[]): Promise<Record<number, number>> => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const scores: Record<number, number> = {};
     
     // 1. Saisonnalité
-    const seasonal = getSeasonalAffinity(history);
+    const seasonal = getSeasonalAffinity(history, drawName);
     const maxSeasonal = seasonal.topNumbers[0]?.count || 1;
     seasonal.topNumbers.forEach(item => {
         scores[item.number] = (scores[item.number] || 0) + (Math.sqrt(item.count / maxSeasonal) * 15);
     });
 
     // 2. Tendance Journalière
-    const dayAffinity = getDayAffinity(history);
+    const dayAffinity = getDayAffinity(history, drawName);
     dayAffinity.slice(0, 20).forEach(item => {
         scores[item.number] = (scores[item.number] || 0) + (item.score * 0.25);
     });
@@ -210,7 +231,7 @@ export const getTemporalScores = async (drawName: string, history: DrawResult[])
     }
 
     // 5. Résonance Temporelle Croisée Inter-Mensuelle (Stratégie cohorte-saisonnière d'excitation croisée Gagnants-Machines)
-    const crossMonth = calculateCrossMonthResonance(history);
+    const crossMonth = calculateCrossMonthResonance(history, drawName);
     const maxCross = Math.max(...Array.from(crossMonth)) || 1;
     for (let i = 1; i <= 90; i++) {
         const normalisedCross = (crossMonth[i] / maxCross) * 100;
@@ -231,11 +252,13 @@ export const getTemporalScores = async (drawName: string, history: DrawResult[])
  * de façon purement déterministe et adaptative, sans aucun nombre magique.
  * Aligné avec l'observation des résonances de cohorte mensuelles (ex: Février vers Juillet).
  */
-export const calculateCrossMonthResonance = (history: DrawResult[]): Float32Array => {
+export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?: string): Float32Array => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const resonance = new Float32Array(91);
     if (history.length < 12) return resonance; // Pas assez de profondeur pour une analyse mensuelle croisée solide
 
-    const currentMonth = new Date().getMonth(); // [0..11]
+    const targetMonth = history.length > 0 && history[0].date ? extractMonth(history[0].date) : -1;
+    const currentMonth = targetMonth !== -1 ? targetMonth : new Date().getMonth();
 
     // 1. Profil fréquentiel des numéros (Gagnants + Machines x0.5) par mois de l'année
     const monthProfiles = Array.from({ length: 12 }, () => new Float32Array(91));
@@ -363,13 +386,16 @@ export interface CrossMonthResonanceAnalysis {
 /**
  * FOURNIT UNE ANALYSE DÉTAILLÉE DE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE
  */
-export const getCrossMonthResonanceAnalysis = (history: DrawResult[]): CrossMonthResonanceAnalysis => {
+export const getCrossMonthResonanceAnalysis = (rawHistory: DrawResult[], drawName?: string): CrossMonthResonanceAnalysis => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const monthsFr = [
         "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
         "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
     ];
     
-    const currentMonth = new Date().getMonth();
+    const targetMonth = history.length > 0 && history[0].date ? extractMonth(history[0].date) : -1;
+    const currentMonth = targetMonth !== -1 ? targetMonth : new Date().getMonth();
+
     const result: CrossMonthResonanceAnalysis = {
         currentMonthIndex: currentMonth,
         currentMonthName: monthsFr[currentMonth],
@@ -442,7 +468,7 @@ export const getCrossMonthResonanceAnalysis = (history: DrawResult[]): CrossMont
         result.sourceMonthName = monthsFr[bestSourceMonth];
         result.correlation = maxCorr;
 
-        const rawResonance = calculateCrossMonthResonance(history);
+        const rawResonance = calculateCrossMonthResonance(history, drawName);
         const maxRes = Math.max(...Array.from(rawResonance)) || 1;
 
         const numbersScores = Array.from({ length: 90 }, (_, i) => i + 1)
@@ -451,7 +477,12 @@ export const getCrossMonthResonanceAnalysis = (history: DrawResult[]): CrossMont
                 score: Math.round((rawResonance[n] / maxRes) * 100)
             }))
             .filter(item => item.score > 0)
-            .sort((a, b) => b.score - a.score);
+            .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                const hashA = (a.number * 2654435761) % 4294967296;
+                const hashB = (b.number * 2654435761) % 4294967296;
+                return hashB - hashA;
+            });
 
         result.topNumbers = numbersScores.slice(0, 12);
     }

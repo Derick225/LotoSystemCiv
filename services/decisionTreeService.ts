@@ -434,7 +434,13 @@ export const runDecisionForest = async (
     return { votes: [], dataset: [] };
   }
 
-  const activeIndices = activeFeatures.map(label => FEATURES_LABELS.indexOf(label)).filter(idx => idx !== -1);
+  // Vérifier si l'historique nettoyé du tirage contient au moins un tirage avec des numéros Machine
+  const hasMachineData = history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  const effectiveFeatures = hasMachineData 
+    ? activeFeatures 
+    : activeFeatures.filter(f => f !== 'Machine Leak');
+
+  const activeIndices = effectiveFeatures.map(label => FEATURES_LABELS.indexOf(label)).filter(idx => idx !== -1);
   if (activeIndices.length === 0) return { votes: [], dataset: [] };
 
   // 1. Calcul du Consensus Map (avec cache stable)
@@ -640,7 +646,20 @@ export const runDecisionForest = async (
 
       const sortedByAffinity = affinityArray
         .filter(item => item.affinity > (1.0 / 90.0))
-        .sort((a, b) => b.affinity - a.affinity || b.vote.score - a.vote.score)
+        .sort((a, b) => {
+          if (Math.abs(b.affinity - a.affinity) > 1e-6) return b.affinity - a.affinity;
+          if (Math.abs(b.vote.score - a.vote.score) > 1e-6) return b.vote.score - a.vote.score;
+          // Tie-breaker 1 : Somme des features du candidat pour départager de façon continue
+          const candA = candidates.find(c => c.number === a.vote.candidate);
+          const candB = candidates.find(c => c.number === b.vote.candidate);
+          const sumA = candA ? candA.features.reduce((s, f) => s + f, 0) : 0;
+          const sumB = candB ? candB.features.reduce((s, f) => s + f, 0) : 0;
+          if (Math.abs(sumB - sumA) > 1e-6) return sumB - sumA;
+          // Tie-breaker 2 : Hachage LCG déterministe
+          const hashA = (a.vote.candidate * 2654435761) % 4294967296;
+          const hashB = (b.vote.candidate * 2654435761) % 4294967296;
+          return hashB - hashA;
+        })
         .map(item => item.vote);
 
       // Correction : Formatage correct du dataset complet pour calculateFeatureImportance
