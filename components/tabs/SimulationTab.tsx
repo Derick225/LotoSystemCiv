@@ -17,9 +17,11 @@ import {
   AlertTriangle,
   TrendingUp,
   TrendingDown,
-  Dna
+  Dna,
+  Repeat
 } from "lucide-react";
 import { ParallelSimulationTab } from "./ParallelSimulationTab";
+import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -43,7 +45,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
-    const [mode, setMode] = useState<"single" | "comparative" | "walkforward">("single");
+    const [mode, setMode] = useState<"single" | "comparative" | "walkforward" | "replay">("single");
     const [simulating, setSimulating] = useState(false);
     const [learning, setLearning] = useState(false);
     const [learningResult, setLearningResult] = useState<LearningStatus | null>(null);
@@ -245,10 +247,23 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
             >
               <Dna size={14} /> Walk-Forward & MC
             </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setMode("replay");
+              }}
+              className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 shrink-0 ${mode === "replay" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+            >
+              <Repeat size={14} /> Replay Déterministe
+            </button>
           </div>
         </div>
 
-        {mode === "single" ? (
+        {mode === "replay" ? (
+          <div className="animate-slide-up">
+            <DeterministicReplayInspector drawName={drawName} />
+          </div>
+        ) : mode === "single" ? (
           <div className="space-y-8 animate-slide-up">
             {/* Control Card */}
             <div className="bg-slate-900 p-8 md:p-8 rounded-3xl border border-slate-800 shadow-2xl text-center relative overflow-hidden group">

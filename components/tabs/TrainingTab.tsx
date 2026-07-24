@@ -12,6 +12,7 @@ import {
     Upload, Download, ShieldCheck, Gauge, Layers, Sparkles, Sliders, History,
     BrainCircuit, HelpCircle, AlertTriangle, Lock
 } from 'lucide-react';
+import { NeuralDarwinismLab } from '../NeuralDarwinismLab';
 import type { AlgoWeights, TrainingReport } from '../../types';
 import { ExportService } from '../../services/exportService';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
@@ -383,6 +384,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     
     // State
     const [status, setStatus] = useState<'idle' | 'running' | 'completed'>('idle');
+    const [activeSubTab, setActiveSubTab] = useState<'standard' | 'darwinian'>('standard');
     const [evolutionData, setEvolutionData] = useState<Array<{ gen: number; bestFitness: number; avgFitness?: number; diversity: number; bestGenome: AlgoWeights; source?: string }>>([]);
     const [originalWeights, setOriginalWeights] = useState<AlgoWeights>(DEFAULT_ALGO_WEIGHTS);
     const [liveWeights, setLiveWeights] = useState<AlgoWeights>(DEFAULT_ALGO_WEIGHTS);
@@ -697,6 +699,40 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return (
         <div className="space-y-6 md:space-y-8 animate-fade-in pb-24 w-full overflow-hidden relative">
             
+            {/* MODE SUB-NAVBAR */}
+            <div className="flex justify-center mb-2">
+                <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 shadow-inner">
+                    <button
+                        onClick={() => {
+                            audioEngine.play('click');
+                            setActiveSubTab('standard');
+                        }}
+                        className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${
+                            activeSubTab === 'standard' ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        <BrainCircuit size={14} /> Entraînement & Calibration Standard
+                    </button>
+                    <button
+                        onClick={() => {
+                            audioEngine.play('click');
+                            setActiveSubTab('darwinian');
+                        }}
+                        className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${
+                            activeSubTab === 'darwinian' ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold' : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        <Dna size={14} /> Laboratoire Darwinien ADN Neural
+                    </button>
+                </div>
+            </div>
+
+            {activeSubTab === 'darwinian' ? (
+                <div className="animate-slide-up">
+                    <NeuralDarwinismLab drawName={drawName} />
+                </div>
+            ) : (
+                <>
             {/* FULLSCREEN CALIBRATION INTEGRATION OVERLAY */}
             {applyingState !== 'idle' && (
                 <div className="fixed inset-0 bg-[#020512]/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1476,6 +1512,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     )}
                 </div>
             </div>
+            </>
+            )}
         </div>
     );
 };

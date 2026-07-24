@@ -243,6 +243,28 @@ export const deleteForensicReportLocal = async (id: string) => {
 // MOTEUR D'AUTOPSIE MATHÉMATIQUE (ZÉRO NOMBRE MAGIQUE)
 // ============================================================================
 
+export const runForensicAutopsy = (
+  drawName: string,
+  date: string,
+  predictedNumbers: number[],
+  actualWinningNumbers: number[],
+  predictionBreakdown?: Record<number, ScoreBreakdown>,
+  predictionId?: string,
+  drawResultId?: string,
+  skipLLM: boolean = false,
+  fullHistory?: DrawResult[]
+) => performForensicAnalysis(
+  drawName,
+  date,
+  predictedNumbers,
+  actualWinningNumbers,
+  predictionBreakdown,
+  predictionId,
+  drawResultId,
+  skipLLM,
+  fullHistory
+);
+
 export const performForensicAnalysis = async (
   drawName: string,
   date: string,
