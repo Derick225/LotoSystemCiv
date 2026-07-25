@@ -1,33 +1,63 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
-// optimize-weights: Edge Function for continuous RLHF learning and Genetic Optimization
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const { history, currentWeights, rlSignal, drawName } = await req.json();
+    const { history: reqHistory, currentWeights: reqWeights, rlSignal, drawName } = await req.json();
 
-    if (!history || !currentWeights || !drawName) {
-      return new Response(JSON.stringify({ error: "Missing required parameters" }), {
+    if (!drawName) {
+      return new Response(JSON.stringify({ error: "Missing drawName parameter" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Heavy coordinate descent / genetic algorithm offloaded to Edge Worker
-    // Mock implementation for demonstration:
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante");
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Grid position on 10x9 grid
+    // Fetch history if not provided
+    let history = reqHistory;
+    if (!history || history.length === 0) {
+      const { data, error } = await supabase
+        .from('draw_results')
+        .select('*')
+        .eq('draw_name', drawName)
+        .order('date', { ascending: false })
+        .limit(100);
+      if (error || !data) throw new Error("Impossible de charger l'historique");
+      history = data;
+    }
+
+    // Fetch current weights if not provided
+    let currentWeights = reqWeights;
+    if (!currentWeights || Object.keys(currentWeights).length === 0) {
+      const { data, error } = await supabase
+        .from('algo_weights')
+        .select('weights')
+        .eq('draw_name', drawName)
+        .maybeSingle();
+      if (!error && data) {
+        currentWeights = data.weights;
+      } else {
+        currentWeights = { frequency: 0.15, gap: 0.15, spectral: 0.1, markov: 0.1, bayes: 0.1, momentum: 0.1, affinity: 0.1, spatial: 0.05, temporal: 0.05, fractal: 0.05, machine_bias: 0.05 };
+      }
+    }
+
+    // Heavy coordinate descent / genetic algorithm offloaded to Edge Worker
     const getGridPos = (val: number) => {
       const row = Math.floor((val - 1) / 10);
       const col = (val - 1) % 10;
       return { row, col };
     };
 
-    // Calculate Hurst exponent continuously from draw sums
     const getHurstExponent = (hist: any[]): number => {
       const limit = Math.min(hist.length, 50);
       if (limit < 10) return 0.5;
@@ -53,7 +83,6 @@ serve(async (req) => {
       return isNaN(H) || !isFinite(H) ? 0.5 : Math.max(0.15, Math.min(0.85, H));
     };
 
-    // Calculate Shannon entropy of historical draws
     const getShannonEntropy = (hist: any[]): number => {
       const freq = new Float32Array(91);
       let total = 0;
@@ -78,7 +107,6 @@ serve(async (req) => {
       return entropy / maxEntropy;
     };
 
-    // Lightweight signal matrix calculator
     const computeSignalMatrix = (context: any[]) => {
       const signalMatrix: Record<number, Record<string, number>> = {};
       const totalDraws = context.length || 1;
@@ -90,16 +118,10 @@ serve(async (req) => {
         const gap = lastIdx === -1 ? 50 : lastIdx;
         const wasInLastMachine = (context[0]?.machine || []).includes(i);
 
-        // 1. Frequency
         const freq = freqCount / totalDraws;
-
-        // 2. Gap decay
         const gapDecay = Math.exp(-0.05 * gap);
-
-        // 3. Spectral signal
         const spectral = Math.abs(Math.cos(freqCount * 0.15 + gap * 0.25));
 
-        // 4. Markov transitioning probability
         let transitionCount = 0;
         lastWinners.forEach((lw: number) => {
           for (let d = 1; d < context.length; d++) {
@@ -112,13 +134,9 @@ serve(async (req) => {
         });
         const markov = transitionCount / totalDraws;
 
-        // 5. Bayes probability estimation
         const bayes = freq * (1.0 / (1.0 + Math.abs(gap - (totalDraws / (freqCount || 1)))));
-
-        // 6. Momentum
         const momentum = context.slice(0, 5).filter(d => (d.gagnants || d.winners || []).includes(i)).length / 5.0;
 
-        // 7. Spatial grid distance
         let minGridDist = 99.0;
         const posI = getGridPos(i);
         lastWinners.forEach((lw: number) => {
@@ -128,7 +146,6 @@ serve(async (req) => {
         });
         const spatial = Math.exp(-0.5 * minGridDist);
 
-        // 8. Temporal alignment
         const occurrenceIndices: number[] = [];
         context.forEach((d, index) => {
           const winners = d.gagnants || d.winners || [];
@@ -164,7 +181,6 @@ serve(async (req) => {
       return signalMatrix;
     };
 
-    // Normalize weights dictionary
     const normalizeWeights = (w: Record<string, number>): Record<string, number> => {
       const res: Record<string, number> = {};
       let total = 0;
@@ -178,7 +194,6 @@ serve(async (req) => {
       return res;
     };
 
-    // Evaluate weight fitness across history folds
     const evaluateWeights = (w: Record<string, number>, folds: any[]): number => {
       const normalized = normalizeWeights(w);
       let totalFitness = 0;
@@ -200,7 +215,6 @@ serve(async (req) => {
         candidates.sort((a, b) => b.val - a.val);
         const top5 = candidates.slice(0, 5).map(c => c.n);
 
-        // Calculate continuous topological matching metric
         let topologicalSim = 0;
         targets.forEach((actual: number) => {
           let maxSim = 1e-9;
@@ -227,7 +241,6 @@ serve(async (req) => {
       return totalFitness / (folds.length || 1);
     };
 
-    // Prepare 3 Validation Folds using dynamic history slicing
     const folds: any[] = [];
     const foldCount = Math.min(3, Math.floor(history.length / 10));
     for (let k = 0; k < foldCount; k++) {
@@ -242,7 +255,6 @@ serve(async (req) => {
       }
     }
 
-    // Compute dynamic, continuous learning speed based on Hurst and Entropy
     const H = getHurstExponent(history);
     const entropy = getShannonEntropy(history);
     const baseLearningRate = 0.04;
@@ -263,12 +275,10 @@ serve(async (req) => {
         for (const key of keys) {
           const originalVal = bestWeights[key];
           
-          // Test positive step
           const candidatePos = { ...bestWeights };
           candidatePos[key] = Math.max(0.001, originalVal + lr * dampFactor);
           const fitnessPos = evaluateWeights(candidatePos, folds);
 
-          // Test negative step
           const candidateNeg = { ...bestWeights };
           candidateNeg[key] = Math.max(0.001, originalVal - lr * dampFactor);
           const fitnessNeg = evaluateWeights(candidateNeg, folds);
@@ -283,7 +293,6 @@ serve(async (req) => {
         }
       }
     } else {
-      // Fallback to stable deterministic LCG jitter if folds cannot be built
       let lcgSeed = 9999;
       for (let charIdx = 0; charIdx < drawName.length; charIdx++) {
         lcgSeed = (lcgSeed * 31 + drawName.charCodeAt(charIdx)) >>> 0;
@@ -304,6 +313,17 @@ serve(async (req) => {
 
     const newWeights = bestWeights;
 
+    // Save directly to Supabase
+    const { error: upsertError } = await supabase.from('algo_weights').upsert({
+      draw_name: drawName,
+      weights: newWeights,
+      updated_at: new Date().toISOString()
+    });
+
+    if (upsertError) {
+      console.warn("Failed to save optimized weights to Supabase:", upsertError);
+    }
+
     return new Response(
       JSON.stringify({
         status: "success",
@@ -312,7 +332,8 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    const err = error as Error;
+    return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
