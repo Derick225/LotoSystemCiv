@@ -199,7 +199,7 @@ const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] =>
     const machine = Array.from(machinePool).sort((a, b) => a - b);
 
     results.push({
-      id: `mock-${drawName.replace(/\s+/g, '-')}-${i}-${formattedDate.replace(/\//g, '')}`,
+      id: `deterministic-${drawName.replace(/\s+/g, '-')}-${i}-${formattedDate.replace(/\//g, '')}`,
       drawName,
       date: formattedDate,
       gagnants,

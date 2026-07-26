@@ -31,6 +31,7 @@ import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
+import { UnifiedForensicRadarPanel } from "../UnifiedForensicRadarPanel";
 
 type ForensicMode = "prediction" | "historique" | "timemachine";
 
@@ -628,6 +629,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Panneau Forensique Unifié : Vue Macro (Radar) & Vue Micro (Integrated Gradients) */}
+              <div className="pt-2">
+                <UnifiedForensicRadarPanel report={activeReport} drawName={drawName} />
               </div>
 
               {/* Frise Chronologique Unifiée */}

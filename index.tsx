@@ -15,6 +15,10 @@ import "@fontsource/jetbrains-mono/700.css";
 import App from './App';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
+import { offlineQueueService } from './services/offlineQueueService';
+
+// Initialisation du réconciliateur de queue hors-ligne IndexedDB / Supabase
+offlineQueueService.initReconciler();
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];

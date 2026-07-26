@@ -88,10 +88,10 @@ export interface AlgorithmPlugin {
 export const algorithmRegistry: AlgorithmPlugin[] = [];
 
 /**
- * Creates a robust mock AlgorithmContext for deterministic verification of plugins.
+ * Creates a robust AlgorithmContext for deterministic verification of plugins during registration.
  */
-const createMockContextForValidation = (): AlgorithmContext => {
-  const dummyHistory: DrawResult[] = Array(15).fill(0).map((_, i) => ({
+const createValidationContext = (): AlgorithmContext => {
+  const validationHistory: DrawResult[] = Array(15).fill(0).map((_, i) => ({
     id: `draw_${i}`,
     date: `2026-01-${i + 1}`,
     gagnants: [1, 2, 3, 4, 5],
@@ -118,7 +118,7 @@ const createMockContextForValidation = (): AlgorithmContext => {
     machineTransferMap[i] = 0.5;
   }
 
-  const mockContext: AlgorithmContext = {
+  const validationContext: AlgorithmContext = {
     features: {
       freqMap,
       gapsMap,
@@ -135,7 +135,7 @@ const createMockContextForValidation = (): AlgorithmContext => {
       volatility: {},
       drift: {}
     } as any,
-    history: dummyHistory,
+    history: validationHistory,
     deterministicSeed: 987654321,
     statisticalBounds: {
       median: 5.0,
@@ -149,7 +149,7 @@ const createMockContextForValidation = (): AlgorithmContext => {
     }
   };
 
-  return mockContext;
+  return validationContext;
 };
 
 /**
@@ -181,16 +181,16 @@ export const registerAlgorithm = (plugin: AlgorithmPlugin) => {
     );
   }
 
-  // 3. RUNTIME MATHEMATICAL INTEGRITY TEST (Unit testing via mock context)
+  // 3. RUNTIME MATHEMATICAL INTEGRITY TEST (Verification via validation context)
   try {
-    const mockCtx = createMockContextForValidation();
+    const validationCtx = createValidationContext();
     // Call precompute to populate plugin cache if needed
-    plugin.precompute(mockCtx);
+    plugin.precompute(validationCtx);
     
     // Test evaluate on sample numbers
     const testNumbers = [1, 45, 90];
     for (const num of testNumbers) {
-      const result = plugin.evaluate(num, mockCtx);
+      const result = plugin.evaluate(num, validationCtx);
       if (!result) {
         throw new Error(`L'évaluation a retourné null ou undefined pour le numéro ${num}.`);
       }

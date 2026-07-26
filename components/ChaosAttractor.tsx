@@ -104,13 +104,16 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     return points;
   }, [history]);
 
-  // 2. Generate Strange Attractor Orbits (Lorenz/Clifford manifold initialized deterministically)
-  const strangeAttractorData = useMemo(() => {
+  // 2. Generate Strange Attractor Orbits (Lorenz/Clifford manifold initialized deterministically with Float32Array GPU Object Pool)
+  const MAX_PARTICLES = 1000;
+  const particleBufferRef = useRef<Float32Array>(new Float32Array(MAX_PARTICLES * 5)); // x, y, z, scale, hue
+
+  const activeParticleCount = useMemo(() => {
     const seed = (currentDrawName.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0) * 1000) + trajectory3DPoints.length;
     const lcg = createDeterministicLCG(seed);
 
-    const totalParticles = 400; // 400 instanced spheres in 1 single draw call
-    const particlePositions: { x: number; y: number; z: number; scale: number; hue: number }[] = [];
+    const totalParticles = 400; // Active particles in pool
+    const buf = particleBufferRef.current;
 
     // Base parameters derived from actual chaos dimension & turbulence
     const sigma = 10.0 + (turbulence / 100) * 4.0;
@@ -121,6 +124,8 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     let currX = 0.1 + lcg() * 0.2;
     let currY = 0.0 + lcg() * 0.2;
     let currZ = 0.0 + lcg() * 0.2;
+
+    const histLen = trajectory3DPoints.length;
 
     for (let i = 0; i < totalParticles; i++) {
       // Lorenz differential step
@@ -138,7 +143,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       const scaledZ = ((currZ - 25) / 20) * 3.5;
 
       // Mix with actual historical points if available
-      const histMatch = trajectory3DPoints[i % Math.max(1, trajectory3DPoints.length)];
+      const histMatch = histLen > 0 ? trajectory3DPoints[i % histLen] : null;
       const mixWeight = 0.35;
       const finalX = histMatch ? scaledX * (1 - mixWeight) + histMatch.x * mixWeight : scaledX;
       const finalY = histMatch ? scaledY * (1 - mixWeight) + histMatch.y * mixWeight : scaledY;
@@ -147,13 +152,19 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       const hue = 0.55 + (i / totalParticles) * 0.35; // Indigo to Emerald
       const scale = 0.08 + Math.sin(i * 0.1) * 0.03;
 
-      particlePositions.push({ x: finalX, y: finalY, z: finalZ, scale, hue });
+      // Direct write into pre-allocated Float32Array buffer
+      const offset = i * 5;
+      buf[offset] = finalX;
+      buf[offset + 1] = finalY;
+      buf[offset + 2] = finalZ;
+      buf[offset + 3] = scale;
+      buf[offset + 4] = hue;
     }
 
-    return particlePositions;
+    return totalParticles;
   }, [trajectory3DPoints, turbulence, currentDrawName]);
 
-  // 3. Three.js Instanced Mesh WebGL Engine setup
+  // 3. Three.js Instanced Mesh WebGL Engine setup with GPU Object Pooling
   useEffect(() => {
     if (viewMode !== '3d' || !canvasRef.current || !containerRef.current) return;
 
@@ -197,8 +208,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     dirLight2.position.set(-5, -5, -5);
     scene.add(dirLight2);
 
-    // Instanced Mesh Creation (SINGLE DRAW CALL)
-    const particleCount = strangeAttractorData.length;
+    // Instanced Mesh Creation with Object Pool (SINGLE DRAW CALL)
     const sphereGeometry = new THREE.SphereGeometry(1, 10, 10); // Low polygon density for performance
     const sphereMaterial = new THREE.MeshPhongMaterial({
       shininess: 60,
@@ -207,19 +217,30 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       opacity: 0.85,
     });
 
-    const instancedMesh = new THREE.InstancedMesh(sphereGeometry, sphereMaterial, particleCount);
+    const instancedMesh = new THREE.InstancedMesh(sphereGeometry, sphereMaterial, MAX_PARTICLES);
+    instancedMesh.count = activeParticleCount;
+
+    // Static reusable objects for zero-allocation updates
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
+    const buf = particleBufferRef.current;
 
-    strangeAttractorData.forEach((p, idx) => {
-      dummy.position.set(p.x, p.y, p.z);
-      dummy.scale.setScalar(p.scale);
+    for (let idx = 0; idx < activeParticleCount; idx++) {
+      const offset = idx * 5;
+      const x = buf[offset];
+      const y = buf[offset + 1];
+      const z = buf[offset + 2];
+      const scale = buf[offset + 3];
+      const hue = buf[offset + 4];
+
+      dummy.position.set(x, y, z);
+      dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       instancedMesh.setMatrixAt(idx, dummy.matrix);
 
-      color.setHSL(p.hue, 0.85, 0.55);
+      color.setHSL(hue, 0.85, 0.55);
       instancedMesh.setColorAt(idx, color);
-    });
+    }
 
     instancedMesh.instanceMatrix.needsUpdate = true;
     if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
@@ -360,7 +381,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         renderer.dispose();
       }
     };
-  }, [viewMode, strangeAttractorData, trajectory3DPoints]);
+  }, [viewMode, activeParticleCount, trajectory3DPoints]);
 
   // 2D SVG Trajectory Math
   const trajectory2DPoints = useMemo(() => {

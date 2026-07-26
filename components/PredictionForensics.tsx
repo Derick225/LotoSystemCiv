@@ -13,6 +13,7 @@ import { isSupabaseConfigured } from "../services/supabaseClient";
 import { useToast } from "./ui/Toast";
 import { applyBayesianForensicFeedback } from "../services/prediction/weightsManager";
 import { audioEngine } from "../utils/audioEngine";
+import { UnifiedForensicRadarPanel } from "./UnifiedForensicRadarPanel";
 import {
   ThumbsUp,
   ThumbsDown,
@@ -353,37 +354,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
               
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                {/* Left: 3D Attractor & Trajectories */}
+                {/* Left: Unified Forensic Radar & Integrated Gradients */}
                 <div className="lg:col-span-7 space-y-6 flex flex-col justify-between">
-                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-lg overflow-hidden flex flex-col">
-                    <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/20 dark:bg-slate-950/20 flex justify-between items-center">
-                      <h4 className="font-black text-slate-800 dark:text-white uppercase text-[10px] tracking-wider flex items-center gap-2">
-                        <Waves size={14} className="text-fuchsia-500 animate-pulse" />
-                        Aperçu Topologique des Forces Actives
-                      </h4>
-                    </div>
-                    <div className="p-6">
-                       {/* Simplified metric blocks instead of a 3D Radar */}
-                       <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
-                            <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Stabilité Topologique</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.topologicalTensionIndex ? (100 - report.topologicalTensionIndex).toFixed(1) : "85.0"}%</span>
-                          </div>
-                          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
-                            <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Divergence KL</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.kl_divergence?.toFixed(3) ?? "0.051"}</span>
-                          </div>
-                          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
-                            <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Atypicité (Anomalie)</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.drawAnomalyScore ? (report.drawAnomalyScore * 100).toFixed(1) : "12.5"}%</span>
-                          </div>
-                          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700/50">
-                            <span className="text-[10px] text-slate-500 uppercase font-black block mb-1">Force de Résonance</span>
-                            <span className="text-xl font-mono text-slate-800 dark:text-slate-100">{report.unifiedIntegrityIndex ? (report.unifiedIntegrityIndex / 100 + 0.05).toFixed(2) : "1.05"}x</span>
-                          </div>
-                       </div>
-                    </div>
-                  </div>
+                  <UnifiedForensicRadarPanel report={report} drawName={report.drawName} />
 
                   <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/60 dark:border-slate-800 shadow-lg">
                     <h4 className="font-black text-slate-800 dark:text-white mb-4 uppercase text-[10px] tracking-wider flex items-center gap-2">

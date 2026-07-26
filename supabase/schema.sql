@@ -241,6 +241,9 @@ CREATE INDEX IF NOT EXISTS idx_predictions_user_draw ON public.predictions(user_
 CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON public.predictions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_forensic_user_draw ON public.forensic_reports(user_id, draw_name);
 CREATE INDEX IF NOT EXISTS idx_learning_user_draw ON public.learning_sessions(user_id, draw_name);
+CREATE INDEX IF NOT EXISTS idx_learning_logs_draw_created ON public.learning_logs(draw_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_draw_created ON public.prediction_snapshots(draw_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_draw_target_date ON public.prediction_snapshots(draw_name, target_date DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_draw ON public.prediction_feedback(draw_name);
 CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_target_date ON public.prediction_snapshots(target_date);
 CREATE INDEX IF NOT EXISTS idx_draw_regimes_lookup ON public.draw_regimes(draw_name);

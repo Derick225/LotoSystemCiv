@@ -1,4 +1,5 @@
 import { get, set, del, keys as idbKeys, clear } from "idb-keyval";
+import { getCanonicalDrawHistoryHash } from "../../utils/mathUtils";
 
 /**
  * Configuration centralisée des durées de vie du cache (TTL) par domaine métier.
@@ -87,6 +88,20 @@ class CacheService {
     subKey?: string,
   ): string {
     return `nexus_${domain}_${identifier}${subKey ? `_${subKey}` : ""}`;
+  }
+
+  /**
+   * Génère une clé de cache déterministe isolée par la signature canonique de l'historique propre du tirage.
+   * Empêche toute pollution ou croisement de données inter-tirages.
+   */
+  public generateCanonicalDrawKey(
+    domain: string,
+    drawName: string,
+    history: { date?: string; gagnants?: number[] }[],
+    subKey?: string,
+  ): string {
+    const canonicalHash = getCanonicalDrawHistoryHash(drawName, history);
+    return `nexus_${domain}_${canonicalHash}${subKey ? `_${subKey}` : ""}`;
   }
 
   /**

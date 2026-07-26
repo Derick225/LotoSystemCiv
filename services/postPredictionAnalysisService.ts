@@ -890,11 +890,23 @@ export const performForensicAnalysis = async (
     }
     const diversityScore = pairs > 0 ? diversitySum / pairs : 0;
 
+    // Calcul effectif du vecteur de synergie à partir de la matrice ADN
+    const synergyVector = new Float32Array(numAlgos);
+    if (dnaMatrix.length > 0) {
+      for (let a = 0; a < numAlgos; a++) {
+        let sum = 0;
+        for (let k = 0; k < dnaMatrix.length; k++) {
+          sum += dnaMatrix[k][a] || 0;
+        }
+        synergyVector[a] = sum / dnaMatrix.length;
+      }
+    }
+
     winningXAP = optimizer.generateXAP(
       {
         numbers: actualWinningNumbers,
         dnaMatrix,
-        synergyVector: new Float32Array(numAlgos), // dummy synergy
+        synergyVector,
         distance: 0,
         diversityScore,
       },

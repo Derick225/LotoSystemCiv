@@ -101,22 +101,49 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({ drawName })
         return () => { isMounted = false; };
     }, [drawName, history, temporalDepth, globalWeights]);
 
-    // Function to evaluate grid scores for arbitrary weights (mock/fast evaluator for engine)
+    // Function to evaluate grid scores for arbitrary weights based on real historical draw features
     const evalGridScores = useCallback((w: AlgoWeights): number[] => {
         const scores = new Array(90).fill(0);
         const keys = Object.keys(w) as AlgoKey[];
         
+        // Calculate historical frequency and gaps from history for fast evaluation
+        const freqMap = new Array(91).fill(0);
+        const lastSeen = new Array(91).fill(history.length);
+        const totalDraws = Math.max(1, history.length);
+
+        history.forEach((d, idx) => {
+            if (Array.isArray(d.gagnants)) {
+                d.gagnants.forEach(n => {
+                    if (n >= 1 && n <= 90) {
+                        freqMap[n]++;
+                        if (idx < lastSeen[n]) lastSeen[n] = idx;
+                    }
+                });
+            }
+        });
+
         for (let num = 1; num <= 90; num++) {
             let s = 0;
-            keys.forEach((k, idx) => {
+            const freqRatio = freqMap[num] / totalDraws;
+            const gapDecay = Math.exp(-0.05 * lastSeen[num]);
+            const spectralVal = Math.abs(Math.sin(num * 0.1 + freqRatio * 3.14));
+
+            keys.forEach((k) => {
                 const weightVal = w[k] || 0.05;
-                const trigContrib = Math.sin(num * (idx + 1) * 0.1) + Math.cos((num + idx) * 0.08);
-                s += weightVal * (50 + trigContrib * 20);
+                let featVal = 0.5;
+                if (k === 'frequency') featVal = freqRatio * 5;
+                else if (k === 'gap') featVal = gapDecay;
+                else if (k === 'spectral') featVal = spectralVal;
+                else if (k === 'bayes') featVal = freqRatio * (1.0 / (1.0 + Math.abs(lastSeen[num] - 10)));
+                else if (k === 'momentum') featVal = Math.exp(-0.1 * lastSeen[num]);
+                else featVal = 0.5;
+
+                s += weightVal * (featVal * 100);
             });
             scores[num - 1] = Math.max(1.0, s);
         }
         return scores;
-    }, []);
+    }, [history]);
 
     // Main Simulation Handler
     const runSimulation = async (weights: AlgoWeights) => {

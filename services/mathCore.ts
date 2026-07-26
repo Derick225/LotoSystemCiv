@@ -143,12 +143,48 @@ export function computeHaarWaveletEnergy(signal: number[]): number {
 
 export function computeRobustHurst(signal: number[]): number {
     const N = signal.length;
-    if (N < 20) return 0.5;
-    const windowSizes = [Math.floor(N/2), Math.floor(N/4), Math.floor(N/8)].filter(w => w >= 4);
+    if (N < 10) return 0.5;
+
+    // Calcul de la volatilité locale continue de la série temporelle
+    const meanVal = mean(signal);
+    let totalVar = 0;
+    const diffs: number[] = [];
+    for (let i = 0; i < N; i++) {
+        const diff = signal[i] - meanVal;
+        totalVar += diff * diff;
+        if (i > 0) diffs.push(Math.abs(signal[i] - signal[i - 1]));
+    }
+    const globalStd = Math.sqrt(totalVar / N) || 1e-6;
+    const localVol = diffs.length > 0 ? mean(diffs) / (globalStd + 1e-6) : 1.0;
+
+    // Estimation adaptative continue des fenêtres basées sur la volatilité locale
+    const minWin = Math.max(4, Math.floor(4 * Math.exp(-0.15 * localVol)));
+    const maxWin = Math.min(Math.floor(N / 2), Math.max(minWin + 2, Math.floor(N * 0.75 * Math.tanh(1.0 + 0.2 * localVol))));
+
+    const numScales = 5;
+    const windowSizes: number[] = [];
+    if (maxWin > minWin) {
+        for (let s = 0; s < numScales; s++) {
+            const frac = s / (numScales - 1);
+            const wSize = Math.floor(minWin * Math.pow(maxWin / minWin, frac));
+            if (wSize >= 4 && !windowSizes.includes(wSize)) {
+                windowSizes.push(wSize);
+            }
+        }
+    }
+    if (windowSizes.length < 2) {
+        windowSizes.length = 0;
+        const w1 = Math.max(4, Math.floor(N / 2));
+        const w2 = Math.max(4, Math.floor(N / 4));
+        if (w1 >= 4) windowSizes.push(w1);
+        if (w2 >= 4 && w2 !== w1) windowSizes.push(w2);
+    }
+
     const logRs: number[] = [];
     const logSizes: number[] = [];
     for (const wSize of windowSizes) {
         const chunksCount = Math.floor(N / wSize);
+        if (chunksCount < 1) continue;
         let totalRS = 0;
         for (let i = 0; i < chunksCount; i++) {
             const chunk = signal.slice(i * wSize, (i + 1) * wSize);
@@ -157,7 +193,7 @@ export function computeRobustHurst(signal: number[]): number {
             let sum = 0;
             const z = y.map(v => { sum += v; return sum; });
             const R = Math.max(...z) - Math.min(...z);
-            const S = stdDev(chunk) || 1;
+            const S = stdDev(chunk) || 1e-6;
             totalRS += R / S;
         }
         const avgRS = totalRS / chunksCount;
@@ -170,11 +206,11 @@ export function computeRobustHurst(signal: number[]): number {
     const mX = mean(logSizes);
     const mY = mean(logRs);
     let num = 0, den = 0;
-    for(let i=0; i<logRs.length; i++) {
+    for (let i = 0; i < logRs.length; i++) {
         num += (logSizes[i] - mX) * (logRs[i] - mY);
         den += Math.pow(logSizes[i] - mX, 2);
     }
-    return den !== 0 ? Math.max(0, Math.min(1, num / den)) : 0.5;
+    return den !== 0 ? Math.max(0.01, Math.min(0.99, num / den)) : 0.5;
 }
 
 // Matrix Operations
@@ -893,6 +929,126 @@ export const calculateShannonEntropy = (history: DrawResult[]): { normalized: nu
     const maxEntropy = Math.log2(90); 
     return { normalized: entropy / maxEntropy };
 };
+
+/**
+ * Calcul d'Entropie de Tsallis non-extensive basée sur l'estimation de densité continue (Gaussienne filtrée / T-Distribution de Student).
+ * Capture les régimes de transition chaotique sans bruits ni seuils binaires de discrétisation.
+ */
+export const calculateTsallisEntropy = (
+    history: DrawResult[],
+    q: number = 1.5,
+    degreesOfFreedom: number = 5.0
+): { normalized: number; tsallisValue: number } => {
+    if (history.length === 0) return { normalized: 0, tsallisValue: 0 };
+
+    const DOMAIN_SIZE = 90;
+    const freqs = new Float32Array(DOMAIN_SIZE + 1);
+    let totalBalls = 0;
+
+    for (const d of history) {
+        for (const n of d.gagnants) {
+            if (n >= 1 && n <= DOMAIN_SIZE) {
+                freqs[n]++;
+                totalBalls++;
+            }
+        }
+    }
+
+    if (totalBalls === 0) return { normalized: 0, tsallisValue: 0 };
+
+    // Estimation de densité par Noyau T-Distribution de Student continu (Smooth KDE)
+    const empiricalProb = new Float32Array(DOMAIN_SIZE + 1);
+    for (let i = 1; i <= DOMAIN_SIZE; i++) {
+        empiricalProb[i] = freqs[i] / totalBalls;
+    }
+
+    const freqArray = Array.from(freqs.slice(1));
+    const sigma = stdDev(freqArray) || 1.0;
+    const bandwidth = Math.max(0.1, 1.06 * sigma * Math.pow(DOMAIN_SIZE, -0.2));
+
+    const smoothDensity = new Float64Array(DOMAIN_SIZE + 1);
+    let sumDensity = 0;
+    const nu = degreesOfFreedom;
+
+    for (let x = 1; x <= DOMAIN_SIZE; x++) {
+        let densityAtX = 0;
+        for (let y = 1; y <= DOMAIN_SIZE; y++) {
+            if (empiricalProb[y] > 0) {
+                const z = (x - y) / bandwidth;
+                // Student-t PDF kernel: (1 + z^2 / nu)^(-0.5 * (nu + 1))
+                const studentWeight = Math.pow(1.0 + (z * z) / nu, -0.5 * (nu + 1.0));
+                densityAtX += empiricalProb[y] * studentWeight;
+            }
+        }
+        smoothDensity[x] = densityAtX;
+        sumDensity += densityAtX;
+    }
+
+    for (let x = 1; x <= DOMAIN_SIZE; x++) {
+        smoothDensity[x] /= (sumDensity || 1.0);
+    }
+
+    let sumPq = 0;
+    for (let x = 1; x <= DOMAIN_SIZE; x++) {
+        if (smoothDensity[x] > 0) {
+            sumPq += Math.pow(smoothDensity[x], q);
+        }
+    }
+
+    let tsallisValue = 0;
+    if (Math.abs(q - 1.0) < 1e-4) {
+        let shannon = 0;
+        for (let x = 1; x <= DOMAIN_SIZE; x++) {
+            if (smoothDensity[x] > 0) {
+                shannon -= smoothDensity[x] * Math.log2(smoothDensity[x]);
+            }
+        }
+        tsallisValue = shannon;
+    } else {
+        tsallisValue = (1.0 - sumPq) / (q - 1.0);
+    }
+
+    const pUniform = 1.0 / DOMAIN_SIZE;
+    const maxTsallis = Math.abs(q - 1.0) < 1e-4
+        ? Math.log2(DOMAIN_SIZE)
+        : (1.0 - DOMAIN_SIZE * Math.pow(pUniform, q)) / (q - 1.0);
+
+    const normalized = Math.max(0, Math.min(1.0, tsallisValue / (maxTsallis || 1.0)));
+
+    return { normalized, tsallisValue };
+};
+
+/**
+ * Distance de Wasserstein-1 (Earth Mover's Distance) 1D continue entre deux distributions de probabilité.
+ * Fournit une régularisation métrique lisse et différentiable, éliminant tout seuil d'activation binaire.
+ */
+export function computeWassersteinDistance(
+    P: Float32Array | number[],
+    Q: Float32Array | number[]
+): number {
+    const N = Math.min(P.length, Q.length);
+    if (N === 0) return 0;
+
+    let sumP = 0, sumQ = 0;
+    for (let i = 0; i < N; i++) {
+        sumP += Math.max(0, P[i]);
+        sumQ += Math.max(0, Q[i]);
+    }
+    sumP = sumP || Number.EPSILON;
+    sumQ = sumQ || Number.EPSILON;
+
+    let cdfP = 0;
+    let cdfQ = 0;
+    let wassersteinDist = 0;
+
+    for (let i = 0; i < N; i++) {
+        cdfP += Math.max(0, P[i]) / sumP;
+        cdfQ += Math.max(0, Q[i]) / sumQ;
+        wassersteinDist += Math.abs(cdfP - cdfQ);
+    }
+
+    return wassersteinDist / N;
+}
 
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
     const expected = totalObservations / 90; 

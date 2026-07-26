@@ -178,3 +178,29 @@ export const getDeterministicUUID = (str: string): string => {
     return `${part1}-${part2}-${part3}-${part4}-${part5}`;
 };
 
+/**
+ * Génère une signature/hash canonique déterministe basée exclusivement sur le tirage actif et son historique propre.
+ * Garantit l'isolation absolue inter-tirages des matrices de synergie, caches et rapports analytiques.
+ */
+export const getCanonicalDrawHistoryHash = (drawName: string, history: { date?: string; gagnants?: number[] }[]): string => {
+    const cleanDraw = drawName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    let signatureStr = `${cleanDraw}_len:${history.length}`;
+    for (let i = 0; i < Math.min(25, history.length); i++) {
+        const d = history[i];
+        const gStr = Array.isArray(d?.gagnants) ? d.gagnants.join(',') : '';
+        signatureStr += `|${d?.date || i}:${gStr}`;
+    }
+
+    let h1 = 0x811c9dc5, h2 = 0x12345678, h3 = 0xabcdef01, h4 = 0x76543210;
+    const fnvPrime32 = 16777619, altPrime32 = 10995116;
+    for (let i = 0; i < signatureStr.length; i++) {
+        const char = signatureStr.charCodeAt(i);
+        h1 = Math.imul(h1 ^ char, fnvPrime32);
+        h2 = Math.imul(h2 ^ char, altPrime32);
+        h3 = Math.imul(h3 ^ char, fnvPrime32) + h1;
+        h4 = Math.imul(h4 ^ char, altPrime32) + h2;
+    }
+    const toHex8 = (num: number) => (num >>> 0).toString(16).padStart(8, '0');
+    return `${cleanDraw}_${history.length}_${toHex8(h1)}${toHex8(h2)}`;
+};
+

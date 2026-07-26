@@ -264,14 +264,22 @@ export const LearningService = {
 
       const currentWeights = await getAlgoWeights(drawName);
 
-      // Cloud Auto-Learning Delegation
+      // Cloud Auto-Learning Delegation avec Timeout 5000ms et Repli Déterministe
       const useCloudEngine = useNexusStore.getState().useCloudEngine;
       if (useCloudEngine && isSupabaseConfigured() && !customWeights) {
         try {
           console.log(`[CLOUD AUTO-LEARNING] Délégation de l'apprentissage ${drawName} vers Supabase Edge Function (self-learn)...`);
-          const response = await apiClient.post<{ success: boolean; improved: boolean; weights: any; delta: string; message?: string }>('self-learn', {
+          
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Délai dépassé pour l'Edge Function self-learn (>5000ms)")), 5000)
+          );
+
+          const cloudPromise = apiClient.post<{ success: boolean; improved: boolean; weights: any; delta: string; message?: string }>('self-learn', {
             drawName
           });
+
+          const response = await Promise.race([cloudPromise, timeoutPromise]);
+
           if (response && response.success) {
             if (response.improved && response.weights) {
               const { updateGlobalWeights } = useNexusStore.getState();
@@ -296,7 +304,7 @@ export const LearningService = {
             }
           }
         } catch (err) {
-          console.warn("[CLOUD AUTO-LEARNING] Échec de l'apprentissage Cloud, basculement sur l'apprentissage local.", err);
+          console.warn("[CLOUD AUTO-LEARNING] Échec ou timeout (>5000ms) de l'apprentissage Cloud, basculement sur l'apprentissage local déterministe.", err);
         }
       }
 

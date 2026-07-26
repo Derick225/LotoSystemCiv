@@ -110,6 +110,26 @@ export interface PredictionFeedback {
   userComment: string;
 }
 
+/**
+ * Interface générique unifiée pour les instantanés de prédictions et les logs d'apprentissage.
+ * Garantit la cohérence des types et élimine la dette technique des casts untyped.
+ */
+export interface PredictionSnapshot<
+  TWeightMap = Record<string, number>,
+  TForensicData = Record<string, any>
+> {
+  id: string;
+  userId?: string | null;
+  drawName: string;
+  targetDate?: string;
+  suggestedNumbers: number[];
+  candidates: number[];
+  confidence: number;
+  weights: TWeightMap;
+  metrics?: TForensicData;
+  createdAt?: string;
+}
+
 // --- NOUVEAUX TYPES FORENSIC ---
 
 export interface CounterfactualResult {

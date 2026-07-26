@@ -7,6 +7,7 @@ import { ALL_DRAWS } from '../constants';
 import { get, set, del, keys } from "idb-keyval";
 import { EnhancedMetrics } from './prediction/metrics.types';
 import { getDeterministicUUID } from '../utils/mathUtils';
+import { offlineQueueService } from './offlineQueueService';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
@@ -162,17 +163,10 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
         console.error("Local save snapshot failed", e);
     }
 
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return; // Only save snapshots for authenticated users
-        
-        await supabase.from('prediction_snapshots').insert({
-            ...snapshotData,
-            user_id: user.id
-        });
-    } catch (e) {
-        console.error("Failed to save prediction snapshot to cloud", e);
-    }
+    // Offline-first enqueue with automatic background reconciliation
+    offlineQueueService.enqueue('prediction_snapshot', drawName, snapshotData).catch(e => {
+        console.error("Failed to enqueue prediction snapshot for offline sync", e);
+    });
 };
 
 export const savePredictionToHistory = async (drawName: string, prediction: Prediction, drawResultId?: string, metrics?: EnhancedMetrics): Promise<PredictionHistoryItem> => {
@@ -306,12 +300,10 @@ export const saveLearningSession = async (drawName: string, sessionData: Omit<Le
         console.error("Storage error:", e);
     }
     
-    // Sync background
-    try {
-        await syncLearningSessions([session]);
-    } catch (e) {
-        console.error("Learning session sync failed", e);
-    }
+    // Sync background via offline queue
+    offlineQueueService.enqueue('learning_session', drawName, session).catch(e => {
+        console.error("Learning session offline enqueue failed", e);
+    });
     
     return session;
 };

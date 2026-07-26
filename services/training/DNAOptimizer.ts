@@ -1,4 +1,5 @@
 import { AlgoKey, AlgoWeights } from "../../types";
+import { computeWassersteinDistance } from "../mathCore";
 
 export interface DNAProfile {
   algoKeys: AlgoKey[];
@@ -472,8 +473,12 @@ export class DNAOptimizer {
       targetProfile.medianVector,
     );
     const klDiv = this.klDivergence(synergyVector, targetProfile.medianVector);
+    const wassersteinDist = computeWassersteinDistance(
+      synergyVector,
+      targetProfile.medianVector,
+    );
 
-    let distance = (cosDist + klDiv + varianceCost) / 3.0;
+    let distance = (cosDist + klDiv + varianceCost + wassersteinDist) / 4.0;
 
     if (candidateNumbers && historicalDraws && historicalDraws.length > 0) {
       const spectralSync = this.evaluateSpectral55Alignment(
@@ -682,6 +687,10 @@ export class DNAOptimizer {
         const winners = new Set(historicalDraws[d]?.gagnants || []);
         const numberBreakdowns = breakdownsByDraw[d] || {};
 
+        const predDist = new Float32Array(90);
+        const targetDist = new Float32Array(90);
+
+        let mse = 0;
         for (let n = 1; n <= 90; n++) {
           const breakdown = numberBreakdowns[n] || {};
           let predictedScore = 0;
@@ -690,9 +699,16 @@ export class DNAOptimizer {
           });
           const target = winners.has(n) ? 1.0 : 0.0;
           const error = predictedScore - target;
-          totalLoss += error * error;
-          count++;
+          mse += error * error;
+
+          predDist[n - 1] = Math.max(0, predictedScore);
+          targetDist[n - 1] = target;
         }
+
+        const wassLoss = computeWassersteinDistance(predDist, targetDist);
+        const combinedLoss = 0.5 * (mse / 90.0) + 0.5 * wassLoss;
+        totalLoss += combinedLoss;
+        count++;
       }
       return count > 0 ? totalLoss / count : 0;
     };
