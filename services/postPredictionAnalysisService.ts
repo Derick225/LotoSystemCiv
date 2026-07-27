@@ -124,7 +124,8 @@ export const healForensicReport = (report: ForensicReport): ForensicReport => {
     healed.combo.every((n) => predictedSet.has(n));
   const hasNonHit = matches.some((m: ForensicEvidence) => m.errorType !== "Hit");
 
-  if ((!healed.combo || (isComboIdenticalToPredicted && hasNonHit)) && actualFromMatches.length > 0) {
+  // Only override combo from actualFromMatches if actualFromMatches has a full set (>= 5 numbers)
+  if ((!healed.combo || healed.combo.length < 5 || (isComboIdenticalToPredicted && hasNonHit)) && actualFromMatches.length >= 5) {
     healed.combo = actualFromMatches.sort((a, b) => a - b);
   }
 

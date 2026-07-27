@@ -152,6 +152,19 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     return report.matches.filter((m) => m.errorType === "Voisin").length;
   }, [report.matches]);
 
+  const displayCombo = useMemo(() => {
+    if (Array.isArray(report.combo) && report.combo.length >= 5) {
+      return report.combo.slice(0, 5);
+    }
+    const nums = new Set<number>(report.combo || []);
+    if (Array.isArray(report.matches)) {
+      report.matches.forEach((m) => {
+        if (typeof m.actual === "number" && m.actual > 0) nums.add(m.actual);
+      });
+    }
+    return Array.from(nums).sort((a, b) => a - b).slice(0, 5);
+  }, [report.combo, report.matches]);
+
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-950 w-full max-w-6xl h-[90vh] rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
@@ -379,8 +392,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                       <div className="flex flex-col items-center gap-2">
                         <span className="text-[8px] font-black text-emerald-500 uppercase bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">Tirage Réel</span>
                         <div className="flex gap-1.5">
-                          {report.combo?.map((num, i) => (
-                            <NumberBall key={i} number={num} size="sm" glow={Array.isArray(report.matches) && report.matches.some(m => m.predicted === num && m.errorType === "Hit")} />
+                          {displayCombo.map((num, i) => (
+                            <NumberBall key={i} number={num} size="sm" glow={Array.isArray(report.matches) && report.matches.some(m => (m.predicted === num || m.actual === num) && m.errorType === "Hit")} />
                           ))}
                         </div>
                       </div>

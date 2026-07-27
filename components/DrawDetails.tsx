@@ -1,5 +1,5 @@
 
-import React, {  useEffect, Suspense, lazy, useCallback } from 'react';
+import React, { useEffect, Suspense, useCallback } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { 
   Database, Activity, Target, Share2, 
@@ -10,16 +10,17 @@ import { useToast } from './ui/Toast';
 import { LocalErrorBoundary } from './ui/LocalErrorBoundary';
 import { audioEngine } from '../utils/audioEngine';
 import { useSyncStatus } from '../hooks/useSyncStatus';
+import { lazyWithRetry } from '../utils/lazyWithRetry';
 
-// Lazy loading sécurisé des modules lourds
-const FluxHub = lazy(() => import('./tabs/FluxHub').then(m => ({ default: m.FluxHub })));
-const SignalHub = lazy(() => import('./tabs/SignalHub').then(m => ({ default: m.SignalHub })));
-const TopologyHub = lazy(() => import('./tabs/TopologyHub').then(m => ({ default: m.TopologyHub })));
-const OracleHub = lazy(() => import('./tabs/OracleHub').then(m => ({ default: m.OracleHub })));
-const SimulationTab = lazy(() => import('./tabs/SimulationTab').then(m => ({ default: m.SimulationTab })));
-const SimulationLab = lazy(() => import('./tabs/SimulationLab').then(m => ({ default: m.SimulationLab })));
-const ForensicHub = lazy(() => import('./tabs/ForensicHub').then(m => ({ default: m.ForensicHub })));
-const WhatIfSimulatorTab = lazy(() => import('./tabs/WhatIfSimulatorTab').then(m => ({ default: m.WhatIfSimulatorTab })));
+// Lazy loading sécurisé des modules lourds avec retentatives automatiques
+const FluxHub = lazyWithRetry(() => import('./tabs/FluxHub'), 'FluxHub');
+const SignalHub = lazyWithRetry(() => import('./tabs/SignalHub'), 'SignalHub');
+const TopologyHub = lazyWithRetry(() => import('./tabs/TopologyHub'), 'TopologyHub');
+const OracleHub = lazyWithRetry(() => import('./tabs/OracleHub'), 'OracleHub');
+const SimulationTab = lazyWithRetry(() => import('./tabs/SimulationTab'), 'SimulationTab');
+const SimulationLab = lazyWithRetry(() => import('./tabs/SimulationLab'), 'SimulationLab');
+const ForensicHub = lazyWithRetry(() => import('./tabs/ForensicHub'), 'ForensicHub');
+const WhatIfSimulatorTab = lazyWithRetry(() => import('./tabs/WhatIfSimulatorTab'), 'WhatIfSimulatorTab');
 
 type MainTab = 'Flux' | 'Signaux' | 'Topologie' | 'Oracle' | 'Simulation' | 'Labo' | 'Forensic' | 'WhatIf';
 

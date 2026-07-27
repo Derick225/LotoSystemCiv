@@ -7,6 +7,8 @@ import { audioEngine } from "../utils/audioEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { generateMasterPrediction } from "../services/predictionEngine";
 import { runForensicAutopsy } from "../services/postPredictionAnalysisService";
+import { normalizeWeights, adjustWeightsForRegime } from "../services/prediction/weightsManager";
+import { computeRobustHurst, calculateShannonEntropy } from "../services/mathCore";
 
 interface ForensicTimeMachineProps {
   drawName: string;
@@ -184,25 +186,89 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     setIsCalibrating(true);
     audioEngine.play("scan");
     try {
-      const divergences = simulationResult.forensicReport.scoreDivergence;
+      const divergences = simulationResult.forensicReport.scoreDivergence as { algo: string; impact: number }[];
       const newWeights = { ...currentWeights };
-      let adjusted = 0;
+      let adjustedCount = 0;
 
-      divergences.forEach((div: { algo: string; impact: number }) => {
+      // 1. Calcul de la norme RMS du vecteur d'impact pour un pas d'apprentissage AdaGrad déterministe
+      const sumSquaredImpact = divergences.reduce((sum, d) => sum + Math.pow(d.impact || 0, 2), 0);
+      const rmsImpact = Math.sqrt(sumSquaredImpact / Math.max(1, divergences.length));
+      // Pas d'apprentissage continu adaptatif : inversement proportionnel à la variance du signal
+      const adaptiveLearningRate = 0.10 / (1.0 + rmsImpact / 50.0);
+
+      divergences.forEach((div) => {
         const key = div.algo as keyof AlgoWeights;
         if (typeof newWeights[key] === "number") {
-          // Continuous learning step based on forensic divergence impact
-          const learningFactor = 0.05;
-          const delta = div.impact * learningFactor;
-          newWeights[key] = Math.max(0.1, Math.min(10.0, newWeights[key] + delta));
-          adjusted++;
+          const delta = (div.impact / 100.0) * adaptiveLearningRate;
+          newWeights[key] = newWeights[key] + delta;
+          adjustedCount++;
         }
       });
 
-      if (adjusted > 0) {
-        updateGlobalWeights(newWeights);
+      // 2. Normalisation L1 stricte avec bornes topologiques
+      let calibratedWeights = normalizeWeights(newWeights);
+
+      // 3. Modulation par le régime stochastique local (Hurst & Entropie) à T-historicalIndex
+      const historySub = drawHistory.slice(historicalIndex + 1);
+      if (historySub.length >= 10) {
+        const recentDrawNumbers = historySub.slice(0, 20).flatMap((d) => d.gagnants);
+        const hurstVal = computeRobustHurst(recentDrawNumbers);
+        const entropyVal = calculateShannonEntropy(historySub).normalized;
+        const volatilityVal = Math.min(100, Math.max(0, (1.0 - hurstVal) * 100));
+
+        calibratedWeights = adjustWeightsForRegime(calibratedWeights, {
+          regime: hurstVal > 0.55 ? "PERSISTENT" : "CHAOTIQUE",
+          hurst: hurstVal,
+          entropy: entropyVal,
+          volatility: volatilityVal,
+        });
+      }
+
+      if (adjustedCount > 0) {
+        updateGlobalWeights(calibratedWeights, drawName);
         audioEngine.play("success");
-        showToast(`Calibration forensique appliquée sur ${adjusted} algorithmes à T-${historicalIndex}`, "success");
+        showToast(
+          `Calibration forensique appliquée sur ${adjustedCount} algorithmes à T-${historicalIndex} (Régime continu)`,
+          "success"
+        );
+
+        // 4. Ré-exécution immédiate déterministe de la simulation sur le tirage sélectionné
+        const pastContextHistory = drawHistory.slice(historicalIndex + 1);
+        if (pastContextHistory.length >= 5 && targetDraw) {
+          const reSimMaster = await generateMasterPrediction(
+            drawName,
+            pastContextHistory,
+            pastContextHistory.length,
+            calibratedWeights
+          );
+          if (reSimMaster) {
+            const hits = reSimMaster.suggestedNumbers.filter((n) =>
+              targetDraw.gagnants.includes(n)
+            );
+            const accuracy = Math.round((hits.length / 5) * 100);
+            const reReport = await runForensicAutopsy(
+              drawName,
+              targetDraw.date,
+              reSimMaster.suggestedNumbers,
+              targetDraw.gagnants,
+              reSimMaster.breakdown,
+              `tm_calib_${targetDraw.id}`,
+              targetDraw.id,
+              true,
+              pastContextHistory
+            );
+
+            setSimulationResult({
+              accuracy,
+              hits,
+              predicted: reSimMaster.suggestedNumbers,
+              actual: targetDraw.gagnants,
+              confidence: Math.round(reSimMaster.confidence * 100),
+              xapExp: reSimMaster.xapExp,
+              forensicReport: reReport,
+            });
+          }
+        }
       }
     } catch (err) {
       showToast("Échec de la calibration.", "error");

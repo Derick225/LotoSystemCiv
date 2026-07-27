@@ -376,7 +376,7 @@ export const evolveNeuralDNA = async (
     if (onTelemetry) {
       const stepsCount = 5;
       for (let i = 1; i <= stepsCount; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await new Promise((resolve) => setTimeout(resolve, 5));
         onTelemetry({
           gen: Math.round((options.generations / stepsCount) * i),
           bestFitness: cachedResult.report?.score || 0,
@@ -466,7 +466,7 @@ export const runLoopSimulation = async (
         if (abortSignal?.aborted) {
           throw new Error("Simulation interrompue.");
         }
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => setTimeout(resolve, 2));
         const percent = Math.round(((i + 1) / cachedResult.steps.length) * 100);
         onProgress(percent, cachedResult.steps[i]);
       }

@@ -4,6 +4,7 @@ import { NexusProvider } from './components/NexusProvider';
 import { useNexusStore } from './store/useNexusStore';
 import { useAuth } from './hooks/useAuth';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
+import { useNeuralWarmup } from './hooks/useNeuralWarmup';
 import { AppShell, ViewMode } from './components/layout/AppShell';
 import { GlobalErrorBoundary } from './components/ui/GlobalErrorBoundary';
 import { LocalErrorBoundary } from './components/ui/LocalErrorBoundary';
@@ -18,19 +19,20 @@ import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw } from './types';
 import { ALL_DRAWS } from './constants';
 import { motion, AnimatePresence } from 'framer-motion';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 
-const BootSequence = lazy(() => import('./components/intro/BootSequence').then(m => ({ default: m.BootSequence })));
-const TutorialOverlay = lazy(() => import('./components/ui/TutorialOverlay').then(m => ({ default: m.TutorialOverlay })));
-const InstallPrompt = lazy(() => import('./components/InstallPrompt').then(m => ({ default: m.InstallPrompt })));
-const AuthScreen = lazy(() => import('./components/auth/AuthScreen').then(m => ({ default: m.AuthScreen })));
-const ResetPasswordScreen = lazy(() => import('./components/auth/ResetPasswordScreen').then(m => ({ default: m.ResetPasswordScreen })));
-const SubscriptionWall = lazy(() => import('./components/auth/SubscriptionWall').then(m => ({ default: m.SubscriptionWall })));
-const GlobalNumberHUD = lazy(() => import('./components/ui/GlobalNumberHUD').then(m => ({ default: m.GlobalNumberHUD })));
+const BootSequence = lazyWithRetry(() => import('./components/intro/BootSequence'), 'BootSequence');
+const TutorialOverlay = lazyWithRetry(() => import('./components/ui/TutorialOverlay'), 'TutorialOverlay');
+const InstallPrompt = lazyWithRetry(() => import('./components/InstallPrompt'), 'InstallPrompt');
+const AuthScreen = lazyWithRetry(() => import('./components/auth/AuthScreen'), 'AuthScreen');
+const ResetPasswordScreen = lazyWithRetry(() => import('./components/auth/ResetPasswordScreen'), 'ResetPasswordScreen');
+const SubscriptionWall = lazyWithRetry(() => import('./components/auth/SubscriptionWall'), 'SubscriptionWall');
+const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumberHUD'), 'GlobalNumberHUD');
 
-const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(m => ({ default: m.GlobalDashboard })));
-const DrawDetails = lazy(() => import('./components/DrawDetails').then(m => ({ default: m.DrawDetails })));
-const AdminPanel = lazy(() => import('./components/admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
-const UserWallet = lazy(() => import('./components/UserWallet').then(m => ({ default: m.UserWallet })));
+const GlobalDashboard = lazyWithRetry(() => import('./components/GlobalDashboard'), 'GlobalDashboard');
+const DrawDetails = lazyWithRetry(() => import('./components/DrawDetails'), 'DrawDetails');
+const AdminPanel = lazyWithRetry(() => import('./components/admin/AdminPanel'), 'AdminPanel');
+const UserWallet = lazyWithRetry(() => import('./components/UserWallet'), 'UserWallet');
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -76,6 +78,9 @@ const AppContent: React.FC = () => {
     return sessionStorage.getItem('nexus_booted') === 'true';
   });
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  // Initialisation et pré-chauffage automatique du Neural Engine dès la fin de la BootSequence
+  const warmupState = useNeuralWarmup(isBooted);
 
   useEffect(() => {
     initializeStore();

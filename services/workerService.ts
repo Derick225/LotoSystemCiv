@@ -250,6 +250,23 @@ class WorkerService {
             }
         }
     }
+
+    public async warmup(drawName: string = "Loto 5/90"): Promise<{ ready: boolean; latencyMs: number }> {
+        const start = performance.now();
+        try {
+            if (!this.workerReady || !this.localWorker) {
+                this.initLocalWorker();
+            }
+            if (this.localWorker) {
+                // Lightweight ping task to force Web Worker JIT parse and memory warm-up
+                await this.runInLocalWorker('warmup', { drawName }, []);
+            }
+        } catch (e) {
+            console.debug("[Nexus Worker] Warmup fallback:", e);
+        }
+        const latencyMs = Math.round(performance.now() - start);
+        return { ready: true, latencyMs };
+    }
 }
 
 export const workerService = new WorkerService();

@@ -212,7 +212,8 @@ export const analyzeHarmonyLinear = (
 
     let stdDevVariance = criticalVariance * 0.25;
     if (history && history.length > 0) {
-      const historyVariances = history.map(draw => {
+      const historySample = history.length > 500 ? history.slice(0, 500) : history;
+      const historyVariances = historySample.map(draw => {
         const sortedDraw = [...draw.gagnants].sort((a, b) => a - b);
         if (sortedDraw.length <= 1) return 0;
         let localGapSum = 0;

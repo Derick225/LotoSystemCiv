@@ -123,7 +123,7 @@ const computeBootstrapCI = async (data: number[], iterations: number = 200, prng
     // Simulation du score pour le bootstrap (proportionnel au rendement par rapport à la taille théorique)
     scores.push((sum / n) * (100 / drawWinnersSize)); 
     
-    if (i % 50 === 0) await new Promise((r) => setTimeout(r, 0));
+    if (i % 250 === 0) await new Promise((r) => setTimeout(r, 0));
   }
 
   means.sort((a, b) => a - b);
@@ -377,7 +377,7 @@ export const runBacktestTraining = async (
     windowScores.push(hitCount);
 
     if (onProgress) onProgress(Math.round(((idx + 1) / testIndices.length) * 100));
-    if (idx % 2 === 0) await new Promise((r) => setTimeout(r, 0));
+    if (idx % 10 === 0) await new Promise((r) => setTimeout(r, 0));
   }
 
   const totalTests = trainingResults.length;

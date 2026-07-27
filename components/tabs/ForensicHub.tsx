@@ -172,6 +172,22 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
     return reports.length > 0 ? reports[0] : null;
   }, [selectedReport, reports]);
 
+  // Guaranteed 5 real draw numbers for official draw combo
+  const displayCombo = useMemo(() => {
+    if (!activeReport) return [];
+    if (Array.isArray(activeReport.combo) && activeReport.combo.length >= 5) {
+      return activeReport.combo.slice(0, 5);
+    }
+    // Search in history for the real draw to display all 5 real winning numbers
+    const matchedDraw = history.find(
+      (h) => h.drawName === activeReport.drawName && (h.date === activeReport.date || h.id === activeReport.drawResultId)
+    );
+    if (matchedDraw && Array.isArray(matchedDraw.gagnants) && matchedDraw.gagnants.length >= 5) {
+      return matchedDraw.gagnants.slice(0, 5);
+    }
+    return activeReport.combo || [];
+  }, [activeReport, history]);
+
   // Derived Drift Metrics
   const driftMetrics = useMemo(() => {
     let hurstVal = 0.54;
@@ -458,11 +474,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
                             Tirage Réel Officiel
                           </span>
                           <div className="flex gap-1.5 flex-wrap">
-                            {activeReport.combo?.map((num, idx) => {
+                            {displayCombo.map((num, idx) => {
                               const isHit =
                                 Array.isArray(activeReport.matches) &&
                                 activeReport.matches.some(
-                                  (m) => m.predicted === num && m.errorType === "Hit"
+                                  (m) => (m.predicted === num || m.actual === num) && m.errorType === "Hit"
                                 );
                               return (
                                 <div

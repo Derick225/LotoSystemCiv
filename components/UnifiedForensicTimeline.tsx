@@ -272,21 +272,33 @@ export const UnifiedForensicTimeline: React.FC<UnifiedForensicTimelineProps> = (
 
                   {/* Draw Balls (Compact) */}
                   <div className="flex gap-1">
-                    {rep.combo?.slice(0, 5).map((n) => {
-                      const isHit = Array.isArray(rep.matches) && rep.matches.some(m => m.predicted === n && m.errorType === "Hit");
-                      return (
-                        <div
-                          key={n}
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shadow-sm ${
-                            isHit
-                              ? "bg-emerald-500 text-white"
-                              : "bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800 text-slate-600 dark:text-slate-400"
-                          }`}
-                        >
-                          {n}
-                        </div>
-                      );
-                    })}
+                    {(() => {
+                      let comboList = Array.isArray(rep.combo) && rep.combo.length >= 5 ? rep.combo.slice(0, 5) : [];
+                      if (comboList.length < 5) {
+                        const setNums = new Set<number>(rep.combo || []);
+                        if (Array.isArray(rep.matches)) {
+                          rep.matches.forEach((m) => {
+                            if (typeof m.actual === "number" && m.actual > 0) setNums.add(m.actual);
+                          });
+                        }
+                        comboList = Array.from(setNums).sort((a, b) => a - b).slice(0, 5);
+                      }
+                      return comboList.map((n) => {
+                        const isHit = Array.isArray(rep.matches) && rep.matches.some(m => (m.predicted === n || m.actual === n) && m.errorType === "Hit");
+                        return (
+                          <div
+                            key={n}
+                            className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shadow-sm ${
+                              isHit
+                                ? "bg-emerald-500 text-white"
+                                : "bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800 text-slate-600 dark:text-slate-400"
+                            }`}
+                          >
+                            {n}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
 
                   {/* Drift and Reality Gauges */}
