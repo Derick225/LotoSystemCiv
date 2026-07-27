@@ -113,29 +113,26 @@ export const calculateCombinationEnergyDetailed = (
     repetitionPenalty = Math.min(25.0, Math.pow(zIntersection, 2.0));
   }
 
-  // 2. Parité : Filtre Gaussien Continu (Ratio optimal Pair/Impair 2-3 ou 3-2 pour N=5)
+  // 2. Parité : Loi binomiale B(combo.length, 0.5)
   let parityPenalty = 0.0;
   if (combo.length > 0) {
     const evens = combo.filter((n) => n % 2 === 0).length;
-    const targetEvens = combo.length * 0.5;
-    const zEvens = (evens - targetEvens) / 0.85;
-    parityPenalty = 18.0 * (1.0 - Math.exp(-0.5 * Math.pow(zEvens, 2.0)));
+    const expectedEvens = combo.length * 0.5;
+    const stdEvens = Math.sqrt(combo.length * 0.25);
+    const zEvens = (evens - expectedEvens) / stdEvens;
+    parityPenalty = Math.min(10.0, Math.pow(zEvens, 2.0));
   }
 
-  // 3. Dizaines (Décades) : Barrière Gaussienne Continue (Max 3 numéros par dizaine)
+  // 3. Dizaines (Décades) : Loi Multinomiale
   let decadePenalty = 0.0;
   if (combo.length > 0) {
     const decades = new Array(10).fill(0);
     for (const num of combo) decades[Math.floor(num / 10.0)]++;
-    for (let k = 0; k < 10; k++) {
-      if (decades[k] > 3) {
-        const excess = decades[k] - 3;
-        decadePenalty += 20.0 * (Math.exp(1.2 * excess) - 1.0);
-      } else if (decades[k] === 3) {
-        decadePenalty += 1.5;
-      }
-    }
-    decadePenalty = Math.min(35.0, decadePenalty);
+    const maxDecade = decades.reduce((a, b) => Math.max(a, b), 0);
+    const expectedDecade = combo.length / 10.0;
+    const stdDecades = Math.sqrt(combo.length * 0.1 * 0.9);
+    const zDecades = Math.max(0.0, maxDecade - expectedDecade) / stdDecades;
+    decadePenalty = Math.min(15.0, Math.pow(zDecades, 2.0));
   }
 
   // 4. Amplitude : Z-score Gaussien Empirique
@@ -378,14 +375,14 @@ export const calculateCombinationEnergy = (
  * Unifie la construction gloutonne sur le gain marginal d'énergie et execute
  * un recuit simulé déterministe avec reheat et opérateurs de mutations spécialisées.
  */
-export const generateCombination = (
+export const generateCombination = async (
   sortedScores: ScoredNumber[],
   affinityMap: Float32Array[],
   calibration: EmpiricalCalibration,
   outsiderCount: number,
   lastDraw: number[] | undefined,
   regimeStateNormalized: number,
-): number[] => {
+): Promise<number[]> => {
   const outsiderRatio = outsiderCount / DRAW_SIZE;
   const scoresMap = new Map<number, number>();
   const breakdownsMap = new Map<number, ScoreBreakdown>();
@@ -560,15 +557,39 @@ export const generateCombination = (
   const iterationsPerTemp = Math.max(8, Math.floor(Math.log(stateSpaceSize) * 3.5 * Math.exp(regimeStateNormalized)));
 
   let stagnationCounter = 0;
-  
-  // Limite mathématique du nombre d'itérations externes (pire cas refroidissement 0.99 avec marge x2)
-  const maxCoolingRate = 0.99;
-  const maxExternalIterations = Math.ceil(Math.abs(Math.log(1e-4) / Math.log(maxCoolingRate))) * 2;
-  let externalIterations = 0;
+
+  // CORRECTIF PERFORMANCE : mesuré empiriquement sur données réelles (Baraka, 240 tirages),
+  // le plafond précédent (2x le pire cas théorique sans réchauffe, ~1833 itérations) était
+  // SYSTÉMATIQUEMENT atteint intégralement — la boucle ne convergeait jamais naturellement
+  // avant la limite, causant ~20 secondes par prédiction. Deux causes combinées :
+  // 1) le mécanisme de réchauffe peut se déclencher très souvent en cas de stagnation
+  //    fréquente près d'un optimum local, entretenant une tension avec le refroidissement ;
+  // 2) le plafond de 2x était lui-même trop généreux pour un usage interactif.
+  // On plafonne maintenant les DEUX leviers : le nombre total d'itérations externes (budget
+  // resserré, toujours dérivé du pire cas théorique mais avec une marge réduite) ET le nombre
+  // de réchauffes autorisées (au-delà, le refroidissement continue sans plus être contré).
+  // bestCombo (déjà suivi tout au long de la recherche) garantit qu'on ne perd jamais la
+  // meilleure solution trouvée, quel que soit le point d'arrêt.
+  const worstCaseCoolingSteps = Math.log(1e-4) / Math.log(0.99);
+  const maxOuterIterations = Math.ceil(worstCaseCoolingSteps * 0.4);
+  const maxReheatEvents = Math.max(3, Math.ceil(Math.log2(stateSpaceSize)));
+  let reheatEventCount = 0;
+  let outerIterationCount = 0;
 
   // --- ÉTAPE 4 : RECUIT SIMULÉ ULTRA ROBUSTE ---
-  while (temperature > minTemperature && externalIterations < maxExternalIterations) {
-    externalIterations++;
+  while (temperature > minTemperature && outerIterationCount < maxOuterIterations) {
+    outerIterationCount++;
+
+    // CORRECTIF RÉACTIVITÉ : céder le contrôle au navigateur toutes les 15 itérations
+    // externes. Sans ce point de cession, même une recherche rapide en soi (quelques
+    // secondes) s'exécute comme un unique bloc synchrone ininterrompu, gelant l'interface
+    // (aucun rendu, aucune interaction possible) pendant toute sa durée. La fréquence (15)
+    // équilibre réactivité perçue et surcoût de planification : assez fréquent pour rester
+    // fluide, assez espacé pour ne pas dominer le temps de calcul utile.
+    if (outerIterationCount % 15 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
     const energyVariances: number[] = [];
     
     for (let i = 0; i < iterationsPerTemp; i++) {
@@ -702,10 +723,11 @@ export const generateCombination = (
       }
     }
 
-    // --- REHEAT (Anti-Minima Locaux) ---
-    if (stagnationCounter >= 30) {
+    // --- REHEAT (Anti-Minima Locaux), plafonné à maxReheatEvents ---
+    if (stagnationCounter >= 30 && reheatEventCount < maxReheatEvents) {
       temperature = Math.min(initialTemperature * 1.5, temperature * 1.15);
       stagnationCounter = 0;
+      reheatEventCount++;
     }
 
     const avgVariance = energyVariances.length > 0 
@@ -720,110 +742,5 @@ export const generateCombination = (
     temperature *= adaptiveCoolingRate;
   }
 
-  const rawBest = bestCombo.sort((a, b) => a - b);
-  return applyContinuousDecadeAndParityFilter(rawBest, scoresMap, affinityMap, allCandidatesPool);
-};
-
-/**
- * FILTRE GAUSSIEN CONTINU DE POST-PROCESSING (BALANCE DÉCENNALE ET PARITÉ)
- * Garantit qu'aucune combinaison finale n'excède 3 numéros par dizaine
- * et respecte strictement le ratio Pair/Impair 2-3 ou 3-2.
- */
-export const applyContinuousDecadeAndParityFilter = (
-  combo: number[],
-  scoresMap: Map<number, number>,
-  affinityMap: Float32Array[],
-  candidatePool: number[]
-): number[] => {
-  if (!combo || combo.length !== DRAW_SIZE) return combo;
-  let current = [...combo];
-
-  const getDecadeViolations = (nums: number[]) => {
-    const decades = new Array(10).fill(0);
-    nums.forEach(n => decades[Math.floor(n / 10)]++);
-    return decades.findIndex(count => count > 3);
-  };
-
-  const getParityDeviation = (nums: number[]) => {
-    const evens = nums.filter(n => n % 2 === 0).length;
-    if (evens < 2) return -1; // Trop d'impairs
-    if (evens > 3) return 1;  // Trop de pairs
-    return 0; // Parité idéale 2-3 ou 3-2
-  };
-
-  let maxAttempts = 15;
-  let attempts = 0;
-
-  while (attempts < maxAttempts) {
-    const badDecade = getDecadeViolations(current);
-    const parityDev = getParityDeviation(current);
-
-    if (badDecade === -1 && parityDev === 0) {
-      break; // Combinaison conforme aux contraintes
-    }
-
-    attempts++;
-
-    let targetIdx = -1;
-    let worstScore = Infinity;
-
-    if (badDecade !== -1) {
-      current.forEach((num, idx) => {
-        if (Math.floor(num / 10) === badDecade) {
-          const score = scoresMap.get(num) || 0;
-          if (score < worstScore) {
-            worstScore = score;
-            targetIdx = idx;
-          }
-        }
-      });
-    } else if (parityDev !== 0) {
-      const targetParityMod = parityDev > 0 ? 0 : 1;
-      current.forEach((num, idx) => {
-        if ((num % 2) === targetParityMod) {
-          const score = scoresMap.get(num) || 0;
-          if (score < worstScore) {
-            worstScore = score;
-            targetIdx = idx;
-          }
-        }
-      });
-    }
-
-    if (targetIdx === -1) targetIdx = 0;
-
-    let bestReplacement = -1;
-    let bestReplacementScore = -Infinity;
-
-    for (const candidate of candidatePool) {
-      if (current.includes(candidate)) continue;
-      const candidateDecade = Math.floor(candidate / 10);
-      const candidateIsEven = candidate % 2 === 0;
-
-      if (badDecade !== -1 && candidateDecade === badDecade) continue;
-      if (parityDev > 0 && candidateIsEven) continue;
-      if (parityDev < 0 && !candidateIsEven) continue;
-
-      const proposed = [...current];
-      proposed[targetIdx] = candidate;
-
-      const proposedDecades = new Array(10).fill(0);
-      proposed.forEach(n => proposedDecades[Math.floor(n / 10)]++);
-      if (proposedDecades.some(c => c > 3)) continue;
-
-      const candScore = scoresMap.get(candidate) || 0;
-      if (candScore > bestReplacementScore) {
-        bestReplacementScore = candScore;
-        bestReplacement = candidate;
-      }
-    }
-
-    if (bestReplacement !== -1) {
-      current[targetIdx] = bestReplacement;
-    } else {
-      break;
-    }
-  }
-
-  return current.sort((a, b) => a - b);
+  return bestCombo.sort((a, b) => a - b);
 };

@@ -1,63 +1,39 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { deletePrediction } from "../../services/predictionHistoryService";
-import {
-  deleteForensicReportLocal,
-  syncForensicReportsWithCloud,
-} from "../../services/postPredictionAnalysisService";
+import { deleteForensicReportLocal, syncForensicReportsWithCloud } from "../../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../../services/syncService";
 import { PredictionForensics } from "../PredictionForensics";
-import {
-  Target,
-  Trash2,
-  RefreshCw,
-  Cloud,
-  History,
-  Clock,
-  Activity,
-  Zap,
-  Sliders,
-  Sparkles,
-  Maximize2,
-  CheckCircle2,
-  AlertTriangle,
-  FileSearch,
-} from "lucide-react";
-import { ForensicReport, PredictionHistoryItem, AlgoWeights } from "../../types";
-import { useForensicData } from "../../hooks/useForensicData";
+import { Target, Trash2, RefreshCw, Cloud, History, Clock, BookOpen, Activity, CheckCircle2 } from "lucide-react";
+import { ForensicReport, PredictionHistoryItem } from "../../types";
+import { useForensicData } from '../../hooks/useForensicData';
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import { PredictionHistory } from "../PredictionHistory";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
-import { UnifiedForensicRadarPanel } from "../UnifiedForensicRadarPanel";
 
 type ForensicMode = "prediction" | "historique" | "timemachine";
 
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
-  const regime = useNexusStore((state) => state.regime);
-  const fractal = useNexusStore((state) => state.fractal);
   const { showToast } = useToast();
-
-  const {
-    reports,
-    pendingPredictions,
-    setPendingPredictions,
-    refreshData: refreshForensicData,
-    setReports,
+  
+  const { 
+      reports, 
+      pendingPredictions, 
+      setPendingPredictions,
+      refreshData: refreshForensicData, 
+      setReports 
   } = useForensicData(drawName);
 
   const [syncing, setSyncing] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
-  const [showDeepInspection, setShowDeepInspection] = useState(false);
   const [mode, setMode] = useState<ForensicMode>("prediction");
-  const [applyingAdjustments, setApplyingAdjustments] = useState(false);
 
-  // SYMBIOSE : Navigation croisée
+  // SYMBIOSE : Écouteur d'événements pour navigation croisée
   useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -77,37 +53,29 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
   }, [refreshForensicData]);
 
   const handleRefresh = () => {
-    try {
-      audioEngine.play("click");
-    } catch (e) {}
+    try { audioEngine.play("click"); } catch(e) {}
     refreshForensicData();
   };
 
   const handleSync = async () => {
-    try {
-      audioEngine.play("click");
-    } catch (e) {}
+    try { audioEngine.play("click"); } catch(e) {}
     setSyncing(true);
     try {
       const synced = await syncForensicReportsWithCloud();
       const filtered = synced.filter((r) => r.drawName === drawName);
-
+      
       const uniqueMap = new Map<string, ForensicReport>();
       filtered.forEach((r) => {
         if (r && r.id) {
           uniqueMap.set(r.id, r);
         }
       });
-
+      
       setReports(Array.from(uniqueMap.values()));
-      try {
-        audioEngine.play("success");
-      } catch (e) {}
+      try { audioEngine.play("success"); } catch(e) {}
       showToast("Synchronisation Cloud terminée.", "success");
     } catch (e) {
-      try {
-        audioEngine.play("error");
-      } catch (e) {}
+      try { audioEngine.play("error"); } catch(e) {}
       showToast("Erreur de synchronisation.", "error");
     } finally {
       setSyncing(false);
@@ -116,9 +84,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
 
   const handleDeleteReport = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      audioEngine.play("click");
-    } catch (e) {}
+    try { audioEngine.play("click"); } catch(e) {}
     if (!confirm("Supprimer ce rapport Forensic (Local + Cloud) ?")) return;
 
     try {
@@ -130,610 +96,265 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(({ drawNam
       await deleteForensicReportCloud(id);
       setReports((prev) => prev.filter((r) => r.id !== id));
       if (selectedReport?.id === id) setSelectedReport(null);
-      try {
-        audioEngine.play("success");
-      } catch (e) {}
+      try { audioEngine.play("success"); } catch(e) {}
       showToast("Rapport supprimé.", "info");
     } catch (e) {
-      try {
-        audioEngine.play("error");
-      } catch (e) {}
+      try { audioEngine.play("error"); } catch(e) {}
       showToast("Erreur suppression.", "error");
     }
   };
 
   const handleDeletePending = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      audioEngine.play("click");
-    } catch (e) {}
+    try { audioEngine.play("click"); } catch(e) {}
     if (!confirm("Supprimer cette prédiction en attente ?")) return;
 
     try {
       await deletePrediction(id);
-      setPendingPredictions((prev: PredictionHistoryItem[]) =>
-        prev.filter((p: PredictionHistoryItem) => p.id !== id)
-      );
-      try {
-        audioEngine.play("success");
-      } catch (e) {}
+      setPendingPredictions((prev: PredictionHistoryItem[]) => prev.filter((p: PredictionHistoryItem) => p.id !== id));
+      try { audioEngine.play("success"); } catch(e) {}
       showToast("Prédiction supprimée.", "info");
     } catch (e) {
-      try {
-        audioEngine.play("error");
-      } catch (e) {}
+      try { audioEngine.play("error"); } catch(e) {}
       showToast("Erreur lors de la suppression.", "error");
     }
   };
 
-  // Active Report
-  const activeReport = useMemo(() => {
-    if (selectedReport) return selectedReport;
-    return reports.length > 0 ? reports[0] : null;
-  }, [selectedReport, reports]);
-
-  // Guaranteed 5 real draw numbers for official draw combo
-  const displayCombo = useMemo(() => {
-    if (!activeReport) return [];
-    if (Array.isArray(activeReport.combo) && activeReport.combo.length >= 5) {
-      return activeReport.combo.slice(0, 5);
-    }
-    // Search in history for the real draw to display all 5 real winning numbers
-    const matchedDraw = history.find(
-      (h) => h.drawName === activeReport.drawName && (h.date === activeReport.date || h.id === activeReport.drawResultId)
-    );
-    if (matchedDraw && Array.isArray(matchedDraw.gagnants) && matchedDraw.gagnants.length >= 5) {
-      return matchedDraw.gagnants.slice(0, 5);
-    }
-    return activeReport.combo || [];
-  }, [activeReport, history]);
-
-  // Derived Drift Metrics
-  const driftMetrics = useMemo(() => {
-    let hurstVal = 0.54;
-    if (fractal && fractal.length > 0 && fractal[0].hurst !== undefined) {
-      hurstVal = fractal[0].hurst;
-    } else if (regime?.chaosDimension) {
-      hurstVal = Math.max(0.3, Math.min(0.85, 2 - regime.chaosDimension));
-    }
-
-    let entropyVal = 4.25;
-    if (activeReport?.shannon_entropy !== undefined) {
-      entropyVal = activeReport.shannon_entropy;
-    } else if (reports.length > 0 && reports[0].shannon_entropy !== undefined) {
-      entropyVal = reports[0].shannon_entropy;
-    }
-
-    let statusLabel = "STABLE";
-    let statusColor = "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
-    let desc = "Régime déterministe régulier. Alignement optimal des poids.";
-
-    if (hurstVal < 0.45 || entropyVal > 4.8) {
-      statusLabel = "FORTE DÉRIVE";
-      statusColor = "text-rose-500 bg-rose-500/10 border-rose-500/20";
-      desc = "Fluctuations chaotiques élevées. Réajustement recommandé.";
-    } else if (hurstVal < 0.55 || entropyVal > 4.4) {
-      statusLabel = "DÉRIVE MODÉRÉE";
-      statusColor = "text-amber-500 bg-amber-500/10 border-amber-500/20";
-      desc = "Micro-variations de régime. Poids sous surveillance active.";
-    }
-
-    const tension = activeReport?.topologicalTensionIndex ?? 22;
-    const klDiv = activeReport?.kl_divergence ?? 0.048;
-
-    return {
-      hurstVal,
-      entropyVal,
-      statusLabel,
-      statusColor,
-      desc,
-      tension,
-      klDiv,
-    };
-  }, [fractal, regime, activeReport, reports]);
-
-  // Top Underperforming Algorithms & Suggested Boosts
-  const correctionData = useMemo(() => {
-    const defaultAlgos = [
-      {
-        name: "Markov Transition (2nd Order)",
-        algoKey: "markovOrder2",
-        deficit: 18.5,
-        boost: 0.08,
-        reason: "Sous-pondération sur transitions paires",
-      },
-      {
-        name: "Fractal Hurst Rescaled Range",
-        algoKey: "fractalHurst",
-        deficit: 14.2,
-        boost: 0.06,
-        reason: "Décalage d'échelle de résonance",
-      },
-      {
-        name: "Hawkes Spatio-Temporal Volatility",
-        algoKey: "hawkesIntensity",
-        deficit: 11.0,
-        boost: 0.04,
-        reason: "Inertie temporelle sur salves",
-      },
-    ];
-
-    if (!reports || reports.length === 0) return defaultAlgos;
-
-    if (activeReport?.counterfactuals && activeReport.counterfactuals.length >= 3) {
-      return activeReport.counterfactuals.slice(0, 3).map((cf) => ({
-        name: cf.algo.replace(/_/g, " "),
-        algoKey: cf.algo,
-        deficit: cf.improvement,
-        boost: Math.max(0.02, cf.optimalWeight - cf.originalWeight),
-        reason: `Gain d'alignement estimé: +${cf.improvement.toFixed(1)}%`,
-      }));
-    }
-
-    return defaultAlgos;
-  }, [reports, activeReport]);
-
-  // 1-Click Apply Weight Adjustments
-  const handleApplyAdjustments = async () => {
-    try {
-      audioEngine.play("click");
-    } catch (e) {}
-    setApplyingAdjustments(true);
-
-    try {
-      const updatedWeights: Record<string, number> = {
-        ...(globalWeights as unknown as Record<string, number>),
-      };
-
-      correctionData.forEach((item) => {
-        const current = updatedWeights[item.algoKey] || 0.1;
-        updatedWeights[item.algoKey] = Math.min(0.4, current + item.boost);
-      });
-
-      const total = Object.values(updatedWeights).reduce((a, b) => a + b, 0);
-      if (total > 0) {
-        Object.keys(updatedWeights).forEach((k) => {
-          updatedWeights[k] /= total;
-        });
-      }
-
-      await updateGlobalWeights(updatedWeights as unknown as AlgoWeights, drawName);
-      try {
-        audioEngine.play("success");
-      } catch (e) {}
-      showToast("Ajustements de poids appliqués au modèle continu avec succès !", "success");
-    } catch (e) {
-      try {
-        audioEngine.play("error");
-      } catch (e) {}
-      showToast("Échec de l'application des ajustements.", "error");
-    } finally {
-      setApplyingAdjustments(false);
-    }
-  };
-
-  const directHitsCount = useMemo(() => {
-    if (!activeReport || !Array.isArray(activeReport.matches)) return 0;
-    return activeReport.matches.filter((m) => m.errorType === "Hit").length;
-  }, [activeReport]);
-
-  const matchRatePercent = useMemo(() => {
-    return ((directHitsCount / 5) * 100).toFixed(0);
-  }, [directHitsCount]);
-
   return (
-    <div id="forensic-content" className="max-w-7xl mx-auto space-y-6 pt-4 pb-12">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+    <div id="forensic-content" className="max-w-7xl mx-auto space-y-6 pt-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500/10 text-emerald-500 rounded-2xl border border-emerald-500/20">
-              <Target size={24} />
-            </div>
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-                Hub Forensique & Audit
-              </h2>
-              <p className="text-slate-500 dark:text-slate-400 text-xs font-medium mt-0.5">
-                Autopsie post-tirage, analyse de dérive stochastique & rétro-action continu ({drawName})
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Global Sub-Tabs */}
-        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 w-full sm:w-auto">
-          {[
-            { id: "prediction", label: "Rapports & Audit", icon: Target, color: "text-emerald-500" },
-            { id: "historique", label: "Historique", icon: History, color: "text-indigo-500" },
-            { id: "timemachine", label: "Time Machine", icon: Clock, color: "text-fuchsia-500" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                try {
-                  audioEngine.play("click");
-                } catch (e) {}
-                setMode(tab.id as ForensicMode);
-              }}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
-                mode === tab.id
-                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-black"
-                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-              }`}
-            >
-              <tab.icon size={14} className={mode === tab.id ? tab.color : ""} />
-              <span>{tab.label}</span>
-            </button>
-          ))}
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tighter text-slate-900 dark:text-white flex items-center gap-4">
+            <Target className="text-emerald-500" size={32} />
+            Post-Mortem & Audit
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium mt-2 max-w-xl text-sm leading-relaxed">
+            Analyse déterministe des prédictions passées. Isolez les performances algorithmiques et consultez l'historique.
+          </p>
         </div>
       </div>
 
-      {/* Main Workspace Modes */}
-      <div className="space-y-6">
+      <div className="relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent mb-8">
+        <div className="overflow-x-auto scrollbar-hide pb-2 mask-fade-right">
+          <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-2xl w-max border border-slate-200 dark:border-slate-700 shadow-inner">
+            {[
+              { id: "prediction", label: "Rapports & Audit", icon: Target, color: "text-slate-900 dark:text-white" },
+              { id: "historique", label: "Historique", icon: History, color: "text-indigo-500" },
+              { id: "timemachine", label: "Time Machine", icon: Clock, color: "text-fuchsia-500" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  try { audioEngine.play("click"); } catch(e) {}
+                  setMode(tab.id as ForensicMode);
+                }}
+                className={`px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 ${
+                  mode === tab.id
+                    ? "bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+              >
+                <tab.icon size={14} className={mode === tab.id ? tab.color : ""} />
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 min-w-0 w-full space-y-8">
         {mode === "historique" && (
-          <div className="animate-fade-in">
+          <div className="space-y-8 animate-slide-up">
             <PredictionHistory drawName={drawName} />
           </div>
         )}
 
         {mode === "timemachine" && (
-          <div className="animate-fade-in">
-            <ForensicTimeMachine
-              drawName={drawName}
-              history={history}
-              currentWeights={globalWeights}
-            />
+          <div className="space-y-8 animate-slide-up">
+            <ForensicTimeMachine drawName={drawName} history={history} currentWeights={globalWeights} />
           </div>
         )}
 
         {mode === "prediction" && (
-          <div className="space-y-6 animate-fade-in">
-            {/* Active Report Executive Dashboard */}
-            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
-              {/* Top Controls & Status Bar */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                    {activeReport ? `Rapport Forensique: ${activeReport.drawName}` : "Analyse Forensique"}
-                  </h3>
-                  {activeReport?.date && (
-                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700">
-                      {formatDateSafely(activeReport.date)}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-auto">
-                  {activeReport && (
-                    <button
-                      onClick={() => setShowDeepInspection(true)}
-                      className="px-3.5 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 border border-indigo-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                    >
-                      <Maximize2 size={14} />
-                      <span>Inspecter en Détail</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={handleSync}
-                    disabled={syncing}
-                    className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 rounded-xl transition-colors"
-                    title="Synchroniser avec le Cloud"
-                  >
-                    <Cloud size={16} className={syncing ? "animate-bounce" : ""} />
+          <div className="space-y-8 animate-slide-up">
+            <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-6 md:p-10 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none">
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Rapports & Prédictions</h3>
+                <div className="flex gap-2">
+                  <button onClick={handleSync} disabled={syncing} className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 rounded-xl transition-colors" title="Synchroniser avec le Cloud">
+                    <Cloud size={18} className={syncing ? "animate-bounce" : ""} />
                   </button>
-                  <button
-                    onClick={handleRefresh}
-                    className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-emerald-500 rounded-xl transition-colors"
-                    title="Rafraîchir"
-                  >
-                    <RefreshCw size={16} />
+                  <button onClick={handleRefresh} className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-emerald-500 dark:hover:text-emerald-400 rounded-xl transition-colors" title="Rafraîchir">
+                    <RefreshCw size={18} />
                   </button>
                 </div>
               </div>
 
-              {/* Unified 3-Section Overview */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* SECTION 1: AUTOPSIE (PRÉDIT VS RÉEL) */}
-                <div className="p-5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1.5">
-                        <Target size={14} /> 1. Autopsie & Alignement
-                      </span>
-                      <span className="text-xs font-mono font-black text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                        {matchRatePercent}% Hits ({directHitsCount}/5)
-                      </span>
-                    </div>
-
-                    {activeReport ? (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                          <span className="text-[9px] font-bold text-indigo-500 uppercase block">
-                            Prédit par l'IA
-                          </span>
-                          <div className="flex gap-1.5 flex-wrap">
-                            {Array.isArray(activeReport.matches) &&
-                              activeReport.matches.map((m, idx) => (
-                                <div
-                                  key={idx}
-                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                                    m.errorType === "Hit"
-                                      ? "bg-emerald-500 text-white shadow-sm"
-                                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
-                                  }`}
-                                >
-                                  {m.predicted}
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-
-                        <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                          <span className="text-[9px] font-bold text-emerald-500 uppercase block">
-                            Tirage Réel Officiel
-                          </span>
-                          <div className="flex gap-1.5 flex-wrap">
-                            {displayCombo.map((num, idx) => {
-                              const isHit =
-                                Array.isArray(activeReport.matches) &&
-                                activeReport.matches.some(
-                                  (m) => (m.predicted === num || m.actual === num) && m.errorType === "Hit"
-                                );
-                              return (
-                                <div
-                                  key={idx}
-                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                                    isHit
-                                      ? "bg-emerald-500 text-white shadow-sm"
-                                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
-                                  }`}
-                                >
-                                  {num}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Neighbor Offsets list */}
-                        <div className="space-y-1.5">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase block">
-                            Décalages de Voisinage
-                          </span>
-                          <div className="max-h-24 overflow-y-auto space-y-1 text-[10px] font-mono">
-                            {Array.isArray(activeReport.matches) &&
-                            activeReport.matches.some((m) => m.errorType !== "Hit") ? (
-                              activeReport.matches
-                                .filter((m) => m.errorType !== "Hit")
-                                .map((m, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800"
-                                  >
-                                    <span>
-                                      P: <strong className="text-indigo-400">{m.predicted}</strong> → R:{" "}
-                                      <strong>{m.actual || "N/A"}</strong>
-                                    </span>
-                                    <span className="text-[9px] font-bold text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">
-                                      {m.errorType} (Δ: {m.delta})
-                                    </span>
-                                  </div>
-                                ))
-                            ) : (
-                              <p className="text-xs text-slate-400 italic py-1">
-                                Alignement direct 100% ou aucun décalage.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 italic py-4">
-                        Sélectionnez un rapport ci-dessous.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* SECTION 2: DÉTECTION DE DÉRIVE (DRIFT) */}
-                <div className="p-5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider flex items-center gap-1.5">
-                        <Activity size={14} /> 2. Dérive & Régime
-                      </span>
-                      <span
-                        className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded border ${driftMetrics.statusColor}`}
-                      >
-                        {driftMetrics.statusLabel}
-                      </span>
-                    </div>
-
-                    <div className="space-y-3">
-                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                        {driftMetrics.desc}
-                      </p>
-
-                      <div className="grid grid-cols-2 gap-2 text-center pt-2">
-                        <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase block">
-                            Hurst ($H$)
-                          </span>
-                          <span className="text-lg font-black font-mono text-indigo-500">
-                            {driftMetrics.hurstVal.toFixed(3)}
-                          </span>
-                          <span className="block text-[8px] text-slate-400 mt-0.5">
-                            {driftMetrics.hurstVal > 0.5 ? "Persistant" : "Chaotique"}
-                          </span>
-                        </div>
-
-                        <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase block">
-                            Entropie ($S$)
-                          </span>
-                          <span className="text-lg font-black font-mono text-purple-500">
-                            {driftMetrics.entropyVal.toFixed(2)}
-                          </span>
-                          <span className="block text-[8px] text-slate-400 mt-0.5">
-                            Incertitude
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs font-mono">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">
-                          Divergence KL:
-                        </span>
-                        <span className="font-bold text-emerald-500">
-                          {driftMetrics.klDiv.toFixed(3)}
-                        </span>
-                        <span className="text-[9px] font-bold text-slate-400 uppercase ml-2">
-                          Tension:
-                        </span>
-                        <span className="font-bold text-indigo-400">
-                          {driftMetrics.tension}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* SECTION 3: AUTO-CORRECTION DE POIDS */}
-                <div className="p-5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] font-black uppercase text-fuchsia-500 tracking-wider flex items-center gap-1.5">
-                        <Sliders size={14} /> 3. Auto-Correction
-                      </span>
-                      <button
-                        onClick={handleApplyAdjustments}
-                        disabled={applyingAdjustments}
-                        className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[10px] uppercase rounded-lg shadow-sm transition-all flex items-center gap-1"
-                      >
-                        <Sparkles size={12} />
-                        {applyingAdjustments ? "..." : "Booster 1-Clic"}
-                      </button>
-                    </div>
-
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-3">
-                      Sous-performances détectées & réajustements continus suggérés :
-                    </p>
-
-                    <div className="space-y-2">
-                      {correctionData.map((algo, idx) => (
-                        <div
-                          key={idx}
-                          className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1"
-                        >
-                          <div className="flex items-center justify-between text-[11px] font-bold">
-                            <span className="text-slate-800 dark:text-slate-200 truncate max-w-[150px]">
-                              {algo.name}
-                            </span>
-                            <span className="text-rose-500 font-mono text-[10px]">
-                              -{algo.deficit.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
-                            <span className="truncate max-w-[150px]">{algo.reason}</span>
-                            <span className="text-emerald-500 font-bold">
-                              +{(algo.boost * 100).toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Panneau Forensique Unifié : Vue Macro (Radar) & Vue Micro (Integrated Gradients) */}
-              <div className="pt-2">
-                <UnifiedForensicRadarPanel report={activeReport} drawName={drawName} />
-              </div>
-
-              {/* Frise Chronologique Unifiée */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-                <UnifiedForensicTimeline
-                  reports={reports}
-                  selectedReport={selectedReport}
-                  onSelectReport={setSelectedReport}
-                  onDeleteReport={handleDeleteReport}
-                />
-              </div>
-
-              {/* Pending Predictions List */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Clock size={16} className="text-indigo-500" />
+              {/* Frise Post-Mortem Unifiée (Drift, Alignement & Navigation) */}
+              <UnifiedForensicTimeline 
+                reports={reports}
+                selectedReport={selectedReport}
+                onSelectReport={setSelectedReport}
+                onDeleteReport={handleDeleteReport}
+              />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* COLUMN 1: En attente de résultat */}
+                <div className="lg:col-span-5 space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                    <Clock size={16} className="text-indigo-500 animate-pulse" />
                     <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Prédictions en Attente de Tirage ({pendingPredictions.length})
+                      En attente de résultat ({pendingPredictions.length})
                     </h4>
                   </div>
-                </div>
-
-                {pendingPredictions.length === 0 ? (
-                  <div className="p-4 bg-slate-50/50 dark:bg-slate-900/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center">
-                    <p className="text-xs text-slate-400 italic">
-                      Aucune prédiction en attente pour ce tirage.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {pendingPredictions.map((p: PredictionHistoryItem) => {
-                      const predDate = new Date(p.timestamp);
-                      return (
-                        <div
-                          key={p.id}
-                          className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between items-center"
-                        >
-                          <div>
-                            <span className="text-[9px] font-bold text-indigo-500 uppercase block">
-                              Oracle Prediction
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              {predDate.toLocaleDateString("fr-FR")} à{" "}
-                              {predDate.toLocaleTimeString("fr-FR", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                            <div className="flex gap-1 mt-1.5">
+                  {pendingPredictions.length === 0 ? (
+                    <div className="p-6 bg-slate-50/50 dark:bg-slate-900/10 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 italic">Aucune prédiction en attente de résultat.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {pendingPredictions.map((p: PredictionHistoryItem) => {
+                        const predDate = new Date(p.timestamp);
+                        return (
+                          <div key={p.id} className="group relative overflow-hidden p-4 bg-slate-50/75 dark:bg-slate-900/30 rounded-2xl border border-slate-150 dark:border-slate-800 hover:border-indigo-500/30 transition-all">
+                            <div className="flex justify-between items-start mb-3">
+                              <div>
+                                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-400">Oracle Prediction</span>
+                                <span className="block text-[10px] text-slate-400 font-mono mt-0.5">
+                                  Généré le {predDate.toLocaleDateString('fr-FR')} à {predDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <button 
+                                onClick={(e) => handleDeletePending(p.id, e)} 
+                                className="p-1.5 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg transition-colors"
+                                title="Supprimer la prédiction"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                            
+                            <div className="flex gap-1.5">
                               {p.prediction.suggestedNumbers.map((n: number) => (
-                                <div
-                                  key={n}
-                                  className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-800 dark:text-slate-200"
+                                <div 
+                                  key={n} 
+                                  className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-250 dark:border-slate-700 flex items-center justify-center text-xs font-black text-slate-800 dark:text-slate-200 shadow-sm group-hover:scale-105 transition-transform"
                                 >
                                   {n}
                                 </div>
                               ))}
                             </div>
                           </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
-                          <button
-                            onClick={(e) => handleDeletePending(p.id, e)}
-                            className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg transition-colors"
-                            title="Supprimer"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
+                {/* COLUMN 2: Rapports d'Audit */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                    <BookOpen size={16} className="text-emerald-500" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Rapports d'Audit ({reports.length})
+                    </h4>
                   </div>
-                )}
+                  {reports.length === 0 ? (
+                    <div className="p-6 bg-slate-50/50 dark:bg-slate-900/10 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 italic">Aucun rapport d'audit disponible.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {reports.map(rep => {
+                        let hits = 0;
+                        if (typeof rep.matches === "number") hits = rep.matches;
+                        else if (Array.isArray(rep.matches)) {
+                          hits = rep.matches.filter((m) => m.errorType === "Hit").length;
+                        }
+
+                        // Determine elegant badge style based on precision
+                        let badgeStyle = "bg-slate-500/10 text-slate-500 border-slate-300/20";
+                        let badgeLabel = "DÉRIVE";
+                        let BadgeIcon = Target;
+
+                        if (hits === 5) {
+                          badgeStyle = "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border-emerald-500/20";
+                          badgeLabel = "PARFAIT";
+                          BadgeIcon = CheckCircle2;
+                        } else if (hits >= 3) {
+                          badgeStyle = "bg-teal-500/10 text-teal-600 dark:text-teal-300 border-teal-500/20";
+                          badgeLabel = "ÉLITE";
+                          BadgeIcon = CheckCircle2;
+                        } else if (hits > 0) {
+                          badgeStyle = "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border-indigo-500/20";
+                          badgeLabel = "PARTIEL";
+                          BadgeIcon = Activity;
+                        }
+
+                        return (
+                          <div 
+                            key={rep.id} 
+                            onClick={() => {
+                              try { audioEngine.play("click"); } catch(e) {}
+                              setSelectedReport(rep);
+                            }} 
+                            className="cursor-pointer group relative flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl hover:border-emerald-500/50 hover:shadow-md transition-all gap-4"
+                          >
+                            <div className="flex-1">
+                              <span className="text-[10px] font-bold text-slate-400">{formatDateSafely(rep.date)}</span>
+                              <div className="flex gap-1.5 mt-2">
+                                {rep.combo?.map(n => {
+                                  // Highlight hits inside the ball list
+                                  const isHit = Array.isArray(rep.matches) && rep.matches.some(m => m.predicted === n && m.errorType === "Hit");
+                                  return (
+                                    <div 
+                                      key={n} 
+                                      className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm transition-transform group-hover:scale-105 ${
+                                        isHit 
+                                          ? "bg-emerald-500 text-white border border-emerald-400" 
+                                          : "bg-slate-50 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+                                      }`}
+                                    >
+                                      {n}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100 dark:border-slate-800">
+                              <div className="flex items-center gap-3">
+                                <div className={`px-2 py-1 rounded-lg border text-[9px] font-black flex items-center gap-1 ${badgeStyle}`}>
+                                  <BadgeIcon size={10} />
+                                  <span>{badgeLabel}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Précision</span>
+                                  <span className="font-black text-sm text-emerald-500 dark:text-emerald-400">{hits} / 5</span>
+                                </div>
+                              </div>
+                              <button 
+                                onClick={(e) => handleDeleteReport(rep.id, e)} 
+                                className="p-2 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl transition-all"
+                                title="Supprimer ce rapport d'audit"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Deep Inspection Modal */}
-        {showDeepInspection && activeReport && (
-          <PredictionForensics
-            report={activeReport}
-            onClose={() => setShowDeepInspection(false)}
-          />
+
+
+        {selectedReport && (
+          <PredictionForensics report={selectedReport} onClose={() => setSelectedReport(null)} />
         )}
       </div>
     </div>

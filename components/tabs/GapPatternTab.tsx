@@ -36,7 +36,6 @@ import { audioEngine } from '../../utils/audioEngine';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { lotteryService } from '../../services/lotteryService';
 import { generateMasterPrediction } from '../../services/predictionEngine';
-import { GapRangeSequenceWidget } from '../prediction/GapRangeSequenceWidget';
 
 export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const history = useNexusStore(state => state.history);
@@ -94,13 +93,14 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         drawNamesToAnalyze = [drawKey];
       }
       
-      const keys = [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND];
+      const keys = [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.GAP_BAND_SEQUENCE];
       const algoScores: Record<string, number[]> = {
         [AlgoKey.GAPS]: [],
         [AlgoKey.GAP_SEQUENCE]: [],
         [AlgoKey.GAP_PATTERN]: [],
         [AlgoKey.GAP_CADENCE]: [],
-        [AlgoKey.GAP_TREND]: []
+        [AlgoKey.GAP_TREND]: [],
+        [AlgoKey.GAP_BAND_SEQUENCE]: []
       };
       
       for (const dName of drawNamesToAnalyze) {
@@ -128,6 +128,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           algoScores[AlgoKey.GAP_PATTERN].push(bd[AlgoKey.GAP_PATTERN] || 0);
           algoScores[AlgoKey.GAP_CADENCE].push(bd[AlgoKey.GAP_CADENCE] || 0);
           algoScores[AlgoKey.GAP_TREND].push(bd[AlgoKey.GAP_TREND] || 0);
+          algoScores[AlgoKey.GAP_BAND_SEQUENCE].push(bd[AlgoKey.GAP_BAND_SEQUENCE] || 0);
         }
       }
       
@@ -283,8 +284,6 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   return (
     <div className="space-y-8 animate-fade-in pb-12 w-full overflow-hidden">
-      {/* Module de Recherche des Séquences et Patterns de Tranches d'Écarts (Tranches de 5 / 10) */}
-      <GapRangeSequenceWidget drawName={drawName} />
       
       {/* HEADER HERO */}
       <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900/40 to-emerald-950/20 p-6 md:p-8 rounded-[2.5rem] border border-indigo-500/10 shadow-xl relative overflow-hidden">
@@ -977,7 +976,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     ].map(row => (
                       <tr key={row.key} className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                         <td className="p-3 text-[10px] font-bold text-slate-700 dark:text-slate-300">{row.label}</td>
-                        {[AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND].map(colKey => {
+                        {[AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.GAP_BAND_SEQUENCE].map(colKey => {
                           const val = correlationData.matrix[row.key]?.[colKey] ?? 0;
                           const absVal = Math.abs(val);
                           

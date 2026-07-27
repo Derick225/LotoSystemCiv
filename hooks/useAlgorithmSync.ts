@@ -25,13 +25,13 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.GAP_TREND]: 'Tendance des Écarts',
   [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Résonance Inter-Mensuelle',
   [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation (Inverse-Variance)',
-  [AlgoKey.GAP_RANGE_SEQUENCE]: 'Tranches d\'Écarts (Markov)',
+  [AlgoKey.GAP_BAND_SEQUENCE]: 'Transition de Bandes d\'Écart',
 };
 
 export const ALGO_CATEGORIES = [
   {
     name: "Fréquentiel & Transition",
-    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.SEQUENCE_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.GAP_RANGE_SEQUENCE]
+    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.SEQUENCE_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.GAP_BAND_SEQUENCE]
   },
   {
     name: "Mathématique & Structural",

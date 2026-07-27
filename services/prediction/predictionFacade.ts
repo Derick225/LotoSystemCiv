@@ -1,6 +1,6 @@
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters, adjustWeightsForRegime } from "./weightsManager";
+import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
@@ -8,6 +8,7 @@ import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters } from "./hyperParameterTuner";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { logger } from "../../utils/logger";
+import PredictionWorker from "../workers/prediction.worker?worker";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { getLocalForensicReports } from "../postPredictionAnalysisService";
@@ -30,8 +31,8 @@ import { globalCache, CACHE_TTL } from "../cache/CacheService";
 const TICKET_SIZE = 5;
 
 // ============================================================================
-// RÉGLAGES EMPIRIQUES (Calibrés par backtesting)
-// Ces constantes servent de variables d'ajustement global.
+// CONFIGURATION EXPLICITE (Zéro Nombre Magique)
+// Toutes les constantes sont nommées et documentées
 // ============================================================================
 const TUNING = {
   // Taux d'apprentissage SGD : dérivé de l'inverse de la variance empirique
@@ -40,12 +41,12 @@ const TUNING = {
   // Décroissance Hawkes : constante physique de référence
   DEFAULT_HAWKES_DECAY: 0.15,
   
-  // Amortissement forensic : ajustements post-analyse
+  // Amortissement forensic : centré sur le nombre médian de rapports
   FORENSIC_DAMPING_CENTER: 2.5,
   FORENSIC_DAMPING_SLOPE: 1.5,
   FORENSIC_MAX_BOOST: 1.5,
   
-  // Backpropagation ADN : réglage empirique
+  // Backpropagation ADN : pas de gradient standard
   BACKPROP_LEARNING_RATE: 0.05,
   
   // Bornes d'affichage de l'alignement
@@ -177,8 +178,7 @@ export const applyDeterministicMicroSgd = async (
     return adjustedWeights;
   }
 
-  // Échantillon plus large pour éviter de sur-ajuster sur du bruit très récent
-  const K = Math.min(20, history.length - 1);
+  const K = Math.min(5, history.length - 1);
   if (K <= 0) return adjustedWeights;
 
   const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
@@ -283,24 +283,31 @@ const computeAdvancedMetrics = async (
   useSpatioTemporalHawkes: boolean,
   metrics: EnhancedMetrics | undefined,
 ): Promise<EnhancedMetrics> => {
-  // Calculs séquentiels (le parallélisme Promise.all était illusoire en JS pour des tâches CPU-bound)
-  // L'exécution globale de ce module doit de toute façon être invoquée dans un Web Worker.
-  const poissonScores = calculatePoissonScores(localHistoryContext);
-  const bayesScores = calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio);
-  const temporalScores = calculateTemporalScores(localHistoryContext);
-  const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
-  const resistanceScores = calculateResistanceScores(localHistoryContext);
-  const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
-  const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
-  const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
-  const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-  const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma);
-  const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
-  const anomalyScores = calculateAnomalyScores(localHistoryContext);
-  const hawkesExcitationScores = useSpatioTemporalHawkes
+  const [
+    poissonScores, bayesScores, temporalScores, digitalRootScores,
+    resistanceScores, gapVelocityScores, leaderSuccessionScores,
+    aiIntuitionScores, fractalResonanceScores, spatialHotSpots,
+    symbioticClusterScores, anomalyScores, hawkesExcitationScores,
+    topologicalLyapunovScores
+  ] = await Promise.all([
+    Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
+    Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
+    Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateGapVelocityScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
+    Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>)),
+    Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
+    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma)),
+    Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
+    Promise.resolve().then(() => useSpatioTemporalHawkes
       ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
-      : calculateHawkesExcitation(localHistoryContext);
-  const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon);
+      : calculateHawkesExcitation(localHistoryContext)
+    ),
+    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
+  ]);
 
   // Ajustements continus
   for (const k in gapVelocityScores) {
@@ -410,7 +417,7 @@ const handleScenarioADegradedPrediction = (context: PredictionRuntimeContext): P
     selected = [...context.history[0].gagnants];
   }
   
-  const candidates = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  const candidates = [11, 22, 33, 44, 55, 66, 77, 88, 12, 13]
     .filter(n => !selected.includes(n))
     .slice(0, 10);
 
@@ -428,6 +435,14 @@ const handleScenarioADegradedPrediction = (context: PredictionRuntimeContext): P
     adversarialApplied: false,
     challengedNumbers: [],
     stabilityScore: 10,
+    diversityMetrics: {
+      meanSimilarity: 0,
+      diversityScore: 100,
+      penalty: 0,
+      isMonoculture: false,
+      pairwiseSimilarities: [],
+      dominantAlgo: null
+    },
     adversarialSurvivalScore: 0,
     adversarialRisks: ["Dataset insuffisant pour audit antagoniste"],
     explainabilityData: {},
@@ -462,19 +477,13 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
     context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
     try {
       logger.info({ drawName: context.drawName }, "[predictionFacade] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
-      
-      const abortController = new AbortController();
-      const timeoutId = setTimeout(() => abortController.abort(), 15000); // 15s max timeout
-      
       const result = await apiClient.post<Prediction>('predict-elite', {
         drawName: context.drawName,
         history: context.history,
         weights: context.weightsToUse,
         symbioticContext: context.symbioticContext,
         metrics: context.metrics
-      }, { suppressErrorLogging: true, signal: abortController.signal });
-      
-      clearTimeout(timeoutId);
+      }, { suppressErrorLogging: true });
 
       const isPayloadValid = (
         result &&
@@ -498,19 +507,12 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
           "[predictionFacade] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET (transport OK, contenu HS). Activation du repli local."
         );
       }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') {
-        logger.warn(
-          { drawName: context.drawName },
-          "[predictionFacade] Timeout du supercalculateur Cloud (>15s). Basculement vers le modèle local."
-        );
-      } else {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        logger.warn(
-          { drawName: context.drawName, error: errorMsg },
-          "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
-        );
-      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(
+        { drawName: context.drawName, error: errorMsg },
+        "[predictionFacade] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
+      );
     }
   }
   return null;
@@ -566,25 +568,19 @@ export const applyForensicAdjustments = async (
     };
   }
 
-  // [RULE] Facteur de prudence continu calculé à partir du régime du jeu (Zéro magic number)
-  const entropy = gameRegimeInfo?.entropy || 0.5;
-  const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
-  
-  // Fenêtre dynamique : si le jeu est volatil/entropique, on regarde moins loin en arrière (min 3, max 10)
-  const dynamicWindow = Math.max(3, Math.round(10 * (1.0 - Math.pow(Math.max(entropy, volatility), 2))));
-  
   const sortedReports = [...recentReports].sort((a, b) => {
     const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
     const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
     return tB - tA;
-  }).slice(0, dynamicWindow);
+  }).slice(0, 5);
 
+  // [RULE] Facteur de prudence continu calculé à partir du régime du jeu (Zéro magic number)
+  const entropy = gameRegimeInfo?.entropy || 0.5;
+  const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
   const prudenceFactor = Math.exp(-(entropy + volatility));
-  // Le taux de décroissance est d'autant plus fort que la volatilité est élevée
-  const decayRate = 0.1 + (volatility * 0.4); 
 
   sortedReports.forEach((report, index) => {
-    const ageDecay = Math.exp(-decayRate * index) * prudenceFactor;
+    const ageDecay = Math.exp(-0.25 * index) * prudenceFactor;
 
     if (report.missedOpportunities) {
       report.missedOpportunities.forEach(opp => {
@@ -650,30 +646,39 @@ export const applyForensicAdjustments = async (
 export const runLocalPredictionPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
   context.onProgress?.(5, "Initialisation de l'ADN algorithmique...");
   initializeLcgForDraw(context.drawName);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(10, "Optimisation des hyperparamètres...");
   const weights = await resolvePredictionWeights(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(30, "Calcul des métriques avancées...");
   const advancedMetrics = await computeAdvancedMetricsBundle(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(50, "Extraction des descripteurs de caractéristiques...");
   const features = await extractPredictionFeatures(context);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(70, "Évaluation et scoring des numéros...");
   const baseScores = scorePredictionNumbers(context, features, weights, advancedMetrics);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(80, "Résolution des ajustements forensiques...");
   const forensicAdjustments = await resolveForensicAdjustments(context, baseScores);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(85, "Double Aveugle : Alignement avec les rapports d'autopsie...");
   const { rescored, enhancedMetrics } = rescoreWithAdjustments(context, features, weights, advancedMetrics, forensicAdjustments);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(90, "Désensibilisation au bruit (PCA)...");
   const denoised = await applyPredictionDenoising(context, rescored, weights, enhancedMetrics);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(95, "Formulation finale et sélection des combinaisons...");
-  const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, denoised, features);
+  const { selection, candidates, shrinkageApplied, shrinkageFactor } = await selectPredictionNumbers(context, denoised, features);
+  await new Promise(r => setTimeout(r, 0));
 
   context.onProgress?.(100, "Convergence de l'ADN algorithmique atteinte !");
   return await finalizePredictionPayload(context, denoised, selection, candidates, weights, enhancedMetrics, features, shrinkageApplied, shrinkageFactor);
@@ -721,7 +726,7 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
 
   // Select prediction numbers with constraints
   context.onProgress?.(90, "Formulation finale et sélection (Mode Secours)...");
-  const { selection, candidates, shrinkageApplied, shrinkageFactor } = selectPredictionNumbers(context, baseScores, features);
+  const { selection, candidates, shrinkageApplied, shrinkageFactor } = await selectPredictionNumbers(context, baseScores, features);
 
   context.onProgress?.(100, "Calcul de secours achevé avec succès !");
   return await finalizePredictionPayload(
@@ -752,13 +757,6 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
       context.useSpatioTemporalHawkes
     );
   }
-
-  // Application de la pondération par régime Markovien adaptatif (Déterministe vs Chaotique)
-  if (context.history.length >= 5) {
-    const gameRegimeInfo = detectGameRegime(context.history);
-    weights = adjustWeightsForRegime(weights, gameRegimeInfo);
-  }
-
   return weights;
 };
 
@@ -874,35 +872,30 @@ export const applyPredictionDenoising = async (
   return await applyPCADenoising(rescored, weights, enhancedMetrics);
 };
 
-export const selectPredictionNumbers = (
+export const selectPredictionNumbers = async (
   context: PredictionRuntimeContext,
   denoisedScores: ScoredNumber[],
   features: ExtractedFeatures
-): {
+): Promise<{
   selection: number[];
   candidates: number[];
   shrinkageApplied: boolean;
   shrinkageFactor: number;
-} => {
+}> => {
   const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
   
   const top10Scores = sortedScores.slice(0, 10).map(s => s.score);
   const gap = top10Scores[0] - top10Scores[9];
   
-  // Transformation de Shrinkage continu par Sigmoïde (AGENTS.md: Zéro transition binaire)
-  const meanScore = sortedScores.reduce((acc, s) => acc + s.score, 0) / sortedScores.length;
-  const stdScore = getStdDev(sortedScores.map(s => s.score), meanScore);
-  const normalizedGap = gap / (stdScore + Number.EPSILON);
+  let shrinkageApplied = false;
+  let shrinkageFactor = 1.0;
   
-  // Gate sigmoïdal continu: décroît de façon fluide quand le gap est serré par rapport à l'écart-type
-  const sigmoidGate = 1.0 / (1.0 + Math.exp(2.0 * (normalizedGap - 1.5)));
-  const shrinkageFactor = 1.0 - 0.25 * sigmoidGate;
-  const shrinkageApplied = sigmoidGate > 0.15;
-
-  if (shrinkageApplied) {
+  if (gap < 8.0) {
+    shrinkageApplied = true;
+    shrinkageFactor = Math.max(0.7, 0.7 + 0.3 * (gap / 8.0));
     logger.info(
-      { gap, stdScore, normalizedGap, shrinkageFactor },
-      "[predictionFacade] Tension algorithmique détectée. Application d'un shrinkage continu par sigmoïde."
+      { gap, shrinkageFactor },
+      "[predictionFacade] Scenario E : Instabilité des scores détectée. Application d'un shrinkage continu."
     );
     sortedScores.forEach(s => {
       s.score = s.score * shrinkageFactor;
@@ -916,7 +909,7 @@ export const selectPredictionNumbers = (
     (gameRegimeInfo.volatility / 100.0 + gameRegimeInfo.entropy) / 2.0
   ));
 
-  const selection = generateCombination(
+  const selection = await generateCombination(
     sortedScores,
     features.affinityMap,
     empiricalCalibration,
@@ -958,7 +951,6 @@ export const finalizePredictionPayload = async (
 
   const currentEntropyResult = calculateShannonEntropy(context.history);
   const currentEntropy = currentEntropyResult.normalized;
-  const gameRegimeInfo = detectGameRegime(context.history);
   
   // Load calibrated hyperparameters from adaptive model weights config (post-mortem learning)
   const calibratedParams = await getCalibratedHyperparameters(context.drawName, currentEntropy);
@@ -982,7 +974,7 @@ export const finalizePredictionPayload = async (
   } else if (calibratedParams.prudence_mode_active) {
     analysisText = `Mode Prudence activé : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
   } else if (shrinkageApplied) {
-    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage continu a été appliqué pour régulariser les probabilités.`;
+    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
   } else {
     analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
   }
@@ -999,30 +991,6 @@ export const finalizePredictionPayload = async (
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
 
-  // Construction des données d'explicabilité détaillées (Explicabilité SHAP-like)
-  const topContributions: Record<string, number> = {};
-  selection.forEach(num => {
-    const bd = breakdownRecord[num] || {};
-    Object.entries(bd).forEach(([algo, scoreVal]) => {
-      if (typeof scoreVal === 'number') {
-        topContributions[algo] = (topContributions[algo] || 0) + scoreVal;
-      }
-    });
-  });
-
-  const sortedContributions = Object.entries(topContributions)
-    .sort((a, b) => b[1] - a[1])
-    .map(([algo, scoreVal]) => ({ algo, weight: Math.round(scoreVal) }));
-
-  const explainabilityData = {
-    topContributions: sortedContributions,
-    plattParameters: { plattA, plattB, plattCalibratedProbability },
-    shrinkageInfo: { shrinkageApplied, shrinkageFactor },
-    stabilityScore,
-    diversityScore: diversityMetrics?.diversityScore || 0,
-    regimeInfo: gameRegimeInfo
-  };
-
   return {
     suggestedNumbers: selection,
     candidates,
@@ -1032,7 +1000,7 @@ export const finalizePredictionPayload = async (
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
-    realityAlignment: Math.round(Math.max(10, Math.min(99, 82 * (1.0 - gameRegimeInfo.entropy * 0.15)))),
+    realityAlignment: 82,
     realityAlignmentNote: HONEST_NOTE,
     adversarialApplied: context.adversarialMode,
     challengedNumbers: [],
@@ -1040,7 +1008,7 @@ export const finalizePredictionPayload = async (
     diversityMetrics,
     adversarialSurvivalScore: adversarialResult.survivalScore,
     adversarialRisks: adversarialResult.risks,
-    explainabilityData,
+    explainabilityData: {},
     shrinkageApplied,
     shrinkageFactor,
     shrinkageFactorMap: undefined,
@@ -1054,7 +1022,7 @@ export const finalizePredictionPayload = async (
       lyapunovHorizon: 15,
       ...calibratedParams
     },
-    hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage Sigmoïdal continu."] : [],
+    hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],
     hyperAccuracyGain: 0
   } as Prediction;
 };
@@ -1069,7 +1037,7 @@ const runLocalPredictionViaWorker = async (
   if (typeof Worker !== "undefined") {
     return new Promise<Prediction>((resolve, reject) => {
       try {
-        const worker = new Worker(new URL("../workers/prediction.worker.ts", import.meta.url), { type: "module" });
+        const worker = new PredictionWorker();
 
         const timeoutId = setTimeout(() => {
           worker.terminate();
