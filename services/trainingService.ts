@@ -3,6 +3,7 @@ import {
   generateMasterPrediction,
   saveAlgoWeights,
   getAlgoWeights,
+  hashWeights,
 } from "./predictionEngine";
 import { useNexusStore } from "../store/useNexusStore";
 import { detectGameRegime } from "./mathService";
@@ -449,9 +450,7 @@ export const runLoopSimulation = async (
   const purifiedHistory = purifyHistoryForDraw(drawName, rawHistory);
 
   // Gestion du cache de boucle
-  const weightsHash = Object.entries(originalWeights)
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",");
+  const weightsHash = hashWeights(originalWeights);
   const cacheKey = globalCache.generateKey(
     "loop_simulation",
     drawName,
@@ -604,7 +603,8 @@ export const runBacktestTrainingAsync = async (
   history: DrawResult[],
   sampleSize: number,
   onProgress?: (progress: number) => void,
-  customWeights?: any
+  customWeights?: any,
+  skipTraining: boolean = true,
 ): Promise<TrainingReport> => {
   const purifiedHistory = purifyHistoryForDraw(drawName, history);
   return runBacktestWorker<TrainingReport>(
@@ -612,7 +612,8 @@ export const runBacktestTrainingAsync = async (
     purifiedHistory,
     sampleSize,
     onProgress,
-    customWeights
+    customWeights,
+    skipTraining
   );
 };
 

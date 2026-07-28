@@ -146,6 +146,7 @@ export const runBacktestTraining = async (
   requestedSampleSize: number = 30,
   onProgress?: (progress: number) => void,
   customWeights?: any,
+  skipTraining: boolean = true,
 ): Promise<TrainingReport> => {
   const validationResult = BacktestInputSchema.safeParse({ drawName, sampleSize: requestedSampleSize });
   if (!validationResult.success) {
@@ -226,7 +227,7 @@ export const runBacktestTraining = async (
       weightsToUse,
       undefined,
       undefined,
-      true,
+      skipTraining,
     );
 
     const predicted = prediction.suggestedNumbers;

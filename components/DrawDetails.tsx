@@ -33,17 +33,9 @@ const SimulationTab = lazyWithRetry(
   () => import("./tabs/SimulationTab"),
   "SimulationTab",
 );
-const SimulationLab = lazyWithRetry(
-  () => import("./tabs/SimulationLab"),
-  "SimulationLab",
-);
 const ForensicHub = lazyWithRetry(
   () => import("./tabs/ForensicHub"),
   "ForensicHub",
-);
-const WhatIfSimulatorTab = lazyWithRetry(
-  () => import("./tabs/WhatIfSimulatorTab"),
-  "WhatIfSimulatorTab",
 );
 
 // Preloaders pour chargement prédictif au survol
@@ -53,8 +45,6 @@ const tabPreloaders: Record<MainTab, () => Promise<unknown>> = {
   Topologie: () => import("./tabs/TopologyHub"),
   Oracle: () => import("./tabs/OracleHub"),
   Simulation: () => import("./tabs/SimulationTab"),
-  Labo: () => import("./tabs/SimulationLab"),
-  WhatIf: () => import("./tabs/WhatIfSimulatorTab"),
   Forensic: () => import("./tabs/ForensicHub"),
 };
 
@@ -64,9 +54,7 @@ type MainTab =
   | "Topologie"
   | "Oracle"
   | "Simulation"
-  | "Labo"
-  | "Forensic"
-  | "WhatIf";
+  | "Forensic";
 
 export const DrawDetails: React.FC = () => {
   const drawName = useNexusStore((state) => state.drawName);
@@ -155,18 +143,6 @@ export const DrawDetails: React.FC = () => {
       icon: FlaskConical,
       label: "Backtest",
       desc: "Simulation Historique",
-    },
-    {
-      id: "Labo",
-      icon: FlaskConical,
-      label: "Labo ML",
-      desc: "Laboratoire TF.js",
-    },
-    {
-      id: "WhatIf",
-      icon: Activity,
-      label: "What-If",
-      desc: "Simulateur Continu",
     },
     {
       id: "Forensic",
@@ -395,10 +371,6 @@ export const DrawDetails: React.FC = () => {
             {activeMainTab === "Oracle" && <OracleHub drawName={drawName} />}
             {activeMainTab === "Simulation" && (
               <SimulationTab drawName={drawName} />
-            )}
-            {activeMainTab === "Labo" && <SimulationLab drawName={drawName} />}
-            {activeMainTab === "WhatIf" && (
-              <WhatIfSimulatorTab drawName={drawName} />
             )}
             {activeMainTab === "Forensic" && (
               <ForensicHub drawName={drawName} />

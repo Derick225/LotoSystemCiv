@@ -118,7 +118,8 @@ export const runBacktestWorker = async <T = unknown>(
   purifiedHistory: DrawResult[],
   sampleSize: number,
   onProgress?: (progress: number) => void,
-  customWeights?: unknown
+  customWeights?: unknown,
+  skipTraining: boolean = true,
 ): Promise<T> => {
   return new Promise<T>((resolve, reject) => {
     let worker: Worker;
@@ -161,7 +162,8 @@ export const runBacktestWorker = async <T = unknown>(
       winningCount: packed.winningCount,
       totalCols: packed.totalCols,
       sampleSize, 
-      customWeights 
+      customWeights,
+      skipTraining
     }, [packed.historyBuffer]);
   });
 };

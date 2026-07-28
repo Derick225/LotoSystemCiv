@@ -103,12 +103,24 @@ export const testDatabaseConnection = async () => {
     const { error, count } = await supabase.from('draw_results').select('*', { count: 'exact', head: true });
     const latency = Math.round(performance.now() - start);
     if (error) {
+      const errorMsg = typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as any).message)
+        : String(error);
+      const lowerMsg = errorMsg.toLowerCase();
+
       if (error.code === '42P01') return { success: false, error: "Table 'draw_results' inexistante. Exécutez le script SQL.", code: error.code };
-      if ((error instanceof Error ? error.message : String(error)).includes('fetch')) return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
-      return { success: false, error: (error instanceof Error ? error.message : String(error)), code: error.code || 'UNKNOWN', latency };
+      if (lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('connection') || lowerMsg.includes('contact')) {
+        return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
+      }
+      return { success: false, error: errorMsg, code: error.code || 'UNKNOWN', latency };
     }
     return { success: true, count: count ?? 0, latency };
   } catch (err: unknown) {
-    return { success: false, error: (err instanceof Error ? err.message : String(err)) || "Erreur critique de connexion." };
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const lowerMsg = errorMsg.toLowerCase();
+    if (lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('connection') || lowerMsg.includes('contact')) {
+      return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
+    }
+    return { success: false, error: errorMsg || "Erreur critique de connexion." };
   }
 };

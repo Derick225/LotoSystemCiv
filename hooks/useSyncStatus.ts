@@ -27,7 +27,7 @@ export function useSyncStatus() {
     try {
       if (isOnline) {
         const connected = await testDatabaseConnection();
-        setDbConnection(connected ? 'connected' : 'disconnected');
+        setDbConnection(connected.success ? 'connected' : 'disconnected');
       } else {
         setDbConnection('disconnected');
       }

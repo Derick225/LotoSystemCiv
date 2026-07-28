@@ -489,6 +489,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const [optimizerType, setOptimizerType] = useState<
     "pso" | "genetic" | "bayesian" | "meta"
   >("meta");
+  const [skipTrainingInBacktest, setSkipTrainingInBacktest] = useState(true);
 
   // State
   const [status, setStatus] = useState<"idle" | "running" | "completed">(
@@ -653,6 +654,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             Math.max(5, Math.min(sampleSize, history.length)),
             undefined,
             originalWeights,
+            skipTrainingInBacktest,
           );
           setInitialScore(baseReport.score);
         } catch (e) {
@@ -666,7 +668,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [drawName, history, originalWeights, sampleSize]);
+  }, [drawName, history, originalWeights, sampleSize, skipTrainingInBacktest]);
 
   // Position-Based DNA Profile extraction (sorted numbers context) - Decoupled to core computation
   useEffect(() => {
@@ -1148,6 +1150,34 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     disabled={status === "running"}
                     className="w-full h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-emerald-500"
                   />
+                </div>
+
+                <div className="pt-2 border-t border-slate-800/50">
+                  <label
+                    className="flex items-start gap-3 cursor-pointer select-none group"
+                    style={{ minHeight: "44px" }}
+                  >
+                    <div className="relative flex items-center h-5 mt-1 shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={skipTrainingInBacktest}
+                        onChange={(e) => {
+                          audioEngine.play("click");
+                          setSkipTrainingInBacktest(e.target.checked);
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-white" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 group-hover:text-white transition-colors block">
+                        Optimisation Backtest (Vitesse)
+                      </span>
+                      <span className="text-[10px] text-slate-500 block leading-tight">
+                        Passe l'entraînement SGD stochastique à chaque tirage pour accélérer le backtest de 10x.
+                      </span>
+                    </div>
+                  </label>
                 </div>
 
                 {history.length < 15 && (

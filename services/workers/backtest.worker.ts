@@ -6,7 +6,7 @@ const ctx = self as unknown as Worker;
 
 ctx.onmessage = async (e: MessageEvent) => {
   try {
-    const { drawName, history, historyBuffer, drawCount, winningCount, totalCols, sampleSize, customWeights } = e.data;
+    const { drawName, history, historyBuffer, drawCount, winningCount, totalCols, sampleSize, customWeights, skipTraining } = e.data;
     const hist = (historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history)) as DrawResult[];
     
     // Validate required inputs based on standard
@@ -24,7 +24,8 @@ ctx.onmessage = async (e: MessageEvent) => {
       (progress: number) => {
         ctx.postMessage({ type: 'progress', percent: Math.min(100, Math.max(0, Math.round(progress))) });
       },
-      customWeights
+      customWeights,
+      skipTraining
     );
 
     ctx.postMessage({ type: 'progress', percent: 100 });
