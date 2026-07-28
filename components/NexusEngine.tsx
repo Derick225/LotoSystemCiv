@@ -1,292 +1,361 @@
-import React, { useEffect, useMemo } from 'react';
-import { useNexusStore } from '../store/useNexusStore';
-import { useDrawHistory, useNexusAnalytics } from '../hooks/useLottery';
-import { getAlgoWeights, generateMasterPrediction } from '../services/predictionEngine';
-import { generateEmpiricalCalibration } from '../services/prediction/ticketAnalysisService';
-import { generateSmartInsights } from '../services/insightService';
-import { getPredictionHistoryAsync, calculateHistoricalPerformance, linkPredictionToResult, findMatchingResultForPrediction } from '../services/predictionHistoryService';
-import { performForensicAnalysis, saveForensicReport, syncForensicReportsWithCloud, getLocalForensicReports } from '../services/postPredictionAnalysisService';
-import { LearningService } from '../services/learningService';
-import { AppError, logError } from '../utils/AppError';
-import { useAutonomousAgent } from '../hooks/useAutonomousAgent';
-import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import React, { useEffect, useMemo } from "react";
+import { useNexusStore } from "../store/useNexusStore";
+import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
+import {
+  getAlgoWeights,
+  generateMasterPrediction,
+} from "../services/predictionEngine";
+import { generateEmpiricalCalibration } from "../services/prediction/ticketAnalysisService";
+import { generateSmartInsights } from "../services/insightService";
+import {
+  getPredictionHistoryAsync,
+  calculateHistoricalPerformance,
+  linkPredictionToResult,
+  findMatchingResultForPrediction,
+} from "../services/predictionHistoryService";
+import {
+  performForensicAnalysis,
+  saveForensicReport,
+  syncForensicReportsWithCloud,
+  getLocalForensicReports,
+} from "../services/postPredictionAnalysisService";
+import { LearningService } from "../services/learningService";
+import { AppError, logError } from "../utils/AppError";
+import { useAutonomousAgent } from "../hooks/useAutonomousAgent";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 
 export const NexusEngine: React.FC = () => {
-    useAutonomousAgent(); // Initialize the autonomous agent daemon
-    const drawName = useNexusStore(s => s.drawName);
-    const temporalDepth = useNexusStore(s => s.temporalDepth);
-    const globalWeights = useNexusStore(s => s.globalWeights);
-    const setGlobalWeights = useNexusStore(s => s.setGlobalWeights);
-    const setHistoryData = useNexusStore(s => s.setHistoryData);
-    const setAnalyticsData = useNexusStore(s => s.setAnalyticsData);
-    const setLoading = useNexusStore(s => s.setLoading);
-    const setLastPrediction = useNexusStore(s => s.setLastPrediction);
-    const setSmartInsights = useNexusStore(s => s.setSmartInsights);
-    const setCalibration = useNexusStore(s => s.setCalibration);
-    const setEmpiricalCalibration = useNexusStore(s => s.setEmpiricalCalibration);
+  useAutonomousAgent(); // Initialize the autonomous agent daemon
+  const drawName = useNexusStore((s) => s.drawName);
+  const temporalDepth = useNexusStore((s) => s.temporalDepth);
+  const globalWeights = useNexusStore((s) => s.globalWeights);
+  const setGlobalWeights = useNexusStore((s) => s.setGlobalWeights);
+  const setHistoryData = useNexusStore((s) => s.setHistoryData);
+  const setAnalyticsData = useNexusStore((s) => s.setAnalyticsData);
+  const setLoading = useNexusStore((s) => s.setLoading);
+  const setLastPrediction = useNexusStore((s) => s.setLastPrediction);
+  const setSmartInsights = useNexusStore((s) => s.setSmartInsights);
+  const setCalibration = useNexusStore((s) => s.setCalibration);
+  const setEmpiricalCalibration = useNexusStore(
+    (s) => s.setEmpiricalCalibration,
+  );
 
-    // Direct length store selectors are replaced with content-aware logic below to prevent stale state on identical draw sizes
+  // Direct length store selectors are replaced with content-aware logic below to prevent stale state on identical draw sizes
 
-    // --- DATA FETCHING VIA REACT QUERY ---
-    const { 
-        data: rawHistory, 
-        isLoading: historyLoading,
-        refetch: refetchHistory 
-    } = useDrawHistory(drawName);
+  // --- DATA FETCHING VIA REACT QUERY ---
+  const {
+    data: rawHistory,
+    isLoading: historyLoading,
+    refetch: refetchHistory,
+  } = useDrawHistory(drawName);
 
-    // Assurer l'isolation hermétique et la convergence (TIRAGE ISOLATION RULE)
-    const history = useMemo(() => {
-        return purifyHistoryForDraw(drawName, rawHistory || []);
-    }, [drawName, rawHistory]);
+  // Assurer l'isolation hermétique et la convergence (TIRAGE ISOLATION RULE)
+  const history = useMemo(() => {
+    return purifyHistoryForDraw(drawName, rawHistory || []);
+  }, [drawName, rawHistory]);
 
-    const {
-        data: analytics,
-        isLoading: analyticsLoading
-    } = useNexusAnalytics(drawName, history);
+  const { data: analytics, isLoading: analyticsLoading } = useNexusAnalytics(
+    drawName,
+    history,
+  );
 
-    const loading = historyLoading || analyticsLoading;
+  const loading = historyLoading || analyticsLoading;
 
-    // Sync loading state
-    useEffect(() => {
-        setLoading(loading);
-    }, [loading, setLoading]);
+  // Sync loading state
+  useEffect(() => {
+    setLoading(loading);
+  }, [loading, setLoading]);
 
-    // Force refetch on store rehydration
-    useEffect(() => {
-        const handleRehydrated = () => {
-            console.log("[NexusEngine] Store rehydration detected, forcing full state synchronization...");
-            refetchHistory();
-        };
-        window.addEventListener('NEXUS_STORE_REHYDRATED', handleRehydrated);
-        return () => window.removeEventListener('NEXUS_STORE_REHYDRATED', handleRehydrated);
-    }, [refetchHistory]);
+  // Force refetch on store rehydration
+  useEffect(() => {
+    const handleRehydrated = () => {
+      console.log(
+        "[NexusEngine] Store rehydration detected, forcing full state synchronization...",
+      );
+      refetchHistory();
+    };
+    window.addEventListener("NEXUS_STORE_REHYDRATED", handleRehydrated);
+    return () =>
+      window.removeEventListener("NEXUS_STORE_REHYDRATED", handleRehydrated);
+  }, [refetchHistory]);
 
-    // 1. Initialisation Configuration (Weights & RL)
-    useEffect(() => {
-        let mounted = true;
-        const initConfig = async () => {
-            const weights = await getAlgoWeights(drawName);
-            if(mounted) setGlobalWeights(weights);
-        };
-        initConfig();
-        return () => { mounted = false; };
-    }, [drawName, setGlobalWeights]);
+  // 1. Initialisation Configuration (Weights & RL)
+  useEffect(() => {
+    let mounted = true;
+    const initConfig = async () => {
+      const weights = await getAlgoWeights(drawName);
+      if (mounted) setGlobalWeights(weights);
+    };
+    initConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [drawName, setGlobalWeights]);
 
-    // 2. Calcul des Stats basiques (Rapide, synchrone)
-    useEffect(() => {
-        if (!history || history.length === 0) {
-            const currentStoreHistory = useNexusStore.getState().history;
-            if (currentStoreHistory.length > 0) {
-                setHistoryData([], [], []);
-            }
-            return;
+  // 2. Calcul des Stats basiques (Rapide, synchrone)
+  useEffect(() => {
+    if (!history || history.length === 0) {
+      const currentStoreHistory = useNexusStore.getState().history;
+      if (currentStoreHistory.length > 0) {
+        setHistoryData([], [], []);
+      }
+      return;
+    }
+
+    const storeHistory = useNexusStore.getState().history;
+    const hasDrawNameMismatch =
+      history.length > 0 &&
+      storeHistory.length > 0 &&
+      (history[0].drawName !== storeHistory[0].drawName ||
+        history[0].draw_name !== storeHistory[0].draw_name);
+
+    if (
+      storeHistory.length !== history.length ||
+      hasDrawNameMismatch ||
+      storeHistory.length === 0
+    ) {
+      const counts: Record<number, number> = {};
+      history.forEach((d) =>
+        d.gagnants.forEach((n) => (counts[n] = (counts[n] || 0) + 1)),
+      );
+      const computedStats = Object.entries(counts)
+        .map(([n, c]) => ({ number: Number(n), count: c }))
+        .sort((a, b) => b.count - a.count);
+
+      const computedGaps: { number: number; gap: number }[] = [];
+      for (let i = 1; i <= 90; i++) {
+        let gap = 0;
+        for (const draw of history) {
+          if (draw.gagnants.includes(i)) break;
+          gap++;
         }
-        
-        const storeHistory = useNexusStore.getState().history;
-        const hasDrawNameMismatch = history.length > 0 && storeHistory.length > 0 && 
-            (history[0].drawName !== storeHistory[0].drawName || history[0].draw_name !== storeHistory[0].draw_name);
+        computedGaps.push({ number: i, gap });
+      }
 
-        if (storeHistory.length !== history.length || hasDrawNameMismatch || storeHistory.length === 0) {
-            const counts: Record<number, number> = {};
-            history.forEach(d => d.gagnants.forEach(n => counts[n] = (counts[n] || 0) + 1));
-            const computedStats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
+      const empCal = generateEmpiricalCalibration(history);
+      setEmpiricalCalibration(empCal);
 
-            const computedGaps: { number: number; gap: number }[] = [];
-            for (let i = 1; i <= 90; i++) {
-                let gap = 0;
-                for (const draw of history) { if (draw.gagnants.includes(i)) break; gap++; }
-                computedGaps.push({ number: i, gap });
+      setHistoryData(history, computedStats, computedGaps);
+    }
+  }, [history, setHistoryData, setEmpiricalCalibration]);
+
+  // Sync Analytics
+  useEffect(() => {
+    if (analytics) {
+      setAnalyticsData(analytics);
+    }
+  }, [analytics, setAnalyticsData]);
+
+  // 3. Génération Prédiction & Insights (Dépendant des Analytics et Weights)
+  useEffect(() => {
+    if (!analytics || !history || history.length < 10) return;
+
+    let mounted = true;
+    const runEngine = async () => {
+      try {
+        // Génération de la prédiction Master
+        const prediction = await generateMasterPrediction(
+          drawName,
+          history,
+          temporalDepth,
+          globalWeights,
+          {
+            spectral: analytics.spectral,
+            correlationMatrix: analytics.correlationMatrix,
+            regularity: analytics.regularity,
+          },
+          analytics.symbioticContext || undefined,
+        );
+        if (mounted) setLastPrediction(prediction);
+
+        // Insights
+        const insights = await generateSmartInsights(
+          drawName,
+          history,
+          analytics.spectral,
+          analytics.regularity.map((r) => ({
+            number: r.number,
+            gap: r.currentGap,
+          })),
+          analytics.regularity,
+        );
+        if (mounted) setSmartInsights(insights);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logError(
+          new AppError(msg || "Engine Error", "NEXUS_ENGINE_ERROR", "high", {
+            error: e,
+          }),
+          { source: "NexusEngine" },
+        );
+      }
+    };
+
+    const t = setTimeout(() => {
+      runEngine();
+    }, 100);
+    return () => {
+      mounted = false;
+      clearTimeout(t);
+    };
+  }, [
+    drawName,
+    history,
+    analytics,
+    globalWeights,
+    temporalDepth,
+    setLastPrediction,
+    setSmartInsights,
+  ]);
+
+  // 4. Calibration & Forensic Automator (Dépendant de l'historique uniquement)
+  useEffect(() => {
+    if (!history || history.length < 10) return;
+
+    let mounted = true;
+    const runCalibration = async () => {
+      try {
+        // Calibration (Backtesting historique des prédictions)
+        const preds = await getPredictionHistoryAsync(drawName);
+        if (preds.length > 0 && mounted) {
+          // Preload all local forensic reports to prevent O(N * M) IndexedDB lookups/parsing inside the loop
+          const allLocalReports = await getLocalForensicReports();
+
+          // --- AUTO-LINKER & FORENSIC AUTOMATOR ---
+          let historyChanged = false;
+          let forensicGenerated = false;
+          let hasTriggerableLearning = false;
+
+          // Chunk the processing to avoid blocking main thread
+          for (let i = 0; i < preds.length; i++) {
+            if (!mounted) break;
+            const item = preds[i];
+            let match = item.drawResultId
+              ? history.find((r) => r.id === item.drawResultId)
+              : null;
+
+            if (!item.drawResultId) {
+              match = findMatchingResultForPrediction(item, history);
+              if (match) {
+                await linkPredictionToResult(item.id, match.id);
+                historyChanged = true;
+              }
             }
-            
-            const empCal = generateEmpiricalCalibration(history);
-            setEmpiricalCalibration(empCal);
-            
-            setHistoryData(history, computedStats, computedGaps);
-        }
-    }, [history, setHistoryData, setEmpiricalCalibration]);
 
-    // Sync Analytics
-    useEffect(() => {
-        if (analytics) {
-            setAnalyticsData(analytics);
-        }
-    }, [analytics, setAnalyticsData]);
+            // Automate Forensic Analysis if linked and no report exists
+            if (match) {
+              const existingReport = allLocalReports.find(
+                (r) => r.predictionId === item.id,
+              );
+              if (!existingReport) {
+                try {
+                  const report = await performForensicAnalysis(
+                    drawName,
+                    match.date,
+                    item.prediction.suggestedNumbers,
+                    match.gagnants,
+                    item.prediction.breakdown,
+                    item.id,
+                    match.id,
+                    true, // skipLLM for automated background analysis
+                    history,
+                  );
+                  saveForensicReport(report);
+                  forensicGenerated = true;
 
-    // 3. Génération Prédiction & Insights (Dépendant des Analytics et Weights)
-    useEffect(() => {
-        if (!analytics || !history || history.length < 10) return;
-
-        let mounted = true;
-        const runEngine = async () => {
-            try {
-                // Génération de la prédiction Master
-                const prediction = await generateMasterPrediction(
-                    drawName, 
-                    history, 
-                    temporalDepth,
-                    globalWeights, 
-                    {
-                        spectral: analytics.spectral, 
-                        correlationMatrix: analytics.correlationMatrix, 
-                        regularity: analytics.regularity
-                    }, 
-                    analytics.symbioticContext || undefined
-                );
-                if (mounted) setLastPrediction(prediction);
-
-                // Insights
-                const insights = await generateSmartInsights(
-                    drawName, 
-                    history, 
-                    analytics.spectral, 
-                    analytics.regularity.map(r => ({ number: r.number, gap: r.currentGap })), 
-                    analytics.regularity
-                );
-                if (mounted) setSmartInsights(insights);
-            } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : String(e);
-                logError(new AppError(msg || "Engine Error", "NEXUS_ENGINE_ERROR", "high", { error: e }), { source: 'NexusEngine' });
-            }
-        };
-
-        const t = setTimeout(() => {
-            runEngine();
-        }, 100);
-        return () => { 
-            mounted = false; 
-            clearTimeout(t);
-        };
-    }, [drawName, history, analytics, globalWeights, temporalDepth, setLastPrediction, setSmartInsights]);
-
-    // 4. Calibration & Forensic Automator (Dépendant de l'historique uniquement)
-    useEffect(() => {
-        if (!history || history.length < 10) return;
-
-        let mounted = true;
-        const runCalibration = async () => {
-            try {
-                // Calibration (Backtesting historique des prédictions)
-                const preds = await getPredictionHistoryAsync(drawName);
-                if (preds.length > 0 && mounted) {
-                    // Preload all local forensic reports to prevent O(N * M) IndexedDB lookups/parsing inside the loop
-                    const allLocalReports = await getLocalForensicReports();
-
-                    // --- AUTO-LINKER & FORENSIC AUTOMATOR ---
-                    let historyChanged = false;
-                    let forensicGenerated = false;
-                    let hasTriggerableLearning = false;
-                    
-                    // Chunk the processing to avoid blocking main thread
-                    for (let i = 0; i < preds.length; i++) {
-                        if (!mounted) break;
-                        const item = preds[i];
-                        let match = item.drawResultId ? history.find(r => r.id === item.drawResultId) : null;
-                        
-                        if (!item.drawResultId) {
-                            match = findMatchingResultForPrediction(item, history);
-                            if (match) {
-                                await linkPredictionToResult(item.id, match.id);
-                                historyChanged = true;
-                            }
-                        }
-
-                        // Automate Forensic Analysis if linked and no report exists
-                        if (match) {
-                            const existingReport = allLocalReports.find(r => r.predictionId === item.id);
-                            if (!existingReport) {
-                                try {
-                                    const report = await performForensicAnalysis(
-                                        drawName, match.date, 
-                                        item.prediction.suggestedNumbers, 
-                                        match.gagnants, item.prediction.breakdown,
-                                        item.id,
-                                        match.id,
-                                        true, // skipLLM for automated background analysis
-                                        history
-                                    );
-                                    saveForensicReport(report);
-                                    forensicGenerated = true;
-                                    
-                                    // AUTO-TUNING: Self-Learning based on Forensic Reports
-                                    // PROTECTION CYGNE NOIR: On ne s'optimise pas sur le bruit statistique pur
-                                    if (report.isBlackSwan) {
-                                        console.warn(`[Auto-Tuner] Tirage chaotique (Cygne Noir) détecté le ${match.date}. Apprentissage bloqué pour prévenir l'oubli catastrophique (Catastrophic Forgetting).`);
-                                    } else {
-                                        hasTriggerableLearning = true;
-                                    }
-                                } catch (e) {
-                                    console.warn("Auto-Forensic failed for", item.id, e);
-                                }
-                            }
-                        }
-                        
-                        // Yield to event loop every 5 items to keep UI responsive
-                        if (i % 5 === 0) {
-                            await new Promise(r => setTimeout(r, 5));
-                        }
-                    }
-                    
-                    const bgEnabled = localStorage.getItem("nexus_enable_bg_autolearn") === "true";
-                    if (hasTriggerableLearning && bgEnabled) {
-                        try {
-                            const learningResult = await LearningService.triggerAutoLearning(drawName);
-                            if (learningResult && learningResult.improvement && learningResult.weights && mounted) {
-                                setGlobalWeights(learningResult.weights);
-                            }
-                        } catch (e) {
-                            console.error("Background auto learning block failed", e);
-                        }
-                    }
-                    
-                    if (forensicGenerated && mounted) {
-                        syncForensicReportsWithCloud().catch(e => console.error("Auto-sync forensic failed", e));
-                    }
-                    
-                    // Recalculate performance with updated preds if needed
-                    const updatedPreds = historyChanged ? await getPredictionHistoryAsync(drawName) : preds;
-                    const perf = calculateHistoricalPerformance(updatedPreds, history);
-                    
-                    if (mounted) {
-                        setCalibration({
-                            overallScore: 0.25,
-                            reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
-                            bias: 'NEUTRAL',
-                            sampleSize: perf.analyzedDrawsCount,
-                            baseline: 0.2,
-                            variance: 0.05,
-                            trend: 0,
-                            confidence: 0.8
-                        });
-                    }
+                  // AUTO-TUNING: Self-Learning based on Forensic Reports
+                  // PROTECTION CYGNE NOIR: On ne s'optimise pas sur le bruit statistique pur
+                  if (report.isBlackSwan) {
+                    console.warn(
+                      `[Auto-Tuner] Tirage chaotique (Cygne Noir) détecté le ${match.date}. Apprentissage bloqué pour prévenir l'oubli catastrophique (Catastrophic Forgetting).`,
+                    );
+                  } else {
+                    hasTriggerableLearning = true;
+                  }
+                } catch (e) {
+                  console.warn("Auto-Forensic failed for", item.id, e);
                 }
-            } catch (e: unknown) {
-                console.error("Calibration Error", e);
+              }
             }
-        };
 
-        const t = setTimeout(() => {
-            runCalibration();
-        }, 500); // give the UI time to render first
-        return () => { 
-            mounted = false; 
-            clearTimeout(t);
-        };
-    }, [drawName, history, setCalibration, setGlobalWeights]);
-
-    // Override refresh in store to use React Query refetch
-    useEffect(() => {
-        useNexusStore.setState({
-            refresh: async () => {
-                await refetchHistory();
-            },
-            refreshData: async (name: string, force?: boolean) => {
-                useNexusStore.getState().setDrawName(name);
-                if (force) {
-                    await refetchHistory();
-                }
+            // Yield to event loop every 5 items to keep UI responsive
+            if (i % 5 === 0) {
+              await new Promise((r) => setTimeout(r, 5));
             }
-        });
-    }, [refetchHistory]);
+          }
 
-    return null; // Headless component
+          const bgEnabled =
+            localStorage.getItem("nexus_enable_bg_autolearn") === "true";
+          if (hasTriggerableLearning && bgEnabled) {
+            try {
+              const learningResult =
+                await LearningService.triggerAutoLearning(drawName);
+              if (
+                learningResult &&
+                learningResult.improvement &&
+                learningResult.weights &&
+                mounted
+              ) {
+                setGlobalWeights(learningResult.weights);
+              }
+            } catch (e) {
+              console.error("Background auto learning block failed", e);
+            }
+          }
+
+          if (forensicGenerated && mounted) {
+            syncForensicReportsWithCloud().catch((e) =>
+              console.error("Auto-sync forensic failed", e),
+            );
+          }
+
+          // Recalculate performance with updated preds if needed
+          const updatedPreds = historyChanged
+            ? await getPredictionHistoryAsync(drawName)
+            : preds;
+          const perf = calculateHistoricalPerformance(updatedPreds, history);
+
+          if (mounted) {
+            setCalibration({
+              overallScore: 0.25,
+              reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
+              bias: "NEUTRAL",
+              sampleSize: perf.analyzedDrawsCount,
+              baseline: 0.2,
+              variance: 0.05,
+              trend: 0,
+              confidence: 0.8,
+            });
+          }
+        }
+      } catch (e: unknown) {
+        console.error("Calibration Error", e);
+      }
+    };
+
+    const t = setTimeout(() => {
+      runCalibration();
+    }, 500); // give the UI time to render first
+    return () => {
+      mounted = false;
+      clearTimeout(t);
+    };
+  }, [drawName, history, setCalibration, setGlobalWeights]);
+
+  // Override refresh in store to use React Query refetch
+  useEffect(() => {
+    useNexusStore.setState({
+      refresh: async () => {
+        await refetchHistory();
+      },
+      refreshData: async (name: string, force?: boolean) => {
+        useNexusStore.getState().setDrawName(name);
+        if (force) {
+          await refetchHistory();
+        }
+      },
+    });
+  }, [refetchHistory]);
+
+  return null; // Headless component
 };

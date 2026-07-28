@@ -109,7 +109,7 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * cadenceBoost;
   adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * cadenceBoost;
   adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
-  adjusted[AlgoKey.GAP_RANGE_SEQUENCE] = (adjusted[AlgoKey.GAP_RANGE_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
+  adjusted[AlgoKey.GAP_BAND_SEQUENCE] = (adjusted[AlgoKey.GAP_BAND_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
 
   // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien)
   const topologyBayesBoost = 1.0 + 1.8 * chaoticFactor;

@@ -1,3 +1,4 @@
+import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { getAlgoWeights, normalizeWeights, getCalibratedHyperparameters } from "./weightsManager";
@@ -131,7 +132,7 @@ const evaluatePredictionStability = (
  * Évite les recalculs O(K^14 * N)
  */
 type AlgoBundle = EnhancedMetrics;
-const buildAlgoBundle = (
+export const buildAlgoBundle = (
   subHistory: DrawResult[],
   drawName: string,
   useSpatioTemporalHawkes: boolean,
@@ -1065,11 +1066,15 @@ const runLocalPredictionViaWorker = async (
           worker.terminate();
         };
 
+        const packed = packHistory(context.history as any);
         worker.postMessage({
           taskId: `MASTER_${Date.now()}`,
           type: "master",
           drawName: context.drawName,
-          history: context.history,
+          historyBuffer: packed.historyBuffer,
+          drawCount: packed.drawCount,
+          winningCount: packed.winningCount,
+          totalCols: packed.totalCols,
           temporalDepth: context.temporalDepth,
           weightsToUse: context.weightsToUse,
           metrics: context.metrics,
@@ -1080,7 +1085,7 @@ const runLocalPredictionViaWorker = async (
           isForensicOptimized: context.isForensicOptimized,
           useSpatioTemporalHawkes: context.useSpatioTemporalHawkes ?? true,
           preloadedForensicReports: context.preloadedForensicReports
-        });
+        }, [packed.historyBuffer]);
       } catch (workerError) {
         reject(workerError);
       }
@@ -1151,14 +1156,15 @@ export const generateMasterPrediction = async (
           try {
             return await runLocalPredictionViaWorker(context);
           } catch (workerErr) {
-            logger.warn(
+            logger.error(
               { drawName: context.drawName, error: workerErr instanceof Error ? workerErr.message : String(workerErr) },
-              "[predictionFacade] Échec du Web Worker de prédiction locale. Basculement sur le thread principal pour Local Complet."
+              "[predictionFacade] Échec du Web Worker de prédiction locale. AUCUN basculement sur le thread principal pour éviter les freezes."
             );
-            return await runLocalPredictionPipeline(context);
+            throw workerErr;
           }
         } else {
-          return await runLocalPredictionPipeline(context);
+            logger.warn("[predictionFacade] Web Workers non supportés, passage direct au Local Simplifié.");
+            throw new Error("Web Workers non supportés");
         }
       } catch (e) {
         logger.error(
@@ -1181,7 +1187,8 @@ export const generateMasterPrediction = async (
       // PHASE 4 — Réponse Prudente Dégradée
       return handleScenarioADegradedPrediction(context);
     },
-    CACHE_TTL.LONG
+    CACHE_TTL.MEDIUM,
+    context.drawName
   );
 };
 

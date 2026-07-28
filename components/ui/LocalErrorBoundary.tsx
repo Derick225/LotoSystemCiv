@@ -1,6 +1,6 @@
-import { logger } from '../../utils/logger';
-import React, {  ErrorInfo, ReactNode } from 'react';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { logger } from "../../utils/logger";
+import React, { ErrorInfo, ReactNode } from "react";
+import { RefreshCw, AlertTriangle } from "lucide-react";
 
 interface LocalErrorBoundaryProps {
   children?: ReactNode;
@@ -17,7 +17,10 @@ interface LocalErrorBoundaryState {
  * LocalErrorBoundary v1.2
  * Isolates module-level rendering failures to prevent app-wide crash.
  */
-export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps, LocalErrorBoundaryState> {
+export class LocalErrorBoundary extends React.Component<
+  LocalErrorBoundaryProps,
+  LocalErrorBoundaryState
+> {
   public state: LocalErrorBoundaryState = { hasError: false, error: null };
 
   constructor(props: LocalErrorBoundaryProps) {
@@ -37,8 +40,13 @@ export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps,
   handleReload = () => {
     try {
       // @ts-ignore
-      if (window.audioEngine) window.audioEngine.play('click');
-    } catch (e) { logger.error(e instanceof Error ? e : new Error(String(e)), 'Silenced error'); }
+      if (window.audioEngine) window.audioEngine.play("click");
+    } catch (e) {
+      logger.error(
+        e instanceof Error ? e : new Error(String(e)),
+        "Silenced error",
+      );
+    }
     this.setState({ hasError: false, error: null });
   };
 
@@ -50,12 +58,17 @@ export class LocalErrorBoundary extends React.Component<LocalErrorBoundaryProps,
             <AlertTriangle size={24} className="text-amber-500" />
           </div>
           <div>
-            <p className="font-black text-xs uppercase tracking-widest text-slate-800 dark:text-white mb-1">Module Indisponible</p>
+            <p className="font-black text-xs uppercase tracking-widest text-slate-800 dark:text-white mb-1">
+              Module Indisponible
+            </p>
             <p className="text-slate-400 text-[10px] opacity-70 max-w-[200px] mx-auto leading-relaxed">
               {this.state.error?.message || "Erreur de rendu interne."}
             </p>
           </div>
-          <button onClick={this.handleReload} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
+          <button
+            onClick={this.handleReload}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+          >
             <RefreshCw size={12} /> Restaurer le module
           </button>
         </div>

@@ -5,7 +5,10 @@ import {
   BacktestReport,
   BettingStrategy,
 } from "../../services/backtestingEngine";
-import { LearningService, LearningStatus } from "../../services/learningService";
+import {
+  LearningService,
+  LearningStatus,
+} from "../../services/learningService";
 import {
   Play,
   RefreshCw,
@@ -18,7 +21,7 @@ import {
   TrendingUp,
   TrendingDown,
   Dna,
-  Repeat
+  Repeat,
 } from "lucide-react";
 import { ParallelSimulationTab } from "./ParallelSimulationTab";
 import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
@@ -34,10 +37,14 @@ import {
   Line,
   BarChart,
   Bar,
-  Legend
+  Legend,
 } from "recharts";
 import { audioEngine } from "../../utils/audioEngine";
-import { BacktestingFramework, WalkForwardMetric, MonteCarloResult } from "../../services/backtestingFramework";
+import {
+  BacktestingFramework,
+  WalkForwardMetric,
+  MonteCarloResult,
+} from "../../services/backtestingFramework";
 
 export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
   ({ drawName }) => {
@@ -45,10 +52,14 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
-    const [mode, setMode] = useState<"single" | "comparative" | "walkforward" | "replay">("single");
+    const [mode, setMode] = useState<
+      "single" | "comparative" | "walkforward" | "replay"
+    >("single");
     const [simulating, setSimulating] = useState(false);
     const [learning, setLearning] = useState(false);
-    const [learningResult, setLearningResult] = useState<LearningStatus | null>(null);
+    const [learningResult, setLearningResult] = useState<LearningStatus | null>(
+      null,
+    );
     const [progress, setProgress] = useState(0);
     const [report, setReport] = useState<BacktestReport | null>(null);
 
@@ -60,7 +71,10 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const [payoutModel, setPayoutModel] = useState<string>("LEGACY");
 
     // Walk Forward Advanced State
-    const [wfResults, setWfResults] = useState<Record<string, WalkForwardMetric> | null>(null);
+    const [wfResults, setWfResults] = useState<Record<
+      string,
+      WalkForwardMetric
+    > | null>(null);
     const [wfRunning, setWfRunning] = useState(false);
     const [wfProgress, setWfProgress] = useState(0);
 
@@ -108,7 +122,16 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
         audioEngine.play("error");
         if (isMounted.current) setSimulating(false);
       }
-    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet, payoutModel]);
+    }, [
+      drawName,
+      history,
+      globalWeights,
+      depth,
+      strategy,
+      initialBankroll,
+      unitBet,
+      payoutModel,
+    ]);
 
     const handleAutoRegulate = useCallback(async () => {
       audioEngine.play("click");
@@ -116,7 +139,12 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
       setLearningResult(null);
       try {
         // CORRECTION CRITIQUE : on force l'enregistrement de l'amélioration s'il y en a une (force = true)
-        const result = await LearningService.triggerAutoLearning(drawName, globalWeights, false, true);
+        const result = await LearningService.triggerAutoLearning(
+          drawName,
+          globalWeights,
+          false,
+          true,
+        );
         if (isMounted.current) {
           setLearningResult(result);
           if (result.improvement && result.weights) {
@@ -128,16 +156,16 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           setLearning(false);
         }
       } catch (e) {
-         console.error(e);
-         audioEngine.play("error");
-         if (isMounted.current) {
-           setLearning(false);
-           setLearningResult({
-             lastRun: new Date().toISOString(),
-             improvement: false,
-             message: `Échec de l'optimisation cybernétique : ${e instanceof Error ? e.message : String(e)}`,
-           });
-         }
+        console.error(e);
+        audioEngine.play("error");
+        if (isMounted.current) {
+          setLearning(false);
+          setLearningResult({
+            lastRun: new Date().toISOString(),
+            improvement: false,
+            message: `Échec de l'optimisation cybernétique : ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
       }
     }, [drawName, globalWeights, setGlobalWeights]);
 
@@ -146,7 +174,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
       audioEngine.play("click");
       setWfRunning(true);
       setWfResults(null);
-      setMcResults(null); 
+      setMcResults(null);
       setWfProgress(0);
 
       try {
@@ -155,13 +183,13 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           history,
           globalWeights,
           depth,
-          strategy === "CONFIDENCE_SMART" ? "FLAT" : strategy as any, // fallback standard of Kelly / Martingale / Flat
+          strategy === "CONFIDENCE_SMART" ? "FLAT" : (strategy as any), // fallback standard of Kelly / Martingale / Flat
           initialBankroll,
           unitBet,
           (p) => {
             if (isMounted.current) setWfProgress(p);
           },
-          payoutModel
+          payoutModel,
         );
 
         if (isMounted.current) {
@@ -175,7 +203,16 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
         audioEngine.play("error");
         if (isMounted.current) setWfRunning(false);
       }
-    }, [drawName, history, globalWeights, depth, strategy, initialBankroll, unitBet, payoutModel]);
+    }, [
+      drawName,
+      history,
+      globalWeights,
+      depth,
+      strategy,
+      initialBankroll,
+      unitBet,
+      payoutModel,
+    ]);
 
     const handleRunMonteCarlo = useCallback(() => {
       audioEngine.play("click");
@@ -189,7 +226,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
             depth,
             initialBankroll,
             unitBet,
-            strategyWeights: globalWeights
+            strategyWeights: globalWeights,
           });
 
           if (isMounted.current) {
@@ -278,16 +315,21 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   Crash Test Financier
                 </h3>
                 <p className="text-slate-400 text-sm font-medium max-w-lg mx-auto mb-4 leading-relaxed">
-                  Rejouez l'historique réel en appliquant l'ADN prédictif actuel. Configurez les règles de gestion du risque ci-dessous.
+                  Rejouez l'historique réel en appliquant l'ADN prédictif
+                  actuel. Configurez les règles de gestion du risque ci-dessous.
                 </p>
                 <div className="flex items-center justify-center gap-2 mb-8 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 py-2 px-4 rounded-full mx-auto w-fit text-[10px] font-black uppercase tracking-widest">
-                  <Activity size={12} /> Mode Time Machine Strict : 100% Isolé (Zéro fuite du futur)
+                  <Activity size={12} /> Mode Time Machine Strict : 100% Isolé
+                  (Zéro fuite du futur)
                 </div>
 
                 {/* Advanced Parameters Configuration Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8 text-left bg-slate-950/40 p-6 rounded-2xl border border-slate-800/60 shadow-inner">
                   <div>
-                    <label htmlFor="sim-strategy" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="sim-strategy"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Stratégie de Sizing
                     </label>
                     <select
@@ -300,14 +342,23 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                     >
                       <option value="FLAT">Mise Plate (Standard)</option>
-                      <option value="MARTINGALE">Martingale (Double après perte)</option>
-                      <option value="KELLY">Critère de Kelly (Scientifique)</option>
-                      <option value="CONFIDENCE_SMART">Intelligente (Confiance IA)</option>
+                      <option value="MARTINGALE">
+                        Martingale (Double après perte)
+                      </option>
+                      <option value="KELLY">
+                        Critère de Kelly (Scientifique)
+                      </option>
+                      <option value="CONFIDENCE_SMART">
+                        Intelligente (Confiance IA)
+                      </option>
                     </select>
                   </div>
 
                   <div>
-                    <label htmlFor="sim-depth" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="sim-depth"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Période de Backtest (Tirages)
                     </label>
                     <select
@@ -321,13 +372,18 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                     >
                       <option value={20}>20 derniers tirages</option>
                       <option value={50}>50 derniers tirages (Standard)</option>
-                      <option value={100}>100 derniers tirages (Recommandé)</option>
+                      <option value={100}>
+                        100 derniers tirages (Recommandé)
+                      </option>
                       <option value={150}>150 derniers tirages (Max)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label htmlFor="sim-bankroll" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="sim-bankroll"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Capital de Départ (F)
                     </label>
                     <input
@@ -338,14 +394,19 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       max={1000000}
                       value={initialBankroll}
                       onChange={(e) => {
-                        setInitialBankroll(Math.max(1000, Number(e.target.value)));
+                        setInitialBankroll(
+                          Math.max(1000, Number(e.target.value)),
+                        );
                       }}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
 
                   <div>
-                    <label htmlFor="sim-unitbet" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="sim-unitbet"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Mise de Base (F)
                     </label>
                     <input
@@ -363,7 +424,10 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label htmlFor="sim-payout" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="sim-payout"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Modèle de Gains (Cote de Gains)
                     </label>
                     <select
@@ -375,10 +439,20 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       }}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                     >
-                      <option value="LEGACY">Classique (×15 / ×100 / ×1500 / ×15000)</option>
-                      <option value="STANDARD">LONACI Standard (×15 / ×240 / ×2100 / ×15000 / ×40000)</option>
-                      <option value="DOUBLE_CHANCE">LONACI Double Chance (×10 / ×100 / ×1000 / ×5000 / ×20000)</option>
-                      <option value="DOUBLE_CHANCE_MACHINE">LONACI Double Chance Machine (×8 / ×80 / ×800 / ×4000 / ×15000)</option>
+                      <option value="LEGACY">
+                        Classique (×15 / ×100 / ×1500 / ×15000)
+                      </option>
+                      <option value="STANDARD">
+                        LONACI Standard (×15 / ×240 / ×2100 / ×15000 / ×40000)
+                      </option>
+                      <option value="DOUBLE_CHANCE">
+                        LONACI Double Chance (×10 / ×100 / ×1000 / ×5000 /
+                        ×20000)
+                      </option>
+                      <option value="DOUBLE_CHANCE_MACHINE">
+                        LONACI Double Chance Machine (×8 / ×80 / ×800 / ×4000 /
+                        ×15000)
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -420,7 +494,9 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                         className="group-hover/btn2:rotate-12 transition-transform"
                       />
                     )}
-                    {learning ? "Régulation génétique..." : "Auto-Réguler l'ADN"}
+                    {learning
+                      ? "Régulation génétique..."
+                      : "Auto-Réguler l'ADN"}
                   </button>
                   {simulating && (
                     <div className="absolute -bottom-2 left-2 right-2 h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -430,23 +506,34 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       ></div>
                     </div>
                   )}
-                  
+
                   {/* Panneau de Feedback de l'Auto-Régulation de l'ADN */}
                   {learningResult && (
                     <div className="mt-6 text-left bg-slate-950/80 p-6 rounded-3xl border border-slate-800/80 shadow-2xl animate-scale-in w-full">
                       <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/60">
                         <div className="flex items-center gap-2">
-                          <Dna className={learningResult.improvement ? "text-emerald-400 animate-pulse" : "text-slate-400"} size={18} />
+                          <Dna
+                            className={
+                              learningResult.improvement
+                                ? "text-emerald-400 animate-pulse"
+                                : "text-slate-400"
+                            }
+                            size={18}
+                          />
                           <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
                             Rapport d'Auto-Régulation ADN
                           </span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                          learningResult.improvement 
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                            : "bg-slate-500/10 text-slate-400 border-slate-500/20"
-                        }`}>
-                          {learningResult.improvement ? "Optimisé" : "Déjà Optimal"}
+                        <span
+                          className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                            learningResult.improvement
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                          }`}
+                        >
+                          {learningResult.improvement
+                            ? "Optimisé"
+                            : "Déjà Optimal"}
                         </span>
                       </div>
 
@@ -461,48 +548,72 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       )}
 
                       {/* Comparaison Champion-Challenger */}
-                      {learningResult.oldScore !== undefined && learningResult.newScore !== undefined && (
-                        <div className="grid grid-cols-2 gap-4 mb-4 pt-2">
-                          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
-                            <span className="text-[8px] font-bold uppercase text-slate-500 block mb-1">Efficacité Avant</span>
-                            <span className="text-sm font-black text-slate-400">
-                              {learningResult.oldScore.toFixed(2)} pts
-                            </span>
+                      {learningResult.oldScore !== undefined &&
+                        learningResult.newScore !== undefined && (
+                          <div className="grid grid-cols-2 gap-4 mb-4 pt-2">
+                            <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
+                              <span className="text-[8px] font-bold uppercase text-slate-500 block mb-1">
+                                Efficacité Avant
+                              </span>
+                              <span className="text-sm font-black text-slate-400">
+                                {learningResult.oldScore.toFixed(2)} pts
+                              </span>
+                            </div>
+                            <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
+                              <span className="text-[8px] font-bold uppercase text-emerald-500 block mb-1">
+                                Efficacité Après
+                              </span>
+                              <span className="text-sm font-black text-emerald-400">
+                                {learningResult.newScore.toFixed(2)} pts{" "}
+                                {learningResult.improvement &&
+                                  `(+${learningResult.delta}%)`}
+                              </span>
+                            </div>
                           </div>
-                          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
-                            <span className="text-[8px] font-bold uppercase text-emerald-500 block mb-1">Efficacité Après</span>
-                            <span className="text-sm font-black text-emerald-400">
-                              {learningResult.newScore.toFixed(2)} pts {learningResult.improvement && `(+${learningResult.delta}%)`}
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                        )}
 
                       {/* Détail des changements de l'ADN */}
-                      {learningResult.weightChanges && Object.keys(learningResult.weightChanges).length > 0 && (
-                        <div className="space-y-2 mt-4 pt-2 border-t border-slate-800/40">
-                          <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider block mb-2">
-                            Réajustement des Poids IA
-                          </span>
-                          <div className="grid grid-cols-2 gap-2 text-[10px]">
-                            {Object.entries(learningResult.weightChanges).map(([algo, change]) => {
-                              const absChangePercent = Math.abs(change * 100).toFixed(1);
-                              return (
-                                <div key={algo} className="flex items-center justify-between bg-slate-900/30 px-3 py-2 rounded-xl border border-slate-800/30">
-                                  <span className="text-slate-400 capitalize font-medium">{algo}</span>
-                                  {change > 0.001 ? (
-                                    <span className="text-emerald-400 font-bold font-mono">+{absChangePercent}%</span>
-                                  ) : change < -0.001 ? (
-                                    <span className="text-rose-400 font-bold font-mono">-{absChangePercent}%</span>
-                                  ) : (
-                                    <span className="text-slate-500 font-bold font-mono">0.0%</span>
-                                  )}
-                                </div>
-                              );
-                            })}
+                      {learningResult.weightChanges &&
+                        Object.keys(learningResult.weightChanges).length >
+                          0 && (
+                          <div className="space-y-2 mt-4 pt-2 border-t border-slate-800/40">
+                            <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider block mb-2">
+                              Réajustement des Poids IA
+                            </span>
+                            <div className="grid grid-cols-2 gap-2 text-[10px]">
+                              {Object.entries(learningResult.weightChanges).map(
+                                ([algo, change]) => {
+                                  const absChangePercent = Math.abs(
+                                    change * 100,
+                                  ).toFixed(1);
+                                  return (
+                                    <div
+                                      key={algo}
+                                      className="flex items-center justify-between bg-slate-900/30 px-3 py-2 rounded-xl border border-slate-800/30"
+                                    >
+                                      <span className="text-slate-400 capitalize font-medium">
+                                        {algo}
+                                      </span>
+                                      {change > 0.001 ? (
+                                        <span className="text-emerald-400 font-bold font-mono">
+                                          +{absChangePercent}%
+                                        </span>
+                                      ) : change < -0.001 ? (
+                                        <span className="text-rose-400 font-bold font-mono">
+                                          -{absChangePercent}%
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-500 font-bold font-mono">
+                                          0.0%
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                },
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </div>
                   )}
                 </div>
@@ -574,19 +685,29 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                         </div>
                       </div>
                       <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                        <div className="text-xs text-slate-500 uppercase font-black mb-1" title="Pénalise uniquement la volatilité négative">
+                        <div
+                          className="text-xs text-slate-500 uppercase font-black mb-1"
+                          title="Pénalise uniquement la volatilité négative"
+                        >
                           Sortino Ratio
                         </div>
                         <div className="text-xl font-black text-indigo-400">
-                          {report.sortinoRatio !== undefined ? report.sortinoRatio : "-"}
+                          {report.sortinoRatio !== undefined
+                            ? report.sortinoRatio
+                            : "-"}
                         </div>
                       </div>
                       <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                        <div className="text-xs text-slate-500 uppercase font-black mb-1" title="Profit Net / Drawdown Max">
+                        <div
+                          className="text-xs text-slate-500 uppercase font-black mb-1"
+                          title="Profit Net / Drawdown Max"
+                        >
                           Recovery Factor
                         </div>
                         <div className="text-xl font-black text-indigo-400">
-                          {report.recoveryFactor !== undefined ? report.recoveryFactor : "-"}
+                          {report.recoveryFactor !== undefined
+                            ? report.recoveryFactor
+                            : "-"}
                         </div>
                       </div>
                     </div>
@@ -600,83 +721,87 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   </h4>
                   <div className="w-full h-full flex justify-center items-center">
                     {report.history && report.history.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart
-                        data={report.history}
-                        margin={{ top: 20, right: 0, left: 0, bottom: 0 }}
-                      >
-                      <defs>
-                        <linearGradient
-                          id="colorProfit"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart
+                          data={report.history}
+                          margin={{ top: 20, right: 0, left: 0, bottom: 0 }}
                         >
-                          <stop
-                            offset="5%"
-                            stopColor="#10b981"
-                            stopOpacity={0.3}
+                          <defs>
+                            <linearGradient
+                              id="colorProfit"
+                              x1="0"
+                              y1="0"
+                              x2="0"
+                              y2="1"
+                            >
+                              <stop
+                                offset="5%"
+                                stopColor="#10b981"
+                                stopOpacity={0.3}
+                              />
+                              <stop
+                                offset="95%"
+                                stopColor="#10b981"
+                                stopOpacity={0}
+                              />
+                            </linearGradient>
+                            <linearGradient
+                              id="colorLoss"
+                              x1="0"
+                              y1="0"
+                              x2="0"
+                              y2="1"
+                            >
+                              <stop
+                                offset="5%"
+                                stopColor="#f43f5e"
+                                stopOpacity={0.3}
+                              />
+                              <stop
+                                offset="95%"
+                                stopColor="#f43f5e"
+                                stopOpacity={0}
+                              />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            vertical={false}
+                            opacity={0.1}
                           />
-                          <stop
-                            offset="95%"
-                            stopColor="#10b981"
-                            stopOpacity={0}
+                          <Tooltip
+                            contentStyle={{
+                              borderRadius: "16px",
+                              border: "none",
+                              backgroundColor: "#0f172a",
+                              color: "#fff",
+                              fontSize: "10px",
+                              boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
+                            }}
+                            formatter={(value: number) => [
+                              `${value.toLocaleString()} F`,
+                              "Capital",
+                            ]}
                           />
-                        </linearGradient>
-                        <linearGradient
-                          id="colorLoss"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="5%"
-                            stopColor="#f43f5e"
-                            stopOpacity={0.3}
+                          <XAxis dataKey="date" hide />
+                          <YAxis hide domain={["auto", "auto"]} />
+                          <Area
+                            type="monotone"
+                            dataKey="balance"
+                            stroke={
+                              report.netProfit >= 0 ? "#10b981" : "#f43f5e"
+                            }
+                            strokeWidth={3}
+                            fill={`url(#${report.netProfit >= 0 ? "colorProfit" : "colorLoss"})`}
+                            animationDuration={1500}
                           />
-                          <stop
-                            offset="95%"
-                            stopColor="#f43f5e"
-                            stopOpacity={0}
-                          />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        vertical={false}
-                        opacity={0.1}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: "16px",
-                          border: "none",
-                          backgroundColor: "#0f172a",
-                          color: "#fff",
-                          fontSize: "10px",
-                          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
-                        }}
-                        formatter={(value: number) => [
-                          `${value.toLocaleString()} F`,
-                          "Capital",
-                        ]}
-                      />
-                      <XAxis dataKey="date" hide />
-                      <YAxis hide domain={["auto", "auto"]} />
-                      <Area
-                        type="monotone"
-                        dataKey="balance"
-                        stroke={report.netProfit >= 0 ? "#10b981" : "#f43f5e"}
-                        strokeWidth={3}
-                        fill={`url(#${report.netProfit >= 0 ? "colorProfit" : "colorLoss"})`}
-                        animationDuration={1500}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  ) : (
-                    <span className="text-slate-500 text-xs text-center relative z-20">Données insuffisantes</span>
-                  )}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <span className="text-slate-500 text-xs text-center relative z-20">
+                        Données insuffisantes
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -699,7 +824,10 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   Validation Walk-Forward Continue
                 </h3>
                 <p className="text-slate-400 text-sm font-medium leading-relaxed mb-6">
-                  Le test de robustesse suprême. Simulez l'intégralité de la chaîne d'apprentissage par l'erreur (DNA backpropagation + calibration bayésienne) sur une fenêtre glissante temporelle stricte.
+                  Le test de robustesse suprême. Simulez l'intégralité de la
+                  chaîne d'apprentissage par l'erreur (DNA backpropagation +
+                  calibration bayésienne) sur une fenêtre glissante temporelle
+                  stricte.
                 </p>
 
                 <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
@@ -714,7 +842,10 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                 {/* Configurations Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left bg-slate-950/40 p-6 rounded-2xl border border-slate-800/60 shadow-inner mb-6">
                   <div>
-                    <label htmlFor="wf-depth" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="wf-depth"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Profondeur de Test (Tirages)
                     </label>
                     <select
@@ -728,12 +859,17 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                     >
                       <option value={20}>20 derniers tirages</option>
                       <option value={50}>50 derniers tirages (Standard)</option>
-                      <option value={100}>100 derniers tirages (Validation Robuste)</option>
+                      <option value={100}>
+                        100 derniers tirages (Validation Robuste)
+                      </option>
                     </select>
                   </div>
 
                   <div>
-                    <label htmlFor="wf-strategy" className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                    <label
+                      htmlFor="wf-strategy"
+                      className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                    >
                       Régime de Risque (Mises)
                     </label>
                     <select
@@ -747,7 +883,9 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                     >
                       <option value="FLAT">Mise Plate (Standard)</option>
                       <option value="MARTINGALE">Martingale Éperonnée</option>
-                      <option value="KELLY">Kelly Fractionnaire Scientifique</option>
+                      <option value="KELLY">
+                        Kelly Fractionnaire Scientifique
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -762,7 +900,9 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   ) : (
                     <Play size={18} className="fill-current" />
                   )}
-                  {wfRunning ? `Exécution Forensique glissante ${wfProgress}%` : "Lancer le Walk-Forward de Test"}
+                  {wfRunning
+                    ? `Exécution Forensique glissante ${wfProgress}%`
+                    : "Lancer le Walk-Forward de Test"}
                 </button>
               </div>
             </div>
@@ -772,8 +912,14 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                 {/* 4 Models Cards Comparative Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {Object.values(wfResults).map((metric) => {
-                    const isProfitable = metric.finalBankroll >= metric.initBankroll;
-                    const brierQuality = metric.brierScore < 0.055 ? "Excellente" : metric.brierScore < 0.058 ? "Optimisée" : "Incomplète";
+                    const isProfitable =
+                      metric.finalBankroll >= metric.initBankroll;
+                    const brierQuality =
+                      metric.brierScore < 0.055
+                        ? "Excellente"
+                        : metric.brierScore < 0.058
+                          ? "Optimisée"
+                          : "Incomplète";
                     return (
                       <div
                         key={metric.strategyName}
@@ -781,53 +927,83 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                           metric.strategyName === "Full Hybrid"
                             ? "border-indigo-500/40 bg-gradient-to-br from-indigo-950/20 to-slate-950 shadow-indigo-600/5 shadow-2xl"
                             : metric.strategyName === "Adversarial Defensive"
-                            ? "border-emerald-500/40 bg-gradient-to-br from-emerald-950/20 to-slate-950 shadow-emerald-600/5"
-                            : "border-slate-800"
+                              ? "border-emerald-500/40 bg-gradient-to-br from-emerald-950/20 to-slate-950 shadow-emerald-600/5"
+                              : "border-slate-800"
                         }`}
                       >
                         <div>
                           <div className="flex items-start justify-between mb-4">
                             <div>
-                              <div className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Modèle de Test</div>
-                              <h4 className="text-xl font-black text-white uppercase tracking-tight">{metric.strategyName}</h4>
+                              <div className="text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                                Modèle de Test
+                              </div>
+                              <h4 className="text-xl font-black text-white uppercase tracking-tight">
+                                {metric.strategyName}
+                              </h4>
                             </div>
                             <span
                               className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border ${
-                                isProfitable 
-                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                                isProfitable
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                   : "bg-rose-500/10 text-rose-400 border-rose-500/20"
                               }`}
                             >
-                              {metric.roi >= 0 ? "+" : ""}{metric.roi}% ROI
+                              {metric.roi >= 0 ? "+" : ""}
+                              {metric.roi}% ROI
                             </span>
                           </div>
 
                           {/* Capital / Drawdowns */}
                           <div className="grid grid-cols-3 gap-2 mb-6">
                             <div className="bg-black/30 p-3 rounded-2xl border border-white/5 text-center">
-                              <span className="text-[8px] font-bold uppercase text-slate-500">Solde Final</span>
-                              <div className="text-sm font-black text-white">{metric.finalBankroll.toLocaleString()} F</div>
+                              <span className="text-[8px] font-bold uppercase text-slate-500">
+                                Solde Final
+                              </span>
+                              <div className="text-sm font-black text-white">
+                                {metric.finalBankroll.toLocaleString()} F
+                              </div>
                             </div>
                             <div className="bg-black/30 p-3 rounded-2xl border border-white/5 text-center">
-                              <span className="text-[8px] font-bold uppercase text-slate-500">Drawdown Max</span>
-                              <div className="text-sm font-black text-rose-400">-{metric.maxDrawdown}%</div>
+                              <span className="text-[8px] font-bold uppercase text-slate-500">
+                                Drawdown Max
+                              </span>
+                              <div className="text-sm font-black text-rose-400">
+                                -{metric.maxDrawdown}%
+                              </div>
                             </div>
-                            <div className="bg-black/30 p-3 rounded-2xl border border-white/5 text-center" title="Brier Score du modèle (plus bas = calibration idéale)">
-                              <span className="text-[8px] font-bold uppercase text-slate-500">Brier Score</span>
-                              <div className="text-sm font-black text-indigo-400">{metric.brierScore}</div>
+                            <div
+                              className="bg-black/30 p-3 rounded-2xl border border-white/5 text-center"
+                              title="Brier Score du modèle (plus bas = calibration idéale)"
+                            >
+                              <span className="text-[8px] font-bold uppercase text-slate-500">
+                                Brier Score
+                              </span>
+                              <div className="text-sm font-black text-indigo-400">
+                                {metric.brierScore}
+                              </div>
                             </div>
                           </div>
 
                           {/* Hits Distributions */}
                           <div className="mb-4">
-                            <div className="text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2">Répartition des Hits (Tirages gagnés)</div>
+                            <div className="text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+                              Répartition des Hits (Tirages gagnés)
+                            </div>
                             <div className="grid grid-cols-5 gap-1.5">
                               {[1, 2, 3, 4, 5].map((k) => {
-                                const count = metric.totalHits[k as 1|2|3|4|5] || 0;
+                                const count =
+                                  metric.totalHits[k as 1 | 2 | 3 | 4 | 5] || 0;
                                 return (
-                                  <div key={k} className="bg-slate-900 border border-slate-800 rounded-xl p-2 text-center">
-                                    <div className="text-[8px] font-black text-slate-500">{k}★</div>
-                                    <div className="text-xs font-black text-white">{count}</div>
+                                  <div
+                                    key={k}
+                                    className="bg-slate-900 border border-slate-800 rounded-xl p-2 text-center"
+                                  >
+                                    <div className="text-[8px] font-black text-slate-500">
+                                      {k}★
+                                    </div>
+                                    <div className="text-xs font-black text-white">
+                                      {count}
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -838,12 +1014,20 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                         {/* Audits & Diagnostics */}
                         <div className="pt-4 border-t border-slate-800/60 grid grid-cols-2 gap-4 mt-4">
                           <div>
-                            <span className="text-[8px] font-bold uppercase text-slate-500 block">Indice UFI Moyen</span>
-                            <span className="text-xs font-black text-slate-300">{metric.avgUFI} / 100</span>
+                            <span className="text-[8px] font-bold uppercase text-slate-500 block">
+                              Indice UFI Moyen
+                            </span>
+                            <span className="text-xs font-black text-slate-300">
+                              {metric.avgUFI} / 100
+                            </span>
                           </div>
                           <div className="text-right">
-                            <span className="text-[8px] font-bold uppercase text-slate-500 block">Anomalies de l'UFI</span>
-                            <span className={`text-xs font-black uppercase ${metric.blackSwanCount > 0 ? "text-amber-400" : "text-slate-400"}`}>
+                            <span className="text-[8px] font-bold uppercase text-slate-500 block">
+                              Anomalies de l'UFI
+                            </span>
+                            <span
+                              className={`text-xs font-black uppercase ${metric.blackSwanCount > 0 ? "text-amber-400" : "text-slate-400"}`}
+                            >
                               {metric.blackSwanCount} Cygnes Noirs
                             </span>
                           </div>
@@ -856,39 +1040,83 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                 {/* Multiline Capital Curve Chart */}
                 <div className="bg-slate-900/50 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-xl h-96 relative">
                   <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                    <Activity size={14} /> Courbes Comparatives de Capital (Walk-Forward)
+                    <Activity size={14} /> Courbes Comparatives de Capital
+                    (Walk-Forward)
                   </h4>
                   <div className="w-full h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart
                         data={(() => {
-                          const hybridHist = wfResults["Full Hybrid"]?.history || [];
+                          const hybridHist =
+                            wfResults["Full Hybrid"]?.history || [];
                           return hybridHist.map((entry, idx) => ({
                             date: entry.date,
-                            "Baseline Random": wfResults["Baseline Random"]?.history[idx]?.balance || 0,
-                            "Frequency Only": wfResults["Frequency Only"]?.history[idx]?.balance || 0,
-                            "Full Hybrid": wfResults["Full Hybrid"]?.history[idx]?.balance || 0,
-                            "Adversarial Defensive": wfResults["Adversarial Defensive"]?.history[idx]?.balance || 0
+                            "Baseline Random":
+                              wfResults["Baseline Random"]?.history[idx]
+                                ?.balance || 0,
+                            "Frequency Only":
+                              wfResults["Frequency Only"]?.history[idx]
+                                ?.balance || 0,
+                            "Full Hybrid":
+                              wfResults["Full Hybrid"]?.history[idx]?.balance ||
+                              0,
+                            "Adversarial Defensive":
+                              wfResults["Adversarial Defensive"]?.history[idx]
+                                ?.balance || 0,
                           }));
                         })()}
                         margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" opacity={0.05} />
                         <XAxis dataKey="date" hide />
-                        <YAxis stroke="#475569" fontSize={10} domain={["auto", "auto"]} />
+                        <YAxis
+                          stroke="#475569"
+                          fontSize={10}
+                          domain={["auto", "auto"]}
+                        />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: "#020617",
                             border: "1px solid #1e293b",
                             borderRadius: "12px",
-                            fontSize: "10px"
+                            fontSize: "10px",
                           }}
                         />
-                        <Legend wrapperStyle={{ fontSize: "9px", textTransform: "uppercase", fontWeight: "900" }} />
-                        <Line type="monotone" strokeWidth={1.5} dataKey="Baseline Random" stroke="#64748b" dot={false} />
-                        <Line type="monotone" strokeWidth={1.5} dataKey="Frequency Only" stroke="#f59e0b" dot={false} />
-                        <Line type="monotone" strokeWidth={3} dataKey="Full Hybrid" stroke="#6366f1" dot={false} />
-                        <Line type="monotone" strokeWidth={3} dataKey="Adversarial Defensive" stroke="#10b981" dot={false} />
+                        <Legend
+                          wrapperStyle={{
+                            fontSize: "9px",
+                            textTransform: "uppercase",
+                            fontWeight: "900",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          strokeWidth={1.5}
+                          dataKey="Baseline Random"
+                          stroke="#64748b"
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          strokeWidth={1.5}
+                          dataKey="Frequency Only"
+                          stroke="#f59e0b"
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          strokeWidth={3}
+                          dataKey="Full Hybrid"
+                          stroke="#6366f1"
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
+                          strokeWidth={3}
+                          dataKey="Adversarial Defensive"
+                          stroke="#10b981"
+                          dot={false}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -900,32 +1128,51 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 h-96 flex flex-col justify-between">
                     <div>
                       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Activity size={14} /> Courbe de Calibration Probabiliste (Full Hybrid)
+                        <Activity size={14} /> Courbe de Calibration
+                        Probabiliste (Full Hybrid)
                       </h4>
                       <p className="text-[10px] text-slate-500 mb-6">
-                        Compare la probabilité estimée du modèle avec le taux réel historique d'apparition dans chaque tranche de confiance.
+                        Compare la probabilité estimée du modèle avec le taux
+                        réel historique d'apparition dans chaque tranche de
+                        confiance.
                       </p>
                     </div>
                     <div className="w-full h-64">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={wfResults["Full Hybrid"]?.calibrationCurve || []}
+                          data={
+                            wfResults["Full Hybrid"]?.calibrationCurve || []
+                          }
                           margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" opacity={0.05} />
-                          <XAxis dataKey="label" stroke="#475569" fontSize={9} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#475569"
+                            fontSize={9}
+                          />
                           <YAxis stroke="#475569" fontSize={9} />
                           <Tooltip
                             contentStyle={{
                               backgroundColor: "#020617",
                               border: "none",
                               fontSize: "10px",
-                              borderRadius: "12px"
+                              borderRadius: "12px",
                             }}
                           />
                           <Legend wrapperStyle={{ fontSize: "9px" }} />
-                          <Bar name="Attendu (Théorique)" dataKey="expectedProb" fill="#312e81" radius={[4, 4, 0, 0]} />
-                          <Bar name="Réel Constaté" dataKey="actualRate" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                          <Bar
+                            name="Attendu (Théorique)"
+                            dataKey="expectedProb"
+                            fill="#312e81"
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar
+                            name="Réel Constaté"
+                            dataKey="actualRate"
+                            fill="#4f46e5"
+                            radius={[4, 4, 0, 0]}
+                          />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -935,10 +1182,13 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                   <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 h-96 flex flex-col justify-between">
                     <div>
                       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Activity size={14} /> Stress-Test de Ruine Monte Carlo (1000 Runs)
+                        <Activity size={14} /> Stress-Test de Ruine Monte Carlo
+                        (1000 Runs)
                       </h4>
                       <p className="text-[10px] text-slate-500 mb-4">
-                        Soumettez l'algorithme d'estimation de probabilité à 1 000 trajectoires stochastiques déterministes pour modéliser le comportement de drawdown maximal absolu.
+                        Soumettez l'algorithme d'estimation de probabilité à 1
+                        000 trajectoires stochastiques déterministes pour
+                        modéliser le comportement de drawdown maximal absolu.
                       </p>
                     </div>
 
@@ -949,7 +1199,9 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                           disabled={mcRunning}
                           className="px-6 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg active:scale-95 disabled:opacity-50"
                         >
-                          {mcRunning ? "Stress-Test en cours..." : "Calculer le Risque de Faillite"}
+                          {mcRunning
+                            ? "Stress-Test en cours..."
+                            : "Calculer le Risque de Faillite"}
                         </button>
                       </div>
                     ) : (
@@ -957,19 +1209,33 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                         {/* MC KPIs */}
                         <div className="grid grid-cols-3 gap-3 mb-4 bg-black/45 p-4 rounded-2xl border border-white/5">
                           <div className="text-center">
-                            <span className="text-[8px] font-bold text-slate-500 uppercase">Risque de Ruine</span>
-                            <div className={`text-sm font-black ${mcResults.bankruptcyProbability > 0.1 ? "text-rose-400" : "text-emerald-400"}`}>
+                            <span className="text-[8px] font-bold text-slate-500 uppercase">
+                              Risque de Ruine
+                            </span>
+                            <div
+                              className={`text-sm font-black ${mcResults.bankruptcyProbability > 0.1 ? "text-rose-400" : "text-emerald-400"}`}
+                            >
                               {mcResults.ruinRisk}%
                             </div>
                           </div>
                           <div className="text-center">
-                            <span className="text-[8px] font-bold text-slate-500 uppercase font-black">Capital Médian</span>
+                            <span className="text-[8px] font-bold text-slate-500 uppercase font-black">
+                              Capital Médian
+                            </span>
                             <div className="text-sm font-black text-indigo-400">
-                              {Math.round(mcResults.medianFinalBalance).toLocaleString()} F
+                              {Math.round(
+                                mcResults.medianFinalBalance,
+                              ).toLocaleString()}{" "}
+                              F
                             </div>
                           </div>
-                          <div className="text-center" title="Sharpe Ratio espéré sous de fortes perturbations">
-                            <span className="text-[8px] font-bold text-slate-500 uppercase">Ratio Sharpe</span>
+                          <div
+                            className="text-center"
+                            title="Sharpe Ratio espéré sous de fortes perturbations"
+                          >
+                            <span className="text-[8px] font-bold text-slate-500 uppercase">
+                              Ratio Sharpe
+                            </span>
                             <div className="text-sm font-black text-amber-400">
                               {mcResults.expectedSharpe}
                             </div>
@@ -978,27 +1244,74 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
 
                         {/* Projection bound */}
                         <div className="text-[9px] font-black text-slate-400 uppercase tracking-wide flex justify-between px-2 mb-2">
-                          <span>Intervalle Pessimiste (P5): {Math.round(mcResults.p5).toLocaleString()} F</span>
-                          <span>Optimiste (P95): {Math.round(mcResults.p95).toLocaleString()} F</span>
+                          <span>
+                            Intervalle Pessimiste (P5):{" "}
+                            {Math.round(mcResults.p5).toLocaleString()} F
+                          </span>
+                          <span>
+                            Optimiste (P95):{" "}
+                            {Math.round(mcResults.p95).toLocaleString()} F
+                          </span>
                         </div>
 
                         {/* Trajectories Mini Graph */}
                         <div className="w-full h-32 opacity-80">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
-                              data={mcResults.trajectorySamples[0].map((_, stepIdx) => ({
-                                name: stepIdx,
-                                path0: mcResults.trajectorySamples[0]?.[stepIdx] || 0,
-                                path1: mcResults.trajectorySamples[1]?.[stepIdx] || 0,
-                                path2: mcResults.trajectorySamples[2]?.[stepIdx] || 0,
-                                path3: mcResults.trajectorySamples[3]?.[stepIdx] || 0,
-                              }))}
+                              data={mcResults.trajectorySamples[0].map(
+                                (_, stepIdx) => ({
+                                  name: stepIdx,
+                                  path0:
+                                    mcResults.trajectorySamples[0]?.[stepIdx] ||
+                                    0,
+                                  path1:
+                                    mcResults.trajectorySamples[1]?.[stepIdx] ||
+                                    0,
+                                  path2:
+                                    mcResults.trajectorySamples[2]?.[stepIdx] ||
+                                    0,
+                                  path3:
+                                    mcResults.trajectorySamples[3]?.[stepIdx] ||
+                                    0,
+                                }),
+                              )}
                             >
-                              <CartesianGrid strokeDasharray="3 3" opacity={0.03} />
-                              <Area type="monotone" dataKey="path0" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.05} dot={false} />
-                              <Area type="monotone" dataKey="path1" stroke="#34d399" fill="#34d399" fillOpacity={0.05} dot={false} />
-                              <Area type="monotone" dataKey="path2" stroke="#60a5fa" fill="#60a5fa" fillOpacity={0.05} dot={false} />
-                              <Area type="monotone" dataKey="path3" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.05} dot={false} />
+                              <CartesianGrid
+                                strokeDasharray="3 3"
+                                opacity={0.03}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="path0"
+                                stroke="#a78bfa"
+                                fill="#a78bfa"
+                                fillOpacity={0.05}
+                                dot={false}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="path1"
+                                stroke="#34d399"
+                                fill="#34d399"
+                                fillOpacity={0.05}
+                                dot={false}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="path2"
+                                stroke="#60a5fa"
+                                fill="#60a5fa"
+                                fillOpacity={0.05}
+                                dot={false}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="path3"
+                                stroke="#fbbf24"
+                                fill="#fbbf24"
+                                fillOpacity={0.05}
+                                dot={false}
+                              />
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>

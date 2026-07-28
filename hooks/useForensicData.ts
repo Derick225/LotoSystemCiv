@@ -6,6 +6,7 @@ import { getPlatinumHistory, performPlatinumAudit } from '../services/metaAnalys
 import { PredictionHistoryItem, ForensicReport, PlatinumAudit } from '../types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { useToast } from '../components/ui/Toast';
+import { syncForensicReports } from '../services/syncService';
 
 export const useForensicData = (drawName: string) => {
     const history = useNexusStore((state) => state.history);
@@ -187,6 +188,16 @@ export const useForensicData = (drawName: string) => {
         setRefreshKey(prev => prev + 1);
     }, []);
 
+    const syncReports = useCallback(async () => {
+        if (!navigator.onLine) {
+            showToast("Mode hors-ligne : Synchronisation suspendue.", "info");
+            return;
+        }
+        const synced = await syncForensicReports(reports);
+        setReports(synced);
+        return synced;
+    }, [reports, showToast]);
+
     return {
         reports,
         pendingPredictions,
@@ -194,6 +205,8 @@ export const useForensicData = (drawName: string) => {
         platinumAudits,
         loading,
         refreshData,
-        setReports
+        refreshLocal: refreshData,
+        setReports,
+        syncReports
     };
 };

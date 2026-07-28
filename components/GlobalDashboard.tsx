@@ -13,10 +13,7 @@ import {
 import { analyzeIntraDraw } from "../services/intraDrawService";
 import { LearningService } from "../services/learningService";
 import { useNexusStore } from "../store/useNexusStore";
-import {
-  useDailySummary,
-  lotteryKeys,
-} from "../hooks/useLottery";
+import { useDailySummary, lotteryKeys } from "../hooks/useLottery";
 import { useQueryClient } from "@tanstack/react-query";
 import { DRAW_SCHEDULE } from "../constants";
 import type { Draw, DrawResult } from "../types";
@@ -68,8 +65,12 @@ interface GlobalDashboardProps {
 const MetaLearningIndicator = React.memo(() => {
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const calibration = useNexusStore((state) => state.calibration);
-  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
-  const setForensicOptimized = useNexusStore((state) => state.setForensicOptimized);
+  const isForensicOptimized = useNexusStore(
+    (state) => state.isForensicOptimized,
+  );
+  const setForensicOptimized = useNexusStore(
+    (state) => state.setForensicOptimized,
+  );
   const { showToast } = useToast();
 
   const strategyBalance = useMemo(() => {
@@ -94,9 +95,12 @@ const MetaLearningIndicator = React.memo(() => {
     return Math.min(99, baseConfidence + boost);
   }, [globalWeights, calibration]);
 
-  // Using a continuous sigmoid-based activation concept instead of strict binary, 
+  // Using a continuous sigmoid-based activation concept instead of strict binary,
   // but keeping boolean for UI styling flags.
-  const shadowIntensity = Math.min(1.0, Math.max(0.0, (globalWeights?.fractal || 0) * 10.0));
+  const shadowIntensity = Math.min(
+    1.0,
+    Math.max(0.0, (globalWeights?.fractal || 0) * 10.0),
+  );
   const isShadowActive = shadowIntensity > 0.3;
 
   return (
@@ -151,10 +155,12 @@ const MetaLearningIndicator = React.memo(() => {
           <button
             onClick={() => {
               setForensicOptimized(!isForensicOptimized);
-              try { audioEngine.play("success"); } catch(e) {}
+              try {
+                audioEngine.play("success");
+              } catch (e) {}
               showToast(
                 `Optimisation Forensic ${!isForensicOptimized ? "activée" : "désactivée"} avec succès.`,
-                !isForensicOptimized ? "success" : "info"
+                !isForensicOptimized ? "success" : "info",
               );
             }}
             className={`flex items-center gap-2 px-3 py-2 border rounded-2xl transition-all duration-300 hover:scale-105 active:scale-95 shadow-md relative overflow-hidden group cursor-pointer ${
@@ -167,26 +173,34 @@ const MetaLearningIndicator = React.memo(() => {
             <Brain
               size={14}
               className={`transition-transform duration-500 ${
-                isForensicOptimized ? "animate-pulse text-emerald-400 rotate-[360deg] scale-110" : "text-slate-400 group-hover:scale-110"
+                isForensicOptimized
+                  ? "animate-pulse text-emerald-400 rotate-[360deg] scale-110"
+                  : "text-slate-400 group-hover:scale-110"
               }`}
             />
             <div className="text-left leading-none">
               <span className="text-[7px] text-slate-500 font-black uppercase tracking-widest block">
                 Forensic
               </span>
-              <span className={`text-[10px] font-black uppercase mt-0.5 transition-colors duration-300 ${
-                isForensicOptimized ? "text-emerald-400" : "text-slate-400"
-              }`}>
+              <span
+                className={`text-[10px] font-black uppercase mt-0.5 transition-colors duration-300 ${
+                  isForensicOptimized ? "text-emerald-400" : "text-slate-400"
+                }`}
+              >
                 {isForensicOptimized ? "Optimisé" : "Désactivé"}
               </span>
             </div>
             {/* Indication visuelle de statut sous forme d'interrupteur mini */}
-            <div className={`w-7 h-4 rounded-full transition-colors duration-300 relative flex items-center p-0.5 ml-1 ${
-              isForensicOptimized ? "bg-emerald-500" : "bg-slate-600"
-            }`}>
-              <div className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ease-out ${
-                isForensicOptimized ? "translate-x-3" : "translate-x-0"
-              }`} />
+            <div
+              className={`w-7 h-4 rounded-full transition-colors duration-300 relative flex items-center p-0.5 ml-1 ${
+                isForensicOptimized ? "bg-emerald-500" : "bg-slate-600"
+              }`}
+            >
+              <div
+                className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ease-out ${
+                  isForensicOptimized ? "translate-x-3" : "translate-x-0"
+                }`}
+              />
             </div>
           </button>
 
@@ -230,9 +244,14 @@ const MetaLearningIndicator = React.memo(() => {
 
 const LatestResultHero = React.memo(
   ({ result, onAnalyze }: { result: DrawResult; onAnalyze: () => void }) => {
-    const storeCalibration = useNexusStore((state) => state.empiricalCalibration);
+    const storeCalibration = useNexusStore(
+      (state) => state.empiricalCalibration,
+    );
     const calibration = storeCalibration || FALLBACK_CALIBRATION;
-    const metrics = useMemo(() => analyzeIntraDraw(result, calibration), [result, calibration]);
+    const metrics = useMemo(
+      () => analyzeIntraDraw(result, calibration),
+      [result, calibration],
+    );
     const [showXRay, setShowXRay] = useState(false);
 
     return (
@@ -516,7 +535,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     const drawName = useNexusStore((state) => state.drawName);
     const temporalDepth = useNexusStore((state) => state.temporalDepth);
     const navigateToModule = useNexusStore((state) => state.navigateToModule);
-    const isAutonomousAgentActive = useNexusStore((state) => state.isAutonomousAgentActive);
+    const isAutonomousAgentActive = useNexusStore(
+      (state) => state.isAutonomousAgentActive,
+    );
 
     const queryClient = useQueryClient();
 
@@ -532,15 +553,15 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     const [selectedDay, setSelectedDay] = useState<string>(
       daysOrder[new Date().getDay()],
     );
-    const [dashboardTab, setDashboardTab] = useState<"schedule" | "macro">("schedule");
+    const [dashboardTab, setDashboardTab] = useState<"schedule" | "macro">(
+      "schedule",
+    );
     const { data: summary = [], isLoading: loadingSummary } =
       useDailySummary(selectedDay);
 
     // const { data: globalHotData = [] } = useGlobalStats(drawName);
 
     const [fullSyncing, setFullSyncing] = useState(false);
-
-
 
     // Calculs Dynamiques pour le Dashboard (Reflétant les changements de poids/prédiction)
     const dynamicVolatility = useMemo(() => {
@@ -550,7 +571,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       if (lastPrediction?.confidence) {
         const stabilityFactor = lastPrediction.confidence / 100;
         // Réduction dérivée de l'entropie spectrale vs entropie temporelle
-        const reductionBounds = Math.max(0.1, Math.min(0.5, (histVol / 100)));
+        const reductionBounds = Math.max(0.1, Math.min(0.5, histVol / 100));
         return Math.round(histVol * (1 - stabilityFactor * reductionBounds));
       }
       return histVol;
@@ -612,7 +633,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
         // Force execution by clearing timestamp
         localStorage.removeItem(`nexus_autolearn_last_${drawName}`);
 
-        const result = await LearningService.triggerAutoLearning(drawName, undefined, false, true);
+        const result = await LearningService.triggerAutoLearning(
+          drawName,
+          undefined,
+          false,
+          true,
+        );
         if (result.lastRun) {
           safeSetItem(
             `nexus_autolearn_last_${drawName}`,
@@ -621,7 +647,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           showToast(result.message, result.improvement ? "success" : "info");
           if (result.improvement) {
             if (result.weights) {
-              await useNexusStore.getState().updateGlobalWeights(result.weights, drawName);
+              await useNexusStore
+                .getState()
+                .updateGlobalWeights(result.weights, drawName);
             }
             refreshData(drawName);
           }
@@ -639,26 +667,34 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       // Auto-sync exactly ~30 mins after any draw time
       const syncTimer = setInterval(async () => {
         const now = new Date();
-        const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+        const days = [
+          "Dimanche",
+          "Lundi",
+          "Mardi",
+          "Mercredi",
+          "Jeudi",
+          "Vendredi",
+          "Samedi",
+        ];
         const todaySchedule = DRAW_SCHEDULE[days[now.getDay()]];
         if (!todaySchedule) return;
 
         for (const time of Object.keys(todaySchedule)) {
-          const [h, m] = time.split(':').map(Number);
+          const [h, m] = time.split(":").map(Number);
           const drawDate = new Date();
           drawDate.setHours(h, m, 0, 0);
           const targetSyncTime = new Date(drawDate.getTime() + 30 * 60 * 1000);
-          
+
           // Check if we are within a 1-minute window of the target sync time (+30m)
           const diffMs = Math.abs(now.getTime() - targetSyncTime.getTime());
-          
+
           if (diffMs <= 60000) {
             const drawNameKey = todaySchedule[time];
-            const dateStr = now.toISOString().split('T')[0];
+            const dateStr = now.toISOString().split("T")[0];
             const storageKey = `nexus_autosync_${drawNameKey}_${dateStr}`;
-            
+
             if (!localStorage.getItem(storageKey)) {
-              localStorage.setItem(storageKey, 'true'); // Optimistic lock
+              localStorage.setItem(storageKey, "true"); // Optimistic lock
               try {
                 const count = await checkAndSyncRecentResults();
                 if (count > 0) {
@@ -672,7 +708,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                   audioEngine.play("success");
                 }
               } catch (e: any) {
-                if (e?.code !== 'SYNC_REQUIRES_BACKEND') {
+                if (e?.code !== "SYNC_REQUIRES_BACKEND") {
                   localStorage.removeItem(storageKey); // Release lock on failure to allow retry
                   console.error("Auto-sync failed", e);
                 }
@@ -702,8 +738,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
         );
         if (count > 0) audioEngine.play("success");
       } catch (e: any) {
-        if (e?.code === 'SYNC_REQUIRES_BACKEND') {
-          showToast("Mode démo : aucun backend configuré, synchronisation indisponible.", "info");
+        if (e?.code === "SYNC_REQUIRES_BACKEND") {
+          showToast(
+            "Mode démo : aucun backend configuré, synchronisation indisponible.",
+            "info",
+          );
         } else {
           showToast("Sync cloud interrompue.", "error");
         }
@@ -935,7 +974,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                   <button
                     onClick={() => {
                       audioEngine.play("click");
-                      onSelectDraw({ name: "ALL", day: "Tous", time: "Archive" });
+                      onSelectDraw({
+                        name: "ALL",
+                        day: "Tous",
+                        time: "Archive",
+                      });
                     }}
                     className="mx-auto md:mx-0 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2 group"
                   >
@@ -1046,20 +1089,23 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                                       </div>
                                     ))}
                                   </div>
-                                  <div 
+                                  <div
                                     className="flex items-center justify-between pt-4 md:pt-6 border-t border-white/5 cursor-pointer"
                                     onClick={(e) => {
-                                        e.stopPropagation();
-                                        audioEngine.play("click");
-                                        onSelectDraw({
-                                            day: selectedDay,
-                                            time: item.time,
-                                            name: item.name,
-                                        });
-                                        // We let the view transition, and trigger the navigation event after a short delay
-                                        setTimeout(() => {
-                                            navigateToModule('Forensic', 'prediction');
-                                        }, 300);
+                                      e.stopPropagation();
+                                      audioEngine.play("click");
+                                      onSelectDraw({
+                                        day: selectedDay,
+                                        time: item.time,
+                                        name: item.name,
+                                      });
+                                      // We let the view transition, and trigger the navigation event after a short delay
+                                      setTimeout(() => {
+                                        navigateToModule(
+                                          "Forensic",
+                                          "prediction",
+                                        );
+                                      }, 300);
                                     }}
                                   >
                                     <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-black text-indigo-400 uppercase group-hover:text-indigo-300">

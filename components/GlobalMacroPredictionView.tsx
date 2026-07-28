@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { 
-  BrainCircuit, 
-  Activity, 
-  RefreshCw, 
-  Layers, 
+import {
+  BrainCircuit,
+  Activity,
+  RefreshCw,
+  Layers,
   Award,
-  Info
+  Info,
 } from "lucide-react";
 import { motion as motionComponent, AnimatePresence } from "framer-motion"; // Let's use framer-motion as in the rest of the app
 import { useNexusStore } from "../store/useNexusStore";
@@ -31,48 +31,62 @@ export const GlobalMacroPredictionView: React.FC = () => {
   const [forcedOutsiderCount] = useState(2);
 
   // Load ALL combined draw histories on mount
-  const loadAllHistoryAndPredict = useCallback(async (isSilent = false) => {
-    if (!isSilent) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      if (!isSilent) audioEngine.play("scan");
-      
-      // Fetch results of ALL drawings combined
-      const allHistory = await lotteryService.fetchHistory("ALL", true);
-      setHistoryCount(allHistory.length);
-
-      if (allHistory.length < 10) {
-        throw new Error("Historique global insuffisant pour calculer la macro-convergence (Minimum 10 tirages requis).");
-      }
-
-      // Generate the prediction deterministically
-      const pred = await generateMasterPrediction(
-        "ALL_COMBINED",
-        allHistory,
-        temporalDepth,
-        globalWeights,
-        undefined,
-        undefined,
-        false,
-        adversarialMode,
-        forcedOutsiderCount
-      );
-
-      setPrediction(pred);
+  const loadAllHistoryAndPredict = useCallback(
+    async (isSilent = false) => {
       if (!isSilent) {
-        audioEngine.play("success");
-        showToast("🔮 Macro-Convergence calculée sur l'ensemble de tous les tirages !", "success");
+        setLoading(true);
+        setError(null);
       }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Échec du calcul de convergence globale.");
-      if (!isSilent) audioEngine.play("error");
-    } finally {
-      setLoading(false);
-    }
-  }, [temporalDepth, globalWeights, adversarialMode, forcedOutsiderCount, showToast]);
+      try {
+        if (!isSilent) audioEngine.play("scan");
+
+        // Fetch results of ALL drawings combined
+        const allHistory = await lotteryService.fetchHistory("ALL", true);
+        setHistoryCount(allHistory.length);
+
+        if (allHistory.length < 10) {
+          throw new Error(
+            "Historique global insuffisant pour calculer la macro-convergence (Minimum 10 tirages requis).",
+          );
+        }
+
+        // Generate the prediction deterministically
+        const pred = await generateMasterPrediction(
+          "ALL_COMBINED",
+          allHistory,
+          temporalDepth,
+          globalWeights,
+          undefined,
+          undefined,
+          false,
+          adversarialMode,
+          forcedOutsiderCount,
+        );
+
+        setPrediction(pred);
+        if (!isSilent) {
+          audioEngine.play("success");
+          showToast(
+            "🔮 Macro-Convergence calculée sur l'ensemble de tous les tirages !",
+            "success",
+          );
+        }
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message || "Échec du calcul de convergence globale.");
+        if (!isSilent) audioEngine.play("error");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      temporalDepth,
+      globalWeights,
+      adversarialMode,
+      forcedOutsiderCount,
+      showToast,
+    ],
+  );
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -101,13 +115,16 @@ export const GlobalMacroPredictionView: React.FC = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 pb-6 border-b border-slate-100 dark:border-slate-800/80">
         <div className="space-y-1.5">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 text-[10px] font-black rounded-full uppercase tracking-widest">
-            <Layers size={12} className="animate-pulse" /> Convergence Macro-Tirages ({historyCount} tirages analysés)
+            <Layers size={12} className="animate-pulse" /> Convergence
+            Macro-Tirages ({historyCount} tirages analysés)
           </span>
           <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">
             Moteur de Convergence Globale
           </h3>
           <p className="text-slate-400 text-xs font-medium leading-relaxed max-w-xl">
-            Cette prédiction analyse la séquence totale unifiée de tous les tirages confondus pour isoler les harmoniques de fond et les zones d'attraction croisées.
+            Cette prédiction analyse la séquence totale unifiée de tous les
+            tirages confondus pour isoler les harmoniques de fond et les zones
+            d'attraction croisées.
           </p>
         </div>
 
@@ -124,7 +141,7 @@ export const GlobalMacroPredictionView: React.FC = () => {
       {/* CONTENT BLOCK */}
       <AnimatePresence mode="wait">
         {loading ? (
-          <motionComponent.div 
+          <motionComponent.div
             key="loading"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -132,17 +149,21 @@ export const GlobalMacroPredictionView: React.FC = () => {
             className="flex flex-col items-center justify-center py-20 gap-4"
           >
             <BrainCircuit className="text-indigo-500 animate-spin" size={48} />
-            <span className="text-xs font-black uppercase tracking-widest text-slate-500">Inférence en cours sur l'historique complet...</span>
+            <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Inférence en cours sur l'historique complet...
+            </span>
           </motionComponent.div>
         ) : error ? (
-          <motionComponent.div 
+          <motionComponent.div
             key="error"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-center space-y-3"
           >
-            <span className="text-rose-500 font-bold block">Une anomalie est survenue</span>
+            <span className="text-rose-500 font-bold block">
+              Une anomalie est survenue
+            </span>
             <p className="text-slate-400 text-xs">{error}</p>
           </motionComponent.div>
         ) : prediction ? (
@@ -171,12 +192,16 @@ export const GlobalMacroPredictionView: React.FC = () => {
                     key={num}
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
-                    transition={{ delay: i * 0.1, type: "spring", stiffness: 100 }}
+                    transition={{
+                      delay: i * 0.1,
+                      type: "spring",
+                      stiffness: 100,
+                    }}
                   >
-                    <NumberBall 
-                      number={num} 
-                      size="md" 
-                      isAttractor={i === 0} 
+                    <NumberBall
+                      number={num}
+                      size="md"
+                      isAttractor={i === 0}
                       confidence={prediction.confidence}
                     />
                   </motionComponent.div>
@@ -187,10 +212,12 @@ export const GlobalMacroPredictionView: React.FC = () => {
               <div className="max-w-md mx-auto space-y-2">
                 <div className="flex justify-between items-center text-[10px] font-black text-slate-500 uppercase tracking-wider">
                   <span>Confiance de l'Inférence</span>
-                  <span className="text-indigo-500 font-mono">{prediction.confidence}%</span>
+                  <span className="text-indigo-500 font-mono">
+                    {prediction.confidence}%
+                  </span>
                 </div>
                 <div className="h-2 bg-slate-200 dark:bg-slate-900 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-indigo-500 rounded-full transition-all duration-1000"
                     style={{ width: `${prediction.confidence}%` }}
                   />
@@ -200,19 +227,20 @@ export const GlobalMacroPredictionView: React.FC = () => {
 
             {/* COMPOSANTE 2: DOUBLE-CHANCE & CANDIDATS */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              
               {/* Candidates balls */}
               <div className="lg:col-span-7 bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
                 <h4 className="text-xs font-black text-slate-800 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <Award size={16} className="text-indigo-500" /> Numéros de Secours (Candidats)
+                  <Award size={16} className="text-indigo-500" /> Numéros de
+                  Secours (Candidats)
                 </h4>
                 <p className="text-slate-400 text-[11px]">
-                  Vecteurs secondaires d'attraction validés par l'analyse statistique des écarts (gaps) et de la balistique.
+                  Vecteurs secondaires d'attraction validés par l'analyse
+                  statistique des écarts (gaps) et de la balistique.
                 </p>
-                
+
                 <div className="flex flex-wrap gap-3 pt-2">
                   {prediction.candidates.map((num) => (
-                    <div 
+                    <div
                       key={num}
                       className="w-10 h-10 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center font-mono font-bold text-slate-700 dark:text-slate-300 shadow-sm"
                     >
@@ -225,27 +253,29 @@ export const GlobalMacroPredictionView: React.FC = () => {
               {/* Consensus list */}
               <div className="lg:col-span-5 bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
                 <h4 className="text-xs font-black text-slate-800 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <Activity size={16} className="text-indigo-500" /> Profil de Pondération Actif
+                  <Activity size={16} className="text-indigo-500" /> Profil de
+                  Pondération Actif
                 </h4>
 
                 <div className="space-y-3">
-                  {consensusPercentages.slice(0, 4).map(({ algo, percentage }) => (
-                    <div key={algo} className="space-y-1">
-                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
-                        <span>{algo}</span>
-                        <span>{percentage}%</span>
+                  {consensusPercentages
+                    .slice(0, 4)
+                    .map(({ algo, percentage }) => (
+                      <div key={algo} className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                          <span>{algo}</span>
+                          <span>{percentage}%</span>
+                        </div>
+                        <div className="h-1 bg-slate-200 dark:bg-slate-850 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-500 rounded-full"
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-1 bg-slate-200 dark:bg-slate-850 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-indigo-500 rounded-full"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
-
             </div>
 
             {/* ADVERSARIAL MODE CONTROLS */}
@@ -253,16 +283,22 @@ export const GlobalMacroPredictionView: React.FC = () => {
               <div className="flex items-start gap-3">
                 <Info className="text-indigo-500 shrink-0 mt-0.5" size={16} />
                 <div>
-                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 block uppercase tracking-wider">Inférence Adversaire de Laplace</span>
+                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 block uppercase tracking-wider">
+                    Inférence Adversaire de Laplace
+                  </span>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Active un modèle de régularisation qui filtre les numéros trop prévisibles pour forcer la sélection d'outsiders à fort potentiel d'écart.
+                    Active un modèle de régularisation qui filtre les numéros
+                    trop prévisibles pour forcer la sélection d'outsiders à fort
+                    potentiel d'écart.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-4 shrink-0 w-full sm:w-auto justify-end">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Filtre Adversaire</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    Filtre Adversaire
+                  </span>
                   <button
                     onClick={() => {
                       audioEngine.play("click");
@@ -275,7 +311,6 @@ export const GlobalMacroPredictionView: React.FC = () => {
                 </div>
               </div>
             </div>
-
           </motionComponent.div>
         ) : null}
       </AnimatePresence>

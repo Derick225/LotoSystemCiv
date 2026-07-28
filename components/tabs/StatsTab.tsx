@@ -1,62 +1,68 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { useNexusStore } from '../../store/useNexusStore';
-import { StatsSkeleton } from '../skeletons/StatsSkeleton';
-import { ProbabilityField } from '../ProbabilityField';
-import { CoOccurrenceGraph } from '../CoOccurrenceGraph';
-import { NumberBall } from '../NumberBall';
-import { 
-  Trophy, 
-  Clock, 
-  Flame, 
-  BarChart3, 
-  TrendingUp, 
-  Sparkles, 
-  ArrowRight, 
-  Activity, 
-  Search, 
-  Zap, 
-  Layers
-} from 'lucide-react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Cell, 
-  LineChart, 
-  Line, 
-  RadarChart, 
-  PolarGrid, 
-  PolarAngleAxis, 
-  PolarRadiusAxis, 
-  Radar 
-} from 'recharts';
-import { advancedStatsService, AdvancedStatsReport } from '../../services/advancedStatsService';
+import React, { useMemo, useState, useEffect } from "react";
+import { useNexusStore } from "../../store/useNexusStore";
+import { StatsSkeleton } from "../skeletons/StatsSkeleton";
+import { ProbabilityField } from "../ProbabilityField";
+import { CoOccurrenceGraph } from "../CoOccurrenceGraph";
+import { NumberBall } from "../NumberBall";
+import {
+  Trophy,
+  Clock,
+  Flame,
+  BarChart3,
+  TrendingUp,
+  Sparkles,
+  ArrowRight,
+  Activity,
+  Search,
+  Zap,
+  Layers,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  LineChart,
+  Line,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+} from "recharts";
+import {
+  advancedStatsService,
+  AdvancedStatsReport,
+} from "../../services/advancedStatsService";
 
 export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-  const stats = useNexusStore(state => state.stats);
-  const gaps = useNexusStore(state => state.gaps);
-  const history = useNexusStore(state => state.history);
-  const loading = useNexusStore(state => state.loading);
+  const stats = useNexusStore((state) => state.stats);
+  const gaps = useNexusStore((state) => state.gaps);
+  const history = useNexusStore((state) => state.history);
+  const loading = useNexusStore((state) => state.loading);
 
-  const [activeTab, setActiveTab] = useState<'basic' | 'advanced'>('basic');
+  const [activeTab, setActiveTab] = useState<"basic" | "advanced">("basic");
   const [advReport, setAdvReport] = useState<AdvancedStatsReport | null>(null);
   const [advLoading, setAdvLoading] = useState<boolean>(false);
-  const [searchFreq, setSearchFreq] = useState<string>('');
+  const [searchFreq, setSearchFreq] = useState<string>("");
   const [selectedNum, setSelectedNum] = useState<number>(1);
 
   // Load advanced stats
   useEffect(() => {
     if (!history || history.length === 0) return;
-    
+
     let isMounted = true;
     const fetchAdvStats = async () => {
       setAdvLoading(true);
       try {
-        const report = await advancedStatsService.computeAdvancedStats(drawName, history);
+        const report = await advancedStatsService.computeAdvancedStats(
+          drawName,
+          history,
+        );
         if (isMounted) {
           setAdvReport(report);
           // Auto-select first champion or number 1
@@ -65,63 +71,71 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           }
         }
       } catch (err) {
-        console.error('[StatsTab] Advanced stats calculation failed:', err);
+        console.error("[StatsTab] Advanced stats calculation failed:", err);
       } finally {
         if (isMounted) setAdvLoading(false);
       }
     };
 
     fetchAdvStats();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [drawName, history]);
 
   // Basic memoized stats
   const topNumbers = useMemo(() => stats.slice(0, 5), [stats]);
-  const topGaps = useMemo(() => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 5), [gaps]);
+  const topGaps = useMemo(
+    () => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 5),
+    [gaps],
+  );
 
   const probabilityScores = useMemo(() => {
     const scores: Record<number, number> = {};
     const maxFreq = stats[0]?.count || 1;
-    const gapsGaps = gaps.map(g => g.gap);
+    const gapsGaps = gaps.map((g) => g.gap);
     const maxGap = gapsGaps.length > 0 ? Math.max(...gapsGaps) : 1;
-    stats.forEach(s => {
-      const g = gaps.find(x => x.number === s.number)?.gap || 0;
-      const score = ((s.count / maxFreq) * 60) + ((g / maxGap) * 40);
+    stats.forEach((s) => {
+      const g = gaps.find((x) => x.number === s.number)?.gap || 0;
+      const score = (s.count / maxFreq) * 60 + (g / maxGap) * 40;
       scores[s.number] = Math.round(score);
     });
     return scores;
   }, [stats, gaps]);
 
   const chartData = useMemo(() => {
-    return stats.slice(0, 15).map(s => ({
+    return stats.slice(0, 15).map((s) => ({
       name: s.number.toString(),
       count: s.count,
-      gap: gaps.find(g => g.number === s.number)?.gap || 0
+      gap: gaps.find((g) => g.number === s.number)?.gap || 0,
     }));
   }, [stats, gaps]);
 
   const gapChartData = useMemo(() => {
-    return [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 15).map(g => ({
-      name: g.number.toString(),
-      gap: g.gap,
-      count: stats.find(s => s.number === g.number)?.count || 0
-    }));
+    return [...gaps]
+      .sort((a, b) => b.gap - a.gap)
+      .slice(0, 15)
+      .map((g) => ({
+        name: g.number.toString(),
+        gap: g.gap,
+        count: stats.find((s) => s.number === g.number)?.count || 0,
+      }));
   }, [stats, gaps]);
 
   const decileData = useMemo(() => {
     const deciles = Array.from({ length: 9 }, (_, i) => ({
       subject: `${i * 10 + 1}-${(i + 1) * 10}`,
       count: 0,
-      fullMark: 100
+      fullMark: 100,
     }));
-    
-    stats.forEach(s => {
+
+    stats.forEach((s) => {
       const decileIndex = Math.floor((s.number - 1) / 10);
       if (decileIndex >= 0 && decileIndex < 9) {
         deciles[decileIndex].count += s.count;
       }
     });
-    
+
     return deciles;
   }, [stats]);
 
@@ -130,26 +144,43 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     if (!advReport) return [];
     if (!searchFreq) return advReport.frequencies;
     const q = searchFreq.trim();
-    return advReport.frequencies.filter(f => f.number.toString() === q);
+    return advReport.frequencies.filter((f) => f.number.toString() === q);
   }, [advReport, searchFreq]);
 
   // Selected source transitional followers
   const transitionTargets = useMemo(() => {
     if (!advReport) return [];
-    const found = advReport.transitions.find(t => t.number === selectedNum);
+    const found = advReport.transitions.find((t) => t.number === selectedNum);
     return found ? found.nextNumbers : [];
   }, [advReport, selectedNum]);
 
   if (loading || stats.length === 0) return <StatsSkeleton />;
 
-  const CustomTooltip = ({ active, payload, label }: { active?: boolean, payload?: any[], label?: string }) => {
+  const CustomTooltip = ({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean;
+    payload?: any[];
+    label?: string;
+  }) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-slate-950/95 border border-slate-700/50 p-3 rounded-xl shadow-2xl backdrop-blur-md">
           <p className="text-white font-black text-xs mb-2">Numéro {label}</p>
           {payload.map((entry: any, index: number) => (
-            <p key={index} className="text-[11px] font-bold" style={{ color: entry.color || '#38bdf8' }}>
-              {entry.name === 'count' ? 'Sorties' : entry.name === 'gap' ? 'Écart' : entry.name}: {entry.value}
+            <p
+              key={index}
+              className="text-[11px] font-bold"
+              style={{ color: entry.color || "#38bdf8" }}
+            >
+              {entry.name === "count"
+                ? "Sorties"
+                : entry.name === "gap"
+                  ? "Écart"
+                  : entry.name}
+              : {entry.value}
             </p>
           ))}
         </div>
@@ -160,26 +191,25 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   return (
     <div className="space-y-8 animate-fade-in pb-12 w-full overflow-hidden">
-      
       {/* SELECTION DES MODE DE STATISTIQUES */}
       <div className="flex p-1 bg-slate-100 dark:bg-slate-900/60 rounded-2xl w-full max-w-md mx-auto border border-slate-200/50 dark:border-slate-800/80 shadow-inner">
         <button
-          onClick={() => setActiveTab('basic')}
+          onClick={() => setActiveTab("basic")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${
-            activeTab === 'basic'
-              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md'
-              : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            activeTab === "basic"
+              ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md"
+              : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           }`}
         >
           <BarChart3 size={15} />
           Données de Base
         </button>
         <button
-          onClick={() => setActiveTab('advanced')}
+          onClick={() => setActiveTab("advanced")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${
-            activeTab === 'advanced'
-              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md'
-              : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            activeTab === "advanced"
+              ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md"
+              : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           }`}
         >
           <Sparkles size={15} className="text-amber-500" />
@@ -187,24 +217,52 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </button>
       </div>
 
-      {activeTab === 'basic' ? (
+      {activeTab === "basic" ? (
         <div className="space-y-8 md:space-y-10 animate-fade-in">
           {/* GRAPHIQUES RECHARTS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
             <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50">
               <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                <BarChart3 className="text-emerald-500" size={18}/> Top 15 Fréquences
+                <BarChart3 className="text-emerald-500" size={18} /> Top 15
+                Fréquences
               </h4>
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
-                    <Tooltip content={<CustomTooltip />} cursor={{ fill: '#334155', opacity: 0.1 }} />
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#334155"
+                      opacity={0.15}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{
+                        fill: "#64748b",
+                        fontSize: 10,
+                        fontWeight: "bold",
+                      }}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
+                    />
+                    <Tooltip
+                      content={<CustomTooltip />}
+                      cursor={{ fill: "#334155", opacity: 0.1 }}
+                    />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                       {chartData.map((_entry, index) => (
-                        <Cell key={`cell-${index}`} fill={index < 3 ? '#f59e0b' : '#10b981'} />
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={index < 3 ? "#f59e0b" : "#10b981"}
+                        />
                       ))}
                     </Bar>
                   </BarChart>
@@ -214,16 +272,50 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
             <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50">
               <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                <TrendingUp className="text-indigo-500" size={18}/> Top 15 Écarts (Dormants)
+                <TrendingUp className="text-indigo-500" size={18} /> Top 15
+                Écarts (Dormants)
               </h4>
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={gapChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                  <LineChart
+                    data={gapChartData}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#334155"
+                      opacity={0.15}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{
+                        fill: "#64748b",
+                        fontSize: 10,
+                        fontWeight: "bold",
+                      }}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#64748b", fontSize: 10 }}
+                    />
                     <Tooltip content={<CustomTooltip />} />
-                    <Line type="monotone" dataKey="gap" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#1e293b' }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                    <Line
+                      type="monotone"
+                      dataKey="gap"
+                      stroke="#6366f1"
+                      strokeWidth={3}
+                      dot={{
+                        r: 4,
+                        fill: "#6366f1",
+                        strokeWidth: 2,
+                        stroke: "#1e293b",
+                      }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -231,25 +323,35 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-            
             {/* LES PLUS SORTIS */}
             <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-5"><Flame size={60} className="md:w-20 md:h-20" /></div>
+              <div className="absolute top-0 right-0 p-4 opacity-5">
+                <Flame size={60} className="md:w-20 md:h-20" />
+              </div>
               <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                <Trophy className="text-amber-500" size={18}/> Champions
+                <Trophy className="text-amber-500" size={18} /> Champions
               </h4>
               <div className="space-y-3">
                 {topNumbers.map((entry, index) => (
-                  <div key={entry.number} className="flex items-center justify-between p-2.5 rounded-xl md:rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/50 hover:border-amber-500/30 transition-colors">
+                  <div
+                    key={entry.number}
+                    className="flex items-center justify-between p-2.5 rounded-xl md:rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/50 hover:border-amber-500/30 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[10px] ${index === 0 ? 'bg-amber-400 text-white shadow-lg shadow-amber-500/30' : index === 1 ? 'bg-slate-300 text-slate-600' : 'bg-orange-300 text-white'}`}>
+                      <div
+                        className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[10px] ${index === 0 ? "bg-amber-400 text-white shadow-lg shadow-amber-500/30" : index === 1 ? "bg-slate-300 text-slate-600" : "bg-orange-300 text-white"}`}
+                      >
                         {index + 1}
                       </div>
                       <NumberBall number={entry.number} size="sm" />
                     </div>
                     <div className="text-right">
-                      <span className="block text-sm md:text-lg font-black text-slate-800 dark:text-white leading-none">{entry.count}</span>
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Sorties</span>
+                      <span className="block text-sm md:text-lg font-black text-slate-800 dark:text-white leading-none">
+                        {entry.count}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+                        Sorties
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -258,13 +360,18 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
             {/* LES PLUS RETARDATAIRES */}
             <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-5"><Clock size={60} className="md:w-20 md:h-20" /></div>
+              <div className="absolute top-0 right-0 p-4 opacity-5">
+                <Clock size={60} className="md:w-20 md:h-20" />
+              </div>
               <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 uppercase tracking-widest">
-                <Clock className="text-indigo-500" size={18}/> Absents
+                <Clock className="text-indigo-500" size={18} /> Absents
               </h4>
               <div className="space-y-3">
                 {topGaps.map((entry, index) => (
-                  <div key={entry.number} className="flex items-center justify-between p-2.5 rounded-xl md:rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/50 hover:border-indigo-500/30 transition-colors">
+                  <div
+                    key={entry.number}
+                    className="flex items-center justify-between p-2.5 rounded-xl md:rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/50 hover:border-indigo-500/30 transition-colors"
+                  >
                     <div className="flex items-center gap-3">
                       <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-black text-[10px] text-slate-500">
                         {index + 1}
@@ -272,8 +379,12 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       <NumberBall number={entry.number} size="sm" />
                     </div>
                     <div className="text-right">
-                      <span className="block text-sm md:text-lg font-black text-indigo-500 leading-none">{entry.gap}</span>
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Écart</span>
+                      <span className="block text-sm md:text-lg font-black text-indigo-500 leading-none">
+                        {entry.gap}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+                        Écart
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -283,15 +394,39 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* DISTRIBUTION PAR DÉCILE */}
             <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50 relative overflow-hidden flex flex-col">
               <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2 uppercase tracking-widest">
-                <BarChart3 className="text-purple-500" size={18}/> Distribution par Décile
+                <BarChart3 className="text-purple-500" size={18} /> Distribution
+                par Décile
               </h4>
-              <p className="text-[10px] text-slate-400 mb-4 uppercase tracking-widest font-bold">Répartition globale des sorties</p>
+              <p className="text-[10px] text-slate-400 mb-4 uppercase tracking-widest font-bold">
+                Répartition globale des sorties
+              </p>
               <div className="flex-1 min-h-[250px] w-full relative z-10">
                 <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={decileData}>
-                    <PolarGrid stroke="#334155" strokeDasharray="3 3" opacity={0.2} />
-                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} axisLine={false} />
+                  <RadarChart
+                    cx="50%"
+                    cy="50%"
+                    outerRadius="70%"
+                    data={decileData}
+                  >
+                    <PolarGrid
+                      stroke="#334155"
+                      strokeDasharray="3 3"
+                      opacity={0.2}
+                    />
+                    <PolarAngleAxis
+                      dataKey="subject"
+                      tick={{
+                        fill: "#64748b",
+                        fontSize: 10,
+                        fontWeight: "bold",
+                      }}
+                    />
+                    <PolarRadiusAxis
+                      angle={30}
+                      domain={[0, "auto"]}
+                      tick={false}
+                      axisLine={false}
+                    />
                     <Radar
                       name="Sorties"
                       dataKey="count"
@@ -316,9 +451,11 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           <section className="w-full bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700/50">
             <div className="flex justify-between items-center mb-6 px-4">
               <h3 className="text-lg md:text-xl font-black text-slate-800 dark:text-white tracking-tighter uppercase flex items-center gap-2">
-                <Flame className="text-rose-500" size={20}/> Chaleur Thermique
+                <Flame className="text-rose-500" size={20} /> Chaleur Thermique
               </h3>
-              <span className="text-xs font-black bg-slate-100 dark:bg-slate-900 px-3 py-1 rounded-full text-slate-500 uppercase border border-slate-200 dark:border-slate-700/60">Vecteur 1-90</span>
+              <span className="text-xs font-black bg-slate-100 dark:bg-slate-900 px-3 py-1 rounded-full text-slate-500 uppercase border border-slate-200 dark:border-slate-700/60">
+                Vecteur 1-90
+              </span>
             </div>
             <ProbabilityField scores={probabilityScores} />
           </section>
@@ -328,43 +465,67 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           {advLoading && !advReport ? (
             <StatsSkeleton />
           ) : !advReport ? (
-            <div className="text-center py-12 text-slate-400">Aucune donnée disponible pour l'analyse avancée.</div>
+            <div className="text-center py-12 text-slate-400">
+              Aucune donnée disponible pour l'analyse avancée.
+            </div>
           ) : (
             <div className="space-y-8 lg:space-y-10">
-              
               {/* SECTION 1: TEMPORAL INDICATORS */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                 {/* REPEATS */}
                 <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl border border-slate-100 dark:border-slate-700/50 relative overflow-hidden flex flex-col justify-between">
                   <div>
                     <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2 uppercase tracking-widest">
-                      <Zap className="text-amber-500" size={18}/> Mémoire de Répétition (Draw-to-Draw)
+                      <Zap className="text-amber-500" size={18} /> Mémoire de
+                      Répétition (Draw-to-Draw)
                     </h4>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">Moyenne de numéros répétés entre tirages consécutifs</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">
+                      Moyenne de numéros répétés entre tirages consécutifs
+                    </p>
                   </div>
-                  
+
                   <div className="flex items-center gap-6 my-4">
                     <div className="relative flex items-center justify-center w-24 h-24 rounded-full bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800">
-                      <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tighter">{advReport.averageRepeats}</span>
+                      <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tighter">
+                        {advReport.averageRepeats}
+                      </span>
                     </div>
                     <div className="flex-1 space-y-2">
                       <p className="text-xs font-bold text-slate-600 dark:text-slate-400 leading-relaxed">
-                        Chaque tirage hérite en moyenne de <span className="text-amber-500 font-extrabold">{advReport.averageRepeats}</span> numéros du tirage précédent.
+                        Chaque tirage hérite en moyenne de{" "}
+                        <span className="text-amber-500 font-extrabold">
+                          {advReport.averageRepeats}
+                        </span>{" "}
+                        numéros du tirage précédent.
                       </p>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">Théorie Hypergéométrique : ~0.28</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                        Théorie Hypergéométrique : ~0.28
+                      </p>
                     </div>
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Distribution du taux de répétition</p>
+                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">
+                      Distribution du taux de répétition
+                    </p>
                     <div className="grid grid-cols-6 gap-1 text-center">
-                      {[0, 1, 2, 3, 4, 5].map(v => {
+                      {[0, 1, 2, 3, 4, 5].map((v) => {
                         const count = advReport.repeatsDistribution[v] || 0;
-                        const pct = advReport.totalDraws > 0 ? (count / advReport.totalDraws) * 100 : 0;
+                        const pct =
+                          advReport.totalDraws > 0
+                            ? (count / advReport.totalDraws) * 100
+                            : 0;
                         return (
-                          <div key={v} className="p-1 rounded bg-slate-50 dark:bg-slate-900/60 border border-slate-100/50 dark:border-slate-800/40">
-                            <span className="block text-[10px] text-slate-400 font-bold">{v} Rép.</span>
-                            <span className="block text-xs font-black text-slate-700 dark:text-slate-300">{pct.toFixed(0)}%</span>
+                          <div
+                            key={v}
+                            className="p-1 rounded bg-slate-50 dark:bg-slate-900/60 border border-slate-100/50 dark:border-slate-800/40"
+                          >
+                            <span className="block text-[10px] text-slate-400 font-bold">
+                              {v} Rép.
+                            </span>
+                            <span className="block text-xs font-black text-slate-700 dark:text-slate-300">
+                              {pct.toFixed(0)}%
+                            </span>
                           </div>
                         );
                       })}
@@ -376,25 +537,38 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl border border-slate-100 dark:border-slate-700/50 relative overflow-hidden flex flex-col justify-between">
                   <div>
                     <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2 uppercase tracking-widest">
-                      <Layers className="text-indigo-500" size={18}/> Densité de Séquences Consécutives
+                      <Layers className="text-indigo-500" size={18} /> Densité
+                      de Séquences Consécutives
                     </h4>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">Tirages contenant des numéros se suivant (ex. 12 & 13)</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">
+                      Tirages contenant des numéros se suivant (ex. 12 & 13)
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-6 my-4">
                     <div className="relative flex items-center justify-center w-24 h-24 rounded-full bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800">
-                      <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tighter">{advReport.consecutiveDrawsRate}%</span>
+                      <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tighter">
+                        {advReport.consecutiveDrawsRate}%
+                      </span>
                     </div>
                     <div className="flex-1 space-y-2">
                       <p className="text-xs font-bold text-slate-600 dark:text-slate-400 leading-relaxed">
-                        Près de <span className="text-indigo-500 font-extrabold">{advReport.consecutiveDrawsRate}%</span> des tirages contiennent au moins un doublet consécutif.
+                        Près de{" "}
+                        <span className="text-indigo-500 font-extrabold">
+                          {advReport.consecutiveDrawsRate}%
+                        </span>{" "}
+                        des tirages contiennent au moins un doublet consécutif.
                       </p>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">Forte cohésion spatiale de l'appareil de tirage</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                        Forte cohésion spatiale de l'appareil de tirage
+                      </p>
                     </div>
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500 leading-relaxed font-bold">
-                    Cette proportion indique que la production séquentielle n'est pas purement uniforme, facilitant les regroupements de "barycentre" topologiques.
+                    Cette proportion indique que la production séquentielle
+                    n'est pas purement uniforme, facilitant les regroupements de
+                    "barycentre" topologiques.
                   </div>
                 </div>
               </div>
@@ -404,13 +578,22 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 border-b border-slate-100 dark:border-slate-800 pb-6">
                   <div>
                     <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-1 flex items-center gap-2 uppercase tracking-widest">
-                      <Activity className="text-rose-500 animate-pulse" size={18}/> Transition Séquentielle Markovienne
+                      <Activity
+                        className="text-rose-500 animate-pulse"
+                        size={18}
+                      />{" "}
+                      Transition Séquentielle Markovienne
                     </h4>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">Sélectionnez un numéro source pour voir ses continuateurs les plus probables</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">
+                      Sélectionnez un numéro source pour voir ses continuateurs
+                      les plus probables
+                    </p>
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-black text-slate-500 uppercase">Actif:</span>
+                    <span className="text-xs font-black text-slate-500 uppercase">
+                      Actif:
+                    </span>
                     <div className="bg-slate-100 dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200/50 dark:border-slate-800/60 font-black text-slate-800 dark:text-sky-400 text-sm flex items-center gap-2">
                       <NumberBall number={selectedNum} size="xs" />
                     </div>
@@ -420,60 +603,79 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                   {/* SELECTOR MATRIX GRID 1-90 */}
                   <div className="lg:col-span-8 space-y-3">
-                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">Matrice d'excitation (1 à 90) :</p>
+                    <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
+                      Matrice d'excitation (1 à 90) :
+                    </p>
                     <div className="grid grid-cols-10 gap-1.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100/50 dark:border-slate-800/50 max-h-[290px] overflow-y-auto custom-scrollbar">
-                      {Array.from({ length: 90 }, (_, i) => i + 1).map(num => {
-                        const isSelected = selectedNum === num;
-                        // Find frequency category
-                        const freq = advReport.frequencies.find(f => f.number === num);
-                        const isHot = freq && freq.regime === 'Chaud';
-                        const isCold = freq && freq.regime === 'Froid';
+                      {Array.from({ length: 90 }, (_, i) => i + 1).map(
+                        (num) => {
+                          const isSelected = selectedNum === num;
+                          // Find frequency category
+                          const freq = advReport.frequencies.find(
+                            (f) => f.number === num,
+                          );
+                          const isHot = freq && freq.regime === "Chaud";
+                          const isCold = freq && freq.regime === "Froid";
 
-                        return (
-                          <button
-                            key={num}
-                            onClick={() => setSelectedNum(num)}
-                            className={`py-1 text-xs font-black rounded-lg transition-all border ${
-                              isSelected 
-                                ? 'bg-rose-500 text-white border-rose-600 scale-110 shadow-md shadow-rose-500/20 z-10'
-                                : isHot
-                                ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border-amber-200/40 dark:border-amber-900/30 hover:border-amber-400'
-                                : isCold
-                                ? 'bg-blue-50 dark:bg-blue-950/20 text-blue-500 dark:text-blue-400 border-blue-200/40 dark:border-blue-900/30 hover:border-blue-400'
-                                : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200/40 dark:border-slate-800 hover:border-slate-400 hover:text-slate-700 dark:hover:text-white'
-                            }`}
-                          >
-                            {num}
-                          </button>
-                        );
-                      })}
+                          return (
+                            <button
+                              key={num}
+                              onClick={() => setSelectedNum(num)}
+                              className={`py-1 text-xs font-black rounded-lg transition-all border ${
+                                isSelected
+                                  ? "bg-rose-500 text-white border-rose-600 scale-110 shadow-md shadow-rose-500/20 z-10"
+                                  : isHot
+                                    ? "bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border-amber-200/40 dark:border-amber-900/30 hover:border-amber-400"
+                                    : isCold
+                                      ? "bg-blue-50 dark:bg-blue-950/20 text-blue-500 dark:text-blue-400 border-blue-200/40 dark:border-blue-900/30 hover:border-blue-400"
+                                      : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200/40 dark:border-slate-800 hover:border-slate-400 hover:text-slate-700 dark:hover:text-white"
+                              }`}
+                            >
+                              {num}
+                            </button>
+                          );
+                        },
+                      )}
                     </div>
                   </div>
 
                   {/* TRANSITION RESULTS */}
                   <div className="lg:col-span-4 flex flex-col justify-between p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100/50 dark:border-slate-800">
                     <div>
-                      <span className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">Séquences de Transition de {selectedNum} :</span>
+                      <span className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">
+                        Séquences de Transition de {selectedNum} :
+                      </span>
                       {transitionTargets.length === 0 ? (
-                        <p className="text-xs text-slate-400 dark:text-slate-600 py-6 text-center italic">Cette coordonnée temporelle n'a pas encore initié de séquelle de transition.</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-600 py-6 text-center italic">
+                          Cette coordonnée temporelle n'a pas encore initié de
+                          séquelle de transition.
+                        </p>
                       ) : (
                         <div className="space-y-4">
                           {transitionTargets.map((t, idx) => (
                             <div key={t.number} className="space-y-1">
                               <div className="flex items-center justify-between text-xs">
                                 <div className="flex items-center gap-3">
-                                  <span className="text-[10px] font-black text-slate-400">#{idx + 1}</span>
+                                  <span className="text-[10px] font-black text-slate-400">
+                                    #{idx + 1}
+                                  </span>
                                   <NumberBall number={t.number} size="sm" />
                                 </div>
                                 <div className="text-right">
-                                  <span className="font-black text-slate-800 dark:text-white block leading-none">{t.percentage}%</span>
-                                  <span className="text-[9px] text-slate-400 uppercase tracking-tighter">{t.count} fois</span>
+                                  <span className="font-black text-slate-800 dark:text-white block leading-none">
+                                    {t.percentage}%
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 uppercase tracking-tighter">
+                                    {t.count} fois
+                                  </span>
                                 </div>
                               </div>
                               <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div 
-                                  className="bg-rose-500 h-full rounded-full transition-all duration-500" 
-                                  style={{ width: `${Math.min(100, t.percentage * 3)}%` }} // Scaling slightly for readability
+                                <div
+                                  className="bg-rose-500 h-full rounded-full transition-all duration-500"
+                                  style={{
+                                    width: `${Math.min(100, t.percentage * 3)}%`,
+                                  }} // Scaling slightly for readability
                                 />
                               </div>
                             </div>
@@ -483,7 +685,9 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed font-bold">
-                      La transition Markovienne quantifie l'excitation croisée induite par la présence du numéro source lors du tirage précédent.
+                      La transition Markovienne quantifie l'excitation croisée
+                      induite par la présence du numéro source lors du tirage
+                      précédent.
                     </div>
                   </div>
                 </div>
@@ -494,23 +698,35 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 {/* TOP PAIRS */}
                 <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl border border-slate-100 dark:border-slate-700/50">
                   <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-4">
-                    <Trophy className="text-amber-500" size={18}/> Top 12 Paires Récurrentes Co-occurentes
+                    <Trophy className="text-amber-500" size={18} /> Top 12
+                    Paires Récurrentes Co-occurentes
                   </h4>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">Paires de 2 numéros sortant le plus souvent ensemble</p>
-                  
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">
+                    Paires de 2 numéros sortant le plus souvent ensemble
+                  </p>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
                     {advReport.topPairs.slice(0, 12).map((p, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/60 hover:border-amber-500/20 transition-colors">
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/60 hover:border-amber-500/20 transition-colors"
+                      >
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-slate-400">#{idx + 1}</span>
+                          <span className="text-[10px] font-black text-slate-400">
+                            #{idx + 1}
+                          </span>
                           <div className="flex gap-1.5">
                             <NumberBall number={p.pair[0]} size="sm" />
                             <NumberBall number={p.pair[1]} size="sm" />
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="block text-sm font-black text-slate-800 dark:text-white leading-none">{p.count} sorties</span>
-                          <span className="text-[9px] text-amber-500 font-black uppercase">Z: +{p.zScore}</span>
+                          <span className="block text-sm font-black text-slate-800 dark:text-white leading-none">
+                            {p.count} sorties
+                          </span>
+                          <span className="text-[9px] text-amber-500 font-black uppercase">
+                            Z: +{p.zScore}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -520,15 +736,23 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 {/* TOP TRIPLETS */}
                 <div className="bg-white dark:bg-slate-800/80 p-6 md:p-8 rounded-[2rem] md:rounded-3xl border border-slate-100 dark:border-slate-700/50">
                   <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-2 flex items-center gap-2 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 pb-4">
-                    <Layers className="text-purple-500" size={18}/> Top 12 Triplets Récurrentes Co-occurentes
+                    <Layers className="text-purple-500" size={18} /> Top 12
+                    Triplets Récurrentes Co-occurentes
                   </h4>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">Triplets de 3 numéros sortant le plus souvent ensemble</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mb-6">
+                    Triplets de 3 numéros sortant le plus souvent ensemble
+                  </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
                     {advReport.topTriplets.slice(0, 12).map((t, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/60 hover:border-purple-500/20 transition-colors">
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100/30 dark:border-slate-800/60 hover:border-purple-500/20 transition-colors"
+                      >
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-slate-400">#{idx + 1}</span>
+                          <span className="text-[10px] font-black text-slate-400">
+                            #{idx + 1}
+                          </span>
                           <div className="flex gap-1">
                             <NumberBall number={t.triplet[0]} size="sm" />
                             <NumberBall number={t.triplet[1]} size="sm" />
@@ -536,8 +760,12 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="block text-sm font-black text-slate-800 dark:text-white leading-none">{t.count} sorties</span>
-                          <span className="text-[9px] text-purple-400 font-black uppercase">Z: +{t.zScore}</span>
+                          <span className="block text-sm font-black text-slate-800 dark:text-white leading-none">
+                            {t.count} sorties
+                          </span>
+                          <span className="text-[9px] text-purple-400 font-black uppercase">
+                            Z: +{t.zScore}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -550,19 +778,26 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-slate-100 dark:border-slate-800 pb-6">
                   <div>
                     <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white mb-1 flex items-center gap-2 uppercase tracking-widest">
-                      <BarChart3 className="text-indigo-500" size={18}/> Spectre Complet des Fréquences & Z-Scores
+                      <BarChart3 className="text-indigo-500" size={18} />{" "}
+                      Spectre Complet des Fréquences & Z-Scores
                     </h4>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">Classification des numéros par écart d'occurrence standardisée (Tirage unique isolé)</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">
+                      Classification des numéros par écart d'occurrence
+                      standardisée (Tirage unique isolé)
+                    </p>
                   </div>
 
                   {/* SEARCH ACCORDION ACTION */}
                   <div className="relative w-full md:w-52">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600" size={14} />
+                    <Search
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-600"
+                      size={14}
+                    />
                     <input
                       type="text"
                       placeholder="Numéro (1-90)..."
                       value={searchFreq}
-                      onChange={e => setSearchFreq(e.target.value)}
+                      onChange={(e) => setSearchFreq(e.target.value)}
                       className="w-full pl-9 pr-4 py-2 text-xs bg-slate-100 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 rounded-full text-slate-700 dark:text-white placeholder-slate-400 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
                     />
                   </div>
@@ -577,31 +812,50 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         <th className="pb-3 text-center">Tendance %</th>
                         <th className="pb-3 text-center">Attendu</th>
                         <th className="pb-3 text-center">Z-Score de Dérive</th>
-                        <th className="pb-3 text-center">Régime Cybernétique</th>
+                        <th className="pb-3 text-center">
+                          Régime Cybernétique
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100/50 dark:divide-slate-800/40 font-bold">
-                      {filteredFreqs.slice(0, searchFreq ? 1 : 20).map(f => {
+                      {filteredFreqs.slice(0, searchFreq ? 1 : 20).map((f) => {
                         return (
-                          <tr key={f.number} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                          <tr
+                            key={f.number}
+                            className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors"
+                          >
                             <td className="py-2.5 flex items-center justify-center">
                               <NumberBall number={f.number} size="sm" />
                             </td>
-                            <td className="py-2.5 text-center text-slate-800 dark:text-white font-extrabold text-sm">{f.count}</td>
-                            <td className="py-2.5 text-center text-slate-400">{f.percentage}%</td>
-                            <td className="py-2.5 text-center text-slate-500">{f.expectedCount}</td>
-                            <td className={`py-2.5 text-center font-extrabold ${f.zScore >= 1.0 ? 'text-amber-500' : f.zScore <= -1.0 ? 'text-blue-500' : 'text-slate-400'}`}>
+                            <td className="py-2.5 text-center text-slate-800 dark:text-white font-extrabold text-sm">
+                              {f.count}
+                            </td>
+                            <td className="py-2.5 text-center text-slate-400">
+                              {f.percentage}%
+                            </td>
+                            <td className="py-2.5 text-center text-slate-500">
+                              {f.expectedCount}
+                            </td>
+                            <td
+                              className={`py-2.5 text-center font-extrabold ${f.zScore >= 1.0 ? "text-amber-500" : f.zScore <= -1.0 ? "text-blue-500" : "text-slate-400"}`}
+                            >
                               {f.zScore > 0 ? `+${f.zScore}` : f.zScore}
                             </td>
                             <td className="py-2.5 text-center">
-                              <span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase rounded-full border ${
-                                f.regime === 'Chaud'
-                                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                                  : f.regime === 'Froid'
-                                  ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                                  : 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 border-slate-200/40 dark:border-slate-800/50'
-                              }`}>
-                                {f.regime === 'Chaud' ? '🔥 CHAUD' : f.regime === 'Froid' ? '❄️ FROID' : '⚡ NEUTRE'}
+                              <span
+                                className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase rounded-full border ${
+                                  f.regime === "Chaud"
+                                    ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                                    : f.regime === "Froid"
+                                      ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                                      : "bg-slate-100 dark:bg-slate-900/60 text-slate-400 border-slate-200/40 dark:border-slate-800/50"
+                                }`}
+                              >
+                                {f.regime === "Chaud"
+                                  ? "🔥 CHAUD"
+                                  : f.regime === "Froid"
+                                    ? "❄️ FROID"
+                                    : "⚡ NEUTRE"}
                               </span>
                             </td>
                           </tr>
@@ -612,10 +866,12 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 </div>
 
                 {!searchFreq && (
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-4 text-center font-bold">Affichage des 20 numéros les plus significatifs (Utilisez la recherche ci-dessus pour d'autres numéros)</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-4 text-center font-bold">
+                    Affichage des 20 numéros les plus significatifs (Utilisez la
+                    recherche ci-dessus pour d'autres numéros)
+                  </p>
                 )}
               </div>
-
             </div>
           )}
         </div>

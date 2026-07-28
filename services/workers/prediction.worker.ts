@@ -2,6 +2,7 @@
 
 import { generateMasterPredictionCore } from "../prediction/predictionFacade";
 import { generatePlatinumPredictionCore } from "../metaAnalystService";
+import { runMonteCarloMcmcCore } from "../prediction/monteCarloMcmc";
 import { unpackHistory } from "./zeroCopy";
 
 self.onmessage = async (e: MessageEvent) => {
@@ -25,7 +26,10 @@ self.onmessage = async (e: MessageEvent) => {
     useSpatioTemporalHawkes,
     preloadedForensicReports,
     userOptions,
-    _basePrediction
+    _basePrediction,
+    resolvedMcIterations,
+    resolvedNoiseLevel,
+    resolvedLearningRate
   } = e.data;
 
   const history = historyBuffer
@@ -33,7 +37,25 @@ self.onmessage = async (e: MessageEvent) => {
     : (Array.isArray(rawHistory) ? rawHistory : []);
 
   try {
-    if (type === 'platinum') {
+    if (type === 'mcmc') {
+       const result = await runMonteCarloMcmcCore(
+         drawName,
+         history,
+         temporalDepth,
+         weightsToUse,
+         metrics,
+         symbioticContext,
+         adversarialMode,
+         isForensicOptimized,
+         resolvedMcIterations,
+         resolvedNoiseLevel,
+         resolvedLearningRate,
+         (progress: number, message: string) => {
+           self.postMessage({ taskId, isProgress: true, progress, message });
+         }
+       );
+       self.postMessage({ taskId, success: true, result });
+    } else if (type === 'platinum') {
       const result = await generatePlatinumPredictionCore(
         drawName,
         history,

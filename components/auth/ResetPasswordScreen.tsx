@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
-import { authService } from '../../services/authService';
-import { useToast } from '../ui/Toast';
-import { Lock, ArrowRight, Cpu } from 'lucide-react';
-import { audioEngine } from '../../utils/audioEngine';
+import React, { useState } from "react";
+import { authService } from "../../services/authService";
+import { useToast } from "../ui/Toast";
+import { Lock, ArrowRight, Cpu } from "lucide-react";
+import { audioEngine } from "../../utils/audioEngine";
 
 interface ResetPasswordScreenProps {
   onSuccess: () => void;
 }
 
-export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({ onSuccess }) => {
+export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
+  onSuccess,
+}) => {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,18 +23,22 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({ onSucc
     }
 
     setLoading(true);
-    audioEngine.play('click');
+    audioEngine.play("click");
 
     try {
       const { error } = await authService.updatePassword(password);
       if (error) throw error;
       showToast("Mot de passe mis à jour avec succès !", "success");
-      audioEngine.play('success');
+      audioEngine.play("success");
       onSuccess();
     } catch (error: unknown) {
       console.error(error);
-      audioEngine.play('error');
-      showToast((error instanceof Error ? error.message : String(error)) || "Erreur lors de la mise à jour", "error");
+      audioEngine.play("error");
+      showToast(
+        (error instanceof Error ? error.message : String(error)) ||
+          "Erreur lors de la mise à jour",
+        "error",
+      );
     } finally {
       setLoading(false);
     }
@@ -80,7 +86,10 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({ onSucc
             ) : (
               <>
                 Mettre à jour
-                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                <ArrowRight
+                  size={16}
+                  className="group-hover:translate-x-1 transition-transform"
+                />
               </>
             )}
           </button>

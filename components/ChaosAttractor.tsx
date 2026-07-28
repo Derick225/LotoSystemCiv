@@ -1,8 +1,19 @@
-import React, { useMemo, useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { DrawResult } from '../types';
-import { Wind, AlertTriangle, ShieldCheck, Gauge, Compass, Activity, Box, Eye, RefreshCw, Sparkles } from 'lucide-react';
-import { useNexusStore } from '../store/useNexusStore';
+import React, { useMemo, useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+import { DrawResult } from "../types";
+import {
+  Wind,
+  AlertTriangle,
+  ShieldCheck,
+  Gauge,
+  Compass,
+  Activity,
+  Box,
+  Eye,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
+import { useNexusStore } from "../store/useNexusStore";
 
 interface ChaosAttractorProps {
   history: DrawResult[];
@@ -23,9 +34,10 @@ function createDeterministicLCG(seed: number) {
 export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const regime = useNexusStore((state) => state.regime);
   const volatility = useNexusStore((state) => state.volatility);
-  const currentDrawName = useNexusStore((state) => state.currentDrawName) || "Loto 5/90";
+  const currentDrawName =
+    useNexusStore((state) => state.currentDrawName) || "Loto 5/90";
 
-  const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
+  const [viewMode, setViewMode] = useState<"3d" | "2d">("3d");
   const [fps, setFps] = useState<number>(60);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,32 +46,31 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const weylDiscrepancy = regime?.weylDiscrepancy ?? 0.18;
   const chaosDimension = regime?.chaosDimension ?? 1.84;
 
-
   const status = useMemo(() => {
     if (turbulence > 75)
       return {
-        label: 'TEMPÊTE (Hasard pur)',
-        color: 'text-rose-500',
-        border: 'border-rose-500/25',
-        bg: 'bg-rose-500/10',
-        desc: 'Le régime est fortement instable. Prédictions sous haute variance.',
+        label: "TEMPÊTE (Hasard pur)",
+        color: "text-rose-500",
+        border: "border-rose-500/25",
+        bg: "bg-rose-500/10",
+        desc: "Le régime est fortement instable. Prédictions sous haute variance.",
         icon: <AlertTriangle className="text-rose-500" size={20} />,
       };
     if (turbulence > 40)
       return {
-        label: 'BRÈCHE (Phase variable)',
-        color: 'text-indigo-400',
-        border: 'border-indigo-500/25',
-        bg: 'bg-indigo-500/10',
-        desc: 'Le système alterne entre régularité markovienne et résurgence chaotique.',
+        label: "BRÈCHE (Phase variable)",
+        color: "text-indigo-400",
+        border: "border-indigo-500/25",
+        bg: "bg-indigo-500/10",
+        desc: "Le système alterne entre régularité markovienne et résurgence chaotique.",
         icon: <Wind className="text-indigo-400" size={20} />,
       };
     return {
-      label: 'CALME (Attracteur stable)',
-      color: 'text-emerald-500',
-      border: 'border-emerald-500/25',
-      bg: 'bg-emerald-500/10',
-      desc: 'Les orbites de phase sont bien définies. Alignement optimal pour l\'IA.',
+      label: "CALME (Attracteur stable)",
+      color: "text-emerald-500",
+      border: "border-emerald-500/25",
+      bg: "bg-emerald-500/10",
+      desc: "Les orbites de phase sont bien définies. Alignement optimal pour l'IA.",
       icon: <ShieldCheck className="text-emerald-500" size={20} />,
     };
   }, [turbulence]);
@@ -82,7 +93,13 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       maxSum = 440;
     }
 
-    const points: { x: number; y: number; z: number; val: number; index: number }[] = [];
+    const points: {
+      x: number;
+      y: number;
+      z: number;
+      val: number;
+      index: number;
+    }[] = [];
     for (let i = 2; i < sums.length; i++) {
       const valX = sums[i - 2];
       const valY = sums[i - 1];
@@ -106,10 +123,17 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
 
   // 2. Generate Strange Attractor Orbits (Lorenz/Clifford manifold initialized deterministically with Float32Array GPU Object Pool)
   const MAX_PARTICLES = 1000;
-  const particleBufferRef = useRef<Float32Array>(new Float32Array(MAX_PARTICLES * 5)); // x, y, z, scale, hue
+  const particleBufferRef = useRef<Float32Array>(
+    new Float32Array(MAX_PARTICLES * 5),
+  ); // x, y, z, scale, hue
 
   const activeParticleCount = useMemo(() => {
-    const seed = (currentDrawName.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0) * 1000) + trajectory3DPoints.length;
+    const seed =
+      currentDrawName
+        .split("")
+        .reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0) *
+        1000 +
+      trajectory3DPoints.length;
     const lcg = createDeterministicLCG(seed);
 
     const totalParticles = 400; // Active particles in pool
@@ -145,9 +169,15 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       // Mix with actual historical points if available
       const histMatch = histLen > 0 ? trajectory3DPoints[i % histLen] : null;
       const mixWeight = 0.35;
-      const finalX = histMatch ? scaledX * (1 - mixWeight) + histMatch.x * mixWeight : scaledX;
-      const finalY = histMatch ? scaledY * (1 - mixWeight) + histMatch.y * mixWeight : scaledY;
-      const finalZ = histMatch ? scaledZ * (1 - mixWeight) + histMatch.z * mixWeight : scaledZ;
+      const finalX = histMatch
+        ? scaledX * (1 - mixWeight) + histMatch.x * mixWeight
+        : scaledX;
+      const finalY = histMatch
+        ? scaledY * (1 - mixWeight) + histMatch.y * mixWeight
+        : scaledY;
+      const finalZ = histMatch
+        ? scaledZ * (1 - mixWeight) + histMatch.z * mixWeight
+        : scaledZ;
 
       const hue = 0.55 + (i / totalParticles) * 0.35; // Indigo to Emerald
       const scale = 0.08 + Math.sin(i * 0.1) * 0.03;
@@ -166,7 +196,8 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
 
   // 3. Three.js Instanced Mesh WebGL Engine setup with GPU Object Pooling
   useEffect(() => {
-    if (viewMode !== '3d' || !canvasRef.current || !containerRef.current) return;
+    if (viewMode !== "3d" || !canvasRef.current || !containerRef.current)
+      return;
 
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -180,7 +211,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         canvas,
         alpha: true,
         antialias: true,
-        powerPreference: 'high-performance',
+        powerPreference: "high-performance",
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap DPR for high mobile FPS
       renderer.setSize(width, height);
@@ -217,7 +248,11 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       opacity: 0.85,
     });
 
-    const instancedMesh = new THREE.InstancedMesh(sphereGeometry, sphereMaterial, MAX_PARTICLES);
+    const instancedMesh = new THREE.InstancedMesh(
+      sphereGeometry,
+      sphereMaterial,
+      MAX_PARTICLES,
+    );
     instancedMesh.count = activeParticleCount;
 
     // Static reusable objects for zero-allocation updates
@@ -243,7 +278,8 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     }
 
     instancedMesh.instanceMatrix.needsUpdate = true;
-    if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
+    if (instancedMesh.instanceColor)
+      instancedMesh.instanceColor.needsUpdate = true;
     scene.add(instancedMesh);
 
     // Draw Trajectory Line between historical 3D points
@@ -254,7 +290,10 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       });
 
       const lineGeometry = new THREE.BufferGeometry();
-      lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+      lineGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(linePositions, 3),
+      );
 
       const lineMaterial = new THREE.LineBasicMaterial({
         color: 0x818cf8,
@@ -312,13 +351,13 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     };
     const onTouchEnd = () => handleEnd();
 
-    canvas.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
 
-    canvas.addEventListener('touchstart', onTouchStart, { passive: true });
-    canvas.addEventListener('touchmove', onTouchMove, { passive: true });
-    canvas.addEventListener('touchend', onTouchEnd);
+    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: true });
+    canvas.addEventListener("touchend", onTouchEnd);
 
     // Animation Loop with FPS Monitoring
     let animationFrameId: number;
@@ -361,19 +400,19 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       renderer.setSize(newWidth, height);
     };
 
-    window.addEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener("resize", handleResize);
 
-      canvas.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
 
-      canvas.removeEventListener('touchstart', onTouchStart);
-      canvas.removeEventListener('touchmove', onTouchMove);
-      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
 
       sphereGeometry.dispose();
       sphereMaterial.dispose();
@@ -412,10 +451,10 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   }, [history]);
 
   const pathD = useMemo(() => {
-    if (trajectory2DPoints.length < 2) return '';
+    if (trajectory2DPoints.length < 2) return "";
     return trajectory2DPoints.reduce((acc, p, i) => {
-      return acc + `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
-    }, '');
+      return acc + `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+    }, "");
   }, [trajectory2DPoints]);
 
   return (
@@ -445,22 +484,22 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         <div className="flex items-center gap-2">
           <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
             <button
-              onClick={() => setViewMode('3d')}
+              onClick={() => setViewMode("3d")}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                viewMode === '3d'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
+                viewMode === "3d"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
               }`}
             >
               <Box size={12} />
               <span>3D Orbit</span>
             </button>
             <button
-              onClick={() => setViewMode('2d')}
+              onClick={() => setViewMode("2d")}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                viewMode === '2d'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
+                viewMode === "2d"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
               }`}
             >
               <Eye size={12} />
@@ -485,15 +524,22 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         ref={containerRef}
         className="relative flex justify-center items-center bg-slate-950 rounded-2xl border border-slate-900/80 p-2 shadow-inner overflow-hidden min-h-[250px]"
       >
-        {viewMode === '3d' ? (
+        {viewMode === "3d" ? (
           <>
-            <canvas ref={canvasRef} className="cursor-grab active:cursor-grabbing rounded-xl touch-none" />
+            <canvas
+              ref={canvasRef}
+              className="cursor-grab active:cursor-grabbing rounded-xl touch-none"
+            />
 
             {/* Performance Overlay */}
             <div className="absolute top-3 left-3 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[9px] font-mono font-bold text-slate-300 shadow-sm">
-              <Activity size={12} className={fps >= 50 ? 'text-emerald-400' : 'text-amber-400'} />
+              <Activity
+                size={12}
+                className={fps >= 50 ? "text-emerald-400" : "text-amber-400"}
+              />
               <span>
-                {fps} FPS <span className="text-slate-500">| 400 particules</span>
+                {fps} FPS{" "}
+                <span className="text-slate-500">| 400 particules</span>
               </span>
             </div>
 
@@ -543,7 +589,13 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
                 />
 
                 <defs>
-                  <linearGradient id="attractor-gradient" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <linearGradient
+                    id="attractor-gradient"
+                    x1="0%"
+                    y1="100%"
+                    x2="100%"
+                    y2="0%"
+                  >
                     <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.4" />
                     <stop offset="50%" stopColor="#8b5cf6" stopOpacity="0.75" />
                     <stop offset="100%" stopColor="#22c55e" stopOpacity="1" />
@@ -559,8 +611,12 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
                         cx={p.x}
                         cy={p.y}
                         r={isLast ? 4 : 2}
-                        fill={isLast ? '#22c55e' : '#4f46e5'}
-                        opacity={isLast ? 1 : 0.4 + (idx / trajectory2DPoints.length) * 0.4}
+                        fill={isLast ? "#22c55e" : "#4f46e5"}
+                        opacity={
+                          isLast
+                            ? 1
+                            : 0.4 + (idx / trajectory2DPoints.length) * 0.4
+                        }
                       />
                       {isLast && (
                         <circle
@@ -621,7 +677,9 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       <div className="space-y-2 pt-2 border-t border-slate-900">
         <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-wider">
           <span>Stabilité du Flux Chaotique</span>
-          <span className="font-mono text-slate-200">{turbulence.toFixed(0)}%</span>
+          <span className="font-mono text-slate-200">
+            {turbulence.toFixed(0)}%
+          </span>
         </div>
         <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
           <div

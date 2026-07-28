@@ -14,10 +14,18 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
   setShowCyberFlags,
 }) => {
   const { flags, toggleFlag } = useFeatureFlags();
-  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
-  const setForensicOptimized = useNexusStore((state) => state.setForensicOptimized);
-  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
-  const setUseSpatioTemporalHawkes = useNexusStore((state) => state.setUseSpatioTemporalHawkes);
+  const isForensicOptimized = useNexusStore(
+    (state) => state.isForensicOptimized,
+  );
+  const setForensicOptimized = useNexusStore(
+    (state) => state.setForensicOptimized,
+  );
+  const useSpatioTemporalHawkes = useNexusStore(
+    (state) => state.useSpatioTemporalHawkes,
+  );
+  const setUseSpatioTemporalHawkes = useNexusStore(
+    (state) => state.setUseSpatioTemporalHawkes,
+  );
 
   return (
     <>
@@ -54,7 +62,8 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
                     Optimisation Forensic
                   </span>
                   <span className="text-[8px] text-indigo-700 dark:text-indigo-300 font-medium">
-                    Intègre les erreurs passées (+1, -1, ombres, miroirs, calibrages)
+                    Intègre les erreurs passées (+1, -1, ombres, miroirs,
+                    calibrages)
                   </span>
                 </div>
                 <button
@@ -177,7 +186,9 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
                   </span>
                 </div>
                 <button
-                  onClick={() => setUseSpatioTemporalHawkes(!useSpatioTemporalHawkes)}
+                  onClick={() =>
+                    setUseSpatioTemporalHawkes(!useSpatioTemporalHawkes)
+                  }
                   className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${useSpatioTemporalHawkes ? "bg-cyan-500 justify-end" : "bg-slate-300 dark:bg-slate-750 justify-start"}`}
                 >
                   <span className="w-4 h-4 bg-white rounded-full shadow" />

@@ -323,3 +323,77 @@ export const useNexusStore = create<NexusState>()(
     },
   ),
 );
+
+// --- ATOMIC SELECTORS FOR SUB-TABS AND COMPONENTS ---
+// State selectors
+export const useNexusDrawName = () => useNexusStore((s) => s.drawName);
+export const useNexusCurrentDrawName = () => useNexusStore((s) => s.currentDrawName);
+export const useNexusInspectingNumber = () => useNexusStore((s) => s.inspectingNumber);
+export const useNexusHoveredNumber = () => useNexusStore((s) => s.hoveredNumber);
+export const useNexusActiveMainTab = () => useNexusStore((s) => s.activeMainTab);
+export const useNexusActiveSubTab = () => useNexusStore((s) => s.activeSubTab);
+export const useNexusIsFocusMode = () => useNexusStore((s) => s.isFocusMode);
+
+// Config & Settings selectors
+export const useNexusGlobalWeights = () => useNexusStore((s) => s.globalWeights);
+export const useNexusIsForensicOptimized = () => useNexusStore((s) => s.isForensicOptimized);
+export const useNexusIsAutonomousAgentActive = () => useNexusStore((s) => s.isAutonomousAgentActive);
+export const useNexusAgentLogs = () => useNexusStore((s) => s.agentLogs);
+export const useNexusNeuralFeedbackLogs = () => useNexusStore((s) => s.neuralFeedbackLogs);
+export const useNexusVocalContext = () => useNexusStore((s) => s.vocalContext);
+export const useNexusUseCloudEngine = () => useNexusStore((s) => s.useCloudEngine);
+export const useNexusUseSpatioTemporalHawkes = () => useNexusStore((s) => s.useSpatioTemporalHawkes);
+export const useNexusTemporalDepth = () => useNexusStore((s) => s.temporalDepth);
+
+// Data selectors
+export const useNexusHistory = () => useNexusStore((s) => s.history);
+export const useNexusStats = () => useNexusStore((s) => s.stats);
+export const useNexusGaps = () => useNexusStore((s) => s.gaps);
+
+// Analytics selectors
+export const useNexusSpectral = () => useNexusStore((s) => s.spectral);
+export const useNexusWavelet = () => useNexusStore((s) => s.wavelet);
+export const useNexusFractal = () => useNexusStore((s) => s.fractal);
+export const useNexusVolatility = () => useNexusStore((s) => s.volatility);
+export const useNexusRegime = () => useNexusStore((s) => s.regime);
+export const useNexusCorrelationMatrix = () => useNexusStore((s) => s.correlationMatrix);
+export const useNexusRegularity = () => useNexusStore((s) => s.regularity);
+export const useNexusSymbioticContext = () => useNexusStore((s) => s.symbioticContext);
+
+// Engine selectors
+export const useNexusLastPrediction = () => useNexusStore((s) => s.lastPrediction);
+export const useNexusSmartInsights = () => useNexusStore((s) => s.smartInsights);
+export const useNexusCalibration = () => useNexusStore((s) => s.calibration);
+export const useNexusEmpiricalCalibration = () => useNexusStore((s) => s.empiricalCalibration);
+export const useNexusLoading = () => useNexusStore((s) => s.loading);
+
+// Actions selectors
+export const useNexusActions = () =>
+  useNexusStore((s) => ({
+    setDrawName: s.setDrawName,
+    setInspectingNumber: s.setInspectingNumber,
+    setHoveredNumber: s.setHoveredNumber,
+    setFocusMode: s.setFocusMode,
+    navigateToModule: s.navigateToModule,
+    setGlobalWeights: s.setGlobalWeights,
+    setForensicOptimized: s.setForensicOptimized,
+    setAutonomousAgentActive: s.setAutonomousAgentActive,
+    addAgentLog: s.addAgentLog,
+    addNeuralFeedbackLogs: s.addNeuralFeedbackLogs,
+    setVocalContext: s.setVocalContext,
+    setUseCloudEngine: s.setUseCloudEngine,
+    setUseSpatioTemporalHawkes: s.setUseSpatioTemporalHawkes,
+    setTemporalDepth: s.setTemporalDepth,
+    setLastPrediction: s.setLastPrediction,
+    setSmartInsights: s.setSmartInsights,
+    setCalibration: s.setCalibration,
+    setEmpiricalCalibration: s.setEmpiricalCalibration,
+    setHistoryData: s.setHistoryData,
+    setAnalyticsData: s.setAnalyticsData,
+    setLoading: s.setLoading,
+    refreshData: s.refreshData,
+    updateGlobalWeights: s.updateGlobalWeights,
+    refresh: s.refresh,
+    resetInfrastructure: s.resetInfrastructure,
+  }));
+

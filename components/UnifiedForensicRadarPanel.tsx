@@ -34,11 +34,9 @@ interface UnifiedForensicRadarPanelProps {
   className?: string;
 }
 
-export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps> = ({
-  report,
-  drawName,
-  className = "",
-}) => {
+export const UnifiedForensicRadarPanel: React.FC<
+  UnifiedForensicRadarPanelProps
+> = ({ report, drawName, className = "" }) => {
   const [level, setLevel] = useState<"macro" | "micro">("macro");
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
 
@@ -65,17 +63,24 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
 
     // 3. Entropie (Shannon Entropy relative to max ~4.49)
     const entropyRaw = report.shannon_entropy ?? 4.25;
-    const entropyScore = Math.min(100, Math.max(10, (entropyRaw / 4.492) * 100));
+    const entropyScore = Math.min(
+      100,
+      Math.max(10, (entropyRaw / 4.492) * 100),
+    );
 
     // 4. Synergie (Unified Integrity Index or Co-occurrence synergy)
     const synergyScore = Math.min(
       100,
-      Math.max(10, report.unifiedIntegrityIndex ?? 75)
+      Math.max(10, report.unifiedIntegrityIndex ?? 75),
     );
 
     return [
       { subject: "Précision", value: Math.round(precisionScore), target: 85 },
-      { subject: "Dérive spectrale", value: Math.round(spectralScore), target: 80 },
+      {
+        subject: "Dérive spectrale",
+        value: Math.round(spectralScore),
+        target: 80,
+      },
       { subject: "Entropie", value: Math.round(entropyScore), target: 90 },
       { subject: "Synergie", value: Math.round(synergyScore), target: 85 },
     ];
@@ -113,8 +118,16 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
       { key: "spectralFrequency", name: "Analyse Spectrale", score: 0.69 },
       { key: "coOccurrence", name: "Matrice Co-Occurrence", score: 0.74 },
       { key: "gapEfficiency", name: "Efficacité des Écarts", score: 0.65 },
-      { key: "bayesianCalibration", name: "Calibration Bayésienne", score: 0.79 },
-      { key: "neuralNetwork", name: "Réseau de Neurones Multi-Head", score: 0.85 },
+      {
+        key: "bayesianCalibration",
+        name: "Calibration Bayésienne",
+        score: 0.79,
+      },
+      {
+        key: "neuralNetwork",
+        name: "Réseau de Neurones Multi-Head",
+        score: 0.85,
+      },
     ];
 
     // Seed pseudo-deterministic variation based on activeNumber & drawName
@@ -134,17 +147,19 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
 
     const igResult = computeIntegratedGradients(
       algoScores as Record<AlgoKey, number>,
-      mockWeights as any
+      mockWeights as any,
     );
 
-    const barData = Object.entries(igResult.featureAttributions).map(([k, attr]) => {
-      const name = algoList.find((a) => a.key === k)?.name || k;
-      return {
-        algoKey: k,
-        name,
-        attributionPercent: Math.round(attr * 100),
-      };
-    });
+    const barData = Object.entries(igResult.featureAttributions).map(
+      ([k, attr]) => {
+        const name = algoList.find((a) => a.key === k)?.name || k;
+        return {
+          algoKey: k,
+          name,
+          attributionPercent: Math.round(attr * 100),
+        };
+      },
+    );
 
     barData.sort((a, b) => b.attributionPercent - a.attributionPercent);
 
@@ -152,7 +167,8 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
       barData,
       topDriver: igResult.topDriver,
       topDriverName:
-        algoList.find((a) => a.key === igResult.topDriver)?.name || igResult.topDriver,
+        algoList.find((a) => a.key === igResult.topDriver)?.name ||
+        igResult.topDriver,
     };
   }, [activeNumber, drawName]);
 
@@ -185,7 +201,8 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
               </span>
             </h3>
             <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">
-              Radar d'alignement macro & attribution micro par Integrated Gradients
+              Radar d'alignement macro & attribution micro par Integrated
+              Gradients
             </p>
           </div>
         </div>
@@ -234,11 +251,20 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
           {/* Radar Chart */}
           <div className="md:col-span-7 h-[280px] relative flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
-              <RadarChart cx="50%" cy="50%" outerRadius="75%" data={macroRadarData}>
+              <RadarChart
+                cx="50%"
+                cy="50%"
+                outerRadius="75%"
+                data={macroRadarData}
+              >
                 <defs>
                   <radialGradient id="macroRadarGrad" cx="0.5" cy="0.5" r="0.5">
                     <stop offset="0%" stopColor="#6366f1" stopOpacity={0.6} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.15} />
+                    <stop
+                      offset="100%"
+                      stopColor="#6366f1"
+                      stopOpacity={0.15}
+                    />
                   </radialGradient>
                 </defs>
                 <PolarGrid stroke="#334155" strokeDasharray="3 3" />
@@ -246,7 +272,12 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
                   dataKey="subject"
                   tick={{ fill: "#94a3b8", fontSize: 11, fontWeight: 800 }}
                 />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                <PolarRadiusAxis
+                  angle={30}
+                  domain={[0, 100]}
+                  tick={false}
+                  axisLine={false}
+                />
                 <Radar
                   name="Alignement RéeI"
                   dataKey="value"
@@ -316,7 +347,8 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
           {/* Number Selector Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
             <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Target size={14} className="text-emerald-500" /> Numéro Inspecté :
+              <Target size={14} className="text-emerald-500" /> Numéro Inspecté
+              :
             </span>
 
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -368,7 +400,13 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
                 layout="vertical"
                 margin={{ top: 5, right: 30, left: 120, bottom: 5 }}
               >
-                <XAxis type="number" domain={[0, 100]} unit="%" stroke="#64748b" fontSize={10} />
+                <XAxis
+                  type="number"
+                  domain={[0, 100]}
+                  unit="%"
+                  stroke="#64748b"
+                  fontSize={10}
+                />
                 <YAxis
                   type="category"
                   dataKey="name"
@@ -390,7 +428,10 @@ export const UnifiedForensicRadarPanel: React.FC<UnifiedForensicRadarPanelProps>
                 />
                 <Bar dataKey="attributionPercent" radius={[0, 6, 6, 0]}>
                   {microAttributionData.barData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={COLORS[index % COLORS.length]}
+                    />
                   ))}
                 </Bar>
               </BarChart>

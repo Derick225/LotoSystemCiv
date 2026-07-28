@@ -1,20 +1,38 @@
-import React, { useState } from 'react';
-import { useNexusStore } from '../store/useNexusStore';
-import { Dna, Play, Zap, RefreshCw, Activity, ShieldCheck, CheckCircle2, AlertCircle, Award, Sparkles, Sliders, BarChart3, ArrowUpRight } from 'lucide-react';
-import { evolveNeuralDNACore } from '../services/trainingService';
-import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { audioEngine } from '../utils/audioEngine';
-import { useToast } from './ui/Toast';
-import { AlgoWeights, TrainingReport } from '../types';
-import { LABELS_MAP } from '../hooks/useAlgorithmSync';
+import React, { useState } from "react";
+import { useNexusStore } from "../store/useNexusStore";
+import {
+  Dna,
+  Play,
+  Zap,
+  RefreshCw,
+  Activity,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Award,
+  Sparkles,
+  Sliders,
+  BarChart3,
+  ArrowUpRight,
+} from "lucide-react";
+import { evolveNeuralDNACore } from "../services/trainingService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
+import { audioEngine } from "../utils/audioEngine";
+import { useToast } from "./ui/Toast";
+import { AlgoWeights, TrainingReport } from "../types";
+import { LABELS_MAP } from "../hooks/useAlgorithmSync";
 
-export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName }) => {
+export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
+  drawName,
+}) => {
   const { showToast } = useToast();
-  const history = useNexusStore(state => state.history);
-  const globalWeights = useNexusStore(state => state.globalWeights);
-  const setGlobalWeights = useNexusStore(state => state.setGlobalWeights);
+  const history = useNexusStore((state) => state.history);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
 
-  const [optimizerType, setOptimizerType] = useState<"genetic" | "pso" | "bayesian" | "meta">("genetic");
+  const [optimizerType, setOptimizerType] = useState<
+    "genetic" | "pso" | "bayesian" | "meta"
+  >("genetic");
   const [generations, setGenerations] = useState<number>(15);
   const [sampleSize, setSampleSize] = useState<number>(30);
 
@@ -31,7 +49,10 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
   const runEvolution = async () => {
     const cleanHistory = purifyHistoryForDraw(drawName, history);
     if (cleanHistory.length < 10) {
-      showToast("Historique insuffisant pour l'évolution d'ADN (minimum 10 tirages).", "error");
+      showToast(
+        "Historique insuffisant pour l'évolution d'ADN (minimum 10 tirages).",
+        "error",
+      );
       return;
     }
 
@@ -48,18 +69,24 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
         { generations, sampleSize, optimizerType },
         (logData) => {
           if (logData?.message) {
-            setTelemetryLogs(prev => [...prev.slice(-12), logData.message]);
+            setTelemetryLogs((prev) => [...prev.slice(-12), logData.message]);
           }
-        }
+        },
       );
 
       setEvolutionResult(result);
       audioEngine.play("success");
-      showToast(`Évolution terminée : Gain d'efficacité +${(result.improvement * 100).toFixed(1)}%`, "success");
+      showToast(
+        `Évolution terminée : Gain d'efficacité +${(result.improvement * 100).toFixed(1)}%`,
+        "success",
+      );
     } catch (err: any) {
       console.error(err);
       audioEngine.play("error");
-      showToast(`Échec de l'évolution ADN: ${err.message || String(err)}`, "error");
+      showToast(
+        `Échec de l'évolution ADN: ${err.message || String(err)}`,
+        "error",
+      );
     } finally {
       setIsEvolving(false);
     }
@@ -73,10 +100,16 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
   };
 
   // Extract top algorithm gene weights for visualization
-  const topGenes = evolutionResult ? Object.entries(evolutionResult.bestWeights)
-    .map(([key, value]) => ({ key, label: LABELS_MAP[key as keyof typeof LABELS_MAP] || key, val: value as number }))
-    .sort((a, b) => b.val - a.val)
-    .slice(0, 8) : [];
+  const topGenes = evolutionResult
+    ? Object.entries(evolutionResult.bestWeights)
+        .map(([key, value]) => ({
+          key,
+          label: LABELS_MAP[key as keyof typeof LABELS_MAP] || key,
+          val: value as number,
+        }))
+        .sort((a, b) => b.val - a.val)
+        .slice(0, 8)
+    : [];
 
   return (
     <div className="bg-slate-950 p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-2xl space-y-8">
@@ -87,10 +120,13 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
             <Dna size={12} /> Laboratoire Darwinien d'ADN Neural
           </div>
           <h3 className="text-2xl font-black text-white uppercase tracking-tight flex items-center gap-2">
-            Laboratoire d'Évolution ADN <span className="text-xs font-mono text-emerald-400">v12.0</span>
+            Laboratoire d'Évolution ADN{" "}
+            <span className="text-xs font-mono text-emerald-400">v12.0</span>
           </h3>
           <p className="text-xs text-slate-400 mt-1 max-w-xl">
-            Optimise de façon stochastique déterministe les poids algorithmiques via opérateurs génétiques (mutation fermée de Dirichlet, sélection de Pareto, validation Holdout sans fuite).
+            Optimise de façon stochastique déterministe les poids algorithmiques
+            via opérateurs génétiques (mutation fermée de Dirichlet, sélection
+            de Pareto, validation Holdout sans fuite).
           </p>
         </div>
 
@@ -107,7 +143,9 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
       {/* PARAMETERS CONFIG */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80">
         <div>
-          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">Algorithme d'Optimisation</label>
+          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">
+            Algorithme d'Optimisation
+          </label>
           <select
             value={optimizerType}
             onChange={(e: any) => setOptimizerType(e.target.value)}
@@ -122,7 +160,9 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
         </div>
 
         <div>
-          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">Générations ({generations})</label>
+          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">
+            Générations ({generations})
+          </label>
           <input
             type="range"
             min={5}
@@ -136,7 +176,9 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
         </div>
 
         <div>
-          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">Échantillon Apprentissage ({sampleSize} tirages)</label>
+          <label className="block text-[9px] font-black uppercase text-slate-400 mb-1.5">
+            Échantillon Apprentissage ({sampleSize} tirages)
+          </label>
           <input
             type="range"
             min={10}
@@ -158,7 +200,8 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
           </div>
           {telemetryLogs.map((log, i) => (
             <div key={i} className="text-slate-400">
-              <span className="text-emerald-500 mr-2">›</span>{log}
+              <span className="text-emerald-500 mr-2">›</span>
+              {log}
             </div>
           ))}
         </div>
@@ -171,10 +214,14 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
             <div className="flex flex-wrap justify-between items-center gap-4">
               <div>
                 <h4 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Award className="text-amber-400" size={18} /> Génome Optimisé Résultant
+                  <Award className="text-amber-400" size={18} /> Génome Optimisé
+                  Résultant
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Holdout Verifiable : {evolutionResult.isGeneralizable ? "Oui (Généralisation Confirmée)" : "Échantillon restreint"}
+                  Holdout Verifiable :{" "}
+                  {evolutionResult.isGeneralizable
+                    ? "Oui (Généralisation Confirmée)"
+                    : "Échantillon restreint"}
                 </p>
               </div>
 
@@ -188,27 +235,39 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80">
-                <span className="text-[9px] font-black uppercase text-slate-500">Gain d'Efficacité</span>
+                <span className="text-[9px] font-black uppercase text-slate-500">
+                  Gain d'Efficacité
+                </span>
                 <span className="text-2xl font-black text-emerald-400 mt-1 block font-mono">
                   +{(evolutionResult.improvement * 100).toFixed(1)}%
                 </span>
               </div>
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80">
-                <span className="text-[9px] font-black uppercase text-slate-500">Moyenne Hits / Tirage</span>
+                <span className="text-[9px] font-black uppercase text-slate-500">
+                  Moyenne Hits / Tirage
+                </span>
                 <span className="text-2xl font-black text-indigo-400 mt-1 block font-mono">
                   {evolutionResult.report.averageHits.toFixed(2)} / 5
                 </span>
               </div>
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-900">
-                <span className="text-[9px] font-black uppercase text-slate-500">Score de Fitness Global</span>
+                <span className="text-[9px] font-black uppercase text-slate-500">
+                  Score de Fitness Global
+                </span>
                 <span className="text-2xl font-black text-amber-400 mt-1 block font-mono">
                   {evolutionResult.report.score.toFixed(1)}
                 </span>
               </div>
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-900">
-                <span className="text-[9px] font-black uppercase text-slate-500">Ratio Surapprentissage</span>
-                <span className={`text-2xl font-black mt-1 block font-mono ${evolutionResult.overfittingRatio && evolutionResult.overfittingRatio > 1.25 ? "text-amber-400" : "text-emerald-400"}`}>
-                  {evolutionResult.overfittingRatio ? evolutionResult.overfittingRatio.toFixed(2) : "1.00"}
+                <span className="text-[9px] font-black uppercase text-slate-500">
+                  Ratio Surapprentissage
+                </span>
+                <span
+                  className={`text-2xl font-black mt-1 block font-mono ${evolutionResult.overfittingRatio && evolutionResult.overfittingRatio > 1.25 ? "text-amber-400" : "text-emerald-400"}`}
+                >
+                  {evolutionResult.overfittingRatio
+                    ? evolutionResult.overfittingRatio.toFixed(2)
+                    : "1.00"}
                 </span>
               </div>
             </div>
@@ -220,10 +279,17 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({ drawName })
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {topGenes.map((gene, i) => (
-                  <div key={gene.key} className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80 space-y-1">
+                  <div
+                    key={gene.key}
+                    className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80 space-y-1"
+                  >
                     <div className="flex justify-between items-center text-[10px]">
-                      <span className="font-bold text-slate-300 truncate">{gene.label}</span>
-                      <span className="font-mono font-black text-emerald-400">{(gene.val * 100).toFixed(1)}%</span>
+                      <span className="font-bold text-slate-300 truncate">
+                        {gene.label}
+                      </span>
+                      <span className="font-mono font-black text-emerald-400">
+                        {(gene.val * 100).toFixed(1)}%
+                      </span>
                     </div>
                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
                       <div

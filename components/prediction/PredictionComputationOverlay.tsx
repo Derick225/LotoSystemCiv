@@ -59,7 +59,9 @@ export const PredictionComputationOverlay: React.FC<
           <div className="w-full max-w-sm mb-8 space-y-1.5 px-4">
             <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
               <span>Progression de l'Inférence</span>
-              <span className="font-mono text-indigo-500 dark:text-indigo-400">{progress}%</span>
+              <span className="font-mono text-indigo-500 dark:text-indigo-400">
+                {progress}%
+              </span>
             </div>
             <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
               <motion.div

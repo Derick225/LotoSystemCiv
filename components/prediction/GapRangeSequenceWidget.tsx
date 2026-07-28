@@ -1,48 +1,55 @@
-import React, { useState, useMemo } from 'react';
-import { useNexusStore } from '../../store/useNexusStore';
-import { 
-  gapRangeSequenceService, 
-  GapRangeStep, 
-  GapRangeBinInfo 
-} from '../../services/prediction/gapRangeSequenceService';
-import { NumberBall } from '../NumberBall';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Cell 
-} from 'recharts';
-import { 
-  Layers, 
-  TrendingUp, 
-  Sparkles, 
-  Filter, 
-  CheckCircle2, 
+import React, { useState, useMemo } from "react";
+import { useNexusStore } from "../../store/useNexusStore";
+import {
+  gapRangeSequenceService,
+  GapRangeStep,
+  GapRangeBinInfo,
+} from "../../services/prediction/gapRangeSequenceService";
+import { NumberBall } from "../NumberBall";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
+import {
+  Layers,
+  TrendingUp,
+  Sparkles,
+  Filter,
+  CheckCircle2,
   SlidersHorizontal,
   ChevronRight,
-  HelpCircle
-} from 'lucide-react';
-import { audioEngine } from '../../utils/audioEngine';
+  HelpCircle,
+} from "lucide-react";
+import { audioEngine } from "../../utils/audioEngine";
 
 interface GapRangeSequenceWidgetProps {
   drawName: string;
 }
 
-export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ drawName }) => {
-  const history = useNexusStore(state => state.history);
-  const globalWeights = useNexusStore(state => state.globalWeights);
-  const lastPrediction = useNexusStore(state => state.lastPrediction);
+export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
+  drawName,
+}) => {
+  const history = useNexusStore((state) => state.history);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const lastPrediction = useNexusStore((state) => state.lastPrediction);
 
-  const [step, setStep] = useState<GapRangeStep>('combined');
+  const [step, setStep] = useState<GapRangeStep>("combined");
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
 
   // Compute Gap Range Sequence analysis dynamically
   const report = useMemo(() => {
-    return gapRangeSequenceService.analyzeGapRangePatterns(drawName, history, step, 90);
+    return gapRangeSequenceService.analyzeGapRangePatterns(
+      drawName,
+      history,
+      step,
+      90,
+    );
   }, [drawName, history, step]);
 
   const activeBin = useMemo(() => {
@@ -56,17 +63,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
     // 1. Identifier les tranches favorisées (top 3)
     const topBins = report.topPredictedBins.slice(0, 3);
     const favoredNumbers = new Set<number>();
-    
-    topBins.forEach(bin => {
-      bin.matchingNumbers.forEach(num => favoredNumbers.add(num));
+
+    topBins.forEach((bin) => {
+      bin.matchingNumbers.forEach((num) => favoredNumbers.add(num));
     });
 
-    const results = Array.from(favoredNumbers).map(num => {
+    const results = Array.from(favoredNumbers).map((num) => {
       let score = 50;
       if (lastPrediction?.breakdown?.[num]) {
         let totalVal = 0;
         let totalW = 0;
-        for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
+        for (const [algo, val] of Object.entries(
+          lastPrediction.breakdown[num],
+        )) {
           const w = globalWeights[algo as keyof typeof globalWeights] || 1;
           totalVal += (val || 0) * w;
           totalW += w;
@@ -80,7 +89,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
 
     // Filtre des numéros ayant survécu à l'ADN actuel (Score >= 50) et tri par score décroissant
     return results
-      .filter(item => item.score >= 50)
+      .filter((item) => item.score >= 50)
       .sort((a, b) => {
         if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
         const hashA = (a.num * 2654435761) % 4294967296;
@@ -90,17 +99,17 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
   }, [report, globalWeights, lastPrediction]);
 
   const handleStepChange = (newStep: GapRangeStep) => {
-    audioEngine.play('click');
+    audioEngine.play("click");
     setStep(newStep);
     setSelectedBinIndex(null);
   };
 
   const chartData = useMemo(() => {
-    return report.bins.map(bin => ({
+    return report.bins.map((bin) => ({
       binIndex: bin.binIndex,
       label: bin.label,
       probability: parseFloat((bin.probability * 100).toFixed(1)),
-      count: bin.matchingNumbers.length
+      count: bin.matchingNumbers.length,
     }));
   }, [report]);
 
@@ -122,8 +131,9 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             </h3>
           </div>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Modèle Markovien de transition de fréquences d'écarts d'apparition d'un tirage au suivant.
-            Prédit les tranches d'écarts les plus probables pour filtrer l'ADN des numéros.
+            Modèle Markovien de transition de fréquences d'écarts d'apparition
+            d'un tirage au suivant. Prédit les tranches d'écarts les plus
+            probables pour filtrer l'ADN des numéros.
           </p>
         </div>
 
@@ -134,11 +144,11 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             Tranches
           </span>
           <button
-            onClick={() => handleStepChange('combined')}
+            onClick={() => handleStepChange("combined")}
             className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-              step === 'combined'
-                ? 'bg-gradient-to-r from-indigo-600 to-emerald-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
+              step === "combined"
+                ? "bg-gradient-to-r from-indigo-600 to-emerald-600 text-white shadow-lg shadow-indigo-600/30"
+                : "text-slate-400 hover:text-white"
             }`}
           >
             Multi-Res (5 & 10)
@@ -147,8 +157,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             onClick={() => handleStepChange(10)}
             className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
               step === 10
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "text-slate-400 hover:text-white"
             }`}
           >
             Tranches de 10
@@ -157,8 +167,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             onClick={() => handleStepChange(5)}
             className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
               step === 5
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "text-slate-400 hover:text-white"
             }`}
           >
             Tranches de 5
@@ -170,11 +180,22 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
       {report.resolutionWeights && (
         <div className="bg-indigo-950/40 border border-indigo-500/20 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between text-xs font-mono text-slate-300">
           <span className="text-indigo-400 font-bold flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Fusion Multi-Résolution Entropique :
+            <Sparkles className="w-3.5 h-3.5" /> Fusion Multi-Résolution
+            Entropique :
           </span>
           <div className="flex items-center gap-4">
-            <span>Poids Tranches de 5 : <strong className="text-emerald-400">{(report.resolutionWeights.step5Weight * 100).toFixed(1)}%</strong></span>
-            <span>Poids Tranches de 10 : <strong className="text-indigo-400">{(report.resolutionWeights.step10Weight * 100).toFixed(1)}%</strong></span>
+            <span>
+              Poids Tranches de 5 :{" "}
+              <strong className="text-emerald-400">
+                {(report.resolutionWeights.step5Weight * 100).toFixed(1)}%
+              </strong>
+            </span>
+            <span>
+              Poids Tranches de 10 :{" "}
+              <strong className="text-indigo-400">
+                {(report.resolutionWeights.step10Weight * 100).toFixed(1)}%
+              </strong>
+            </span>
           </div>
         </div>
       )}
@@ -187,9 +208,9 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             Signature des Écarts du Dernier Tirage
           </div>
           <div className="text-xs text-slate-300 font-mono">
-            Séquence des tranches :{' '}
+            Séquence des tranches :{" "}
             <span className="text-emerald-400 font-bold">
-              {report.lastDrawBinLabels.join('  ➔  ')}
+              {report.lastDrawBinLabels.join("  ➔  ")}
             </span>
           </div>
         </div>
@@ -203,8 +224,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             >
               <NumberBall number={item.number} size="sm" />
               <div className="flex flex-col text-[10px]">
-                <span className="text-slate-400">Écart : <strong className="text-amber-400">{item.gap}</strong></span>
-                <span className="text-indigo-300 font-mono font-bold">{item.binLabel}</span>
+                <span className="text-slate-400">
+                  Écart : <strong className="text-amber-400">{item.gap}</strong>
+                </span>
+                <span className="text-indigo-300 font-mono font-bold">
+                  {item.binLabel}
+                </span>
               </div>
             </div>
           ))}
@@ -234,31 +259,46 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
                   if (e && e.activePayload && e.activePayload.length > 0) {
                     const idx = e.activePayload[0].payload.binIndex;
                     setSelectedBinIndex(idx);
-                    audioEngine.play('click');
+                    audioEngine.play("click");
                   }
                 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={11} tickLine={false} unit="%" />
+                <XAxis
+                  dataKey="label"
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  unit="%"
+                />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#0f172a',
-                    borderColor: '#334155',
-                    borderRadius: '12px',
-                    fontSize: '12px',
-                    color: '#f8fafc'
+                    backgroundColor: "#0f172a",
+                    borderColor: "#334155",
+                    borderRadius: "12px",
+                    fontSize: "12px",
+                    color: "#f8fafc",
                   }}
-                  formatter={(val: any) => [`${val}%`, 'Probabilité']}
+                  formatter={(val: any) => [`${val}%`, "Probabilité"]}
                   labelFormatter={(label) => `Tranche d'écart ${label}`}
                 />
-                <Bar dataKey="probability" radius={[6, 6, 0, 0]} cursor="pointer">
+                <Bar
+                  dataKey="probability"
+                  radius={[6, 6, 0, 0]}
+                  cursor="pointer"
+                >
                   {chartData.map((entry) => {
-                    const isTop = report.topPredictedBins[0]?.binIndex === entry.binIndex;
+                    const isTop =
+                      report.topPredictedBins[0]?.binIndex === entry.binIndex;
                     const isSelected = activeBin.binIndex === entry.binIndex;
-                    let fill = '#3b82f6';
-                    if (isTop) fill = '#10b981';
-                    if (isSelected) fill = '#6366f1';
+                    let fill = "#3b82f6";
+                    if (isTop) fill = "#10b981";
+                    if (isSelected) fill = "#6366f1";
                     return <Cell key={`cell-${entry.binIndex}`} fill={fill} />;
                   })}
                 </Bar>
@@ -282,35 +322,40 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
                     key={bin.binIndex}
                     onClick={() => {
                       setSelectedBinIndex(bin.binIndex);
-                      audioEngine.play('click');
+                      audioEngine.play("click");
                     }}
                     className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
-                        ? 'bg-indigo-950/60 border-indigo-500 shadow-md'
-                        : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                        ? "bg-indigo-950/60 border-indigo-500 shadow-md"
+                        : "bg-slate-900 border-slate-800 hover:border-slate-700"
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <span
                         className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center ${
                           rank === 0
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                             : rank === 1
-                            ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
-                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                         }`}
                       >
                         #{rank + 1}
                       </span>
                       <div>
                         <div className="text-xs font-bold text-white flex items-center gap-2">
-                          Tranche <span className="font-mono text-indigo-300">{bin.label}</span>
+                          Tranche{" "}
+                          <span className="font-mono text-indigo-300">
+                            {bin.label}
+                          </span>
                           <span className="text-[10px] text-slate-400 font-normal">
-                            (écarts {bin.minGap} à {bin.maxGap === Infinity ? '60+' : bin.maxGap})
+                            (écarts {bin.minGap} à{" "}
+                            {bin.maxGap === Infinity ? "60+" : bin.maxGap})
                           </span>
                         </div>
                         <div className="text-[10px] text-slate-400 mt-0.5">
-                          {bin.matchingNumbers.length} numéros actuellement dans cette tranche
+                          {bin.matchingNumbers.length} numéros actuellement dans
+                          cette tranche
                         </div>
                       </div>
                     </div>
@@ -319,7 +364,9 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
                       <div className="text-xs font-black font-mono text-emerald-400">
                         {(bin.probability * 100).toFixed(1)}%
                       </div>
-                      <div className="text-[9px] uppercase tracking-wider text-slate-500">Vraisemblance</div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-500">
+                        Vraisemblance
+                      </div>
                     </div>
                   </div>
                 );
@@ -330,8 +377,9 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
           <div className="text-[11px] text-slate-400 bg-slate-900/80 p-3 rounded-xl border border-slate-800/60 flex items-start gap-2">
             <HelpCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
             <span>
-              Les probabilités de transition sont calculées par chaîne de Markov conditionnelle
-              lissée par la loi de Laplace, dérivée uniquement de l'historique du tirage actif.
+              Les probabilités de transition sont calculées par chaîne de Markov
+              conditionnelle lissée par la loi de Laplace, dérivée uniquement de
+              l'historique du tirage actif.
             </span>
           </div>
         </div>
@@ -358,7 +406,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
         {/* Numbers Grid */}
         {survivingNumbers.length === 0 ? (
           <p className="text-xs text-slate-500 italic py-4 text-center">
-            Aucun numéro des tranches favorisées n'a survécu au filtrage algorithmique actuel.
+            Aucun numéro des tranches favorisées n'a survécu au filtrage
+            algorithmique actuel.
           </p>
         ) : (
           <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
@@ -372,12 +421,17 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
 
                   <div className="w-full text-center space-y-0.5">
                     <div className="text-[10px] font-bold font-mono text-indigo-300">
-                      Score : <span className="text-emerald-400 font-black">{score.toFixed(1)}</span>
+                      Score :{" "}
+                      <span className="text-emerald-400 font-black">
+                        {score.toFixed(1)}
+                      </span>
                     </div>
                     <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full rounded-full"
-                        style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
+                        style={{
+                          width: `${Math.min(100, Math.max(0, score))}%`,
+                        }}
                       />
                     </div>
                   </div>
@@ -395,11 +449,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
               <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                Analogie Historique : Patterns de Séquences Similaires & Transitions
+                Analogie Historique : Patterns de Séquences Similaires &
+                Transitions
               </h4>
             </div>
             <span className="text-[10px] text-slate-400 font-mono">
-              Top {report.sequenceMatches.length} séquences historiques analogues
+              Top {report.sequenceMatches.length} séquences historiques
+              analogues
             </span>
           </div>
 
@@ -414,18 +470,23 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({ 
                     Tirage Historique #{match.historicalDrawIndex}
                   </span>
                   <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full font-bold border border-emerald-500/20">
-                    Similarité Jaccard : {(match.similarityScore * 100).toFixed(0)}%
+                    Similarité Jaccard :{" "}
+                    {(match.similarityScore * 100).toFixed(0)}%
                   </span>
                 </div>
 
                 <div className="flex items-center gap-2 text-[10px] font-mono">
                   <span className="text-slate-400">Signature :</span>
-                  <span className="text-indigo-300">{match.historicalGapsSignature.join(', ')}</span>
+                  <span className="text-indigo-300">
+                    {match.historicalGapsSignature.join(", ")}
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-2 text-[10px] font-mono">
                   <span className="text-slate-400">Transition Suivante :</span>
-                  <span className="text-emerald-400 font-bold">{match.subsequentGapsSignature.join(' ➔ ')}</span>
+                  <span className="text-emerald-400 font-bold">
+                    {match.subsequentGapsSignature.join(" ➔ ")}
+                  </span>
                 </div>
               </div>
             ))}

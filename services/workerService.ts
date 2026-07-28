@@ -1,7 +1,7 @@
 
 import { AppError } from '../utils/AppError';
 import { apiClient } from '../core/api/apiClient';
-import { packHistory, packMatrix, packArray } from './workers/zeroCopy';
+import { packHistory, packMatrix, packArray, collectTransferables } from './workers/zeroCopy';
 
 /**
  * NEXUS WORKER SERVICE
@@ -121,7 +121,6 @@ class WorkerService {
                     p.rows = packed.rows;
                     p.cols = packed.cols;
                     delete p.matrix;
-                    transferables.push(packed.matrixBuffer);
                 }
                 if (Array.isArray(p.features)) {
                     const packed = packMatrix(p.features);
@@ -129,16 +128,18 @@ class WorkerService {
                     p.featRows = packed.rows;
                     p.featCols = packed.cols;
                     delete p.features;
-                    transferables.push(packed.matrixBuffer);
                 }
                 if (Array.isArray(p.labels)) {
                     const packed = packArray(p.labels);
                     p.labelsBuffer = packed.arrayBuffer;
                     delete p.labels;
-                    transferables.push(packed.arrayBuffer);
                 }
                 msgPayload = p;
             }
+
+            // Collect all ArrayBuffers / TypedArray buffers for zero-copy Transferable transfer
+            collectTransferables(msgPayload, transferables);
+            if (historyBuffer) collectTransferables(historyBuffer, transferables);
 
             this.localWorker.postMessage({
                 taskId,

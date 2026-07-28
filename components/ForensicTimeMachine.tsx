@@ -1,14 +1,34 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNexusStore } from "../store/useNexusStore";
-import { Clock, Play, Pause, Calendar, Network, TrendingUp, AlertTriangle, FastForward, Sliders, ShieldCheck, Target, Sparkles, Cpu } from "lucide-react";
+import {
+  Clock,
+  Play,
+  Pause,
+  Calendar,
+  Network,
+  TrendingUp,
+  AlertTriangle,
+  FastForward,
+  Sliders,
+  ShieldCheck,
+  Target,
+  Sparkles,
+  Cpu,
+} from "lucide-react";
 import { AlgoWeights, DrawResult } from "../types";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { generateMasterPrediction } from "../services/predictionEngine";
 import { runForensicAutopsy } from "../services/postPredictionAnalysisService";
-import { normalizeWeights, adjustWeightsForRegime } from "../services/prediction/weightsManager";
-import { computeRobustHurst, calculateShannonEntropy } from "../services/mathCore";
+import {
+  normalizeWeights,
+  adjustWeightsForRegime,
+} from "../services/prediction/weightsManager";
+import {
+  computeRobustHurst,
+  calculateShannonEntropy,
+} from "../services/mathCore";
 
 interface ForensicTimeMachineProps {
   drawName: string;
@@ -22,9 +42,13 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
   currentWeights,
 }) => {
   const { showToast } = useToast();
-  const temporalDepth = useNexusStore(state => state.temporalDepth);
-  const isForensicOptimized = useNexusStore(state => state.isForensicOptimized);
-  const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const isForensicOptimized = useNexusStore(
+    (state) => state.isForensicOptimized,
+  );
+  const updateGlobalWeights = useNexusStore(
+    (state) => state.updateGlobalWeights,
+  );
 
   const drawHistory = useMemo(() => {
     return purifyHistoryForDraw(drawName, history);
@@ -49,7 +73,13 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
   const [walkForwardStats, setWalkForwardStats] = useState<{
     isActive: boolean;
-    history: { date: string; hits: number; accuracy: number; predicted: number[]; actual: number[] }[];
+    history: {
+      date: string;
+      hits: number;
+      accuracy: number;
+      predicted: number[];
+      actual: number[];
+    }[];
   } | null>(null);
 
   const targetDraw = useMemo(() => {
@@ -64,7 +94,10 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
   const computeTimeTravelPrediction = async () => {
     if (!targetDraw || pastHistory.length < 5) {
-      showToast("Profondeur d'historique insuffisante dans le passé (minimum 5 requis).", "error");
+      showToast(
+        "Profondeur d'historique insuffisante dans le passé (minimum 5 requis).",
+        "error",
+      );
       return;
     }
     setIsSimulating(true);
@@ -79,20 +112,35 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         true,
         false,
         0,
-        isForensicOptimized
+        isForensicOptimized,
       );
 
-      const hits = pred.suggestedNumbers.filter((n) => targetDraw.gagnants.includes(n));
-      const accuracy = Math.round((hits.length / targetDraw.gagnants.length) * 100);
+      const hits = pred.suggestedNumbers.filter((n) =>
+        targetDraw.gagnants.includes(n),
+      );
+      const accuracy = Math.round(
+        (hits.length / targetDraw.gagnants.length) * 100,
+      );
 
       // Compute topological near-misses (distance 1 or 2 on domain 1-90)
-      const nearMisses: { predicted: number; actual: number; distance: number }[] = [];
-      pred.suggestedNumbers.forEach(predNum => {
+      const nearMisses: {
+        predicted: number;
+        actual: number;
+        distance: number;
+      }[] = [];
+      pred.suggestedNumbers.forEach((predNum) => {
         if (!targetDraw.gagnants.includes(predNum)) {
-          targetDraw.gagnants.forEach(winNum => {
-            const dist = Math.min(Math.abs(predNum - winNum), 90 - Math.abs(predNum - winNum));
+          targetDraw.gagnants.forEach((winNum) => {
+            const dist = Math.min(
+              Math.abs(predNum - winNum),
+              90 - Math.abs(predNum - winNum),
+            );
             if (dist <= 2) {
-              nearMisses.push({ predicted: predNum, actual: winNum, distance: dist });
+              nearMisses.push({
+                predicted: predNum,
+                actual: winNum,
+                distance: dist,
+              });
             }
           });
         }
@@ -110,7 +158,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
           undefined,
           undefined,
           true,
-          pastHistory
+          pastHistory,
         );
       } catch (err) {
         console.warn("Forensic autopsy step warning:", err);
@@ -124,19 +172,26 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         confidence: pred.confidence,
         xapExp: pred.xapExp,
         nearMisses,
-        forensicReport
+        forensicReport,
       });
 
       if (isWalkForwarding) {
-        setWalkForwardStats(prev => {
+        setWalkForwardStats((prev) => {
           if (!prev) return null;
-          if (prev.history.some(item => item.date === targetDraw.date)) return prev;
+          if (prev.history.some((item) => item.date === targetDraw.date))
+            return prev;
           return {
             ...prev,
             history: [
               ...prev.history,
-              { date: targetDraw.date, hits: hits.length, accuracy, predicted: pred.suggestedNumbers, actual: targetDraw.gagnants }
-            ]
+              {
+                date: targetDraw.date,
+                hits: hits.length,
+                accuracy,
+                predicted: pred.suggestedNumbers,
+                actual: targetDraw.gagnants,
+              },
+            ],
           };
         });
       }
@@ -156,10 +211,11 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     let interval: ReturnType<typeof setInterval>;
     if (isWalkForwarding) {
       interval = setInterval(() => {
-        setHistoricalIndex(prev => {
+        setHistoricalIndex((prev) => {
           if (prev > 0) return prev - 1;
           setIsWalkForwarding(false);
-          if (walkForwardStats) setWalkForwardStats(s => s ? { ...s, isActive: false } : null);
+          if (walkForwardStats)
+            setWalkForwardStats((s) => (s ? { ...s, isActive: false } : null));
           return 0;
         });
       }, playbackSpeed);
@@ -170,9 +226,11 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
   const toggleWalkForward = () => {
     if (!isWalkForwarding) {
       setWalkForwardStats({ isActive: true, history: [] });
-      setHistoricalIndex(Math.min(drawHistory.length - 6, Math.max(10, historicalIndex)));
+      setHistoricalIndex(
+        Math.min(drawHistory.length - 6, Math.max(10, historicalIndex)),
+      );
     } else {
-      setWalkForwardStats(s => s ? { ...s, isActive: false } : null);
+      setWalkForwardStats((s) => (s ? { ...s, isActive: false } : null));
     }
     setIsWalkForwarding(!isWalkForwarding);
     audioEngine.play("click");
@@ -186,15 +244,23 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     setIsCalibrating(true);
     audioEngine.play("scan");
     try {
-      const divergences = simulationResult.forensicReport.scoreDivergence as { algo: string; impact: number }[];
+      const divergences = simulationResult.forensicReport.scoreDivergence as {
+        algo: string;
+        impact: number;
+      }[];
       const newWeights = { ...currentWeights };
       let adjustedCount = 0;
 
       // 1. Calcul de la norme RMS du vecteur d'impact pour un pas d'apprentissage AdaGrad déterministe
-      const sumSquaredImpact = divergences.reduce((sum, d) => sum + Math.pow(d.impact || 0, 2), 0);
-      const rmsImpact = Math.sqrt(sumSquaredImpact / Math.max(1, divergences.length));
+      const sumSquaredImpact = divergences.reduce(
+        (sum, d) => sum + Math.pow(d.impact || 0, 2),
+        0,
+      );
+      const rmsImpact = Math.sqrt(
+        sumSquaredImpact / Math.max(1, divergences.length),
+      );
       // Pas d'apprentissage continu adaptatif : inversement proportionnel à la variance du signal
-      const adaptiveLearningRate = 0.10 / (1.0 + rmsImpact / 50.0);
+      const adaptiveLearningRate = 0.1 / (1.0 + rmsImpact / 50.0);
 
       divergences.forEach((div) => {
         const key = div.algo as keyof AlgoWeights;
@@ -211,10 +277,15 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
       // 3. Modulation par le régime stochastique local (Hurst & Entropie) à T-historicalIndex
       const historySub = drawHistory.slice(historicalIndex + 1);
       if (historySub.length >= 10) {
-        const recentDrawNumbers = historySub.slice(0, 20).flatMap((d) => d.gagnants);
+        const recentDrawNumbers = historySub
+          .slice(0, 20)
+          .flatMap((d) => d.gagnants);
         const hurstVal = computeRobustHurst(recentDrawNumbers);
         const entropyVal = calculateShannonEntropy(historySub).normalized;
-        const volatilityVal = Math.min(100, Math.max(0, (1.0 - hurstVal) * 100));
+        const volatilityVal = Math.min(
+          100,
+          Math.max(0, (1.0 - hurstVal) * 100),
+        );
 
         calibratedWeights = adjustWeightsForRegime(calibratedWeights, {
           regime: hurstVal > 0.55 ? "PERSISTENT" : "CHAOTIQUE",
@@ -229,7 +300,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         audioEngine.play("success");
         showToast(
           `Calibration forensique appliquée sur ${adjustedCount} algorithmes à T-${historicalIndex} (Régime continu)`,
-          "success"
+          "success",
         );
 
         // 4. Ré-exécution immédiate déterministe de la simulation sur le tirage sélectionné
@@ -239,11 +310,11 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             drawName,
             pastContextHistory,
             pastContextHistory.length,
-            calibratedWeights
+            calibratedWeights,
           );
           if (reSimMaster) {
             const hits = reSimMaster.suggestedNumbers.filter((n) =>
-              targetDraw.gagnants.includes(n)
+              targetDraw.gagnants.includes(n),
             );
             const accuracy = Math.round((hits.length / 5) * 100);
             const reReport = await runForensicAutopsy(
@@ -255,7 +326,7 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
               `tm_calib_${targetDraw.id}`,
               targetDraw.id,
               true,
-              pastContextHistory
+              pastContextHistory,
             );
 
             setSimulationResult({
@@ -282,7 +353,10 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     const len = walkForwardStats.history.length;
     const totalHits = walkForwardStats.history.reduce((a, b) => a + b.hits, 0);
     const avgHits = (totalHits / len).toFixed(2);
-    const successRate = ((walkForwardStats.history.filter((h) => h.hits >= 1).length / len) * 100).toFixed(1);
+    const successRate = (
+      (walkForwardStats.history.filter((h) => h.hits >= 1).length / len) *
+      100
+    ).toFixed(1);
     return { len, avgHits, successRate };
   }, [walkForwardStats]);
 
@@ -303,10 +377,12 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             <Clock size={12} /> Machine Temporelle & Autopsie Aveugle
           </div>
           <h3 className="text-2xl font-black text-white uppercase tracking-tight flex items-center gap-2">
-            Time Machine Forensic <span className="text-xs text-fuchsia-400 font-mono">v12.0</span>
+            Time Machine Forensic{" "}
+            <span className="text-xs text-fuchsia-400 font-mono">v12.0</span>
           </h3>
           <p className="text-[11px] text-slate-400 mt-2">
-            Inférence 100% aveugle sur le passé pour tester les performances du modèle sans pollution temporelle.
+            Inférence 100% aveugle sur le passé pour tester les performances du
+            modèle sans pollution temporelle.
           </p>
         </div>
 
@@ -316,13 +392,23 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
               <span>Saut Temporel (-T)</span>
               <button
                 onClick={toggleWalkForward}
-                className={`flex items-center p-1.5 rounded-full border transition-all ${isWalkForwarding ? 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-400 animate-pulse' : 'bg-slate-800 border-slate-700 hover:text-white'}`}
-                title={isWalkForwarding ? "Pause Walk-Forward" : "Démarrer Walk-Forward"}
+                className={`flex items-center p-1.5 rounded-full border transition-all ${isWalkForwarding ? "bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-400 animate-pulse" : "bg-slate-800 border-slate-700 hover:text-white"}`}
+                title={
+                  isWalkForwarding
+                    ? "Pause Walk-Forward"
+                    : "Démarrer Walk-Forward"
+                }
               >
-                {isWalkForwarding ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+                {isWalkForwarding ? (
+                  <Pause size={12} fill="currentColor" />
+                ) : (
+                  <Play size={12} fill="currentColor" />
+                )}
               </button>
             </div>
-            <span className="text-fuchsia-400 font-mono font-bold">Tirage -{historicalIndex}</span>
+            <span className="text-fuchsia-400 font-mono font-bold">
+              Tirage -{historicalIndex}
+            </span>
           </div>
 
           <input
@@ -361,8 +447,17 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         <div className="flex flex-wrap justify-between items-center gap-4">
           <div className="flex items-center gap-2.5 text-xs text-slate-300 font-bold">
             <Calendar size={14} className="text-fuchsia-400" />
-            <span>Tirage Cible : <strong className="text-white font-mono">{targetDraw.date}</strong></span>
-            {isSimulating && <span className="text-fuchsia-400 animate-pulse text-[10px]">Calcul de l'inférence...</span>}
+            <span>
+              Tirage Cible :{" "}
+              <strong className="text-white font-mono">
+                {targetDraw.date}
+              </strong>
+            </span>
+            {isSimulating && (
+              <span className="text-fuchsia-400 animate-pulse text-[10px]">
+                Calcul de l'inférence...
+              </span>
+            )}
           </div>
 
           <button
@@ -371,18 +466,25 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
             className="px-3.5 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-black text-[10px] uppercase rounded-xl border border-fuchsia-400/30 shadow-lg transition-all flex items-center gap-2 disabled:opacity-50"
           >
             <Sliders size={12} />
-            {isCalibrating ? "Calibration..." : "Calibrer les Poids à ce Tirage"}
+            {isCalibrating
+              ? "Calibration..."
+              : "Calibrer les Poids à ce Tirage"}
           </button>
         </div>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">Gagnants Réels (T-{historicalIndex})</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+              Gagnants Réels (T-{historicalIndex})
+            </span>
             <div className="flex gap-2">
               {targetDraw.gagnants.slice(0, 5).map((num, idx) => {
                 const isHit = simulationResult?.hits.includes(num);
                 return (
-                  <div key={idx} className={`w-11 h-11 rounded-full border-2 flex items-center justify-center font-bold font-mono text-xs ${isHit ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.25)] animate-bounce" : "border-slate-800 bg-black/40 text-slate-400"}`}>
+                  <div
+                    key={idx}
+                    className={`w-11 h-11 rounded-full border-2 flex items-center justify-center font-bold font-mono text-xs ${isHit ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.25)] animate-bounce" : "border-slate-800 bg-black/40 text-slate-400"}`}
+                  >
                     {num}
                   </div>
                 );
@@ -392,12 +494,17 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
 
           {simulationResult && (
             <div>
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">Vecteur Suggéré</span>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                Vecteur Suggéré
+              </span>
               <div className="flex gap-2">
                 {simulationResult.predicted.slice(0, 5).map((num, idx) => {
                   const isHit = targetDraw.gagnants.includes(num);
                   return (
-                    <div key={idx} className={`w-11 h-11 rounded-full border-2 flex items-center justify-center font-bold font-mono text-xs ${isHit ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.25)]" : "border-indigo-500/40 bg-indigo-500/5 text-indigo-300"}`}>
+                    <div
+                      key={idx}
+                      className={`w-11 h-11 rounded-full border-2 flex items-center justify-center font-bold font-mono text-xs ${isHit ? "border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.25)]" : "border-indigo-500/40 bg-indigo-500/5 text-indigo-300"}`}
+                    >
                       {num}
                     </div>
                   );
@@ -414,16 +521,23 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
               <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-2">
                 <Target size={12} /> Voisins Topologiques Proches (Écart ≤ 2)
               </span>
-              {simulationResult.nearMisses && simulationResult.nearMisses.length > 0 ? (
+              {simulationResult.nearMisses &&
+              simulationResult.nearMisses.length > 0 ? (
                 <div className="flex flex-wrap gap-2 text-[10px] font-mono">
                   {simulationResult.nearMisses.map((nm, i) => (
-                    <span key={i} className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg">
-                      Suggéré {nm.predicted} → Gagnant {nm.actual} (dist: {nm.distance})
+                    <span
+                      key={i}
+                      className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg"
+                    >
+                      Suggéré {nm.predicted} → Gagnant {nm.actual} (dist:{" "}
+                      {nm.distance})
                     </span>
                   ))}
                 </div>
               ) : (
-                <span className="text-[10px] text-slate-500 italic">Aucune déviation sous ±2 numéros.</span>
+                <span className="text-[10px] text-slate-500 italic">
+                  Aucune déviation sous ±2 numéros.
+                </span>
               )}
             </div>
 
@@ -431,16 +545,27 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
               <span className="text-[10px] font-black uppercase tracking-wider text-fuchsia-400 flex items-center gap-1.5 mb-2">
                 <Cpu size={12} /> Performance Algorithmique & Dérive
               </span>
-              {simulationResult.forensicReport?.scoreDivergence && simulationResult.forensicReport.scoreDivergence.length > 0 ? (
+              {simulationResult.forensicReport?.scoreDivergence &&
+              simulationResult.forensicReport.scoreDivergence.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 text-[9px] font-mono">
-                  {simulationResult.forensicReport.scoreDivergence.slice(0, 4).map((sd: any, i: number) => (
-                    <span key={i} className={`px-2 py-0.5 rounded border ${sd.impact > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
-                      {sd.algo}: {sd.impact > 0 ? `+${sd.impact.toFixed(1)}` : sd.impact.toFixed(1)}
-                    </span>
-                  ))}
+                  {simulationResult.forensicReport.scoreDivergence
+                    .slice(0, 4)
+                    .map((sd: any, i: number) => (
+                      <span
+                        key={i}
+                        className={`px-2 py-0.5 rounded border ${sd.impact > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}
+                      >
+                        {sd.algo}:{" "}
+                        {sd.impact > 0
+                          ? `+${sd.impact.toFixed(1)}`
+                          : sd.impact.toFixed(1)}
+                      </span>
+                    ))}
                 </div>
               ) : (
-                <span className="text-[10px] text-slate-500 italic">Score de divergence stable.</span>
+                <span className="text-[10px] text-slate-500 italic">
+                  Score de divergence stable.
+                </span>
               )}
             </div>
           </div>
@@ -452,25 +577,41 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         <div className="bg-slate-900/30 p-6 rounded-[2rem] border border-slate-800/80">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-md font-black text-white uppercase tracking-wider flex items-center gap-2">
-              <TrendingUp size={16} className="text-fuchsia-400" /> Walk-Forward Analysis
+              <TrendingUp size={16} className="text-fuchsia-400" /> Walk-Forward
+              Analysis
             </h3>
-            <button onClick={() => setWalkForwardStats(null)} className="px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[9px] font-bold uppercase transition-all">
+            <button
+              onClick={() => setWalkForwardStats(null)}
+              className="px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[9px] font-bold uppercase transition-all"
+            >
               Réinitialiser
             </button>
           </div>
-          
+
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900">
-              <span className="text-[9px] font-black uppercase text-slate-500">Tirages Simulés</span>
-              <span className="text-2xl font-black text-white mt-1 block font-mono">{walkForwardSummary.len}</span>
+              <span className="text-[9px] font-black uppercase text-slate-500">
+                Tirages Simulés
+              </span>
+              <span className="text-2xl font-black text-white mt-1 block font-mono">
+                {walkForwardSummary.len}
+              </span>
             </div>
             <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900">
-              <span className="text-[9px] font-black uppercase text-slate-500">Espérance Hits</span>
-              <span className="text-2xl font-black text-fuchsia-400 mt-1 block font-mono">{walkForwardSummary.avgHits}</span>
+              <span className="text-[9px] font-black uppercase text-slate-500">
+                Espérance Hits
+              </span>
+              <span className="text-2xl font-black text-fuchsia-400 mt-1 block font-mono">
+                {walkForwardSummary.avgHits}
+              </span>
             </div>
             <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-900">
-              <span className="text-[9px] font-black uppercase text-slate-500">Taux Succès (≥1)</span>
-              <span className="text-2xl font-black text-emerald-400 mt-1 block font-mono">{walkForwardSummary.successRate}%</span>
+              <span className="text-[9px] font-black uppercase text-slate-500">
+                Taux Succès (≥1)
+              </span>
+              <span className="text-2xl font-black text-emerald-400 mt-1 block font-mono">
+                {walkForwardSummary.successRate}%
+              </span>
             </div>
           </div>
 
@@ -485,24 +626,39 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-900">
-                {walkForwardStats?.history.slice().reverse().map((item, index) => (
-                  <tr key={index} className="hover:bg-slate-900/30 transition-colors">
-                    <td className="p-3 font-mono font-bold text-slate-300">{item.date}</td>
-                    <td className="p-3 font-mono font-black">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] ${item.hits >= 2 ? 'bg-emerald-500/10 text-emerald-400' : item.hits === 1 ? 'bg-blue-500/10 text-blue-400' : 'bg-slate-800 text-slate-500'}`}>
-                        {item.hits} / 5
-                      </span>
-                    </td>
-                    <td className="p-3 font-mono text-slate-300">{item.actual.join(", ")}</td>
-                    <td className="p-3 font-mono text-slate-400 flex gap-1">
-                      {item.predicted.map((num, i) => (
-                        <span key={i} className={`px-1 rounded ${item.actual.includes(num) ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/20' : 'bg-slate-800 text-slate-500'}`}>
-                          {num}
+                {walkForwardStats?.history
+                  .slice()
+                  .reverse()
+                  .map((item, index) => (
+                    <tr
+                      key={index}
+                      className="hover:bg-slate-900/30 transition-colors"
+                    >
+                      <td className="p-3 font-mono font-bold text-slate-300">
+                        {item.date}
+                      </td>
+                      <td className="p-3 font-mono font-black">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[9px] ${item.hits >= 2 ? "bg-emerald-500/10 text-emerald-400" : item.hits === 1 ? "bg-blue-500/10 text-blue-400" : "bg-slate-800 text-slate-500"}`}
+                        >
+                          {item.hits} / 5
                         </span>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="p-3 font-mono text-slate-300">
+                        {item.actual.join(", ")}
+                      </td>
+                      <td className="p-3 font-mono text-slate-400 flex gap-1">
+                        {item.predicted.map((num, i) => (
+                          <span
+                            key={i}
+                            className={`px-1 rounded ${item.actual.includes(num) ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/20" : "bg-slate-800 text-slate-500"}`}
+                          >
+                            {num}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
@@ -511,4 +667,3 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
     </div>
   );
 };
-

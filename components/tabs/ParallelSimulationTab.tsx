@@ -60,7 +60,7 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
         globalWeights,
         depth,
         initialBankroll,
-        unitBet
+        unitBet,
       );
       audioEngine.play("success");
       setReports(results);
@@ -74,42 +74,51 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
 
   const bestStrategy = useMemo(() => {
     if (!reports) return null;
-    const strategies = Object.entries(reports) as [
-      string,
-      BacktestReport,
-    ][];
+    const strategies = Object.entries(reports) as [string, BacktestReport][];
     return strategies.sort((a, b) => b[1].netProfit - a[1].netProfit)[0];
   }, [reports]);
 
   const chartData = useMemo(() => {
     return reports
-      ? (reports.flat?.history || []).map((h: { date: string, balance: number }, i: number) => ({
-          date: h.date,
-          "Mise Plate": h.balance,
-          "Martingale": reports.martingale?.history[i]?.balance || 0,
-          "Kelly": reports.kelly?.history[i]?.balance || 0,
-          "IA Prédictive": reports.confidence_smart?.history[i]?.balance || 0,
-        }))
+      ? (reports.flat?.history || []).map(
+          (h: { date: string; balance: number }, i: number) => ({
+            date: h.date,
+            "Mise Plate": h.balance,
+            Martingale: reports.martingale?.history[i]?.balance || 0,
+            Kelly: reports.kelly?.history[i]?.balance || 0,
+            "IA Prédictive": reports.confidence_smart?.history[i]?.balance || 0,
+          }),
+        )
       : [];
   }, [reports]);
 
   const getStrategyLabel = (key: string) => {
     switch (key) {
-      case "flat": return "Mise Plate (Prudent)";
-      case "martingale": return "Martingale (Spéculatif)";
-      case "kelly": return "Critère de Kelly (Scientifique)";
-      case "confidence_smart": return "IA Prédictive (Adaptatif)";
-      default: return key;
+      case "flat":
+        return "Mise Plate (Prudent)";
+      case "martingale":
+        return "Martingale (Spéculatif)";
+      case "kelly":
+        return "Critère de Kelly (Scientifique)";
+      case "confidence_smart":
+        return "IA Prédictive (Adaptatif)";
+      default:
+        return key;
     }
   };
 
   const getStrategyColor = (key: string) => {
     switch (key) {
-      case "flat": return "text-slate-400";
-      case "martingale": return "text-rose-400";
-      case "kelly": return "text-amber-400";
-      case "confidence_smart": return "text-indigo-400";
-      default: return "text-white";
+      case "flat":
+        return "text-slate-400";
+      case "martingale":
+        return "text-rose-400";
+      case "kelly":
+        return "text-amber-400";
+      case "confidence_smart":
+        return "text-indigo-400";
+      default:
+        return "text-white";
     }
   };
 
@@ -124,7 +133,9 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
             Simulateur <span className="text-indigo-500">Multivarié</span>
           </h3>
           <p className="text-slate-400 text-sm font-medium mb-8 leading-relaxed max-w-xl mx-auto">
-            Le vortex calcule simultanément 4 univers parallèles basés sur nos modèles de Sizing de risque réels. Quel profil tire le meilleur parti de l'ADN ?
+            Le vortex calcule simultanément 4 univers parallèles basés sur nos
+            modèles de Sizing de risque réels. Quel profil tire le meilleur
+            parti de l'ADN ?
           </p>
 
           {/* Configuration Inputs */}
@@ -148,7 +159,10 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
             </div>
 
             <div>
-              <label htmlFor="parallel-bankroll" className="block text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+              <label
+                htmlFor="parallel-bankroll"
+                className="block text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+              >
                 Capital de Départ (F)
               </label>
               <input
@@ -157,13 +171,18 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
                 step={5000}
                 min={1000}
                 value={initialBankroll}
-                onChange={(e) => setInitialBankroll(Math.max(1000, Number(e.target.value)))}
+                onChange={(e) =>
+                  setInitialBankroll(Math.max(1000, Number(e.target.value)))
+                }
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-400 focus:outline-none"
               />
             </div>
 
             <div>
-              <label htmlFor="parallel-unitbet" className="block text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2">
+              <label
+                htmlFor="parallel-unitbet"
+                className="block text-[9px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+              >
                 Mise de Base (F)
               </label>
               <input
@@ -172,7 +191,9 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
                 step={50}
                 min={50}
                 value={unitBet}
-                onChange={(e) => setUnitBet(Math.max(50, Number(e.target.value)))}
+                onChange={(e) =>
+                  setUnitBet(Math.max(50, Number(e.target.value)))
+                }
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-400 focus:outline-none"
               />
             </div>
@@ -206,71 +227,129 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
             </div>
             <div className="h-[360px] w-full overflow-hidden flex justify-center items-center">
               {chartData && chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={chartMargin}>
-                  <defs>
-                    <linearGradient id="colorFlat" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#94a3b8" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorMartingale" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorKelly" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorConfidenceSmart" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    opacity={0.1}
-                  />
-                  <XAxis dataKey="date" hide />
-                  <YAxis hide domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Legend iconType="circle" wrapperStyle={legendStyle} />
-                  <Area
-                    type="monotone"
-                    dataKey="Mise Plate"
-                    stroke="#94a3b8"
-                    fill="url(#colorFlat)"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="Martingale"
-                    stroke="#f43f5e"
-                    fill="url(#colorMartingale)"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="Kelly"
-                    stroke="#fbbf24"
-                    fill="url(#colorKelly)"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="IA Prédictive"
-                    stroke="#6366f1"
-                    fill="url(#colorConfidenceSmart)"
-                    strokeWidth={3.5}
-                    fillOpacity={1}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={chartMargin}>
+                    <defs>
+                      <linearGradient
+                        id="colorFlat"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#94a3b8"
+                          stopOpacity={0.15}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#94a3b8"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                      <linearGradient
+                        id="colorMartingale"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#f43f5e"
+                          stopOpacity={0.15}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#f43f5e"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                      <linearGradient
+                        id="colorKelly"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#fbbf24"
+                          stopOpacity={0.15}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#fbbf24"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                      <linearGradient
+                        id="colorConfidenceSmart"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#6366f1"
+                          stopOpacity={0.2}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#6366f1"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      vertical={false}
+                      opacity={0.1}
+                    />
+                    <XAxis dataKey="date" hide />
+                    <YAxis hide domain={["auto", "auto"]} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Legend iconType="circle" wrapperStyle={legendStyle} />
+                    <Area
+                      type="monotone"
+                      dataKey="Mise Plate"
+                      stroke="#94a3b8"
+                      fill="url(#colorFlat)"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="Martingale"
+                      stroke="#f43f5e"
+                      fill="url(#colorMartingale)"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="Kelly"
+                      stroke="#fbbf24"
+                      fill="url(#colorKelly)"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="IA Prédictive"
+                      stroke="#6366f1"
+                      fill="url(#colorConfidenceSmart)"
+                      strokeWidth={3.5}
+                      fillOpacity={1}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               ) : (
-                <span className="text-slate-500 text-xs">Ajustement du vortex...</span>
+                <span className="text-slate-500 text-xs">
+                  Ajustement du vortex...
+                </span>
               )}
             </div>
           </div>
@@ -304,10 +383,7 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
                         </h5>
                       </div>
                       {isBest && (
-                        <Trophy
-                          size={16}
-                          className="text-amber-400"
-                        />
+                        <Trophy size={16} className="text-amber-400" />
                       )}
                     </div>
 

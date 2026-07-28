@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../services/predictionEngine';
 import { savePredictionToHistory } from '../services/predictionHistoryService';
@@ -10,11 +10,15 @@ import { DNAOptimizer } from '../services/training/DNAOptimizer';
 import { useFeatureFlags } from '../services/prediction/featureFlags';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
-import type { AlgoWeights, Prediction } from '../types';
+
+import { packHistory } from '../services/workers/zeroCopy';
+import { Prediction } from '../types';
+import { AlgoWeights } from '../types';
 
 export const usePredictionGenerator = (drawName: string) => {
     const { showToast } = useToast();
-    const history = useNexusStore(state => state.history);
+    const rawHistory = useNexusStore(state => state.history);
+    const history = useDeferredValue(rawHistory);
     const temporalDepth = useNexusStore(state => state.temporalDepth);
     const setLastPrediction = useNexusStore(state => state.setLastPrediction);
     const globalWeights = useNexusStore(state => state.globalWeights);
@@ -41,10 +45,10 @@ export const usePredictionGenerator = (drawName: string) => {
     const [optimizedWeights, setOptimizedWeights] = useState<AlgoWeights | null>(null);
     const [previousWeights, setPreviousWeights] = useState<AlgoWeights | null>(null);
 
+    const regime = useNexusStore(state => state.regime);
     const currentEntropy = useMemo(() => {
-        if (history.length === 0) return 0;
-        return calculateShannonEntropy(history.slice(0, 10)).normalized;
-    }, [history]);
+        return regime?.entropy || (history.length > 0 ? calculateShannonEntropy(history.slice(0, 10)).normalized : 0);
+    }, [regime, history]);
 
     const resolvedLearningRate = useMemo(() => {
         return Math.max(0.01, Math.min(0.2, 0.15 * (1.0 - currentEntropy) + 0.01));
@@ -59,28 +63,22 @@ export const usePredictionGenerator = (drawName: string) => {
         return Math.max(10, Math.min(100, Math.round(20 + 80 * (currentEntropy || 0.5))));
     }, [currentEntropy]);
 
-    const gameRegimeInfo = useMemo(() => {
-        if (!history || history.length < 5) return null;
-        try {
-            return detectGameRegime(history);
-        } catch (e) {
-            console.warn("[Oracle Base] Failed to detect game regime:", e);
-            return null;
-        }
-    }, [history]);
+    const gameRegimeInfo = regime;
 
+    const [chaoticRatio, setChaoticRatio] = useState(0);
     useEffect(() => {
         let active = true;
         const fetchReports = async () => {
             try {
                 const rawReports = await getLocalForensicReports();
-                if (!rawReports) return;
+                if (!rawReports || !active) return;
                 const reports = rawReports.filter(r => r.drawName === drawName);
-                if (reports.length > 0 && active) {
+                if (reports.length > 0) {
                     const windowSize = Math.min(10, reports.length);
                     const swans = reports.slice(0, windowSize).filter(r => r.isBlackSwan).length;
-                    const chaoticRatio = swans / windowSize;
-                    setIsChaotic(chaoticRatio >= 0.25 || (volatility?.score ?? 0) > 85);
+                    setChaoticRatio(swans / windowSize);
+                } else {
+                    setChaoticRatio(0);
                 }
             } catch (err) {
                 console.warn("[Oracle Base] Reports validation bypassed (local fallback mode active):", err);
@@ -88,7 +86,11 @@ export const usePredictionGenerator = (drawName: string) => {
         };
         fetchReports();
         return () => { active = false; };
-    }, [drawName, volatility]);
+    }, [drawName]);
+
+    useEffect(() => {
+        setIsChaotic(chaoticRatio >= 0.25 || (volatility?.score ?? 0) > 85);
+    }, [chaoticRatio, volatility]);
 
     useEffect(() => {
         setLastPrediction(null);
@@ -205,165 +207,57 @@ export const usePredictionGenerator = (drawName: string) => {
             let specificWeights = await resolveWeights();
             const metrics = { spectral, correlationMatrix, regularity, volatility, fractal };
             
-            const histSum = history.slice(0, 10).reduce((acc, curr) => acc + curr.gagnants.reduce((a, b) => a + b, 0), 0);
+            const packed = packHistory(history);
             
-            // Linear Congruential Generator (LCG) pour un tirage déterministe et statistiquement indépendant
-            const LCG_M = 0x80000000;
-            const LCG_A = 1103515245;
-            const LCG_C = 12345;
-            let lcgSeed = (histSum + history.length) % LCG_M;
-            const nextRandom = () => {
-                lcgSeed = (LCG_A * lcgSeed + LCG_C) % LCG_M;
-                return lcgSeed / LCG_M;
-            };
+            const worker = new Worker(new URL('../services/workers/prediction.worker.ts', import.meta.url), { type: 'module' });
             
-            let currentStateVector = new Float32Array(Object.keys(specificWeights).length);
-            Object.keys(specificWeights).forEach((k, idx) => {
-                currentStateVector[idx] = (specificWeights as any)[k] || 0;
-            });
-            let currentEnergy = -Infinity; // Sera initialisé à la première itération
-            let currentPred: Prediction | null = null;
-            
-            const counts: Record<number, number> = {};
-            const breakdownAcc: Record<number, Record<string, number>> = {};
+            const aggregatedPred: Prediction = await new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => {
+                    worker.terminate();
+                    reject(new Error("Timeout du Web Worker MCMC"));
+                }, 120000);
 
-            for (let i = 0; i < resolvedMcIterations; i++) {
-                if (i % 5 === 0) setComputingStep(`MCMC Metropolis-Hastings (${i}/${resolvedMcIterations})...`);
-                
-                const proposedVector = new Float32Array(currentStateVector.length);
-                let sumWeights = 0;
-                Object.keys(specificWeights).forEach((_, idx) => {
-                    // Bruit gaussien approché
-                    const u1 = Math.max(Number.EPSILON, nextRandom());
-                    const u2 = Math.max(Number.EPSILON, nextRandom());
-                    const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-                    
-                    const noise = z0 * 0.1 * resolvedNoiseLevel;
-                    proposedVector[idx] = Math.max(0.01, currentStateVector[idx] * (1.0 + noise));
-                    sumWeights += proposedVector[idx];
-                });
-                for(let j=0; j<proposedVector.length; j++) proposedVector[j] /= sumWeights;
-
-                const perturbedWeights = {} as AlgoWeights;
-                Object.keys(specificWeights).forEach((k, idx) => {
-                    (perturbedWeights as any)[k] = proposedVector[idx];
-                });
-
-                // On génère la prédiction pour le vecteur proposé (ceci est la fonction d'évaluation la plus précise possible)
-                const pred = await generateMasterPrediction(drawName, history, temporalDepth, perturbedWeights, metrics, symbioticContext || undefined, false, flags.adversarialMode, undefined, isForensicOptimized);
-                
-                // L'énergie est la "netteté" (sharpness) de la prédiction : écart entre le top 5 et le bruit de fond
-                let topScores = [];
-                for (let n = 1; n <= 90; n++) {
-                    let s = 0;
-                    if (pred.breakdown[n]) {
-                       Object.values(pred.breakdown[n]).forEach(v => s += v);
+                worker.onmessage = (e: MessageEvent) => {
+                    const { success, result, error, isProgress, progress, message } = e.data;
+                    if (isProgress) {
+                        setComputingProgress(progress);
+                        setComputingStep(message);
+                        return;
                     }
-                    topScores.push(s);
-                }
-                topScores.sort((a,b) => b - a);
-                const top5Avg = topScores.slice(0, 5).reduce((a,b)=>a+b, 0) / 5;
-                const next15Avg = topScores.slice(5, 20).reduce((a,b)=>a+b, 0) / 15;
-                // Plus ce ratio est élevé, plus la prédiction est confiante/nette (moins d'entropie)
-                const proposedEnergy = (top5Avg - next15Avg) / (top5Avg || 1);
-
-                if (i === 0) {
-                    currentStateVector = proposedVector;
-                    currentEnergy = proposedEnergy;
-                    currentPred = pred;
-                } else {
-                    const beta = 1.0 / (resolvedLearningRate + 0.01);
-                    // Critère de Metropolis : on veut maximiser l'énergie (la netteté de la prédiction)
-                    // clamp ratio à [0, 1]
-                    const acceptanceRatio = Math.min(1.0, Math.exp(beta * (proposedEnergy - currentEnergy)));
-                    const transitionProb = nextRandom();
-
-                    if (transitionProb < acceptanceRatio) {
-                        currentStateVector = proposedVector;
-                        currentEnergy = proposedEnergy;
-                        currentPred = pred;
+                    clearTimeout(timeoutId);
+                    if (success) {
+                        resolve(result);
+                    } else {
+                        reject(new Error(error || "Erreur MCMC Worker"));
                     }
-                }
+                    worker.terminate();
+                };
 
-                // On agrège directement l'état courant (accepté ou précédent maintenu) pour éviter les fuites mémoire
-                if (currentPred) {
-                    currentPred.suggestedNumbers.forEach(n => {
-                        counts[n] = (counts[n] || 0) + 1;
-                        if (!breakdownAcc[n] && currentPred!.breakdown[n]) {
-                            breakdownAcc[n] = { ...currentPred!.breakdown[n] };
-                        }
-                    });
-                }
-                
-                // Yield thread
-                if (i % 2 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 0));
-                }
-            }
+                worker.onerror = (err) => {
+                    clearTimeout(timeoutId);
+                    reject(err);
+                    worker.terminate();
+                };
 
-            setComputingStep("Convergence Globale...");
-
-            const topCands = Object.entries(counts)
-                .sort((a, b) => b[1] - a[1])
-                .map(x => Number(x[0]));
-                
-            const top5 = topCands.slice(0, 5).sort((a,b) => a - b);
-            const candidates = topCands.slice(5, 15);
-
-            const activeWeights = globalWeights || DEFAULT_ALGO_WEIGHTS;
-            const optimizer = new DNAOptimizer(Object.keys(activeWeights) as AlgoKey[]);
-            const dnaMatrix = top5.map(num => {
-                const bdown = breakdownAcc[num] || {};
-                const vec = new Float32Array(optimizer['numAlgos']);
-                optimizer['algoKeys'].forEach((k, idx) => { vec[idx] = bdown[k] || 0; });
-                return vec;
+                worker.postMessage({
+                    taskId: `MCMC_${Date.now()}`,
+                    type: 'mcmc',
+                    drawName,
+                    historyBuffer: packed.historyBuffer,
+                    drawCount: packed.drawCount,
+                    winningCount: packed.winningCount,
+                    totalCols: packed.totalCols,
+                    temporalDepth: 10,
+                    weightsToUse: specificWeights,
+                    metrics,
+                    symbioticContext: symbioticContext || undefined,
+                    adversarialMode: flags.adversarialMode,
+                    isForensicOptimized,
+                    resolvedMcIterations,
+                    resolvedNoiseLevel,
+                    resolvedLearningRate
+                }, [packed.historyBuffer]);
             });
-
-            const historicalVectors: Float32Array[] = [];
-            const sampleDepth = Math.min(30, history.length);
-            for (let i = 0; i < sampleDepth; i++) {
-                const winners = history[i]?.gagnants || [];
-                winners.forEach(w => {
-                    const bdown = breakdownAcc[w] || {};
-                    const vec = new Float32Array(optimizer['numAlgos']);
-                    optimizer['algoKeys'].forEach((k, idx) => { vec[idx] = bdown[k] || 0; });
-                    historicalVectors.push(vec);
-                });
-            }
-
-            let calculatedAlignment: number | undefined; 
-            if (historicalVectors.length > 0 && dnaMatrix.length > 0) {
-                try {
-                    const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, 30);
-                    const evaluation = optimizer.evaluateCandidate(dnaMatrix, targetProfile, top5, history.map(h => h.gagnants || []));
-                    // L'alignement est fonction exponentielle inverse de la distance euclidienne (plus rigoureux que 105 / (1+d))
-                    calculatedAlignment = Math.round(100 * Math.exp(-evaluation.distance));
-                } catch(e) {
-                    console.warn("[MC] DNA Evaluation bypassed:", e);
-                }
-            }
-
-            // Consensus MCMC : pourcentage moyen d'apparition des 5 meilleurs numéros au fil des itérations
-            const top5Consensus = top5.reduce((sum, n) => sum + counts[n], 0) / (5 * resolvedMcIterations);
-            const dynamicConfidence = Math.round(Math.min(99, Math.max(10, top5Consensus * 100)));
-
-            const aggregatedPred: Prediction = {
-                suggestedNumbers: top5,
-                candidates: candidates,
-                breakdown: breakdownAcc as any,
-                confidence: dynamicConfidence,
-                analysis: `Convergence MCMC Metropolis-Hastings avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique optimisé.`,
-                timestamp: Date.now(),
-                realityAlignment: calculatedAlignment,
-                diversityMetrics: {
-                    meanSimilarity: 0.1,
-                    diversityScore: 0.9,
-                    penalty: 0,
-                    isMonoculture: false,
-                    pairwiseSimilarities: [],
-                    dominantAlgo: "MCMC"
-                }
-            };
 
             setLastPrediction(aggregatedPred);
             
@@ -385,7 +279,7 @@ export const usePredictionGenerator = (drawName: string) => {
             setIsComputing(false);
             setComputingStep("");
         }
-    }, [history, drawName, resolvedMcIterations, resolvedNoiseLevel, resolvedLearningRate, flags.adversarialMode, spectral, correlationMatrix, regularity, volatility, fractal, symbioticContext, globalWeights, currentEntropy, setLastPrediction, showToast]);
+    }, [history, drawName, resolvedMcIterations, resolvedNoiseLevel, resolvedLearningRate, flags.adversarialMode, spectral, correlationMatrix, regularity, volatility, fractal, symbioticContext, globalWeights, currentEntropy, setLastPrediction, showToast, isForensicOptimized]);
 
     const handleOptimizeWeights = async () => {
         if (!navigator.onLine) {

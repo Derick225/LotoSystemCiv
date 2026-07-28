@@ -169,6 +169,45 @@ export function unpackArray(input: ArrayBuffer | Float64Array | number[]): numbe
   return Array.from(arr);
 }
 
+/**
+ * Traverses an object or array to discover all ArrayBuffers / TypedArray buffers
+ * and pushes them to the transferables array for 0-copy postMessage transfers.
+ */
+export function collectTransferables(
+  obj: unknown,
+  transferables: Transferable[],
+  visited = new WeakSet<object>()
+): void {
+  if (!obj || typeof obj !== 'object') return;
+  if (visited.has(obj as object)) return;
+  visited.add(obj as object);
+
+  if (obj instanceof ArrayBuffer) {
+    if (!transferables.includes(obj)) {
+      transferables.push(obj);
+    }
+    return;
+  }
+
+  if (ArrayBuffer.isView(obj)) {
+    if (obj.buffer && !transferables.includes(obj.buffer)) {
+      transferables.push(obj.buffer);
+    }
+    return;
+  }
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      collectTransferables(item, transferables, visited);
+    }
+    return;
+  }
+
+  for (const key of Object.keys(obj)) {
+    collectTransferables((obj as Record<string, unknown>)[key], transferables, visited);
+  }
+}
+
 export interface AdaptiveCoeffs {
   cLinear: number;
   cGrid: number;

@@ -1,9 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { authService } from '../../services/authService';
-import { useToast } from '../ui/Toast';
-import { Lock, Mail, ArrowRight, ShieldCheck, Cpu, Globe, AlertTriangle, FileWarning } from 'lucide-react';
-import { audioEngine } from '../../utils/audioEngine';
-import {  getSupabaseConfigDiagnostics } from '../../services/supabaseClient';
+import React, { useState, useEffect } from "react";
+import { authService } from "../../services/authService";
+import { useToast } from "../ui/Toast";
+import {
+  Lock,
+  Mail,
+  ArrowRight,
+  ShieldCheck,
+  Cpu,
+  Globe,
+  AlertTriangle,
+  FileWarning,
+} from "lucide-react";
+import { audioEngine } from "../../utils/audioEngine";
+import { getSupabaseConfigDiagnostics } from "../../services/supabaseClient";
 
 interface AuthScreenProps {
   onSuccess: () => void;
@@ -14,14 +23,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isReset, setIsReset] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  
-  const [configStatus, setConfigStatus] = useState(getSupabaseConfigDiagnostics());
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [configStatus, setConfigStatus] = useState(
+    getSupabaseConfigDiagnostics(),
+  );
 
   useEffect(() => {
-      // Met à jour le status au montage (utile pour le HMR)
-      setConfigStatus(getSupabaseConfigDiagnostics());
+    // Met à jour le status au montage (utile pour le HMR)
+    setConfigStatus(getSupabaseConfigDiagnostics());
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -31,17 +42,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       return;
     }
     setLoading(true);
-    audioEngine.play('click');
+    audioEngine.play("click");
     try {
       const { error } = await authService.resetPasswordForEmail(email);
       if (error) throw error;
-      showToast("Lien de réinitialisation envoyé ! Vérifiez votre boîte mail.", "success");
-      audioEngine.play('success');
+      showToast(
+        "Lien de réinitialisation envoyé ! Vérifiez votre boîte mail.",
+        "success",
+      );
+      audioEngine.play("success");
       setIsReset(false);
     } catch (error: unknown) {
       console.error(error);
-      audioEngine.play('error');
-      showToast((error instanceof Error ? error.message : String(error)) || "Erreur lors de la réinitialisation", "error");
+      audioEngine.play("error");
+      showToast(
+        (error instanceof Error ? error.message : String(error)) ||
+          "Erreur lors de la réinitialisation",
+        "error",
+      );
     } finally {
       setLoading(false);
     }
@@ -50,8 +68,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!configStatus.isConfigured) {
-        showToast("Configuration requise avant connexion.", "error");
-        return;
+      showToast("Configuration requise avant connexion.", "error");
+      return;
     }
     if (!email || !password) {
       showToast("Veuillez remplir tous les champs", "error");
@@ -59,25 +77,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
     }
 
     setLoading(true);
-    audioEngine.play('click');
+    audioEngine.play("click");
 
     try {
       if (isLogin) {
         const { error } = await authService.login(email, password);
         if (error) throw error;
-        audioEngine.play('success');
+        audioEngine.play("success");
         onSuccess();
       } else {
         const { error } = await authService.signUp(email, password);
         if (error) throw error;
-        showToast("Compte créé ! Vérifiez votre email ou connectez-vous.", "success");
+        showToast(
+          "Compte créé ! Vérifiez votre email ou connectez-vous.",
+          "success",
+        );
         setIsLogin(true);
-        audioEngine.play('success');
+        audioEngine.play("success");
       }
     } catch (error: unknown) {
       console.error(error);
-      audioEngine.play('error');
-      showToast((error instanceof Error ? error.message : String(error)) || "Erreur d'authentification", "error");
+      audioEngine.play("error");
+      showToast(
+        (error instanceof Error ? error.message : String(error)) ||
+          "Erreur d'authentification",
+        "error",
+      );
     } finally {
       setLoading(false);
     }
@@ -85,48 +110,74 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
 
   // Si la config est invalide, on affiche un écran d'erreur critique
   if (!configStatus.isConfigured) {
-      return (
-        <div className="min-h-screen bg-nexus-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-red-600 animate-pulse"></div>
-            <div className="w-full max-w-lg glass-card border border-red-500/30 p-8 rounded-2xl shadow-2xl relative z-10">
-                <div className="flex flex-col items-center text-center mb-8">
-                    <div className="w-20 h-20 bg-red-500/10 rounded-3xl flex items-center justify-center mb-4 border border-red-500/20">
-                        <AlertTriangle size={40} className="text-red-500" />
-                    </div>
-                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">Configuration Requise</h2>
-                    <p className="text-sm text-slate-400 mt-2 font-medium">Les clés d'accès à la base de données sont manquantes ou invalides.</p>
-                </div>
-
-                <div className="space-y-4 bg-black/30 p-6 rounded-2xl border border-white/5 mb-8">
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-500 uppercase">VITE_SUPABASE_URL</span>
-                        {configStatus.url.valid 
-                            ? <span className="text-xs font-mono text-emerald-400 flex items-center gap-1"><ShieldCheck size={12}/> {configStatus.url.value}</span>
-                            : <span className="text-xs font-mono text-red-400 flex items-center gap-1"><FileWarning size={12}/> {configStatus.url.error}</span>
-                        }
-                    </div>
-                    <div className="h-px bg-white/10 w-full"></div>
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-500 uppercase">VITE_SUPABASE_ANON_KEY</span>
-                        {configStatus.key.valid 
-                            ? <span className="text-xs font-mono text-emerald-400 flex items-center gap-1"><ShieldCheck size={12}/> {configStatus.key.value}</span>
-                            : <span className="text-xs font-mono text-red-400 flex items-center gap-1"><FileWarning size={12}/> {configStatus.key.error}</span>
-                        }
-                    </div>
-                </div>
-
-                <div className="bg-indigo-900/20 p-4 rounded-xl border border-indigo-500/20 text-center">
-                    <p className="text-xs text-indigo-300 font-medium">
-                        Modifiez le fichier <span className="font-mono bg-black/40 px-1 py-0.5 rounded text-white">.env</span> à la racine du projet et redémarrez le serveur.
-                    </p>
-                </div>
-                
-                <button onClick={() => window.location.reload()} className="w-full mt-6 py-4 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-2xl transition uppercase text-xs tracking-widest">
-                    Recharger la page
-                </button>
+    return (
+      <div className="min-h-screen bg-nexus-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-red-600 animate-pulse"></div>
+        <div className="w-full max-w-lg glass-card border border-red-500/30 p-8 rounded-2xl shadow-2xl relative z-10">
+          <div className="flex flex-col items-center text-center mb-8">
+            <div className="w-20 h-20 bg-red-500/10 rounded-3xl flex items-center justify-center mb-4 border border-red-500/20">
+              <AlertTriangle size={40} className="text-red-500" />
             </div>
+            <h2 className="text-2xl font-black text-white uppercase tracking-tight">
+              Configuration Requise
+            </h2>
+            <p className="text-sm text-slate-400 mt-2 font-medium">
+              Les clés d'accès à la base de données sont manquantes ou
+              invalides.
+            </p>
+          </div>
+
+          <div className="space-y-4 bg-black/30 p-6 rounded-2xl border border-white/5 mb-8">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase">
+                VITE_SUPABASE_URL
+              </span>
+              {configStatus.url.valid ? (
+                <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
+                  <ShieldCheck size={12} /> {configStatus.url.value}
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-red-400 flex items-center gap-1">
+                  <FileWarning size={12} /> {configStatus.url.error}
+                </span>
+              )}
+            </div>
+            <div className="h-px bg-white/10 w-full"></div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase">
+                VITE_SUPABASE_ANON_KEY
+              </span>
+              {configStatus.key.valid ? (
+                <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
+                  <ShieldCheck size={12} /> {configStatus.key.value}
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-red-400 flex items-center gap-1">
+                  <FileWarning size={12} /> {configStatus.key.error}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-indigo-900/20 p-4 rounded-xl border border-indigo-500/20 text-center">
+            <p className="text-xs text-indigo-300 font-medium">
+              Modifiez le fichier{" "}
+              <span className="font-mono bg-black/40 px-1 py-0.5 rounded text-white">
+                .env
+              </span>{" "}
+              à la racine du projet et redémarrez le serveur.
+            </p>
+          </div>
+
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full mt-6 py-4 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-2xl transition uppercase text-xs tracking-widest"
+          >
+            Recharger la page
+          </button>
         </div>
-      );
+      </div>
+    );
   }
 
   return (
@@ -138,14 +189,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       <div className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 p-8 rounded-3xl shadow-2xl relative z-10 animate-scale-in">
         <div className="text-center mb-10">
           <div className="w-full max-w-[280px] mx-auto mb-6">
-            <img src="/logo-full.svg" alt="LotoPro Platinum Elite logo" className="w-full h-auto drop-shadow-2xl" />
+            <img
+              src="/logo-full.svg"
+              alt="LotoPro Platinum Elite logo"
+              className="w-full h-auto drop-shadow-2xl"
+            />
           </div>
           <p className="text-xs text-slate-400 font-bold uppercase tracking-[0.3em] mt-4">
             Accès Sécurisé Requis
           </p>
         </div>
 
-        <form onSubmit={isReset ? handleResetPassword : handleSubmit} className="space-y-6">
+        <form
+          onSubmit={isReset ? handleResetPassword : handleSubmit}
+          className="space-y-6"
+        >
           <div className="space-y-4">
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors">
@@ -187,8 +245,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               <Cpu className="animate-spin" size={18} />
             ) : (
               <>
-                {isReset ? "Envoyer le lien" : (isLogin ? "Initialiser Session" : "Créer Identité")}
-                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                {isReset
+                  ? "Envoyer le lien"
+                  : isLogin
+                    ? "Initialiser Session"
+                    : "Créer Identité"}
+                <ArrowRight
+                  size={16}
+                  className="group-hover:translate-x-1 transition-transform"
+                />
               </>
             )}
           </button>
@@ -198,25 +263,32 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           {!isReset && isLogin && (
             <button
               type="button"
-              onClick={() => { setIsReset(true); audioEngine.play('click'); }}
+              onClick={() => {
+                setIsReset(true);
+                audioEngine.play("click");
+              }}
               className="text-[10px] text-indigo-400 font-bold hover:text-indigo-300 transition-colors uppercase tracking-widest block mx-auto"
             >
               Mot de passe oublié ?
             </button>
           )}
-          
+
           <button
-            onClick={() => { 
+            onClick={() => {
               if (isReset) {
                 setIsReset(false);
               } else {
-                setIsLogin(!isLogin); 
+                setIsLogin(!isLogin);
               }
-              audioEngine.play('click'); 
+              audioEngine.play("click");
             }}
             className="text-xs text-slate-400 font-bold hover:text-white transition-colors uppercase tracking-wide"
           >
-            {isReset ? "Retour à la connexion" : (isLogin ? "Pas encore de compte ? S'inscrire" : "Déjà membre ? Se connecter")}
+            {isReset
+              ? "Retour à la connexion"
+              : isLogin
+                ? "Pas encore de compte ? S'inscrire"
+                : "Déjà membre ? Se connecter"}
           </button>
         </div>
 

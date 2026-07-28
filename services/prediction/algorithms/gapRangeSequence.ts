@@ -16,7 +16,7 @@ import { gapRangeSequenceService, GapRangeStep } from '../gapRangeSequenceServic
   * Garantie : 100% Déterministe, Zéro Nombre Magique, Respect de la Règle d'Isolation du Tirage.
   */
 export const gapRangeSequencePlugin: AlgorithmPlugin = {
-  key: AlgoKey.GAP_RANGE_SEQUENCE,
+  key: AlgoKey.GAP_BAND_SEQUENCE,
   category: 'advanced',
   stability: 'stable',
   mathematicalBasis: 'Chaîne de Markov conditionnelle et modèle de transition de fréquences sur tranches d\'écarts d\'apparition',
@@ -31,15 +31,15 @@ export const gapRangeSequencePlugin: AlgorithmPlugin = {
     const report = gapRangeSequenceService.analyzeGapRangePatterns(drawName, history, step, 90);
 
     ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.GAP_RANGE_SEQUENCE] = report;
+    ctx.pluginCache[AlgoKey.GAP_BAND_SEQUENCE] = report;
   },
 
   evaluate(num: number, ctx: AlgorithmContext) {
-    if (!ctx.pluginCache?.[AlgoKey.GAP_RANGE_SEQUENCE]) {
+    if (!ctx.pluginCache?.[AlgoKey.GAP_BAND_SEQUENCE]) {
       this.precompute(ctx);
     }
 
-    const report = ctx.pluginCache![AlgoKey.GAP_RANGE_SEQUENCE];
+    const report = ctx.pluginCache![AlgoKey.GAP_BAND_SEQUENCE];
     if (!report || !report.scoresByNumber) {
       return { score: 50, confidence: 0.5 };
     }

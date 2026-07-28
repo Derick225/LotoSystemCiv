@@ -44,7 +44,9 @@ export const UnifiedAlgoRadar: React.FC<UnifiedAlgoRadarProps> = ({
 
   if (!data || data.length === 0) {
     return (
-      <div className={`flex items-center justify-center bg-slate-900/40 rounded-2xl border border-slate-800 p-6 h-[${height}px] ${className}`}>
+      <div
+        className={`flex items-center justify-center bg-slate-900/40 rounded-2xl border border-slate-800 p-6 h-[${height}px] ${className}`}
+      >
         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
           Aucune donnée radar disponible
         </span>
@@ -56,7 +58,10 @@ export const UnifiedAlgoRadar: React.FC<UnifiedAlgoRadarProps> = ({
   const chartData = data.map((d) => ({
     subject: d.subject,
     A: Math.max(0, Math.min(100, d.value)),
-    B: d.comparisonValue !== undefined ? Math.max(0, Math.min(100, d.comparisonValue)) : undefined,
+    B:
+      d.comparisonValue !== undefined
+        ? Math.max(0, Math.min(100, d.comparisonValue))
+        : undefined,
     fullMark: d.fullMark || 100,
   }));
 
@@ -64,7 +69,9 @@ export const UnifiedAlgoRadar: React.FC<UnifiedAlgoRadarProps> = ({
   const gradIdComp = `radarGrad_${comparisonColor.replace("#", "")}`;
 
   return (
-    <div className={`w-full relative flex flex-col justify-between ${className}`}>
+    <div
+      className={`w-full relative flex flex-col justify-between ${className}`}
+    >
       {title && (
         <div className="flex justify-between items-center mb-2 px-1">
           <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
@@ -79,12 +86,24 @@ export const UnifiedAlgoRadar: React.FC<UnifiedAlgoRadarProps> = ({
             <defs>
               <radialGradient id={gradIdPrimary} cx="0.5" cy="0.5" r="0.5">
                 <stop offset="0%" stopColor={primaryColor} stopOpacity={0.6} />
-                <stop offset="100%" stopColor={primaryColor} stopOpacity={0.15} />
+                <stop
+                  offset="100%"
+                  stopColor={primaryColor}
+                  stopOpacity={0.15}
+                />
               </radialGradient>
               {hasComparison && (
                 <radialGradient id={gradIdComp} cx="0.5" cy="0.5" r="0.5">
-                  <stop offset="0%" stopColor={comparisonColor} stopOpacity={0.5} />
-                  <stop offset="100%" stopColor={comparisonColor} stopOpacity={0.1} />
+                  <stop
+                    offset="0%"
+                    stopColor={comparisonColor}
+                    stopOpacity={0.5}
+                  />
+                  <stop
+                    offset="100%"
+                    stopColor={comparisonColor}
+                    stopOpacity={0.1}
+                  />
                 </radialGradient>
               )}
             </defs>
@@ -136,7 +155,11 @@ export const UnifiedAlgoRadar: React.FC<UnifiedAlgoRadarProps> = ({
 
             {showLegend && (
               <Legend
-                wrapperStyle={{ fontSize: "10px", fontWeight: 700, paddingTop: "8px" }}
+                wrapperStyle={{
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  paddingTop: "8px",
+                }}
               />
             )}
           </RadarChart>

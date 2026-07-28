@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import * as mathCore from './mathCore';
-import { unpackHistory, unpackMatrix, unpackArray } from './workers/zeroCopy';
+import { unpackHistory, unpackMatrix, unpackArray, collectTransferables } from './workers/zeroCopy';
 
 self.onmessage = (e: MessageEvent) => {
     const { taskId, task, payload, history, historyBuffer, drawCount, winningCount, totalCols } = e.data;
@@ -49,7 +49,12 @@ self.onmessage = (e: MessageEvent) => {
                 result = { status: 'OK' };
         }
         
-        self.postMessage({ taskId, success: true, result });
+        const transferables: Transferable[] = [];
+        if (result && typeof result === 'object') {
+            collectTransferables(result, transferables);
+        }
+
+        self.postMessage({ taskId, success: true, result }, transferables);
     } catch (error: unknown) {
         self.postMessage({ taskId, success: false, error: (error instanceof Error ? error.message : String(error)) || "Erreur interne au Web Worker" });
     }

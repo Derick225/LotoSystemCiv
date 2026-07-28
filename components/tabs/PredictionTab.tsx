@@ -34,8 +34,10 @@ export const PredictionTab = React.memo<{ drawName: string }>(
   ({ drawName }) => {
     const { showToast } = useToast();
 
-    const history = useNexusStore((state) => state.history);
-    const lastPrediction = useNexusStore((state) => state.lastPrediction);
+    const rawHistory = useNexusStore((state) => state.history);
+    const history = React.useDeferredValue(rawHistory);
+    const rawLastPrediction = useNexusStore((state) => state.lastPrediction);
+    const lastPrediction = React.useDeferredValue(rawLastPrediction);
     const setLastPrediction = useNexusStore((state) => state.setLastPrediction);
     const nexusLoading = useNexusStore((state) => state.loading);
     const globalWeights = useNexusStore((state) => state.globalWeights);
@@ -205,11 +207,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   Moteur d'Exécution
                 </span>
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-                  {useCloudEngine ? "Cloud Supabase (10 Algos)" : "Calcul Local Intégral (19 Algos)"}
+                  {useCloudEngine
+                    ? "Cloud Supabase (10 Algos)"
+                    : "Calcul Local Intégral (19 Algos)"}
                 </span>
                 <span className="text-[9px] text-slate-400 block leading-normal">
-                  {useCloudEngine 
-                    ? "Délégation haute performance aux serveurs de calcul." 
+                  {useCloudEngine
+                    ? "Délégation haute performance aux serveurs de calcul."
                     : "Moteur local complet avec les 19 modèles mathématiques d'écarts."}
                 </span>
               </div>
@@ -218,13 +222,15 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   type="checkbox"
                   checked={useCloudEngine}
                   onChange={(e) => {
-                    try { audioEngine.play('click'); } catch (err) {}
+                    try {
+                      audioEngine.play("click");
+                    } catch (err) {}
                     setUseCloudEngine(e.target.checked);
                     showToast(
-                      e.target.checked 
-                        ? "Moteur Cloud Supabase activé." 
-                        : "Calcul Local Intégral activé.", 
-                      "info"
+                      e.target.checked
+                        ? "Moteur Cloud Supabase activé."
+                        : "Calcul Local Intégral activé.",
+                      "info",
                     );
                   }}
                   className="sr-only peer"
@@ -238,13 +244,18 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 onClick={() => runInference()}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
-                <Activity size={18} className="group-hover:animate-pulse" /> Lancer la génération
+                <Activity size={18} className="group-hover:animate-pulse" />{" "}
+                Lancer la génération
               </button>
               <button
                 onClick={runMonteCarlo}
                 className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
-                <RefreshCw size={18} className="group-hover:rotate-180 transition-transform duration-500" /> Monte Carlo
+                <RefreshCw
+                  size={18}
+                  className="group-hover:rotate-180 transition-transform duration-500"
+                />{" "}
+                Monte Carlo
               </button>
             </div>
           </div>
@@ -302,24 +313,33 @@ export const PredictionTab = React.memo<{ drawName: string }>(
 
           {/* New inline engine switch */}
           <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-150 dark:border-slate-850">
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">Moteur</span>
+            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              Moteur
+            </span>
             <button
               onClick={() => {
-                try { audioEngine.play('click'); } catch (err) {}
+                try {
+                  audioEngine.play("click");
+                } catch (err) {}
                 setUseCloudEngine(false);
-                showToast("Calcul Local Intégral (19 Algos) sélectionné", "info");
+                showToast(
+                  "Calcul Local Intégral (19 Algos) sélectionné",
+                  "info",
+                );
               }}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${!useCloudEngine ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold'}`}
+              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${!useCloudEngine ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold"}`}
             >
               Local (19 Algos)
             </button>
             <button
               onClick={() => {
-                try { audioEngine.play('click'); } catch (err) {}
+                try {
+                  audioEngine.play("click");
+                } catch (err) {}
                 setUseCloudEngine(true);
                 showToast("Cloud Supabase (10 Algos) sélectionné", "info");
               }}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${useCloudEngine ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold'}`}
+              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${useCloudEngine ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold"}`}
             >
               Cloud
             </button>
@@ -334,7 +354,10 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               {isComputing ? (
                 <RefreshCw className="animate-spin" size={16} />
               ) : (
-                <RefreshCw size={16} className="group-hover:rotate-180 transition-transform duration-500" />
+                <RefreshCw
+                  size={16}
+                  className="group-hover:rotate-180 transition-transform duration-500"
+                />
               )}
               Relancer la génération
             </button>
@@ -367,17 +390,34 @@ export const PredictionTab = React.memo<{ drawName: string }>(
           </div>
         </div>
 
-        {/* Computation Overlay */}
-        <PredictionComputationOverlay
-          isComputing={isComputing}
-          computingStep={computingStep}
-          historyLength={history.length}
-          progress={computingProgress}
-        />
+        {/* Computation Overlay & Results Grid Container */}
+        <div className="relative min-h-[400px]">
+          {isComputing && lastPrediction && (
+            <div className="absolute inset-0 z-50 bg-slate-50/60 dark:bg-slate-950/60 backdrop-blur-md rounded-3xl sm:rounded-[2rem] flex items-center justify-center p-4 transition-all duration-300">
+              <div className="w-full max-w-xl">
+                <PredictionComputationOverlay
+                  isComputing={isComputing}
+                  computingStep={computingStep}
+                  historyLength={history.length}
+                  progress={computingProgress}
+                />
+              </div>
+            </div>
+          )}
 
-        {/* Results Grid */}
-        {!isComputing && lastPrediction && (
-          <div className="grid lg:grid-cols-12 gap-8">
+          {isComputing && !lastPrediction && (
+            <div className="mb-8">
+              <PredictionComputationOverlay
+                isComputing={isComputing}
+                computingStep={computingStep}
+                historyLength={history.length}
+                progress={computingProgress}
+              />
+            </div>
+          )}
+
+          {lastPrediction && (
+            <div className="grid lg:grid-cols-12 gap-8">
             {/* Primary Vector */}
             <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl sm:rounded-[2rem] p-4 sm:p-8 md:p-10 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none flex flex-col justify-center relative overflow-hidden group">
               {/* Background Decor */}
@@ -560,7 +600,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                     </div>
                     {lastPrediction.diversityMetrics.isMonoculture && (
                       <p className="text-[10px] text-rose-500 font-bold mt-1">
-                        ⚠️ Alerte Monoculture détectée dans l'ADN des candidats. Rejet par le générateur.
+                        ⚠️ Alerte Monoculture détectée dans l'ADN des candidats.
+                        Rejet par le générateur.
                       </p>
                     )}
                   </div>
@@ -683,30 +724,31 @@ export const PredictionTab = React.memo<{ drawName: string }>(
 
               <div className="bg-white dark:bg-slate-900 rounded-3xl sm:rounded-[2rem] p-4 sm:p-8 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none flex flex-col justify-start relative overflow-hidden">
                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 w-full text-left flex items-center gap-2">
-                  <Network size={14} className="text-indigo-400" /> Poids Algorithmiques
+                  <Network size={14} className="text-indigo-400" /> Poids
+                  Algorithmiques
                 </h3>
                 <div className="w-full space-y-4">
                   {Object.entries(optimizedWeights || globalWeights)
                     .sort(([, a], [, b]) => (b as number) - (a as number))
                     .slice(0, 5)
                     .map(([key, val]) => (
-                    <div key={key} className="w-full">
-                      <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 capitalize">
-                          {key.replace(/([A-Z])/g, ' $1').trim()}
-                        </span>
-                        <span className="text-[10px] font-mono text-indigo-500 font-bold">
-                          {((val as number) * 100).toFixed(1)}%
-                        </span>
+                      <div key={key} className="w-full">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 capitalize">
+                            {key.replace(/([A-Z])/g, " $1").trim()}
+                          </span>
+                          <span className="text-[10px] font-mono text-indigo-500 font-bold">
+                            {((val as number) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-1000 ease-out"
+                            style={{ width: `${(val as number) * 100}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-1000 ease-out" 
-                          style={{ width: `${(val as number) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
                 <p className="mt-6 text-[9px] text-slate-400 italic text-center w-full">
                   Pondérations optimisées déterministes.
@@ -723,7 +765,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 </h3>
                 <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 sm:gap-4">
                   {lastPrediction.xapExp.map((xap) => {
-                    const topShapley = xap.shapleyValues 
+                    const topShapley = xap.shapleyValues
                       ? Object.entries(xap.shapleyValues)
                           .sort((a, b) => b[1] - a[1])
                           .slice(0, 2)
@@ -733,12 +775,12 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                       <div
                         key={xap.number}
                         className="bg-slate-50 dark:bg-slate-800/50 rounded-xl xs:rounded-2xl p-2 xs:p-4 border border-slate-100 dark:border-slate-700/50 flex flex-col items-center justify-between text-center min-h-[140px] xs:min-h-[160px] shadow-sm relative group cursor-help transition-all hover:border-indigo-500/30"
-                        title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(', ') || 'Aucun'}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || '1.00'}`}
+                        title={`Algorithmes en synergie: ${xap.synergyAlgos?.join(", ") || "Aucun"}\nEntropie: ${xap.compositionEntropy?.toFixed(2) || "1.00"}`}
                       >
                         <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-lg mb-2 border border-indigo-200/50 dark:border-indigo-800/50 shadow-inner">
                           {xap.number}
                         </div>
-                        
+
                         <div className="w-full space-y-2 mt-1">
                           {topShapley.map(([algo, sv], idx) => (
                             <div key={algo} className="w-full">
@@ -752,7 +794,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                               </div>
                               <div className="w-full bg-slate-200 dark:bg-slate-700 h-1 rounded-full overflow-hidden">
                                 <div
-                                  className={`${idx === 0 ? 'bg-indigo-500' : 'bg-slate-400 dark:bg-slate-500'} h-full rounded-full transition-all duration-700`}
+                                  className={`${idx === 0 ? "bg-indigo-500" : "bg-slate-400 dark:bg-slate-500"} h-full rounded-full transition-all duration-700`}
                                   style={{ width: `${Number(sv)}%` }}
                                 />
                               </div>
@@ -764,7 +806,10 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   })}
                 </div>
                 <p className="mt-6 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400 italic border-l-2 border-indigo-500 pl-3">
-                  * L'XAP (eXplainable Attribution Prediction) utilise la Théorie des Jeux (Valeurs de Shapley) pour quantifier la contribution marginale exacte de chaque modèle corrélé dans la synergie algorithmique du vecteur.
+                  * L'XAP (eXplainable Attribution Prediction) utilise la
+                  Théorie des Jeux (Valeurs de Shapley) pour quantifier la
+                  contribution marginale exacte de chaque modèle corrélé dans la
+                  synergie algorithmique du vecteur.
                 </p>
               </div>
             )}
@@ -783,6 +828,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </div>
           </div>
         )}
+        </div>
 
         <ExplainabilityDrawer />
         <TrainingEvolutionDrawer
