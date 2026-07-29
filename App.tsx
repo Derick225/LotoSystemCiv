@@ -106,7 +106,7 @@ const AppContent: React.FC = () => {
           if (foundDraw) {
             setSelectedDraw(foundDraw);
             setDrawName(foundDraw.name);
-            refreshData(foundDraw.name, true);
+            refreshData(foundDraw.name, false);
           }
         } else {
           setSelectedDraw(null);
@@ -168,7 +168,7 @@ const AppContent: React.FC = () => {
   const handleSelectDraw = useCallback((draw: Draw) => {
     audioEngine.play('click');
     setDrawName(draw.name);
-    refreshData(draw.name, true);
+    refreshData(draw.name, false);
     setSelectedDraw(draw);
     setViewMode('home');
     setShowWallet(false);

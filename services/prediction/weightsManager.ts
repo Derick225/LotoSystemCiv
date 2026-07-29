@@ -393,10 +393,8 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   let weights: AlgoWeights = getDefaultWeights();
   let localWeights: Partial<AlgoWeights> | null = null;
   let localUpdatedAt: Date | null = null;
-  let remoteWeights: Partial<AlgoWeights> | null = null;
-  let remoteUpdatedAt: Date | null = null;
 
-  // 1. Lire les poids locaux depuis IndexedDB (Source de Vérité Locale) sans aucun fallback synchrone vers localStorage
+  // 1. Lire les poids locaux depuis IndexedDB (Source de Vérité Locale)
   if (typeof window !== 'undefined') {
     try {
       const parsed = await get<{ weights: Partial<AlgoWeights>; updatedAt?: string }>(`nexus_config_${drawName}`);
@@ -409,10 +407,79 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     } catch (e) { /* Silenced */ }
   }
 
-  // 2. Lire les poids distants depuis Supabase
+  // Si on a des poids locaux, on les renvoie instantanément (SWR) et on revalide en arrière-plan
+  if (localWeights) {
+    const localMergedWeights = normalizeWeights({ ...weights, ...localWeights });
+    weightsCache.set(drawName, { weights: localMergedWeights, timestamp: now });
+
+    // Revalidation asynchrone en arrière-plan pour ne pas bloquer le thread principal ni les transitions d'UI
+    if (isSupabaseConfigured() && navigator.onLine) {
+      (async () => {
+        try {
+          let remoteWeights: Partial<AlgoWeights> | null = null;
+          let remoteUpdatedAt: Date | null = null;
+
+          const { data: adaptiveConfig } = await supabase
+            .from('model_weights_config')
+            .select('weights, updated_at')
+            .eq('draw_name', drawName)
+            .maybeSingle();
+
+          if (adaptiveConfig?.weights) {
+            remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
+            if (adaptiveConfig.updated_at) {
+              remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
+            }
+          } else {
+            const { data } = await supabase
+              .from('algo_weights')
+              .select('weights, updated_at')
+              .eq('draw_name', drawName)
+              .maybeSingle();
+
+            if (data?.weights) {
+              remoteWeights = data.weights as Partial<AlgoWeights>;
+              if (data.updated_at) {
+                remoteUpdatedAt = new Date(data.updated_at);
+              }
+            }
+          }
+
+          if (remoteWeights && remoteUpdatedAt && localUpdatedAt) {
+            // Si les poids distants sont strictement plus récents (+ de 5 min d'avance), on met à jour le local
+            if (remoteUpdatedAt.getTime() > localUpdatedAt.getTime() + 300000) {
+              const freshWeights = normalizeWeights({ ...getDefaultWeights(), ...remoteWeights });
+              // Mettre à jour IndexedDB
+              await set(`nexus_config_${drawName}`, {
+                weights: remoteWeights,
+                updatedAt: remoteUpdatedAt.toISOString()
+              });
+              // Mettre à jour le cache mémoire
+              weightsCache.set(drawName, { weights: freshWeights, timestamp: Date.now() });
+              
+              // Mettre à jour le store si l'utilisateur est toujours sur ce tirage
+              const { useNexusStore } = await import('../../store/useNexusStore');
+              const activeDraw = useNexusStore.getState().drawName;
+              if (activeDraw === drawName) {
+                useNexusStore.getState().setGlobalWeights(freshWeights);
+              }
+            }
+          }
+        } catch (e) {
+          // Silenced background error
+        }
+      })();
+    }
+
+    return localMergedWeights;
+  }
+
+  // Si aucun poids local n'est présent (premier démarrage ou cache vidé), on fait le fetch synchrone complet
+  let remoteWeights: Partial<AlgoWeights> | null = null;
+  let remoteUpdatedAt: Date | null = null;
+
   if (isSupabaseConfigured() && navigator.onLine) {
     try {
-      // D'abord tenter de récupérer la configuration de poids recalibrés de l'auto-apprentissage
       const { data: adaptiveConfig } = await supabase
         .from('model_weights_config')
         .select('weights, updated_at')
@@ -425,7 +492,6 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
           remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
         }
       } else {
-        // Fallback vers les poids de base de algo_weights
         const { data } = await supabase
           .from('algo_weights')
           .select('weights, updated_at')
@@ -442,32 +508,18 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     } catch (e) { /* Silenced */ }
   }
 
-  // 3. Choix intelligent de l'ADN (Stratégie Local-First robuste basée sur l'horodatage)
-  let selectedWeights: Partial<AlgoWeights> | null = null;
-
-  if (localWeights && remoteWeights) {
-    if (localUpdatedAt && remoteUpdatedAt) {
-      // Tolérance de 5 minutes (300 000 ms) pour empêcher des skews NTP ou database latency d'écraser les modifications locales
-      if (localUpdatedAt.getTime() + 300000 >= remoteUpdatedAt.getTime()) {
-        selectedWeights = localWeights;
-      } else {
-        selectedWeights = remoteWeights;
-      }
-    } else {
-      // Priorité au local par défaut en l'absence de timestamp (Local-First)
-      selectedWeights = localWeights;
-    }
-  } else {
-    selectedWeights = localWeights || remoteWeights;
-  }
-
-  if (selectedWeights) {
-    weights = { ...weights, ...selectedWeights };
+  if (remoteWeights) {
+    weights = { ...weights, ...remoteWeights };
+    // Sauvegarder localement pour les futurs chargements instantanés
+    try {
+      await set(`nexus_config_${drawName}`, {
+        weights: remoteWeights,
+        updatedAt: remoteUpdatedAt ? remoteUpdatedAt.toISOString() : new Date().toISOString()
+      });
+    } catch (e) { /* Silenced */ }
   }
 
   const finalWeights = normalizeWeights(weights);
-  
-  // Cache the weights
   weightsCache.set(drawName, { weights: finalWeights, timestamp: now });
   return finalWeights;
 };

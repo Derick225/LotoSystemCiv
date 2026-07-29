@@ -226,10 +226,14 @@ export const NexusEngine: React.FC = () => {
           let forensicGenerated = false;
           let hasTriggerableLearning = false;
 
+          // Seules les 10 dernières prédictions (les plus récentes) ont besoin d'être vérifiées et analysées en arrière-plan.
+          // Cela évite de recalculer l'analyse forensique pour des centaines de vieux tirages à chaque changement de jeu.
+          const relevantPreds = preds.slice(0, 10);
+
           // Chunk the processing to avoid blocking main thread
-          for (let i = 0; i < preds.length; i++) {
+          for (let i = 0; i < relevantPreds.length; i++) {
             if (!mounted) break;
-            const item = preds[i];
+            const item = relevantPreds[i];
             let match = item.drawResultId
               ? history.find((r) => r.id === item.drawResultId)
               : null;
@@ -335,7 +339,7 @@ export const NexusEngine: React.FC = () => {
 
     const t = setTimeout(() => {
       runCalibration();
-    }, 500); // give the UI time to render first
+    }, 2000); // give the UI time to render first
     return () => {
       mounted = false;
       clearTimeout(t);
