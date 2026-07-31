@@ -27,7 +27,7 @@ export const GlobalMacroPredictionView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Parameter controls
-  const [adversarialMode, setAdversarialMode] = useState(false);
+  const adversarialMode = false;
   const [forcedOutsiderCount] = useState(2);
 
   // Load ALL combined draw histories on mount
@@ -278,39 +278,7 @@ export const GlobalMacroPredictionView: React.FC = () => {
               </div>
             </div>
 
-            {/* ADVERSARIAL MODE CONTROLS */}
-            <div className="flex flex-col sm:flex-row gap-6 p-5 bg-indigo-500/5 rounded-2xl border border-indigo-500/10 items-center justify-between">
-              <div className="flex items-start gap-3">
-                <Info className="text-indigo-500 shrink-0 mt-0.5" size={16} />
-                <div>
-                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 block uppercase tracking-wider">
-                    Inférence Adversaire de Laplace
-                  </span>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Active un modèle de régularisation qui filtre les numéros
-                    trop prévisibles pour forcer la sélection d'outsiders à fort
-                    potentiel d'écart.
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-4 shrink-0 w-full sm:w-auto justify-end">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">
-                    Filtre Adversaire
-                  </span>
-                  <button
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setAdversarialMode(!adversarialMode);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${adversarialMode ? "bg-indigo-600 border-indigo-500 text-white" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500"}`}
-                  >
-                    {adversarialMode ? "ACTIF" : "INACTIF"}
-                  </button>
-                </div>
-              </div>
-            </div>
           </motionComponent.div>
         ) : null}
       </AnimatePresence>

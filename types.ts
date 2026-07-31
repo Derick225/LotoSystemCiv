@@ -278,6 +278,7 @@ export interface ForensicReport {
   spectralDeviations?: SpectralDeviation[];
   rmse?: number; // Root Mean Square Error du modèle
   continuousTopologicalLoss?: number; // Nouvelle perte continue topologique
+  wassersteinLoss?: number; // Distance de Wasserstein (Earth Mover's Distance)
   kl_divergence?: number; // Kullback-Leibler Divergence
   brier_score?: number; // Probabilistic accuracy
   winningXAP?: import('./services/training/DNAOptimizer').XAPExplanation[];

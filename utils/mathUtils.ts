@@ -18,22 +18,29 @@ export const LCG_CONSTANTS = {
 
 /**
  * Générateur Congruentiel Linéaire (LCG) pour un déterminisme absolu (100% reproductible).
- * Ces valeurs garantissent une période maximale et de bonnes propriétés statistiques pour des suites d'écarts de loterie.
+ * Utilise les constantes de Park-Miller (a = 48271, m = 2^31 - 1, c = 0)
+ * et un hachage FNV-1a de la graine pour garantir l'uniformité et éviter les corrélations de germes.
  */
 export class LCG {
     private seed: number;
 
     constructor(initialSeed: string | number) {
         if (typeof initialSeed === 'string') {
-            let hash = 0;
+            let hash = 2166136261;
             for (let i = 0; i < initialSeed.length; i++) {
-                const char = initialSeed.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash;
+                hash ^= initialSeed.charCodeAt(i);
+                hash = Math.imul(hash, 16777619);
             }
-            this.seed = Math.abs(hash) || LCG_CONSTANTS.DEFAULT_SEED;
+            this.seed = (hash >>> 0) % 2147483647;
+            if (this.seed === 0) {
+                this.seed = 1;
+            }
         } else {
-            this.seed = initialSeed || LCG_CONSTANTS.DEFAULT_SEED;
+            const parsed = Number(initialSeed);
+            this.seed = (isNaN(parsed) || parsed === 0) ? 1 : Math.abs(parsed) % 2147483647;
+            if (this.seed === 0) {
+                this.seed = 1;
+            }
         }
     }
 
@@ -41,9 +48,8 @@ export class LCG {
      * Génère le prochain nombre pseudo-aléatoire déterministe dans l'intervalle [0, 1[.
      */
     public next(): number {
-        // Formule standard LCG : X_{n+1} = (a * X_n + c) mod m
-        this.seed = (this.seed * LCG_CONSTANTS.MULTIPLIER + LCG_CONSTANTS.INCREMENT) >>> 0;
-        return this.seed / LCG_CONSTANTS.MODULO;
+        this.seed = (this.seed * 48271) % 2147483647;
+        return (this.seed - 1) / 2147483646;
     }
 }
 

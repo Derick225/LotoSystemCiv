@@ -77,23 +77,6 @@ export const PredictionFeatureLab: React.FC<PredictionFeatureLabProps> = ({
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800">
                 <div className="flex flex-col pr-2">
                   <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">
-                    Anti-Consensus
-                  </span>
-                  <span className="text-[8px] text-slate-550 dark:text-slate-400">
-                    Perturbations contradictoires
-                  </span>
-                </div>
-                <button
-                  onClick={() => toggleFlag("adversarialMode")}
-                  className={`w-9 h-5 rounded-full transition-colors relative flex items-center p-0.5 ${flags.adversarialMode ? "bg-orange-500 justify-end" : "bg-slate-300 dark:bg-slate-750 justify-start"}`}
-                >
-                  <span className="w-4 h-4 bg-white rounded-full shadow" />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800">
-                <div className="flex flex-col pr-2">
-                  <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">
                     Rétropropagation ADN
                   </span>
                   <span className="text-[8px] text-slate-550 dark:text-slate-400">

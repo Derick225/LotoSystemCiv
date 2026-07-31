@@ -8,6 +8,7 @@ import { SymbioticContext } from '../../types';
 import { generateMasterPredictionCore } from './predictionFacade';
 import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../../shared/prediction.types';
 import { DNAOptimizer } from '../training/DNAOptimizer';
+import { ParkMillerLCG } from './deterministicCore';
 
 export const runMonteCarloMcmcCore = async (
     drawName: string,
@@ -23,16 +24,11 @@ export const runMonteCarloMcmcCore = async (
     resolvedLearningRate: number,
     onProgress: (progress: number, message: string) => void
 ): Promise<Prediction> => {
-    const histSum = history.slice(0, 10).reduce((acc, curr) => acc + curr.gagnants.reduce((a, b) => a + b, 0), 0);
-    
-    const LCG_M = 0x80000000;
-    const LCG_A = 1103515245;
-    const LCG_C = 12345;
-    let lcgSeed = (histSum + history.length) % LCG_M;
-    const nextRandom = () => {
-        lcgSeed = (LCG_A * lcgSeed + LCG_C) % LCG_M;
-        return lcgSeed / LCG_M;
-    };
+    const lastDraw = history[0];
+    const timestampDernierTirage = lastDraw ? new Date(lastDraw.date).getTime() : Date.now();
+    const seedString = `${drawName}_${timestampDernierTirage}`;
+    const pmLcg = new ParkMillerLCG(seedString);
+    const nextRandom = () => pmLcg.nextFloat();
     
     let currentStateVector = new Float32Array(Object.keys(specificWeights).length);
     Object.keys(specificWeights).forEach((k, idx) => {

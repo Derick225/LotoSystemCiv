@@ -800,34 +800,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 </div>
               </label>
 
-              {/* Toggle 3: Adversarial Protocol */}
-              <label
-                className="flex items-start gap-3 cursor-pointer select-none group"
-                style={{ minHeight: "44px" }}
-              >
-                <div className="relative flex items-center h-5 mt-1.5 shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={adversarialMode}
-                    onChange={(e) => {
-                      audioEngine.play("click");
-                      setAdversarialMode(e.target.checked);
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600 peer-checked:after:bg-white" />
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-300 group-hover:text-white transition-colors block">
-                    Filtre Antagoniste d'Entropie
-                  </span>
-                  <span className="text-[10px] text-slate-500 block leading-normal">
-                    Protocole anti-consensus brisant les biais des numéros
-                    d'inertie statique pour capturer les ruptures de transition.
-                  </span>
-                </div>
-              </label>
-
               {/* Slider: Outsider Count */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-wider text-slate-300">
@@ -1129,24 +1101,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </span>
                         </div>
 
-                        {/* Adversarial Survival Probability Card */}
-                        <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800/40 hover:border-slate-700/50 transition-colors">
-                          <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1.5">
-                            Survie Antagoniste
-                          </span>
-                          <div className="flex items-baseline gap-1">
-                            <span
-                              className={`text-sm font-black font-mono ${prediction.adversarialSurvivalScore !== undefined && prediction.adversarialSurvivalScore > 0.6 ? "text-teal-400" : "text-amber-400"}`}
-                            >
-                              {prediction.adversarialSurvivalScore !== undefined
-                                ? `${(prediction.adversarialSurvivalScore * 100).toFixed(0)}%`
-                                : "92%"}
-                            </span>
-                          </div>
-                          <span className="text-[8px] text-slate-500 block leading-tight mt-1">
-                            Capacité à surmonter le surapprentissage d'inertie.
-                          </span>
-                        </div>
+
                       </div>
 
                       {/* Dynamic Hyper-parameter Calibration Panel */}

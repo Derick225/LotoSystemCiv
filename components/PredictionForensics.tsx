@@ -176,7 +176,15 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                     val: report.kl_divergence?.toFixed(4) ?? "N/A",
                   },
                   {
-                    label: "Topologie",
+                    label: "Wasserstein",
+                    val: report.wassersteinLoss?.toFixed(4) ?? "N/A",
+                  },
+                  {
+                    label: "Entropie Shannon",
+                    val: report.shannon_entropy?.toFixed(2) ?? "N/A",
+                  },
+                  {
+                    label: "Topologie (Loss)",
                     val: report.continuousTopologicalLoss?.toFixed(4) ?? "N/A",
                   },
                 ].map((m, i) => (

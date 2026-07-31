@@ -83,8 +83,165 @@ export const AppShell: React.FC<AppShellProps> = ({
     <div
       className={`min-h-screen text-slate-200 selection:bg-indigo-500/30 transition-colors duration-500 font-sans flex flex-col relative overflow-x-hidden w-full ${isFocusMode ? "bg-black" : ""}`}
     >
+      {/* Sleek Floating Sidebar for Desktop (STATION, ADMIN, WALLET) */}
+      <div
+        className={`fixed left-4 top-4 bottom-4 w-16 bg-nexus-950/60 backdrop-blur-2xl border border-white/10 rounded-3xl py-6 hidden md:flex flex-col justify-between items-center z-[100] transition-all duration-700 shadow-2xl ${
+          isFocusMode ? "-translate-x-full opacity-0 pointer-events-none" : "translate-x-0 opacity-100"
+        }`}
+      >
+        {/* Top brand icon */}
+        <div 
+          onClick={onReset}
+          className="cursor-pointer hover:scale-105 transition-transform"
+        >
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center border border-indigo-400/20 shadow-md">
+            <span className="text-white text-xs font-black font-mono tracking-tighter">LP</span>
+          </div>
+        </div>
+
+        {/* Navigation Section */}
+        <div className="flex flex-col gap-4">
+          {/* Station Button */}
+          <button
+            onClick={() => {
+              setViewMode("home");
+              setShowWallet(false);
+              audioEngine.play("click");
+            }}
+            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+              viewMode === "home" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+            }`}
+          >
+            {viewMode === "home" && !showWallet && (
+              <motion.div
+                layoutId="sidebar-active-pill"
+                className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
+                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+              />
+            )}
+            <Home size={20} className={viewMode === "home" && !showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Station
+            </span>
+          </button>
+
+          {/* Admin Button */}
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setViewMode("admin");
+                setShowWallet(false);
+                audioEngine.play("click");
+              }}
+              className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+                viewMode === "admin" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+              }`}
+            >
+              {viewMode === "admin" && !showWallet && (
+                <motion.div
+                  layoutId="sidebar-active-pill"
+                  className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <Settings size={20} className={viewMode === "admin" && !showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
+              <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+                Admin
+              </span>
+            </button>
+          )}
+
+          {/* Wallet Button */}
+          <button
+            onClick={() => {
+              setShowWallet(!showWallet);
+              audioEngine.play("click");
+            }}
+            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+              showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+            }`}
+          >
+            {showWallet && (
+              <motion.div
+                layoutId="sidebar-active-pill"
+                className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
+                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+              />
+            )}
+            <Wallet size={20} className={showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Wallet
+            </span>
+          </button>
+        </div>
+
+        {/* Bottom Actions Section */}
+        <div className="flex flex-col gap-3">
+          {/* Theme Toggle */}
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setTheme(theme === "dark" ? "light" : "dark");
+            }}
+            className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-300 group"
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Thème {theme === "dark" ? "Clair" : "Sombre"}
+            </span>
+          </button>
+
+          {/* Focus Mode Button */}
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setFocusMode(true);
+            }}
+            className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-300 group"
+          >
+            <Maximize size={18} />
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Mode Focus
+            </span>
+          </button>
+
+          {/* Reset Infra Button */}
+          <button
+            onClick={() => {
+              if (
+                confirm(
+                  "Réinitialiser l'Infrastructure ? Cela videra le cache local et rechargera Nexus.",
+                )
+              ) {
+                useNexusStore.getState().resetInfrastructure();
+              }
+            }}
+            className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-amber-400 bg-amber-500/5 border border-amber-500/20 hover:bg-amber-500/10 transition-all duration-300 group"
+          >
+            <Activity size={16} />
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Reset Infra
+            </span>
+          </button>
+
+          {/* Logout Button */}
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              onLogout();
+            }}
+            className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-rose-400 bg-rose-500/5 border border-rose-500/20 hover:bg-rose-500/10 transition-all duration-300 group"
+          >
+            <LogOut size={16} />
+            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
+              Déconnexion
+            </span>
+          </button>
+        </div>
+      </div>
+
       <header
-        className={`fixed top-0 left-0 right-0 z-50 w-full overflow-hidden transition-all duration-700 ${isFocusMode ? "-translate-y-full opacity-0" : "translate-y-0 opacity-100"}`}
+        className={`fixed top-0 left-0 right-0 z-50 w-full overflow-hidden transition-all duration-700 md:pl-24 ${isFocusMode ? "-translate-y-full opacity-0" : "translate-y-0 opacity-100"}`}
       >
         <MarqueeTicker />
         <div
@@ -114,81 +271,22 @@ export const AppShell: React.FC<AppShellProps> = ({
               )}
             </div>
 
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex bg-white/5 p-1 rounded-2xl border border-white/5 shadow-inner">
-              {navItems.map((btn) => (
-                <button
-                  key={btn.id}
-                  onClick={() => {
-                    setViewMode(btn.id as ViewMode);
-                    setShowWallet(false);
-                    audioEngine.play("click");
-                  }}
-                  className={`flex items-center gap-3 px-6 py-2.5 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest ${viewMode === btn.id && !showWallet ? "bg-indigo-600 text-white shadow-xl" : "text-slate-400 hover:text-slate-300"}`}
-                >
-                  <btn.icon size={18} /> <span>{btn.label}</span>
-                </button>
-              ))}
-            </nav>
-
-            <div className="flex items-center gap-1 xs:gap-1.5 md:gap-3">
+            {/* Desktop and Mobile aligned right panel elements */}
+            <div className="flex items-center gap-2">
               <InstallButton />
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setFocusMode(true);
-                }}
-                className={`p-1.5 xs:p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border bg-white/5 text-slate-400 hover:text-white border-white/10 flex items-center justify-center`}
-                title="Mode Focus"
-              >
-                <Maximize size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setTheme(theme === "dark" ? "light" : "dark");
-                }}
-                className={`p-1.5 xs:p-2 md:p-3.5 rounded-lg md:rounded-2xl transition-all border bg-white/5 text-slate-400 hover:text-white border-white/10 flex items-center justify-center`}
-              >
-                {theme === "dark" ? (
-                  <span className="text-xs xs:text-sm">☀️</span>
-                ) : (
-                  <span className="text-xs xs:text-sm">🌙</span>
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setShowWallet(!showWallet);
-                }}
-                className={`hidden md:flex p-2.5 md:p-3.5 rounded-xl md:rounded-2xl transition-all border ${showWallet ? "bg-indigo-600 border-indigo-500 text-white" : "bg-white/5 text-slate-400 border-white/10"}`}
-              >
-                <Wallet size={16} />
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  onLogout();
-                }}
-                className="p-1.5 xs:p-2 md:p-3.5 bg-rose-500/10 rounded-lg md:rounded-2xl text-rose-400 border border-rose-500/20 active:scale-90 transition-all flex items-center justify-center"
-              >
-                <LogOut size={14} />
-              </button>
-              <button
-                onClick={() => {
-                  if (
-                    confirm(
-                      "Réinitialiser l'Infrastructure ? Cela videra le cache local et rechargera Nexus.",
-                    )
-                  ) {
-                    useNexusStore.getState().resetInfrastructure();
-                  }
-                }}
-                className="p-1.5 xs:p-2 md:p-3.5 bg-amber-500/10 rounded-lg md:rounded-2xl text-amber-400 border border-amber-500/20 active:scale-90 transition-all flex items-center justify-center"
-                title="Réinitialiser l'Infrastructure"
-              >
-                <Activity size={14} />
-              </button>
+              
+              {/* Mobile-only menu items */}
+              <div className="flex items-center gap-1.5 md:hidden">
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setTheme(theme === "dark" ? "light" : "dark");
+                  }}
+                  className="p-2 bg-white/5 border border-white/10 text-slate-400 rounded-xl flex items-center justify-center h-10 w-10"
+                >
+                  {theme === "dark" ? "☀️" : "🌙"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -213,9 +311,9 @@ export const AppShell: React.FC<AppShellProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Main Content Area - Padding bottom augmented to clear mobile nav */}
+      {/* Main Content Area - Padding left on desktop to prevent overlap with floating sidebar */}
       <main
-        className={`container mx-auto px-3 md:px-4 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden transition-all duration-700 ${isFocusMode ? "pt-8 pb-8" : "pt-32 md:pt-44 pb-32 md:pb-40"}`}
+        className={`container mx-auto px-3 md:px-4 md:pl-28 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden transition-all duration-700 ${isFocusMode ? "pt-8 pb-8" : "pt-32 md:pt-44 pb-32 md:pb-40"}`}
       >
         <AnimatePresence mode="wait">
           <motion.div

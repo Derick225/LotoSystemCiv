@@ -607,43 +607,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   </div>
                 )}
 
-                {/* proxy antagoniste */}
-                {lastPrediction.adversarialSurvivalScore !== undefined && (
-                  <div className="mb-6 relative z-10">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400 flex flex-row items-center gap-2">
-                        <ShieldAlert size={14} className="text-orange-500" />
-                        Proxy Antagoniste (Résistance)
-                      </span>
-                      <span
-                        className={`text-sm font-black font-mono ${lastPrediction.adversarialSurvivalScore >= 80 ? "text-emerald-500" : lastPrediction.adversarialSurvivalScore >= 50 ? "text-amber-500" : "text-rose-500"}`}
-                      >
-                        {lastPrediction.adversarialSurvivalScore}%
-                      </span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden flex">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${lastPrediction.adversarialSurvivalScore >= 80 ? "bg-emerald-500" : lastPrediction.adversarialSurvivalScore >= 50 ? "bg-amber-500" : "bg-rose-500"}`}
-                        style={{
-                          width: `${lastPrediction.adversarialSurvivalScore}%`,
-                        }}
-                      ></div>
-                    </div>
-                    {lastPrediction.adversarialRisks &&
-                      lastPrediction.adversarialRisks.length > 0 && (
-                        <div className="mt-3 flex flex-col gap-1">
-                          {lastPrediction.adversarialRisks.map((risk, idx) => (
-                            <p
-                              key={idx}
-                              className="text-[9px] text-rose-500 dark:text-rose-400 font-medium bg-rose-50 dark:bg-rose-900/10 p-1.5 rounded"
-                            >
-                              {risk}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                  </div>
-                )}
+
 
                 <div className="w-full h-px bg-slate-100 dark:bg-slate-800/80 my-4 relative z-10"></div>
 

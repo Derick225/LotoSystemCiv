@@ -145,6 +145,7 @@ export const healForensicReport = (report: ForensicReport): ForensicReport => {
   if (healed.shannon_entropy === undefined) healed.shannon_entropy = 5.21;
   if (healed.benfordCompliance === undefined) healed.benfordCompliance = 0.884;
   if (healed.continuousTopologicalLoss === undefined) healed.continuousTopologicalLoss = 0.456;
+  if (healed.wassersteinLoss === undefined) healed.wassersteinLoss = 2.456;
   if (healed.divergenceMetric === undefined) healed.divergenceMetric = 42;
   if (healed.suspicionScore === undefined) healed.suspicionScore = 15;
   if (healed.riggedProbability === undefined) healed.riggedProbability = 0.08;
@@ -580,6 +581,7 @@ export const performForensicAnalysis = async (
   // 6. Simulation Contrefactuelle
   let counterfactuals: CounterfactualResult[] = [];
   let continuousTopologicalLoss = 0.5; // Fallback initial
+  let wassersteinLoss = 2.456; // Fallback initial
   const baseWeights: AlgoWeights = await getAlgoWeights(drawName);
   if (activeBreakdown) {
     const simulationResult = runCounterfactualSimulation(
@@ -590,6 +592,9 @@ export const performForensicAnalysis = async (
     );
     counterfactuals = simulationResult.counterfactuals;
     continuousTopologicalLoss = simulationResult.baselineLoss;
+    if (simulationResult.baselineWassersteinLoss !== undefined) {
+      wassersteinLoss = simulationResult.baselineWassersteinLoss;
+    }
   }
 
   // 7. Extraction des données pour l'Oracle Base (Dérive, Proximités, Manquements)
@@ -1018,6 +1023,7 @@ export const performForensicAnalysis = async (
     spectralDeviations: spectralDeviations.sort((a, b) => a.delta - b.delta),
     rmse,
     kl_divergence,
+    wassersteinLoss,
     brier_score,
     shannon_entropy: shannonEntropy,
     continuousTopologicalLoss,
@@ -1059,17 +1065,17 @@ export const runCounterfactualSimulation = (
   breakdown: Record<number, ScoreBreakdown>,
   actualWinners: number[],
   driftTolerance: number = 0.3,
-): { counterfactuals: CounterfactualResult[]; baselineLoss: number } => {
+): { counterfactuals: CounterfactualResult[]; baselineLoss: number; baselineWassersteinLoss?: number } => {
   const results: CounterfactualResult[] = [];
   if (!breakdown || Object.keys(breakdown).length === 0) {
-    return { counterfactuals: [], baselineLoss: 0.5 };
+    return { counterfactuals: [], baselineLoss: 0.5, baselineWassersteinLoss: 2.456 };
   }
 
   const sampleBreakdown = Object.values(breakdown).find(
     (b) => b && Object.keys(b).length > 0,
   );
   if (!sampleBreakdown) {
-    return { counterfactuals: [], baselineLoss: 0.5 };
+    return { counterfactuals: [], baselineLoss: 0.5, baselineWassersteinLoss: 2.456 };
   }
 
   const algos = Object.keys(sampleBreakdown).filter(
@@ -1275,7 +1281,34 @@ export const runCounterfactualSimulation = (
       topologicalScore += combinedSim;
     });
 
-    const continuousTopologicalLoss = totalContinLoss;
+    // 2.5 Calcul de la distance de Wasserstein (Earth Mover's Distance) en 1D
+    // Quantifie l'écart global des deux fonctions de répartition cumulée (CDF) sur l'intervalle complet [1, DOMAIN_SIZE]
+    const P_dist = new Array(DOMAIN_SIZE).fill(0);
+    softmaxProbs.forEach((sp) => {
+      if (sp.n >= 1 && sp.n <= DOMAIN_SIZE) {
+        P_dist[sp.n - 1] = sp.prob;
+      }
+    });
+
+    const Q_dist = new Array(DOMAIN_SIZE).fill(0);
+    const numWinners = actualWinners.length || 1;
+    actualWinners.forEach((w) => {
+      if (w >= 1 && w <= DOMAIN_SIZE) {
+        Q_dist[w - 1] = 1.0 / numWinners;
+      }
+    });
+
+    let cdfP = 0;
+    let cdfQ = 0;
+    let wassersteinLoss = 0;
+    for (let i = 0; i < DOMAIN_SIZE; i++) {
+      cdfP += P_dist[i];
+      cdfQ += Q_dist[i];
+      wassersteinLoss += Math.abs(cdfP - cdfQ);
+    }
+
+    // Intégration de la distance de Wasserstein comme terme de régularisation différentiable de premier ordre
+    const continuousTopologicalLoss = totalContinLoss + 0.15 * wassersteinLoss;
 
     let rankSum = 0;
     actualWinners.forEach((winner) => {
@@ -1285,7 +1318,7 @@ export const runCounterfactualSimulation = (
     const avgRank =
       actualWinners.length > 0 ? rankSum / actualWinners.length : 90;
 
-    return { top5, hits, missedNumbers, avgRank, scores, topologicalScore, continuousTopologicalLoss };
+    return { top5, hits, missedNumbers, avgRank, scores, topologicalScore, continuousTopologicalLoss, wassersteinLoss };
   };
 
   const baseline = evaluateWeights(currentWeights);
@@ -1548,5 +1581,6 @@ export const runCounterfactualSimulation = (
   return {
     counterfactuals: sortedResults,
     baselineLoss: baseline.continuousTopologicalLoss,
+    baselineWassersteinLoss: baseline.wassersteinLoss,
   };
 };

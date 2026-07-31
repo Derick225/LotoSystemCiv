@@ -3,6 +3,36 @@ export const LCG_C = 1013904223;
 export const LCG_M = Math.pow(2, 32);
 
 /**
+ * Standardized Park-Miller Linear Congruential Generator (LCG)
+ * Constants: a = 48271, m = 2^31 - 1 (2147483647), c = 0.
+ * To ensure reproducibility across backtesting and simulations.
+ */
+export class ParkMillerLCG {
+    private state: number;
+
+    constructor(seedString: string | number) {
+        let hash = 2166136261;
+        const str = String(seedString);
+        for (let i = 0; i < str.length; i++) {
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        this.state = (hash >>> 0) % 2147483647;
+        if (this.state === 0) {
+            this.state = 1;
+        }
+    }
+
+    /**
+     * Returns a float in [0.0, 1.0)
+     */
+    public nextFloat(): number {
+        this.state = (this.state * 48271) % 2147483647;
+        return (this.state - 1) / 2147483646;
+    }
+}
+
+/**
  * Générateur Congruentiel Linéaire (LCG) pur, 100% déterministe basé sur un seed.
  * Utilise un algorithme de hachage non-collisionnel FNV-1a (32-bit) pour garantir
  * la distribution uniforme de la graine d'initialisation (seed).
