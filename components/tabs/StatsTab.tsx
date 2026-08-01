@@ -4,6 +4,7 @@ import { StatsSkeleton } from "../skeletons/StatsSkeleton";
 import { ProbabilityField } from "../ProbabilityField";
 import { CoOccurrenceGraph } from "../CoOccurrenceGraph";
 import { NumberBall } from "../NumberBall";
+import { EntropySpectralDensityChart } from "../EntropySpectralDensityChart";
 import {
   Trophy,
   Clock,
@@ -45,7 +46,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const loading = useNexusStore((state) => state.loading);
 
-  const [activeTab, setActiveTab] = useState<"basic" | "advanced">("basic");
+  const [activeTab, setActiveTab] = useState<"basic" | "advanced" | "spectral">("basic");
   const [advReport, setAdvReport] = useState<AdvancedStatsReport | null>(null);
   const [advLoading, setAdvLoading] = useState<boolean>(false);
   const [searchFreq, setSearchFreq] = useState<string>("");
@@ -192,7 +193,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   return (
     <div className="space-y-8 animate-fade-in pb-12 w-full overflow-hidden">
       {/* SELECTION DES MODE DE STATISTIQUES */}
-      <div className="flex p-1 bg-slate-100 dark:bg-slate-900/60 rounded-2xl w-full max-w-md mx-auto border border-slate-200/50 dark:border-slate-800/80 shadow-inner">
+      <div className="flex p-1 bg-slate-100 dark:bg-slate-900/60 rounded-2xl w-full max-w-xl mx-auto border border-slate-200/50 dark:border-slate-800/80 shadow-inner">
         <button
           onClick={() => setActiveTab("basic")}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${
@@ -214,6 +215,17 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         >
           <Sparkles size={15} className="text-amber-500" />
           Analyse Avancée
+        </button>
+        <button
+          onClick={() => setActiveTab("spectral")}
+          className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${
+            activeTab === "spectral"
+              ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-md"
+              : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+          }`}
+        >
+          <Activity size={15} className="text-cyan-500" />
+          Densité Spectrale (D3)
         </button>
       </div>
 
@@ -460,7 +472,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             <ProbabilityField scores={probabilityScores} />
           </section>
         </div>
-      ) : (
+      ) : activeTab === "advanced" ? (
         <div className="space-y-8 animate-fade-in">
           {advLoading && !advReport ? (
             <StatsSkeleton />
@@ -875,6 +887,8 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             </div>
           )}
         </div>
+      ) : (
+        <EntropySpectralDensityChart history={history} drawName={drawName} />
       )}
     </div>
   );

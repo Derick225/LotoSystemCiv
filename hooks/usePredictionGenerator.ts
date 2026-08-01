@@ -4,7 +4,6 @@ import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWei
 import { savePredictionToHistory } from '../services/predictionHistoryService';
 import { calculateShannonEntropy, detectGameRegime } from '../services/mathService';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';
-import { LearningService } from '../services/learningService';
 import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../shared/prediction.types';
 import { DNAOptimizer } from '../services/training/DNAOptimizer';
 import { useFeatureFlags } from '../services/prediction/featureFlags';
@@ -45,25 +44,83 @@ export const usePredictionGenerator = (drawName: string) => {
     const [optimizedWeights, setOptimizedWeights] = useState<AlgoWeights | null>(null);
     const [previousWeights, setPreviousWeights] = useState<AlgoWeights | null>(null);
 
+    const storeDrawName = useNexusStore(state => state.drawName);
     const regime = useNexusStore(state => state.regime);
+
+    // Strict Draw Isolation Guard check
+    const isIsolated = useMemo(() => {
+        if (!drawName || !storeDrawName) return true;
+        if (storeDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
+            return false;
+        }
+        if (history.length > 0) {
+            const firstDrawName = history[0].drawName || history[0].draw_name;
+            if (firstDrawName && firstDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
+                return false;
+            }
+        }
+        return true;
+    }, [storeDrawName, drawName, history]);
+
+    // Use the validated/purified values to avoid memory pollution
+    const activeHistory = useMemo(() => {
+        if (!isIsolated) return [];
+        return history;
+    }, [isIsolated, history]);
+
+    const activeSpectral = useMemo(() => {
+        if (!isIsolated) return [];
+        return spectral;
+    }, [isIsolated, spectral]);
+
+    const activeCorrelationMatrix = useMemo(() => {
+        if (!isIsolated) return {};
+        return correlationMatrix;
+    }, [isIsolated, correlationMatrix]);
+
+    const activeRegularity = useMemo(() => {
+        if (!isIsolated) return [];
+        return regularity;
+    }, [isIsolated, regularity]);
+
+    const activeVolatility = useMemo(() => {
+        if (!isIsolated) return null;
+        return volatility;
+    }, [isIsolated, volatility]);
+
+    const activeSymbioticContext = useMemo(() => {
+        if (!isIsolated) return null;
+        return symbioticContext;
+    }, [isIsolated, symbioticContext]);
+
+    const activeFractal = useMemo(() => {
+        if (!isIsolated) return [];
+        return fractal;
+    }, [isIsolated, fractal]);
+
+    const activeRegime = useMemo(() => {
+        if (!isIsolated) return null;
+        return regime;
+    }, [isIsolated, regime]);
+
     const currentEntropy = useMemo(() => {
-        return regime?.entropy || (history.length > 0 ? calculateShannonEntropy(history.slice(0, 10)).normalized : 0);
-    }, [regime, history]);
+        return activeRegime?.entropy || (activeHistory.length > 0 ? calculateShannonEntropy(activeHistory.slice(0, 10)).normalized : 0);
+    }, [activeRegime, activeHistory]);
 
     const resolvedLearningRate = useMemo(() => {
         return Math.max(0.01, Math.min(0.2, 0.15 * (1.0 - currentEntropy) + 0.01));
     }, [currentEntropy]);
 
     const resolvedNoiseLevel = useMemo(() => {
-        const volScore = volatility?.score || 50;
+        const volScore = activeVolatility?.score || 50;
         return Math.max(0.1, Math.min(3.0, (volScore / 50.0) * (currentEntropy || 0.5) * 1.5 + 0.2));
-    }, [currentEntropy, volatility]);
+    }, [currentEntropy, activeVolatility]);
 
     const resolvedMcIterations = useMemo(() => {
         return Math.max(10, Math.min(100, Math.round(20 + 80 * (currentEntropy || 0.5))));
     }, [currentEntropy]);
 
-    const gameRegimeInfo = regime;
+    const gameRegimeInfo = activeRegime;
 
     const [chaoticRatio, setChaoticRatio] = useState(0);
     useEffect(() => {
@@ -89,8 +146,8 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [drawName]);
 
     useEffect(() => {
-        setIsChaotic(chaoticRatio >= 0.25 || (volatility?.score ?? 0) > 85);
-    }, [chaoticRatio, volatility]);
+        setIsChaotic(chaoticRatio >= 0.25 || (activeVolatility?.score ?? 0) > 85);
+    }, [chaoticRatio, activeVolatility]);
 
     useEffect(() => {
         setLastPrediction(null);
@@ -115,7 +172,13 @@ export const usePredictionGenerator = (drawName: string) => {
     };
 
     const runInference = useCallback(async (forcedWeights?: AlgoWeights) => {
-        if (history.length < 5) {
+        if (!isIsolated) {
+            audioEngine.play('error');
+            console.error(`[StrictDrawIsolationGuard] Rejected runInference: active draw "${drawName}" is not synchronized with store draw "${storeDrawName}".`);
+            showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
+            return;
+        }
+        if (activeHistory.length < 5) {
             audioEngine.play('error');
             showToast("Historique insuffisant pour l'Oracle Base.", "error");
             return;
@@ -152,14 +215,14 @@ export const usePredictionGenerator = (drawName: string) => {
 
         try {
             await new Promise(r => setTimeout(r, 150)); 
-            const metrics = { spectral, correlationMatrix, regularity, volatility, fractal };
+            const metrics = { spectral: activeSpectral, correlationMatrix: activeCorrelationMatrix, regularity: activeRegularity, volatility: activeVolatility, fractal: activeFractal };
             const res = await generateMasterPrediction(
                 drawName,
-                history,
+                activeHistory,
                 temporalDepth,
                 specificWeights!,
                 metrics,
-                symbioticContext || undefined,
+                activeSymbioticContext || undefined,
                 false,
                 flags.adversarialMode,
                 undefined,
@@ -190,12 +253,18 @@ export const usePredictionGenerator = (drawName: string) => {
             setIsComputing(false);
             setComputingStep("");
         }
-    }, [drawName, history, spectral, correlationMatrix, regularity, volatility, fractal, symbioticContext, globalWeights, quantumMode, flags.adversarialMode, resolvedNoiseLevel, setLastPrediction, showToast]);
+    }, [isIsolated, storeDrawName, drawName, activeHistory, activeSpectral, activeCorrelationMatrix, activeRegularity, activeVolatility, activeFractal, activeSymbioticContext, globalWeights, quantumMode, flags.adversarialMode, resolvedNoiseLevel, setLastPrediction, showToast]);
 
 
 
     const runMonteCarlo = useCallback(async () => {
-        if (history.length < 10) {
+        if (!isIsolated) {
+            audioEngine.play('error');
+            console.error(`[StrictDrawIsolationGuard] Rejected runMonteCarlo: active draw "${drawName}" is not synchronized with store draw "${storeDrawName}".`);
+            showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
+            return;
+        }
+        if (activeHistory.length < 10) {
             showToast("Historique insuffisant.", "error");
             return;
         }
@@ -205,9 +274,9 @@ export const usePredictionGenerator = (drawName: string) => {
 
         try {
             let specificWeights = await resolveWeights();
-            const metrics = { spectral, correlationMatrix, regularity, volatility, fractal };
+            const metrics = { spectral: activeSpectral, correlationMatrix: activeCorrelationMatrix, regularity: activeRegularity, volatility: activeVolatility, fractal: activeFractal };
             
-            const packed = packHistory(history);
+            const packed = packHistory(activeHistory);
             
             const worker = new Worker(new URL('../services/workers/prediction.worker.ts', import.meta.url), { type: 'module' });
             
@@ -250,7 +319,7 @@ export const usePredictionGenerator = (drawName: string) => {
                     temporalDepth: 10,
                     weightsToUse: specificWeights,
                     metrics,
-                    symbioticContext: symbioticContext || undefined,
+                    symbioticContext: activeSymbioticContext || undefined,
                     adversarialMode: flags.adversarialMode,
                     isForensicOptimized,
                     resolvedMcIterations,
@@ -269,7 +338,7 @@ export const usePredictionGenerator = (drawName: string) => {
             
             setActiveDNA("Monte-Carlo (MCMC)");
             audioEngine.play("success");
-            showToast(`Convergence MC achevée avec succès.`, "success");
+            showToast(`Convergence MC achvée avec succès.`, "success");
 
         } catch (e: any) {
             console.error("Monte Carlo Failed:", e);
@@ -279,43 +348,11 @@ export const usePredictionGenerator = (drawName: string) => {
             setIsComputing(false);
             setComputingStep("");
         }
-    }, [history, drawName, resolvedMcIterations, resolvedNoiseLevel, resolvedLearningRate, flags.adversarialMode, spectral, correlationMatrix, regularity, volatility, fractal, symbioticContext, globalWeights, currentEntropy, setLastPrediction, showToast, isForensicOptimized]);
+    }, [isIsolated, storeDrawName, activeHistory, drawName, resolvedMcIterations, resolvedNoiseLevel, resolvedLearningRate, flags.adversarialMode, activeSpectral, activeCorrelationMatrix, activeRegularity, activeVolatility, activeFractal, activeSymbioticContext, globalWeights, currentEntropy, setLastPrediction, showToast, isForensicOptimized]);
 
     const handleOptimizeWeights = async () => {
-        if (!navigator.onLine) {
-            showToast("Mode hors-ligne : Apprentissage suspendu.", "error");
-            return;
-        }
-        audioEngine.play("scan");
-        setIsOptimizing(true);
-        setComputingStep("Extraction du Signal Forensic...");
-        try {
-            const currentW = globalWeights || DEFAULT_ALGO_WEIGHTS;
-            setPreviousWeights({ ...currentW } as AlgoWeights);
-
-            const result = await LearningService.triggerAutoLearning(drawName);
-            
-            if (result && result.weights) {
-                setOptimizedWeights(result.weights);
-                await updateGlobalWeights(result.weights, drawName);
-                
-                audioEngine.play("success");
-                showToast(`ADN Optimisé : + ${result.delta || "0.00"}% performance.`, "success");
-                
-                await runInference(result.weights);
-            } else {
-                audioEngine.play("click");
-                showToast("Les matrices actuelles sont déjà optimales pour la structure stochastique en cours.", "info");
-            }
-
-        } catch (error) {
-            console.error("Failed to optimize weights:", error);
-            audioEngine.play("error");
-            showToast("Erreur lors de l'apprentissage des poids.", "error");
-        } finally {
-            setIsOptimizing(false);
-            setComputingStep("");
-        }
+        // Self-learning optimization retired
+        showToast("L'Auto-apprentissage a été désactivé.", "info");
     };
 
     return {

@@ -19,7 +19,6 @@ import {
   syncForensicReportsWithCloud,
   getLocalForensicReports,
 } from "../services/postPredictionAnalysisService";
-import { LearningService } from "../services/learningService";
 import { AppError, logError } from "../utils/AppError";
 import { useAutonomousAgent } from "../hooks/useAutonomousAgent";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
@@ -224,7 +223,6 @@ export const NexusEngine: React.FC = () => {
           // --- AUTO-LINKER & FORENSIC AUTOMATOR ---
           let historyChanged = false;
           let forensicGenerated = false;
-          let hasTriggerableLearning = false;
 
           // Seules les 10 dernières prédictions (les plus récentes) ont besoin d'être vérifiées et analysées en arrière-plan.
           // Cela évite de recalculer l'analyse forensique pour des centaines de vieux tirages à chaque changement de jeu.
@@ -266,16 +264,6 @@ export const NexusEngine: React.FC = () => {
                   );
                   saveForensicReport(report);
                   forensicGenerated = true;
-
-                  // AUTO-TUNING: Self-Learning based on Forensic Reports
-                  // PROTECTION CYGNE NOIR: On ne s'optimise pas sur le bruit statistique pur
-                  if (report.isBlackSwan) {
-                    console.warn(
-                      `[Auto-Tuner] Tirage chaotique (Cygne Noir) détecté le ${match.date}. Apprentissage bloqué pour prévenir l'oubli catastrophique (Catastrophic Forgetting).`,
-                    );
-                  } else {
-                    hasTriggerableLearning = true;
-                  }
                 } catch (e) {
                   console.warn("Auto-Forensic failed for", item.id, e);
                 }
@@ -285,25 +273,6 @@ export const NexusEngine: React.FC = () => {
             // Yield to event loop every 5 items to keep UI responsive
             if (i % 5 === 0) {
               await new Promise((r) => setTimeout(r, 5));
-            }
-          }
-
-          const bgEnabled =
-            localStorage.getItem("nexus_enable_bg_autolearn") === "true";
-          if (hasTriggerableLearning && bgEnabled) {
-            try {
-              const learningResult =
-                await LearningService.triggerAutoLearning(drawName);
-              if (
-                learningResult &&
-                learningResult.improvement &&
-                learningResult.weights &&
-                mounted
-              ) {
-                setGlobalWeights(learningResult.weights);
-              }
-            } catch (e) {
-              console.error("Background auto learning block failed", e);
             }
           }
 

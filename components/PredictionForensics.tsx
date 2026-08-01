@@ -29,13 +29,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
   onClose,
 }) => {
   const { showToast } = useToast();
-  const [submittingFeedback, setSubmittingFeedback] = useState(false);
-  const [feedbackSent, setFeedbackSent] = useState(false);
-  const [userRating, setUserRating] = useState<
-    PredictionFeedback["userRating"] | null
-  >(null);
-  const [userComment, setUserComment] = useState("");
-
   const handleDeleteReport = async () => {
     if (
       !window.confirm(
@@ -52,33 +45,6 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     } catch (error) {
       logError(error, { action: "delete_report_failed" });
       showToast("Erreur lors de la suppression", "error");
-    }
-  };
-
-  const handleSubmitFeedback = async () => {
-    if (!userRating) return;
-    setSubmittingFeedback(true);
-    try {
-      audioEngine.play("success");
-      const updatedFeedback: PredictionFeedback = {
-        keyLearning: userComment || "Ajustement manuel",
-        userRating,
-        userComment,
-      };
-
-      await updatePredictionFeedback(
-        report.predictionId || report.id,
-        updatedFeedback,
-      );
-      await applyBayesianForensicFeedback(report.drawName, report, userRating);
-
-      setFeedbackSent(true);
-      showToast("Feedback RLHF intégré", "success");
-    } catch (error) {
-      logError(error, { action: "feedback_submission_failed" });
-      showToast("Échec de l'intégration", "error");
-    } finally {
-      setSubmittingFeedback(false);
     }
   };
 
@@ -237,73 +203,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 )}
               </div>
 
-              {/* RLHF Feedback */}
-              <div className="bg-indigo-50 dark:bg-indigo-900/10 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-900/50">
-                <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest block mb-3">
-                  Self-Learning (RLHF)
-                </span>
-                {feedbackSent ? (
-                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-500/20 text-center text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                    ✓ Feedback intégré à l'Oracle
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex gap-2">
-                      {[
-                        {
-                          id: "Visionnaire",
-                          icon: <ThumbsUp size={12} />,
-                          color:
-                            "bg-emerald-500 border-emerald-500 text-emerald-600",
-                        },
-                        {
-                          id: "Standard",
-                          icon: <Meh size={12} />,
-                          color: "bg-amber-500 border-amber-500 text-amber-600",
-                        },
-                        {
-                          id: "Incohérente",
-                          icon: <ThumbsDown size={12} />,
-                          color: "bg-rose-500 border-rose-500 text-rose-600",
-                        },
-                      ].map((rate) => (
-                        <button
-                          key={rate.id}
-                          onClick={() => {
-                            audioEngine.play("click");
-                            setUserRating(
-                              rate.id as PredictionFeedback["userRating"],
-                            );
-                          }}
-                          className={`flex-1 py-2 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-1.5 transition-all border ${
-                            userRating === rate.id
-                              ? `${rate.color.split(" ")[0]} text-white border-transparent shadow-md`
-                              : "bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700"
-                          }`}
-                        >
-                          {rate.icon} {rate.id}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={userComment}
-                        onChange={(e) => setUserComment(e.target.value)}
-                        placeholder="Observation technique..."
-                        className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs outline-none"
-                      />
-                      <button
-                        onClick={handleSubmitFeedback}
-                        disabled={!userRating || submittingFeedback}
-                        className="px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
-                      >
-                        {submittingFeedback ? "..." : "Valider"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+
             </div>
           </div>
         </div>

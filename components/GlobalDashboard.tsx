@@ -11,7 +11,6 @@ import {
   checkAndSyncRecentResults,
 } from "../services/lotteryService";
 import { analyzeIntraDraw } from "../services/intraDrawService";
-import { LearningService } from "../services/learningService";
 import { useNexusStore } from "../store/useNexusStore";
 import { useDailySummary, lotteryKeys } from "../hooks/useLottery";
 import { useQueryClient } from "@tanstack/react-query";
@@ -48,7 +47,6 @@ import { safeSetItem } from "../utils/safeStorage";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../utils/audioEngine";
 import { SLOT_CONFIG } from "../constants";
-import { useDriftCorrection } from "../hooks/useDriftCorrection";
 
 import { GlobalMacroPredictionView } from "./GlobalMacroPredictionView";
 
@@ -589,79 +587,8 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       return base;
     }, [regime, globalWeights]);
 
-    // Extraction de la logique de dérive via un hook dédié
-    useDriftCorrection(drawName, history || []);
+    // Extraction de la logique de dérive via un hook dédié (Retired)
 
-    // AUTO-LEARN TRIGGER (Nightly Build Simulation) - Deactivated by default on startup to prevent browser freezing.
-    useEffect(() => {
-      const triggerAutoLearn = async () => {
-        if (!isAutonomousAgentActive) return;
-
-        if (history && history.length > 60) {
-          const drawName = history[0]?.drawName || "Global";
-          const LAST_RUN_KEY = `nexus_autolearn_last_${drawName}`;
-          const lastRun = localStorage.getItem(LAST_RUN_KEY);
-          const now = Date.now();
-
-          if (!lastRun || now - Number(lastRun) >= 86400000) {
-            const result = await LearningService.triggerAutoLearning(drawName);
-            if (result.lastRun) {
-              safeSetItem(LAST_RUN_KEY, now.toString());
-              showToast(
-                result.message,
-                result.improvement ? "success" : "info",
-              );
-              if (result.improvement) refreshData(drawName);
-            }
-          }
-        }
-      };
-
-      // Delay to let UI settle
-      const t = setTimeout(triggerAutoLearn, 15000);
-      return () => clearTimeout(t);
-    }, [history, isAutonomousAgentActive]);
-
-    const handleAutoLearn = useCallback(async () => {
-      if (!history || history.length < 60) {
-        showToast("Historique insuffisant (>60 requis).", "error");
-        return;
-      }
-      setFullSyncing(true);
-      try {
-        const drawName = history[0]?.drawName || "Global";
-        // Force execution by clearing timestamp
-        localStorage.removeItem(`nexus_autolearn_last_${drawName}`);
-
-        const result = await LearningService.triggerAutoLearning(
-          drawName,
-          undefined,
-          false,
-          true,
-        );
-        if (result.lastRun) {
-          safeSetItem(
-            `nexus_autolearn_last_${drawName}`,
-            Date.now().toString(),
-          );
-          showToast(result.message, result.improvement ? "success" : "info");
-          if (result.improvement) {
-            if (result.weights) {
-              await useNexusStore
-                .getState()
-                .updateGlobalWeights(result.weights, drawName);
-            }
-            refreshData(drawName);
-          }
-        } else {
-          showToast(result.message || "Erreur Auto-Learn.", "error");
-        }
-      } catch (e) {
-        showToast("Erreur Auto-Learn.", "error");
-      } finally {
-        setFullSyncing(false);
-      }
-    }, [history, showToast, refreshData]);
 
     useEffect(() => {
       // Auto-sync exactly ~30 mins after any draw time
@@ -834,23 +761,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 w-full md:flex md:gap-4 md:w-auto relative z-10">
+          <div className="grid grid-cols-2 gap-2 w-full md:flex md:gap-4 md:w-auto relative z-10">
             <button
               onClick={handleExportReport}
               className="group flex-1 md:flex-none px-2 py-3 md:px-8 md:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[8px] sm:text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 flex flex-col sm:flex-row items-center justify-center gap-1.5 md:gap-3"
             >
               <FileText className="w-3.5 h-3.5 md:w-4 md:h-4" />
               <span className="text-center">Rapport PDF</span>
-            </button>
-            <button
-              onClick={handleAutoLearn}
-              disabled={fullSyncing}
-              className="group flex-1 md:flex-none px-2 py-3 md:px-8 md:py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-[8px] sm:text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 flex flex-col sm:flex-row items-center justify-center gap-1.5 md:gap-3 disabled:opacity-50"
-            >
-              <BrainCircuit
-                className={`w-3.5 h-3.5 md:w-4 md:h-4 ${fullSyncing ? "animate-pulse" : ""}`}
-              />
-              <span className="text-center">Auto-Learn</span>
             </button>
             <button
               onClick={handleManualSync}

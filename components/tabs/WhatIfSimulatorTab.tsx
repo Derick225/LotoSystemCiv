@@ -60,6 +60,65 @@ import {
   FitnessLandscapePoint,
 } from "../../services/simulation/whatIfEngine";
 
+const ALGO_SEQUENCE: AlgoKey[] = [
+  AlgoKey.FREQUENCY,
+  AlgoKey.MARKOV,
+  AlgoKey.BAYES,
+  AlgoKey.GAPS,
+  AlgoKey.MOMENTUM,
+  AlgoKey.GAP_SEQUENCE,
+  AlgoKey.GAP_PATTERN,
+  AlgoKey.SEQUENCE_PATTERN,
+  AlgoKey.GAP_CADENCE,
+  AlgoKey.GAP_TREND,
+  AlgoKey.INTER_MONTHLY_RESONANCE,
+  AlgoKey.SPECTRAL,
+  AlgoKey.FRACTAL,
+  AlgoKey.TEMPORAL,
+  AlgoKey.SHADOW_PROBABILITY,
+  AlgoKey.SPATIAL,
+  AlgoKey.AFFINITY,
+  AlgoKey.NETWORK_CORRELATION,
+  AlgoKey.ECHO_STATE,
+  AlgoKey.DERIVED_NEIGHBOR,
+];
+
+const solveBezierY = (x: number, px1: number, py1: number, px2: number, py2: number): number => {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  let lower = 0;
+  let upper = 1;
+  let u = 0.5;
+  for (let i = 0; i < 16; i++) {
+    const cx = 3 * u * (1 - u) * (1 - u) * px1 + 3 * u * u * (1 - u) * px2 + u * u * u;
+    if (Math.abs(cx - x) < 0.001) break;
+    if (cx < x) {
+      lower = u;
+    } else {
+      upper = u;
+    }
+    u = (lower + upper) / 2;
+  }
+  return 3 * u * (1 - u) * (1 - u) * py1 + 3 * u * u * (1 - u) * py2 + u * u * u;
+};
+
+const applyBezierToWeights = (base: AlgoWeights, px1: number, py1: number, px2: number, py2: number): AlgoWeights => {
+  const modulated: Record<string, number> = {};
+  
+  ALGO_SEQUENCE.forEach((key, idx) => {
+    const t = idx / Math.max(1, ALGO_SEQUENCE.length - 1);
+    const bezierFactor = solveBezierY(t, px1, py1, px2, py2);
+    modulated[key] = (base[key] || 0.05) * (0.1 + 1.9 * bezierFactor);
+  });
+  
+  const sum = Object.values(modulated).reduce((a, b) => a + b, 0) || 1;
+  const normalized: Record<string, number> = {};
+  ALGO_SEQUENCE.forEach(k => {
+    normalized[k] = parseFloat((modulated[k] / sum).toFixed(4));
+  });
+  return normalized as AlgoWeights;
+};
+
 export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
@@ -109,6 +168,18 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
     FitnessLandscapePoint[]
   >([]);
 
+  // Bezier Modulator States
+  const [bezierCP, setBezierCP] = useState({ x1: 0.35, y1: 0.15, x2: 0.65, y2: 0.85 });
+  const [activePreset, setActivePreset] = useState<string>("linear");
+  const [isDraggingCP, setIsDraggingCP] = useState<1 | 2 | null>(null);
+
+  // Mini-Backtest Metrics State
+  const [baselineEfficiency, setBaselineEfficiency] = useState<number>(0);
+  const [currentEfficiency, setCurrentEfficiency] = useState<number>(0);
+  const [partialDerivatives, setPartialDerivatives] = useState<
+    Array<{ name: string; key: AlgoKey; value: number }>
+  >([]);
+
   useEffect(() => {
     setCustomWeights(globalWeights);
   }, [globalWeights]);
@@ -141,18 +212,17 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
     };
   }, [drawName, history, temporalDepth, globalWeights]);
 
-  // Function to evaluate grid scores for arbitrary weights based on real historical draw features
-  const evalGridScores = useCallback(
-    (w: AlgoWeights): number[] => {
+  // Function to evaluate grid scores for arbitrary weights based on a specific history slice
+  const evalGridScoresForHistory = useCallback(
+    (w: AlgoWeights, histSlice: typeof history): number[] => {
       const scores = new Array(90).fill(0);
       const keys = Object.keys(w) as AlgoKey[];
 
-      // Calculate historical frequency and gaps from history for fast evaluation
       const freqMap = new Array(91).fill(0);
-      const lastSeen = new Array(91).fill(history.length);
-      const totalDraws = Math.max(1, history.length);
+      const lastSeen = new Array(91).fill(histSlice.length);
+      const totalDraws = Math.max(1, histSlice.length);
 
-      history.forEach((d, idx) => {
+      histSlice.forEach((d, idx) => {
         if (Array.isArray(d.gagnants)) {
           d.gagnants.forEach((n) => {
             if (n >= 1 && n <= 90) {
@@ -186,7 +256,14 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
       }
       return scores;
     },
-    [history],
+    [],
+  );
+
+  const evalGridScores = useCallback(
+    (w: AlgoWeights): number[] => {
+      return evalGridScoresForHistory(w, history);
+    },
+    [history, evalGridScoresForHistory]
   );
 
   // Main Simulation Handler
@@ -269,6 +346,177 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
       hessianAlgoB,
     ],
   );
+
+  // Mini-Backtest over the last 15 draws
+  const runMiniBacktest = useCallback(
+    (w: AlgoWeights): number => {
+      if (history.length < 5) return 0;
+      const N = Math.min(15, history.length - 1);
+      let successSum = 0;
+      let count = 0;
+
+      for (let d = 0; d < N; d++) {
+        const targetDraw = history[d];
+        const histSlice = history.slice(d + 1);
+        if (histSlice.length < 5) continue;
+
+        const rawScores = evalGridScoresForHistory(w, histSlice);
+        
+        const indexed = rawScores.map((score, idx) => ({ ball: idx + 1, score }));
+        indexed.sort((a, b) => b.score - a.score);
+        const top10 = indexed.slice(0, 10).map((x) => x.ball);
+
+        if (Array.isArray(targetDraw.gagnants)) {
+          const hits = targetDraw.gagnants.filter((num) => top10.includes(num)).length;
+          successSum += hits / targetDraw.gagnants.length;
+          count++;
+        }
+      }
+      return count > 0 ? (successSum / count) * 100 : 0;
+    },
+    [history, evalGridScoresForHistory]
+  );
+
+  // Dragging event listeners effect for the Bezier Editor
+  useEffect(() => {
+    if (isDraggingCP === null) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const svgEl = document.getElementById("bezier-svg");
+      if (!svgEl) return;
+      const rect = svgEl.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height));
+
+      setBezierCP(prev => {
+        const updated = { ...prev };
+        if (isDraggingCP === 1) {
+          updated.x1 = parseFloat(x.toFixed(3));
+          updated.y1 = parseFloat(y.toFixed(3));
+        } else {
+          updated.x2 = parseFloat(x.toFixed(3));
+          updated.y2 = parseFloat(y.toFixed(3));
+        }
+        
+        const modulated = applyBezierToWeights(globalWeights, updated.x1, updated.y1, updated.x2, updated.y2);
+        setCustomWeights(modulated);
+        debouncedRunSimulation(modulated);
+        return updated;
+      });
+      setActivePreset("custom");
+    };
+
+    const handleWindowMouseUp = () => {
+      setIsDraggingCP(null);
+    };
+
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+    };
+  }, [isDraggingCP, globalWeights, debouncedRunSimulation]);
+
+  useEffect(() => {
+    if (isDraggingCP === null) return;
+
+    const handleWindowTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 0) return;
+      const svgEl = document.getElementById("bezier-svg");
+      if (!svgEl) return;
+      const rect = svgEl.getBoundingClientRect();
+      const touch = e.touches[0];
+      const x = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, 1 - (touch.clientY - rect.top) / rect.height));
+
+      setBezierCP(prev => {
+        const updated = { ...prev };
+        if (isDraggingCP === 1) {
+          updated.x1 = parseFloat(x.toFixed(3));
+          updated.y1 = parseFloat(y.toFixed(3));
+        } else {
+          updated.x2 = parseFloat(x.toFixed(3));
+          updated.y2 = parseFloat(y.toFixed(3));
+        }
+        
+        const modulated = applyBezierToWeights(globalWeights, updated.x1, updated.y1, updated.x2, updated.y2);
+        setCustomWeights(modulated);
+        debouncedRunSimulation(modulated);
+        return updated;
+      });
+      setActivePreset("custom");
+    };
+
+    const handleWindowTouchEnd = () => {
+      setIsDraggingCP(null);
+    };
+
+    window.addEventListener("touchmove", handleWindowTouchMove, { passive: false });
+    window.addEventListener("touchend", handleWindowTouchEnd);
+    return () => {
+      window.removeEventListener("touchmove", handleWindowTouchMove);
+      window.removeEventListener("touchend", handleWindowTouchEnd);
+    };
+  }, [isDraggingCP, globalWeights, debouncedRunSimulation]);
+
+  // Compute baseline mini-backtest efficiency
+  useEffect(() => {
+    if (history.length >= 5) {
+      const baseEff = runMiniBacktest(globalWeights);
+      setBaselineEfficiency(parseFloat(baseEff.toFixed(1)));
+    }
+  }, [history, globalWeights, runMiniBacktest]);
+
+  // Compute current efficiency and partial derivatives
+  useEffect(() => {
+    if (history.length >= 5) {
+      const curEff = runMiniBacktest(customWeights);
+      setCurrentEfficiency(parseFloat(curEff.toFixed(1)));
+
+      const coreAlgos = [AlgoKey.FREQUENCY, AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.MARKOV];
+      const eps = 0.05;
+
+      const derivs = coreAlgos.map((key) => {
+        const perturbedWeights = { ...customWeights, [key]: (customWeights[key] || 0) + eps };
+        const sum = Object.values(perturbedWeights).reduce((a, b) => a + b, 0) || 1;
+        const normalizedPerturbed: Record<string, number> = {};
+        Object.keys(perturbedWeights).forEach((k) => {
+          normalizedPerturbed[k] = (perturbedWeights[k as AlgoKey] || 0) / sum;
+        });
+
+        const perturbedEff = runMiniBacktest(normalizedPerturbed as AlgoWeights);
+        const deriv = (perturbedEff - curEff) / eps;
+
+        return {
+          name: LABELS[key] || key,
+          key,
+          value: parseFloat(deriv.toFixed(2)),
+        };
+      });
+
+      setPartialDerivatives(derivs);
+    }
+  }, [history, customWeights, runMiniBacktest, LABELS]);
+
+  // Bezier preset application helper
+  const applyPreset = (presetName: string) => {
+    setActivePreset(presetName);
+    let cp = { x1: 0.35, y1: 0.15, x2: 0.65, y2: 0.85 };
+    if (presetName === "linear") {
+      cp = { x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75 };
+    } else if (presetName === "ease-in-out") {
+      cp = { x1: 0.42, y1: 0.0, x2: 0.58, y2: 1.0 };
+    } else if (presetName === "low-boost") {
+      cp = { x1: 0.05, y1: 0.95, x2: 0.15, y2: 0.95 };
+    } else if (presetName === "high-boost") {
+      cp = { x1: 0.85, y1: 0.05, x2: 0.95, y2: 0.05 };
+    }
+    setBezierCP(cp);
+    const modulated = applyBezierToWeights(globalWeights, cp.x1, cp.y1, cp.x2, cp.y2);
+    setCustomWeights(modulated);
+    debouncedRunSimulation(modulated);
+  };
 
   const handleWeightChange = (key: string, value: number) => {
     const newWeights = { ...customWeights, [key]: value };
@@ -437,6 +685,218 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
           <span className="text-xs font-bold text-slate-400 w-24 truncate">
             {scenarioBKey}
           </span>
+        </div>
+      </div>
+
+      {/* SECTION MODULATEUR DE BÉZIER & MINI BACKTEST HISTORIQUE */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 bg-slate-900/90 border border-slate-800 p-6 rounded-3xl backdrop-blur-md shadow-2xl">
+        <div className="md:col-span-5 flex flex-col items-center justify-between bg-slate-950/40 p-4 rounded-2xl border border-slate-800/80">
+          <div className="w-full flex justify-between items-center mb-3">
+            <span className="text-[11px] font-black text-indigo-400 uppercase tracking-widest">
+              Canvas de Bézier Interactif
+            </span>
+            <span className="text-[10px] font-mono text-slate-500">
+              P1: ({bezierCP.x1.toFixed(2)}, {bezierCP.y1.toFixed(2)}) | P2: ({bezierCP.x2.toFixed(2)}, {bezierCP.y2.toFixed(2)})
+            </span>
+          </div>
+
+          <div className="relative w-full aspect-square max-w-[240px] bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center p-2">
+            <svg
+              id="bezier-svg"
+              viewBox="0 0 240 240"
+              className="w-full h-full overflow-visible select-none"
+            >
+              {/* Background Grid Lines */}
+              <line x1="20" y1="75" x2="220" y2="75" stroke="#1e293b" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1="20" y1="120" x2="220" y2="120" stroke="#334155" strokeWidth="1" />
+              <line x1="20" y1="175" x2="220" y2="175" stroke="#1e293b" strokeWidth="1" strokeDasharray="3 3" />
+              
+              <line x1="75" y1="20" x2="75" y2="220" stroke="#1e293b" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1="120" y1="20" x2="120" y2="220" stroke="#334155" strokeWidth="1" />
+              <line x1="175" y1="20" x2="175" y2="220" stroke="#1e293b" strokeWidth="1" strokeDasharray="3 3" />
+
+              {/* Axis labels */}
+              <text x="25" y="215" fill="#475569" fontSize="9" fontWeight="bold">Fréquentiel</text>
+              <text x="185" y="35" fill="#475569" fontSize="9" fontWeight="bold">Profond</text>
+
+              {/* Connection Lines to Control Points */}
+              <line
+                x1="20"
+                y1="220"
+                x2={20 + bezierCP.x1 * 200}
+                y2={220 - bezierCP.y1 * 200}
+                stroke="#818cf8"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+              />
+              <line
+                x1="220"
+                y1="20"
+                x2={20 + bezierCP.x2 * 200}
+                y2={220 - bezierCP.y2 * 200}
+                stroke="#c084fc"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+              />
+
+              {/* The Bezier Curve Path */}
+              <path
+                d={`M 20 220 C ${20 + bezierCP.x1 * 200} ${220 - bezierCP.y1 * 200}, ${20 + bezierCP.x2 * 200} ${220 - bezierCP.y2 * 200}, 220 20`}
+                fill="none"
+                stroke="url(#bezierGradient)"
+                strokeWidth="4"
+              />
+
+              <defs>
+                <linearGradient id="bezierGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#6366f1" />
+                  <stop offset="100%" stopColor="#a855f7" />
+                </linearGradient>
+              </defs>
+
+              {/* Draggable Circle Handle 1 */}
+              <circle
+                cx={20 + bezierCP.x1 * 200}
+                cy={220 - bezierCP.y1 * 200}
+                r="10"
+                fill="#818cf8"
+                stroke="#ffffff"
+                strokeWidth="2.5"
+                className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                onMouseDown={() => setIsDraggingCP(1)}
+                onTouchStart={() => setIsDraggingCP(1)}
+              />
+
+              {/* Draggable Circle Handle 2 */}
+              <circle
+                cx={20 + bezierCP.x2 * 200}
+                cy={220 - bezierCP.y2 * 200}
+                r="10"
+                fill="#c084fc"
+                stroke="#ffffff"
+                strokeWidth="2.5"
+                className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                onMouseDown={() => setIsDraggingCP(2)}
+                onTouchStart={() => setIsDraggingCP(2)}
+              />
+            </svg>
+          </div>
+          <p className="text-[10px] text-slate-500 text-center mt-3 leading-relaxed">
+            Glissez les deux poignées colorées pour modifier continuement la courbure cybernétique.
+          </p>
+        </div>
+
+        <div className="md:col-span-7 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-5 text-indigo-400 shrink-0" />
+              <h3 className="text-base font-black text-white">Modulation Cybernétique de Bézier</h3>
+            </div>
+            <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+              Ce système applique un étalement continu non-linéaire sur les 20 algorithmes en séquence (du fréquentiel classique au deep learning).
+            </p>
+          </div>
+
+          {/* Preset Buttons */}
+          <div className="space-y-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
+              Profils Prédéfinis
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { id: "linear", label: "Linéaire Flat" },
+                { id: "ease-in-out", label: "Ease In-Out S-Curve" },
+                { id: "low-boost", label: "Structurel (Basse)" },
+                { id: "high-boost", label: "Profond (Haute)" },
+              ].map((preset) => (
+                <button
+                  key={preset.id}
+                  onClick={() => applyPreset(preset.id)}
+                  className={`px-3 py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                    activePreset === preset.id
+                      ? "bg-indigo-600/30 text-indigo-300 border-indigo-500"
+                      : "bg-slate-950/40 text-slate-400 border-slate-800/80 hover:bg-slate-950/80"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mini-Backtest Performance Panel */}
+          <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                Efficacité Baseline (Global)
+              </span>
+              <div className="text-2xl font-black text-slate-300">{baselineEfficiency}%</div>
+            </div>
+
+            <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-800/80 sm:pl-4">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                Efficacité Courante (What-If)
+              </span>
+              <div className="text-2xl font-black text-indigo-400">{currentEfficiency}%</div>
+            </div>
+
+            <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-800/80 sm:pl-4">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                Écart de Performance
+              </span>
+              <div className="flex items-center gap-1.5">
+                {currentEfficiency - baselineEfficiency >= 0 ? (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    ▲ +{(currentEfficiency - baselineEfficiency).toFixed(1)}%
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    ▼ {(currentEfficiency - baselineEfficiency).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Partial Derivatives Panel */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                Sensibilité de l'Efficacité (Dérivées Partielles ∂E / ∂W)
+              </span>
+              <span className="text-[9px] font-mono text-slate-400">ε = 0.05</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              {partialDerivatives.map((deriv) => {
+                const isPositive = deriv.value >= 0;
+                return (
+                  <div
+                    key={deriv.key}
+                    className="bg-slate-950/20 border border-slate-800/50 p-2.5 rounded-xl flex flex-col justify-between space-y-1"
+                  >
+                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-300">
+                      <span>{deriv.name}</span>
+                      <span className={isPositive ? "text-emerald-400" : "text-rose-400"}>
+                        {isPositive ? "+" : ""}{deriv.value.toFixed(2)}
+                      </span>
+                    </div>
+                    {/* Visual derivative bar */}
+                    <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden relative">
+                      <div
+                        className={`absolute top-0 h-full rounded-full transition-all duration-300 ${
+                          isPositive ? "bg-emerald-500 left-1/2" : "bg-rose-500 right-1/2"
+                        }`}
+                        style={{
+                          width: `${Math.min(50, Math.abs(deriv.value) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 

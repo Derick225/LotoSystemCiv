@@ -518,15 +518,6 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
               autopsyCount++;
           }
         }
-
-        if (autopsyCount > 0) {
-          try {
-              const { LearningService } = await import('./learningService');
-              await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
-          } catch (e) {
-              console.error("Self-learn trigger error:", e);
-          }
-        }
       }
       return; // Return if cloud logic works
     } catch (e) {
@@ -538,7 +529,6 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
   try {
     const { getPredictionHistoryAsync, linkPredictionToResult } = await import('./predictionHistoryService');
     const { performForensicAnalysis, saveForensicReport } = await import('./postPredictionAnalysisService');
-    const { LearningService } = await import('./learningService');
 
     const history = await lotteryService.fetchHistory(drawName);
     const resultToMatch = history.find((r) => r.date === normalizeDate(date) || r.id === resultId);
@@ -571,12 +561,10 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
     }
 
     if (autopsiesRun > 0) {
-       console.log(`[Auto-Learning] Déclenchement automatique après ${autopsiesRun} autopsie(s) effectuée(s).`);
+       console.log(`[Autopsie] ${autopsiesRun} autopsie(s) effectuée(s).`);
     } else {
-       console.log(`[Auto-Learning] Déclenchement automatique suite à l'enregistrement d'un nouveau tirage.`);
+       console.log(`[Autopsie] Enregistrement d'un nouveau tirage sans autopsie.`);
     }
-    // Auto-apprentissage automatique via Edge Function Self-Learn (ou fallback local)
-    await LearningService.triggerAutoLearning(normalizeDrawName(drawName));
   } catch (e) {
     console.error("Local automation trigger failed:", e);
   }

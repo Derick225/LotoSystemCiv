@@ -6,10 +6,6 @@ import {
   BettingStrategy,
 } from "../../services/backtestingEngine";
 import {
-  LearningService,
-  LearningStatus,
-} from "../../services/learningService";
-import {
   Play,
   RefreshCw,
   Trophy,
@@ -22,9 +18,11 @@ import {
   TrendingDown,
   Dna,
   Repeat,
+  Sliders,
 } from "lucide-react";
 import { ParallelSimulationTab } from "./ParallelSimulationTab";
 import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
+import { WhatIfSimulatorTab } from "./WhatIfSimulatorTab";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -53,13 +51,9 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
     const [mode, setMode] = useState<
-      "single" | "comparative" | "walkforward" | "replay"
+      "single" | "comparative" | "walkforward" | "replay" | "whatif"
     >("single");
     const [simulating, setSimulating] = useState(false);
-    const [learning, setLearning] = useState(false);
-    const [learningResult, setLearningResult] = useState<LearningStatus | null>(
-      null,
-    );
     const [progress, setProgress] = useState(0);
     const [report, setReport] = useState<BacktestReport | null>(null);
 
@@ -132,42 +126,6 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
       unitBet,
       payoutModel,
     ]);
-
-    const handleAutoRegulate = useCallback(async () => {
-      audioEngine.play("click");
-      setLearning(true);
-      setLearningResult(null);
-      try {
-        // CORRECTION CRITIQUE : on force l'enregistrement de l'amélioration s'il y en a une (force = true)
-        const result = await LearningService.triggerAutoLearning(
-          drawName,
-          globalWeights,
-          false,
-          true,
-        );
-        if (isMounted.current) {
-          setLearningResult(result);
-          if (result.improvement && result.weights) {
-            setGlobalWeights(result.weights);
-            audioEngine.play("success");
-          } else {
-            audioEngine.play("error");
-          }
-          setLearning(false);
-        }
-      } catch (e) {
-        console.error(e);
-        audioEngine.play("error");
-        if (isMounted.current) {
-          setLearning(false);
-          setLearningResult({
-            lastRun: new Date().toISOString(),
-            improvement: false,
-            message: `Échec de l'optimisation cybernétique : ${e instanceof Error ? e.message : String(e)}`,
-          });
-        }
-      }
-    }, [drawName, globalWeights, setGlobalWeights]);
 
     const handleRunWalkForward = useCallback(async () => {
       if (history.length < 10) return;
@@ -293,10 +251,23 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
             >
               <Repeat size={14} /> Replay Déterministe
             </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setMode("whatif");
+              }}
+              className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 shrink-0 ${mode === "whatif" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+            >
+              <Sliders size={14} /> Simulateur What-If
+            </button>
           </div>
         </div>
 
-        {mode === "replay" ? (
+        {mode === "whatif" ? (
+          <div className="animate-slide-up">
+            <WhatIfSimulatorTab drawName={drawName} />
+          </div>
+        ) : mode === "replay" ? (
           <div className="animate-slide-up">
             <DeterministicReplayInspector drawName={drawName} />
           </div>
@@ -478,142 +449,12 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
                       ? `Calcul en cours ${progress}%`
                       : "Lancer la Simulation"}
                   </button>
-                  <button
-                    onClick={handleAutoRegulate}
-                    disabled={learning || simulating}
-                    className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-inner border border-slate-700 flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group/btn2"
-                  >
-                    {learning ? (
-                      <RefreshCw
-                        className="animate-spin text-indigo-400"
-                        size={16}
-                      />
-                    ) : (
-                      <Dna
-                        size={16}
-                        className="group-hover/btn2:rotate-12 transition-transform"
-                      />
-                    )}
-                    {learning
-                      ? "Régulation génétique..."
-                      : "Auto-Réguler l'ADN"}
-                  </button>
                   {simulating && (
                     <div className="absolute -bottom-2 left-2 right-2 h-1 bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-indigo-500 transition-all duration-300"
                         style={{ width: `${progress}%` }}
                       ></div>
-                    </div>
-                  )}
-
-                  {/* Panneau de Feedback de l'Auto-Régulation de l'ADN */}
-                  {learningResult && (
-                    <div className="mt-6 text-left bg-slate-950/80 p-6 rounded-3xl border border-slate-800/80 shadow-2xl animate-scale-in w-full">
-                      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/60">
-                        <div className="flex items-center gap-2">
-                          <Dna
-                            className={
-                              learningResult.improvement
-                                ? "text-emerald-400 animate-pulse"
-                                : "text-slate-400"
-                            }
-                            size={18}
-                          />
-                          <span className="text-[10px] font-black uppercase text-slate-300 tracking-wider">
-                            Rapport d'Auto-Régulation ADN
-                          </span>
-                        </div>
-                        <span
-                          className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                            learningResult.improvement
-                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                              : "bg-slate-500/10 text-slate-400 border-slate-500/20"
-                          }`}
-                        >
-                          {learningResult.improvement
-                            ? "Optimisé"
-                            : "Déjà Optimal"}
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-slate-300 font-medium mb-4 leading-relaxed">
-                        {learningResult.message}
-                      </p>
-
-                      {learningResult.criticalDecision && (
-                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800/40 text-[11px] text-indigo-300 leading-relaxed font-semibold mb-4">
-                          {learningResult.criticalDecision}
-                        </div>
-                      )}
-
-                      {/* Comparaison Champion-Challenger */}
-                      {learningResult.oldScore !== undefined &&
-                        learningResult.newScore !== undefined && (
-                          <div className="grid grid-cols-2 gap-4 mb-4 pt-2">
-                            <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
-                              <span className="text-[8px] font-bold uppercase text-slate-500 block mb-1">
-                                Efficacité Avant
-                              </span>
-                              <span className="text-sm font-black text-slate-400">
-                                {learningResult.oldScore.toFixed(2)} pts
-                              </span>
-                            </div>
-                            <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/50 text-center">
-                              <span className="text-[8px] font-bold uppercase text-emerald-500 block mb-1">
-                                Efficacité Après
-                              </span>
-                              <span className="text-sm font-black text-emerald-400">
-                                {learningResult.newScore.toFixed(2)} pts{" "}
-                                {learningResult.improvement &&
-                                  `(+${learningResult.delta}%)`}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                      {/* Détail des changements de l'ADN */}
-                      {learningResult.weightChanges &&
-                        Object.keys(learningResult.weightChanges).length >
-                          0 && (
-                          <div className="space-y-2 mt-4 pt-2 border-t border-slate-800/40">
-                            <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider block mb-2">
-                              Réajustement des Poids IA
-                            </span>
-                            <div className="grid grid-cols-2 gap-2 text-[10px]">
-                              {Object.entries(learningResult.weightChanges).map(
-                                ([algo, change]) => {
-                                  const absChangePercent = Math.abs(
-                                    change * 100,
-                                  ).toFixed(1);
-                                  return (
-                                    <div
-                                      key={algo}
-                                      className="flex items-center justify-between bg-slate-900/30 px-3 py-2 rounded-xl border border-slate-800/30"
-                                    >
-                                      <span className="text-slate-400 capitalize font-medium">
-                                        {algo}
-                                      </span>
-                                      {change > 0.001 ? (
-                                        <span className="text-emerald-400 font-bold font-mono">
-                                          +{absChangePercent}%
-                                        </span>
-                                      ) : change < -0.001 ? (
-                                        <span className="text-rose-400 font-bold font-mono">
-                                          -{absChangePercent}%
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-500 font-bold font-mono">
-                                          0.0%
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                },
-                              )}
-                            </div>
-                          </div>
-                        )}
                     </div>
                   )}
                 </div>

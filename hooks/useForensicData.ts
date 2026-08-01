@@ -10,6 +10,7 @@ import { syncForensicReports } from '../services/syncService';
 
 export const useForensicData = (drawName: string) => {
     const history = useNexusStore((state) => state.history);
+    const storeDrawName = useNexusStore((state) => state.drawName);
     const { showToast } = useToast();
     const [reports, setReports] = useState<ForensicReport[]>([]);
     const [pendingPredictions, setPendingPredictions] = useState<PredictionHistoryItem[]>([]);
@@ -18,6 +19,11 @@ export const useForensicData = (drawName: string) => {
     const [refreshKey, setRefreshKey] = useState(0);
 
     const loadData = useCallback(async () => {
+        if (storeDrawName && storeDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
+            console.warn(`[StrictDrawIsolationGuard] useForensicData loadData rejected because storeDrawName "${storeDrawName}" !== active drawName "${drawName}"`);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
             // 1. Charger les rapports locaux
@@ -178,7 +184,7 @@ export const useForensicData = (drawName: string) => {
         } finally {
             setLoading(false);
         }
-    }, [drawName, history, showToast]);
+    }, [drawName, storeDrawName, history, showToast]);
 
     useEffect(() => {
         loadData();

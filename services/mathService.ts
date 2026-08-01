@@ -1,4 +1,5 @@
 
+import { useNexusStore } from '../store/useNexusStore';
 import { workerService } from './workerService';
 import { computeTransferEntropy, runSpectral, denoiseFeaturesKernelPCA, runContinuousWaveletTransformAnalysis } from './mathCore';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
@@ -26,9 +27,20 @@ export const calculateFrequency = (history: DrawResult[], number: number, limit:
 const mathCache = new Map<string, { timestamp: number; data: unknown }>();
 const CACHE_TTL = 30000; // 30 seconds for math results
 
-const getCached = <T,>(key: string): T | null => {
+const getCached = <T,>(key: string, expectedDrawName?: string): T | null => {
     const cached = mathCache.get(key);
-    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) return cached.data as T;
+    if (!cached) return null;
+
+    if (expectedDrawName) {
+        const normalizedExpected = expectedDrawName.trim().toLowerCase();
+        const keyLower = key.toLowerCase();
+        if (!keyLower.includes(normalizedExpected)) {
+            console.warn(`[StrictDrawIsolationGuard] Rejected cache entry for key "${key}" because it does not match expected draw "${expectedDrawName}"`);
+            return null;
+        }
+    }
+
+    if (Date.now() - cached.timestamp < CACHE_TTL) return cached.data as T;
     return null;
 };
 
@@ -1160,8 +1172,17 @@ const computeDFT = (signal: number[]): number => {
 export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     if (history.length === 0) return [];
     
-    const cacheKey = `spectral_${history[0].drawName}_${history[0].id}_${history.length}`;
-    const cached = getCached<SpectralMetric[]>(cacheKey);
+    const activeDrawName = useNexusStore.getState().drawName;
+    const historyDrawName = history[0].drawName || history[0].draw_name || "";
+    
+    // Strict Draw Isolation Guard
+    if (activeDrawName && historyDrawName && activeDrawName.trim().toLowerCase() !== historyDrawName.trim().toLowerCase()) {
+        console.warn(`[StrictDrawIsolationGuard] Rejected spectral calculation: active draw "${activeDrawName}" does not match history draw "${historyDrawName}"`);
+        return [];
+    }
+    
+    const cacheKey = `spectral_${historyDrawName}_${history[0].id}_${history.length}`;
+    const cached = getCached<SpectralMetric[]>(cacheKey, activeDrawName);
     if (cached) return cached;
 
     if (typeof window !== 'undefined' && workerService.isAvailable()) {
@@ -1179,8 +1200,17 @@ export const calculateSpectralMetricsAsync = async (history: DrawResult[]): Prom
 export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promise<SpectralMetric[]> => {
     if (history.length === 0) return [];
     
-    const cacheKey = `wavelet_${history[0].drawName}_${history[0].id}_${history.length}`;
-    const cached = getCached<SpectralMetric[]>(cacheKey);
+    const activeDrawName = useNexusStore.getState().drawName;
+    const historyDrawName = history[0].drawName || history[0].draw_name || "";
+    
+    // Strict Draw Isolation Guard
+    if (activeDrawName && historyDrawName && activeDrawName.trim().toLowerCase() !== historyDrawName.trim().toLowerCase()) {
+        console.warn(`[StrictDrawIsolationGuard] Rejected wavelet calculation: active draw "${activeDrawName}" does not match history draw "${historyDrawName}"`);
+        return [];
+    }
+    
+    const cacheKey = `wavelet_${historyDrawName}_${history[0].id}_${history.length}`;
+    const cached = getCached<SpectralMetric[]>(cacheKey, activeDrawName);
     if (cached) return cached;
 
     if (typeof window !== 'undefined' && workerService.isAvailable()) {
@@ -1198,8 +1228,17 @@ export const calculateWaveletMetricsAsync = async (history: DrawResult[]): Promi
 export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promise<FractalMetric[]> => {
     if (history.length === 0) return [];
     
-    const cacheKey = `fractal_${history[0].drawName}_${history[0].id}_${history.length}`;
-    const cached = getCached<FractalMetric[]>(cacheKey);
+    const activeDrawName = useNexusStore.getState().drawName;
+    const historyDrawName = history[0].drawName || history[0].draw_name || "";
+    
+    // Strict Draw Isolation Guard
+    if (activeDrawName && historyDrawName && activeDrawName.trim().toLowerCase() !== historyDrawName.trim().toLowerCase()) {
+        console.warn(`[StrictDrawIsolationGuard] Rejected fractal calculation: active draw "${activeDrawName}" does not match history draw "${historyDrawName}"`);
+        return [];
+    }
+    
+    const cacheKey = `fractal_${historyDrawName}_${history[0].id}_${history.length}`;
+    const cached = getCached<FractalMetric[]>(cacheKey, activeDrawName);
     if (cached) return cached;
 
     if (typeof window !== 'undefined' && workerService.isAvailable()) {
@@ -1217,8 +1256,17 @@ export const calculateFractalMetricsAsync = async (history: DrawResult[]): Promi
 export const calculateCorrelationMatrixAsync = async (history: DrawResult[]): Promise<Record<number, { affinities: Record<number, number> }>> => {
     if (history.length === 0) return {};
     
-    const cacheKey = `correlation_${history[0].drawName}_${history[0].id}_${history.length}`;
-    const cached = getCached<Record<number, { affinities: Record<number, number> }>>(cacheKey);
+    const activeDrawName = useNexusStore.getState().drawName;
+    const historyDrawName = history[0].drawName || history[0].draw_name || "";
+    
+    // Strict Draw Isolation Guard
+    if (activeDrawName && historyDrawName && activeDrawName.trim().toLowerCase() !== historyDrawName.trim().toLowerCase()) {
+        console.warn(`[StrictDrawIsolationGuard] Rejected correlation calculation: active draw "${activeDrawName}" does not match history draw "${historyDrawName}"`);
+        return {};
+    }
+    
+    const cacheKey = `correlation_${historyDrawName}_${history[0].id}_${history.length}`;
+    const cached = getCached<Record<number, { affinities: Record<number, number> }>>(cacheKey, activeDrawName);
     if (cached) return cached;
 
     const matrix: Record<number, { affinities: Record<number, number> }> = {};

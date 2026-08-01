@@ -133,21 +133,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
           <div className="w-full flex flex-col xs:flex-row xs:absolute xs:top-6 xs:left-6 xs:right-6 justify-between items-center gap-3 z-10 mb-8 xs:mb-0 xs:px-6">
             <div className="flex gap-2">
               <button
-                onClick={handleOptimizeWeights}
-                disabled={isOptimizing}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-full border bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-full xs:w-auto text-center"
-              >
-                <BrainCircuit
-                  size={14}
-                  className={
-                    isOptimizing ? "animate-pulse text-indigo-500" : ""
-                  }
-                />
-                <span className="text-xs font-semibold uppercase tracking-wider">
-                  {isOptimizing ? "Calibrage..." : "Auto-Tune"}
-                </span>
-              </button>
-              <button
                 onClick={() => setIsTrainingDashboardOpen(true)}
                 className="flex items-center justify-center gap-2 px-4 py-2 rounded-full border bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors w-full xs:w-auto text-center"
               >

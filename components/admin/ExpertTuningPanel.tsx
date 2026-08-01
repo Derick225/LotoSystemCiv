@@ -8,8 +8,8 @@ import {
   getAlgoWeights,
   getStrategyName,
 } from "../../services/predictionEngine";
-import { LearningService } from "../../services/learningService";
 import { runBayesianOptimization } from "../../services/bayesianOptimizer";
+import { runSimulatedAnnealingOptimization } from "../../services/simulatedAnnealingOptimizer";
 import type { AlgoWeights, AdaptiveRules } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { useToast } from "../ui/Toast";
@@ -30,6 +30,7 @@ import {
   Scan,
   Server,
   Cloud,
+  Flame,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { getLocalForensicReports } from "../../services/postPredictionAnalysisService";
@@ -64,6 +65,13 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
   const [bayesProgress, setBayesProgress] = useState<{
     progress: number;
     score: number;
+  } | null>(null);
+  const [isAnnealing, setIsAnnealing] = useState(false);
+  const [annealingProgress, setAnnealingProgress] = useState<{
+    progress: number;
+    bestScore: number;
+    currentScore: number;
+    temperature: number;
   } | null>(null);
   const [lastLearnStatus, setLastLearnStatus] = useState<string | null>(null);
   const [dnaName, setDnaName] = useState<string>("Chargement...");
@@ -172,83 +180,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     showToast("Tensor Flow équilibré (Σ = 1.0).", "info");
   };
 
-  const handleDeepLearning = async () => {
-    audioEngine.play("scan");
-    if (history.length < 20) {
-      audioEngine.play("error");
-      showToast(
-        "Données insuffisantes pour le Deep Learning (Min 20).",
-        "error",
-      );
-      return;
-    }
-
-    setIsCalibrating(true);
-    showToast(`🧬 Mutation génétique pour ${selectedDrawName}...`, "info");
-
-    try {
-      const result = await LearningService.triggerAutoLearning(
-        selectedDrawName,
-        undefined,
-        false,
-        true,
-      );
-
-      if (result.improvement && result.weights) {
-        if (result.requiresHumanValidation) {
-          audioEngine.play("error");
-          const confirmValidation = window.confirm(
-            `[🚨 Human-in-the-Loop] L'agent RL a détecté une déviation critique (+${result.delta}%).\n\nCette modification entraîne un changement structurel de la matrice (Rejet par mini-backtest évité, mais shift majeur constaté).\n\nSouhaitez-vous appliquer ces nouveaux poids ?`,
-          );
-
-          if (!confirmValidation) {
-            showToast("Validation humaine annulée. Poids rejetés.", "info");
-            setIsCalibrating(false);
-            return;
-          }
-          // Validate and bypassHITL on second save
-          await LearningService.triggerAutoLearning(
-            selectedDrawName,
-            undefined,
-            true,
-          );
-        }
-
-        const safeWeights = normalizeWeights(result.weights);
-        setLocalWeights(safeWeights);
-        setDnaName(getStrategyName(safeWeights));
-
-        // Sauvegarde immédiate
-        await saveAlgoWeights(selectedDrawName, safeWeights);
-        if (selectedDrawName === activeDrawName) {
-          await updateGlobalWeights(safeWeights);
-          await refreshData(selectedDrawName, true); // Force le recalcul
-        }
-
-        audioEngine.play("success");
-        showToast(
-          `✅ ADN optimisé avec succès (Contextual Bandit RL).`,
-          "success",
-        );
-        const nowStr = new Date().toLocaleTimeString();
-        setLastLearnStatus(nowStr);
-        localStorage.setItem(`nexus_last_learn_${selectedDrawName}`, nowStr);
-        setIsDirty(false);
-      } else {
-        audioEngine.play("error");
-        showToast(
-          result.message || "Aucune amélioration significative.",
-          "info",
-        );
-      }
-    } catch (e) {
-      audioEngine.play("error");
-      showToast("Rupture du lien d'apprentissage.", "error");
-    } finally {
-      setIsCalibrating(false);
-    }
-  };
-
   const handleBayesianOptimization = async () => {
     audioEngine.play("scan");
     if (history.length < 25) {
@@ -309,34 +240,62 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     }
   };
 
-  const handleRollback = async () => {
-    audioEngine.play("scan");
-    const history = await LearningService.getWeightHistory(selectedDrawName);
-    if (history.length === 0) {
-      showToast("Aucun point de restauration disponible.", "error");
+  const handleSimulatedAnnealing = async () => {
+    if (!selectedDrawName) return;
+    if (history.length < 5) {
+      showToast(
+        "Historique de tirages insuffisant (minimum de 5 tirages requis pour calibrer l'algorithme).",
+        "error",
+      );
       return;
     }
 
-    const latestVersion = history[0];
-    const confirmRollback = window.confirm(
-      `Voulez-vous annuler la dernière fusion et restaurer la version du ${new Date(latestVersion.timestamp).toLocaleString()} ?`,
-    );
-    if (confirmRollback) {
-      const restored = await LearningService.rollbackWeights(
+    setIsAnnealing(true);
+    setAnnealingProgress({ progress: 0, bestScore: 0, currentScore: 0, temperature: 0 });
+    showToast(`🌡️ Optimisation par Recuit Simulé déterministe lancée...`, "info");
+
+    try {
+      const result = await runSimulatedAnnealingOptimization(
         selectedDrawName,
-        latestVersion.id,
+        localWeights,
+        {
+          historyDepth: temporalDepth
+        },
+        (prog) => {
+          setAnnealingProgress(prog);
+        },
       );
-      if (restored) {
-        setLocalWeights(restored);
-        setDnaName(getStrategyName(restored));
-        await updateGlobalWeights(restored, selectedDrawName);
+
+      if (result.improvement > 0) {
+        setLocalWeights(result.bestWeights);
+        setDnaName(getStrategyName(result.bestWeights));
+
+        await saveAlgoWeights(selectedDrawName, result.bestWeights);
         if (selectedDrawName === activeDrawName) {
+          await updateGlobalWeights(result.bestWeights);
           await refreshData(selectedDrawName, true);
         }
-        showToast("Restauration réussie.", "success");
+
         audioEngine.play("success");
+        showToast(
+          `✅ Recuit Simulé validé (+${result.improvement.toFixed(1)} Pts d'ajustement).`,
+          "success",
+        );
         setIsDirty(false);
+      } else {
+        audioEngine.play("error");
+        showToast("Aucune meilleure configuration trouvée par le recuit simulé.", "info");
       }
+    } catch (e: unknown) {
+      audioEngine.play("error");
+      showToast(
+        (e instanceof Error ? e.message : String(e)) ||
+          "Erreur lors de l'optimisation par recuit.",
+        "error",
+      );
+    } finally {
+      setIsAnnealing(false);
+      setAnnealingProgress(null);
     }
   };
 
@@ -478,95 +437,94 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       <div className="bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative group">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/5 rounded-full blur-[120px] pointer-events-none group-hover:bg-indigo-600/10 transition-colors duration-500"></div>
 
-        <div className="bg-slate-900/80 backdrop-blur-md p-6 md:p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-6 w-full md:w-auto">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 shrink-0">
-              <Dna size={32} className="text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
-                  Console Neurale
-                </h2>
-                <span className="px-3 py-1 bg-white/5 rounded-full text-[10px] font-black uppercase text-slate-400 border border-white/5">
-                  {selectedDrawName}
-                </span>
+        <div className="bg-slate-900/80 backdrop-blur-md p-6 md:p-8 border-b border-white/5 flex flex-col gap-6">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-6 w-full">
+            <div className="flex items-center gap-6 w-full md:w-auto">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 shrink-0">
+                <Dna size={32} className="text-white" />
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">
-                  {dnaName}
-                </span>
-                {lastLearnStatus && (
-                  <span className="text-[10px] text-emerald-500 font-medium ml-2 flex items-center gap-1">
-                    <CheckCircle2 size={10} /> Synchro {lastLearnStatus}
+              <div>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
+                    Console Neurale
+                  </h2>
+                  <span className="px-3 py-1 bg-white/5 rounded-full text-[10px] font-black uppercase text-slate-400 border border-white/5">
+                    {selectedDrawName}
                   </span>
-                )}
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">
+                    {dnaName}
+                  </span>
+                  {lastLearnStatus && (
+                    <span className="text-[10px] text-emerald-500 font-medium ml-2 flex items-center gap-1">
+                      <CheckCircle2 size={10} /> Synchro {lastLearnStatus}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2 w-full md:w-auto mt-4 md:mt-0 justify-stretch md:justify-end">
-            <button
-              onClick={handleApplyForensicPatches}
-              className="flex-1 md:flex-none justify-center bg-white/5 hover:bg-white/10 text-slate-300 px-3 py-3 md:px-6 md:py-4 rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest border border-white/5 transition-all flex items-center gap-1.5 md:gap-2"
-              title="Appliquer les suggestions Forensic"
-            >
-              <Microscope
-                size={14}
-                className="text-rose-500 shrink-0 md:w-4 md:h-4"
-              />
-              <span className="whitespace-nowrap">Patch</span>
-            </button>
-            <button
-              onClick={handleRollback}
-              className="flex-1 md:flex-none justify-center bg-white/5 hover:bg-rose-500/10 text-slate-300 hover:text-rose-400 px-3 py-3 md:px-6 md:py-4 rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest border border-white/5 transition-all flex items-center gap-1.5 md:gap-2"
-              title="Rollback (Annuler la dernière mutation)"
-            >
-              <RefreshCw size={14} className="shrink-0 md:w-4 md:h-4" />
-              <span className="whitespace-nowrap">Rollback</span>
-            </button>
-            <button
-              onClick={handleBayesianOptimization}
-              disabled={isCalibrating}
-              className="flex-1 md:flex-none justify-center px-3 py-3 md:px-6 md:py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-1.5 md:gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-w-[130px]"
-              title="Optimisation Bayésienne TPE"
-            >
-              {isCalibrating && bayesProgress !== null ? (
-                <RefreshCw
-                  className="animate-spin shrink-0 md:w-4 md:h-4"
+            <div className="flex flex-wrap gap-2 w-full md:w-auto mt-4 md:mt-0 justify-stretch md:justify-end">
+              <button
+                onClick={handleApplyForensicPatches}
+                disabled={isCalibrating || isAnnealing}
+                className="flex-1 md:flex-none justify-center bg-white/5 hover:bg-white/10 text-slate-300 px-3 py-3 md:px-6 md:py-4 rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest border border-white/5 transition-all flex items-center gap-1.5 md:gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Appliquer les suggestions Forensic"
+              >
+                <Microscope
                   size={14}
+                  className="text-rose-500 shrink-0 md:w-4 md:h-4"
                 />
-              ) : (
-                <Scan size={14} className="shrink-0 md:w-4 md:h-4" />
-              )}
-              <span className="whitespace-nowrap">
-                {isCalibrating && bayesProgress !== null
-                  ? `TPE: ${bayesProgress.progress}%`
-                  : "Bayes-Tune"}
-              </span>
-            </button>
-            <button
-              onClick={handleDeepLearning}
-              disabled={isCalibrating}
-              className="flex-1 md:flex-none justify-center px-3 py-3 md:px-6 md:py-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-1.5 md:gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-w-[130px]"
-            >
-              {isCalibrating && !bayesProgress ? (
-                <RefreshCw
-                  className="animate-spin shrink-0 md:w-4 md:h-4"
-                  size={14}
-                />
-              ) : (
-                <BrainCircuit size={14} className="shrink-0 md:w-4 md:h-4" />
-              )}
-              <span className="whitespace-nowrap">
-                {isCalibrating && !bayesProgress ? "Mutation..." : "Auto-Learn"}
-              </span>
-            </button>
+                <span className="whitespace-nowrap">Patch</span>
+              </button>
+              <button
+                onClick={handleBayesianOptimization}
+                disabled={isCalibrating || isAnnealing}
+                className="flex-1 md:flex-none justify-center px-3 py-3 md:px-6 md:py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-1.5 md:gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-w-[130px]"
+                title="Optimisation Bayésienne TPE"
+              >
+                {isCalibrating && bayesProgress !== null ? (
+                  <RefreshCw
+                    className="animate-spin shrink-0 md:w-4 md:h-4"
+                    size={14}
+                  />
+                ) : (
+                  <Scan size={14} className="shrink-0 md:w-4 md:h-4" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isCalibrating && bayesProgress !== null
+                    ? `TPE: ${bayesProgress.progress}%`
+                    : "Bayes-Tune"}
+                </span>
+              </button>
+              <button
+                onClick={handleSimulatedAnnealing}
+                disabled={isCalibrating || isAnnealing}
+                className="flex-1 md:flex-none justify-center px-3 py-3 md:px-6 md:py-4 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white rounded-xl md:rounded-2xl font-black text-[9px] md:text-[10px] uppercase tracking-widest shadow-lg flex items-center gap-1.5 md:gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-w-[130px]"
+                title="Optimisation par Recuit Simulé déterministe"
+              >
+                {isAnnealing && annealingProgress !== null ? (
+                  <RefreshCw
+                    className="animate-spin shrink-0 md:w-4 md:h-4"
+                    size={14}
+                  />
+                ) : (
+                  <Flame size={14} className="shrink-0 md:w-4 md:h-4" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isAnnealing && annealingProgress !== null
+                    ? `SA: ${annealingProgress.progress}%`
+                    : "SA-Tune"}
+                </span>
+              </button>
+            </div>
           </div>
+          
           {bayesProgress && (
-            <div className="mt-4 px-2">
+            <div className="w-full px-2">
               <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-teal-400 mb-2">
-                <span>Optimisation Bayésienne</span>
+                <span>Optimisation Bayésienne TPE</span>
                 <span>
                   Meilleur Score: {bayesProgress.score.toFixed(1)} Pts
                 </span>
@@ -575,6 +533,23 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                 <div
                   className="h-full bg-teal-500 transition-all duration-300"
                   style={{ width: `${bayesProgress.progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {annealingProgress && (
+            <div className="w-full px-2">
+              <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-amber-400 mb-2">
+                <span>Recuit Simulé Déterministe</span>
+                <span>
+                  Temp: {annealingProgress.temperature.toFixed(4)} | Score: {annealingProgress.bestScore.toFixed(1)} Pts
+                </span>
+              </div>
+              <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                  style={{ width: `${annealingProgress.progress}%` }}
                 />
               </div>
             </div>
