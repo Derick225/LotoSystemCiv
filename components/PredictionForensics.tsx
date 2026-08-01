@@ -55,6 +55,31 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     );
   };
 
+  const handleFeedback = async (rating: "positive" | "neutral" | "negative") => {
+    if (!report.predictionId) {
+      showToast("ID de prédiction manquant", "error");
+      return;
+    }
+
+    const userRating: "Visionnaire" | "Standard" | "Incohérente" = 
+      rating === "positive" ? "Visionnaire" : 
+      rating === "neutral" ? "Standard" : 
+      "Incohérente";
+
+    try {
+      audioEngine.play("click");
+      await updatePredictionFeedback(report.predictionId, {
+        userRating,
+        keyLearning: "Ajustement suite à l'autopsie forensique",
+        userComment: ""
+      });
+      await applyBayesianForensicFeedback(report.drawName, report, userRating);
+      showToast("Retour enregistré, poids ajustés (RLHF)", "success");
+    } catch (e) {
+      showToast("Erreur lors de l'enregistrement", "error");
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
       <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col my-auto max-h-[90vh]">
@@ -203,6 +228,41 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 )}
               </div>
 
+              {/* RLHF Section */}
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-indigo-500/30 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]">
+                <h4 className="font-black text-slate-800 dark:text-white uppercase text-[10px] tracking-wider flex items-center gap-2 mb-3">
+                  <Brain size={14} className="text-indigo-500" />
+                  RLHF (Reinforcement Learning from Human Feedback)
+                </h4>
+                <p className="text-[10px] text-slate-500 mb-4 leading-relaxed">
+                  Évaluez la qualité de cette prédiction. Vos retours ajusteront
+                  directement les poids algorithmiques via le moteur de
+                  Bayes-Markov pour les prochains tirages.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => handleFeedback("positive")}
+                    className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 rounded-xl flex flex-col items-center gap-1 transition-all"
+                  >
+                    <ThumbsUp size={16} />
+                    <span className="text-[9px] font-bold uppercase">Succès</span>
+                  </button>
+                  <button
+                    onClick={() => handleFeedback("neutral")}
+                    className="p-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 rounded-xl flex flex-col items-center gap-1 transition-all"
+                  >
+                    <Meh size={16} />
+                    <span className="text-[9px] font-bold uppercase">Passable</span>
+                  </button>
+                  <button
+                    onClick={() => handleFeedback("negative")}
+                    className="p-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 rounded-xl flex flex-col items-center gap-1 transition-all"
+                  >
+                    <ThumbsDown size={16} />
+                    <span className="text-[9px] font-bold uppercase">Échec</span>
+                  </button>
+                </div>
+              </div>
 
             </div>
           </div>

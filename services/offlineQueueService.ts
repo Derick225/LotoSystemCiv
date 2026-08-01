@@ -91,15 +91,21 @@ class OfflineQueueService {
 
       const { data: { user } } = await supabase.auth.getUser();
 
-      for (const key of queueKeys) {
-        const raw = await get(key);
+      const { getMany, delMany, setMany } = await import('idb-keyval');
+      const values = await getMany(queueKeys);
+      const keysToDelete: string[] = [];
+      const entriesToUpdate: [string, any][] = [];
+
+      for (let i = 0; i < values.length; i++) {
+        const raw = values[i];
+        const key = queueKeys[i];
         if (!raw) continue;
 
         let item: OfflineQueueItem;
         try {
           item = typeof raw === 'string' ? JSON.parse(raw) : raw;
         } catch {
-          await del(key);
+          keysToDelete.push(key);
           continue;
         }
 
@@ -132,19 +138,27 @@ class OfflineQueueService {
         }
 
         if (syncSuccess) {
-          await del(key);
+          keysToDelete.push(key);
           processed++;
         } else {
           item.attempts += 1;
           if (item.attempts >= 5) {
-            await del(key);
+            keysToDelete.push(key);
             errors++;
           } else {
-            await set(key, JSON.stringify(item));
+            entriesToUpdate.push([key, JSON.stringify(item)]);
             errors++;
           }
         }
       }
+      
+      if (keysToDelete.length > 0) {
+          await delMany(keysToDelete);
+      }
+      if (entriesToUpdate.length > 0) {
+          await setMany(entriesToUpdate);
+      }
+      
     } catch (err) {
       console.error('[OfflineQueue] Erreur critique durant la réconciliation :', err);
     } finally {

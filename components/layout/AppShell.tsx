@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { MarqueeTicker } from "../ui/MarqueeTicker";
 import { useNexusStore } from "../../store/useNexusStore";
+import { useSyncStatus } from "../../hooks/useSyncStatus";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { InstallButton } from "../ui/InstallButton";
@@ -57,6 +58,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const isFocusMode = useNexusStore((state) => state.isFocusMode);
   const setFocusMode = useNexusStore((state) => state.setFocusMode);
+  const { dbConnection, isSyncing } = useSyncStatus();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -266,6 +268,24 @@ export const AppShell: React.FC<AppShellProps> = ({
                   <WifiOff size={12} />
                   <span className="text-[10px] font-black tracking-widest">
                     HORS LIGNE
+                  </span>
+                </div>
+              )}
+              {!isOffline && (
+                <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full ml-2 border transition-colors ${
+                  dbConnection === 'connected' 
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+                    : dbConnection === 'checking' || isSyncing
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                      : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                }`}>
+                  <Activity size={12} className={dbConnection === 'checking' || isSyncing ? "animate-pulse" : ""} />
+                  <span className="text-[10px] font-black tracking-widest uppercase">
+                    {dbConnection === 'connected' 
+                      ? (isSyncing ? "SYNC..." : "DB LINKED") 
+                      : dbConnection === 'checking' 
+                        ? "CHECK..." 
+                        : "DB UNLINKED"}
                   </span>
                 </div>
               )}

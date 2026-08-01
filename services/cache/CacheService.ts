@@ -193,7 +193,12 @@ class CacheService {
         const keysToDelete = allKeys.filter(
           (k) => typeof k === "string" && k.startsWith(prefix),
         ) as string[];
-        await Promise.all(keysToDelete.map((k) => del(k)));
+        
+        if (keysToDelete.length > 0) {
+            import('idb-keyval').then(({ delMany }) => {
+                delMany(keysToDelete).catch(e => console.warn(e));
+            });
+        }
       } catch (e) {
         console.warn(
           `[CacheService] Prefix invalidation failed for ${prefix}`,
@@ -287,14 +292,24 @@ class CacheService {
     if (CACHE_FLAGS.ENABLE_IDB) {
       try {
         const allKeys = await idbKeys();
-        for (const key of allKeys) {
-          if (typeof key === "string") {
-            const entry = await get<CacheEntry<any>>(key);
-            if (entry && !this.isValid(entry)) {
-              await del(key);
-              clearedCount++;
+        const stringKeys = allKeys.filter(k => typeof k === 'string') as string[];
+        
+        if (stringKeys.length > 0) {
+            const { getMany, delMany } = await import('idb-keyval');
+            const values = await getMany(stringKeys);
+            const keysToDelete: string[] = [];
+            
+            for (let i = 0; i < values.length; i++) {
+                const entry = values[i];
+                if (entry && !this.isValid(entry as CacheEntry<any>)) {
+                    keysToDelete.push(stringKeys[i]);
+                }
             }
-          }
+            
+            if (keysToDelete.length > 0) {
+                await delMany(keysToDelete);
+                clearedCount += keysToDelete.length;
+            }
         }
       } catch (e) {
         console.warn("[CacheService] GC Error on IDB:", e);
@@ -331,16 +346,24 @@ class CacheService {
           (k) => typeof k === "string" && k.startsWith(prefix),
         ) as string[];
 
-        for (const key of domainKeys) {
-          if (!this.memoryCache.has(key)) {
-            const entry = await get<CacheEntry<T>>(key);
-            if (entry && this.isValid(entry)) {
-              if (CACHE_FLAGS.ENABLE_MEMORY) this.memoryCache.set(key, entry);
-              results.push(entry.data);
-            } else if (entry) {
-              await del(key);
+        const keysToFetch = domainKeys.filter(k => !this.memoryCache.has(k));
+        if (keysToFetch.length > 0) {
+            const { getMany, delMany } = await import('idb-keyval');
+            const values = await getMany(keysToFetch);
+            const keysToDelete: string[] = [];
+            
+            for (let i = 0; i < values.length; i++) {
+                const entry = values[i] as CacheEntry<T> | undefined;
+                if (entry && this.isValid(entry)) {
+                    if (CACHE_FLAGS.ENABLE_MEMORY) this.memoryCache.set(keysToFetch[i], entry);
+                    results.push(entry.data);
+                } else if (entry) {
+                    keysToDelete.push(keysToFetch[i]);
+                }
             }
-          }
+            if (keysToDelete.length > 0) {
+                await delMany(keysToDelete);
+            }
         }
       } catch (e) {
         console.warn(

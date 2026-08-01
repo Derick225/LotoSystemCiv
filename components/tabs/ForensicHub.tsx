@@ -101,6 +101,33 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {pendingPredictions.length > 0 && (
+              <div className="lg:col-span-12 space-y-4 mb-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-rose-500/30">
+                  <Activity size={16} className="text-rose-500 animate-pulse" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-rose-500">
+                    Prédictions en Attente d'Audit ({pendingPredictions.length})
+                  </h4>
+                </div>
+                <div className="p-5 bg-rose-500/5 border border-rose-500/20 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div>
+                    <p className="text-[11px] text-slate-400">
+                      Certaines prédictions passées n'ont pas encore été confrontées aux résultats réels.
+                    </p>
+                    <p className="text-[10px] text-rose-400 font-bold mt-1 uppercase tracking-widest">
+                      L'autopsie automatique s'exécute en arrière-plan.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRefresh}
+                    className="px-5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-black text-xs uppercase tracking-widest rounded-xl transition-colors border border-rose-500/30 whitespace-nowrap"
+                  >
+                    Forcer l'Audit
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="lg:col-span-12 space-y-4">
               <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
                 <BookOpen size={16} className="text-emerald-500" />

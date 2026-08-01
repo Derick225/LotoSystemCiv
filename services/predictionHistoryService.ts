@@ -24,17 +24,21 @@ const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
   const items: PredictionHistoryItem[] = [];
   try {
     const allKeys = await keys();
-    const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(HISTORY_KEY_PREFIX));
-    for (const k of histKeys) {
-      const itemStr = await get(k as string);
-      if (itemStr) {
-        try {
-          const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
-          if (item && item.timestamp) items.push(item);
-        } catch (e) {
-          console.warn("Error parsing history item", e);
+    const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(HISTORY_KEY_PREFIX)) as string[];
+    if (histKeys.length > 0) {
+        const { getMany } = await import('idb-keyval');
+        const values = await getMany(histKeys);
+        for (let i = 0; i < values.length; i++) {
+            const itemStr = values[i];
+            if (itemStr) {
+                try {
+                    const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
+                    if (item && item.timestamp) items.push(item);
+                } catch (e) {
+                    console.warn("Error parsing history item", e);
+                }
+            }
         }
-      }
     }
   } catch (e) {
     console.warn("Error getting local history", e);
@@ -88,10 +92,11 @@ export const syncAllHistory = async (drawName: string): Promise<PredictionHistor
     try {
         const synced = await syncPredictions(local);
         
-        // Mettre à jour le localStorage avec les données fusionnées
-        for(const item of synced) {
-            const key = `${HISTORY_KEY_PREFIX}${item.id}`;
-            await set(key, JSON.stringify(item));
+        // Mettre à jour le localStorage (IndexedDB) avec les données fusionnées en une seule transaction
+        const { setMany } = await import( 'idb-keyval');
+        const entries: [string, any][] = synced.map(item => [`${HISTORY_KEY_PREFIX}${item.id}`, JSON.stringify(item)]);
+        if (entries.length > 0) {
+            await setMany(entries);
         }
         
         // Sync snapshots implicitly
@@ -231,8 +236,10 @@ export const updatePredictionFeedback = async (id: string, feedback: PredictionF
 export const clearPredictionHistory = async (drawName: string) => {
     const all = await getLocalHistory();
     const toDelete = all.filter(p => p.drawName?.toLowerCase() === drawName?.toLowerCase());
-    for(const p of toDelete) {
-        await del(`${HISTORY_KEY_PREFIX}${p.id}`);
+    const { delMany } = await import( 'idb-keyval');
+    const keysToDelete = toDelete.map(p => `${HISTORY_KEY_PREFIX}${p.id}`);
+    if (keysToDelete.length > 0) {
+        await delMany(keysToDelete);
     }
 };
 
@@ -255,17 +262,22 @@ export const getAllLearningSessions = async (): Promise<LearningSession[]> => {
   const sessions: LearningSession[] = [];
   try {
     const allKeys = await keys();
-    const sessKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(LEARNING_SESSION_KEY_PREFIX));
-    for (const k of sessKeys) {
-      const itemStr = await get(k as string);
-      if (itemStr) {
-        try {
-          const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
-          if (item && item.timestamp) sessions.push(item);
-        } catch (e) {
-          console.warn("Error parsing session item", e);
+    const sessKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(LEARNING_SESSION_KEY_PREFIX)) as string[];
+    
+    if (sessKeys.length > 0) {
+        const { getMany } = await import( 'idb-keyval');
+        const values = await getMany(sessKeys);
+        for (let i = 0; i < values.length; i++) {
+            const itemStr = values[i];
+            if (itemStr) {
+                try {
+                    const item = (typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr);
+                    if (item && item.timestamp) sessions.push(item);
+                } catch (e) {
+                    console.warn("Error parsing session item", e);
+                }
+            }
         }
-      }
     }
   } catch (e) {
     console.warn("Error getting learning sessions", e);
@@ -317,8 +329,10 @@ export const syncLearningSessionsWithCloud = async (drawName: string) => {
     const local = await getLearningSessions(drawName);
     try {
         const synced = await syncLearningSessions(local);
-        for(const s of synced) {
-            await set(`${LEARNING_SESSION_KEY_PREFIX}${s.id}`, JSON.stringify(s));
+        const { setMany } = await import( 'idb-keyval');
+        const entries: [string, any][] = synced.map(s => [`${LEARNING_SESSION_KEY_PREFIX}${s.id}`, JSON.stringify(s)]);
+        if (entries.length > 0) {
+            await setMany(entries);
         }
         return synced;
     } catch (e) {
