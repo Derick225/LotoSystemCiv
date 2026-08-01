@@ -30,7 +30,7 @@ import { useToast } from "../ui/Toast";
 import { ListSkeleton } from "../skeletons/ListSkeleton";
 import { SimilarityFinder } from "../SimilarityFinder";
 import { HeatmapCalendar } from "../HeatmapCalendar";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, useWindowVirtualizer } from "@tanstack/react-virtual";
 import { audioEngine } from "../../utils/audioEngine";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFluxMath } from "../../hooks/useFluxMath";
@@ -364,11 +364,11 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
 
   const parentRef = useRef<HTMLDivElement>(null);
 
-  const rowVirtualizer = useVirtualizer({
+  const rowVirtualizer = useWindowVirtualizer({
     count: filteredHistory.length,
-    getScrollElement: () => parentRef.current,
     estimateSize: () => (window.innerWidth < 768 ? 160 : 135),
     overscan: 6,
+    scrollMargin: parentRef.current?.offsetTop ?? 0,
   });
 
   const handleSimilarity = useCallback((d: DrawResult) => {
@@ -378,7 +378,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   if (loading && history.length === 0) return <ListSkeleton />;
 
   return (
-    <div className="space-y-4 md:space-y-6 animate-fade-in pb-4 w-full max-w-7xl mx-auto px-1 md:px-0 h-[calc(100dvh-210px)] md:h-[calc(100dvh-220px)] flex flex-col">
+    <div className="space-y-4 md:space-y-6 animate-fade-in pb-8 w-full max-w-7xl mx-auto px-1 md:px-0">
       {/* Top Header KPI & Stats Bar */}
       <div className="bg-slate-900/90 text-white p-4 sm:p-5 rounded-[2rem] border border-slate-800/80 shadow-2xl relative overflow-hidden shrink-0">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -888,40 +888,35 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
       {viewMode === "list" && (
         <div
           ref={parentRef}
-          className="flex-1 w-full overflow-y-auto overflow-x-hidden min-h-0 bg-transparent scrollbar-hide py-1"
+          className="w-full bg-transparent py-1 relative min-h-[400px]"
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+          }}
         >
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
-          >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const draw = filteredHistory[virtualRow.index];
-              return (
-                <div
-                  key={draw ? `${draw.id}_${virtualRow.key}` : virtualRow.key}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <DrawRowCard
-                    draw={draw}
-                    index={virtualRow.index}
-                    totalCount={filteredHistory.length}
-                    meanSum={globalMeanSum}
-                    onSimilarity={handleSimilarity}
-                  />
-                </div>
-              );
-            })}
-          </div>
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const draw = filteredHistory[virtualRow.index];
+            return (
+              <div
+                key={draw ? `${draw.id}_${virtualRow.key}` : virtualRow.key}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                }}
+              >
+                <DrawRowCard
+                  draw={draw}
+                  index={virtualRow.index}
+                  totalCount={filteredHistory.length}
+                  meanSum={globalMeanSum}
+                  onSimilarity={handleSimilarity}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

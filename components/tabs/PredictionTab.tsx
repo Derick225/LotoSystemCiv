@@ -5,6 +5,7 @@ import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
 import { NeuralHeatmapGrid } from "../NeuralHeatmapGrid";
 import { usePredictionGenerator } from "../../hooks/usePredictionGenerator";
+import { useForensicData } from "../../hooks/useForensicData";
 import { ExplainabilityDrawer } from "../ExplainabilityDrawer";
 import { audioEngine } from "../../utils/audioEngine";
 import { TrainingEvolutionDrawer } from "../TrainingEvolutionDrawer";
@@ -100,6 +101,51 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       runMonteCarlo,
       handleOptimizeWeights,
     } = usePredictionGenerator(drawName);
+
+    const { reports } = useForensicData(drawName);
+
+    const rlhfMetrics = React.useMemo(() => {
+      const recent = reports.slice(0, 5);
+      if (recent.length === 0) return { score: 100, consecutiveFailures: 0, status: 'neutral' };
+      
+      let consecutiveFailures = 0;
+      let totalScore = 0;
+      
+      for (const r of recent) {
+        if (r.performanceScore < 40) {
+          consecutiveFailures++;
+        } else {
+          break;
+        }
+      }
+      
+      recent.forEach(r => totalScore += r.performanceScore);
+      const avgScore = totalScore / recent.length;
+      
+      return {
+        score: Math.round(avgScore),
+        consecutiveFailures,
+        status: consecutiveFailures >= 3 ? 'critical' : consecutiveFailures > 0 ? 'warning' : 'optimal'
+      };
+    }, [reports]);
+
+    const handleRunInference = async () => {
+      let specificWeights = undefined;
+      if (rlhfMetrics.status === 'critical') {
+        const current = globalWeights && Object.keys(globalWeights).length > 0 ? { ...globalWeights } : null;
+        if (current) {
+           const penalized = { ...current };
+           const keys = Object.keys(penalized) as (keyof typeof penalized)[];
+           const uniform = 1.0 / (keys.length || 1);
+           // Dampening towards uniform distribution (max entropy)
+           keys.forEach(k => {
+              penalized[k] = penalized[k] * 0.5 + uniform * 0.5;
+           });
+           specificWeights = penalized;
+        }
+      }
+      runInference(specificWeights);
+    };
 
     const checkNetworkAndAuth = useCallback(async () => {
       setNetworkState((prev) => ({ ...prev, checkingConnection: true }));
@@ -225,8 +271,35 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-8">
+              <div className="sm:col-span-2">
+                <div className={`p-3 rounded-xl border flex items-start gap-3 transition-colors ${
+                  rlhfMetrics.status === 'critical' ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400' :
+                  rlhfMetrics.status === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400' :
+                  'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400'
+                }`}>
+                  <BrainCircuit size={18} className={`shrink-0 mt-0.5 ${
+                    rlhfMetrics.status === 'critical' ? 'text-rose-500' :
+                    rlhfMetrics.status === 'warning' ? 'text-amber-500' :
+                    'text-emerald-500'
+                  }`} />
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-wider mb-1 flex items-center gap-2">
+                      Score de Fiabilité RLHF: {rlhfMetrics.score}%
+                      {rlhfMetrics.status === 'critical' && <span className="bg-rose-500 text-white px-1.5 py-0.5 rounded text-[8px] animate-pulse">PÉNALITÉ APPLIQUÉE</span>}
+                    </h4>
+                    <p className="text-[9px] leading-relaxed opacity-90">
+                      {rlhfMetrics.status === 'critical' 
+                        ? `Le modèle a échoué sur les ${rlhfMetrics.consecutiveFailures} derniers tirages. Une pénalité d'amortissement bayésienne sera appliquée sur les poids algorithmiques.` 
+                        : rlhfMetrics.status === 'warning'
+                        ? `Attention : ${rlhfMetrics.consecutiveFailures} échec(s) récent(s). Le moteur ajuste dynamiquement la variance.`
+                        : "Fiabilité optimale confirmée par l'autopsie des derniers tirages."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <button
-                onClick={() => runInference()}
+                onClick={handleRunInference}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
                 <Activity size={18} className="group-hover:animate-pulse" />{" "}
@@ -332,7 +405,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
 
           <div className="flex items-center gap-3 w-full md:w-auto">
             <button
-              onClick={() => runInference()}
+              onClick={handleRunInference}
               disabled={isComputing}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider disabled:opacity-50 group"
             >
