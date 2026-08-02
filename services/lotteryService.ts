@@ -306,40 +306,63 @@ export const fetchResults = async (drawName: string, force?: boolean): Promise<{
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort(); 
+  const names = sortedTimes.map(time => draws[time]);
   
-  const promises = sortedTimes.map(async (time) => {
-      const name = draws[time];
-      let lastDraw: DrawResult | null = null;
-      try {
-          if (isSupabaseConfigured() && navigator.onLine) {
-              const { data, error } = await supabase
-                .from('draw_results')
-                .select('*')
-                .eq('draw_name', name)
-                .order('date', { ascending: false })
-                .limit(1);
-              if (error) throw error;
-              if (data && data[0]) {
+  try {
+      if (isSupabaseConfigured() && navigator.onLine) {
+          const { data, error } = await supabase
+            .from('draw_results')
+            .select('*')
+            .in('draw_name', names)
+            .order('date', { ascending: false });
+          if (error) throw error;
+
+          return sortedTimes.map((time) => {
+              const name = draws[time];
+              // Since the query is sorted by date desc, the first match found in array is the newest
+              const match = data?.find(row => row.draw_name === name);
+              let lastDraw: DrawResult | null = null;
+              if (match) {
                   lastDraw = {
-                      id: data[0].id,
-                      drawName: data[0].draw_name,
-                      date: formatDate(data[0].date),
-                      gagnants: data[0].gagnants,
-                      machine: data[0].machine || [],
-                      version: data[0].version || 1
+                      id: match.id,
+                      drawName: match.draw_name,
+                      date: formatDate(match.date),
+                      gagnants: match.gagnants,
+                      machine: match.machine || [],
+                      version: match.version || 1
                   };
               }
-          } else {
+              return { time, name, result: lastDraw };
+          });
+      } else {
+          const promises = sortedTimes.map(async (time) => {
+              const name = draws[time];
+              let lastDraw: DrawResult | null = null;
+              try {
+                  const history = await lotteryService.fetchHistory(name);
+                  if (history.length > 0) lastDraw = history[0];
+              } catch (e) {
+                  // ignore
+              }
+              return { time, name, result: lastDraw };
+          });
+          return Promise.all(promises);
+      }
+  } catch (e) {
+      // Fallback individually on error to guarantee robustness
+      const promises = sortedTimes.map(async (time) => {
+          const name = draws[time];
+          let lastDraw: DrawResult | null = null;
+          try {
               const history = await lotteryService.fetchHistory(name);
               if (history.length > 0) lastDraw = history[0];
+          } catch (err) {
+              // ignore
           }
           return { time, name, result: lastDraw };
-      } catch (e) {
-          return { time, name, result: null };
-      }
-  });
-  
-  return Promise.all(promises);
+      });
+      return Promise.all(promises);
+  }
 };
 
 export const getNextScheduledDraw = () => {

@@ -265,6 +265,16 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
 export const resolvePredictionWeights = async (context: PredictionRuntimeContext): Promise<AlgoWeights> => {
   let weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
   
+  if (!context.skipTraining) {
+    // 1. Appliquer le meta-learning de Kalman à partir des rapports forensiques locaux (autopsies post-mortem précédentes)
+    try {
+      const { applyMetaLearning } = await import("./weightsManager");
+      weights = await applyMetaLearning(weights, context.history, context.drawName);
+    } catch (err) {
+      logger.warn({ err }, "Échec de l'intégration du calibrage de Kalman post-mortem.");
+    }
+  }
+  
   if (!context.skipTraining && context.history.length >= 10) {
     const currentEntropyResult = calculateShannonEntropy(context.history);
     const currentEntropy = currentEntropyResult.normalized;

@@ -437,9 +437,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         hyperTuningLog: predictionData.hyperTuningLog,
         hyperAccuracyGain: predictionData.hyperAccuracyGain,
         aiWeights,
-        aiRationale,
+        aiRationale: predictionData.aiRationale || aiRationale,
         aiConfidence,
-        aiStrategicAdvice,
+        aiStrategicAdvice: predictionData.aiStrategicAdvice || aiStrategicAdvice,
         isLocalFallback,
       });
       audioEngine.play("success");

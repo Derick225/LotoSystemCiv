@@ -342,6 +342,9 @@ export interface SpectralMetric {
   energy: number;
   resonance?: boolean;
   dominantPeriod?: number;
+  denoisedEnergy?: number;
+  transientEnergy?: number;
+  phaseShift?: number;
 }
 
 export interface LearningSession {

@@ -256,6 +256,7 @@ export const useNexusStore = create<NexusState>()(
       setAnalyticsData: (analytics) =>
         set({
           spectral: analytics?.spectral || [],
+          wavelet: analytics?.wavelet || [],
           fractal: analytics?.fractal || [],
           volatility: analytics?.volatility || null,
           regime: analytics?.regime || null,

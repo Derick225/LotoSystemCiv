@@ -96,6 +96,45 @@ export const finalizePredictionPayload = async (
     analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
   }
 
+  let postMortemInsights = "";
+  let latestAutopsyNotes = "";
+  let strategicAdvice = "";
+
+  try {
+    const { getLocalForensicReports } = await import("../postPredictionAnalysisService");
+    const reports = await getLocalForensicReports() || [];
+    const drawReports = reports.filter(r => r.drawName === context.drawName);
+    if (drawReports.length > 0) {
+      const latestReport = drawReports[0];
+      
+      postMortemInsights = `\n\n[Rétroaction & Calibrage ADN Post-Mortem] : Ajustements de Kalman appliqués basés sur l'autopsie du tirage du ${latestReport.date || "précédent"}. `;
+      if (latestReport.proposedAdjustments && latestReport.proposedAdjustments.length > 0) {
+        const topAdjustments = latestReport.proposedAdjustments
+          .filter((adj: any) => Math.abs(adj.proposedWeightChange) > 0.005)
+          .slice(0, 4)
+          .map((adj: any) => `${adj.algo} (${adj.proposedWeightChange > 0 ? "+" : ""}${(adj.proposedWeightChange * 100).toFixed(2)}%)`)
+          .join(", ");
+        if (topAdjustments) {
+          postMortemInsights += `Calibrages de poids : ${topAdjustments}.`;
+        }
+      }
+      
+      if (latestReport.recommendations && latestReport.recommendations.length > 0) {
+        if (Array.isArray(latestReport.recommendations)) {
+          strategicAdvice = latestReport.recommendations.join(" ");
+        } else if (typeof latestReport.recommendations === "string") {
+          strategicAdvice = latestReport.recommendations;
+        }
+      } else if (latestReport.aiAnalysis) {
+        strategicAdvice = latestReport.aiAnalysis;
+      }
+      
+      latestAutopsyNotes = `Divergence post-mortem précédente : ${latestReport.divergenceMetric || 0}%. Index d'intégrité unifiée (UFI) : ${latestReport.unifiedIntegrityIndex || 100}%.`;
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to inject post-mortem insights into prediction");
+  }
+
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
 
   const breakdownRecord: Record<number, Record<string, number>> = {};
@@ -113,7 +152,7 @@ export const finalizePredictionPayload = async (
     candidates,
     confidence: finalConfidence,
     confidenceNote: HONEST_NOTE,
-    analysis: analysisText,
+    analysis: analysisText + postMortemInsights + (latestAutopsyNotes ? `\n${latestAutopsyNotes}` : ""),
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
@@ -140,6 +179,8 @@ export const finalizePredictionPayload = async (
       ...calibratedParams
     },
     hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],
-    hyperAccuracyGain: 0
+    hyperAccuracyGain: 0,
+    aiRationale: latestAutopsyNotes || undefined,
+    aiStrategicAdvice: strategicAdvice || undefined,
   } as Prediction;
 };

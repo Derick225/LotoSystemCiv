@@ -21,10 +21,11 @@ import { ALL_DRAWS } from './constants';
 import { motion, AnimatePresence } from 'framer-motion';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 
-const BootSequence = lazyWithRetry(() => import('./components/intro/BootSequence'), 'BootSequence');
+import { BootSequence } from './components/intro/BootSequence';
+import { AuthScreen } from './components/auth/AuthScreen';
+
 const TutorialOverlay = lazyWithRetry(() => import('./components/ui/TutorialOverlay'), 'TutorialOverlay');
 const InstallPrompt = lazyWithRetry(() => import('./components/InstallPrompt'), 'InstallPrompt');
-const AuthScreen = lazyWithRetry(() => import('./components/auth/AuthScreen'), 'AuthScreen');
 const ResetPasswordScreen = lazyWithRetry(() => import('./components/auth/ResetPasswordScreen'), 'ResetPasswordScreen');
 const SubscriptionWall = lazyWithRetry(() => import('./components/auth/SubscriptionWall'), 'SubscriptionWall');
 const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumberHUD'), 'GlobalNumberHUD');
@@ -193,38 +194,48 @@ const AppContent: React.FC = () => {
       await refreshSubscription();
   };
 
-  if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center font-mono text-slate-300">
+        <div className="w-full max-w-md p-8 flex flex-col items-center">
+          <div className="relative mb-10">
+            <div className="w-24 h-24 border-4 border-indigo-500/10 rounded-full animate-[spin_3s_linear_infinite]"></div>
+            <div className="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-[spin_1.5s_linear_infinite]"></div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-4xl font-black text-white tracking-tighter">N</span>
+            </div>
+          </div>
+          <div className="text-center space-y-2">
+            <h2 className="text-xs font-black uppercase tracking-[0.25em] text-indigo-400 animate-pulse">Initialisation Sécurisée</h2>
+            <p className="text-[10px] text-slate-500 tracking-wider">CONNEXION AUX CONDUITS NEURONAUX...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   if (isResettingPassword) {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+      <Suspense fallback={<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
         <ResetPasswordScreen onSuccess={() => setIsResettingPassword(false)} />
       </Suspense>
     );
   }
 
   if (!session) {
-    return (
-      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
-        <AuthScreen onSuccess={() => {}} />
-      </Suspense>
-    );
+    return <AuthScreen onSuccess={() => {}} />;
   }
 
   if (!isAdmin && subscription?.status === 'expired') {
       return (
-        <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <Suspense fallback={<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
           <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />
         </Suspense>
       );
   }
 
   if (!isBooted) {
-    return (
-      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
-        <BootSequence onComplete={() => setIsBooted(true)} />
-      </Suspense>
-    );
+    return <BootSequence onComplete={() => setIsBooted(true)} />;
   }
 
     const renderContent = () => {

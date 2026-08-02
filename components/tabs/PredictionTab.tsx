@@ -112,14 +112,18 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       let totalScore = 0;
       
       for (const r of recent) {
-        if (r.performanceScore < 40) {
+        const perfScore = 100 - (r.divergenceMetric ?? 100);
+        if (perfScore < 40) {
           consecutiveFailures++;
         } else {
           break;
         }
       }
       
-      recent.forEach(r => totalScore += r.performanceScore);
+      recent.forEach(r => {
+        const perfScore = 100 - (r.divergenceMetric ?? 100);
+        totalScore += perfScore;
+      });
       const avgScore = totalScore / recent.length;
       
       return {
