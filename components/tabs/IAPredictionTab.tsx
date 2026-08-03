@@ -24,8 +24,10 @@ import {
   ChevronDown,
   Microscope,
   Link as LinkIcon,
+  Volume2,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
+import { speechEngine } from "../../utils/speechEngine";
 import { supabase } from "../../services/supabaseClient";
 import { useToast } from "../ui/Toast";
 import {
@@ -92,6 +94,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
   const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
   const setUseCloudEngine = useNexusStore((state) => state.setUseCloudEngine);
+  const isSimpleView = useNexusStore((state) => state.isSimpleView);
 
   // Switch between 'inference' (direct mode), 'backtest' (retrospective audit) and 'audit_log' (local journal)
   const [activeMode, setActiveMode] = useState<
@@ -1001,6 +1004,18 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                     </div>
 
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 pb-6">
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          speechEngine.speakNumbers(prediction.suggestedNumbers, drawName);
+                          showToast("Lecture vocale des numéros en cours...", "info");
+                        }}
+                        className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all duration-300 shadow-lg shadow-emerald-500/20 active:scale-95 cursor-pointer"
+                      >
+                        <Volume2 size={18} className="animate-pulse" />
+                        <span>Écouter les Numéros 🔊</span>
+                      </button>
+
                       <button
                         onClick={async () => {
                           audioEngine.play("click");

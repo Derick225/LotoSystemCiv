@@ -293,6 +293,22 @@ export const AppShell: React.FC<AppShellProps> = ({
 
             {/* Desktop and Mobile aligned right panel elements */}
             <div className="flex items-center gap-2">
+              {/* Toggle Vue Simplifiée / Vue Scientifique */}
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  useNexusStore.getState().toggleSimpleView();
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-black uppercase tracking-wider transition-all duration-300 shadow-md ${
+                  useNexusStore.getState().isSimpleView
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                    : "bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20"
+                }`}
+                title={useNexusStore.getState().isSimpleView ? "Actuellement : Vue Simplifiée (Chiffres Clairs & Synthèse Vocale). Cliquez pour passer en Vue Scientifique." : "Actuellement : Vue Scientifique (Graphiques). Cliquez pour passer en Vue Simplifiée."}
+              >
+                <span>{useNexusStore.getState().isSimpleView ? "🟢 Vue Simple" : "🔬 Vue Graphique"}</span>
+              </button>
+
               <InstallButton />
               
               {/* Mobile-only menu items */}

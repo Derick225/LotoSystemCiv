@@ -33,6 +33,7 @@ interface NexusState {
   activeMainTab: string;
   activeSubTab: string | null;
   isFocusMode: boolean;
+  isSimpleView: boolean;
 
   // Settings & Config
   globalWeights: AlgoWeights;
@@ -78,6 +79,8 @@ interface NexusState {
   setInspectingNumber: (num: number | null) => void;
   setHoveredNumber: (num: number | null) => void;
   setFocusMode: (focus: boolean) => void;
+  setSimpleView: (simple: boolean) => void;
+  toggleSimpleView: () => void;
   navigateToModule: (mainTab: string, subTab?: string | null) => void;
   setGlobalWeights: (weights: AlgoWeights) => void;
   setForensicOptimized: (opt: boolean) => void;
@@ -127,6 +130,7 @@ export const useNexusStore = create<NexusState>()(
       activeMainTab: "Flux",
       activeSubTab: null,
       isFocusMode: false,
+      isSimpleView: true,
 
       globalWeights: {} as AlgoWeights, // Will be initialized by initialize or getAlgoWeights
       isForensicOptimized: false,
@@ -227,6 +231,8 @@ export const useNexusStore = create<NexusState>()(
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
       setFocusMode: (focus) => set({ isFocusMode: focus }),
+      setSimpleView: (simple) => set({ isSimpleView: simple }),
+      toggleSimpleView: () => set((s) => ({ isSimpleView: !s.isSimpleView })),
       navigateToModule: (mainTab, subTab = null) =>
         set({ activeMainTab: mainTab, activeSubTab: subTab }),
       setGlobalWeights: (weights) => set({ globalWeights: weights }),
@@ -312,6 +318,7 @@ export const useNexusStore = create<NexusState>()(
         drawName: state.drawName,
         useCloudEngine: state.useCloudEngine,
         temporalDepth: state.temporalDepth,
+        isSimpleView: state.isSimpleView,
       }),
       storage:
         typeof window !== "undefined"
@@ -334,6 +341,7 @@ export const useNexusHoveredNumber = () => useNexusStore((s) => s.hoveredNumber)
 export const useNexusActiveMainTab = () => useNexusStore((s) => s.activeMainTab);
 export const useNexusActiveSubTab = () => useNexusStore((s) => s.activeSubTab);
 export const useNexusIsFocusMode = () => useNexusStore((s) => s.isFocusMode);
+export const useNexusIsSimpleView = () => useNexusStore((s) => s.isSimpleView);
 
 // Config & Settings selectors
 export const useNexusGlobalWeights = () => useNexusStore((s) => s.globalWeights);

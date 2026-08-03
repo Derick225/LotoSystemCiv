@@ -28,7 +28,9 @@ import {
   Cpu,
   WifiOff,
   Sparkles,
+  Volume2,
 } from "lucide-react";
+import { speechEngine } from "../../utils/speechEngine";
 import { motion } from "framer-motion";
 
 export const PredictionTab = React.memo<{ drawName: string }>(
@@ -492,10 +494,21 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
                     <Sparkles size={12} /> Vecteur Formulé
                   </h3>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter">
                       Sélection Optimale
                     </span>
+                    <button
+                      onClick={() => {
+                        try { audioEngine.play("click"); } catch (e) {}
+                        speechEngine.speakNumbers(lastPrediction.suggestedNumbers, drawName);
+                        showToast("Lecture vocale des numéros...", "info");
+                      }}
+                      className="px-3.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    >
+                      <Volume2 size={16} className="animate-pulse" />
+                      <span>Écouter 🔊</span>
+                    </button>
                     {isChaotic && (
                       <div
                         className="bg-orange-500/10 text-orange-600 dark:text-orange-400 p-2 rounded-xl"
