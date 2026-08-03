@@ -298,6 +298,64 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     .sort(([, a], [, b]) => (b as number) - (a as number))
     .slice(0, 10);
 
+  // --- CALCULS DU BULLETIN DE SYNTHÈSE IA (DÉTERMINISTES EN CONTINU) ---
+  const sortedAlgosList = Object.entries(liveWeights).sort((a, b) => b[1] - a[1]);
+  const topAlgoEntry = sortedAlgosList[0];
+  const topAlgoKey = topAlgoEntry ? topAlgoEntry[0] : "";
+  const topAlgoLabel = topAlgoKey ? formatLabel(topAlgoKey) : "Inconnu";
+  const topAlgoWeight = topAlgoEntry ? topAlgoEntry[1] : 0;
+
+  // Phrase de recommandation explicite et claire en français simple
+  let simpleRecommendation = "L'ADN cybernétique s'équilibre. Le moteur recommande de combiner l'ensemble des signaux de manière pondérée.";
+  if (topAlgoKey.toLowerCase().includes("spectral")) {
+    simpleRecommendation = "L'IA recommande aujourd'hui de faire confiance aux cycles courts. L'algorithme Spectral a pris le dessus.";
+  } else if (topAlgoKey.toLowerCase().includes("symbiotic") || topAlgoKey.toLowerCase().includes("context")) {
+    simpleRecommendation = "L'IA détecte une harmonie symbiotique forte entre les tirages récents. Privilégiez les associations de paires éprouvées.";
+  } else if (topAlgoKey.toLowerCase().includes("regularity") || topAlgoKey.toLowerCase().includes("volatility")) {
+    simpleRecommendation = "L'IA repère des patterns de régularité thermique stables. Misez sur la constance des sorties récentes.";
+  } else if (topAlgoKey.toLowerCase().includes("fractal") || topAlgoKey.toLowerCase().includes("hurst")) {
+    simpleRecommendation = "Les structures fractales auto-similaires dominent l'espace d'inférence. Les tendances de fond et de répétition à long terme sont privilégiées.";
+  } else if (topAlgoKey.toLowerCase().includes("correlation")) {
+    simpleRecommendation = "Les corrélations croisées inter-numéros sont maximales. L'algorithme privilégie les attractions de groupes de numéros.";
+  }
+
+  // Calcul continu et déterministe de la stabilité à partir de l'entropie de Shannon des poids
+  const weightsArray = Object.values(liveWeights);
+  const totalW = weightsArray.reduce((acc, w) => acc + w, 0) || 1;
+  const entropy = weightsArray.reduce((acc, w) => {
+    const p = w / totalW;
+    return p > 0 ? acc - p * Math.log2(p) : acc;
+  }, 0);
+  const maxEntropy = Math.log2(Math.max(1, weightsArray.length));
+  
+  // Convertir l'entropie de manière continue en un score de stabilité (0% à 100%)
+  const stabilityPercentage = maxEntropy > 0 
+    ? Math.max(10, Math.min(100, Math.round((1 - (entropy / maxEntropy)) * 100))) 
+    : 100;
+
+  // Climat de l'IA continu et déterministe
+  let climateLabel = "Stable (Vert)";
+  let climateColorClass = "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+  let climateColorBar = "bg-emerald-500";
+  let climateDescription = "Le modèle de prédiction est stabilisé et prêt à l'emploi.";
+  
+  if (status === "running") {
+    climateLabel = "En Apprentissage (Rouge)";
+    climateColorClass = "text-rose-400 bg-rose-500/10 border-rose-500/20 animate-pulse";
+    climateColorBar = "bg-rose-500";
+    climateDescription = "Calculs en cours... Le climat se stabilisera à la fin de l'évolution.";
+  } else if (stabilityPercentage < 35) {
+    climateLabel = "En recherche (Jaune)";
+    climateColorClass = "text-amber-400 bg-amber-500/10 border-amber-500/20";
+    climateColorBar = "bg-amber-500";
+    climateDescription = "L'IA cherche encore ses repères. Pensez à augmenter les générations.";
+  } else if (stabilityPercentage < 65) {
+    climateLabel = "Optimisation Modérée (Bleu)";
+    climateColorClass = "text-sky-400 bg-sky-500/10 border-sky-500/20";
+    climateColorBar = "bg-sky-400";
+    climateDescription = "L'alignement des signaux progresse positivement.";
+  }
+
   return (
     <div className="w-full text-slate-300 font-sans pb-24 animate-fade-in">
       {/* Top Navigation / Flattened Tabs */}
@@ -414,50 +472,65 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         {/* Right Column: Visualization & Logs */}
         <div className="lg:col-span-8 flex flex-col gap-10">
           
-          {/* Evolution Chart */}
-          <div className="h-64 bg-slate-900/30 rounded-2xl p-6 relative">
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-500 absolute top-6 left-6 z-10">
-              Trajectoire de Fitness
-            </h3>
-            {evolutionData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={evolutionData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="fitGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="gen" hide />
-                  <YAxis hide domain={['auto', 'auto']} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', fontSize: '11px', borderRadius: '8px' }}
-                    itemStyle={{ color: '#c7d2fe' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="bestFitness" 
-                    stroke="#818cf8" 
-                    strokeWidth={2}
-                    fillOpacity={1} 
-                    fill="url(#fitGrad)" 
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest">
-                En attente des données...
+          {/* Bulletin de Synthèse Cybernétique (Remplaçant les courbes complexes pour une clarté absolue) */}
+          <div className="bg-slate-900/30 rounded-3xl p-6 md:p-8 border border-slate-800/60 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/5 rounded-full blur-[60px] -mr-10 -mt-10"></div>
+            
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 relative z-10 pb-4 border-b border-slate-800/40">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 block mb-1">
+                  Moteur d'Optimisation Cybernétique
+                </span>
+                <h3 className="text-lg font-black text-white tracking-tight">
+                  Bulletin de Synthèse de la Stratégie IA
+                </h3>
               </div>
-            )}
+              <div className={`flex items-center gap-2.5 px-4 py-2 rounded-2xl border ${climateColorClass} text-xs font-black uppercase tracking-widest`}>
+                <span className="w-2 h-2 rounded-full bg-current"></span>
+                Climat : {climateLabel}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 relative z-10">
+              {/* Thermomètre / Jauge de Stabilité Unique */}
+              <div className="md:col-span-4 bg-slate-950/50 p-5 rounded-2xl border border-slate-900 flex flex-col justify-between space-y-4">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Stabilité du Modèle</span>
+                  <div className="text-3xl font-black text-slate-100 tracking-tight">{stabilityPercentage}%</div>
+                </div>
+                <div className="space-y-2">
+                  <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-700 ${climateColorBar}`}
+                      style={{ width: `${stabilityPercentage}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-normal">{climateDescription}</p>
+                </div>
+              </div>
+
+              {/* Grand Conseil Pratique en Français Simple */}
+              <div className="md:col-span-8 bg-slate-950/30 p-5 rounded-2xl border border-slate-900/60 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-2">Recommandation du jour</span>
+                  <p className="text-sm md:text-base font-medium text-slate-200 leading-relaxed">
+                    « {simpleRecommendation} »
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-slate-900 flex justify-between items-center text-[10px] text-slate-500">
+                  <span>Force dominante : <strong className="text-slate-300 uppercase">{topAlgoLabel}</strong></span>
+                  <span>Impact : <strong className="text-indigo-400">{(topAlgoWeight * 100).toFixed(0)}%</strong></span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-            {/* Live Weights Top 10 */}
+            {/* Live Weights (Simplified Text Badges) */}
             <div>
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
-                  Génome Actif (Top 10)
+                  Pondération Simplifiée de l'IA
                 </h3>
                 {status === "completed" && (
                   <button
@@ -468,27 +541,30 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   </button>
                 )}
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {sortedLiveAlgos.map(([algo, weight]) => {
                   const label = formatLabel(algo);
                   const wNum = weight as number;
-                  const isHigh = wNum > 0.1;
+                  
+                  // Détermination simplifiée de la force
+                  let forceLabel = "Faible";
+                  let forceColorClass = "bg-slate-800/40 text-slate-500 border-slate-800/50";
+                  if (wNum > 0.20) {
+                    forceLabel = "Fort";
+                    forceColorClass = "bg-indigo-500/15 text-indigo-400 border-indigo-500/20 font-black";
+                  } else if (wNum > 0.08) {
+                    forceLabel = "Moyen";
+                    forceColorClass = "bg-amber-500/15 text-amber-400 border-amber-500/20 font-bold";
+                  }
+
                   return (
-                    <div key={algo} className="group">
-                      <div className="flex justify-between items-baseline mb-1.5">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate mr-4">
-                          {label}
-                        </span>
-                        <span className={`text-[12px] font-black ${isHigh ? 'text-indigo-400' : 'text-slate-500'}`}>
-                          {(wNum * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1 overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-500 ${isHigh ? 'bg-indigo-500' : 'bg-slate-700'}`}
-                          style={{ width: `${Math.min(100, wNum * 100)}%` }}
-                        />
-                      </div>
+                    <div key={algo} className="flex justify-between items-center p-3 bg-slate-950/25 border border-slate-900/50 rounded-xl hover:bg-slate-900/20 transition-colors">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wide truncate mr-4">
+                        {label}
+                      </span>
+                      <span className={`text-[10px] uppercase tracking-widest px-3 py-1 rounded-lg border ${forceColorClass}`}>
+                        {forceLabel}
+                      </span>
                     </div>
                   );
                 })}

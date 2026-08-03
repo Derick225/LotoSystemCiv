@@ -810,24 +810,64 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
             </div>
           </div>
 
-          <div className="pt-4 border-t border-white/5 bg-slate-950/25 p-4 rounded-2xl space-y-2">
+          <div className="pt-4 border-t border-white/5 bg-slate-950/25 p-4 rounded-[1.5rem] space-y-3">
             <div className="flex items-center gap-1.5 text-slate-400">
-              <Info size={12} className="text-cyan-500" />
+              <Gauge size={12} className="text-cyan-500" />
               <span className="text-[9px] font-black uppercase tracking-wider font-sans">
-                État Stochastique Global
+                Garde-Fou Surchauffe (Inertie)
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-normal font-mono">
-              Shannon Entropy relative :{" "}
-              <span className="text-slate-300 font-bold">
-                {(computedMetrics.shannonEntropy * 100).toFixed(1)}%
-              </span>
-              . Friction de viscosité d'onde :{" "}
-              <span className="text-slate-300 font-bold">
-                {computedMetrics.alpha.toFixed(3)}
-              </span>
-              .
-            </p>
+            
+            {(() => {
+              const entropy = computedMetrics.shannonEntropy;
+              let state: { label: string; desc: string; color: string; dotClass: string };
+              if (entropy < 0.45) {
+                state = {
+                  label: "OK (Climat Stable)",
+                  desc: "Mémoire parfaitement fluide. Zéro dérive stochastique.",
+                  color: "bg-emerald-500/10 border-emerald-500/25 text-emerald-400",
+                  dotClass: "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)] animate-pulse"
+                };
+              } else if (entropy < 0.65) {
+                state = {
+                  label: "TRANSITION (Couplage)",
+                  desc: "Frictions actives. Dissipation de l'énergie cinétique.",
+                  color: "bg-amber-500/10 border-amber-500/25 text-amber-400",
+                  dotClass: "bg-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.8)] animate-bounce"
+                };
+              } else {
+                state = {
+                  label: "SURCHAUFFE (Saturation)",
+                  desc: "Surchauffe entropique. Réduction cinétique immédiate requise.",
+                  color: "bg-rose-500/10 border-rose-500/25 text-rose-400",
+                  dotClass: "bg-rose-500 shadow-[0_0_15px_rgba(239,68,68,1)] animate-ping"
+                };
+              }
+
+              return (
+                <div className={`p-3 rounded-xl border ${state.color} flex items-center gap-3.5 transition-all`}>
+                  {/* Gyrophare virtuel */}
+                  <div className="relative flex items-center justify-center">
+                    <div className={`w-3.5 h-3.5 rounded-full ${state.dotClass}`} />
+                    <div className="absolute w-6 h-6 rounded-full border border-current opacity-20 animate-ping pointer-events-none" />
+                  </div>
+                  
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black tracking-wider uppercase">
+                        {state.label}
+                      </span>
+                      <span className="text-[8px] font-mono opacity-60">
+                        (E: {(entropy * 100).toFixed(1)}%)
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-normal mt-0.5 font-sans">
+                      {state.desc}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 

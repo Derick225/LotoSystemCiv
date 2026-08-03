@@ -59,10 +59,33 @@ interface BacktestResult {
   confidence: number;
 }
 
+// Météo des Numéro continu et déterministe basé sur l'historique de tirage
+export const getThermalIndex = (num: number, historyList: any[]) => {
+  if (!historyList || historyList.length === 0) {
+    return { label: "Stable (Régulier)", emoji: "🟢", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" };
+  }
+  // On analyse les 15 derniers tirages de manière déterministe
+  const lastDraws = historyList.slice(0, 15);
+  let count = 0;
+  for (const draw of lastDraws) {
+    if (draw.gagnants && draw.gagnants.includes(num)) {
+      count++;
+    }
+  }
+  if (count >= 2) {
+    return { label: "Chaud (Prêt à sortir)", emoji: "🔴", color: "text-rose-400 bg-rose-500/10 border-rose-500/20" };
+  } else if (count === 1) {
+    return { label: "Stable (Régulier)", emoji: "🟢", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" };
+  } else {
+    return { label: "Froid (En sommeil)", emoji: "🔵", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" };
+  }
+};
+
 export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
+  const [showExpertTools, setShowExpertTools] = useState<boolean>(false);
   const history = useNexusStore((state) => state.history);
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);
@@ -442,8 +465,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         aiStrategicAdvice: predictionData.aiStrategicAdvice || aiStrategicAdvice,
         isLocalFallback,
       });
-      audioEngine.play("success");
-      showToast("Convergence Hybride IA complétée.", "success");
+      const finalConfidence = aiConfidence || predictionData.confidence;
+      const finalStability = predictionData.stabilityScore || 80;
+      if (finalConfidence < 75 || finalStability < 75) {
+        audioEngine.play("error");
+        showToast("Inférence complétée avec indices d'instabilité (Alerte Discrète).", "info");
+      } else {
+        audioEngine.play("success");
+        showToast("Convergence Hybride IA optimale (Accord Harmonieux).", "success");
+      }
     } catch (e: any) {
       console.error("Failed to compute IA prediction hybridly:", e);
       setError(e.message || "Erreur de quantification mathématique hybride.");
@@ -897,10 +927,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, ease: "easeOut" }}
-                className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+                className={showExpertTools ? "grid grid-cols-1 lg:grid-cols-3 gap-6" : "space-y-6"}
               >
                 {/* Main Prediction & Metrics */}
-                <div className="lg:col-span-2 space-y-6">
+                <div className={showExpertTools ? "lg:col-span-2 space-y-6" : "space-y-6"}>
                   {/* Suggested numbers card */}
                   <div className="bg-slate-900/40 p-8 rounded-[2rem] border border-slate-800/80 shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -939,30 +969,38 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-center gap-4 py-6">
-                      {prediction.suggestedNumbers.map((num, idx) => (
-                        <motion.div
-                          key={`sugg-${num}`}
-                          initial={{ scale: 0.5, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={{
-                            delay: idx * 0.08,
-                            type: "spring",
-                            stiffness: 120,
-                          }}
-                          className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-b from-indigo-500/10 to-fuchsia-500/10 hover:from-indigo-500/20 hover:to-fuchsia-500/20 border-2 border-indigo-500/30 hover:border-fuchsia-500/50 flex flex-col items-center justify-center shadow-lg hover:shadow-indigo-500/5 hover:scale-105 transition-all cursor-pointer group"
-                        >
-                          <span className="text-xl md:text-2xl font-black text-white group-hover:text-fuchsia-300 transition-colors">
-                            {String(num).padStart(2, "0")}
-                          </span>
-                          <span className="text-[8px] font-mono text-slate-500 uppercase tracking-tighter">
-                            P-{idx + 1}
-                          </span>
-                        </motion.div>
-                      ))}
+                    <div className="flex flex-wrap items-center justify-center gap-6 py-8">
+                      {prediction.suggestedNumbers.map((num, idx) => {
+                        const weather = getThermalIndex(num, history || []);
+                        const xapItem = prediction.xapExp?.find(x => x.number === num);
+                        return (
+                          <motion.div
+                            key={`sugg-${num}`}
+                            initial={{ scale: 0.5, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{
+                              delay: idx * 0.08,
+                              type: "spring",
+                              stiffness: 120,
+                            }}
+                            className="flex flex-col items-center"
+                          >
+                            <NumberBall
+                              number={num}
+                              size="lg"
+                              glow={prediction.confidence > 80}
+                              confidence={xapItem ? xapItem.contributionPercentage : undefined}
+                            />
+                            <div className={`mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${weather.color} text-[10px] font-black uppercase tracking-wider shadow-sm`}>
+                              <span>{weather.emoji}</span>
+                              <span>{weather.label.split(" ")[0]}</span>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
                     </div>
 
-                    <div className="flex justify-center pt-2 pb-6">
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 pb-6">
                       <button
                         onClick={async () => {
                           audioEngine.play("click");
@@ -1026,9 +1064,27 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                         <History size={14} />
                         Enregistrer dans le Journal d'Audit
                       </button>
-                    </div>
 
-                    <div className="mt-6 pt-6 border-t border-slate-800/60 space-y-4">
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setShowExpertTools(!showExpertTools);
+                        }}
+                        className={`px-6 py-3 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:scale-[1.03] active:scale-95 cursor-pointer ${
+                          showExpertTools
+                            ? "bg-indigo-950/40 border-indigo-500 text-indigo-300"
+                            : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <Sliders size={14} />
+                        {showExpertTools ? "Masquer les Outils Experts" : "Afficher les Outils Experts"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showExpertTools && (
+                    <>
+                      <div className="bg-slate-900/40 p-8 rounded-[2rem] border border-slate-800/80 shadow-xl relative overflow-hidden space-y-6">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/40">
                           <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
@@ -1315,7 +1371,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </div>
                         )}
                     </div>
-                  </div>
 
                   {/* AI Weights & Rationale Bento Panel */}
                   {prediction.aiWeights && (
@@ -1496,58 +1551,62 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       </div>
                     </div>
                   )}
+                    </>
+                  )}
                 </div>
 
                 {/* Side column: Expanded candidates */}
-                <div className="space-y-6">
-                  <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-slate-800/80 shadow-xl relative overflow-hidden h-full">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-fuchsia-500/5 rounded-full blur-2xl pointer-events-none" />
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5 mb-2">
-                      <Target size={12} className="text-fuchsia-400" />
-                      Vecteurs de Rupture Marginale
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mb-6">
-                      Candidats résiduels exploitant le delta d'entropie locale
-                    </p>
+                {showExpertTools && (
+                  <div className="space-y-6">
+                    <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-slate-800/80 shadow-xl relative overflow-hidden h-full">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-fuchsia-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5 mb-2">
+                        <Target size={12} className="text-fuchsia-400" />
+                        Vecteurs de Rupture Marginale
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mb-6">
+                        Candidats résiduels exploitant le delta d'entropie locale
+                      </p>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-2 gap-3">
-                      {prediction.candidates.map((num, idx) => {
-                        const isEven = num % 2 === 0;
-                        return (
-                          <div
-                            key={`cand-${num}`}
-                            className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 hover:border-slate-700 hover:bg-slate-950 transition-all flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="w-7 h-7 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-black flex items-center justify-center">
-                                {num}
-                              </span>
-                              <span className="text-[9px] font-mono text-slate-500">
-                                {isEven ? "Pair" : "Impair"}
+                      <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-2 gap-3">
+                        {prediction.candidates.map((num, idx) => {
+                          const isEven = num % 2 === 0;
+                          return (
+                            <div
+                              key={`cand-${num}`}
+                              className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 hover:border-slate-700 hover:bg-slate-950 transition-all flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="w-7 h-7 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-black flex items-center justify-center">
+                                  {num}
+                                </span>
+                                <span className="text-[9px] font-mono text-slate-500">
+                                  {isEven ? "Pair" : "Impair"}
+                                </span>
+                              </div>
+                              <span className="text-[8px] font-black text-slate-600">
+                                C-{idx + 1}
                               </span>
                             </div>
-                            <span className="text-[8px] font-black text-slate-600">
-                              C-{idx + 1}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
 
-                    <div className="mt-8 p-4 bg-fuchsia-500/5 border border-fuchsia-500/10 rounded-2xl flex items-start gap-3">
-                      <CheckCircle2
-                        size={16}
-                        className="text-fuchsia-400 flex-shrink-0 mt-0.5"
-                      />
-                      <p className="text-[10px] text-fuchsia-300/90 leading-relaxed">
-                        <strong>Intégration Modulaire</strong> : Intégrez ces
-                        candidats de gisement pour composer des formulaires de
-                        couverture s'appuyant sur l'analyse de régularisation
-                        continue.
-                      </p>
+                      <div className="mt-8 p-4 bg-fuchsia-500/5 border border-fuchsia-500/10 rounded-2xl flex items-start gap-3">
+                        <CheckCircle2
+                          size={16}
+                          className="text-fuchsia-400 flex-shrink-0 mt-0.5"
+                        />
+                        <p className="text-[10px] text-fuchsia-300/90 leading-relaxed">
+                          <strong>Intégration Modulaire</strong> : Intégrez ces
+                          candidats de gisement pour composer des formulaires de
+                          couverture s'appuyant sur l'analyse de régularisation
+                          continue.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </motion.div>
             ) : (
               <motion.div

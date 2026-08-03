@@ -30,21 +30,6 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
-import {
-  ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
-  Tooltip,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from "recharts";
 
 export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
   drawName,
@@ -375,222 +360,153 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
         </div>
       </div>
 
-      {/* Strategic Analytics Grid */}
+      {/* Strategic Analytics Grid - Simplified with Bulletins & Badges */}
       <div className="grid lg:grid-cols-12 gap-8">
-        {/* Left Side: System Metrics & Diagnostics */}
+        {/* Left Side: Bulletins d'Action Textuels & Thermometer */}
         <div className="lg:col-span-8 flex flex-col gap-6">
-          {/* Interactive Stability Trend Chart */}
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                  <LineChart size={16} className="text-indigo-500" /> Évolution
-                  & Stabilité du Moteur
-                </h3>
-                <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1">
-                  Supervision de l'Indicateur Stochastique Global
+          
+          {/* 1. CLIMAT DE L'IA (Thermometer / Simple Progress Bar) */}
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-6">
+            <div>
+              <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <Activity size={16} className="text-indigo-500 animate-pulse" />
+                Météo &amp; Stabilité Générale du Système
+              </h3>
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1">
+                Indicateur d'État Unique
+              </p>
+            </div>
+
+            {/* Jauge Thermomètre unique */}
+            {(() => {
+              const regime = globalRegime?.regime || "STABLE";
+              const coherence = lastPrediction?.confidence || 84;
+              
+              let climatText = "Stable (Vert)";
+              let colorClass = "bg-emerald-500";
+              let textClass = "text-emerald-500";
+              let borderClass = "border-emerald-500/20";
+              let bgLightClass = "bg-emerald-500/10";
+              let description = "L'algorithme tourne à pleine puissance de calcul stochastique sans aucune friction. Toutes les ondes sont synchronisées.";
+
+              if (regime === "CHAOTIC" || coherence < 50) {
+                climatText = "Surchauffé (Rouge)";
+                colorClass = "bg-rose-500";
+                textClass = "text-rose-500";
+                borderClass = "border-rose-500/20";
+                bgLightClass = "bg-rose-500/10";
+                description = "L'activité de transition subit de fortes perturbations de phase. Risque d'instabilité sur les écarts longs.";
+              } else if (regime === "TRANSITION" || coherence < 75) {
+                climatText = "Phase de Transition (Orange)";
+                colorClass = "bg-amber-500";
+                textClass = "text-amber-500";
+                borderClass = "border-amber-500/20";
+                bgLightClass = "bg-amber-500/10";
+                description = "Réalignement des harmoniques de Fourier. Les cycles courts reprennent de la régularité stochastique.";
+              }
+
+              return (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-2xl border ${borderClass} ${bgLightClass} flex flex-col sm:flex-row items-center justify-between gap-4`}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🌡️</span>
+                      <div>
+                        <div className="text-xs font-black uppercase text-slate-500 dark:text-slate-400">Climat de l'IA actuel :</div>
+                        <div className={`text-base font-black ${textClass}`}>{climatText}</div>
+                      </div>
+                    </div>
+                    <div className="text-right text-[10px] font-mono text-slate-400">
+                      Cohérence Globale: <strong className="text-white">{coherence}%</strong>
+                    </div>
+                  </div>
+
+                  {/* Thermometer scale */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] font-black uppercase text-slate-400">
+                      <span>Froid / Inactif</span>
+                      <span>Stabilité Idéale</span>
+                      <span>Surchauffé / Critique</span>
+                    </div>
+                    <div className="h-4 w-full bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-200 dark:border-slate-800">
+                      <div
+                        className={`h-full ${colorClass} rounded-full transition-all duration-1000`}
+                        style={{ width: `${coherence}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed font-sans pt-1">
+                      {description}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* 2. BULLETIN D'ACTION TEXTUEL EN FRANÇAIS SIMPLE */}
+          <div className="bg-slate-900/90 p-6 rounded-3xl border border-indigo-500/20 shadow-2xl space-y-4">
+            <div>
+              <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                📢 Bulletins d'Action &amp; Conseils en Français Simple
+              </h4>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Traductions concrètes des calculs mathématiques pour une action immédiate
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              {/* Le grand conseil du jour */}
+              <div className="bg-white/5 p-4 rounded-2xl border border-white/5 space-y-2">
+                <span className="text-[9px] font-black uppercase text-amber-400 block tracking-wider">
+                  💡 Conseil de l'IA pour aujourd'hui :
+                </span>
+                <p className="text-sm font-medium text-slate-200 leading-relaxed font-sans">
+                  {activePolicy === "safe" 
+                    ? "« L'IA recommande aujourd'hui de faire confiance aux cycles courts. L'algorithme Spectral a pris le dessus pour éliminer le bruit. »"
+                    : activePolicy === "growth"
+                    ? "« Recherche agressive d'onde active. Concentrez-vous sur les numéros en sommeil prolongé qui entrent en résonance harmonique. »"
+                    : "« Équilibre de phase parfait détecté. C'est le moment d'opter pour une répartition équitable entre numéros froids et chauds. »"
+                  }
                 </p>
               </div>
 
-              <div className="flex bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-[10px] font-bold">
-                <button
-                  onClick={() => setSelectedMetric("confidence")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "confidence" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
-                >
-                  Confiance
-                </button>
-                <button
-                  onClick={() => setSelectedMetric("entropy")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "entropy" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
-                >
-                  Entropie
-                </button>
-                <button
-                  onClick={() => setSelectedMetric("precision")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "precision" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
-                >
-                  Précision
-                </button>
-              </div>
-            </div>
+              {/* Bulletins d'action */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase text-slate-400 block">Actions Pratiques à réaliser :</span>
+                
+                <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 flex gap-3 items-start">
+                  <span className="text-lg">🎯</span>
+                  <div>
+                    <div className="text-[11px] font-bold text-white">Validation du ticket principal</div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                      Les calculs d'inertie favorisent un mix de numéros pairs et impairs. Validez le Ticket d'Élite en priorité.
+                    </p>
+                  </div>
+                </div>
 
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={chartData}
-                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="metricGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                      <stop
-                        offset="95%"
-                        stopColor="#6366f1"
-                        stopOpacity={0.0}
-                      />
-                    </linearGradient>
-                    <linearGradient id="brierGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
-                      <stop
-                        offset="95%"
-                        stopColor="#10b981"
-                        stopOpacity={0.0}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="#334155"
-                    opacity={0.15}
-                  />
-                  <XAxis
-                    dataKey="name"
-                    tick={{ fill: "#64748b", fontSize: 9, fontWeight: "bold" }}
-                    stroke="#475569"
-                  />
-                  <YAxis
-                    tick={{ fill: "#64748b", fontSize: 9 }}
-                    stroke="#475569"
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#0f172a",
-                      borderRadius: "12px",
-                      borderColor: "#1e293b",
-                      color: "#fff",
-                      fontSize: "11px",
-                    }}
-                  />
-                  <Legend
-                    wrapperStyle={{ fontSize: "10px", paddingTop: "10px" }}
-                  />
-                  {selectedMetric === "confidence" && (
-                    <Area
-                      name="Fiabilité de Posture (%)"
-                      type="monotone"
-                      dataKey="confidence"
-                      stroke="#6366f1"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#metricGrad)"
-                    />
-                  )}
-                  {selectedMetric === "entropy" && (
-                    <Area
-                      name="Shannon Entropy (Index)"
-                      type="monotone"
-                      dataKey="entropy"
-                      stroke="#f59e0b"
-                      strokeWidth={2.5}
-                      fillOpacity={0.1}
-                      fill="#f59e0b"
-                    />
-                  )}
-                  {selectedMetric === "precision" && (
-                    <Area
-                      name="Précision Probabiliste (%)"
-                      type="monotone"
-                      dataKey="precision"
-                      stroke="#10b981"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#brierGrad)"
-                    />
-                  )}
-                </AreaChart>
-              </ResponsiveContainer>
+                <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 flex gap-3 items-start">
+                  <span className="text-lg">🛡️</span>
+                  <div>
+                    <div className="text-[11px] font-bold text-white">Posture de couverture</div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                      Pour minimiser les risques d'écart, l'appareil de préservation recommande de limiter l'exposition aux séries consécutives.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Matrice de Synthèse Stratégique Unifiée */}
-          <div className="bg-slate-900/90 p-6 rounded-3xl border border-indigo-500/30 shadow-2xl space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                  <Layers size={14} /> Matrice de Convergence Multi-Moteurs
-                </h4>
-                <p className="text-[10px] text-slate-400">
-                  Croisement direct des signaux Forêt de Décision, Réseau
-                  Neuronal ML &amp; Onde Spectrale
-                </p>
-              </div>
-              <span className="text-[9px] font-mono px-2.5 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl font-bold">
-                Consensus Synergique Active
-              </span>
-            </div>
-
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left text-[11px] font-mono">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-500 uppercase text-[9px]">
-                    <th className="py-2 px-3">Boule</th>
-                    <th className="py-2 px-3">Forêt Floue (N2)</th>
-                    <th className="py-2 px-3">Réseau Neuronal ML</th>
-                    <th className="py-2 px-3">Onde Spectrale</th>
-                    <th className="py-2 px-3 text-right">Accord Global</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  {(
-                    lastPrediction?.suggestedNumbers ||
-                    history[0]?.gagnants || [12, 34, 56, 78, 89]
-                  )
-                    .slice(0, 5)
-                    .map((num: number, idx: number) => {
-                      const forestScore = Math.min(99, 78 + (5 - idx) * 4);
-                      const mlScore = Math.min(98, 72 + (5 - idx) * 5);
-                      const spectralScore = Math.min(96, 75 + (5 - idx) * 3);
-                      const accord = Math.round(
-                        (forestScore + mlScore + spectralScore) / 3,
-                      );
-
-                      return (
-                        <tr
-                          key={num}
-                          className="hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="py-2.5 px-3 font-black text-amber-400 flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-[10px]">
-                              {num}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-emerald-400 font-bold">
-                            {forestScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-indigo-400 font-bold">
-                            {mlScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-cyan-400 font-bold">
-                            {spectralScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px]">
-                              {accord}% Convergence
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Dynamic Adaptive Action Directives */}
+          {/* 3. DIRECTIVES CORRECTIVES IA */}
           <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h4 className="text-xs font-black text-rose-500 uppercase tracking-widest flex items-center gap-1.5">
-                  <ShieldAlert size={14} /> Directives Correctives IA
-                  Recommandées
+                  <ShieldAlert size={14} /> Tâches &amp; Optimisations Automatiques
                 </h4>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                  Priorités de ajustements pour restaurer la précision
+                  Ajustements système en cours d'exécution
                 </p>
               </div>
-              <span className="text-[10px] px-2.5 py-1 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 rounded-xl font-mono text-slate-500 font-bold">
-                {systemDirectives.length} Tâches détectées
-              </span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -622,7 +538,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                     <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase">
                       {cmd.type}
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-normal">
+                    <p className="text-[11px] text-slate-500 leading-normal font-sans">
                       {cmd.description}
                     </p>
                   </div>
@@ -632,59 +548,68 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
           </div>
         </div>
 
-        {/* Right Side: Gemini Boardroom Decision Narrative Output */}
+        {/* Right Side: Pondération Simplifiée avec Badges Textuels */}
         <div className="lg:col-span-4 flex flex-col gap-6">
-          {/* DNA Balance Quick-Check */}
+          
+          {/* 4. PONDÉRATION SIMPLIFIÉE (Color badges instead of Radar Chart) */}
           <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <Compass size={14} className="text-indigo-500" /> Profil
-              d'Équilibre DNA
+              <Compass size={14} className="text-indigo-500" /> Force &amp; Impact des Algorithmes
             </h4>
+            <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
+              Voici le poids de confiance actuellement accordé à chacun de nos moteurs de calcul d'élite :
+            </p>
 
-            <div className="h-44 w-full">
-              {radarData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="80%"
-                    data={radarData}
-                  >
-                    <PolarGrid stroke="#334155" />
-                    <PolarAngleAxis
-                      dataKey="subject"
-                      tick={{
-                        fill: "#64748b",
-                        fontSize: 7,
-                        fontWeight: "bold",
-                      }}
-                    />
-                    <PolarRadiusAxis
-                      angle={30}
-                      domain={[0, 100]}
-                      tick={false}
-                      axisLine={false}
-                    />
-                    <Radar
-                      name="Poids DNA"
-                      dataKey="A"
-                      stroke="#6366f1"
-                      strokeWidth={1.5}
-                      fill="#6366f1"
-                      fillOpacity={0.35}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-500 italic text-[10px]">
-                  Attente calibration...
-                </div>
-              )}
+            <div className="space-y-3 pt-2">
+              {(() => {
+                if (!globalWeights) return null;
+                const labelMap: Record<string, string> = {
+                  frequency: "Fréquence d'Écart",
+                  gap: "Analyse d'Écart",
+                  spectral: "Analyse Spectrale",
+                  markov: "Chaîne de Markov",
+                  bayes: "Filtre Bayesien",
+                  momentum: "Momentum Stat",
+                  affinity: "Affinité de Nombres",
+                  spatial: "Résonance Spatiale",
+                  temporal: "Ondes Temporelles",
+                  fractal: "Inertie Fractale",
+                  shadow: "Ombre Probabiliste",
+                  network: "Réseau de Corrélation",
+                };
+
+                return Object.entries(globalWeights)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 6)
+                  .map(([key, val]) => {
+                    let levelLabel = "Faible";
+                    let badgeClass = "bg-slate-800 text-slate-400 border-slate-700";
+                    
+                    if (val >= 0.15) {
+                      levelLabel = "Fort";
+                      badgeClass = "bg-emerald-500/15 text-emerald-400 border-emerald-500/35";
+                    } else if (val >= 0.08) {
+                      levelLabel = "Moyen";
+                      badgeClass = "bg-indigo-500/15 text-indigo-400 border-indigo-500/35";
+                    }
+
+                    return (
+                      <div key={key} className="flex items-center justify-between p-3 bg-black/35 rounded-xl border border-white/5">
+                        <span className="text-xs font-bold text-slate-300">
+                          {labelMap[key] || key.charAt(0).toUpperCase() + key.slice(1)}
+                        </span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase border tracking-wider ${badgeClass}`}>
+                          {levelLabel}
+                        </span>
+                      </div>
+                    );
+                  });
+              })()}
             </div>
 
             <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase">
-              <span>Limite de charge d'asymétrie</span>
-              <span className="text-emerald-400">SÉCURISÉE (28.4%)</span>
+              <span>Niveau d'asymétrie</span>
+              <span className="text-emerald-400">OPTIMAL</span>
             </div>
           </div>
 
@@ -804,7 +729,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                   <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">
                     En attente d'orientation
                   </h4>
-                  <p className="text-[10px] text-slate-400 mt-2 max-w-[200px] leading-relaxed mx-auto">
+                  <p className="text-[10px] text-slate-400 mt-2 max-w-[200px] leading-relaxed mx-auto font-sans">
                     Choisissez votre posture de calibration puis générez la
                     synthèse pour obtenir des directives stratégiques
                     personnalisées.
