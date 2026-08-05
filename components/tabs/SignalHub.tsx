@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy, useEffect } from "react";
+import React, { useState, Suspense, lazy, useEffect, useTransition } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { SmartInsights } from "../SmartInsights";
 import {
@@ -66,6 +66,7 @@ export const SignalHub: React.FC = () => {
   const currentDrawName = useNexusStore((state) => state.currentDrawName);
   const activeDraw = drawName || currentDrawName;
 
+  const [isPending, startTransition] = useTransition();
   const [activeSubTab, setActiveSubTab] = useState("stats");
   const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
 
@@ -94,7 +95,9 @@ export const SignalHub: React.FC = () => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail?.subTab) {
-        setActiveSubTab(customEvent.detail.subTab);
+        startTransition(() => {
+          setActiveSubTab(customEvent.detail.subTab);
+        });
         const contentElement = document.getElementById("signal-content");
         if (contentElement)
           contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -147,12 +150,14 @@ export const SignalHub: React.FC = () => {
                     key={tab.id}
                     onClick={() => {
                       audioEngine.play("click");
-                      setActiveSubTab(tab.id);
+                      startTransition(() => {
+                        setActiveSubTab(tab.id);
+                      });
                     }}
                     onMouseEnter={() => subTabPreloaders[tab.id]?.()}
                     onTouchStart={() => subTabPreloaders[tab.id]?.()}
                     className={`
-                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
+                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 btn-reactive
                                             ${
                                               activeSubTab === tab.id
                                                 ? "bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"

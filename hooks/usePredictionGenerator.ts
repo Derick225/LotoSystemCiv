@@ -158,6 +158,24 @@ export const usePredictionGenerator = (drawName: string) => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));
     }, [globalWeights]);
 
+    useEffect(() => {
+        const handleFallback = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            if (customEvent.detail?.drawName === drawName) {
+                const errorDetail = customEvent.detail?.error || "";
+                console.warn("[Scenario C Fallback Event] Triggered:", errorDetail);
+                showToast(
+                    "Échec Cloud (Réseau/Serveur). Basculement automatique local (Scénario C).",
+                    "info"
+                );
+            }
+        };
+        window.addEventListener('CLOUD_PREDICTION_FALLBACK', handleFallback);
+        return () => {
+            window.removeEventListener('CLOUD_PREDICTION_FALLBACK', handleFallback);
+        };
+    }, [drawName, showToast]);
+
     const resolveWeights = async (forcedWeights?: AlgoWeights | null) => {
         let specificWeights = forcedWeights || (Object.keys(globalWeights || {}).length > 0 ? { ...globalWeights } as AlgoWeights : null);
         if (!specificWeights) {

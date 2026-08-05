@@ -85,14 +85,14 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
               <button
                 onClick={handleSync}
                 disabled={syncing}
-                className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 rounded-xl transition-colors"
+                className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-indigo-500 rounded-xl transition-colors btn-reactive"
                 title="Synchroniser avec le Cloud"
               >
                 <Cloud size={18} className={syncing ? "animate-bounce" : ""} />
               </button>
               <button
                 onClick={handleRefresh}
-                className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-emerald-500 rounded-xl transition-colors"
+                className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-emerald-500 rounded-xl transition-colors btn-reactive"
                 title="Rafraîchir"
               >
                 <RefreshCw size={18} />
@@ -120,7 +120,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
                   </div>
                   <button
                     onClick={handleRefresh}
-                    className="px-5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-black text-xs uppercase tracking-widest rounded-xl transition-colors border border-rose-500/30 whitespace-nowrap"
+                    className="px-5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-black text-xs uppercase tracking-widest rounded-xl transition-colors border border-rose-500/30 whitespace-nowrap btn-reactive"
                   >
                     Forcer l'Audit
                   </button>

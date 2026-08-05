@@ -149,6 +149,14 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
           { drawName: context.drawName, result },
           "[predictionScenarios] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET (transport OK, contenu HS). Activation du repli local."
         );
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('CLOUD_PREDICTION_FALLBACK', {
+            detail: {
+              drawName: context.drawName,
+              error: "Payload cloud analytique invalide ou incomplet."
+            }
+          }));
+        }
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
@@ -156,6 +164,14 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
         { drawName: context.drawName, error: errorMsg },
         "[predictionScenarios] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
       );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('CLOUD_PREDICTION_FALLBACK', {
+          detail: {
+            drawName: context.drawName,
+            error: errorMsg
+          }
+        }));
+      }
     }
   }
   return null;

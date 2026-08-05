@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy, useEffect } from "react";
+import React, { useState, Suspense, lazy, useEffect, useTransition } from "react";
 import {
   Grid,
   GitBranch,
@@ -55,6 +55,7 @@ const TabLoader = () => (
 );
 
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
+  const [isPending, startTransition] = useTransition();
   const [subTab, setSubTab] = useState<
     "spatial" | "synergy" | "decision" | "combinations" | "python" | "neural"
   >("spatial");
@@ -64,7 +65,9 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail?.subTab) {
-        setSubTab(customEvent.detail.subTab);
+        startTransition(() => {
+          setSubTab(customEvent.detail.subTab);
+        });
         const contentElement = document.getElementById("topology-content");
         if (contentElement)
           contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -142,20 +145,22 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                 key={tab.id}
                 onClick={() => {
                   audioEngine.play("click");
-                  setSubTab(
-                    tab.id as
-                      | "spatial"
-                      | "synergy"
-                      | "decision"
-                      | "combinations"
-                      | "python"
-                      | "neural",
-                  );
+                  startTransition(() => {
+                    setSubTab(
+                      tab.id as
+                        | "spatial"
+                        | "synergy"
+                        | "decision"
+                        | "combinations"
+                        | "python"
+                        | "neural",
+                    );
+                  });
                 }}
                 onMouseEnter={() => subTabPreloaders[tab.id]?.()}
                 onTouchStart={() => subTabPreloaders[tab.id]?.()}
                 className={`
-                                    px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
+                                    px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 btn-reactive
                                     ${
                                       subTab === tab.id
                                         ? tab.id === "python"

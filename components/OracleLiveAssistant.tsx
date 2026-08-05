@@ -185,21 +185,14 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({
 
   const fetchApiKey = async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers["Authorization"] = `Bearer ${session.access_token}`;
-      }
-      const res = await fetch("/api/gemini-token", { headers });
-      if (res.ok) {
-        const data = await res.json();
+      const { data, error } = await supabase.functions.invoke("gemini-token");
+      if (error) throw error;
+      if (data && data.token) {
         setDynamicApiKey(data.token);
         return data.token;
       }
     } catch (e) {
-      console.warn("Could not fetch token", e);
+      console.warn("Could not fetch token via Supabase Edge Function", e);
     }
     return null;
   };
