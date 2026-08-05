@@ -10,7 +10,7 @@ import {
   Briefcase,
 } from "lucide-react";
 import { audioEngine } from "../utils/audioEngine";
-import { useNexusStore } from "../store/useNexusStore";
+import { useNexusHistory } from "../store/useNexusStore";
 import { detectGameRegime } from "../services/mathService";
 
 interface KellyCalculatorProps {
@@ -22,7 +22,7 @@ type GameMode = "STANDARD" | "DOUBLE_CHANCE" | "DOUBLE_CHANCE_MACHINE";
 export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
   confidence,
 }) => {
-  const history = useNexusStore((state) => state.history);
+  const history = useNexusHistory();
   const [bankroll, setBankroll] = useState<number>(5000);
   const [gameMode, setGameMode] = useState<GameMode>("STANDARD");
   const [selectedBetType, setSelectedBetType] = useState<string>("2N");

@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { useToast } from "./ui/Toast";
 import { PredictionForensics } from "./PredictionForensics";
-import { useNexusStore } from "../store/useNexusStore";
+import { useNexusHistory, useNexusLoading } from "../store/useNexusStore";
 import { TicketXRay } from "./TicketXRay";
 import { audioEngine } from "../utils/audioEngine";
 import { logError, AppError } from "../utils/AppError";
@@ -46,8 +46,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const results = useNexusStore((state) => state.history);
-  const nexusLoading = useNexusStore((state) => state.loading);
+  const results = useNexusHistory();
+  const nexusLoading = useNexusLoading();
   const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [forensicReport, setForensicReport] = useState<ForensicReport | null>(
