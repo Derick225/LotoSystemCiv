@@ -795,7 +795,7 @@ export function runFractal(history: { gagnants: number[] }[]) {
  * réduit l'incertitude sur l'apparition du Numéro Y (Target) au tirage suivant.
  * Retourne les paires ayant la plus forte Entropie de Transfert.
  */
-export function computeTransferEntropy(history: { gagnants: number[] }[], targetNumbers?: number[]) {
+export async function computeTransferEntropy(history: { gagnants: number[] }[], targetNumbers?: number[]) {
     const N = Math.min(history.length, 500); // 500 tirages max pour pertinence
     // CORRECTION : Le seuil de bruit ne doit pas être 0.005. 
     // Il doit être dérivé de la résolution théorique de l'entropie pour N échantillons : 1 / log2(N)
@@ -816,11 +816,18 @@ export function computeTransferEntropy(history: { gagnants: number[] }[], target
     const results = [];
     const targets = targetNumbers && targetNumbers.length > 0 ? targetNumbers : Array.from({length: 90}, (_, i) => i + 1);
 
+    let loopCount = 0;
     for (const Y of targets) {
         const ySeries = occurrences[Y];
         
         for (let X = 1; X <= 90; X++) {
             if (X === Y) continue;
+            
+            // Redonner périodiquement la main au thread de rendu graphique pour fluidité absolue
+            loopCount++;
+            if (loopCount % 200 === 0) {
+                await new Promise(r => setTimeout(r, 0));
+            }
             
             const xSeries = occurrences[X];
             

@@ -184,10 +184,13 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
-            'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
+            'vendor-react': ['react', 'react-dom', 'react-is'],
+            'vendor-motion': ['framer-motion'],
+            'vendor-recharts': ['recharts'],
+            'vendor-icons': ['lucide-react'],
             'vendor-utils': ['jspdf', 'html2canvas'],
-            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query']
+            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query'],
+            'vendor-ui-helpers': ['clsx', 'tailwind-merge']
           }
         }
       }

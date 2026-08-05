@@ -1075,8 +1075,8 @@ export const calculateTransferEntropyAsync = async (history: DrawResult[], targe
     
     // Wrap to prevent UI blocking for 8100 iterations (although fast, it's good practice)
     return new Promise<{source: number, target: number, entropyTransfer: number, confidence: number}[]>((resolve) => {
-        setTimeout(() => {
-            const results = computeTransferEntropy(history, targetNumbers);
+        setTimeout(async () => {
+            const results = await computeTransferEntropy(history, targetNumbers);
             resolve(results);
         }, 10);
     });

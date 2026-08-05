@@ -3,7 +3,7 @@
 import * as mathCore from './mathCore';
 import { unpackHistory, unpackMatrix, unpackArray, collectTransferables } from './workers/zeroCopy';
 
-self.onmessage = (e: MessageEvent) => {
+self.onmessage = async (e: MessageEvent) => {
     const { taskId, task, payload, history, historyBuffer, drawCount, winningCount, totalCols } = e.data;
     
     try {
@@ -43,7 +43,7 @@ self.onmessage = (e: MessageEvent) => {
                 result = mathCore.runContinuousWaveletTransformAnalysis(hist);
                 break;
             case 'TRANSFER_ENTROPY':
-                result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
+                result = await mathCore.computeTransferEntropy(hist, p?.targetNumbers);
                 break;
             default:
                 result = { status: 'OK' };

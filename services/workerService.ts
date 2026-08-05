@@ -42,11 +42,11 @@ class WorkerService {
             
             // Tentative d'initialisation progressive du Web Worker pour une compatibilité maximale
             try {
-                this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
+                this.localWorker = new Worker(new URL('./nexus.worker.ts', /* @ts-ignore */ import.meta.url), { type: 'module' });
             } catch (moduleError) {
                 console.warn("[WorkerService] Échec du worker en mode 'module', essai en mode classique...", moduleError);
                 try {
-                    this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url));
+                    this.localWorker = new Worker(new URL('./nexus.worker.ts', /* @ts-ignore */ import.meta.url));
                 } catch (classicError) {
                     console.error("[WorkerService] Échec définitif de création du Web Worker:", classicError);
                     this.initFailed = true;
@@ -225,7 +225,7 @@ class WorkerService {
                     result = mathCore.runContinuousWaveletTransformAnalysis(hist);
                     break;
                 case 'TRANSFER_ENTROPY':
-                    result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
+                    result = await mathCore.computeTransferEntropy(hist, p?.targetNumbers);
                     break;
                 default:
                     result = { status: 'OK' };
