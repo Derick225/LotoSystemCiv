@@ -30,10 +30,10 @@ const ResetPasswordScreen = lazyWithRetry(() => import('./components/auth/ResetP
 const SubscriptionWall = lazyWithRetry(() => import('./components/auth/SubscriptionWall'), 'SubscriptionWall');
 const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumberHUD'), 'GlobalNumberHUD');
 
-const GlobalDashboard = lazyWithRetry(() => import('./components/GlobalDashboard'), 'GlobalDashboard');
-const DrawDetails = lazyWithRetry(() => import('./components/DrawDetails'), 'DrawDetails');
-const AdminPanel = lazyWithRetry(() => import('./components/admin/AdminPanel'), 'AdminPanel');
-const UserWallet = lazyWithRetry(() => import('./components/UserWallet'), 'UserWallet');
+import { GlobalDashboard } from './components/GlobalDashboard';
+import { DrawDetails } from './components/DrawDetails';
+import { AdminPanel } from './components/admin/AdminPanel';
+import { UserWallet } from './components/UserWallet';
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
