@@ -13,22 +13,48 @@ class WorkerService {
     private localWorker: Worker | null = null;
     private callbacks: Map<string, { resolve: Function, reject: Function }> = new Map();
     private workerReady: boolean = false;
+    private initFailed: boolean = false;
+    private initAttempts: number = 0;
+    private maxInitAttempts: number = 1;
 
     constructor() {
         this.initLocalWorker();
     }
 
     private initLocalWorker() {
+        if (this.initFailed || this.initAttempts >= this.maxInitAttempts) {
+            this.workerReady = false;
+            this.localWorker = null;
+            return;
+        }
+
         try {
             if (typeof Worker === 'undefined') {
                 console.warn("L'environnement ne supporte pas les Web Workers. Exécution en mode dégradé (synchrone).");
+                this.initFailed = true;
                 return;
             }
             if (this.localWorker) {
                 try { this.localWorker.terminate(); } catch (_) {}
             }
-            // Initialisation d'un vrai Web Worker via Vite
-            this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
+            
+            this.initAttempts++;
+            
+            // Tentative d'initialisation progressive du Web Worker pour une compatibilité maximale
+            try {
+                this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
+            } catch (moduleError) {
+                console.warn("[WorkerService] Échec du worker en mode 'module', essai en mode classique...", moduleError);
+                try {
+                    this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url));
+                } catch (classicError) {
+                    console.error("[WorkerService] Échec définitif de création du Web Worker:", classicError);
+                    this.initFailed = true;
+                    this.workerReady = false;
+                    this.localWorker = null;
+                    return;
+                }
+            }
             
             this.localWorker.onmessage = (e: MessageEvent) => {
                 const { taskId, success, result, error } = e.data;
@@ -48,6 +74,8 @@ class WorkerService {
                 console.error("Local Worker interne error:", e);
                 this.workerReady = false;
                 this.localWorker = null;
+                this.initFailed = true; // Désactivation permanente après le premier échec d'exécution/chargement
+                
                 // Reject all pending tasks because the worker is dead
                 for (const [taskId, callback] of Array.from(this.callbacks.entries())) {
                     callback.reject(new Error("Local Worker a crashé ou n'a pas pu se charger."));
@@ -60,6 +88,7 @@ class WorkerService {
             console.error("Impossible d'initialiser le Web Worker Local. Les calculs seront bloquants.", e);
             this.workerReady = false;
             this.localWorker = null;
+            this.initFailed = true;
         }
     }
 
@@ -70,6 +99,9 @@ class WorkerService {
     }
 
     private runInLocalWorker(task: string, payload: unknown, history: unknown[]): Promise<unknown> {
+        if (this.initFailed) {
+            return Promise.reject(new Error("Local Worker non disponible (précédemment échoué)"));
+        }
         if (!this.workerReady || !this.localWorker) {
             this.initLocalWorker();
         }

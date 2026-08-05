@@ -156,15 +156,24 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
         queryFn: async () => {
             if (!history || history.length < 10) return null;
 
-            // Calculs Mathématiques via Workers
-            const [spec, wav, frac, regData, corr, forestRes] = await Promise.all([
-                calculateSpectralMetricsAsync(history),
-                calculateWaveletMetricsAsync(history),
-                calculateFractalMetricsAsync(history),
-                Promise.resolve(calculateRegularity(history)), // Synchrone mais rapide
-                calculateCorrelationMatrixAsync(history),
-                runDecisionForest(history, 'consensus', undefined, drawName)
-            ]);
+            // Calculs Mathématiques séquentiels avec relâchement du thread principal (Time-Slicing)
+            // pour garantir une réactivité UI parfaite (60 FPS) même en mode de secours sur le thread principal.
+            const spec = await calculateSpectralMetricsAsync(history);
+            await new Promise(r => setTimeout(r, 15));
+            
+            const wav = await calculateWaveletMetricsAsync(history);
+            await new Promise(r => setTimeout(r, 15));
+            
+            const frac = await calculateFractalMetricsAsync(history);
+            await new Promise(r => setTimeout(r, 15));
+            
+            const regData = calculateRegularity(history);
+            await new Promise(r => setTimeout(r, 15));
+            
+            const corr = await calculateCorrelationMatrixAsync(history);
+            await new Promise(r => setTimeout(r, 15));
+            
+            const forestRes = await runDecisionForest(history, 'consensus', undefined, drawName);
 
             // Calculs Contextuels
             const spatial = calculateSpatialMetrics(history);
