@@ -13,11 +13,16 @@ import {
   Compass,
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
-import { ChaosAttractor } from "../ChaosAttractor";
 import { calculateGapEfficiency } from "../../services/mathService";
 import { GapEfficiencyMeter } from "../GapEfficiencyMeter";
 import type { GapEfficiency } from "../../types";
 import { audioEngine } from "../../utils/audioEngine";
+
+// Three.js (~600 Ko+) ne doit pas alourdir le chunk de l'onglet Signaux au chargement :
+// on le charge à la demande, uniquement quand le widget est effectivement affiché.
+const ChaosAttractor = lazy(() =>
+  import("../ChaosAttractor").then((m) => ({ default: m.ChaosAttractor })),
+);
 
 const StatsTab = lazy(() =>
   import("./StatsTab").then((m) => ({ default: m.StatsTab })),
@@ -208,7 +213,15 @@ export const SignalHub: React.FC = () => {
 
         {/* Sidebar Widget : Attracteur & GEI */}
         <div className="lg:col-span-4 space-y-6">
-          <ChaosAttractor history={history} />
+          <Suspense
+            fallback={
+              <div className="h-[420px] flex items-center justify-center bg-slate-950 rounded-2xl border border-slate-900/80 animate-pulse text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                Chargement du moteur 3D...
+              </div>
+            }
+          >
+            <ChaosAttractor history={history} />
+          </Suspense>
           <GapEfficiencyMeter data={geiData} />
 
           <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] md:rounded-2xl border border-slate-100 dark:border-slate-700 shadow-xl">

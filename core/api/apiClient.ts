@@ -4,16 +4,49 @@ import { AppError, logError } from '../../utils/AppError';
 interface ApiOptions extends RequestInit {
   requireAuth?: boolean;
   suppressErrorLogging?: boolean;
+  /** Timeout en ms avant abandon de l'appel Edge Function (défaut: 4000ms). */
+  timeoutMs?: number;
+}
+
+// Sans ceci, `supabase.functions.invoke` peut rester en attente pendant la durée
+// du timeout réseau par défaut du navigateur (souvent 30-60s+) si la fonction Edge
+// n'est pas déployée, surchargée ou injoignable. C'est la cause n°1 des gels ressentis
+// avant le basculement automatique vers le Worker local (voir workerService.ts).
+const DEFAULT_EDGE_TIMEOUT_MS = 4000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortController): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.abort();
+      reject(new Error(`Timeout Edge Function après ${ms}ms`));
+    }, ms);
+
+    promise
+      .then((val) => { clearTimeout(timer); resolve(val); })
+      .catch((err) => { clearTimeout(timer); reject(err); });
+  });
 }
 
 export const apiClient = {
   async post<T>(endpoint: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+    const controller = new AbortController();
+    const timeoutMs = options.timeoutMs ?? DEFAULT_EDGE_TIMEOUT_MS;
+
     try {
-      // Appel direct de la Supabase Edge Function
-      const { data, error } = await supabase.functions.invoke(endpoint, {
-        body: body as Record<string, unknown>,
-        headers: options.headers as Record<string, string>
-      });
+      // Appel direct de la Supabase Edge Function, borné par un timeout strict.
+      // `signal` est transmis pour interrompre la requête HTTP sous-jacente dès
+      // que le timeout expire (au lieu de la laisser traîner en arrière-plan).
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke(endpoint, {
+          body: body as Record<string, unknown>,
+          headers: options.headers as Record<string, string>,
+          signal: controller.signal,
+          // @ts-ignore - option native supportée par functions-js >= 2.9x (verrouillé 2.97.0 ici)
+          timeout: timeoutMs
+        }),
+        timeoutMs,
+        controller
+      );
 
       if (error) {
         let errorMessage = error.message;
@@ -60,7 +93,8 @@ export const apiClient = {
         }
         throw error;
       }
-      const isNetworkError = String(error).toLowerCase().includes('fetch') || String(error).toLowerCase().includes('network');
+      const errorText = String(error).toLowerCase();
+      const isNetworkError = errorText.includes('fetch') || errorText.includes('network') || errorText.includes('timeout') || errorText.includes('abort');
       const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', isNetworkError ? 'medium' : 'high', { error });
       if (!options.suppressErrorLogging) {
           logError(unknownError, { endpoint });

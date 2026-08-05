@@ -45,7 +45,9 @@ export const runForensicWorker = async (
   drawName: string,
   actualWinners: number[],
   history: DrawResult[],
-  timeoutMs: number = 15000
+  timeoutMs: number = 15000,
+  predictionMatrix?: Record<number, Record<string, number>>,
+  currentWeights?: Record<string, number>
 ): Promise<ForensicReport> => {
   return new Promise<ForensicReport>((resolve) => {
     let worker: Worker;
@@ -105,7 +107,9 @@ export const runForensicWorker = async (
       historyBuffer: packed.historyBuffer,
       drawCount: packed.drawCount,
       winningCount: packed.winningCount,
-      totalCols: packed.totalCols 
+      totalCols: packed.totalCols,
+      predictionMatrix,
+      currentWeights
     }, [packed.historyBuffer]);
   });
 };

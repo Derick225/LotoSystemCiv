@@ -1,4 +1,3 @@
-
 import { AppError } from '../utils/AppError';
 import { apiClient } from '../core/api/apiClient';
 import { packHistory, packMatrix, packArray, collectTransferables } from './workers/zeroCopy';
@@ -207,49 +206,66 @@ class WorkerService {
 
     private edgeFailures: number = 0;
     private edgeCooldownUntil: number = 0;
+    // Si l'Edge Function a répondu avec succès au moins une fois, on sait qu'elle est
+    // déployée et on peut la solliciter en parallèle (best-effort) pour décharger le CPU
+    // client sur les gros historiques, sans jamais faire attendre l'UI dessus.
+    private edgeConfirmedAvailable: boolean = false;
 
     public async runTask<T>(task: string, payload: unknown = {}, history: unknown[] = []): Promise<T> {
-        // Circuit Breaker: Si l'Edge a trop échoué, on passe directement au Local Worker pendant un temps (ex: 5 minutes)
-        if (Date.now() < this.edgeCooldownUntil) {
+        // PRIORITÉ 1 : Worker local (aucune latence réseau, toujours tenté en premier).
+        // C'est le chemin critique pour la réactivité de l'UI : il ne doit jamais
+        // attendre un aller-retour réseau avant de démarrer.
+        if (this.workerReady || !this.localWorker) {
             try {
-                return await this.runInLocalWorker(task, payload, history) as T;
-            } catch (fallbackError: unknown) {
-                return await this.runInMainThreadFallback<T>(task, payload, history);
-            }
-        }
-
-        try {
-            const response = await apiClient.post<{ success: boolean, result?: unknown, error?: string }>('compute-nexus-analytics', {
-                task,
-                payload,
-                history
-            }, { suppressErrorLogging: true });
-
-            if (response && response.success) {
-                // Reset circuit breaker on success
-                this.edgeFailures = 0;
-                return response.result as T;
-            } else {
-                throw new Error(response?.error || "Erreur silencieuse venant de l'Edge Function");
-            }
-        } catch (e: unknown) {
-            this.edgeFailures++;
-            if (this.edgeFailures >= 3) {
-                // Si ça rate 3 fois de suite, on met l'Edge Function en pause pendant 5 minutes
-                this.edgeCooldownUntil = Date.now() + 5 * 60 * 1000;
-                console.info(`[Nexus Worker] Edge Function hors ligne (Circuit ouvert). Passage en local exclusif pendant 5 min.`);
-            } else {
-                console.info(`[Nexus Worker] Edge Function indisponible (non déployée). Délégation en cours au Worker Local...`);
-            }
-            
-            try {
-                // Utilisation du Worker Asynchrone au lieu d'importer directement mathCore sur le thread principal
                 const result = await this.runInLocalWorker(task, payload, history);
+                // Une fois qu'on sait que le Worker local fonctionne, on tente de
+                // "réchauffer" la disponibilité de l'Edge Function en arrière-plan,
+                // sans bloquer ni attendre sa réponse (fire-and-forget, best-effort).
+                if (!this.edgeConfirmedAvailable && Date.now() >= this.edgeCooldownUntil) {
+                    this.pingEdgeInBackground(task, payload, history);
+                }
                 return result as T;
-            } catch (fallbackError: unknown) {
-                return await this.runInMainThreadFallback<T>(task, payload, history);
+            } catch (localError: unknown) {
+                console.info('[Nexus Worker] Worker local indisponible, tentative via Edge Function...');
             }
         }
+
+        // PRIORITÉ 2 : Edge Function (avec timeout strict défini dans apiClient).
+        // Circuit Breaker : si l'Edge a trop échoué récemment, on ne perd pas de temps à réessayer.
+        if (Date.now() >= this.edgeCooldownUntil) {
+            try {
+                const response = await apiClient.post<{ success: boolean, result?: unknown, error?: string }>('compute-nexus-analytics', {
+                    task,
+                    payload,
+                    history
+                }, { suppressErrorLogging: true });
+
+                if (response && response.success) {
+                    this.edgeFailures = 0;
+                    this.edgeConfirmedAvailable = true;
+                    return response.result as T;
+                }
+                throw new Error(response?.error || "Erreur silencieuse venant de l'Edge Function");
+            } catch (e: unknown) {
+                this.edgeFailures++;
+                if (this.edgeFailures >= 3) {
+                    this.edgeCooldownUntil = Date.now() + 5 * 60 * 1000;
+                    console.info(`[Nexus Worker] Edge Function hors ligne (Circuit ouvert). Pause de 5 min.`);
+                }
+            }
+        }
+
+        // PRIORITÉ 3 (dernier recours) : calcul synchrone sur le thread principal.
+        // Bloque l'UI le temps du calcul : n'est atteint que si ni le Worker local
+        // ni l'Edge Function ne sont disponibles.
+        return await this.runInMainThreadFallback<T>(task, payload, history);
+    }
+
+    /** Sollicite l'Edge Function sans jamais faire attendre l'appelant (fire-and-forget). */
+    private pingEdgeInBackground(task: string, payload: unknown, history: unknown[]): void {
+        apiClient.post('compute-nexus-analytics', { task, payload, history }, { suppressErrorLogging: true, timeoutMs: 4000 })
+            .then(() => { this.edgeConfirmedAvailable = true; this.edgeFailures = 0; })
+            .catch(() => { /* Best-effort : on ignore, le Worker local reste la source de vérité */ });
     }
 
     public async warmup(drawName: string = "Loto 5/90"): Promise<{ ready: boolean; latencyMs: number }> {

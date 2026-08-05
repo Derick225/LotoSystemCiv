@@ -2052,7 +2052,10 @@ export const generateForensicReport = (
     warnings.push("Calibration de confiance surévaluée par rapport aux probabilités réelles.");
   }
 
-  const postMortemStabilityScore = Math.min(100, Math.round(100 * (1.0 - 0.2 * (1.0 / Math.sqrt(history.length)) - 0.1 * (drawAnomalyScore * (1.0 - drawAnomalyScore)))));
+  // Math.max(1, ...) évite une division par zéro (1/sqrt(0) = Infinity) quand
+  // l'historique de contexte est vide, ce qui produisait un score de -Infinity
+  // (donc NaN/inaffichable côté UI) au lieu d'un score borné.
+  const postMortemStabilityScore = Math.max(0, Math.min(100, Math.round(100 * (1.0 - 0.2 * (1.0 / Math.sqrt(Math.max(1, history.length))) - 0.1 * (drawAnomalyScore * (1.0 - drawAnomalyScore))))));
 
   return {
     id,
