@@ -69,6 +69,20 @@ export const SignalHub: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState("stats");
   const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
 
+  // Préchargement en arrière-plan des sous-onglets lors de l'inactivité du navigateur
+  useEffect(() => {
+    const idleCallback = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 1000));
+    idleCallback(() => {
+      Object.values(subTabPreloaders).forEach((preload) => {
+        try {
+          preload();
+        } catch (e) {
+          console.warn("[SignalHub] Échec du préchargement en tâche de fond :", e);
+        }
+      });
+    });
+  }, []);
+
   useEffect(() => {
     if (history.length > 20) {
       calculateGapEfficiency(history).then(setGeiData);

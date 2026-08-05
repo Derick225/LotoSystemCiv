@@ -136,6 +136,23 @@
     letter-spacing: 0.08em;
     @apply uppercase;
   }
+
+  /* Boutons et sélections hyper-réactifs - Retour haptique visuel instantané */
+  .btn-reactive {
+    transition: transform 0.07s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.1s ease-out, border-color 0.1s ease-out, box-shadow 0.1s ease-out;
+    will-change: transform;
+    cursor: pointer;
+  }
+  .btn-reactive:active {
+    transform: scale(0.95) !important;
+  }
+  
+  .select-reactive {
+    transition: border-color 0.1s ease-out, background-color 0.1s ease-out, box-shadow 0.1s ease-out;
+  }
+  .select-reactive:focus {
+    @apply ring-2 ring-indigo-500/20 border-indigo-500;
+  }
 }
 
 /* Custom Scrollbars (Premium Feel) */

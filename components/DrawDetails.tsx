@@ -77,6 +77,20 @@ export const DrawDetails: React.FC = () => {
   // Custom Sync Status Hook Usage
   const { isOnline, dbConnection } = useSyncStatus();
 
+  // Préchargement en arrière-plan de tous les modules lourds dès que le navigateur est inactif
+  useEffect(() => {
+    const idleCallback = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 1000));
+    idleCallback(() => {
+      Object.values(tabPreloaders).forEach((preload) => {
+        try {
+          preload();
+        } catch (e) {
+          console.warn("[DrawDetails] Échec du préchargement de l'onglet en tâche de fond :", e);
+        }
+      });
+    });
+  }, []);
+
   // Système de Navigation Réactif (Sub-Tab Propagation)
   useEffect(() => {
     if (activeMainTab && activeSubTab) {

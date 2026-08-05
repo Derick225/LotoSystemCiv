@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { useState, Suspense, lazy, useTransition } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
   Sparkles,
@@ -10,6 +10,7 @@ import {
   Hexagon,
   Layers,
   Gauge,
+  Sparkle,
 } from "lucide-react";
 import { OracleLiveAssistant } from "../OracleLiveAssistant";
 import { audioEngine } from "../../utils/audioEngine";
@@ -37,6 +38,9 @@ const StrategicSynthesisTab = lazy(() =>
 const IAPredictionTab = lazy(() =>
   import("./IAPredictionTab").then((m) => ({ default: m.IAPredictionTab })),
 );
+const AdvancedPredictionTab = lazy(() =>
+  import("./AdvancedPredictionTab").then((m) => ({ default: m.AdvancedPredictionTab })),
+);
 const InertiaOptimizerTab = lazy(() =>
   import("./InertiaOptimizerTab").then((m) => ({
     default: m.InertiaOptimizerTab,
@@ -46,6 +50,7 @@ const InertiaOptimizerTab = lazy(() =>
 const subTabPreloaders: Record<string, () => Promise<unknown>> = {
   strategic: () => import("./StrategicSynthesisTab"),
   ai_prediction: () => import("./IAPredictionTab"),
+  advanced_prediction: () => import("./AdvancedPredictionTab"),
   inertia_optimizer: () => import("./InertiaOptimizerTab"),
   platinum: () => import("./MetaAnalystTab"),
   convergence: () => import("./ConvergenceTab"),
@@ -60,6 +65,7 @@ interface OracleHubProps {
 export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
   const globalRegime = useNexusStore((state) => state.regime);
   const nexusLoading = useNexusStore((state) => state.loading);
+  const [isPending, startTransition] = useTransition();
 
   // Platinum est maintenant le moteur principal, mais on expose la Synthèse en premier plan
   const [subTab, setSubTab] = useState<
@@ -69,6 +75,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     | "convergence"
     | "strategic"
     | "ai_prediction"
+    | "advanced_prediction"
     | "inertia_optimizer"
   >("strategic");
 
@@ -77,7 +84,9 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail?.subTab) {
-        setSubTab(customEvent.detail.subTab as never);
+        startTransition(() => {
+          setSubTab(customEvent.detail.subTab as never);
+        });
         const contentElement = document.getElementById("oracle-content");
         if (contentElement)
           contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -86,6 +95,20 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     window.addEventListener("NAVIGATE_SUB_ORACLE", handleNavigation);
     return () =>
       window.removeEventListener("NAVIGATE_SUB_ORACLE", handleNavigation);
+  }, []);
+
+  // Préchargement en arrière-plan des sous-onglets lors de l'inactivité du navigateur
+  React.useEffect(() => {
+    const idleCallback = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 1000));
+    idleCallback(() => {
+      Object.values(subTabPreloaders).forEach((preload) => {
+        try {
+          preload();
+        } catch (e) {
+          console.warn("[OracleHub] Échec du préchargement en tâche de fond :", e);
+        }
+      });
+    });
   }, []);
 
   const subTabs = [
@@ -102,6 +125,13 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
       icon: <BrainCircuit size={16} />,
       color: "text-fuchsia-500",
       bg: "hover:bg-fuchsia-50",
+    },
+    {
+      id: "advanced_prediction",
+      label: "Prédiction Avancée",
+      icon: <Sparkle size={16} />,
+      color: "text-purple-500",
+      bg: "hover:bg-purple-50",
     },
     {
       id: "inertia_optimizer",
@@ -158,21 +188,24 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                   key={tab.id}
                   onClick={() => {
                     audioEngine.play("click");
-                    setSubTab(
-                      tab.id as
-                        | "oracle"
-                        | "platinum"
-                        | "orch"
-                        | "convergence"
-                        | "strategic"
-                        | "ai_prediction"
-                        | "inertia_optimizer",
-                    );
+                    startTransition(() => {
+                      setSubTab(
+                        tab.id as
+                          | "oracle"
+                          | "platinum"
+                          | "orch"
+                          | "convergence"
+                          | "strategic"
+                          | "ai_prediction"
+                          | "advanced_prediction"
+                          | "inertia_optimizer",
+                      );
+                    });
                   }}
                   onMouseEnter={() => subTabPreloaders[tab.id]?.()}
                   onTouchStart={() => subTabPreloaders[tab.id]?.()}
                   className={`
-                                        px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
+                                        px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 btn-reactive
                                         ${
                                           subTab === tab.id
                                             ? "bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"
@@ -298,6 +331,9 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
           )}
           {subTab === "ai_prediction" && (
             <IAPredictionTab drawName={drawName} />
+          )}
+          {subTab === "advanced_prediction" && (
+            <AdvancedPredictionTab drawName={drawName} />
           )}
           {subTab === "inertia_optimizer" && (
             <InertiaOptimizerTab drawName={drawName} />

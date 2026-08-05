@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useEffect, lazy, Suspense } from "react";
+import React, { ReactNode, useState, useEffect, lazy, Suspense, useTransition } from "react";
 import {
   Home,
   Settings,
@@ -52,6 +52,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   isAdmin,
   onLogout,
 }) => {
+  const [isPending, startTransition] = useTransition();
   const [showPalette, setShowPalette] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -106,11 +107,13 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Station Button */}
           <button
             onClick={() => {
-              setViewMode("home");
-              setShowWallet(false);
               audioEngine.play("click");
+              startTransition(() => {
+                setViewMode("home");
+                setShowWallet(false);
+              });
             }}
-            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
               viewMode === "home" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
             }`}
           >
@@ -131,11 +134,13 @@ export const AppShell: React.FC<AppShellProps> = ({
           {isAdmin && (
             <button
               onClick={() => {
-                setViewMode("admin");
-                setShowWallet(false);
                 audioEngine.play("click");
+                startTransition(() => {
+                  setViewMode("admin");
+                  setShowWallet(false);
+                });
               }}
-              className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+              className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
                 viewMode === "admin" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
               }`}
             >
@@ -156,10 +161,12 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Wallet Button */}
           <button
             onClick={() => {
-              setShowWallet(!showWallet);
               audioEngine.play("click");
+              startTransition(() => {
+                setShowWallet(!showWallet);
+              });
             }}
-            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group ${
+            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
               showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
             }`}
           >

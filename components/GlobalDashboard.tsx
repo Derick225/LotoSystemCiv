@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useRef,
   useCallback,
+  useTransition,
 } from "react";
 import {
   getNextScheduledDraw,
@@ -345,6 +346,7 @@ const IsolatedNextDrawWidget = React.memo(() => {
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
   ({ onSelectDraw }) => {
     const { showToast } = useToast();
+    const [isPending, startTransition] = useTransition();
     const regime = useNexusStore((state) => state.regime);
     const volatility = useNexusStore((state) => state.volatility);
     const refreshData = useNexusStore((state) => state.refreshData);
@@ -685,10 +687,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                       key={d}
                       onClick={() => {
                         audioEngine.play("click");
-                        setSelectedDay(d);
+                        startTransition(() => {
+                          setSelectedDay(d);
+                        });
                       }}
                       className={`
-                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
+                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0 btn-reactive
                                           ${
                                             selectedDay === d
                                               ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105"
