@@ -1,7 +1,20 @@
 
 import { useNexusStore } from '../store/useNexusStore';
 import { workerService } from './workerService';
-import { computeTransferEntropy, runSpectral, denoiseFeaturesKernelPCA, runContinuousWaveletTransformAnalysis } from './mathCore';
+import { 
+    computeTransferEntropy, 
+    runSpectral, 
+    denoiseFeaturesKernelPCA, 
+    runContinuousWaveletTransformAnalysis,
+    calculateACValue,
+    calculateBenfordCompliance,
+    calculateChiSquare,
+    calculateKolmogorovSmirnov,
+    calculateLjungBoxTest,
+    calculateShannonEntropy,
+    denoiseFeaturesPCA,
+    trainRidgeRegression
+} from './mathCore';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 import { lcgGlobalRandom } from '../utils/mathUtils';
 
@@ -190,150 +203,8 @@ export const performPCA = (data: number[][], nComponents: number = 3): number[][
  * 
  * @param data Matrix [samples, features]
  */
-export const denoiseFeaturesPCA = (data: number[][]): number[][] => {
-    if (!data || data.length === 0) return [];
-    const nSamples = data.length;
-    const nFeatures = data[0].length;
-
-    // Tableaux plats Float32Array pour bypasser la surcharge du GC
-    const centered = new Float32Array(nSamples * nFeatures);
-    const mean = new Float32Array(nFeatures);
-
-    for (let i = 0; i < nSamples; i++) {
-        for (let j = 0; j < nFeatures; j++) {
-            mean[j] += data[i][j];
-        }
-    }
-    
-    for (let j = 0; j < nFeatures; j++) {
-        mean[j] /= nSamples;
-    }
-
-    for (let i = 0; i < nSamples; i++) {
-        for (let j = 0; j < nFeatures; j++) {
-            centered[i * nFeatures + j] = data[i][j] - mean[j];
-        }
-    }
-
-    // Covariance in-place
-    const cov = new Float32Array(nFeatures * nFeatures);
-    const covDenom = nSamples > 1 ? nSamples - 1 : 1;
-    for (let i = 0; i < nFeatures; i++) {
-        for (let j = i; j < nFeatures; j++) {
-            let sum = 0;
-            for (let s = 0; s < nSamples; s++) {
-                sum += centered[s * nFeatures + i] * centered[s * nFeatures + j];
-            }
-            const val = sum / covDenom;
-            cov[i * nFeatures + j] = val;
-            cov[j * nFeatures + i] = val;
-        }
-    }
-
-    // Extraction des valeurs et vecteurs propres sans allocation
-    const eigenValues = new Float32Array(nFeatures);
-    const eigenVectors = new Float32Array(nFeatures * nFeatures);
-    const residualCov = new Float32Array(cov);
-    const vec = new Float32Array(nFeatures);
-    const nextVec = new Float32Array(nFeatures);
-    
-    // Base mathématique harmonique pour initialisation déterministe
-    const PHI = 1.6180339887; 
-
-    for (let k = 0; k < nFeatures; k++) {
-        for (let i = 0; i < nFeatures; i++) {
-            vec[i] = Math.sin((i + k + 1) * PHI); 
-        }
-        
-        let norm = 0;
-        for (let i = 0; i < nFeatures; i++) norm += vec[i] * vec[i];
-        norm = Math.sqrt(norm) || 1;
-        for (let i = 0; i < nFeatures; i++) vec[i] /= norm;
-
-        let eigenVal = 0;
-        for (let iter = 0; iter < 50; iter++) {
-            for (let i = 0; i < nFeatures; i++) {
-                let sum = 0;
-                for (let j = 0; j < nFeatures; j++) {
-                    sum += residualCov[i * nFeatures + j] * vec[j];
-                }
-                nextVec[i] = sum;
-            }
-            
-            norm = 0;
-            for (let i = 0; i < nFeatures; i++) norm += nextVec[i] * nextVec[i];
-            norm = Math.sqrt(norm);
-            
-            if (norm === 0) break;
-            
-            let diff = 0;
-            for (let i = 0; i < nFeatures; i++) {
-                const normalized = nextVec[i] / norm;
-                diff += Math.abs(normalized - vec[i]);
-                vec[i] = normalized;
-            }
-            
-            eigenVal = norm;
-            if (diff < 1e-6) break;
-        }
-        
-        eigenValues[k] = eigenVal;
-        for (let i = 0; i < nFeatures; i++) {
-            eigenVectors[i * nFeatures + k] = vec[i];
-        }
-        
-        for (let i = 0; i < nFeatures; i++) {
-            for (let j = 0; j < nFeatures; j++) {
-                residualCov[i * nFeatures + j] -= eigenVal * vec[i] * vec[j];
-            }
-        }
-    }
-
-    let totalEigen = 0;
-    for (let i = 0; i < nFeatures; i++) totalEigen += Math.abs(eigenValues[i]);
-    const meanEigen = totalEigen / (nFeatures || 1);
-
-    // Calcul empirique de l'écart-type de la force relative
-    let varianceRelative = 0;
-    for (let k = 0; k < nFeatures; k++) {
-        const rs = Math.abs(eigenValues[k]) / (meanEigen + 1e-9);
-        varianceRelative += Math.pow(rs - 1.0, 2);
-    }
-    const stdRelativeStrength = Math.sqrt(varianceRelative / (nFeatures || 1)) || 1.0;
-
-    // ZÉRO NOMBRES MAGIQUES & CONTINUITÉ : Pondération par seuil souple sigmoïdal
-    const continuousWeights = new Float32Array(nFeatures);
-    for (let k = 0; k < nFeatures; k++) {
-        const relativeStrength = Math.abs(eigenValues[k]) / (meanEigen + 1e-9);
-        // Utilisation de l'inverse de l'écart-type empirique comme pente
-        continuousWeights[k] = 1 / (1 + Math.exp(-(relativeStrength - 1) / stdRelativeStrength));
-    }
-
-    const reconstructed = Array(nSamples);
-    const proj = new Float32Array(nFeatures);
-
-    for (let s = 0; s < nSamples; s++) {
-        for (let k = 0; k < nFeatures; k++) {
-            let p = 0;
-            for (let j = 0; j < nFeatures; j++) {
-                p += centered[s * nFeatures + j] * eigenVectors[j * nFeatures + k];
-            }
-            proj[k] = p * continuousWeights[k];
-        }
-
-        const row = new Array(nFeatures);
-        for (let j = 0; j < nFeatures; j++) {
-            let val = mean[j];
-            for (let k = 0; k < nFeatures; k++) {
-                val += proj[k] * eigenVectors[j * nFeatures + k];
-            }
-            row[j] = val;
-        }
-        reconstructed[s] = row;
-    }
-    
-    return reconstructed;
-};
+// Re-exportée de mathCore pour 100% d'exactitude mathématique et éviter la duplication
+export { denoiseFeaturesPCA };
 
 /**
  * Denoise features using Kernel-PCA (Manifold learning pre-image approximation with RBF Kernel).
@@ -351,47 +222,8 @@ export const denoiseFeaturesKernelPCA_wrapper = (data: number[][], gamma?: numbe
  * @param labels Vector [samples] (0 or 1)
  * @param lambda L2 Penalty (default 0.1)
  */
-export const trainRidgeRegression = (features: number[][], labels: number[], lambda?: number, initialLearningRate?: number): number[] => {
-    if (!features || features.length === 0 || features.length !== labels.length) return [];
-    const nFeatures = features[0].length;
-    const nSamples = features.length;
-    
-    const optimalLambda = lambda ?? (1.0 / Math.sqrt(nSamples));
-    const optimalLR = initialLearningRate ?? (1.0 / Math.sqrt(nFeatures));
-    
-    let weights = Array(nFeatures).fill(0);
-    
-    // Accumulateur d'énergie de gradient pour raccord stochastique autodécidant (AdaGrad)
-    const gSum = Array(nFeatures).fill(0);
-    const epsilon = 1e-8; // Constante analytique pour empêcher la division par zéro
-    
-    for (let iter = 0; iter < 100; iter++) {
-        const gradients = Array(nFeatures).fill(0);
-        
-        for (let i = 0; i < nSamples; i++) {
-            let pred = 0;
-            for (let j = 0; j < nFeatures; j++) pred += features[i][j] * weights[j];
-            const error = pred - labels[i];
-            
-            for (let j = 0; j < nFeatures; j++) {
-                gradients[j] += (2 / nSamples) * error * features[i][j];
-            }
-        }
-        
-        for (let j = 0; j < nFeatures; j++) {
-            gradients[j] += 2 * optimalLambda * weights[j];
-            
-            // Accumulation d'énergie stochastique
-            gSum[j] += gradients[j] * gradients[j];
-            
-            // Taux d'apprentissage auto-adaptatif basé sur l'historique du vecteur gradient
-            const adaptiveRate = optimalLR / (Math.sqrt(gSum[j]) + epsilon);
-            weights[j] -= adaptiveRate * gradients[j];
-        }
-    }
-    
-    return weights;
-};
+// Re-exportée de mathCore pour 100% d'exactitude mathématique et éviter la duplication
+export { trainRidgeRegression };
 
 export const applyL2Regularization = (weights: number[], lambda: number = 0.01): number[] => {
     return weights.map(w => w * (1 - lambda));
@@ -751,17 +583,8 @@ export const calculateTrendOscillator = (history: DrawResult[], period: number):
     return result.reverse();
 };
 
-export const calculateACValue = (numbers: number[]): number => {
-    if (numbers.length < 2) return 0;
-    const diffs = new Set<number>();
-    
-    for(let i=0; i<numbers.length; i++) {
-        for(let j=i+1; j<numbers.length; j++) {
-            diffs.add(Math.abs(numbers[i] - numbers[j]));
-        }
-    }
-    return diffs.size - (numbers.length - 1);
-};
+// Re-exportée de mathCore pour 100% d'exactitude mathématique et éviter la duplication
+export { calculateACValue };
 
 export const calculateRegularity = (history: DrawResult[]): NumberRegularity[] => {
     const res: NumberRegularity[] = [];
@@ -899,143 +722,13 @@ export const calculateVolatility = (history: DrawResult[]): { score: number; sta
     return { score, status: score > 60 ? 'Chaos' : score > 30 ? 'Volatile' : 'Stable' };
 };
 
-export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number } => {
-    if (history.length === 0) return { normalized: 0 };
-    
-    const freq = new Float32Array(91);
-    let total = 0;
-    
-    for(const d of history) {
-        for(const n of d.gagnants) {
-            if (n >= 1 && n <= 90) {
-                freq[n]++;
-                total++;
-            }
-        }
-    }
-    
-    if (total === 0) return { normalized: 0 };
-    
-    let entropy = 0;
-    for (let i = 1; i <= 90; i++) {
-        if (freq[i] > 0) {
-            const p = freq[i] / total;
-            entropy -= p * Math.log2(p);
-        }
-    }
-    
-    const maxEntropy = Math.log2(90); 
-    return { normalized: entropy / maxEntropy };
-};
-
-export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {
-    const expected = totalObservations / 90; 
-    let chiSq = 0;
-    
-    for(let i=1; i<=90; i++) {
-        const obs = observed[i] || 0;
-        chiSq += Math.pow(obs - expected, 2) / expected;
-    }
-    
-    return { score: chiSq };
-};
-
-/**
- * Test de Kolmogorov-Smirnov pour vérifier si la distribution
- * empirique des tirages suit une distribution uniforme théorique [1, 90].
- */
-export const calculateKolmogorovSmirnov = (numbers: number[]): { dStatistic: number; isUniform: boolean } => {
-    if (numbers.length === 0) return { dStatistic: 0, isUniform: true };
-    const N = numbers.length;
-    // On compte l'occurrence de chaque nombre pour calculer la Fonction de Répartition Empirique (CDF)
-    const counts = new Float64Array(91);
-    numbers.forEach(num => { if (num >= 1 && num <= 90) counts[num]++; });
-    
-    let currentSum = 0;
-    let maxD = 0;
-    for (let i = 1; i <= 90; i++) {
-        currentSum += counts[i];
-        const empiricalCDF = currentSum / N;
-        const theoreticalCDF = i / 90; // CDF d'une uniforme discrète [1, 90]
-        const d = Math.abs(empiricalCDF - theoreticalCDF);
-        if (d > maxD) maxD = d;
-    }
-    
-    // Valeur critique de D pour alpha = 0.05, grande approximation N
-    const criticalValue = 1.36 / Math.sqrt(N);
-    return {
-        dStatistic: maxD,
-        isUniform: maxD < criticalValue
-    };
-};
-
-/**
- * Ljung-Box Test (Autocorrélation Sérielle).
- * Détecte si des motifs de répétition chronologiques surviennent au-delà du hasard.
- */
-export const calculateLjungBoxTest = (signal: number[], lags: number = 10): { qStatistic: number; hasAutocorrelation: boolean } => {
-    const N = signal.length;
-    if (N < lags * 2) return { qStatistic: 0, hasAutocorrelation: false };
-
-    const getMean = (data: number[]) => data.reduce((a, b) => a + b, 0) / data.length;
-    const mean = getMean(signal);
-    
-    let variance = 0;
-    for (let i = 0; i < N; i++) {
-        variance += Math.pow(signal[i] - mean, 2);
-    }
-    
-    if (variance === 0) return { qStatistic: 0, hasAutocorrelation: false };
-    
-    let qStatistic = 0;
-    for (let k = 1; k <= lags; k++) {
-        let autocovariance = 0;
-        for (let t = k; t < N; t++) {
-            autocovariance += (signal[t] - mean) * (signal[t - k] - mean);
-        }
-        const rhoC = autocovariance / variance;
-        qStatistic += (Math.pow(rhoC, 2) / (N - k));
-    }
-    qStatistic *= N * (N + 2);
-    
-    // CORRECTION : 1.83 est une heuristique approximative. 
-    // Pour un test du Chi-carré à 'lags' degrés de liberté, le seuil à 95% est approximé par : lags + 1.96 * sqrt(2 * lags)
-    const threshold = lags + 1.96 * Math.sqrt(2 * lags);
-    
-    return {
-        qStatistic,
-        hasAutocorrelation: qStatistic > threshold
-    };
-};
-
-export const calculateBenfordCompliance = (numbers: number[]): { score: number, distribution: number[] } => {
-    if (numbers.length === 0) return { score: 0, distribution: Array(9).fill(0) };
-    const counts = new Uint32Array(10);
-    
-    for(const n of numbers) {
-        const str = n.toString();
-        const leading = parseInt(str[0], 10);
-        if(leading >= 1 && leading <= 9) counts[leading]++;
-    }
-    
-    const total = numbers.length;
-    let deviation = 0;
-    const distribution: number[] = [];
-    
-    for(let d=1; d<=9; d++) {
-        const observed = counts[d] / total;
-        distribution.push(observed * 100); // Percentage
-        
-        // For Loto 5/90: Uniform distribution where 1-90 are equally likely
-        // Digit 1-8: 11 occurrences (e.g. 1, 10-19) -> 11/90
-        // Digit 9: 2 occurrences (9, 90) -> 2/90
-        const expected = d === 9 ? (2 / 90) : (11 / 90);
-        deviation += Math.abs(observed - expected);
-    }
-    
-    // Adjusted scaling factor for deviation 
-    const score = Math.max(0, Math.round(100 - (deviation * 50))); 
-    return { score, distribution };
+// Re-exportées de mathCore pour 100% d'exactitude mathématique et éviter la duplication
+export { 
+    calculateShannonEntropy, 
+    calculateChiSquare, 
+    calculateKolmogorovSmirnov, 
+    calculateLjungBoxTest, 
+    calculateBenfordCompliance 
 };
 
 export const findHistoricalMatches = (current: DrawResult, history: DrawResult[], limit: number = 5): { match: DrawResult; nextDraw: DrawResult | null; similarity: number }[] => {

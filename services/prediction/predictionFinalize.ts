@@ -147,6 +147,64 @@ export const finalizePredictionPayload = async (
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
 
+  // Calculate real explainability data using physical and algebraic relations
+  const avgBreakdown: Record<string, number> = {};
+  if (denoisedScores.length > 0) {
+    const firstBreakdown = denoisedScores[0].breakdown;
+    const algoKeys = Object.keys(firstBreakdown);
+    for (const k of algoKeys) {
+      let sum = 0;
+      for (const curr of denoisedScores) {
+        sum += curr.breakdown[k as AlgoKey] ?? 0;
+      }
+      avgBreakdown[k] = sum / denoisedScores.length;
+    }
+  }
+
+  const explainabilityData: Record<number, {
+    shapValues: Record<string, number>;
+    topologicalTension: number;
+    dnaOrbitingIndex: number;
+  }> = {};
+
+  denoisedScores.forEach(curr => {
+    // 1. Calculate SHAP attribution: algorithm score weighted by its model weight
+    const shapValues: Record<string, number> = {};
+    Object.keys(curr.breakdown).forEach(k => {
+      const weight = weights[k as AlgoKey] ?? 0;
+      shapValues[k] = (curr.breakdown[k as AlgoKey] ?? 0) * weight;
+    });
+
+    // 2. Calculate continuous topological tension: gravity/tension on the number line
+    let tensionSum = 0;
+    for (const other of denoisedScores) {
+      if (other.num === curr.num) continue;
+      const distance = Math.abs(curr.num - other.num);
+      tensionSum += (other.score || 0) / (distance * distance);
+    }
+    const topologicalTension = 1.0 + Math.log1p(tensionSum);
+
+    // 3. Calculate DNA orbiting index (cosine similarity with average signature)
+    let dotProduct = 0;
+    let numSqSum = 0;
+    let avgSqSum = 0;
+    Object.keys(curr.breakdown).forEach(k => {
+      const val1 = curr.breakdown[k as AlgoKey] ?? 0;
+      const val2 = avgBreakdown[k] ?? 0;
+      dotProduct += val1 * val2;
+      numSqSum += val1 * val1;
+      avgSqSum += val2 * val2;
+    });
+    const denominator = Math.sqrt(numSqSum) * Math.sqrt(avgSqSum);
+    const dnaOrbitingIndex = denominator > 0 ? dotProduct / denominator : 0;
+
+    explainabilityData[curr.num] = {
+      shapValues,
+      topologicalTension,
+      dnaOrbitingIndex,
+    };
+  });
+
   return {
     suggestedNumbers: selection,
     candidates,
@@ -164,7 +222,7 @@ export const finalizePredictionPayload = async (
     diversityMetrics,
     adversarialSurvivalScore: adversarialResult.survivalScore,
     adversarialRisks: adversarialResult.risks,
-    explainabilityData: {},
+    explainabilityData,
     shrinkageApplied,
     shrinkageFactor,
     shrinkageFactorMap: undefined,

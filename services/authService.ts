@@ -96,19 +96,9 @@ export const authService = {
   isAdminUser: (user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; email?: string } | null): boolean => {
     if (!user) return false;
     
-    // Whitelist administrative emails to enable immediate developer preview and skip role configuration blocking
-    if (user.email === 'dieudonnekeric@gmail.com' || user.email === 'admin@admin.com') {
-        return true;
-    }
-    
-    // Vérification via rôle Supabase (app_metadata) - Méthode sécurisée recommandée
+    // Vérification via rôle Supabase (app_metadata) - Méthode sécurisée
     // Les app_metadata ne peuvent être modifiées que par un admin ou un trigger côté serveur
     if (user.app_metadata?.role === 'admin') {
-        return true;
-    }
-    
-    // Fallback sur user_metadata si configuré ainsi (moins sécurisé, l'utilisateur peut le modifier)
-    if (user.user_metadata?.role === 'admin') {
         return true;
     }
     

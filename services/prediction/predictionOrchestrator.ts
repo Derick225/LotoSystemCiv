@@ -642,10 +642,18 @@ export const generateMasterPrediction = async (
             throw new Error("Web Workers non supportés");
         }
       } catch (e) {
-        logger.error(
-          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
-          "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
-        );
+        const isWorkerUnsupported = e instanceof Error && e.message === "Web Workers non supportés";
+        if (isWorkerUnsupported) {
+          logger.info(
+            { drawName: context.drawName },
+            "[predictionOrchestrator] Web Workers non supportés. Redirection automatique vers Local Simplifié."
+          );
+        } else {
+          logger.error(
+            { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
+            "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
+          );
+        }
       }
 
       // PHASE 3 — Local Simplifié

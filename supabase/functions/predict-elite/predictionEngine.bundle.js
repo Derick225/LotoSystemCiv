@@ -1851,7 +1851,7 @@ function runFractal(history) {
   }
   return results;
 }
-function computeTransferEntropy(history, targetNumbers) {
+async function computeTransferEntropy(history, targetNumbers) {
   const N = Math.min(history.length, 500);
   const noiseFloor = 1 / Math.log2(N || 2);
   const data = history.slice(0, N);
@@ -1866,10 +1866,15 @@ function computeTransferEntropy(history, targetNumbers) {
   }
   const results = [];
   const targets = targetNumbers && targetNumbers.length > 0 ? targetNumbers : Array.from({ length: 90 }, (_, i) => i + 1);
+  let loopCount = 0;
   for (const Y of targets) {
     const ySeries = occurrences[Y];
     for (let X = 1; X <= 90; X++) {
       if (X === Y) continue;
+      loopCount++;
+      if (loopCount % 200 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
       const xSeries = occurrences[X];
       const counts = new Float64Array(8);
       let totalPairs = 0;
@@ -2569,13 +2574,22 @@ var init_workerService = __esm({
       localWorker = null;
       callbacks = /* @__PURE__ */ new Map();
       workerReady = false;
+      initFailed = false;
+      initAttempts = 0;
+      maxInitAttempts = 1;
       constructor() {
         this.initLocalWorker();
       }
       initLocalWorker() {
+        if (this.initFailed || this.initAttempts >= this.maxInitAttempts) {
+          this.workerReady = false;
+          this.localWorker = null;
+          return;
+        }
         try {
           if (typeof Worker === "undefined") {
             console.warn("L'environnement ne supporte pas les Web Workers. Ex\xE9cution en mode d\xE9grad\xE9 (synchrone).");
+            this.initFailed = true;
             return;
           }
           if (this.localWorker) {
@@ -2584,11 +2598,29 @@ var init_workerService = __esm({
             } catch (_) {
             }
           }
-          this.localWorker = new Worker(new URL(
-            "./nexus.worker.ts?worker",
-            /* @ts-ignore */
-            import.meta.url
-          ), { type: "module" });
+          this.initAttempts++;
+          try {
+            this.localWorker = new Worker(new URL(
+              "./nexus.worker.ts",
+              /* @ts-ignore */
+              import.meta.url
+            ), { type: "module" });
+          } catch (moduleError) {
+            console.warn("[WorkerService] \xC9chec du worker en mode 'module', essai en mode classique...", moduleError);
+            try {
+              this.localWorker = new Worker(new URL(
+                "./nexus.worker.ts",
+                /* @ts-ignore */
+                import.meta.url
+              ));
+            } catch (classicError) {
+              console.error("[WorkerService] \xC9chec d\xE9finitif de cr\xE9ation du Web Worker:", classicError);
+              this.initFailed = true;
+              this.workerReady = false;
+              this.localWorker = null;
+              return;
+            }
+          }
           this.localWorker.onmessage = (e) => {
             const { taskId, success, result, error } = e.data;
             const callback = this.callbacks.get(taskId);
@@ -2605,6 +2637,7 @@ var init_workerService = __esm({
             console.error("Local Worker interne error:", e);
             this.workerReady = false;
             this.localWorker = null;
+            this.initFailed = true;
             for (const [taskId, callback] of Array.from(this.callbacks.entries())) {
               callback.reject(new Error("Local Worker a crash\xE9 ou n'a pas pu se charger."));
             }
@@ -2615,6 +2648,7 @@ var init_workerService = __esm({
           console.error("Impossible d'initialiser le Web Worker Local. Les calculs seront bloquants.", e);
           this.workerReady = false;
           this.localWorker = null;
+          this.initFailed = true;
         }
       }
       internalWorkerCounter = 0;
@@ -2622,6 +2656,9 @@ var init_workerService = __esm({
         return true;
       }
       runInLocalWorker(task, payload, history) {
+        if (this.initFailed) {
+          return Promise.reject(new Error("Local Worker non disponible (pr\xE9c\xE9demment \xE9chou\xE9)"));
+        }
         if (!this.workerReady || !this.localWorker) {
           this.initLocalWorker();
         }
@@ -2730,7 +2767,7 @@ var init_workerService = __esm({
               result = mathCore.runContinuousWaveletTransformAnalysis(hist);
               break;
             case "TRANSFER_ENTROPY":
-              result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
+              result = await mathCore.computeTransferEntropy(hist, p?.targetNumbers);
               break;
             default:
               result = { status: "OK" };
@@ -2742,41 +2779,52 @@ var init_workerService = __esm({
       }
       edgeFailures = 0;
       edgeCooldownUntil = 0;
+      // Si l'Edge Function a répondu avec succès au moins une fois, on sait qu'elle est
+      // déployée et on peut la solliciter en parallèle (best-effort) pour décharger le CPU
+      // client sur les gros historiques, sans jamais faire attendre l'UI dessus.
+      edgeConfirmedAvailable = false;
       async runTask(task, payload = {}, history = []) {
-        if (Date.now() < this.edgeCooldownUntil) {
-          try {
-            return await this.runInLocalWorker(task, payload, history);
-          } catch (fallbackError) {
-            return await this.runInMainThreadFallback(task, payload, history);
-          }
-        }
-        try {
-          const response = await apiClient.post("compute-nexus-analytics", {
-            task,
-            payload,
-            history
-          }, { suppressErrorLogging: true });
-          if (response && response.success) {
-            this.edgeFailures = 0;
-            return response.result;
-          } else {
-            throw new Error(response?.error || "Erreur silencieuse venant de l'Edge Function");
-          }
-        } catch (e) {
-          this.edgeFailures++;
-          if (this.edgeFailures >= 3) {
-            this.edgeCooldownUntil = Date.now() + 5 * 60 * 1e3;
-            console.info(`[Nexus Worker] Edge Function hors ligne (Circuit ouvert). Passage en local exclusif pendant 5 min.`);
-          } else {
-            console.info(`[Nexus Worker] Edge Function indisponible (non d\xE9ploy\xE9e). D\xE9l\xE9gation en cours au Worker Local...`);
-          }
+        if (this.workerReady || !this.localWorker) {
           try {
             const result = await this.runInLocalWorker(task, payload, history);
+            if (!this.edgeConfirmedAvailable && Date.now() >= this.edgeCooldownUntil) {
+              this.pingEdgeInBackground(task, payload, history);
+            }
             return result;
-          } catch (fallbackError) {
-            return await this.runInMainThreadFallback(task, payload, history);
+          } catch (localError) {
+            console.info("[Nexus Worker] Worker local indisponible, tentative via Edge Function...");
           }
         }
+        if (Date.now() >= this.edgeCooldownUntil) {
+          try {
+            const response = await apiClient.post("compute-nexus-analytics", {
+              task,
+              payload,
+              history
+            }, { suppressErrorLogging: true });
+            if (response && response.success) {
+              this.edgeFailures = 0;
+              this.edgeConfirmedAvailable = true;
+              return response.result;
+            }
+            throw new Error(response?.error || "Erreur silencieuse venant de l'Edge Function");
+          } catch (e) {
+            this.edgeFailures++;
+            if (this.edgeFailures >= 3) {
+              this.edgeCooldownUntil = Date.now() + 5 * 60 * 1e3;
+              console.info(`[Nexus Worker] Edge Function hors ligne (Circuit ouvert). Pause de 5 min.`);
+            }
+          }
+        }
+        return await this.runInMainThreadFallback(task, payload, history);
+      }
+      /** Sollicite l'Edge Function sans jamais faire attendre l'appelant (fire-and-forget). */
+      pingEdgeInBackground(task, payload, history) {
+        apiClient.post("compute-nexus-analytics", { task, payload, history }, { suppressErrorLogging: true, timeoutMs: 4e3 }).then(() => {
+          this.edgeConfirmedAvailable = true;
+          this.edgeFailures = 0;
+        }).catch(() => {
+        });
       }
       async warmup(drawName = "Loto 5/90") {
         const start = performance.now();
@@ -5453,7 +5501,7 @@ var init_gapTrend = __esm({
 });
 
 // services/prediction/algorithms/interMonthlyResonance.ts
-var DEFAULT_CACHE, clamp3, safeArray, uniqueValidNumbers, parseDateStrict, getDayOfYear, getSeasonalAngle, getCircularAngleDistance, SIGMA_SEASONAL_RAD, calculateSeasonalResonance, buildDrawNumberSet, findTwinDrawCandidates, computeRobustStats, computeTop5Concentration, interMonthlyResonancePlugin;
+var DEFAULT_CACHE, clamp3, safeArray, uniqueValidNumbers, parseDateStrict, getDayOfYear, getSeasonalAngle, getCircularAngleDistance, SIGMA_SEASONAL_RAD, calculateSeasonalResonance, buildDrawNumberSet, calculateJaccardIndex, getGagnants, jaccardDraws, findTwinDrawCandidates, computeRobustStats, computeTop5Concentration, interMonthlyResonancePlugin;
 var init_interMonthlyResonance = __esm({
   "services/prediction/algorithms/interMonthlyResonance.ts"() {
     "use strict";
@@ -5533,7 +5581,23 @@ var init_interMonthlyResonance = __esm({
       ...uniqueValidNumbers(draw.gagnants),
       ...uniqueValidNumbers(draw.machine)
     ]);
-    findTwinDrawCandidates = (history, currentDate, maxYearsToScan, hurst) => {
+    calculateJaccardIndex = (arr1, arr2) => {
+      if (arr1.length === 0 || arr2.length === 0) return 0;
+      const set1 = new Set(arr1);
+      let intersection = 0;
+      for (const num of arr2) {
+        if (set1.has(num)) {
+          intersection++;
+        }
+      }
+      const union = set1.size + arr2.length - intersection;
+      return union > 0 ? intersection / union : 0;
+    };
+    getGagnants = (draw) => uniqueValidNumbers(draw?.gagnants);
+    jaccardDraws = (d1, d2) => {
+      return calculateJaccardIndex(getGagnants(d1), getGagnants(d2));
+    };
+    findTwinDrawCandidates = (history, currentDate, maxYearsToScan, hurst, currentDraw) => {
       const currentYear = currentDate.getFullYear();
       const candidates = [];
       const lambdaYear = 3 + 4 * clamp3(hurst, 0.1, 0.9);
@@ -5548,7 +5612,10 @@ var init_interMonthlyResonance = __esm({
         const gagnantsCount = uniqueValidNumbers(draw.gagnants).length;
         const machineCount = uniqueValidNumbers(draw.machine).length;
         const richness = gagnantsCount / 5 * 0.7 + machineCount / 5 * 0.3;
-        const quality = clamp3(seasonalRes * yearDecay * (0.5 + 0.5 * richness), 0, 1);
+        const jaccardSim = jaccardDraws(draw, currentDraw);
+        const alpha = clamp3(hurst, 0.1, 0.9) * 0.5;
+        const blendedResonance = seasonalRes * (1 - alpha) + jaccardSim * alpha;
+        const quality = clamp3(blendedResonance * yearDecay * (0.5 + 0.5 * richness), 0, 1);
         if (quality > 0.01) {
           const dayDistance = Math.abs(currentDate.getDate() - drawDate.getDate());
           candidates.push({
@@ -5618,7 +5685,7 @@ var init_interMonthlyResonance = __esm({
         if (!Number.isFinite(hurst)) hurst = 0.5;
         hurst = clamp3(hurst, 0.1, 0.9);
         const maxYearsToScan = Math.max(1, Math.min(10, Math.floor(history.length / 52)));
-        const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst);
+        const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst, currentDraw);
         if (twinCandidates.length === 0) {
           ctx.pluginCache[cacheKey] = defaultCache;
           return;
@@ -5655,7 +5722,11 @@ var init_interMonthlyResonance = __esm({
             matchedSourcePeriods++;
             const sourceStrength = overlapCount / Math.max(1, twinNumbers.size);
             const timeAmortization = Math.exp(-decayGamma * k);
-            const periodWeight = combinationActivation * timeAmortization * twinRes.quality * (0.5 + sourceStrength);
+            const jaccardAnchor = jaccardDraws(twinRes.draw, currentDraw);
+            const jaccardEvolution = jaccardDraws(historicalSource, projectedCurrent);
+            const jaccardResonance = (jaccardAnchor + jaccardEvolution) / 2;
+            const jaccardMultiplier = Math.exp(hurst * 2 * jaccardResonance);
+            const periodWeight = combinationActivation * timeAmortization * twinRes.quality * (0.5 + sourceStrength) * jaccardMultiplier;
             const projectedWinners = uniqueValidNumbers(projectedCurrent.gagnants);
             const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
             for (const num of projectedWinners) {
@@ -8141,6 +8212,7 @@ var init_microSgd = __esm({
       let failedDraws = 0;
       let attempted = 0;
       for (let t = K - 1; t >= 0; t--) {
+        await new Promise((r) => setTimeout(r, 0));
         const targetDraw = history[t];
         const subHistory = history.slice(t + 1);
         if (subHistory.length < 5) continue;
@@ -8628,62 +8700,69 @@ var init_predictionOrchestrator = __esm({
       }
     };
     computeAdvancedMetrics = async (localHistoryContext, drawName, hyperparameters, useSpatioTemporalHawkes, metrics) => {
-      const [
-        poissonScores,
-        bayesScores,
-        temporalScores,
-        digitalRootScores,
-        resistanceScores,
-        gapVelocityScores,
-        leaderSuccessionScores,
-        aiIntuitionScores,
-        fractalResonanceScores,
-        spatialHotSpots,
-        symbioticClusterScores,
-        anomalyScores,
-        hawkesExcitationScores,
-        topologicalLyapunovScores
-      ] = await Promise.all([
-        Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
-        Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
-        Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
-        Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
-        Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
-        Promise.resolve().then(() => calculateGapVelocityScores(localHistoryContext)),
-        Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
-        Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, metrics || {})),
-        Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
-        Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma)),
-        Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
-        Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
-        Promise.resolve().then(
-          () => useSpatioTemporalHawkes ? calculateSpatioTemporalHawkes(localHistoryContext, drawName) : calculateHawkesExcitation(localHistoryContext)
-        ),
-        Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
-      ]);
-      for (const k in gapVelocityScores) {
-        gapVelocityScores[k] *= hyperparameters.gapVelocityWeight || 1;
-      }
-      for (const k in hawkesExcitationScores) {
-        hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY;
-      }
-      return {
-        ...metrics,
-        poisson: poissonScores,
-        bayes: bayesScores,
-        temporal: temporalScores,
-        digitalRoot: digitalRootScores,
-        resistance: resistanceScores,
-        gapVelocity: gapVelocityScores,
-        leaderSuccession: leaderSuccessionScores,
-        aiIntuition: aiIntuitionScores,
-        fractalResonance: fractalResonanceScores,
-        spatial: spatialHotSpots,
-        symbioticClusters: symbioticClusterScores,
-        anomaly: anomalyScores,
-        hawkesExcitation: hawkesExcitationScores,
-        topologicalLyapunov: topologicalLyapunovScores
-      };
+      const contentHash = hashHistoryContent(localHistoryContext);
+      const cacheKey = globalCache.generateKey(
+        "adv_metrics",
+        drawName,
+        `${localHistoryContext.length}_${contentHash}_${useSpatioTemporalHawkes ? 1 : 0}_${hyperparameters.bayesWindowRatio || "def"}`
+      );
+      return globalCache.getOrCompute(
+        cacheKey,
+        async () => {
+          const poissonScores = calculatePoissonScores(localHistoryContext);
+          await yieldToUi();
+          const bayesScores = calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio);
+          await yieldToUi();
+          const temporalScores = calculateTemporalScores(localHistoryContext);
+          await yieldToUi();
+          const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
+          await yieldToUi();
+          const resistanceScores = calculateResistanceScores(localHistoryContext);
+          await yieldToUi();
+          const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
+          await yieldToUi();
+          const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
+          await yieldToUi();
+          const aiIntuitionScores = calculateAiIntuition(localHistoryContext, metrics || {});
+          await yieldToUi();
+          const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
+          await yieldToUi();
+          const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma);
+          await yieldToUi();
+          const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
+          await yieldToUi();
+          const anomalyScores = calculateAnomalyScores(localHistoryContext);
+          await yieldToUi();
+          const hawkesExcitationScores = useSpatioTemporalHawkes ? calculateSpatioTemporalHawkes(localHistoryContext, drawName) : calculateHawkesExcitation(localHistoryContext);
+          await yieldToUi();
+          const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon);
+          await yieldToUi();
+          for (const k in gapVelocityScores) {
+            gapVelocityScores[k] *= hyperparameters.gapVelocityWeight || 1;
+          }
+          for (const k in hawkesExcitationScores) {
+            hawkesExcitationScores[k] *= (hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY;
+          }
+          return {
+            ...metrics,
+            poisson: poissonScores,
+            bayes: bayesScores,
+            temporal: temporalScores,
+            digitalRoot: digitalRootScores,
+            resistance: resistanceScores,
+            gapVelocity: gapVelocityScores,
+            leaderSuccession: leaderSuccessionScores,
+            aiIntuition: aiIntuitionScores,
+            fractalResonance: fractalResonanceScores,
+            spatial: spatialHotSpots,
+            symbioticClusters: symbioticClusterScores,
+            anomaly: anomalyScores,
+            hawkesExcitation: hawkesExcitationScores,
+            topologicalLyapunov: topologicalLyapunovScores
+          };
+        },
+        CACHE_TTL.LONG
+      );
     };
     runLocalPredictionPipeline = async (context) => {
       context.onProgress?.(5, "Initialisation de l'ADN algorithmique...");

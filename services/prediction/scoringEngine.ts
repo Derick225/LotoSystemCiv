@@ -138,7 +138,7 @@ export const calculateScores = (
   if (history.length > 0) {
     for (let i = 1; i <= N; i++) {
         // Extraction du code comportemental du numéro pour l'injection via son spectralPower
-        const microDna = calculateMicroDNAPerNumber(targetDrawName, i, history, effectiveWeights as Record<string, number>);
+        const microDna = calculateMicroDNAPerNumber(targetDrawName, i, history, effectiveWeights as Record<string, number>, true);
         microDnaCache[i] = microDna.spectralPower;
     }
   }

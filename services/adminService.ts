@@ -73,13 +73,8 @@ export const adminService = {
             return await fetchLocalUsers();
         }
 
-        try {
-            const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' });
-            return data.users;
-        } catch (error) {
-            console.warn("Using local database due to network, API or permission error:", error);
-            return await fetchLocalUsers();
-        }
+        const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' });
+        return data.users;
     },
 
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
@@ -94,20 +89,8 @@ export const adminService = {
             }
         }
 
-        try {
-            const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role });
-            return data.success;
-        } catch (error) {
-            console.warn("Simulating roll update offline/bypass:", error);
-            try {
-                const users = await fetchLocalUsers();
-                const updated = users.map(u => u.id === userId ? { ...u, role } : u);
-                await set(LOCAL_USERS_KEY, updated);
-                return true;
-            } catch {
-                return false;
-            }
-        }
+        const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role });
+        return data.success;
     },
 
     deleteUser: async (userId: string): Promise<boolean> => {
@@ -122,19 +105,7 @@ export const adminService = {
             }
         }
 
-        try {
-            const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId });
-            return data.success;
-        } catch (error) {
-            console.warn("Simulating deleteUser offline/bypass:", error);
-            try {
-                const users = await fetchLocalUsers();
-                const updated = users.filter(u => u.id !== userId);
-                await set(LOCAL_USERS_KEY, updated);
-                return true;
-            } catch {
-                return false;
-            }
-        }
+        const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId });
+        return data.success;
     }
 };

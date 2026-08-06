@@ -17,11 +17,12 @@ export const calculateMicroDNAPerNumber = (
     drawName: string,
     targetNumber: number,
     history: DrawResult[], 
-    globalDnaContext: Record<string, number>
+    globalDnaContext: Record<string, number>,
+    isAlreadyPurified: boolean = false
 ): NumberMicroDNA => {
     
     // Règle 2: Isolation Absolue - Filtrer l'historique au tirage cible
-    const drawHistory = purifyHistoryForDraw(drawName, history);
+    const drawHistory = isAlreadyPurified ? history : purifyHistoryForDraw(drawName, history);
     
     const algoKeys = Object.keys(globalDnaContext);
     const behavioralDna: Record<string, number> = {};
