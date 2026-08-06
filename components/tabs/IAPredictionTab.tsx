@@ -1903,6 +1903,43 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                   </div>
                 </div>
 
+                {/* Comparaison simplifiée pour tous les profils d'utilisateurs */}
+                <div className="bg-slate-900/50 p-6 rounded-[2rem] border border-slate-800/80 shadow-lg relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl -mr-6 -mt-6"></div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-indigo-400 flex items-center gap-2 mb-4">
+                    📢 VERDICT EN FRANÇAIS SIMPLE : L'IA VS LE HASARD
+                  </h3>
+                  <div className="space-y-4 text-sm text-slate-300">
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl">🏆</span>
+                      <div>
+                        <strong className="text-slate-100">Performance de l'IA :</strong>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          En moyenne, notre intelligence artificielle cible avec précision <strong className="text-indigo-400">{stats.avgDirectHits.toFixed(2)} bon(s) numéro(s)</strong> par tirage sur les tirages récents de test.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl">🎲</span>
+                      <div>
+                        <strong className="text-slate-100">Pur hasard (Une personne au hasard) :</strong>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Une personne ordinaire qui choisit ses numéros au hasard ne trouverait en moyenne que <strong className="text-amber-500">0.28 numéro</strong> par tirage.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 border-t border-slate-800/60 pt-4">
+                      <span className="text-xl">🚀</span>
+                      <div>
+                        <strong className="text-slate-100">Le Verdict :</strong>
+                        <p className="text-xs text-slate-300 mt-0.5">
+                          Notre IA est <strong className="text-emerald-400 font-bold">{stats.alphaGain.toFixed(1)} fois plus performante</strong> que le hasard pur. Elle capte l'information des lois physiques et mathématiques de l'historique sans aucune supposition arbitraire.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Recharts Visualisation */}
                 <div className="bg-slate-900/30 p-6 rounded-[2rem] border border-slate-800/80 shadow-xl">
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-6">

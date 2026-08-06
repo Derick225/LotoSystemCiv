@@ -679,6 +679,33 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   </div>
                 </div>
 
+                {/* Verdict simple pour les utilisateurs */}
+                <div className="bg-slate-950 p-6 rounded-2xl border border-slate-900/60 relative overflow-hidden">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-indigo-400 mb-4 flex items-center gap-1.5">
+                    📢 COMPARAISON SIMPLE : NOTRE MODÈLE VS LE PUR HASARD
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-slate-300">
+                    <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/30 flex flex-col justify-between">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Notre Modèle</span>
+                      <p className="text-xs text-slate-400 leading-normal">
+                        Obtient en moyenne <strong className="text-indigo-400">{validationReport.ensemble.mean.toFixed(2)} bons numéros</strong> par tirage lors des tests chronologiques.
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/30 flex flex-col justify-between">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Pur Hasard</span>
+                      <p className="text-xs text-slate-400 leading-normal">
+                        Une sélection purement aléatoire n'obtiendrait que <strong className="text-amber-500">0.28 bon numéro</strong> en moyenne.
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-900/40 border border-indigo-500/10 flex flex-col justify-between">
+                      <span className="text-[10px] uppercase font-black text-emerald-400 tracking-wider block mb-1">Le Verdict IA</span>
+                      <p className="text-xs text-slate-300 leading-normal">
+                        Notre algorithme est <strong className="text-emerald-400 font-bold">{(validationReport.ensemble.mean / 0.2778).toFixed(1)} fois plus performant</strong> que le pur hasard sur cette période !
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Recharts Cumulative Hits Chart */}
                 <div className="bg-slate-950 p-6 rounded-2xl border border-slate-900">
                   <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-6">
