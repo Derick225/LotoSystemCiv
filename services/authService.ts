@@ -61,8 +61,12 @@ export const authService = {
    */
   getUser: async () => {
     if (!isSupabaseConfigured()) return null;
-    const { data } = await supabase.auth.getUser();
-    return data.user;
+    try {
+      const { data } = await supabase.auth.getUser();
+      return data?.user || null;
+    } catch {
+      return null;
+    }
   },
 
   /**

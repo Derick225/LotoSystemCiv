@@ -475,14 +475,16 @@ export const runDecisionForest = async (
     // Pondération temporelle par récence : décrue exponentielle fluide
     const weight = Number((0.2 + 0.8 * Math.exp(-idx / (trainingSlice.length * 0.5))).toFixed(4));
 
-    // Précalcul contextuel optimisé pour cette ligne d'entraînement
+    // Précalcul contextuel optimisé et étanche (ISOLATION TEMPORELLE STRICTE SUR POUVOIR DU PASSE)
     const contextState = computeContextState(context);
+    const contextConsensusMap = buildConsensusMap(context);
+    const contextDatasetStats = computeDatasetStats(context, contextConsensusMap);
 
-    // Exemples Positifs
+    // Exemples Positifs (features extraites 100% sur le passé isolé)
     for (const n of winners) {
       if (n >= 1 && n <= 90) {
         dataset.push({ 
-          features: extractNumericFeatures(n, context.length, contextState, consensusMap, activeIndices, datasetStats), 
+          features: extractNumericFeatures(n, context.length, contextState, contextConsensusMap, activeIndices, contextDatasetStats), 
           label: 1,
           weight
         });
@@ -513,7 +515,7 @@ export const runDecisionForest = async (
     for (let n = 1; n <= 90; n++) {
       if (!winnerSet.has(n)) highConsensusCandidates.push(n);
     }
-    highConsensusCandidates.sort((a, b) => (consensusMap![b] || 0) - (consensusMap![a] || 0));
+    highConsensusCandidates.sort((a, b) => (contextConsensusMap[b] || 0) - (contextConsensusMap[a] || 0));
 
     const targetNegativesCount = winners.length;
     const countPerStratum = Math.ceil(targetNegativesCount / 3);
@@ -558,10 +560,10 @@ export const runDecisionForest = async (
       }
     }
 
-    // Push des négatifs
+    // Push des négatifs (features extraites 100% sur le passé isolé)
     for (const rnd of negativesSet) {
       dataset.push({ 
-        features: extractNumericFeatures(rnd, context.length, contextState, consensusMap, activeIndices, datasetStats), 
+        features: extractNumericFeatures(rnd, context.length, contextState, contextConsensusMap, activeIndices, contextDatasetStats), 
         label: 0,
         weight
       });

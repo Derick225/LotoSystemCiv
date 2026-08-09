@@ -1,5 +1,6 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { authService } from './authService';
 
 const OFFLINE_QUEUE_PREFIX = 'nexus_offline_queue_';
 
@@ -89,7 +90,11 @@ class OfflineQueueService {
         return { processed: 0, errors: 0 };
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await authService.getUser();
+      if (!user) {
+        this.isProcessing = false;
+        return { processed: 0, errors: 0 };
+      }
 
       const { getMany, delMany, setMany } = await import('idb-keyval');
       const values = await getMany(queueKeys);

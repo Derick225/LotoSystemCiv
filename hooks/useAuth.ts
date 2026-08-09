@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { authService } from '../services/authService';
-import { supabase } from '../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from '../services/subscriptionService';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
@@ -55,7 +55,7 @@ export const useAuth = () => {
 
         checkAuth();
 
-        const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+        const authListenerRes = isSupabaseConfigured() ? supabase.auth.onAuthStateChange(async (_event, newSession) => {
             if (!isMounted) return;
             setSession(newSession);
             if (newSession?.user) {
@@ -72,11 +72,13 @@ export const useAuth = () => {
                 setSubscription(null);
                 setIsAdmin(false);
             }
-        });
+        }) : null;
 
         return () => {
             isMounted = false;
-            authListener.unsubscribe();
+            if (authListenerRes?.data?.subscription) {
+                authListenerRes.data.subscription.unsubscribe();
+            }
             if (unsubscribeSub) unsubscribeSub();
         };
     }, [showToast]);

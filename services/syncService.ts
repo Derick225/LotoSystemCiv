@@ -1,5 +1,6 @@
 
 import { supabase } from './supabaseClient';
+import { authService } from './authService';
 import { PredictionHistoryItem, ForensicReport, LearningSession, Prediction, PredictionFeedback } from '../types';
 import { AppError, logError } from '../utils/AppError';
 import { set, del } from 'idb-keyval';
@@ -88,7 +89,7 @@ const retryWithBackoff = async <T>(
 export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
     if (!navigator.onLine) return localItems; // Mode hors ligne
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await authService.getUser();
     if (!user) return localItems; // Mode hors ligne
 
     // Assainissement préalable de toutes les prédictions locales pour garantir des UUID conformes
@@ -234,7 +235,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 export const syncForensicReports = async (localReports: ForensicReport[]): Promise<ForensicReport[]> => {
     if (!navigator.onLine) return localReports;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await authService.getUser();
     if (!user) return localReports;
 
     try {
@@ -336,7 +337,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 export const syncLearningSessions = async (localSessions: LearningSession[]): Promise<LearningSession[]> => {
     if (!navigator.onLine) return localSessions;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await authService.getUser();
     if (!user) return localSessions;
 
     try {
@@ -429,7 +430,7 @@ export const syncPredictionSnapshots = async (drawName: string) => {
     if (!navigator.onLine) return;
 
     try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await authService.getUser();
         if (!user) return;
 
         // Fetch cloud snapshots
@@ -456,13 +457,21 @@ export const syncPredictionSnapshots = async (drawName: string) => {
 };
 
 export const deletePredictionCloud = async (id: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
+    try {
+        const user = await authService.getUser();
+        if (!user) return;
+        await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
+    } catch (e) {
+        // ignore cloud delete error
+    }
 };
 
 export const deleteForensicReportCloud = async (id: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
+    try {
+        const user = await authService.getUser();
+        if (!user) return;
+        await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
+    } catch (e) {
+        // ignore cloud delete error
+    }
 };

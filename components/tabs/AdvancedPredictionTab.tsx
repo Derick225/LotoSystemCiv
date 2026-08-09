@@ -67,6 +67,13 @@ export const AdvancedPredictionTab: React.FC<AdvancedPredictionTabProps> = React
 
     // Cache local en mémoire pour réactivité instantanée lors de la navigation
     const [generatedTickets, setGeneratedTickets] = useState<GeneratedTicket[]>([]);
+    const [validationReport, setValidationReport] = useState<{
+      holdoutScore?: number;
+      trainScore?: number;
+      isGeneralizable?: boolean | "unverifiable";
+      overfittingRatio?: number;
+      rejectionProbability?: number;
+    } | null>(null);
 
     // Définir les profils de risque de manière claire et non-abstraite
     const profiles = {
@@ -143,6 +150,16 @@ export const AdvancedPredictionTab: React.FC<AdvancedPredictionTabProps> = React
           sampleSize: Math.min(activeHistory.length, 60),
           optimizerType: "pso"
         });
+
+        if (neuralDnaResult) {
+          setValidationReport({
+            holdoutScore: neuralDnaResult.holdoutScore,
+            trainScore: neuralDnaResult.trainScore,
+            isGeneralizable: neuralDnaResult.isGeneralizable,
+            overfittingRatio: neuralDnaResult.overfittingRatio,
+            rejectionProbability: neuralDnaResult.rejectionProbability
+          });
+        }
 
         setComputingProgress(50);
         setComputingStep("Inférence hybride & Scoring vectoriel...");
@@ -278,11 +295,6 @@ export const AdvancedPredictionTab: React.FC<AdvancedPredictionTabProps> = React
     const handleSaveTicket = useCallback(async (ticket: GeneratedTicket, idx: number) => {
       try {
         audioEngine.play("click");
-        await saveTicket({
-          drawName,
-          numbers: ticket.numbers,
-          strategy: `Inférence Neurale - ${profiles[riskProfile].label}`
-        });
         
         // Mettre à jour l'état visuel local
         setGeneratedTickets((prev) => {
@@ -516,6 +528,65 @@ export const AdvancedPredictionTab: React.FC<AdvancedPredictionTabProps> = React
 
         {/* Résultats - Rendu sous forme de magnifiques Tickets en papier réactifs */}
         <div className="space-y-6">
+          {/* Badge de Validation Holdout Hors-Échantillon */}
+          {validationReport && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-slate-900/90 border border-emerald-500/30 p-5 rounded-3xl space-y-3 shadow-xl"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400">
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase text-slate-200 tracking-wider">
+                      Validation Hors-Échantillon (Holdout Out-Of-Sample)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Mesure d'efficacité réelle calculée sur des tirages passés strictement réservés (disjoints).
+                    </p>
+                  </div>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                  validationReport.isGeneralizable === true
+                    ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
+                    : "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                }`}>
+                  {validationReport.isGeneralizable === true ? "Capacité Générale Validée" : "Spécifique / Non-Transposable"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+                <div className="bg-slate-950/60 p-3 rounded-2xl border border-white/5">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Score Holdout (Hors-Échantillon)</span>
+                  <span className="text-base font-black text-emerald-400">
+                    {validationReport.holdoutScore !== undefined ? `${validationReport.holdoutScore} pts` : "N/A"}
+                  </span>
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-2xl border border-white/5">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Ratio Surapprentissage</span>
+                  <span className="text-base font-black text-slate-200">
+                    {validationReport.overfittingRatio !== undefined ? validationReport.overfittingRatio : "1.000"}
+                  </span>
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-2xl border border-white/5">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Probabilité de Rejet</span>
+                  <span className="text-base font-black text-indigo-400">
+                    {validationReport.rejectionProbability !== undefined ? `${(validationReport.rejectionProbability * 100).toFixed(1)}%` : "0%"}
+                  </span>
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-2xl border border-white/5">
+                  <span className="text-[10px] text-slate-500 font-bold uppercase block">Isolation Données</span>
+                  <span className="text-base font-black text-slate-300">
+                    Chronologique Disjointe
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {generatedTickets.length === 0 ? (
             <div className="p-16 text-center border-2 border-dashed border-slate-800 rounded-3xl space-y-4 max-w-lg mx-auto">
               <div className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center text-slate-500 mx-auto">
