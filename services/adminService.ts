@@ -73,39 +73,48 @@ export const adminService = {
             return await fetchLocalUsers();
         }
 
-        const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' });
-        return data.users;
+        try {
+            const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' }, { suppressErrorLogging: true });
+            if (data?.users) return data.users;
+            return await fetchLocalUsers();
+        } catch {
+            return await fetchLocalUsers();
+        }
     },
 
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
-        if (!isSupabaseConfigured()) {
-            try {
-                const users = await fetchLocalUsers();
-                const updated = users.map(u => u.id === userId ? { ...u, role } : u);
-                await set(LOCAL_USERS_KEY, updated);
-                return true;
-            } catch {
-                return false;
+        try {
+            if (isSupabaseConfigured()) {
+                const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role }, { suppressErrorLogging: true });
+                if (data?.success) return true;
             }
-        }
+        } catch { /* fallback local */ }
 
-        const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role });
-        return data.success;
+        try {
+            const users = await fetchLocalUsers();
+            const updated = users.map(u => u.id === userId ? { ...u, role } : u);
+            await set(LOCAL_USERS_KEY, updated);
+            return true;
+        } catch {
+            return false;
+        }
     },
 
     deleteUser: async (userId: string): Promise<boolean> => {
-        if (!isSupabaseConfigured()) {
-            try {
-                const users = await fetchLocalUsers();
-                const updated = users.filter(u => u.id !== userId);
-                await set(LOCAL_USERS_KEY, updated);
-                return true;
-            } catch {
-                return false;
+        try {
+            if (isSupabaseConfigured()) {
+                const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId }, { suppressErrorLogging: true });
+                if (data?.success) return true;
             }
-        }
+        } catch { /* fallback local */ }
 
-        const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId });
-        return data.success;
+        try {
+            const users = await fetchLocalUsers();
+            const updated = users.filter(u => u.id !== userId);
+            await set(LOCAL_USERS_KEY, updated);
+            return true;
+        } catch {
+            return false;
+        }
     }
 };

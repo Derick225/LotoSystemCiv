@@ -1,4 +1,4 @@
-import { supabase } from '../../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../../services/supabaseClient';
 import { AppError, logError } from '../../utils/AppError';
 
 interface ApiOptions extends RequestInit {
@@ -29,6 +29,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortController
 
 export const apiClient = {
   async post<T>(endpoint: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+    if (!isSupabaseConfigured()) {
+      throw new AppError('Supabase non configuré', 'NOT_CONFIGURED', 'low');
+    }
+
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs ?? DEFAULT_EDGE_TIMEOUT_MS;
 
@@ -71,7 +75,7 @@ export const apiClient = {
         throw new AppError(
           errorMessage || `Erreur lors de l'appel à la fonction ${endpoint}`,
           'NETWORK_ERR',
-          isNetworkError ? 'medium' : 'high',
+          isNetworkError ? 'low' : 'medium',
           details
         );
       }
@@ -95,7 +99,7 @@ export const apiClient = {
       }
       const errorText = String(error).toLowerCase();
       const isNetworkError = errorText.includes('fetch') || errorText.includes('network') || errorText.includes('timeout') || errorText.includes('abort');
-      const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', isNetworkError ? 'medium' : 'high', { error });
+      const unknownError = new AppError('Impossible de contacter le serveur', 'UNKNOWN_ERR', isNetworkError ? 'low' : 'medium', { error });
       if (!options.suppressErrorLogging) {
           logError(unknownError, { endpoint });
       }

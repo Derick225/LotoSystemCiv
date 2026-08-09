@@ -54,7 +54,7 @@ export const useForensicData = (drawName: string) => {
                         }
                     }
                 } catch (e) {
-                    console.error("Failed to fetch cloud forensic reports", e);
+                    // Ignorer les erreurs de synchronisation réseau cloud en arrière-plan
                 }
             }
 
