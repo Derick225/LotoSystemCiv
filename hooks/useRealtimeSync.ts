@@ -4,12 +4,18 @@ import { useNexusStore } from '../store/useNexusStore';
 import { useAuth } from './useAuth';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
+import { workManager } from '../services/workManager';
 
 export const useRealtimeSync = () => {
     const { session } = useAuth();
     const { showToast } = useToast();
     const refreshData = useNexusStore((state) => state.refreshData);
     const drawName = useNexusStore((state) => state.drawName);
+
+    // Initialisation et démarrage du WorkManager d'arrière-plan
+    useEffect(() => {
+        workManager.initialize();
+    }, []);
 
     useEffect(() => {
         if (!navigator.onLine || !drawName) return;
@@ -25,17 +31,15 @@ export const useRealtimeSync = () => {
             }
             lastSyncTime = now;
 
-            console.log(`[Background Sync] App focus / visibility detected. Executing progressive background sync for: ${drawName}...`);
+            console.log(`[Background Sync] App focus / visibility detected. Triggering WorkManager draw sync for: ${drawName}...`);
 
             try {
-                // 1. Refresh draw results silently in the background
-                await refreshData(drawName, true);
-
-                // 2. Perform background synchronization of predictions history
-                const { syncAllHistory } = await import('../services/predictionHistoryService');
-                await syncAllHistory(drawName);
-
-                console.log("[Background Sync] Progressive background sync successfully completed.");
+                // Déléguer au WorkManager
+                await workManager.scheduleDrawsSyncWork({
+                    force: false,
+                    drawNames: [drawName],
+                    triggerSource: 'REALTIME_SYNC_HOOK'
+                });
             } catch (err) {
                 console.warn("[Background Sync] Error during background progressive sync:", err);
             }

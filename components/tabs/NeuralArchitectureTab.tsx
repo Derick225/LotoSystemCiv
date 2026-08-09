@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { NumberBall } from "../NumberBall";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import type { Prediction } from "../../types";
 import { useToast } from "../ui/Toast";

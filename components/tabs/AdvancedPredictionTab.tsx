@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import { speechEngine } from "../../utils/speechEngine";
@@ -28,6 +28,7 @@ import { generateMasterPrediction } from "../../services/prediction/predictionFa
 import { extractFeatures } from "../../services/prediction/featureExtractor";
 import { generateCombination } from "../../services/prediction/combinationGenerator";
 import { FALLBACK_CALIBRATION } from "../../shared/prediction.types";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 interface AdvancedPredictionTabProps {
   drawName: string;
@@ -52,13 +53,7 @@ export const AdvancedPredictionTab: React.FC<AdvancedPredictionTabProps> = React
 
     // Isolement strict des données du tirage actif (TIRAGE ISOLATION RULE)
     const activeHistory = useMemo(() => {
-      if (!drawName || history.length === 0) return [];
-      return history.filter(
-        (draw) =>
-          (draw.drawName || draw.draw_name || "")
-            .trim()
-            .toLowerCase() === drawName.trim().toLowerCase()
-      );
+      return purifyHistoryForDraw(drawName, history);
     }, [history, drawName]);
 
     // États de configuration simples et intuitifs (sans complexité visuelle)

@@ -5,7 +5,7 @@ import { FusionResult, Prediction } from "../../types";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import { NumberBall } from "../NumberBall";
 import { TicketXRay } from "../TicketXRay";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { useToast } from "../ui/Toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {

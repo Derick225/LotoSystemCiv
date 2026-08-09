@@ -5,7 +5,7 @@ import {
   getPlatinumHistory,
 } from "../../services/metaAnalystService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { useNexusStore } from "../../store/useNexusStore";
 import type { PlatinumResult, PlatinumScenario, Prediction } from "../../types";
 import { NumberBall } from "../NumberBall";
@@ -371,11 +371,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
   const handleSave = async (scenario: PlatinumScenario) => {
     audioEngine.play("click");
-    await saveTicket({
-      numbers: scenario.numbers,
-      drawName,
-      strategy: `Platinum ${scenario.name}`,
-    });
 
     if (result) {
       const breakdown: Record<number, Record<string, number>> = {};
@@ -637,15 +632,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                   onClick={async () => {
                     audioEngine.play("click");
                     
-                    // Pre-fill user wallet with the primary ticket
-                    await saveTicket({
-                      numbers: optimalScenario.numbers,
-                      drawName,
-                      strategy: `Choix du Directeur - Élite`,
-                    });
+                    // Generate the primary ticket
                     
                     audioEngine.play("success");
-                    showToast("Votre portefeuille a été pré-rempli avec le Ticket d'Élite !", "success");
+                    showToast("Le Ticket d'Élite a été généré avec succès !", "success");
                   }}
                   className="w-full max-w-md py-4.5 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 cursor-pointer group font-sans animate-pulse"
                 >

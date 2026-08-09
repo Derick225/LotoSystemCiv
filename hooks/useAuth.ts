@@ -6,7 +6,6 @@ import { supabase } from '../services/supabaseClient';
 import { checkSubscriptionStatus, subscribeToSubscriptionUpdates } from '../services/subscriptionService';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
-import {  hydrateUserData } from '../services/userPreferencesService';
 import type { SubscriptionState } from '../types';
 
 export const useAuth = () => {
@@ -29,9 +28,6 @@ export const useAuth = () => {
 
                 if (currentSession?.user) {
                     const userId = currentSession.user.id;
-                    hydrateUserData(userId).catch(err => {
-                        console.warn("[AlmostInstantSync] Non-blocking hydration issue:", err);
-                    });
                     const adminStatus = authService.isAdminUser(currentSession?.user);
                     setIsAdmin(adminStatus);
 
@@ -63,9 +59,6 @@ export const useAuth = () => {
             if (!isMounted) return;
             setSession(newSession);
             if (newSession?.user) {
-                hydrateUserData(newSession.user.id).catch(err => {
-                    console.warn("[AlmostInstantSync] Non-blocking hydration issue:", err);
-                });
                 const adminStatus = authService.isAdminUser(newSession.user);
                 setIsAdmin(adminStatus);
 
@@ -86,7 +79,7 @@ export const useAuth = () => {
             authListener.unsubscribe();
             if (unsubscribeSub) unsubscribeSub();
         };
-    }, [hydrateUserData, showToast]);
+    }, [showToast]);
 
     const refreshSubscription = async () => {
         if (session?.user) {

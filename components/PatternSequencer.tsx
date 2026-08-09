@@ -8,7 +8,7 @@ import {
   calculateGeneticDiversityIndex,
 } from "../services/predictionEngine";
 
-import { saveTicket } from "../services/userPreferencesService";
+
 import { useToast } from "./ui/Toast";
 import type { TicketAnalysisResult } from "../types";
 import {

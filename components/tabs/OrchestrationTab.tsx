@@ -27,7 +27,7 @@ import {
   Workflow,
   Network,
 } from "lucide-react";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { useToast } from "../ui/Toast";
 import { TicketXRay } from "../TicketXRay";
 import { audioEngine } from "../../utils/audioEngine";

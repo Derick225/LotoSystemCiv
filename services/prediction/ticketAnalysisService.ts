@@ -236,7 +236,6 @@ export const saveAdaptiveRules = (drawName: string, rules: AdaptiveRules) => {
   try {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`nexus_rules_${drawName}`, JSON.stringify(rules));
-      window.dispatchEvent(new CustomEvent('PREFERENCES_TRIGGER_SYNC'));
     }
   } catch {}
 };

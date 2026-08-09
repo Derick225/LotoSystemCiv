@@ -2,7 +2,6 @@ import React, { ReactNode, useState, useEffect, lazy, Suspense, useTransition } 
 import {
   Home,
   Settings,
-  Wallet,
   Activity,
   LogOut,
   WifiOff,
@@ -32,8 +31,6 @@ interface AppShellProps {
   theme: string;
   setTheme: (theme: "light" | "dark") => void;
   onReset: () => void;
-  showWallet: boolean;
-  setShowWallet: (show: boolean) => void;
   isDrawSelected: boolean;
   isAdmin: boolean;
   onLogout: () => void;
@@ -46,8 +43,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   theme,
   setTheme,
   onReset,
-  showWallet,
-  setShowWallet,
   isDrawSelected,
   isAdmin,
   onLogout,
@@ -86,7 +81,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     <div
       className={`min-h-screen text-slate-200 selection:bg-indigo-500/30 transition-colors duration-500 font-sans flex flex-col relative overflow-x-hidden w-full ${isFocusMode ? "bg-black" : ""}`}
     >
-      {/* Sleek Floating Sidebar for Desktop (STATION, ADMIN, WALLET) */}
+      {/* Sleek Floating Sidebar for Desktop (STATION, ADMIN) */}
       <div
         className={`fixed left-4 top-4 bottom-4 w-16 bg-nexus-950/60 backdrop-blur-2xl border border-white/10 rounded-3xl py-6 hidden md:flex flex-col justify-between items-center z-[100] transition-all duration-700 shadow-2xl ${
           isFocusMode ? "-translate-x-full opacity-0 pointer-events-none" : "translate-x-0 opacity-100"
@@ -110,21 +105,20 @@ export const AppShell: React.FC<AppShellProps> = ({
               audioEngine.play("click");
               startTransition(() => {
                 setViewMode("home");
-                setShowWallet(false);
               });
             }}
             className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
-              viewMode === "home" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+              viewMode === "home" ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
             }`}
           >
-            {viewMode === "home" && !showWallet && (
+            {viewMode === "home" && (
               <motion.div
                 layoutId="sidebar-active-pill"
                 className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
-            <Home size={20} className={viewMode === "home" && !showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
+            <Home size={20} className={viewMode === "home" ? "scale-110" : "group-hover:scale-105 transition-transform"} />
             <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
               Station
             </span>
@@ -137,51 +131,25 @@ export const AppShell: React.FC<AppShellProps> = ({
                 audioEngine.play("click");
                 startTransition(() => {
                   setViewMode("admin");
-                  setShowWallet(false);
                 });
               }}
               className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
-                viewMode === "admin" && !showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                viewMode === "admin" ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
               }`}
             >
-              {viewMode === "admin" && !showWallet && (
+              {viewMode === "admin" && (
                 <motion.div
                   layoutId="sidebar-active-pill"
                   className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <Settings size={20} className={viewMode === "admin" && !showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
+              <Settings size={20} className={viewMode === "admin" ? "scale-110" : "group-hover:scale-105 transition-transform"} />
               <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
                 Admin
               </span>
             </button>
           )}
-
-          {/* Wallet Button */}
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              startTransition(() => {
-                setShowWallet(!showWallet);
-              });
-            }}
-            className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group btn-reactive ${
-              showWallet ? "text-white" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-            }`}
-          >
-            {showWallet && (
-              <motion.div
-                layoutId="sidebar-active-pill"
-                className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 border border-indigo-500/30 -z-10"
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
-              />
-            )}
-            <Wallet size={20} className={showWallet ? "scale-110" : "group-hover:scale-105 transition-transform"} />
-            <span className="absolute left-16 bg-slate-950 border border-white/10 text-white text-[10px] uppercase font-black tracking-widest px-2.5 py-1.5 rounded-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0 shadow-2xl whitespace-nowrap z-50">
-              Wallet
-            </span>
-          </button>
         </div>
 
         {/* Bottom Actions Section */}
@@ -360,7 +328,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       >
         <AnimatePresence mode="wait">
           <motion.div
-            key={viewMode + isDrawSelected + showWallet}
+            key={viewMode + isDrawSelected}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -386,14 +354,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                 key={item.id}
                 onClick={() => {
                   setViewMode(item.id as ViewMode);
-                  setShowWallet(false);
                   audioEngine.play("click");
                 }}
                 className={`snap-center flex flex-col items-center gap-1 p-3 px-5 rounded-2xl transition-all relative shrink-0
-                            ${viewMode === item.id && !showWallet ? "text-white" : "text-slate-500 hover:text-slate-300"}
+                            ${viewMode === item.id ? "text-white" : "text-slate-500 hover:text-slate-300"}
                         `}
               >
-                {viewMode === item.id && !showWallet && (
+                {viewMode === item.id && (
                   <motion.div
                     layoutId="nav-pill"
                     className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 -z-10"
@@ -402,7 +369,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 <item.icon
                   size={22}
                   className={
-                    viewMode === item.id && !showWallet ? "scale-110" : ""
+                    viewMode === item.id ? "scale-110" : ""
                   }
                 />
                 <span className="text-xs font-black uppercase tracking-widest">
@@ -410,26 +377,6 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </span>
               </button>
             ))}
-            <button
-              onClick={() => {
-                setShowWallet(!showWallet);
-                audioEngine.play("click");
-              }}
-              className={`snap-center flex flex-col items-center gap-1 p-3 px-5 rounded-2xl transition-all relative shrink-0
-                        ${showWallet ? "text-white" : "text-slate-500 hover:text-slate-300"}
-                    `}
-            >
-              {showWallet && (
-                <motion.div
-                  layoutId="nav-pill"
-                  className="absolute inset-0 bg-emerald-600 rounded-2xl shadow-lg shadow-emerald-600/30 -z-10"
-                />
-              )}
-              <Wallet size={22} className={showWallet ? "scale-110" : ""} />
-              <span className="text-xs font-black uppercase tracking-widest">
-                Wallet
-              </span>
-            </button>
           </div>
         </div>
       </div>
@@ -440,7 +387,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           isOpen={showPalette}
           onClose={() => setShowPalette(false)}
           onNavigate={(v) => setViewMode(v as ViewMode)}
-          onAction={(a) => a === "wallet" && setShowWallet(true)}
+          onAction={() => {}}
         />
       </Suspense>
     </div>

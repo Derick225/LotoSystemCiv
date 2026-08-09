@@ -182,29 +182,6 @@ export const useNexusStore = create<NexusState>()(
           console.warn("Garbage collection skipped:", e);
         }
 
-        // Écouter l'hydratation cloud pour forcer le store à se recharger depuis IndexedDB
-        if (
-          typeof window !== "undefined" &&
-          !(window as any).__NEXUS_SYNC_REGISTERED__
-        ) {
-          (window as any).__NEXUS_SYNC_REGISTERED__ = true;
-          window.addEventListener("PREFERENCES_HYDRATED", async () => {
-            try {
-              await useNexusStore.persist.rehydrate();
-              const currentDraw = useNexusStore.getState().drawName;
-              if (currentDraw) {
-                const weights = await getAlgoWeights(currentDraw);
-                set({ globalWeights: weights });
-              }
-            } catch (e) {
-              console.error(
-                "Failed to rehydrate NexusStore on cloud hydration:",
-                e,
-              );
-            }
-          });
-        }
-
         const nextDraw = getNextScheduledDraw();
         const currentDraw = get().drawName;
         

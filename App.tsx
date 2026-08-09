@@ -14,7 +14,6 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { queryClient, idbPersister } from './services/queryClient';
 import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
-import { getSettings, saveSettings } from './services/userPreferencesService';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw } from './types';
 import { ALL_DRAWS } from './constants';
@@ -33,7 +32,6 @@ const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumber
 import { GlobalDashboard } from './components/GlobalDashboard';
 import { DrawDetails } from './components/DrawDetails';
 import { AdminPanel } from './components/admin/AdminPanel';
-import { UserWallet } from './components/UserWallet';
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -89,7 +87,6 @@ const AppContent: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
-  const [showWallet, setShowWallet] = useState(false);
 
   // Global Cross-Navigation Hub
   useEffect(() => {
@@ -100,7 +97,6 @@ const AppContent: React.FC = () => {
       if (view === 'admin') {
         setViewMode('admin');
         setSelectedDraw(null);
-        setShowWallet(false);
       } else if (view === 'home') {
         if (drawName) {
           const foundDraw = ALL_DRAWS.find(d => d.name.toLowerCase() === drawName.toLowerCase());
@@ -113,7 +109,6 @@ const AppContent: React.FC = () => {
           setSelectedDraw(null);
         }
         setViewMode('home');
-        setShowWallet(false);
       }
 
       if (mainTab) {
@@ -127,14 +122,13 @@ const AppContent: React.FC = () => {
   }, [setDrawName, refreshData]);
   
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-      const s = getSettings();
-      return s.theme !== 'system' ? s.theme : 'dark';
+      const savedTheme = localStorage.getItem('lotopro_theme');
+      return (savedTheme === 'light' || savedTheme === 'dark') ? savedTheme : 'dark';
   });
 
   useEffect(() => {
-    const savedSettings = getSettings();
-    audioEngine.setEnabled(savedSettings.sound);
-    if (savedSettings.theme !== 'system') setTheme(savedSettings.theme);
+    const soundEnabled = localStorage.getItem('lotopro_sound') !== 'false';
+    audioEngine.setEnabled(soundEnabled);
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('payment') === 'success') {
@@ -160,10 +154,7 @@ const AppContent: React.FC = () => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    const current = getSettings();
-    if (current.theme !== theme) {
-        saveSettings({ ...current, theme });
-    }
+    localStorage.setItem('lotopro_theme', theme);
   }, [theme]);
 
   const handleSelectDraw = useCallback((draw: Draw) => {
@@ -172,7 +163,6 @@ const AppContent: React.FC = () => {
     refreshData(draw.name, false);
     setSelectedDraw(draw);
     setViewMode('home');
-    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [setDrawName, refreshData]);
 
@@ -180,7 +170,6 @@ const AppContent: React.FC = () => {
     audioEngine.play('click');
     setSelectedDraw(null);
     setViewMode('home');
-    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
@@ -241,8 +230,7 @@ const AppContent: React.FC = () => {
     const renderContent = () => {
     let content;
     let key;
-    if (showWallet) { content = <UserWallet />; key = 'wallet'; }
-    else if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
+    if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
@@ -284,13 +272,10 @@ const AppContent: React.FC = () => {
             }
             setViewMode(mode); 
             setSelectedDraw(null); 
-            setShowWallet(false); 
         }}
         theme={theme}
         setTheme={setTheme} 
         onReset={handleReset}
-        showWallet={showWallet}
-        setShowWallet={(show) => { audioEngine.play('click'); setShowWallet(show); }}
         isDrawSelected={!!selectedDraw}
         isAdmin={isAdmin}
         onLogout={handleLogout}

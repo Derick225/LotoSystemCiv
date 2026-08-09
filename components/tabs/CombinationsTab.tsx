@@ -8,7 +8,7 @@ import { calculateACValue } from "../../services/mathService";
 import { runAntColonyOptimization } from "../../services/acoService";
 import { filterDiverseCombinations } from "../../services/prediction/diversityService";
 import { getUniqueSortedNumbers } from "../../utils/arrayUtils";
-import { saveTicket } from "../../services/userPreferencesService";
+
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import type { Prediction } from "../../types";
 import { useToast } from "../ui/Toast";
