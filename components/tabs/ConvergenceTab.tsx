@@ -1,3 +1,4 @@
+import { saveTicket } from "../../services/ticketService";
 import React, { useState } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateFusion } from "../../services/fusionService";

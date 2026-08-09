@@ -1,6 +1,6 @@
 
-import { isSupabaseConfigured } from './supabaseClient';
-import { apiClient } from '../core/api/apiClient';
+import { db, isFirebaseConfigured } from './firebaseClient';
+import { collection, doc, getDocs, updateDoc, deleteDoc } from 'firebase/firestore';
 import { get, set } from 'idb-keyval';
 
 export interface AdminUser {
@@ -69,13 +69,28 @@ const fetchLocalUsers = async (): Promise<AdminUser[]> => {
 
 export const adminService = {
     fetchUsers: async (): Promise<AdminUser[]> => {
-        if (!isSupabaseConfigured()) {
+        if (!isFirebaseConfigured()) {
             return await fetchLocalUsers();
         }
 
         try {
-            const data = await apiClient.post<{ users: AdminUser[] }>('admin-users', { action: 'list' }, { suppressErrorLogging: true });
-            if (data?.users) return data.users;
+            const usersCol = collection(db, 'users');
+            const snapshot = await getDocs(usersCol);
+            if (!snapshot.empty) {
+                const usersList: AdminUser[] = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    usersList.push({
+                        id: docSnap.id,
+                        email: data.email || '',
+                        last_sign_in: data.last_sign_in || data.lastSignIn || '',
+                        created_at: data.created_at || data.createdAt || '',
+                        role: data.role || 'user',
+                        subscription: data.subscription || null
+                    });
+                });
+                return usersList;
+            }
             return await fetchLocalUsers();
         } catch {
             return await fetchLocalUsers();
@@ -84,9 +99,10 @@ export const adminService = {
 
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
         try {
-            if (isSupabaseConfigured()) {
-                const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'updateRole', userId, role }, { suppressErrorLogging: true });
-                if (data?.success) return true;
+            if (isFirebaseConfigured()) {
+                const userRef = doc(db, 'users', userId);
+                await updateDoc(userRef, { role });
+                return true;
             }
         } catch { /* fallback local */ }
 
@@ -102,9 +118,10 @@ export const adminService = {
 
     deleteUser: async (userId: string): Promise<boolean> => {
         try {
-            if (isSupabaseConfigured()) {
-                const data = await apiClient.post<{ success: boolean }>('admin-users', { action: 'delete', userId }, { suppressErrorLogging: true });
-                if (data?.success) return true;
+            if (isFirebaseConfigured()) {
+                const userRef = doc(db, 'users', userId);
+                await deleteDoc(userRef);
+                return true;
             }
         } catch { /* fallback local */ }
 

@@ -1,5 +1,5 @@
 
-import { isSupabaseConfigured } from './supabaseClient';
+import { isFirebaseConfigured } from './firebaseClient';
 import { getNarrativeAnalysis } from './geminiService';
 import type { NarrativeReport, DrawResult, EntropyMetric, ChiSquareMetric } from "../types";
 import { AppError, logError } from '../utils/AppError';
@@ -61,7 +61,7 @@ export const generateNarrativeReport = async (
         confidence: calculatedConfidence
     };
 
-    if (!navigator.onLine || !isSupabaseConfigured()) return fallbackReport;
+    if (!navigator.onLine || !isFirebaseConfigured()) return fallbackReport;
 
     // --- APPEL CLOUD (SI DISPONIBLE) ---
     // Construction d'un contexte analytique riche pour l'IA

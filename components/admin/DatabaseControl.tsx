@@ -1,9 +1,6 @@
+import { db, testDatabaseConnection, isFirebaseConfigured } from "../../services/firebaseClient";
+import { collection, getDocs, writeBatch, doc, getCountFromServer } from "firebase/firestore";
 import React, { useState, useEffect } from "react";
-import {
-  supabase,
-  testDatabaseConnection,
-  isSupabaseConfigured,
-} from "../../services/supabaseClient";
 import { useToast } from "../ui/Toast";
 import { NEXUS_DATABASE_SCHEMA } from "../../services/databaseSchema";
 import {
@@ -40,7 +37,7 @@ export const DatabaseControl: React.FC = () => {
 
   const refreshMetrics = async () => {
     audioEngine.play("click");
-    if (!isSupabaseConfigured()) {
+    if (!isFirebaseConfigured()) {
       setConnectionStatus("error");
       setLastError("Configuration .env manquante");
       return;
@@ -59,20 +56,17 @@ export const DatabaseControl: React.FC = () => {
       setConnectionStatus("success");
       setLastError(null);
 
-      const [draws, analytics, weights, feedback] = await Promise.all([
-        supabase
-          .from("draw_results")
-          .select("*", { count: "exact", head: true }),
-        supabase
-          .from("draw_analytics")
-          .select("*", { count: "exact", head: true }),
-        supabase
-          .from("algo_weights")
-          .select("*", { count: "exact", head: true }),
-        supabase
-          .from("prediction_feedback")
-          .select("*", { count: "exact", head: true }),
+      const [drawsSnap, analyticsSnap, weightsSnap, feedbackSnap] = await Promise.all([
+        getCountFromServer(collection(db, "draw_results")),
+        getCountFromServer(collection(db, "draw_analytics")),
+        getCountFromServer(collection(db, "algo_weights")),
+        getCountFromServer(collection(db, "prediction_feedback")),
       ]);
+
+      const drawsCount = drawsSnap.data().count;
+      const analyticsCount = analyticsSnap.data().count;
+      const weightsCount = weightsSnap.data().count;
+      const feedbackCount = feedbackSnap.data().count;
 
       let total = 0;
       if (typeof window !== "undefined" && window.localStorage) {
@@ -84,10 +78,10 @@ export const DatabaseControl: React.FC = () => {
       }
 
       setMetrics({
-        draws: draws.count || 0,
-        analytics: analytics.count || 0,
-        weights: weights.count || 0,
-        feedback: feedback.count || 0,
+        draws: drawsCount,
+        analytics: analyticsCount,
+        weights: weightsCount,
+        feedback: feedbackCount,
         localStorageSize: Math.round(total / 1024),
       });
       audioEngine.play("success");
@@ -149,7 +143,7 @@ export const DatabaseControl: React.FC = () => {
               <span
                 className={`text-xs font-mono ${connectionStatus === "success" ? "text-emerald-400" : "text-rose-400"}`}
               >
-                {isSupabaseConfigured()
+                {isFirebaseConfigured()
                   ? connectionStatus === "success"
                     ? "Connecté (PostgreSQL)"
                     : "Erreur de Connexion"

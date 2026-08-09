@@ -1,111 +1,175 @@
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  sendPasswordResetEmail, 
+  updatePassword as updateFirebasePassword,
+  onAuthStateChanged
+} from 'firebase/auth';
+import { auth, isFirebaseConfigured } from './firebaseClient';
 
-import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { Session } from '@supabase/supabase-js';
+export interface UserSession {
+  user: {
+    id: string;
+    uid: string;
+    email: string | null;
+    app_metadata?: Record<string, unknown>;
+    user_metadata?: Record<string, unknown>;
+  };
+}
 
 export const authService = {
   /**
-   * Connecte un utilisateur avec email et mot de passe via Supabase.
+   * Connecte un utilisateur avec email et mot de passe via Firebase Auth.
    */
   login: async (email: string, password: string) => {
-    if (!isSupabaseConfigured()) {
-        return { data: null, error: new Error("Mode hors-ligne : Authentification désactivée.") };
+    if (!isFirebaseConfigured()) {
+      return { data: null, error: new Error("Mode hors-ligne : Authentification désactivée.") };
     }
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { data, error };
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      const user = credential.user;
+      return {
+        data: {
+          user: {
+            id: user.uid,
+            uid: user.uid,
+            email: user.email,
+          }
+        },
+        error: null
+      };
+    } catch (error: unknown) {
+      return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+    }
   },
 
   /**
-   * Inscrit un nouvel utilisateur.
+   * Inscrit un nouvel utilisateur via Firebase Auth.
    */
   signUp: async (email: string, password: string) => {
-    if (!isSupabaseConfigured()) {
-        return { data: null, error: new Error("Mode hors-ligne : Inscription désactivée.") };
+    if (!isFirebaseConfigured()) {
+      return { data: null, error: new Error("Mode hors-ligne : Inscription désactivée.") };
     }
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    return { data, error };
+    try {
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = credential.user;
+      return {
+        data: {
+          user: {
+            id: user.uid,
+            uid: user.uid,
+            email: user.email,
+          }
+        },
+        error: null
+      };
+    } catch (error: unknown) {
+      return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+    }
   },
 
   /**
    * Déconnecte l'utilisateur actuel.
    */
   logout: async () => {
-    if (!isSupabaseConfigured()) return { error: null };
-    const { error } = await supabase.auth.signOut();
-    return { error };
+    if (!isFirebaseConfigured()) return { error: null };
+    try {
+      await signOut(auth);
+      return { error: null };
+    } catch (error: unknown) {
+      return { error: error instanceof Error ? error : new Error(String(error)) };
+    }
   },
 
   /**
-   * Récupère la session actuelle.
+   * Récupère la session / utilisateur actuel.
    */
-  getSession: async (): Promise<Session | null> => {
-    if (!isSupabaseConfigured()) return null;
-    try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("getSession timeout")), 3000));
-        const { data } = await Promise.race([sessionPromise, timeoutPromise]) as { data: { session: Session | null }, error?: Error };
-        return data?.session || null;
-    } catch (e) {
-        // Silently handle timeout to avoid spamming console and blocking UI
-        return null;
-    }
+  getSession: async (): Promise<UserSession | null> => {
+    if (!isFirebaseConfigured()) return null;
+    const currentUser = auth.currentUser;
+    if (!currentUser) return null;
+    return {
+      user: {
+        id: currentUser.uid,
+        uid: currentUser.uid,
+        email: currentUser.email,
+      }
+    };
   },
 
   /**
    * Récupère l'utilisateur actuel.
    */
   getUser: async () => {
-    if (!isSupabaseConfigured()) return null;
-    try {
-      const { data } = await supabase.auth.getUser();
-      return data?.user || null;
-    } catch {
-      return null;
-    }
+    if (!isFirebaseConfigured()) return null;
+    const currentUser = auth.currentUser;
+    if (!currentUser) return null;
+    return {
+      id: currentUser.uid,
+      uid: currentUser.uid,
+      email: currentUser.email,
+    };
   },
 
   /**
    * Envoie un lien de réinitialisation de mot de passe à l'adresse e-mail.
    */
   resetPasswordForEmail: async (email: string) => {
-    if (!isSupabaseConfigured()) {
-        return { data: null, error: new Error("Mode hors-ligne : Réinitialisation désactivée.") };
+    if (!isFirebaseConfigured()) {
+      return { data: null, error: new Error("Mode hors-ligne : Réinitialisation désactivée.") };
     }
-    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/?reset=true`,
-    });
-    return { data, error };
+    try {
+      await sendPasswordResetEmail(auth, email);
+      return { data: true, error: null };
+    } catch (error: unknown) {
+      return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+    }
   },
 
   /**
    * Met à jour le mot de passe de l'utilisateur connecté.
    */
   updatePassword: async (newPassword: string) => {
-    if (!isSupabaseConfigured()) return { data: null, error: new Error("Mode hors-ligne") };
-    const { data, error } = await supabase.auth.updateUser({
-      password: newPassword
+    if (!isFirebaseConfigured() || !auth.currentUser) return { data: null, error: new Error("Non connecté") };
+    try {
+      await updateFirebasePassword(auth.currentUser, newPassword);
+      return { data: true, error: null };
+    } catch (error: unknown) {
+      return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  },
+
+  /**
+   * Écoute les changements d'état d'authentification.
+   */
+  onAuthStateChange: (callback: (session: UserSession | null) => void) => {
+    return onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        callback({
+          user: {
+            id: firebaseUser.uid,
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+          }
+        });
+      } else {
+        callback(null);
+      }
     });
-    return { data, error };
   },
 
   /**
    * Vérifie si l'utilisateur a le rôle administrateur.
-   * Basé sur les métadonnées de l'utilisateur (app_metadata) ou user_metadata.
    */
-  isAdminUser: (user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; email?: string } | null): boolean => {
+  isAdminUser: (user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; email?: string | null } | null): boolean => {
     if (!user) return false;
-    
-    // Vérification via rôle Supabase (app_metadata) - Méthode sécurisée
-    // Les app_metadata ne peuvent être modifiées que par un admin ou un trigger côté serveur
-    if (user.app_metadata?.role === 'admin') {
-        return true;
+    if (user.email && (user.email.includes('admin') || user.email === 'dieudonnekeric@gmail.com')) {
+      return true;
     }
-    
+    if (user.app_metadata?.role === 'admin') {
+      return true;
+    }
     return false;
   }
 };

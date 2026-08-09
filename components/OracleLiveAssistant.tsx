@@ -1,5 +1,4 @@
 import { logger } from "../utils/logger";
-import { supabase } from "../services/supabaseClient";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -184,16 +183,12 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({
   }, []);
 
   const fetchApiKey = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke("gemini-token");
-      if (error) throw error;
-      if (data && data.token) {
-        setDynamicApiKey(data.token);
-        return data.token;
-      }
-    } catch (e) {
-      console.warn("Could not fetch token via Supabase Edge Function", e);
+    const key = import.meta.env.VITE_GEMINI_API_KEY || "";
+    if (key) {
+      setDynamicApiKey(key);
+      return key;
     }
+    console.warn("VITE_GEMINI_API_KEY is not defined.");
     return null;
   };
 

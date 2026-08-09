@@ -1,3 +1,4 @@
+import { saveTicket } from "../services/ticketService";
 import { FALLBACK_CALIBRATION } from "../shared/prediction.types";
 
 import React, { useState, useEffect, useMemo } from "react";

@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { speechEngine } from "../../utils/speechEngine";
-import { supabase } from "../../services/supabaseClient";
 import { useToast } from "../ui/Toast";
 import {
   ResponsiveContainer,
@@ -355,76 +354,19 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         globalRegime?.volatility !== undefined ? globalRegime.volatility : 0.1;
       const regimeStr = globalRegime?.regime || "STABLE (Harmonisé)";
 
-      try {
-        const { data, error } = await supabase.functions.invoke(
-          "hybrid-prediction",
-          {
-            body: {
-              drawName,
-              history,
-              regime: regimeStr,
-              hurst: hurstVal,
-              entropy: entropyVal,
-              volatility: volatilityVal,
-            },
-          },
-        );
-
-        if (error) {
-          throw error;
-        }
-
-        if (data) {
-          aiWeights = data.weights;
-          aiRationale = data.rationale;
-          aiConfidence = data.confidence;
-          aiStrategicAdvice = data.strategicAdvice;
-        } else {
-          throw new Error("No data returned");
-        }
-      } catch (e: any) {
-        // If it's a 412 or missing key, fallback
-        if (
-          e.message?.includes("412") ||
-          e.status === 412 ||
-          e.message?.includes("GEMINI_NOT_CONFIGURED")
-        ) {
-          // Gemini not configured - fallback to high-fidelity math optimizer
-          const localFb = generateSmartLocalWeightsFallback(
-            drawName,
-            regimeStr,
-            hurstVal,
-            entropyVal,
-            volatilityVal,
-          );
-          aiWeights = localFb.weights;
-          aiRationale = localFb.rationale;
-          aiConfidence = localFb.confidence;
-          aiStrategicAdvice = localFb.strategicAdvice;
-          isLocalFallback = true;
-          showToast(
-            "Oracle IA non configuré. Recours à la convergence mathématique locale.",
-            "info",
-          );
-        } else {
-          console.warn(
-            "Could not fetch Gemini hybrid weights, falling back to local stochastics:",
-            e,
-          );
-          const localFb = generateSmartLocalWeightsFallback(
-            drawName,
-            regimeStr,
-            hurstVal,
-            entropyVal,
-            volatilityVal,
-          );
-          aiWeights = localFb.weights;
-          aiRationale = localFb.rationale;
-          aiConfidence = localFb.confidence;
-          aiStrategicAdvice = localFb.strategicAdvice;
-          isLocalFallback = true;
-        }
-      }
+      // Alignement direct sur le modèle local d'optimisation mathématique
+      const localFb = generateSmartLocalWeightsFallback(
+        drawName,
+        regimeStr,
+        hurstVal,
+        entropyVal,
+        volatilityVal,
+      );
+      aiWeights = localFb.weights;
+      aiRationale = localFb.rationale;
+      aiConfidence = localFb.confidence;
+      aiStrategicAdvice = localFb.strategicAdvice;
+      isLocalFallback = true;
 
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");

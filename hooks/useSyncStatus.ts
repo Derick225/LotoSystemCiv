@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { testDatabaseConnection } from '../services/supabaseClient';
+import { testDatabaseConnection } from '../services/firebaseClient';
 import { keys } from 'idb-keyval';
 
 export function useSyncStatus() {

@@ -1,7 +1,8 @@
+import { db, isFirebaseConfigured } from "../firebaseClient";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
 import { packHistory } from '../workers/zeroCopy';
-import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
 
@@ -413,17 +414,15 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     weightsCache.set(drawName, { weights: localMergedWeights, timestamp: now });
 
     // Revalidation asynchrone en arrière-plan pour ne pas bloquer le thread principal ni les transitions d'UI
-    if (isSupabaseConfigured() && navigator.onLine) {
+    if (isFirebaseConfigured() && navigator.onLine) {
       (async () => {
         try {
           let remoteWeights: Partial<AlgoWeights> | null = null;
           let remoteUpdatedAt: Date | null = null;
 
-          const { data: adaptiveConfig } = await supabase
-            .from('model_weights_config')
-            .select('weights, updated_at')
-            .eq('draw_name', drawName)
-            .maybeSingle();
+          const docRef = doc(db, 'model_weights_config', drawName);
+          const docSnap = await getDoc(docRef);
+          const adaptiveConfig = docSnap.exists() ? docSnap.data() : null;
 
           if (adaptiveConfig?.weights) {
             remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
@@ -431,11 +430,9 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
               remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
             }
           } else {
-            const { data } = await supabase
-              .from('algo_weights')
-              .select('weights, updated_at')
-              .eq('draw_name', drawName)
-              .maybeSingle();
+            const algoRef = doc(db, 'algo_weights', drawName);
+            const algoSnap = await getDoc(algoRef);
+            const data = algoSnap.exists() ? algoSnap.data() : null;
 
             if (data?.weights) {
               remoteWeights = data.weights as Partial<AlgoWeights>;
@@ -478,13 +475,11 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   let remoteWeights: Partial<AlgoWeights> | null = null;
   let remoteUpdatedAt: Date | null = null;
 
-  if (isSupabaseConfigured() && navigator.onLine) {
+  if (isFirebaseConfigured() && navigator.onLine) {
     try {
-      const { data: adaptiveConfig } = await supabase
-        .from('model_weights_config')
-        .select('weights, updated_at')
-        .eq('draw_name', drawName)
-        .maybeSingle();
+      const docRef = doc(db, 'model_weights_config', drawName);
+      const docSnap = await getDoc(docRef);
+      const adaptiveConfig = docSnap.exists() ? docSnap.data() : null;
 
       if (adaptiveConfig?.weights) {
         remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
@@ -492,11 +487,9 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
           remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
         }
       } else {
-        const { data } = await supabase
-          .from('algo_weights')
-          .select('weights, updated_at')
-          .eq('draw_name', drawName)
-          .maybeSingle();
+        const algoRef = doc(db, 'algo_weights', drawName);
+        const algoSnap = await getDoc(algoRef);
+        const data = algoSnap.exists() ? algoSnap.data() : null;
 
         if (data?.weights) {
           remoteWeights = data.weights as Partial<AlgoWeights>;
@@ -533,8 +526,8 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
       const payload = { weights, updatedAt: new Date().toISOString() };
       await set(`nexus_config_${drawName}`, payload);
     }
-    if (isSupabaseConfigured()) {
-      await supabase.from('algo_weights').upsert({ draw_name: drawName, weights });
+    if (isFirebaseConfigured()) {
+      await setDoc(doc(db, 'algo_weights', drawName), { draw_name: drawName, weights, updated_at: new Date().toISOString() }, { merge: true });
     }
   } catch (e) { /* Silenced */ }
 };
@@ -644,16 +637,14 @@ export const getCalibratedHyperparameters = async (drawName: string, currentEntr
     prudence_mode_active: false
   };
 
-  if (!isSupabaseConfigured() || !navigator.onLine) {
+  if (!isFirebaseConfigured() || !navigator.onLine) {
     return defaultParams;
   }
 
   try {
-    const { data } = await supabase
-      .from('model_weights_config')
-      .select('sigmoid_slope, sigmoid_intercept, boosting_multiplier, prudence_mode_active')
-      .eq('draw_name', drawName)
-      .maybeSingle();
+    const docRef = doc(db, 'model_weights_config', drawName);
+    const docSnap = await getDoc(docRef);
+    const data = docSnap.exists() ? docSnap.data() : null;
 
     if (data) {
       return {

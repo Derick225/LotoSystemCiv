@@ -1,3 +1,5 @@
+import { db, isFirebaseConfigured } from "../services/firebaseClient";
+import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,7 +21,6 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { supabase, isSupabaseConfigured } from "../services/supabaseClient";
 
 export interface WeightHistoryEntry {
   timestamp?: number | string;
@@ -50,59 +51,57 @@ export const TrainingEvolutionDrawer: React.FC<{
 
       const entries: WeightHistoryEntry[] = [];
 
-      // 1. Charger depuis Supabase si disponible
-      if (isSupabaseConfigured() && navigator.onLine) {
+      // 1. Charger depuis Firestore si disponible
+      if (isFirebaseConfigured() && navigator.onLine) {
         try {
-          const { data: logs, error: logsError } = await supabase
-            .from("learning_logs")
-            .select("*")
-            .eq("draw_name", drawName)
-            .order("created_at", { ascending: true });
+          const qLogs = query(
+            collection(db, "learning_logs"),
+            where("draw_name", "==", drawName),
+            orderBy("created_at", "asc")
+          );
+          const logsSnap = await getDocs(qLogs);
+          logsSnap.forEach((doc) => {
+            const item = doc.data() as any;
+            const weights = item.applied_weights || {};
+            const fit = Number(item.new_fitness) || 0;
+            const prevFit = Number(item.previous_fitness) || 0;
+            const gain = prevFit > 0 ? ((fit - prevFit) / prevFit) * 100 : 0;
 
-          if (!logsError && logs) {
-            logs.forEach((item: any) => {
-              const weights = item.applied_weights || {};
-              const fit = Number(item.new_fitness) || 0;
-              const prevFit = Number(item.previous_fitness) || 0;
-              const gain = prevFit > 0 ? ((fit - prevFit) / prevFit) * 100 : 0;
+            entries.push({
+              created_at: item.created_at,
+              timestamp: new Date(item.created_at).getTime(),
+              score: fit,
+              fitness: fit,
+              relativeGain: gain,
+              improvement_delta: item.improvement_delta,
+              weights: weights,
+              source: "supabase",
+            });
+          });
 
+          const qSessions = query(
+            collection(db, "learning_sessions"),
+            where("draw_name", "==", drawName),
+            orderBy("created_at", "asc")
+          );
+          const sessionsSnap = await getDocs(qSessions);
+          sessionsSnap.forEach((doc) => {
+            const s = doc.data() as any;
+            const sData = s.session_data || {};
+            if (sData.bestGenome) {
               entries.push({
-                created_at: item.created_at,
-                timestamp: new Date(item.created_at).getTime(),
-                score: fit,
-                fitness: fit,
-                relativeGain: gain,
-                improvement_delta: item.improvement_delta,
-                weights: weights,
+                created_at: s.created_at,
+                timestamp: s.timestamp || new Date(s.created_at).getTime(),
+                score: sData.bestFitness || sData.score || 0,
+                fitness: sData.bestFitness || sData.score || 0,
+                relativeGain: sData.improvement || 0,
+                weights: sData.bestGenome,
                 source: "supabase",
               });
-            });
-          }
-
-          const { data: sessions, error: sessionsError } = await supabase
-            .from("learning_sessions")
-            .select("*")
-            .eq("draw_name", drawName)
-            .order("created_at", { ascending: true });
-
-          if (!sessionsError && sessions) {
-            sessions.forEach((s: any) => {
-              const sData = s.session_data || {};
-              if (sData.bestGenome) {
-                entries.push({
-                  created_at: s.created_at,
-                  timestamp: s.timestamp || new Date(s.created_at).getTime(),
-                  score: sData.bestFitness || sData.score || 0,
-                  fitness: sData.bestFitness || sData.score || 0,
-                  relativeGain: sData.improvement || 0,
-                  weights: sData.bestGenome,
-                  source: "supabase",
-                });
-              }
-            });
-          }
+            }
+          });
         } catch (e) {
-          console.warn("[TrainingEvolutionDrawer] Supabase fetch error:", e);
+          console.warn("[TrainingEvolutionDrawer] Firestore fetch error:", e);
         }
       }
 

@@ -1,3 +1,4 @@
+import { saveTicket } from "../../services/ticketService";
 import React, { useState, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { motion, AnimatePresence } from "framer-motion";
