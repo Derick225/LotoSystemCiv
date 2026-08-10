@@ -251,7 +251,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 </span>
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
                   {useCloudEngine
-                    ? "Cloud Supabase (10 Algos)"
+                    ? "Cloud Firebase (10 Algos)"
                     : "Calcul Local Intégral (19 Algos)"}
                 </span>
                 <span className="text-[9px] text-slate-400 block leading-normal">
@@ -271,7 +271,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                     setUseCloudEngine(e.target.checked);
                     showToast(
                       e.target.checked
-                        ? "Moteur Cloud Supabase activé."
+                        ? "Moteur Cloud Firebase activé."
                         : "Calcul Local Intégral activé.",
                       "info",
                     );
@@ -407,7 +407,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   audioEngine.play("click");
                 } catch (err) {}
                 setUseCloudEngine(true);
-                showToast("Cloud Supabase (10 Algos) sélectionné", "info");
+                showToast("Cloud Firebase (10 Algos) sélectionné", "info");
               }}
               className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${useCloudEngine ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold"}`}
             >

@@ -229,7 +229,7 @@ export const SyncMonitoringDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Supabase Node */}
+        {/* Firebase Node */}
         <div className="bg-slate-800/50 rounded-lg p-5 border border-slate-700 relative overflow-hidden">
           <div
             className={`absolute top-0 left-0 w-full h-1 ${dbConnection === "connected" ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : dbConnection === "checking" ? "bg-amber-500" : "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"} rounded-t-lg opacity-80`}
@@ -238,7 +238,7 @@ export const SyncMonitoringDashboard: React.FC = () => {
             <Cloud
               className={`w-5 h-5 ${dbConnection === "connected" ? "text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]" : "text-slate-500"}`}
             />
-            <h3 className="font-semibold text-slate-200">Supabase Cloud</h3>
+            <h3 className="font-semibold text-slate-200">Firebase Cloud</h3>
           </div>
 
           <div className="flex items-center justify-center p-6 border border-slate-700/50 rounded bg-slate-900/50 mt-4 h-32 relative">

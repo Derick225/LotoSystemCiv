@@ -754,7 +754,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       setUseCloudEngine(e.target.checked);
                       showToast(
                         e.target.checked
-                          ? "Moteur Cloud Supabase activé (10 Algos)."
+                          ? "Moteur Cloud Firebase activé (10 Algos)."
                           : "Moteur Local Intégral activé (19 Algos).",
                         "info",
                       );
@@ -765,11 +765,11 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 </div>
                 <div className="space-y-1">
                   <span className="text-[11px] font-black uppercase tracking-wider text-indigo-400 group-hover:text-indigo-300 transition-colors block">
-                    Moteur Cloud Supabase
+                    Moteur Cloud Firebase
                   </span>
                   <span className="text-[10px] text-slate-500 block leading-normal">
                     {useCloudEngine
-                      ? "Délègue la prédiction à l'Edge Function Supabase (10 Algos)."
+                      ? "Délègue la prédiction au Cloud Firebase (10 Algos)."
                       : "Calcul local intégral haute fidélité (19 Algos d'Écarts complexes)."}
                   </span>
                 </div>

@@ -181,7 +181,7 @@ export const lotteryService = {
     // ÉCHAPPEMENT DÉTERMINISTE : Si les requêtes échouent et qu'il n'y a pas de cache,
     // on génère un jeu d'historique déterministe complet et riche de 250 tirages.
     // Cette approche élimine toute possibilité d'erreur non gérée (Failed to fetch).
-    console.warn(`[LotteryService] Échec du réseau ou Supabase non disponible pour '${drawName}'. Génération du dataset de secours...`);
+    console.warn(`[LotteryService] Échec du réseau ou aucune donnée Firebase pour '${drawName}'. Génération du dataset de secours...`);
     const fallbackData = generateDeterministicFallbackHistory(drawName);
     await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
     return fallbackData;
