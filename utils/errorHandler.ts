@@ -40,17 +40,17 @@ export const getUserFriendlyError = (error: unknown): string => {
             return "Surcharge de l'Oracle IA. Veuillez patienter 60 secondes avant de réessayer.";
         }
         
-        // --- DONNÉES & SUPABASE ---
+        // --- DONNÉES & BASE DE DONNÉES ---
         if (lowerMsg.includes('no results') || lowerMsg.includes('aucun résultat') || lowerMsg.includes('empty')) {
             return "Aucun résultat disponible pour cette période. Les serveurs officiels sont peut-être en maintenance.";
         }
         if (lowerMsg.includes('proxy') || lowerMsg.includes('invocation')) {
             return "Le relais de données (Proxy) est momentanément saturé. Réessayez dans 30s.";
         }
-        if (lowerMsg.includes('supabase') || lowerMsg.includes('postgres') || lowerMsg.includes('pgrst')) {
-            if (lowerMsg.includes('duplicate')) return "Cette donnée existe déjà dans la base.";
-            if (lowerMsg.includes('relation "draw_results" does not exist') || lowerMsg.includes('42P01')) return "Table introuvable. Veuillez initialiser la base de données.";
-            return "Problème de synchronisation avec le Cloud Nexus.";
+        if (lowerMsg.includes('firebase') || lowerMsg.includes('firestore') || lowerMsg.includes('permission-denied')) {
+            if (lowerMsg.includes('already-exists') || lowerMsg.includes('duplicate')) return "Cette donnée existe déjà dans la base.";
+            if (lowerMsg.includes('permission-denied')) return "Permission refusée par le serveur Firebase.";
+            return "Problème de synchronisation avec la base de données Firebase.";
         }
 
         // --- IA & CALCUL ---

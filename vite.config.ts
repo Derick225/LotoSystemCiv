@@ -189,7 +189,7 @@ export default defineConfig(({ mode }) => {
             'vendor-recharts': ['recharts'],
             'vendor-icons': ['lucide-react'],
             'vendor-utils': ['jspdf', 'html2canvas'],
-            'vendor-core': ['@google/genai', '@supabase/supabase-js', '@tanstack/react-query'],
+            'vendor-core': ['@google/genai', 'firebase/app', 'firebase/auth', 'firebase/firestore', '@tanstack/react-query'],
             'vendor-ui-helpers': ['clsx', 'tailwind-merge']
           }
         }

@@ -41,7 +41,7 @@ export function useSyncStatus() {
         else if (k.startsWith('forensic_report_')) forensics++;
         else if (k.startsWith('learning_session_')) learning++;
         else if (k.startsWith('prediction_snapshot_')) snapshots++;
-        else if (k !== 'supabase.auth.token') other++; 
+        else if (!k.startsWith('firebase:')) other++; 
       });
 
       let totalStorage = 'N/A';

@@ -31,7 +31,7 @@ export interface WeightHistoryEntry {
   improvement_delta?: number | string;
   weights?: Record<string, number>;
   applied_weights?: Record<string, number>;
-  source?: "supabase" | "local";
+  source?: "cloud" | "local";
 }
 
 export const TrainingEvolutionDrawer: React.FC<{
@@ -75,7 +75,7 @@ export const TrainingEvolutionDrawer: React.FC<{
               relativeGain: gain,
               improvement_delta: item.improvement_delta,
               weights: weights,
-              source: "supabase",
+              source: "cloud",
             });
           });
 
@@ -96,7 +96,7 @@ export const TrainingEvolutionDrawer: React.FC<{
                 fitness: sData.bestFitness || sData.score || 0,
                 relativeGain: sData.improvement || 0,
                 weights: sData.bestGenome,
-                source: "supabase",
+                source: "cloud",
               });
             }
           });
