@@ -1,6 +1,5 @@
 {
   "firestore": {
-    "database": "ai-studio-lotoproplatinume-d26b505a-7dfc-4e0a-98db-5404b631ee07",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   }
