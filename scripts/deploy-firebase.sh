@@ -9,6 +9,6 @@ if ! command -v firebase &> /dev/null && ! command -v npx &> /dev/null; then
 fi
 
 echo "📦 Déploiement des règles et des index Firestore..."
-npx firebase deploy --only firestore
+npx firebase deploy --only firestore --project studio-7022336341-7e428
 
 echo "✅ Déploiement Firebase terminé avec succès."

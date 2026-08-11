@@ -21,7 +21,7 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install
 
       - name: Build application (optional verification)
         run: npm run build
@@ -31,7 +31,7 @@ jobs:
       - name: Deploy to Firebase
         uses: w9jds/firebase-action@v13.23.0
         with:
-          args: deploy --only firestore,storage,functions
+          args: deploy --only firestore,storage,functions --project studio-7022336341-7e428
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY || secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
