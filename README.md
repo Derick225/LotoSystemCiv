@@ -12,43 +12,49 @@ npm install
 ```
 
 ### 2. Configuration Environnement (.env)
-Créez un fichier nommé `.env` à la racine du projet et remplissez-le avec vos clés Supabase :
+Renseignez vos clés de configuration Firebase et Gemini dans votre environnement :
 
 ```env
 # Client (Vite)
-VITE_SUPABASE_URL=https://votre-projet.supabase.co
-VITE_SUPABASE_ANON_KEY=votre-cle-anon-publique
+VITE_FIREBASE_API_KEY=votre_cle_api_firebase
+VITE_FIREBASE_AUTH_DOMAIN=votre_projet.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=votre_project_id
+VITE_FIREBASE_STORAGE_BUCKET=votre_projet.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=votre_sender_id
+VITE_FIREBASE_APP_ID=votre_app_id
+
+# Serveur (Gemini)
+GEMINI_API_KEY=votre_cle_google_gemini
 ```
 
-*Pour obtenir ces clés : Allez dans votre Dashboard Supabase > Settings > API.*
-
-### 3. Démarrage
+### 3. Démarrage du serveur de développement
 ```bash
 npm run dev
 ```
 
-### 4. Déploiement du Cerveau (Edge Functions)
-Pour activer l'IA (Gemini) et la synchronisation automatique :
+### 4. Déploiement de la configuration Firebase (Règles & Index Firestore)
 
-1.  Connectez la CLI :
+Pour déployer vos règles de sécurité Firestore (`firestore.rules`) et la configuration des index (`firestore.indexes.json`) :
+
+1. Connectez-vous à Firebase CLI :
     ```bash
-    npx supabase login
-    npx supabase link --project-ref votre-project-id
+    npx firebase login
+    npx firebase use --add
     ```
-2.  Envoyez les secrets serveurs (ne pas mettre dans le .env client !) :
+
+2. Déployez les règles et les index vers Firestore :
     ```bash
-    npx supabase secrets set API_KEY=votre_cle_google_gemini
-    npx supabase secrets set SUPABASE_SERVICE_ROLE_KEY=votre_cle_service_role
+    npx firebase deploy --only firestore
     ```
-3.  Déployez les fonctions :
-    ```bash
-    npm run deploy:nexus
-    ```
+
+Note : Le projet inclut également un fichier de configuration canonique `firebase-blueprint.json` et `firebase.json` pour la synchronisation automatique des schémas Firestore.
 
 ## 🛠️ Architecture Nexus
-*   **Neural Kernel**: Moteur d'inférence basé sur Gemini 3 Pro pour le raisonnement narratif.
-*   **HPC Pipeline**: Calculs spectraux (FFT) et fractals (Hurst) via Web Workers.
-*   **Realtime Sync**: Table `draw_results` synchronisée via pg_cron et Edge Functions.
+*   **Neural Kernel**: Moteur d'inférence basé sur Gemini Pro pour le raisonnement stochastique et narratif.
+*   **Firebase Integration**: Firestore (collections NoSQL pour l'historique et les prédictions) et Firebase Authentication.
+*   **HPC Pipeline**: Calculs spectraux (FFT) et fractals (Hurst) exécutés de manière déterministe.
+*   **Realtime Sync**: Synchronisation continue des tirages et statistiques via Firestore snapshot listeners.
 
 ## ⚠️ Disclaimer
 LotoPro est un outil d'analyse statistique et de divertissement. Il ne garantit aucun gain.
+
