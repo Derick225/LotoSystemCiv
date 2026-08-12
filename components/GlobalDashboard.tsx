@@ -112,13 +112,13 @@ const MetaLearningIndicator = React.memo(() => {
           </div>
           <div>
             <h3 className="text-[10px] md:text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-              Méta-Apprentissage{" "}
+              Analyse Locale Hors-Ligne{" "}
               <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] md:text-[9px] rounded-full border border-emerald-500/20">
-                ACTIF
+                SÉCURISÉE
               </span>
             </h3>
             <p className="text-[9px] md:text-[10px] text-slate-400 font-medium mt-0.5 md:mt-1">
-              Optimisation dynamique en temps réel
+              Calcul déterministe autonome sans quota
             </p>
           </div>
         </div>

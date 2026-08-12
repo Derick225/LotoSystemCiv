@@ -46,7 +46,7 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
                 CinetPay.setConfig({
                     apikey: config.apiKey,
                     site_id: config.siteId,
-                    notify_url: `${SUPABASE_URL}/functions/v1/payment-webhook`,
+                    notify_url: `${SUPABASE_URL}/functions/v1/nexus-api?action=payment-webhook`,
                     mode: 'PRODUCTION'
                 });
 

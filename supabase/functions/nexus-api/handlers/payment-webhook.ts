@@ -1,6 +1,6 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 const CinetPayWebhookSchema = z.object({
     cpm_trans_id: z.string(),
@@ -10,7 +10,7 @@ const CinetPayWebhookSchema = z.object({
     cpm_error_message: z.string().optional()
 }).passthrough();
 
-Deno.serve(async (req) => {
+export async function handlePaymentWebhook(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
                 status: 'FAILED',
                 provider: 'CINETPAY',
                 created_at: new Date().toISOString()
-            }, { onConflict: 'transaction_id' });
+            }, { onConflict: 'transaction_id' }
         }
     }
 

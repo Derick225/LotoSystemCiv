@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req) => {
+export async function handleHybridPrediction(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -138,4 +138,4 @@ Générez la meilleure configuration de poids dans le schéma JSON spécifié.`;
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-});
+}

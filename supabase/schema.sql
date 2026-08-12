@@ -368,7 +368,7 @@ CREATE TRIGGER on_auth_user_created
 SELECT cron.unschedule('sync-draw-results-hourly');
 
 -- On recrée le job avec l'en-tête d'autorisation (Sécurité)
--- Le Cron appelle désormais la Supabase Edge Function 'cron-sync'
+-- Le Cron appelle désormais la Supabase Edge Gateway Function 'nexus-api?action=cron-sync'
 -- REMPLACEZ 'VOTRE_PROJECT_REF' par la référence de votre projet Supabase (ex: iexwhv27jnwut37iq2ksdr)
 -- REMPLACEZ 'VOTRE_ANON_KEY' par votre clé publique (anon key)
 SELECT cron.schedule(
@@ -376,9 +376,9 @@ SELECT cron.schedule(
   '0 * * * *',
   $$
   SELECT net.http_post(
-      url:='https://VOTRE_PROJECT_REF.supabase.co/functions/v1/cron-sync',
+      url:='https://VOTRE_PROJECT_REF.supabase.co/functions/v1/nexus-api?action=cron-sync',
       headers:='{"Content-Type": "application/json", "Authorization": "Bearer VOTRE_ANON_KEY"}'::jsonb,
-      body:='{"manualTrigger": false}'::jsonb
+      body:='{"action": "cron-sync", "manualTrigger": false}'::jsonb
   );
   $$
 );

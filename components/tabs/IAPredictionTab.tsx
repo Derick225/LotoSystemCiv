@@ -331,9 +331,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
 
       try {
         const { data, error } = await supabase.functions.invoke(
-          "hybrid-prediction",
+          "nexus-api",
           {
             body: {
+              action: "hybrid-prediction",
               drawName,
               history,
               regime: regimeStr,

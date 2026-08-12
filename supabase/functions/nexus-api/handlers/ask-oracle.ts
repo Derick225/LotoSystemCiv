@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from 'genai';
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
 
 const RequestSchema = z.object({
     task: z.enum([
@@ -82,13 +82,13 @@ async function generateWithFallback(ai: GoogleGenAI, primaryModel: string, param
     }
 }
 
-Deno.serve(async (req) => {
+export async function handleAskOracle(req: Request, reqBody?: any): Promise<Response> {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
 
     try {
-        const body = await req.json();
+        const body = reqBody || await req.json();
         const validation = RequestSchema.safeParse(body);
         
         if (!validation.success) {
@@ -549,4 +549,4 @@ Deno.serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     }
-});
+}

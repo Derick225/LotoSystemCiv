@@ -1,6 +1,6 @@
 import { createClient } from "supabase";
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
 
 const AdminActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list"), page: z.number().default(1), pageSize: z.number().default(50) }),
@@ -8,7 +8,7 @@ const AdminActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("delete"), userId: z.string().uuid() })
 ]);
 
-Deno.serve(async (req) => {
+export async function handleAdminUsers(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = AdminActionSchema.safeParse(body);
 
     if (!validation.success) {
@@ -130,4 +130,4 @@ Deno.serve(async (req) => {
       status: 400,
     });
   }
-});
+}

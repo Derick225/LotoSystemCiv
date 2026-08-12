@@ -119,19 +119,10 @@ class OfflineQueueService {
             };
             const { error } = await supabase.from('prediction_snapshots').upsert(rowData);
             if (!error) syncSuccess = true;
-          } else if (item.type === 'learning_log') {
-            const { error } = await supabase.from('learning_logs').insert(item.payload);
-            if (!error) syncSuccess = true;
-          } else if (item.type === 'learning_session') {
-            const rowData = {
-              id: item.payload.id,
-              user_id: user?.id || null,
-              draw_name: item.drawName,
-              timestamp: item.payload.timestamp || item.timestamp,
-              session_data: item.payload,
-            };
-            const { error } = await supabase.from('learning_sessions').upsert(rowData);
-            if (!error) syncSuccess = true;
+          } else if (item.type === 'learning_log' || item.type === 'learning_session') {
+            // Désactivé de manière permanente pour éviter de consommer inutilement du quota Supabase gratuit.
+            // On considère le traitement local comme suffisant et réussi.
+            syncSuccess = true;
           }
         } catch (e) {
           console.warn(`[OfflineQueue] Erreur de synchro pour ${item.id} :`, e);

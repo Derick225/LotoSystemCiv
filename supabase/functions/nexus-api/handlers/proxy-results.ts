@@ -1,17 +1,17 @@
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 const ProxyRequestSchema = z.object({
     month: z.string().optional() // Ex: "Octobre 2023"
 });
 
-Deno.serve(async (req) => {
+export async function handleProxyResults(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = ProxyRequestSchema.safeParse(body);
     
     if (!validation.success) {
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify(remoteData), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
-    });
+    }
 
   } catch (error: unknown) {
     console.error("Proxy Results Error:", error)

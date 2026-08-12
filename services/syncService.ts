@@ -334,93 +334,9 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 // --- LEARNING SESSIONS ---
 
 export const syncLearningSessions = async (localSessions: LearningSession[]): Promise<LearningSession[]> => {
-    if (!navigator.onLine) return localSessions;
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return localSessions;
-
-    try {
-        // 1. PULL METADATA: Évite de charger le bloc de données d'apprentissage complet (Phase 3)
-        const { data: cloudMetaList, error } = await supabase
-            .from('learning_sessions')
-            .select('id, timestamp, draw_name')
-            .eq('user_id', user.id)
-            .order('timestamp', { ascending: false })
-            .limit(20);
-
-        if (error) throw error;
-
-        const missingIds = cloudMetaList
-            ? cloudMetaList.filter(c => !localSessions.some(l => l.id === c.id)).map(c => c.id)
-            : [];
-
-        const loadedFullMap = new Map<string, any>();
-        if (missingIds.length > 0) {
-            const { data: fullRows, error: fetchErr } = await supabase
-                .from('learning_sessions')
-                .select('*')
-                .in('id', missingIds);
-            if (fetchErr) throw fetchErr;
-            fullRows?.forEach(row => {
-                loadedFullMap.set(row.id, row);
-            });
-        }
-
-        const mergedMap = new Map<string, LearningSession>();
-
-        cloudMetaList?.forEach((meta: { id: string; timestamp: number; draw_name: string }) => {
-            const hasFull = loadedFullMap.has(meta.id);
-            const localMatch = localSessions.find(l => l.id === meta.id);
-
-            const sessionData = hasFull
-                ? (loadedFullMap.get(meta.id).session_data as unknown as LearningSession)
-                : (localMatch || {
-                    id: meta.id,
-                    drawName: meta.draw_name,
-                    timestamp: meta.timestamp,
-                    improvement: false,
-                    oldScore: 0,
-                    newScore: 0,
-                    weightsBefore: {} as any,
-                    weightsAfter: {} as any
-                  });
-
-            mergedMap.set(meta.id, {
-                ...sessionData,
-                id: meta.id,
-                timestamp: meta.timestamp
-            });
-        });
-
-        localSessions.forEach(item => {
-            if (!mergedMap.has(item.id)) mergedMap.set(item.id, item);
-        });
-
-        const mergedList = Array.from(mergedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
-
-        const toPush = localSessions.filter(l => !cloudMetaList?.some((c: { id: string }) => c.id === l.id));
-
-        if (toPush.length > 0) {
-            const payload = toPush.map(s => ({
-                id: s.id,
-                user_id: user.id,
-                draw_name: s.drawName,
-                timestamp: s.timestamp,
-                session_data: s
-            }));
-
-            await supabase.from('learning_sessions').upsert(payload);
-        }
-
-        return mergedList;
-    } catch (err: unknown) {
-        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
-            ? (err as any).message
-            : String(err);
-        const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
-        logError(new AppError(errorMsg || "Sync Learning Error", "SYNC_LEARNING_ERROR", severity, { error: err }), { source: 'syncLearningSessions' });
-        return localSessions;
-    }
+    // Désactivé de façon permanente pour éviter la synchronisation des données lourdes d'apprentissage machine
+    // et protéger les quotas de lecture/écriture gratuits de Supabase.
+    return localSessions;
 };
 
 // --- DELETE OPERATIONS ---

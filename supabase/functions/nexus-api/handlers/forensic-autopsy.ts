@@ -1,7 +1,7 @@
 import { createClient } from 'supabase'
 import { GoogleGenAI, Type } from 'genai'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
 
 const AutopsyRequestSchema = z.object({
     snapshotId: z.string().uuid(),
@@ -32,13 +32,13 @@ const generateWithFallback = (metrics: { hits: number, nearMisses: number, score
     };
 };
 
-Deno.serve(async (req) => {
+export async function handleForensicAutopsy(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = AutopsyRequestSchema.safeParse(body);
     
     if (!validation.success) {
@@ -316,7 +316,7 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
         boosting_multiplier: 1.0 + (exactHits * 0.05),
         prudence_mode_active: prudenceModeActive,
         updated_at: new Date().toISOString()
-    }, { onConflict: 'draw_name' });
+    }, { onConflict: 'draw_name' }
 
     // Insérer dans forensic_reports
     await supabase.from('forensic_reports').insert({

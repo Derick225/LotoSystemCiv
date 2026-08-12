@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createClient } from 'supabase';
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
 
 // --- STRUCTURES & SCHÉMAS STRICTS DE SÉCURITÉ ---
 const DrawResultSchema = z.object({
@@ -530,13 +530,13 @@ const normalizeSignals = (rawFeatures: Record<number, FeatureVector>): Record<nu
 
 // --- EXECUTE SERVEUR ---
 
-Deno.serve(async (req) => {
+export async function handlePredictElite(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = PredictionRequestSchema.safeParse(body);
     
     if (!validation.success) {
@@ -987,4 +987,4 @@ Deno.serve(async (req) => {
       status: 400,
     });
   }
-});
+}

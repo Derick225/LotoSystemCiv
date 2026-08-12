@@ -1,4 +1,6 @@
 import { createClient } from 'supabase'
+import { handleForensicAutopsy } from './forensic-autopsy.ts'
+import { handleSelfLearn } from './self-learn.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +23,7 @@ const formatMonth = (date: Date) => {
     return `${monthNames[date.getMonth()]} ${date.getFullYear()}`
 }
 
-Deno.serve(async (req) => {
+export async function handleCronSync(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -57,7 +59,7 @@ Deno.serve(async (req) => {
         })
     }
 
-    const body = await req.json().catch(() => ({}))
+    const body = reqBody || await req.json().catch(() => ({}))
     const targetDrawName = body.drawName
     const manualTrigger = body.manualTrigger === true
 
@@ -174,11 +176,10 @@ Deno.serve(async (req) => {
                                 for (let i = 0; i < pendingSnapshots.length; i += chunkSize) {
                                     const chunk = pendingSnapshots.slice(i, i + chunkSize)
                                     
-                                    // Appel direct à l'Edge Function forensic-autopsy
+                                    // Appel direct du handler forensic-autopsy
                                     await Promise.all(chunk.map(snap => 
-                                        supabase.functions.invoke('forensic-autopsy', {
-                                            body: { snapshotId: snap.id, drawResultId: result.id }
-                                        }).catch(e => console.error(`Forensic autopsy trigger error for ${snap.id}:`, e))
+                                        handleForensicAutopsy(req, { snapshotId: snap.id, drawResultId: result.id })
+                                            .catch(e => console.error(`Forensic autopsy trigger error for ${snap.id}:`, e))
                                     ))
                                     autopsyCount += chunk.length
                                 }
@@ -187,10 +188,9 @@ Deno.serve(async (req) => {
                                     if (Date.now() - CRON_START > MAX_EXECUTION_TIME) {
                                         console.warn(`[CRON] Timeout imminent. Skipping self-learn for ${result.draw_name}.`)
                                     } else {
-                                        // Appel direct à l'Edge Function self-learn
-                                        await supabase.functions.invoke('self-learn', {
-                                            body: { drawName: result.draw_name }
-                                        }).catch(e => console.error("Self-learn trigger error:", e))
+                                        // Appel direct du handler self-learn
+                                        await handleSelfLearn(req, { drawName: result.draw_name })
+                                            .catch(e => console.error("Self-learn trigger error:", e))
                                     }
                                 }
                             }

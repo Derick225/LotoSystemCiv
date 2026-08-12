@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
 
 // analyze-draw: Function to offload heavy analytical operations (spectral, fractal, topological tension)
-serve(async (req) => {
+export async function handleAnalyzeDraw(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -142,4 +142,4 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-});
+}

@@ -5,7 +5,6 @@ import {
   Zap,
   LayoutGrid,
   Terminal,
-  Wallet,
   Settings,
   Activity,
 } from "lucide-react";
@@ -64,13 +63,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       icon: <Zap size={16} />,
       group: "Navigation",
       action: () => onNavigate("backtest"),
-    },
-    {
-      id: "nav-wallet",
-      label: "Mon Portefeuille",
-      icon: <Wallet size={16} />,
-      group: "Navigation",
-      action: () => onAction("wallet"),
     },
     {
       id: "sys-scan",

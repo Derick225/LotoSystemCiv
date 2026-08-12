@@ -5,7 +5,6 @@ import { FusionResult, Prediction } from "../../types";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import { NumberBall } from "../NumberBall";
 import { TicketXRay } from "../TicketXRay";
-import { saveTicket } from "../../services/userPreferencesService";
 import { useToast } from "../ui/Toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -111,11 +110,6 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({
   const handleSave = async () => {
     audioEngine.play("click");
     if (!fusionResult) return;
-    await saveTicket({
-      numbers: fusionResult.finalTicket,
-      drawName,
-      strategy: `Fusion-${selectionMethod.toUpperCase()} (${fusionResult.confidence}%)`,
-    });
 
     const breakdown: Record<number, Record<string, number>> = {};
     fusionResult.finalTicket.forEach((num) => {
@@ -1098,7 +1092,7 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({
                     onClick={handleSave}
                     className="w-full mt-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 hover:shadow-indigo-500/20"
                   >
-                    <Save size={16} /> Sauvegarder dans le Wallet
+                    <Save size={16} /> Enregistrer la prédiction
                   </button>
                 </div>
               </div>

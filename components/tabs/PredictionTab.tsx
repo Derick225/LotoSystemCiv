@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { saveTicket } from "../../services/userPreferencesService";
 import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
 import { NeuralHeatmapGrid } from "../NeuralHeatmapGrid";
@@ -16,7 +15,6 @@ import {
   Activity,
   Target,
   RefreshCw,
-  Wallet,
   AlertTriangle,
   BrainCircuit,
   Atom,
@@ -345,32 +343,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 />
               )}
               Relancer la génération
-            </button>
-            <button
-              onClick={async () => {
-                if (!lastPrediction) return;
-                try {
-                  await saveTicket({
-                    numbers: lastPrediction.suggestedNumbers,
-                    drawName,
-                    strategy: "Oracle",
-                  });
-                  showToast("Sauvegardé dans le portefeuille", "success");
-                } catch (error) {
-                  console.error(
-                    "[Oracle Base] Failed to save ticket to database portfolio:",
-                    error,
-                  );
-                  showToast(
-                    "Sauvegardé temporairement (Réseau déconnecté)",
-                    "info",
-                  );
-                }
-              }}
-              disabled={isComputing || !lastPrediction}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white hover:bg-indigo-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider shadow-sm disabled:opacity-50"
-            >
-              <Wallet size={16} /> Enregistrer
             </button>
           </div>
         </div>

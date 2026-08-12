@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 const PaymentInitSchema = z.object({
     userId: z.string().uuid(),
@@ -7,13 +7,13 @@ const PaymentInitSchema = z.object({
     provider: z.enum(['ORANGE', 'MTN', 'WAVE', 'CINETPAY']).optional()
 });
 
-Deno.serve(async (req) => {
+export async function handleInitPayment(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = PaymentInitSchema.safeParse(body);
     
     if (!validation.success) {
@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ success: true, payment_url: data.data.payment_url }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200
-        });
+        }
     } else {
         throw new Error(`CinetPay Error: ${data.message} - ${data.description}`);
     }

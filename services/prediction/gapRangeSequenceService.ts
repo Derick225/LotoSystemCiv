@@ -30,6 +30,7 @@ export interface GapRangeSequenceReport {
   bins: GapRangeBinInfo[];
   topPredictedBins: GapRangeBinInfo[];
   scoresByNumber: Record<number, number>;
+  currentGapsByNumber: Record<number, { gap: number; binIndex: number; binLabel: string }>;
   transitionMatrix: number[][]; // [sourceBin][targetBin] transition counts
   resolutionWeights?: { step5Weight: number; step10Weight: number };
   sequenceMatches?: SequencePatternMatch[];
@@ -150,6 +151,7 @@ export const gapRangeSequenceService = {
         bins: report10.bins,
         topPredictedBins: report10.topPredictedBins,
         scoresByNumber,
+        currentGapsByNumber: report10.currentGapsByNumber,
         transitionMatrix: report10.transitionMatrix,
         resolutionWeights: { step5Weight, step10Weight },
         sequenceMatches: report10.sequenceMatches
@@ -200,12 +202,16 @@ export const gapRangeSequenceService = {
     });
 
     // Compute current open gaps for all 90 numbers at the current prediction time
-    const currentGaps: Record<number, { gap: number; binIndex: number }> = {};
+    const currentGapsByNumber: Record<number, { gap: number; binIndex: number; binLabel: string }> = {};
     for (let num = 1; num <= maxNumber; num++) {
       const lastIdx = lastSeenIndex[num];
       const gap = lastIdx !== -1 ? totalDraws - 1 - lastIdx : totalDraws;
       const binIndex = getGapBinIndex(gap, numericStep);
-      currentGaps[num] = { gap, binIndex };
+      currentGapsByNumber[num] = {
+        gap,
+        binIndex,
+        binLabel: getGapBinLabel(binIndex, numericStep),
+      };
     }
 
     // 2. Build 1st & 2nd Order Markov Transition Matrix between bin occurrences:
@@ -301,7 +307,7 @@ export const gapRangeSequenceService = {
     }
 
     for (let num = 1; num <= maxNumber; num++) {
-      const b = currentGaps[num].binIndex;
+      const b = currentGapsByNumber[num].binIndex;
       matchingNumbersByBin[b].push(num);
     }
 
@@ -335,7 +341,7 @@ export const gapRangeSequenceService = {
 
     const scoresByNumber: Record<number, number> = {};
     for (let num = 1; num <= maxNumber; num++) {
-      const binIdx = currentGaps[num].binIndex;
+      const binIdx = currentGapsByNumber[num].binIndex;
       const prob = binProbabilities[binIdx];
 
       const z = (prob - meanProb) / stdProb;
@@ -353,6 +359,7 @@ export const gapRangeSequenceService = {
       bins,
       topPredictedBins,
       scoresByNumber,
+      currentGapsByNumber,
       transitionMatrix,
       sequenceMatches: sequenceMatches.slice(0, 10)
     };

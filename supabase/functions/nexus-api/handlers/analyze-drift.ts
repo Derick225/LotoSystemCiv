@@ -1,6 +1,6 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 // Schéma de validation pour déclencher l'analyse de dérive
 const DriftAnalysisSchema = z.object({
@@ -14,7 +14,7 @@ const GENOME_KEYS = [
     'fractal'
 ];
 
-Deno.serve(async (req) => {
+export async function handleAnalyzeDrift(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
         logId: adjustmentLog?.id
     }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    });
+    }
 
   } catch (error) {
     const err = error as Error;

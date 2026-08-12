@@ -9,9 +9,14 @@ interface ApiOptions extends RequestInit {
 export const apiClient = {
   async post<T>(endpoint: string, body: unknown, options: ApiOptions = {}): Promise<T> {
     try {
-      // Appel direct de la Supabase Edge Function
-      const { data, error } = await supabase.functions.invoke(endpoint, {
-        body: body as Record<string, unknown>,
+      // Route toutes les requêtes vers la gateway unique 'nexus-api'
+      const requestPayload =
+        typeof body === 'object' && body !== null
+          ? { action: endpoint, ...(body as Record<string, unknown>) }
+          : { action: endpoint, payload: body };
+
+      const { data, error } = await supabase.functions.invoke('nexus-api', {
+        body: requestPayload,
         headers: options.headers as Record<string, string>
       });
 

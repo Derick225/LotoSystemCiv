@@ -32,7 +32,6 @@ const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumber
 const GlobalDashboard = lazyWithRetry(() => import('./components/GlobalDashboard'), 'GlobalDashboard');
 const DrawDetails = lazyWithRetry(() => import('./components/DrawDetails'), 'DrawDetails');
 const AdminPanel = lazyWithRetry(() => import('./components/admin/AdminPanel'), 'AdminPanel');
-const UserWallet = lazyWithRetry(() => import('./components/UserWallet'), 'UserWallet');
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -88,7 +87,6 @@ const AppContent: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
-  const [showWallet, setShowWallet] = useState(false);
 
   // Global Cross-Navigation Hub
   useEffect(() => {
@@ -99,7 +97,6 @@ const AppContent: React.FC = () => {
       if (view === 'admin') {
         setViewMode('admin');
         setSelectedDraw(null);
-        setShowWallet(false);
       } else if (view === 'home') {
         if (drawName) {
           const foundDraw = ALL_DRAWS.find(d => d.name.toLowerCase() === drawName.toLowerCase());
@@ -112,7 +109,6 @@ const AppContent: React.FC = () => {
           setSelectedDraw(null);
         }
         setViewMode('home');
-        setShowWallet(false);
       }
 
       if (mainTab) {
@@ -171,7 +167,6 @@ const AppContent: React.FC = () => {
     refreshData(draw.name, false);
     setSelectedDraw(draw);
     setViewMode('home');
-    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [setDrawName, refreshData]);
 
@@ -179,7 +174,6 @@ const AppContent: React.FC = () => {
     audioEngine.play('click');
     setSelectedDraw(null);
     setViewMode('home');
-    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
@@ -230,8 +224,7 @@ const AppContent: React.FC = () => {
     const renderContent = () => {
     let content;
     let key;
-    if (showWallet) { content = <UserWallet />; key = 'wallet'; }
-    else if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
+    if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
@@ -273,13 +266,10 @@ const AppContent: React.FC = () => {
             }
             setViewMode(mode); 
             setSelectedDraw(null); 
-            setShowWallet(false); 
         }}
         theme={theme}
         setTheme={setTheme} 
         onReset={handleReset}
-        showWallet={showWallet}
-        setShowWallet={(show) => { audioEngine.play('click'); setShowWallet(show); }}
         isDrawSelected={!!selectedDraw}
         isAdmin={isAdmin}
         onLogout={handleLogout}

@@ -33,16 +33,25 @@ const isValidSupabaseKey = (key: string): boolean => {
 };
 
 export const isSupabaseConfigured = (): boolean => {
-  return isValidSupabaseUrl(SUPABASE_URL) && isValidSupabaseKey(SUPABASE_ANON_KEY);
+  const urlValid = isValidSupabaseUrl(SUPABASE_URL);
+  const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
+  return urlValid && keyValid;
 };
 
 export const getSupabaseConfigDiagnostics = () => {
   const urlValid = isValidSupabaseUrl(SUPABASE_URL);
   const keyValid = isValidSupabaseKey(SUPABASE_ANON_KEY);
+  if (urlValid && keyValid) {
+    return {
+      isConfigured: true,
+      url: { valid: true, value: `${SUPABASE_URL.substring(0, 15)}...`, error: null },
+      key: { valid: true, value: "Clé Anon Valide", error: null }
+    };
+  }
   return {
-    isConfigured: urlValid && keyValid,
-    url: { valid: urlValid, value: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 15)}...` : '(Vide)', error: !SUPABASE_URL ? "URL Manquante" : !urlValid ? "Format URL Invalide" : null },
-    key: { valid: keyValid, value: SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 5)}...` : '(Vide)', error: !SUPABASE_ANON_KEY ? "Clé Manquante" : !keyValid ? "Clé Invalide" : null }
+    isConfigured: false,
+    url: { valid: false, value: "Local Storage Engine", error: "Configuration absente (mode local autonome)" },
+    key: { valid: false, value: "Secure Offline Mode", error: "Pas de clé Supabase renseignée" }
   };
 };
 

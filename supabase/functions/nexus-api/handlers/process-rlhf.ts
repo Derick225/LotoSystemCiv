@@ -1,6 +1,6 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 const RLHFRequestSchema = z.object({
     predictionId: z.string().uuid(),
@@ -10,7 +10,7 @@ const RLHFRequestSchema = z.object({
     user_comment: z.string().optional()
 });
 
-Deno.serve(async (req) => {
+export async function handleProcessRlhf(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Invalid RLHF payload", details: validation.error.format() }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 400
-        });
+        }
     }
 
     const { predictionId, rating, drawName, actualHits, user_comment } = validation.data;

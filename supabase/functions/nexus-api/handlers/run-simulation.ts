@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts";
-import { DrawResult } from "../_shared/types.ts";
+import { corsHeaders } from "../../_shared/cors.ts";
+import { DrawResult } from "../../_shared/types.ts";
 
 // --- VALIDATION SCHEMA ---
 const SimulationRequestSchema = z.object({
@@ -175,11 +175,11 @@ const executeSimulation = (
   };
 };
 
-Deno.serve(async (req) => {
+export async function handleRunSimulation(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = SimulationRequestSchema.safeParse(body);
 
     if (!validation.success) {
@@ -204,4 +204,4 @@ Deno.serve(async (req) => {
     const err = error as Error;
     return new Response(JSON.stringify({ error: err.message || "Unknown Error" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 });
   }
-});
+}

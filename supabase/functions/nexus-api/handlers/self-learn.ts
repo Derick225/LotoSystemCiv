@@ -1,6 +1,6 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts"
 
 const SelfLearnRequestSchema = z.object({
     drawName: z.string().default('Global')
@@ -324,7 +324,7 @@ const evaluateGenome = (weights: Record<string, number>, foldsData: { signalMatr
     return totalScore / (foldsData.length || 1);
 };
 
-Deno.serve(async (req) => {
+export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -380,7 +380,7 @@ Deno.serve(async (req) => {
 
         const signalMatrix = computeSignalMatrix(trainingContext);
         const targets = validationSet.map(d => d.gagnants);
-        foldsData.push({ signalMatrix, targets });
+        foldsData.push({ signalMatrix, targets }
     }
 
     if (foldsData.length === 0) {

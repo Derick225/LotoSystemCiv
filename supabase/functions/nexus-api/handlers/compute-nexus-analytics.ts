@@ -1,8 +1,8 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
-import { corsHeaders } from "../_shared/cors.ts"
-import { mean, stdDev, computeDFT, matMul } from "../_shared/math-utils.ts"
-import { DrawResult } from "../_shared/types.ts";
+import { corsHeaders } from "../../_shared/cors.ts"
+import { mean, stdDev, computeDFT, matMul } from "../../_shared/math-utils.ts"
+import { DrawResult } from "../../_shared/types.ts";
 
 // --- VALIDATION SCHEMAS ---
 const AnalyticsRequestSchema = z.object({
@@ -273,7 +273,7 @@ export function runFractal(history: DrawResult[]) {
     return results;
 }
 
-Deno.serve(async (req) => {
+export async function handleComputeNexusAnalytics(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -307,7 +307,7 @@ Deno.serve(async (req) => {
         });
     }
 
-    const body = await req.json();
+    const body = reqBody || await req.json();
     const validation = AnalyticsRequestSchema.safeParse(body);
 
     if (!validation.success) {
@@ -440,7 +440,7 @@ Deno.serve(async (req) => {
                     last_draw_id: lastDraw.id,
                     result,
                     created_at: new Date().toISOString()
-                }, { onConflict: 'draw_name,task,last_draw_id' });
+                }, { onConflict: 'draw_name,task,last_draw_id' }
         }
     }
     
