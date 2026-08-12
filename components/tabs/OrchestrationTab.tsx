@@ -1,4 +1,3 @@
-import { saveTicket } from "../../services/ticketService";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   getFullOrchestrationAnalysis,
@@ -28,7 +27,7 @@ import {
   Workflow,
   Network,
 } from "lucide-react";
-
+import { saveTicket } from "../../services/userPreferencesService";
 import { useToast } from "../ui/Toast";
 import { TicketXRay } from "../TicketXRay";
 import { audioEngine } from "../../utils/audioEngine";

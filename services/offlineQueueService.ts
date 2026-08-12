@@ -1,7 +1,5 @@
-import { db, isFirebaseConfigured } from "./firebaseClient";
-import { doc, setDoc, addDoc, collection } from "firebase/firestore";
 import { get, set, del, keys } from 'idb-keyval';
-import { authService } from './authService';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const OFFLINE_QUEUE_PREFIX = 'nexus_offline_queue_';
 
@@ -72,7 +70,7 @@ class OfflineQueueService {
    * Traite tous les éléments en attente dans la queue IndexedDB et synchronise avec Supabase
    */
   public async processQueue(): Promise<{ processed: number; errors: number }> {
-    if (this.isProcessing || !navigator.onLine || !isFirebaseConfigured()) {
+    if (this.isProcessing || !navigator.onLine || !isSupabaseConfigured()) {
       return { processed: 0, errors: 0 };
     }
 
@@ -91,11 +89,7 @@ class OfflineQueueService {
         return { processed: 0, errors: 0 };
       }
 
-      const user = await authService.getUser();
-      if (!user) {
-        this.isProcessing = false;
-        return { processed: 0, errors: 0 };
-      }
+      const { data: { user } } = await supabase.auth.getUser();
 
       const { getMany, delMany, setMany } = await import('idb-keyval');
       const values = await getMany(queueKeys);
@@ -119,30 +113,25 @@ class OfflineQueueService {
 
         try {
           if (item.type === 'prediction_snapshot') {
-            const payload = item.payload as Record<string, any>;
             const rowData = {
-              ...payload,
+              ...item.payload,
               user_id: user?.id || null,
             };
-            const snapId = payload.id || `${payload.draw_name}_${payload.created_at || Date.now()}`;
-            await setDoc(doc(db, 'prediction_snapshots', snapId), rowData, { merge: true });
-            syncSuccess = true;
+            const { error } = await supabase.from('prediction_snapshots').upsert(rowData);
+            if (!error) syncSuccess = true;
           } else if (item.type === 'learning_log') {
-            const payload = item.payload as Record<string, any>;
-            await addDoc(collection(db, 'learning_logs'), payload);
-            syncSuccess = true;
+            const { error } = await supabase.from('learning_logs').insert(item.payload);
+            if (!error) syncSuccess = true;
           } else if (item.type === 'learning_session') {
-            const payload = item.payload as Record<string, any>;
             const rowData = {
-              id: payload.id,
+              id: item.payload.id,
               user_id: user?.id || null,
               draw_name: item.drawName,
-              timestamp: payload.timestamp || item.timestamp,
-              session_data: payload,
+              timestamp: item.payload.timestamp || item.timestamp,
+              session_data: item.payload,
             };
-            const sessId = rowData.id || `${rowData.draw_name}_${rowData.timestamp}`;
-            await setDoc(doc(db, 'learning_sessions', sessId), rowData, { merge: true });
-            syncSuccess = true;
+            const { error } = await supabase.from('learning_sessions').upsert(rowData);
+            if (!error) syncSuccess = true;
           }
         } catch (e) {
           console.warn(`[OfflineQueue] Erreur de synchro pour ${item.id} :`, e);

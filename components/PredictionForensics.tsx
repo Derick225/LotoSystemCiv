@@ -4,7 +4,7 @@ import { logError } from "../utils/AppError";
 import { deleteForensicReportLocal } from "../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../services/syncService";
 import { updatePredictionFeedback } from "../services/predictionHistoryService";
-import { isFirebaseConfigured } from "../services/firebaseClient";
+import { isSupabaseConfigured } from "../services/supabaseClient";
 import { useToast } from "./ui/Toast";
 import { applyBayesianForensicFeedback } from "../services/prediction/weightsManager";
 import { audioEngine } from "../utils/audioEngine";
@@ -39,7 +39,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     try {
       audioEngine.play("success");
       await deleteForensicReportLocal(report.id);
-      if (isFirebaseConfigured()) await deleteForensicReportCloud(report.id);
+      if (isSupabaseConfigured()) await deleteForensicReportCloud(report.id);
       showToast("Rapport supprimé", "success");
       onClose();
     } catch (error) {

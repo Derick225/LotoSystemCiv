@@ -1,7 +1,5 @@
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "./firebaseClient";
 
-const SUPABASE_URL = "https://firebase.google.com";
+import { supabase, SUPABASE_URL } from './supabaseClient';
 
 export interface PaymentConfig {
     provider: 'CINETPAY' | 'STRIPE' | 'WAVE';
@@ -99,13 +97,15 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
 
 export const verifyTransaction = async (transactionId: string): Promise<boolean> => {
     // In a real app, this would call your backend to verify the transaction status with the provider
-    const docRef = doc(db, 'transactions', transactionId);
-    const docSnap = await getDoc(docRef);
+    const { data, error } = await supabase
+        .from('transactions')
+        .select('status')
+        .eq('id', transactionId)
+        .single();
         
-    if (!docSnap.exists()) {
-        console.error("Erreur lors de la vérification de la transaction: Transaction non trouvée");
+    if (error) {
+        console.error("Erreur lors de la vérification de la transaction:", error);
         return false;
     }
-    const data = docSnap.data();
     return data?.status === 'COMPLETED';
 };

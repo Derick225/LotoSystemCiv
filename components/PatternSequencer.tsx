@@ -1,4 +1,3 @@
-import { saveTicket } from "../services/ticketService";
 import { FALLBACK_CALIBRATION } from "../shared/prediction.types";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -9,7 +8,7 @@ import {
   calculateGeneticDiversityIndex,
 } from "../services/predictionEngine";
 
-
+import { saveTicket } from "../services/userPreferencesService";
 import { useToast } from "./ui/Toast";
 import type { TicketAnalysisResult } from "../types";
 import {

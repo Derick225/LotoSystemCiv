@@ -342,9 +342,6 @@ export interface SpectralMetric {
   energy: number;
   resonance?: boolean;
   dominantPeriod?: number;
-  denoisedEnergy?: number;
-  transientEnergy?: number;
-  phaseShift?: number;
 }
 
 export interface LearningSession {
@@ -541,26 +538,6 @@ export interface TrainingReport {
   mrr?: number;
   ndcg?: number;
   topologicalLoss?: number;
-  randomBaseline?: {
-    totalHits: number;
-    averageHits: number;
-    successRate: number;
-    winDistribution: {
-      zero: number;
-      one: number;
-      two: number;
-      three: number;
-      four: number;
-      five: number;
-    };
-    mrr: number;
-    ndcg: number;
-    significanceTest: {
-      isBetterThanRandom: boolean;
-      pValue: number;
-      zScore: number;
-    };
-  };
 }
 
 export interface TrainingResult {

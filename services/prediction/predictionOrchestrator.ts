@@ -115,74 +115,56 @@ export const computeAdvancedMetrics = async (
   useSpatioTemporalHawkes: boolean,
   metrics: EnhancedMetrics | undefined,
 ): Promise<EnhancedMetrics> => {
-  const contentHash = hashHistoryContent(localHistoryContext);
-  const cacheKey = globalCache.generateKey(
-    'adv_metrics',
-    drawName,
-    `${localHistoryContext.length}_${contentHash}_${useSpatioTemporalHawkes ? 1 : 0}_${hyperparameters.bayesWindowRatio || 'def'}`
-  );
+  const [
+    poissonScores, bayesScores, temporalScores, digitalRootScores,
+    resistanceScores, gapVelocityScores, leaderSuccessionScores,
+    aiIntuitionScores, fractalResonanceScores, spatialHotSpots,
+    symbioticClusterScores, anomalyScores, hawkesExcitationScores,
+    topologicalLyapunovScores
+  ] = await Promise.all([
+    Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
+    Promise.resolve().then(() => calculateTemporalScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateDigitalRootAnalysis(localHistoryContext)),
+    Promise.resolve().then(() => calculateResistanceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateGapVelocityScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateLeaderSuccession(localHistoryContext)),
+    Promise.resolve().then(() => calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>)),
+    Promise.resolve().then(() => calculateFractalResonance(localHistoryContext)),
+    Promise.resolve().then(() => calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma)),
+    Promise.resolve().then(() => calculateCoOccurrenceScores(localHistoryContext)),
+    Promise.resolve().then(() => calculateAnomalyScores(localHistoryContext)),
+    Promise.resolve().then(() => useSpatioTemporalHawkes
+      ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
+      : calculateHawkesExcitation(localHistoryContext)
+    ),
+    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
+  ]);
 
-  return globalCache.getOrCompute(
-    cacheKey,
-    async () => {
-      const poissonScores = calculatePoissonScores(localHistoryContext);
-      await yieldToUi();
-      const bayesScores = calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio);
-      await yieldToUi();
-      const temporalScores = calculateTemporalScores(localHistoryContext);
-      await yieldToUi();
-      const digitalRootScores = calculateDigitalRootAnalysis(localHistoryContext);
-      await yieldToUi();
-      const resistanceScores = calculateResistanceScores(localHistoryContext);
-      await yieldToUi();
-      const gapVelocityScores = calculateGapVelocityScores(localHistoryContext);
-      await yieldToUi();
-      const leaderSuccessionScores = calculateLeaderSuccession(localHistoryContext);
-      await yieldToUi();
-      const aiIntuitionScores = calculateAiIntuition(localHistoryContext, (metrics || {}) as Record<string, unknown>);
-      await yieldToUi();
-      const fractalResonanceScores = calculateFractalResonance(localHistoryContext);
-      await yieldToUi();
-      const spatialHotSpots = calculateSpatialHotSpots(localHistoryContext, 0.5, hyperparameters.spatialSigma);
-      await yieldToUi();
-      const symbioticClusterScores = calculateCoOccurrenceScores(localHistoryContext);
-      await yieldToUi();
-      const anomalyScores = calculateAnomalyScores(localHistoryContext);
-      await yieldToUi();
-      const hawkesExcitationScores = useSpatioTemporalHawkes
-        ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
-        : calculateHawkesExcitation(localHistoryContext);
-      await yieldToUi();
-      const topologicalLyapunovScores = calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon);
-      await yieldToUi();
+  for (const k in gapVelocityScores) {
+    gapVelocityScores[k] *= (hyperparameters.gapVelocityWeight || 1.0);
+  }
+  for (const k in hawkesExcitationScores) {
+    hawkesExcitationScores[k] *= ((hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY);
+  }
 
-      for (const k in gapVelocityScores) {
-        gapVelocityScores[k] *= (hyperparameters.gapVelocityWeight || 1.0);
-      }
-      for (const k in hawkesExcitationScores) {
-        hawkesExcitationScores[k] *= ((hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY);
-      }
-
-      return {
-        ...metrics,
-        poisson: poissonScores,
-        bayes: bayesScores,
-        temporal: temporalScores,
-        digitalRoot: digitalRootScores,
-        resistance: resistanceScores,
-        gapVelocity: gapVelocityScores,
-        leaderSuccession: leaderSuccessionScores,
-        aiIntuition: aiIntuitionScores,
-        fractalResonance: fractalResonanceScores,
-        spatial: spatialHotSpots,
-        symbioticClusters: symbioticClusterScores,
-        anomaly: anomalyScores,
-        hawkesExcitation: hawkesExcitationScores,
-        topologicalLyapunov: topologicalLyapunovScores
-      };
-    },
-    CACHE_TTL.LONG
-  );
+  return {
+    ...metrics,
+    poisson: poissonScores,
+    bayes: bayesScores,
+    temporal: temporalScores,
+    digitalRoot: digitalRootScores,
+    resistance: resistanceScores,
+    gapVelocity: gapVelocityScores,
+    leaderSuccession: leaderSuccessionScores,
+    aiIntuition: aiIntuitionScores,
+    fractalResonance: fractalResonanceScores,
+    spatial: spatialHotSpots,
+    symbioticClusters: symbioticClusterScores,
+    anomaly: anomalyScores,
+    hawkesExcitation: hawkesExcitationScores,
+    topologicalLyapunov: topologicalLyapunovScores
+  };
 };
 
 /**
@@ -282,16 +264,6 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
 
 export const resolvePredictionWeights = async (context: PredictionRuntimeContext): Promise<AlgoWeights> => {
   let weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
-  
-  if (!context.skipTraining) {
-    // 1. Appliquer le meta-learning de Kalman à partir des rapports forensiques locaux (autopsies post-mortem précédentes)
-    try {
-      const { applyMetaLearning } = await import("./weightsManager");
-      weights = await applyMetaLearning(weights, context.history, context.drawName);
-    } catch (err) {
-      logger.warn({ err }, "Échec de l'intégration du calibrage de Kalman post-mortem.");
-    }
-  }
   
   if (!context.skipTraining && context.history.length >= 10) {
     const currentEntropyResult = calculateShannonEntropy(context.history);
@@ -642,18 +614,10 @@ export const generateMasterPrediction = async (
             throw new Error("Web Workers non supportés");
         }
       } catch (e) {
-        const isWorkerUnsupported = e instanceof Error && e.message === "Web Workers non supportés";
-        if (isWorkerUnsupported) {
-          logger.info(
-            { drawName: context.drawName },
-            "[predictionOrchestrator] Web Workers non supportés. Redirection automatique vers Local Simplifié."
-          );
-        } else {
-          logger.error(
-            { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
-            "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
-          );
-        }
+        logger.error(
+          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
+          "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
+        );
       }
 
       // PHASE 3 — Local Simplifié

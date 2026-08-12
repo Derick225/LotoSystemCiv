@@ -47,13 +47,9 @@ class AudioEngine {
     public play(type: 'click' | 'success' | 'error' | 'scan' | 'boot' | 'loading') {
         if (!this.enabled) return;
         
-        // Haptic feedback if supported (Capacitor or Chrome Android) and user active
+        // Haptic feedback if supported (Capacitor or Chrome Android)
         try {
-            if (
-                typeof navigator !== 'undefined' && 
-                navigator.vibrate && 
-                (typeof navigator.userActivation === 'undefined' || navigator.userActivation.hasBeenActive)
-            ) {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 switch(type) {
                     case 'click': navigator.vibrate(10); break;
                     case 'success': navigator.vibrate([20, 50, 20]); break;

@@ -1,4 +1,3 @@
-import { saveTicket } from "../../services/ticketService";
 import React, { useEffect, useState, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
@@ -12,7 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { NumberBall } from "../NumberBall";
-
+import { saveTicket } from "../../services/userPreferencesService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import type { Prediction } from "../../types";
 import { useToast } from "../ui/Toast";

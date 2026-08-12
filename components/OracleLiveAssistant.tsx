@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { supabase } from "../services/supabaseClient";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
@@ -183,12 +184,23 @@ export const OracleLiveAssistant: React.FC<OracleLiveAssistantProps> = ({
   }, []);
 
   const fetchApiKey = async () => {
-    const key = import.meta.env.VITE_GEMINI_API_KEY || "";
-    if (key) {
-      setDynamicApiKey(key);
-      return key;
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const res = await fetch("/api/gemini-token", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setDynamicApiKey(data.token);
+        return data.token;
+      }
+    } catch (e) {
+      console.warn("Could not fetch token", e);
     }
-    console.warn("VITE_GEMINI_API_KEY is not defined.");
     return null;
   };
 

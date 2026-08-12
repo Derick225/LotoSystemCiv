@@ -66,10 +66,7 @@ export const UserManagement: React.FC = () => {
 
     setProcessingId(userId);
     try {
-      const success = await adminService.updateUserRole(userId, newRole);
-      if (!success) {
-        throw new Error("Le serveur a retourné un statut d'échec pour la mise à jour.");
-      }
+      await adminService.updateUserRole(userId, newRole);
       audioEngine.play("success");
       showToast(`Rôle mis à jour : ${newRole}`, "success");
       // Mise à jour optimiste locale
@@ -95,10 +92,7 @@ export const UserManagement: React.FC = () => {
 
     setProcessingId(userId);
     try {
-      const success = await adminService.deleteUser(userId);
-      if (!success) {
-        throw new Error("Le serveur a retourné un statut d'échec pour la suppression.");
-      }
+      await adminService.deleteUser(userId);
       audioEngine.play("success");
       showToast("Utilisateur supprimé", "success");
       setUsers((prev) => prev.filter((u) => u.id !== userId));

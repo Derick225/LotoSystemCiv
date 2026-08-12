@@ -147,35 +147,15 @@ const buildDrawNumberSet = (draw: HistoryDraw): Set<number> =>
     ...uniqueValidNumbers(draw.machine),
   ]);
 
-const calculateJaccardIndex = (arr1: number[], arr2: number[]): number => {
-  if (arr1.length === 0 || arr2.length === 0) return 0;
-  const set1 = new Set(arr1);
-  let intersection = 0;
-  for (const num of arr2) {
-    if (set1.has(num)) {
-      intersection++;
-    }
-  }
-  const union = set1.size + arr2.length - intersection;
-  return union > 0 ? intersection / union : 0;
-};
-
-const getGagnants = (draw: HistoryDraw): number[] => uniqueValidNumbers(draw?.gagnants);
-
-const jaccardDraws = (d1: HistoryDraw, d2: HistoryDraw): number => {
-  return calculateJaccardIndex(getGagnants(d1), getGagnants(d2));
-};
-
 /**
  * Finds all historical twin draws corresponding to the same calendar period in prior years.
- * Uses continuous Gaussian spatio-temporal resonance scoring & structural Déjà-Vu Jaccard index (zero magic binary cutoffs).
+ * Uses continuous Gaussian spatio-temporal resonance scoring (zero magic binary cutoffs).
  */
 const findTwinDrawCandidates = (
   history: HistoryDraw[],
   currentDate: Date,
   maxYearsToScan: number,
-  hurst: number,
-  currentDraw: HistoryDraw
+  hurst: number
 ): TwinCandidate[] => {
   const currentYear = currentDate.getFullYear();
   const candidates: TwinCandidate[] = [];
@@ -200,12 +180,7 @@ const findTwinDrawCandidates = (
     const machineCount = uniqueValidNumbers(draw.machine).length;
     const richness = (gagnantsCount / 5.0) * 0.7 + (machineCount / 5.0) * 0.3;
 
-    // Continuous Déjà-Vu Jaccard index blend with seasonal resonance
-    const jaccardSim = jaccardDraws(draw, currentDraw);
-    const alpha = clamp(hurst, 0.1, 0.9) * 0.5; // bound in [0.05, 0.45]
-    const blendedResonance = seasonalRes * (1.0 - alpha) + jaccardSim * alpha;
-
-    const quality = clamp(blendedResonance * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
+    const quality = clamp(seasonalRes * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
 
     if (quality > 0.01) {
       const dayDistance = Math.abs(currentDate.getDate() - drawDate.getDate());
@@ -301,7 +276,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
 
     // Dynamic scan depth based on total available history
     const maxYearsToScan = Math.max(1, Math.min(10, Math.floor(history.length / 52)));
-    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst, currentDraw);
+    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst);
 
     if (twinCandidates.length === 0) {
       ctx.pluginCache[cacheKey] = defaultCache;
@@ -357,21 +332,12 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
         const sourceStrength = overlapCount / Math.max(1, twinNumbers.size);
         const timeAmortization = Math.exp(-decayGamma * k);
 
-        // Déjà-Vu Jaccard resonance
-        const jaccardAnchor = jaccardDraws(twinRes.draw, currentDraw);
-        const jaccardEvolution = jaccardDraws(historicalSource, projectedCurrent);
-        const jaccardResonance = (jaccardAnchor + jaccardEvolution) / 2.0;
-        
-        // Continuous Jaccard multiplier scaled by Hurst persistence exponent (zero magic parameters)
-        const jaccardMultiplier = Math.exp(hurst * 2.0 * jaccardResonance);
-
-        // Period weight continuous product modulated by structural Déjà-Vu stochastics
+        // Period weight continuous product
         const periodWeight =
           combinationActivation *
           timeAmortization *
           twinRes.quality *
-          (0.5 + sourceStrength) *
-          jaccardMultiplier;
+          (0.5 + sourceStrength);
 
         const projectedWinners = uniqueValidNumbers(projectedCurrent.gagnants);
         const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);

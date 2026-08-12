@@ -150,14 +150,7 @@ export const applyOnlineLearningCore = async (
     const { generateLearningSession, applyForensicAdjustments } = await import(
       "../forensicTrainingBridge"
     );
-    const forensicReport = await runForensicWorker(
-      drawName,
-      actualWinners,
-      contextHistory,
-      15000,
-      prediction.breakdown,
-      currentWeights as Record<AlgoKey, number>
-    );
+    const forensicReport = await runForensicWorker(drawName, actualWinners, contextHistory);
     const learningSession = await generateLearningSession(forensicReport, contextHistory);
     const finalWeights = await applyForensicAdjustments(
       learningSession,
@@ -194,29 +187,11 @@ export const runForensicTrainingStepCore = async (
   const targetDraw = purifiedHistory[0];
   const contextHistory = purifiedHistory.slice(1);
 
-  // Régénère la prédiction théorique effectuée sur ce tirage historique afin de
-  // fournir au worker forensic la vraie matrice de score (predictionMatrix).
-  // Sans elle, le rapport post-mortem compare le tirage réel à un combo
-  // dégénéré et les ajustements de poids qui en découlent sont sans valeur.
-  const { generateMasterPrediction } = await import("../predictionEngine");
-  const prediction = await generateMasterPrediction(
-    drawName,
-    contextHistory,
-    100,
-    currentWeights,
-    undefined,
-    undefined,
-    true
-  );
-
   // Appel du worker forensic unifié avec timeout et fallback
   const forensicReport = await runForensicWorker(
     drawName,
     targetDraw.gagnants,
-    contextHistory,
-    15000,
-    prediction.breakdown,
-    currentWeights as Record<AlgoKey, number>
+    contextHistory
   );
 
   const learningSession = await generateLearningSession(forensicReport, contextHistory);
@@ -331,10 +306,7 @@ export const runLoopSimulationCore = async (
     const forensicReport = await runForensicWorker(
       drawName,
       targetDraw.gagnants,
-      contextHistory,
-      15000,
-      predLoop.breakdown,
-      currentWeights as Record<AlgoKey, number>
+      contextHistory
     );
 
     // 4. Session d'apprentissage adaptative

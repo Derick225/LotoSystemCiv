@@ -1,0 +1,4 @@
+
+> lotopro-platinum-elite@12.0.0 lint
+> tsc --noEmit
+

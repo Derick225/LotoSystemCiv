@@ -42,8 +42,6 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
         if (!name) {
             // Fix corrupted items from cache by forcing the correct drawName
             acc.push({ ...d, drawName, draw_name: drawName } as T);
-        } else if (name === drawName) {
-            acc.push({ ...d, drawName: name, draw_name: name } as T);
         } else {
             const nameStr = String(name).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             if (nameStr === normalizedTarget || normalizedTarget.includes(nameStr) || nameStr.includes(normalizedTarget)) {

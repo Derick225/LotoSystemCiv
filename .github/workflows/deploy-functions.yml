@@ -1,0 +1,39 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy Edge Functions
+        run: |
+          # Deploy each function individually to ignore non-runnable files/directories (like _shared, deno.json, etc.)
+          for dir in supabase/functions/*; do
+            if [ -d "$dir" ] && [ "$(basename "$dir")" != "_shared" ]; then
+              func_name=$(basename "$dir")
+              echo "Deploying Supabase Edge Function: $func_name"
+              supabase functions deploy "$func_name" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }} --no-verify-jwt
+            fi
+          done
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

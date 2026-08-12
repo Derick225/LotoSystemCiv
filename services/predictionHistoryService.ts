@@ -1,7 +1,7 @@
 
 import type { Prediction, LearningSession, PredictionHistoryItem, OrchestrationPattern, PredictionFeedback, PatternType, DrawResult } from '../types';
-import { syncPredictions, syncLearningSessions, syncPredictionSnapshots, deletePredictionCloud } from './syncService';
-import { authService } from './authService';
+import { syncPredictions, syncLearningSessions, syncPredictionSnapshots } from './syncService';
+import { supabase } from './supabaseClient';
 import { getAlgoWeights } from './predictionEngine';
 import { ALL_DRAWS } from '../constants';
 import { get, set, del, keys } from "idb-keyval";
@@ -248,7 +248,11 @@ export const deletePrediction = async (id: string): Promise<void> => {
     
     // Attempt to delete from cloud if syncing is enabled
     try {
-        await deletePredictionCloud(id);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            await supabase.from('predictions').delete().eq('id', id);
+            await supabase.from('prediction_snapshots').delete().eq('id', id);
+        }
     } catch(e) {
         // ignore cloud delete error silently
     }

@@ -14,24 +14,25 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { queryClient, idbPersister } from './services/queryClient';
 import { audioEngine } from './utils/audioEngine';
 import { authService } from './services/authService';
+import { getSettings, saveSettings } from './services/userPreferencesService';
 import { ShieldAlert, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import type { Draw } from './types';
 import { ALL_DRAWS } from './constants';
 import { motion, AnimatePresence } from 'framer-motion';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 
-import { BootSequence } from './components/intro/BootSequence';
-import { AuthScreen } from './components/auth/AuthScreen';
-
+const BootSequence = lazyWithRetry(() => import('./components/intro/BootSequence'), 'BootSequence');
 const TutorialOverlay = lazyWithRetry(() => import('./components/ui/TutorialOverlay'), 'TutorialOverlay');
 const InstallPrompt = lazyWithRetry(() => import('./components/InstallPrompt'), 'InstallPrompt');
+const AuthScreen = lazyWithRetry(() => import('./components/auth/AuthScreen'), 'AuthScreen');
 const ResetPasswordScreen = lazyWithRetry(() => import('./components/auth/ResetPasswordScreen'), 'ResetPasswordScreen');
 const SubscriptionWall = lazyWithRetry(() => import('./components/auth/SubscriptionWall'), 'SubscriptionWall');
 const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumberHUD'), 'GlobalNumberHUD');
 
-import { GlobalDashboard } from './components/GlobalDashboard';
-import { DrawDetails } from './components/DrawDetails';
-import { AdminPanel } from './components/admin/AdminPanel';
+const GlobalDashboard = lazyWithRetry(() => import('./components/GlobalDashboard'), 'GlobalDashboard');
+const DrawDetails = lazyWithRetry(() => import('./components/DrawDetails'), 'DrawDetails');
+const AdminPanel = lazyWithRetry(() => import('./components/admin/AdminPanel'), 'AdminPanel');
+const UserWallet = lazyWithRetry(() => import('./components/UserWallet'), 'UserWallet');
 
 // Composant de sécurité pour les accès non autorisés
 const AccessDenied: React.FC<{ onBack: () => void }> = ({ onBack }) => (
@@ -87,6 +88,7 @@ const AppContent: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [selectedDraw, setSelectedDraw] = useState<Draw | null>(null);
+  const [showWallet, setShowWallet] = useState(false);
 
   // Global Cross-Navigation Hub
   useEffect(() => {
@@ -97,6 +99,7 @@ const AppContent: React.FC = () => {
       if (view === 'admin') {
         setViewMode('admin');
         setSelectedDraw(null);
+        setShowWallet(false);
       } else if (view === 'home') {
         if (drawName) {
           const foundDraw = ALL_DRAWS.find(d => d.name.toLowerCase() === drawName.toLowerCase());
@@ -109,6 +112,7 @@ const AppContent: React.FC = () => {
           setSelectedDraw(null);
         }
         setViewMode('home');
+        setShowWallet(false);
       }
 
       if (mainTab) {
@@ -122,13 +126,14 @@ const AppContent: React.FC = () => {
   }, [setDrawName, refreshData]);
   
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-      const savedTheme = localStorage.getItem('lotopro_theme');
-      return (savedTheme === 'light' || savedTheme === 'dark') ? savedTheme : 'dark';
+      const s = getSettings();
+      return s.theme !== 'system' ? s.theme : 'dark';
   });
 
   useEffect(() => {
-    const soundEnabled = localStorage.getItem('lotopro_sound') !== 'false';
-    audioEngine.setEnabled(soundEnabled);
+    const savedSettings = getSettings();
+    audioEngine.setEnabled(savedSettings.sound);
+    if (savedSettings.theme !== 'system') setTheme(savedSettings.theme);
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('payment') === 'success') {
@@ -154,7 +159,10 @@ const AppContent: React.FC = () => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    localStorage.setItem('lotopro_theme', theme);
+    const current = getSettings();
+    if (current.theme !== theme) {
+        saveSettings({ ...current, theme });
+    }
   }, [theme]);
 
   const handleSelectDraw = useCallback((draw: Draw) => {
@@ -163,6 +171,7 @@ const AppContent: React.FC = () => {
     refreshData(draw.name, false);
     setSelectedDraw(draw);
     setViewMode('home');
+    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [setDrawName, refreshData]);
 
@@ -170,6 +179,7 @@ const AppContent: React.FC = () => {
     audioEngine.play('click');
     setSelectedDraw(null);
     setViewMode('home');
+    setShowWallet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
@@ -183,54 +193,45 @@ const AppContent: React.FC = () => {
       await refreshSubscription();
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center font-mono text-slate-300">
-        <div className="w-full max-w-md p-8 flex flex-col items-center">
-          <div className="relative mb-10">
-            <div className="w-24 h-24 border-4 border-indigo-500/10 rounded-full animate-[spin_3s_linear_infinite]"></div>
-            <div className="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-[spin_1.5s_linear_infinite]"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-4xl font-black text-white tracking-tighter">N</span>
-            </div>
-          </div>
-          <div className="text-center space-y-2">
-            <h2 className="text-xs font-black uppercase tracking-[0.25em] text-indigo-400 animate-pulse">Initialisation Sécurisée</h2>
-            <p className="text-[10px] text-slate-500 tracking-wider">CONNEXION AUX CONDUITS NEURONAUX...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (authLoading) return <div className="min-h-screen bg-nexus-950 flex items-center justify-center text-indigo-500 animate-pulse font-black tracking-widest">INITIALISATION SECURE...</div>;
   
   if (isResettingPassword) {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
         <ResetPasswordScreen onSuccess={() => setIsResettingPassword(false)} />
       </Suspense>
     );
   }
 
   if (!session) {
-    return <AuthScreen onSuccess={() => {}} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <AuthScreen onSuccess={() => {}} />
+      </Suspense>
+    );
   }
 
   if (!isAdmin && subscription?.status === 'expired') {
       return (
-        <Suspense fallback={<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
           <SubscriptionWall userId={session.user.id} onPaymentSuccess={handlePaymentSuccess} onLogout={handleLogout} />
         </Suspense>
       );
   }
 
   if (!isBooted) {
-    return <BootSequence onComplete={() => setIsBooted(true)} />;
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-nexus-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+        <BootSequence onComplete={() => setIsBooted(true)} />
+      </Suspense>
+    );
   }
 
     const renderContent = () => {
     let content;
     let key;
-    if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
+    if (showWallet) { content = <UserWallet />; key = 'wallet'; }
+    else if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
@@ -272,10 +273,13 @@ const AppContent: React.FC = () => {
             }
             setViewMode(mode); 
             setSelectedDraw(null); 
+            setShowWallet(false); 
         }}
         theme={theme}
         setTheme={setTheme} 
         onReset={handleReset}
+        showWallet={showWallet}
+        setShowWallet={(show) => { audioEngine.play('click'); setShowWallet(show); }}
         isDrawSelected={!!selectedDraw}
         isAdmin={isAdmin}
         onLogout={handleLogout}

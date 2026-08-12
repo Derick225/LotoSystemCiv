@@ -76,6 +76,9 @@ export const idbStorage: StateStorage = {
       const compressed = LZString.compressToUTF16(structurallyCompressed);
       await set(name, compressed);
       inMemoryStore.set(name, value);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('PREFERENCES_TRIGGER_SYNC'));
+      }
     } catch (e) {
       console.warn("IndexedDB setItem blocked or failed, falling back to memory storage:", e);
       inMemoryStore.set(name, value);

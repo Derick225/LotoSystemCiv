@@ -5,7 +5,7 @@ import {
   getPlatinumHistory,
 } from "../../services/metaAnalystService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
-
+import { saveTicket } from "../../services/userPreferencesService";
 import { useNexusStore } from "../../store/useNexusStore";
 import type { PlatinumResult, PlatinumScenario, Prediction } from "../../types";
 import { NumberBall } from "../NumberBall";
@@ -30,7 +30,6 @@ import {
   CheckCircle2,
   History,
   Cpu,
-  Volume2,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -156,7 +155,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
   const [shannonEntropyFilter, setShannonEntropyFilter] =
     useState<boolean>(false);
   const [showCalibration, setShowCalibration] = useState<boolean>(false);
-  const [showExpertTools, setShowExpertTools] = useState<boolean>(false);
 
   // Backtesting Simulator state
   const [isBacktesting, setIsBacktesting] = useState<boolean>(false);
@@ -371,6 +369,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
   const handleSave = async (scenario: PlatinumScenario) => {
     audioEngine.play("click");
+    await saveTicket({
+      numbers: scenario.numbers,
+      drawName,
+      strategy: `Platinum ${scenario.name}`,
+    });
 
     if (result) {
       const breakdown: Record<number, Record<string, number>> = {};
@@ -448,13 +451,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     (s) => s.id === selectedScenarioId,
   );
 
-  const optimalScenario = useMemo(() => {
-    if (!result || !result.scenarios || result.scenarios.length === 0) return null;
-    return result.scenarios.reduce((best, current) => 
-      current.probability > best.probability ? current : best
-    , result.scenarios[0]);
-  }, [result]);
-
   return (
     <div className="space-y-6 animate-fade-in pb-20 w-full overflow-hidden">
       <PredictionComputationOverlay
@@ -496,234 +492,136 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
       {result && (
         <>
-          {/* 1. MISSION CONTROL HEADER */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                Cohérence
-              </span>
-              <div className="text-2xl font-black text-white flex items-center gap-2">
-                {result.coherence}%
-                <Activity
-                  size={16}
-                  className={
-                    result.coherence > 80 ? "text-emerald-500" : "text-amber-500"
-                  }
-                />
-              </div>
-            </div>
-            <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                Entropie
-              </span>
-              <div className="text-2xl font-black text-white flex items-center gap-2">
-                {result.entropy.toFixed(2)}
-                <Radio size={16} className="text-indigo-500" />
-              </div>
-            </div>
-            <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                Régime
-              </span>
-              <div
-                className={`text-xl font-black uppercase ${result.regime === "STABLE" ? "text-emerald-400" : result.regime === "CHAOTIC" ? "text-rose-400" : "text-amber-400"}`}
-              >
-                {result.regime}
-              </div>
-            </div>
-            <button
-              onClick={runAnalysis}
-              className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl flex flex-col items-center justify-center text-white transition-colors group"
-            >
-              <RefreshCw
-                size={20}
-                className="mb-1 group-hover:rotate-180 transition-transform duration-300"
-              />
-              <span className="text-xs font-black uppercase tracking-widest">
-                Re-Scan
-              </span>
-            </button>
+      {/* 1. MISSION CONTROL HEADER */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
+            Cohérence
+          </span>
+          <div className="text-2xl font-black text-white flex items-center gap-2">
+            {result.coherence}%
+            <Activity
+              size={16}
+              className={
+                result.coherence > 80 ? "text-emerald-500" : "text-amber-500"
+              }
+            />
           </div>
-
-          {/* 2. LA FEUILLE DE ROUTE QUOTIDIENNE DÉCISIVE */}
-          <div className="bg-slate-900/40 backdrop-blur-xl p-8 md:p-10 rounded-[2rem] border border-white/5 shadow-2xl relative overflow-hidden flex flex-col xl:flex-row items-stretch justify-between gap-8">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-[80px] pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/5 rounded-full blur-[60px] pointer-events-none" />
-            
-            {/* Left Section: Le Choix du Directeur */}
-            <div className="flex-1 space-y-6 flex flex-col justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-3 mb-2">
-                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-[0.2em] bg-amber-500/10 px-3 py-1 rounded-md border border-amber-500/20 flex items-center gap-1.5">
-                    👑 Le Choix du Directeur
-                  </span>
-                  
-                  {/* Alertes de Stabilité : Jetons de confiance ⭐ */}
-                  <div className="flex items-center gap-1 bg-white/5 px-2.5 py-1 rounded-md border border-white/5">
-                    <span className="text-[9px] font-black uppercase text-slate-400 mr-1.5">Stabilité :</span>
-                    {(() => {
-                      let starCount = 1;
-                      let colorClass = "text-rose-400";
-                      let label = "Prudence";
-                      if (result.coherence >= 80) {
-                        starCount = 3;
-                        colorClass = "text-amber-400";
-                        label = "Optimale (Exceptionnelle)";
-                      } else if (result.coherence >= 60) {
-                        starCount = 2;
-                        colorClass = "text-yellow-400";
-                        label = "Sécurisée";
-                      } else {
-                        starCount = 1;
-                        colorClass = "text-rose-400";
-                        label = "Instable";
-                      }
-                      return (
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm tracking-wider font-serif text-amber-400">{"⭐".repeat(starCount)}</span>
-                          <span className={`text-[9px] font-black uppercase ${colorClass}`}>({label})</span>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
-                  La Feuille de Route Décisive
-                </h3>
-                <p className="text-xs text-slate-400 max-w-lg leading-relaxed mt-1 font-sans">
-                  La combinaison optimale absolue calculée aujourd'hui par l'algorithme. C'est le ticket principal recommandé à valider les yeux fermés.
-                </p>
-              </div>
-
-              {/* Giant NumberBall Display - Zero technical detail */}
-              {optimalScenario && (
-                <div className="flex flex-wrap items-center gap-5 py-4 justify-center md:justify-start">
-                  {optimalScenario.numbers.map((num, idx) => (
-                    <motion.div
-                      key={`director-ball-${num}`}
-                      initial={{ scale: 0.5, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{
-                        delay: idx * 0.1,
-                        type: "spring",
-                        stiffness: 140,
-                      }}
-                      className="flex flex-col items-center gap-1"
-                    >
-                      <div className="scale-110 md:scale-125">
-                        <NumberBall
-                          number={num}
-                          size="lg"
-                          glow={true}
-                        />
-                      </div>
-                      <span className="text-[9px] font-black text-amber-500/80 uppercase font-mono tracking-wider mt-1">
-                        Rang {idx + 1}
-                      </span>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-
-              {/* Giant Action Button - Pre-fills the portfolio with maximum resonance combinations */}
-              {optimalScenario && (
-                <button
-                  onClick={async () => {
-                    audioEngine.play("click");
-                    
-                    // Generate the primary ticket
-                    
-                    audioEngine.play("success");
-                    showToast("Le Ticket d'Élite a été généré avec succès !", "success");
-                  }}
-                  className="w-full max-w-md py-4.5 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 cursor-pointer group font-sans animate-pulse"
-                >
-                  <Zap size={16} />
-                  <span>Générer le Ticket d'Élite</span>
-                </button>
-              )}
-            </div>
-
-            {/* Right Section: Speech Accompaniement */}
-            <div className="w-full xl:w-80 bg-slate-950/60 p-6 rounded-2xl border border-white/5 flex flex-col justify-between relative z-10 space-y-4">
-              <div className="space-y-1.5">
-                <span className="text-[8px] font-black uppercase text-indigo-400 tracking-wider block">
-                  Accompagnement Vocal
-                </span>
-                <h4 className="text-xs font-black text-slate-300 uppercase">
-                  Assistance Audio Épurée
-                </h4>
-                <p className="text-[11px] text-slate-500 leading-normal font-sans">
-                  Parfait pour écouter les numéros dictés à haute voix sans avoir à lire d'analyses complexes ou de chiffres compliqués.
-                </p>
-              </div>
-
-              {/* Speech Trigger Button */}
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  
-                  const textToSpeak = `Bonjour. Voici la feuille de route recommandée aujourd'hui par la suite Platinum Élite. Les cinq numéros clés du Choix du Directeur sont : ${optimalScenario?.numbers.join(", ")}. L'indice de stabilité générale est de ${result.coherence >= 80 ? "trois étoiles" : result.coherence >= 60 ? "deux étoiles" : "une étoile"}, ce qui indique une configuration ${result.coherence >= 80 ? "exceptionnelle et idéale" : "favorable"}. Faites confiance à votre instinct et validez votre Ticket d'Élite !`;
-                  
-                  if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-                    utterance.lang = "fr-FR";
-                    utterance.rate = 0.95;
-                    utterance.pitch = 1.0;
-                    window.speechSynthesis.speak(utterance);
-                    showToast("Lecture vocale de la synthèse en cours...", "success");
-                  } else {
-                    showToast("Synthèse vocale non supportée par votre navigateur.", "info");
-                  }
-                }}
-                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-500/10 cursor-pointer active:scale-95 font-sans"
-              >
-                <Volume2 size={14} className="animate-pulse" />
-                <span>Écouter la Synthèse</span>
-              </button>
-
-              {/* Descriptive text block in French simple */}
-              <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-[10px] text-slate-400 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-amber-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                  <span>Diagnostic Épuré (Français Simple) :</span>
-                </div>
-                <p className="leading-relaxed text-slate-300 italic font-sans">
-                  « L'IA recommande aujourd'hui les numéros <strong className="text-white">{optimalScenario?.numbers.join(" • ")}</strong>. Le climat global est très favorable, l'algorithme vous conseille de valider ce ticket directement. »
-                </p>
-              </div>
-            </div>
+        </div>
+        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
+            Entropie
+          </span>
+          <div className="text-2xl font-black text-white flex items-center gap-2">
+            {result.entropy.toFixed(2)}
+            <Radio size={16} className="text-indigo-500" />
           </div>
+        </div>
+        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
+            Régime
+          </span>
+          <div
+            className={`text-xl font-black uppercase ${result.regime === "STABLE" ? "text-emerald-400" : result.regime === "CHAOTIC" ? "text-rose-400" : "text-amber-400"}`}
+          >
+            {result.regime}
+          </div>
+        </div>
+        <button
+          onClick={runAnalysis}
+          className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl flex flex-col items-center justify-center text-white transition-colors group"
+        >
+          <RefreshCw
+            size={20}
+            className="mb-1 group-hover:rotate-180 transition-transform duration-300"
+          />
+          <span className="text-xs font-black uppercase tracking-widest">
+            Re-Scan
+          </span>
+        </button>
+      </div>
 
-          {/* 3. EXPERT MODE TOGGLE BUTTON */}
-          <div className="flex justify-center pt-4">
-            <button
-              onClick={() => {
-                audioEngine.play("click");
-                setShowExpertTools(!showExpertTools);
+      {/* 2. HYPER-SPECTRUM CHART (The main visual) */}
+      <div className="bg-slate-900/40 backdrop-blur-xl p-8 md:p-10 rounded-[2rem] border border-slate-850 shadow-2xl relative overflow-hidden group">
+        <div className="flex justify-between items-center mb-8 px-2">
+          <div>
+            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+              <BarChart3 className="text-indigo-400" size={12} /> Spectre de
+              Probabilité
+            </h3>
+            <span className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
+              Hyper-Spectre Harmonique
+            </span>
+          </div>
+          {hoveredIndex !== null && (
+            <div className="flex items-center gap-2.5 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20 shadow-inner animate-fade-in">
+              <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">
+                Vecteur {hoveredIndex}
+              </span>
+              <span className="text-sm font-black text-emerald-400">
+                {spectrumData[hoveredIndex - 1]?.v}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={spectrumData}
+              onMouseMove={(e) => {
+                if (e.activeTooltipIndex !== undefined)
+                  setHoveredIndex(e.activeTooltipIndex + 1);
               }}
-              className="px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-800/80 hover:bg-slate-750/80 border border-white/5 text-slate-400 hover:text-white transition-all flex items-center gap-2"
+              onMouseLeave={() => setHoveredIndex(null)}
             >
-              <Settings size={12} className={showExpertTools ? "rotate-90 transition-transform" : "transition-transform"} />
-              {showExpertTools ? "Masquer les outils d'expert" : "Afficher les réglages & analyses d'expert (Forensics)"}
-            </button>
-          </div>
+              <defs>
+                <linearGradient id="spectrumBar" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#818cf8" />
+                  <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.4} />
+                </linearGradient>
+              </defs>
+              <Tooltip />
+              <Bar dataKey="v" radius={[2, 2, 0, 0]} animationDuration={1500}>
+                {spectrumData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={
+                      selectedScenario?.numbers.includes(entry.n)
+                        ? selectedScenario.color
+                        : entry.v > 50
+                          ? "#818cf8"
+                          : "#334155"
+                    }
+                    className="transition-all duration-300"
+                  />
+                ))}
+              </Bar>
+              <ReferenceLine y={50} stroke="#334155" strokeDasharray="3 3" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
 
-          <AnimatePresence>
-            {showExpertTools && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden space-y-6 w-full"
-              >
-                {/* 3. ADVANCED OPERATIONS & CALIBRATION */}
-                <div
-                  id="platinum-calibration-panel"
-                  className="bg-slate-900/60 backdrop-blur-md rounded-3xl p-6 border border-white/5 space-y-6"
-                >
+        {/* X-Axis Labels (Simplified) */}
+        <div className="flex justify-between text-xs font-mono text-slate-600 px-1 mt-2">
+          <span>1</span>
+          <span>10</span>
+          <span>20</span>
+          <span>30</span>
+          <span>40</span>
+          <span>50</span>
+          <span>60</span>
+          <span>70</span>
+          <span>80</span>
+          <span>90</span>
+        </div>
+      </div>
+
+      {/* 3. ADVANCED OPERATIONS & CALIBRATION */}
+      <div
+        id="platinum-calibration-panel"
+        className="bg-slate-900/60 backdrop-blur-md rounded-3xl p-6 border border-white/5 space-y-6"
+      >
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
@@ -1062,9 +960,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           </motion.div>
         )}
       </AnimatePresence>
-              </motion.div>
-            )}
-          </AnimatePresence>
       </>)}
     </div>
   );

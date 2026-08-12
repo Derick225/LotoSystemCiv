@@ -1,5 +1,7 @@
 import { DrawResult, Prediction } from "../../types";
 import { logger } from "../../utils/logger";
+import { isSupabaseConfigured } from "../supabaseClient";
+import { apiClient } from "../../core/api/apiClient";
 import { TUNING } from "./microSgd";
 import { useNexusStore } from "../../store/useNexusStore";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
@@ -107,5 +109,54 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
  * Délégation au supercalculateur Cloud / Scénario B & C
  */
 export const tryCloudPrediction = async (context: PredictionRuntimeContext): Promise<Prediction | null> => {
+  const useCloudEngine = context.useCloudEngine ?? getStoreStateSafely().useCloudEngine;
+
+  if (
+    useCloudEngine &&
+    isSupabaseConfigured() &&
+    context.drawName !== "ALL_COMBINED" &&
+    context.drawName !== "ALL"
+  ) {
+    context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
+    try {
+      logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
+      const result = await apiClient.post<Prediction>('predict-elite', {
+        drawName: context.drawName,
+        history: context.history,
+        weights: context.weightsToUse,
+        symbioticContext: context.symbioticContext,
+        metrics: context.metrics
+      }, { suppressErrorLogging: true });
+
+      const isPayloadValid = (
+        result &&
+        Array.isArray(result.suggestedNumbers) &&
+        result.suggestedNumbers.length === TICKET_SIZE &&
+        new Set(result.suggestedNumbers).size === TICKET_SIZE &&
+        result.suggestedNumbers.every((n: number) => typeof n === 'number' && n >= 1 && n <= 90 && !isNaN(n) && Number.isInteger(n)) &&
+        Array.isArray(result.candidates) &&
+        result.candidates.every((n: number) => typeof n === 'number' && n >= 1 && n <= 90 && !isNaN(n) && Number.isInteger(n)) &&
+        typeof result.confidence === 'number' && !isNaN(result.confidence) &&
+        result.confidence >= 1 && result.confidence <= 100
+      );
+
+      if (isPayloadValid) {
+        logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Prédiction obtenue et validée avec succès depuis le Cloud.");
+        context.onProgress?.(100, "[Cloud] Alignement finalisé avec succès.");
+        return result;
+      } else {
+        logger.warn(
+          { drawName: context.drawName, result },
+          "[predictionScenarios] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET (transport OK, contenu HS). Activation du repli local."
+        );
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(
+        { drawName: context.drawName, error: errorMsg },
+        "[predictionScenarios] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
+      );
+    }
+  }
   return null;
 };

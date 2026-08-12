@@ -90,6 +90,15 @@ CREATE TABLE IF NOT EXISTS public.algo_weights (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- D. PRÉFÉRENCES UTILISATEURS
+CREATE TABLE IF NOT EXISTS public.user_preferences (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  watchlist INTEGER[],
+  saved_tickets JSONB,
+  settings JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- D2. ABONNEMENTS
 CREATE TABLE IF NOT EXISTS public.subscriptions (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -211,6 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id)
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_analytics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
@@ -225,6 +235,7 @@ DO $$
 BEGIN 
     EXECUTE 'DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results';
     EXECUTE 'DROP POLICY IF EXISTS "Service Write Results" ON public.draw_results';
+    EXECUTE 'DROP POLICY IF EXISTS "User Own Data" ON public.user_preferences';
 END $$;
 
 -- --- POLITIQUES PUBLIQUES (LECTURE SEULE) ---
@@ -245,6 +256,7 @@ CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR AL
 
 -- --- POLITIQUES UTILISATEUR (ISOLATION) ---
 -- Les utilisateurs ne voient et ne modifient que leurs propres données
+CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
 
@@ -278,6 +290,7 @@ CREATE POLICY "Users can update their own learning sessions" ON public.learning_
 CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_analytics BEFORE UPDATE ON public.draw_analytics FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 `;

@@ -46,39 +46,8 @@ const computeVectorEntropy = (vector: Float64Array): number => {
 };
 
 /**
- * Standardise un vecteur de signaux bruts en Z-scores robustes (Médiane / IQR).
- * Évite qu'une composante à grande échelle brute (ex: freq * 100) écrase les autres signaux.
- */
-const computeRobustZScores = (values: Float64Array): Float64Array => {
-    const zScores = new Float64Array(values.length);
-    const valid: number[] = [];
-    for (let i = 1; i <= MAX_NUM; i++) valid.push(values[i]);
-    valid.sort((a, b) => a - b);
-    
-    const median = valid[Math.floor(valid.length / 2)] || 0;
-    const q1 = valid[Math.floor(valid.length * 0.25)] || 0;
-    const q3 = valid[Math.floor(valid.length * 0.75)] || 0;
-    const iqr = q3 - q1;
-    
-    let scale = iqr / 1.349;
-    if (scale <= 1e-6) {
-        let mean = 0;
-        for (let i = 1; i <= MAX_NUM; i++) mean += values[i];
-        mean /= MAX_NUM;
-        let varSum = 0;
-        for (let i = 1; i <= MAX_NUM; i++) varSum += Math.pow(values[i] - mean, 2);
-        scale = Math.sqrt(varSum / MAX_NUM) || 1.0;
-    }
-    
-    for (let i = 1; i <= MAX_NUM; i++) {
-        zScores[i] = (values[i] - median) / scale;
-    }
-    return zScores;
-};
-
-/**
- * Sélection Gloutonne Déterministe basée sur le rang statistique et l'espacement d'entropie.
- * Zéro biais d'indice artificiel (pas de sinus sur i).
+ * Sélection Gloutonne Déterministe basée sur le score (pondéré par un cycle trigonométrique continu).
+ * Remplace tout concept de température et de tirage aléatoire !
  */
 const greedyDeterministicSelection = (
     vector: Float64Array,
@@ -87,35 +56,21 @@ const greedyDeterministicSelection = (
     entropy: number = 0.5
 ): number[] => {
     const candidates: { n: number, score: number }[] = [];
+    // Dynamic exploration parameters continuously derived from the entropy score
+    const dynamicAmp = 0.05 + 0.20 * entropy;
+    const dynamicFreq = 0.05 + 0.10 * (1.0 - entropy);
     
     for (let i = 1; i <= MAX_NUM; i++) {
         const rawScore = vector[i];
         if (rawScore > 0) {
-            candidates.push({ n: i, score: rawScore });
+            const modulation = 1.0 + dynamicAmp * Math.sin(i * dynamicFreq + phaseShift);
+            const adjustedScore = rawScore * modulation;
+            candidates.push({ n: i, score: adjustedScore });
         }
     }
     
     candidates.sort((a, b) => b.score - a.score);
-
-    if (phaseShift === 0.0 || candidates.length <= count) {
-        return candidates.slice(0, count).map(c => c.n).sort((a, b) => a - b);
-    }
-
-    // Pour les scénarios d'exploration (phaseShift > 0), sélection déterministe par espacement de rang
-    const selected: number[] = [];
-    const step = 1.0 + (entropy * (phaseShift / Math.PI));
-    let currIdx = 0;
-    const pool = [...candidates];
-
-    while (selected.length < count && pool.length > 0) {
-        const idxToTake = Math.min(pool.length - 1, Math.floor(currIdx));
-        selected.push(pool[idxToTake].n);
-        pool.splice(idxToTake, 1);
-        currIdx += step;
-        if (currIdx >= pool.length) currIdx = 0;
-    }
-
-    return selected.sort((a, b) => a - b);
+    return candidates.slice(0, count).map(c => c.n).sort((a, b) => a - b);
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -167,83 +122,48 @@ export async function generatePlatinumPredictionCore(
     let breakdowns = masterPred.breakdown || {};
     const localFeatures = await extractFeatures(drawName, history);
 
-    // 2. CONSTRUCTION DU VECTEUR CONSENSUS (AVEC STANDARDISATION PAR Z-SCORES ROBUSTES)
+    // 2. CONSTRUCTION DU VECTEUR CONSENSUS
     const consensusVector = new Float64Array(MAX_NUM + 1);
     const momentumVector = new Float64Array(MAX_NUM + 1);
     const gapVector = new Float64Array(MAX_NUM + 1);
     const spectralVector = new Float64Array(MAX_NUM + 1);
     
-    // Vecteurs individuels par composante
-    const vFreq = new Float64Array(MAX_NUM + 1);
-    const vGap = new Float64Array(MAX_NUM + 1);
-    const vMomentum = new Float64Array(MAX_NUM + 1);
-    const vSpectral = new Float64Array(MAX_NUM + 1);
-    const vAi = new Float64Array(MAX_NUM + 1);
-    const vFractal = new Float64Array(MAX_NUM + 1);
-    const vBayes = new Float64Array(MAX_NUM + 1);
-    const vMarkov = new Float64Array(MAX_NUM + 1);
-    const vTemporal = new Float64Array(MAX_NUM + 1);
-    const vSpatial = new Float64Array(MAX_NUM + 1);
-    const vAffinity = new Float64Array(MAX_NUM + 1);
-
-    for (let i = 1; i <= MAX_NUM; i++) {
-        const bd = breakdowns[i] || {};
-        vFreq[i] = bd.frequency || (localFeatures.freqMap[i] * (100 / history.length)) || 0;
-        const currentGap = localFeatures.gapsMap[i] || 0;
-        vGap[i] = bd.gap || (currentGap > 0 ? (history.length / currentGap) : 0);
-        vMomentum[i] = bd.momentum || (localFeatures.momentumMap[i] * 10) || 0;
-        vSpectral[i] = bd.spectral || (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
-        vAi[i] = bd.bayes || 0;
-        vFractal[i] = bd.fractal || 0;
-        vBayes[i] = bd.bayes || 0;
-        vMarkov[i] = bd.markov || (localFeatures.markovMap[i] * 10) || 0;
-        vTemporal[i] = bd.temporal || 0;
-        vSpatial[i] = bd.spatial || 0;
-        vAffinity[i] = bd.affinity || 0;
-
-        momentumVector[i] = vMomentum[i];
-        gapVector[i] = vGap[i];
-        spectralVector[i] = vSpectral[i];
-    }
-
-    // Standardisation par Z-scores robustes pour chaque canal de signal
-    const zFreq = computeRobustZScores(vFreq);
-    const zGap = computeRobustZScores(vGap);
-    const zMomentum = computeRobustZScores(vMomentum);
-    const zSpectral = computeRobustZScores(vSpectral);
-    const zAi = computeRobustZScores(vAi);
-    const zFractal = computeRobustZScores(vFractal);
-    const zBayes = computeRobustZScores(vBayes);
-    const zMarkov = computeRobustZScores(vMarkov);
-    const zTemporal = computeRobustZScores(vTemporal);
-    const zSpatial = computeRobustZScores(vSpatial);
-    const zAffinity = computeRobustZScores(vAffinity);
-
-    const rawSums = new Float64Array(MAX_NUM + 1);
-    const fracSpec = new Float64Array(MAX_NUM + 1);
-    const quantAi = new Float64Array(MAX_NUM + 1);
     let maxRawSum = Number.EPSILON;
     let maxFractalSpectral = Number.EPSILON;
     let maxQuantumAi = Number.EPSILON;
+    
+    const rawSums = new Float64Array(MAX_NUM + 1);
+    const fracSpec = new Float64Array(MAX_NUM + 1);
+    const quantAi = new Float64Array(MAX_NUM + 1);
 
     for (let i = 1; i <= MAX_NUM; i++) {
-        // Moyenne des Z-scores robustes équilibrés
-        const zComposite = (
-            zFreq[i] + zGap[i] + zMomentum[i] + zSpectral[i] +
-            zAi[i] + zFractal[i] + zBayes[i] + zMarkov[i] +
-            zTemporal[i] + zSpatial[i] + zAffinity[i]
-        ) / 11.0;
+        const bd = breakdowns[i] || {};
+        const freq = bd.frequency || (localFeatures.freqMap[i] * (100 / history.length)) || 0;
+        const currentGap = localFeatures.gapsMap[i] || 0;
+        const gap = bd.gap || (currentGap > 0 ? (history.length / currentGap) : 0);
+        const momentum = bd.momentum || (localFeatures.momentumMap[i] * 10) || 0;
+        const spectral = bd.spectral || (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
+        const ai = bd.bayes || 0;
+        const fractal = bd.fractal || 0;
+        const bayes = bd.bayes || 0;
+        const markov = bd.markov || (localFeatures.markovMap[i] * 10) || 0;
+        const temporal = bd.temporal || 0;
+        const spatial = bd.spatial || 0;
+        const affinity = bd.affinity || 0;
 
-        // Projection logistique continue
-        const rawSum = (1.0 / (1.0 + safeExp(-zComposite))) * 100.0;
+        momentumVector[i] = momentum;
+        gapVector[i] = gap;
+        spectralVector[i] = spectral;
+
+        const rawSum = freq + gap + momentum + spectral + ai + fractal + bayes + markov + temporal + spatial + affinity;
         rawSums[i] = rawSum;
         if (rawSum > maxRawSum) maxRawSum = rawSum;
 
-        const fs = zFractal[i] * zSpectral[i];
+        const fs = fractal * spectral;
         fracSpec[i] = fs;
         if (fs > maxFractalSpectral) maxFractalSpectral = fs;
 
-        const qa = zSpatial[i] * zAi[i];
+        const qa = spatial * ai;
         quantAi[i] = qa;
         if (qa > maxQuantumAi) maxQuantumAi = qa;
     }

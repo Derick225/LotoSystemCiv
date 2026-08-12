@@ -99,9 +99,6 @@ export const evolveNeuralDNACore = async (
   report: TrainingReport;
   isGeneralizable?: boolean | "unverifiable";
   overfittingRatio?: number;
-  rejectionProbability?: number;
-  holdoutScore?: number;
-  trainScore?: number;
   firstPredictionDNASnapshot?: any;
 }> => {
   const optType = options.optimizerType || "pso";
@@ -286,9 +283,6 @@ export const evolveNeuralDNACore = async (
   let overfittingRatio = 1;
   let isGeneralizable: boolean | "unverifiable" = "unverifiable";
 
-  let holdoutScoreVal: number | undefined;
-  let trainScoreVal: number | undefined;
-
   if (isHoldoutVerifiable) {
     const holdoutReport = await runBacktestTraining(
       drawName,
@@ -305,8 +299,6 @@ export const evolveNeuralDNACore = async (
       finalWeightsBeforeVerification
     );
 
-    holdoutScoreVal = holdoutReport.score;
-    trainScoreVal = trainReport.score;
     overfittingRatio = trainReport.score / (holdoutReport.score || 1);
 
     const trainErrors = trainReport.history.map((h) => 5.0 - h.hitCount);
@@ -348,9 +340,6 @@ export const evolveNeuralDNACore = async (
     report: newReport,
     isGeneralizable,
     overfittingRatio: parseFloat(overfittingRatio.toFixed(3)),
-    rejectionProbability: parseFloat(rejectionProbability.toFixed(3)),
-    holdoutScore: holdoutScoreVal !== undefined ? parseFloat(holdoutScoreVal.toFixed(2)) : undefined,
-    trainScore: trainScoreVal !== undefined ? parseFloat(trainScoreVal.toFixed(2)) : undefined,
     firstPredictionDNASnapshot,
   };
 };
@@ -369,9 +358,6 @@ export const evolveNeuralDNA = async (
   report: TrainingReport;
   isGeneralizable?: boolean | "unverifiable";
   overfittingRatio?: number;
-  rejectionProbability?: number;
-  holdoutScore?: number;
-  trainScore?: number;
   firstPredictionDNASnapshot?: any;
 }> => {
   const optType = options.optimizerType || "pso";

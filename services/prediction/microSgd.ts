@@ -116,9 +116,6 @@ export const applyDeterministicMicroSgd = async (
   let attempted = 0;
 
   for (let t = K - 1; t >= 0; t--) {
-    // Yield to UI event loop to keep screen fluid during SGD optimization
-    await new Promise(r => setTimeout(r, 0));
-
     const targetDraw = history[t];
     const subHistory = history.slice(t + 1);
     if (subHistory.length < 5) continue;

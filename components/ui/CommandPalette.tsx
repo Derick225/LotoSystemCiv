@@ -5,6 +5,7 @@ import {
   Zap,
   LayoutGrid,
   Terminal,
+  Wallet,
   Settings,
   Activity,
 } from "lucide-react";
@@ -41,35 +42,35 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       label: "Aller à la Station",
       icon: <LayoutGrid size={16} />,
       group: "Navigation",
-      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { view: 'home' } })),
+      action: () => onNavigate("home"),
     },
     {
       id: "nav-predictive",
-      label: "Aller à l'Oracle",
+      label: "Aller aux Prédictions",
       icon: <Activity size={16} />,
       group: "Navigation",
-      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Oracle' } })),
+      action: () => onNavigate("predictive"),
     },
     {
-      id: "nav-topologie",
-      label: "Aller à la Topologie",
+      id: "nav-ensemble",
+      label: "Aller à l'Ensemble",
       icon: <Terminal size={16} />,
       group: "Navigation",
-      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Topologie' } })),
+      action: () => onNavigate("ensemble"),
     },
     {
       id: "nav-backtest",
-      label: "Aller aux Simulations",
+      label: "Aller au Backtest",
       icon: <Zap size={16} />,
       group: "Navigation",
-      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Simulation' } })),
+      action: () => onNavigate("backtest"),
     },
     {
-      id: "nav-forensic",
-      label: "Aller au Forensic",
-      icon: <Activity size={16} />,
+      id: "nav-wallet",
+      label: "Mon Portefeuille",
+      icon: <Wallet size={16} />,
       group: "Navigation",
-      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Forensic' } })),
+      action: () => onAction("wallet"),
     },
     {
       id: "sys-scan",
@@ -94,7 +95,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       icon: <Terminal size={16} />,
       group: "Tirages",
       action: () => {
-        window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { view: 'home', drawName: d.name } }));
+        setDrawName(d.name);
       },
     })),
   ];

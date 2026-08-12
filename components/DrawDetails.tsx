@@ -14,7 +14,6 @@ import {
   Clock,
   Navigation,
   Brain,
-  ArrowLeft,
 } from "lucide-react";
 import { useToast } from "./ui/Toast";
 import { LocalErrorBoundary } from "./ui/LocalErrorBoundary";
@@ -77,20 +76,6 @@ export const DrawDetails: React.FC = () => {
 
   // Custom Sync Status Hook Usage
   const { isOnline, dbConnection } = useSyncStatus();
-
-  // Préchargement en arrière-plan de tous les modules lourds dès que le navigateur est inactif
-  useEffect(() => {
-    const idleCallback = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 1000));
-    idleCallback(() => {
-      Object.values(tabPreloaders).forEach((preload) => {
-        try {
-          preload();
-        } catch (e) {
-          console.warn("[DrawDetails] Échec du préchargement de l'onglet en tâche de fond :", e);
-        }
-      });
-    });
-  }, []);
 
   // Système de Navigation Réactif (Sub-Tab Propagation)
   useEffect(() => {
@@ -173,20 +158,6 @@ export const DrawDetails: React.FC = () => {
 
   return (
     <div className="space-y-6 md:space-y-8 animate-fade-in pb-20 w-full overflow-x-hidden font-sans">
-      {/* Navigation Breadcrumb / Retour */}
-      <div className="flex items-center gap-2 md:px-2 pt-2">
-        <button 
-          onClick={() => {
-             audioEngine.play("click");
-             window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { view: 'home' } }));
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-900/40 hover:bg-slate-800 border border-white/5 hover:border-white/10 rounded-xl text-slate-400 hover:text-white transition-all shadow-sm group active:scale-95"
-        >
-          <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-xs font-black uppercase tracking-widest">Retour Station</span>
-        </button>
-      </div>
-
       {/* Header Contextuel HPC */}
       <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-4 md:gap-6 bg-slate-900/60 p-5 md:p-8 rounded-3xl md:rounded-3xl border border-white/5 backdrop-blur-xl w-full shadow-2xl relative overflow-hidden">
         {/* Background Grid FX */}
@@ -345,7 +316,7 @@ export const DrawDetails: React.FC = () => {
 
       {/* Navigation Modulaire - Sticky & Scrollable */}
       <div className="sticky top-[104px] md:top-[120px] z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-3 px-3 md:mx-0 md:px-0">
-        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-[2rem] md:rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full snap-x snap-mandatory">
+        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-[2rem] md:rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -353,7 +324,7 @@ export const DrawDetails: React.FC = () => {
               onMouseEnter={() => tabPreloaders[t.id as MainTab]?.()}
               onTouchStart={() => tabPreloaders[t.id as MainTab]?.()}
               className={`
-                flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2.5 md:py-3.5 rounded-[1.8rem] md:rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden snap-center
+                flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2.5 md:py-3.5 rounded-[1.8rem] md:rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden
                 ${
                   activeMainTab === t.id
                     ? "bg-white dark:bg-slate-700 shadow-lg text-indigo-600 dark:text-white scale-105 z-10 font-bold"

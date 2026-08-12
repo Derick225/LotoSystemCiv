@@ -5,7 +5,6 @@ import React, {
   useMemo,
   useRef,
   useCallback,
-  useTransition,
 } from "react";
 import {
   getNextScheduledDraw,
@@ -49,6 +48,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../utils/audioEngine";
 import { SLOT_CONFIG } from "../constants";
 
+import { GlobalMacroPredictionView } from "./GlobalMacroPredictionView";
 
 interface SummaryItem {
   time: string;
@@ -60,7 +60,185 @@ interface GlobalDashboardProps {
   onSelectDraw: (draw: Draw) => void;
 }
 
+const MetaLearningIndicator = React.memo(() => {
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const calibration = useNexusStore((state) => state.calibration);
+  const isForensicOptimized = useNexusStore(
+    (state) => state.isForensicOptimized,
+  );
+  const setForensicOptimized = useNexusStore(
+    (state) => state.setForensicOptimized,
+  );
+  const { showToast } = useToast();
 
+  const strategyBalance = useMemo(() => {
+    if (!globalWeights || Object.keys(globalWeights).length === 0) return 50;
+    const freq = globalWeights.frequency || 0;
+    const gap = globalWeights.gap || 0;
+    const total = freq + gap;
+    if (total === 0) return 50;
+    return Math.round((freq / total) * 100);
+  }, [globalWeights]);
+
+  const confidence = useMemo(() => {
+    const baseConfidence = calibration?.reliability || 75;
+    if (!globalWeights) return baseConfidence;
+    const values = Object.values(globalWeights).filter(
+      (v) => typeof v === "number",
+    ) as number[];
+    if (values.length === 0) return baseConfidence;
+    const maxWeight = Math.max(...values);
+    // Continuous boost: bounded between 0 and 15 based on the max weight deviation
+    const boost = 15.0 * Math.max(0, Math.min(1.0, (maxWeight - 0.2) / 0.5));
+    return Math.min(99, baseConfidence + boost);
+  }, [globalWeights, calibration]);
+
+  // Using a continuous sigmoid-based activation concept instead of strict binary,
+  // but keeping boolean for UI styling flags.
+  const shadowIntensity = Math.min(
+    1.0,
+    Math.max(0.0, (globalWeights?.fractal || 0) * 10.0),
+  );
+  const isShadowActive = shadowIntensity > 0.3;
+
+  return (
+    <div className="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-3xl md:rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
+      <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-20 -mt-20"></div>
+
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 relative z-10">
+        <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto">
+          <div className="p-2.5 md:p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30 shrink-0">
+            <BrainCircuit className="w-5 h-5 md:w-6 md:h-6 text-indigo-400 animate-pulse-slow" />
+          </div>
+          <div>
+            <h3 className="text-[10px] md:text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+              Méta-Apprentissage{" "}
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] md:text-[9px] rounded-full border border-emerald-500/20">
+                ACTIF
+              </span>
+            </h3>
+            <p className="text-[9px] md:text-[10px] text-slate-400 font-medium mt-0.5 md:mt-1">
+              Optimisation dynamique en temps réel
+            </p>
+          </div>
+        </div>
+
+        <div className="flex-1 w-full flex flex-col gap-2">
+          <div className="flex justify-between text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-500">
+            <span className={strategyBalance < 40 ? "text-indigo-400" : ""}>
+              Écart
+            </span>
+            <span className={strategyBalance > 60 ? "text-indigo-400" : ""}>
+              Fréquence
+            </span>
+          </div>
+          <div className="h-1.5 md:h-2 bg-slate-800 rounded-full overflow-hidden relative">
+            <motion.div
+              initial={{ width: "50%" }}
+              animate={{ width: `${strategyBalance}%` }}
+              transition={{ duration: 1.5, ease: "easeOut" }}
+              className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-indigo-500"
+            />
+            <motion.div
+              initial={{ left: "50%" }}
+              animate={{ left: `${strategyBalance}%` }}
+              transition={{ duration: 1.5, ease: "easeOut" }}
+              className="absolute top-0 w-1 h-full bg-white shadow-[0_0_10px_white]"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Bouton Toggle Optimisation Forensic interactif et animé */}
+          <button
+            onClick={() => {
+              setForensicOptimized(!isForensicOptimized);
+              try {
+                audioEngine.play("success");
+              } catch (e) {}
+              showToast(
+                `Optimisation Forensic ${!isForensicOptimized ? "activée" : "désactivée"} avec succès.`,
+                !isForensicOptimized ? "success" : "info",
+              );
+            }}
+            className={`flex items-center gap-2 px-3 py-2 border rounded-2xl transition-all duration-300 hover:scale-105 active:scale-95 shadow-md relative overflow-hidden group cursor-pointer ${
+              isForensicOptimized
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/15"
+                : "bg-black/30 border-white/5 text-slate-400 hover:text-slate-200"
+            }`}
+            title="Cliquer pour activer/désactiver l'intégration d'autopsies et ajustements passés"
+          >
+            <Brain
+              size={14}
+              className={`transition-transform duration-500 ${
+                isForensicOptimized
+                  ? "animate-pulse text-emerald-400 rotate-[360deg] scale-110"
+                  : "text-slate-400 group-hover:scale-110"
+              }`}
+            />
+            <div className="text-left leading-none">
+              <span className="text-[7px] text-slate-500 font-black uppercase tracking-widest block">
+                Forensic
+              </span>
+              <span
+                className={`text-[10px] font-black uppercase mt-0.5 transition-colors duration-300 ${
+                  isForensicOptimized ? "text-emerald-400" : "text-slate-400"
+                }`}
+              >
+                {isForensicOptimized ? "Optimisé" : "Désactivé"}
+              </span>
+            </div>
+            {/* Indication visuelle de statut sous forme d'interrupteur mini */}
+            <div
+              className={`w-7 h-4 rounded-full transition-colors duration-300 relative flex items-center p-0.5 ml-1 ${
+                isForensicOptimized ? "bg-emerald-500" : "bg-slate-600"
+              }`}
+            >
+              <div
+                className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform duration-300 ease-out ${
+                  isForensicOptimized ? "translate-x-3" : "translate-x-0"
+                }`}
+              />
+            </div>
+          </button>
+
+          {isShadowActive && (
+            <div className="flex items-center gap-2 bg-purple-500/10 px-3 py-2 rounded-xl border border-purple-500/20">
+              <Layers className="w-4 h-4 text-purple-400" />
+              <span className="text-[8px] text-purple-300 font-black uppercase tracking-widest">
+                Shadow
+              </span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-white/5">
+            <Zap className="w-4 h-4 text-yellow-400" />
+            <div className="flex flex-col">
+              <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">
+                Confiance IA
+              </span>
+              <span className="text-lg font-black text-white font-mono">
+                {confidence}%
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 bg-indigo-900/20 px-4 py-2 rounded-xl border border-indigo-500/20">
+            <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
+            <div className="flex flex-col">
+              <span className="text-[8px] text-indigo-300 font-black uppercase tracking-widest">
+                Neural Net
+              </span>
+              <span className="text-[10px] font-black text-white">
+                IA HYBRIDE ACTIVE
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const LatestResultHero = React.memo(
   ({ result, onAnalyze }: { result: DrawResult; onAnalyze: () => void }) => {
@@ -346,7 +524,6 @@ const IsolatedNextDrawWidget = React.memo(() => {
 export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
   ({ onSelectDraw }) => {
     const { showToast } = useToast();
-    const [isPending, startTransition] = useTransition();
     const regime = useNexusStore((state) => state.regime);
     const volatility = useNexusStore((state) => state.volatility);
     const refreshData = useNexusStore((state) => state.refreshData);
@@ -373,6 +550,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     ];
     const [selectedDay, setSelectedDay] = useState<string>(
       daysOrder[new Date().getDay()],
+    );
+    const [dashboardTab, setDashboardTab] = useState<"schedule" | "macro">(
+      "schedule",
     );
     const { data: summary = [], isLoading: loadingSummary } =
       useDailySummary(selectedDay);
@@ -640,7 +820,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
               </button>
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex flex-col gap-6 w-full">
+            <MetaLearningIndicator />
+          </div>
+        )}
 
         {!isEmptyState && (
           <>
@@ -649,7 +833,50 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
               <IsolatedNextDrawWidget />
             </div>
 
-            <section className="mt-12 md:mt-16">
+            {/* TAB SELECTOR FOR THE HOME CONSOLE */}
+            <div className="flex gap-6 border-b border-slate-200/40 dark:border-slate-800 pb-3 mt-12 px-2 md:px-4">
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDashboardTab("schedule");
+                }}
+                className={`text-xs md:text-sm font-black uppercase tracking-widest pb-3 relative transition-colors ${
+                  dashboardTab === "schedule"
+                    ? "text-indigo-500"
+                    : "text-slate-400 hover:text-slate-300"
+                }`}
+              >
+                Séquences du Jour
+                {dashboardTab === "schedule" && (
+                  <motion.div
+                    layoutId="dashboardTabUnderline"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500"
+                  />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDashboardTab("macro");
+                }}
+                className={`text-xs md:text-sm font-black uppercase tracking-widest pb-3 relative transition-colors ${
+                  dashboardTab === "macro"
+                    ? "text-indigo-500 animate-pulse"
+                    : "text-slate-400 hover:text-slate-300"
+                }`}
+              >
+                Convergence Globale (ALL)
+                {dashboardTab === "macro" && (
+                  <motion.div
+                    layoutId="dashboardTabUnderline"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500"
+                  />
+                )}
+              </button>
+            </div>
+
+            {dashboardTab === "schedule" ? (
+              <section className="mt-12 md:mt-16">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-8 md:mb-10 px-2 md:px-4">
                   <div className="text-center md:text-left w-full">
                     <h2 className="text-2xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">
@@ -681,18 +908,16 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                 </div>
 
                 {/* Day Selector - Scrollable horizontal sur mobile */}
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2 snap-x snap-mandatory">
+                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2">
                   {uiDays.map((d) => (
                     <button
                       key={d}
                       onClick={() => {
                         audioEngine.play("click");
-                        startTransition(() => {
-                          setSelectedDay(d);
-                        });
+                        setSelectedDay(d);
                       }}
                       className={`
-                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0 btn-reactive snap-center
+                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
                                           ${
                                             selectedDay === d
                                               ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105"
@@ -831,6 +1056,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                       })}
                 </div>
               </section>
+            ) : (
+              <div className="mt-12 md:mt-16">
+                <GlobalMacroPredictionView />
+              </div>
+            )}
 
             {/* Removed patterns and meta learning sections */}
           </>

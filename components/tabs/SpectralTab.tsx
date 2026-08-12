@@ -253,7 +253,7 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
       </div>
 
-      {/* CWT & DWT: Hybrid Wavelet Transform Card */}
+      {/* CWT: Continuous Wavelet Transform Card */}
       {wavelet && wavelet.length > 0 && (
         <div className="glass-card neural-border p-6 rounded-3xl shadow-sm relative overflow-hidden border border-slate-100 dark:border-slate-800 bg-slate-900/40">
           <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-[80px] -mr-10 -mt-10"></div>
@@ -266,17 +266,17 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     size={14}
                     className="text-amber-500 dark:text-amber-400"
                   />{" "}
-                  Moteur de Décomposition Hybride CWT / DWT (Db4 & Haar)
+                  Décomposition Multi-échelle Continue (CWT)
                 </div>
                 <h4 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
-                  Analyse Temps-Fréquence & Dénoyage Multi-résolution par Ondelettes
+                  Analyse Temps-Fréquence d'Ondelette Continue (CWT)
                 </h4>
               </div>
               <div className="bg-amber-500/10 px-4 py-2 rounded-2xl border border-amber-500/20 flex items-center gap-3">
                 <Sparkles size={16} className="text-amber-400" />
                 <div>
                   <div className="text-[9px] font-black uppercase tracking-widest text-amber-500">
-                    Résonance Hybride
+                    Numéros en Résonance
                   </div>
                   <div className="text-sm font-mono font-black text-amber-400">
                     {resonantWaveletsCount} Actifs
@@ -286,17 +286,20 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             </div>
 
             <p className="text-slate-500 dark:text-slate-400 text-xs font-medium leading-relaxed">
-              Le signal binaire historique de chaque numéro est d'abord décomposé par{" "}
-              <strong> Transformée en Ondelettes Discrète (DWT)</strong> à l'aide de filtres Daubechies (Db4) et Haar.{" "}
-              Un dénoyage adaptatif <strong>VisuShrink (Soft Thresholding)</strong> est appliqué pour éliminer le bruit haute fréquence.{" "}
-              Les coefficients de détails DWT mesurent les <strong>ruptures d'inertie de phase transitoires</strong> (changements brutaux de tendance locale),{" "}
-              tandis que la <strong>Transformée en Ondelettes Continue (CWT de Morlet)</strong> est calculée sur le signal épuré pour quantifier la dérive d'énergie à long terme.{" "}
-              L'intégration de ces deux mondes élimine les faux signaux et cible la résonance cyclique pure.
+              Contrairement à la transformée de Fourier classique (FFT) qui
+              supprime toute coordonnée temporelle, la
+              <strong> Transformée en Ondelettes Continues (CWT)</strong>{" "}
+              utilise des ondelettes de Morlet complexes décalées et étirées en
+              continu (échelles de 1.5 à 12.0 tirages). Elle détecte
+              simultanément <em>quand</em> et <em>à quelle fréquence</em> les
+              paquets d'énergie probabiliste s'accumulent pour chaque numéro,
+              révélant des micro-cycles non-stationnaires indétectables par SVD
+              simple.
             </p>
 
             <div className="space-y-4">
               <div className="text-xs font-black uppercase tracking-wider text-slate-400">
-                Top 5 - Leader Énergétique Combiné (CWT dénoyée + Ruptures DWT) :
+                Top 5 - Forte Énergie d'Ondelette continue (CWT) :
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                 {highWavelet.map((w, index) => {
@@ -331,22 +334,6 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                           </div>
                         </div>
                       </div>
-
-                      <div className="space-y-1 text-[9px] font-semibold text-slate-400">
-                        <div className="flex justify-between">
-                          <span>Tendance CWT dénoyée:</span>
-                          <span className="font-mono text-slate-300">{w.denoisedEnergy}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Rupture de Phase (DWT):</span>
-                          <span className="font-mono text-slate-300">{w.transientEnergy}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Période dominante:</span>
-                          <span className="font-mono text-amber-400">{w.dominantPeriod?.toFixed(1)}t</span>
-                        </div>
-                      </div>
-
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-1 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full ${isResonant ? "bg-amber-500" : "bg-indigo-500"}`}

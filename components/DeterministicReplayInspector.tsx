@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  useNexusHistory,
-  useNexusGlobalWeights,
-  useNexusTemporalDepth,
-} from "../store/useNexusStore";
+import { useNexusStore } from "../store/useNexusStore";
 import {
   Play,
   Pause,
@@ -40,9 +36,9 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const history = useNexusHistory();
-  const globalWeights = useNexusGlobalWeights();
-  const temporalDepth = useNexusTemporalDepth();
+  const history = useNexusStore((state) => state.history);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
 
   const cleanHistory = useMemo(() => {
     return purifyHistoryForDraw(drawName, history);

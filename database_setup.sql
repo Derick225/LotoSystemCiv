@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS public.algo_weights (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- D. UTILISATEURS
+CREATE TABLE IF NOT EXISTS public.user_preferences (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  watchlist INTEGER[],
+  saved_tickets JSONB,
+  settings JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- D2. ABONNEMENTS
 CREATE TABLE IF NOT EXISTS public.subscriptions (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -240,6 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_draw_regimes_lookup ON public.draw_regimes(draw_n
 ALTER TABLE public.draw_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_analytics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.algo_weights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
@@ -262,6 +272,7 @@ CREATE POLICY "Public Read Performance Metrics" ON public.model_performance_metr
 CREATE POLICY "Public Read Weights Config" ON public.model_weights_config FOR SELECT USING (true);
 
 -- Policies User
+CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
@@ -316,6 +327,7 @@ $$;
 -- 7. TRIGGERS & FUNCTIONS
 -- ==========================================
 CREATE OR REPLACE TRIGGER handle_updated_at_draw_results BEFORE UPDATE ON public.draw_results FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+CREATE OR REPLACE TRIGGER handle_updated_at_user_prefs BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_algo_weights BEFORE UPDATE ON public.algo_weights FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_transactions BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
 CREATE OR REPLACE TRIGGER handle_updated_at_subscriptions BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
@@ -326,6 +338,9 @@ CREATE OR REPLACE TRIGGER handle_updated_at_model_weights_config BEFORE UPDATE O
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
+  INSERT INTO public.user_preferences (user_id, settings)
+  VALUES (NEW.id, '{"theme": "dark", "sound": true}'::jsonb);
+  
   INSERT INTO public.subscriptions (user_id, status, plan, start_date, expires_at)
   VALUES (NEW.id, 'trial', 'premium', now(), now() + interval '30 days');
   

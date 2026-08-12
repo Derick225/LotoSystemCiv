@@ -795,7 +795,7 @@ export function runFractal(history: { gagnants: number[] }[]) {
  * réduit l'incertitude sur l'apparition du Numéro Y (Target) au tirage suivant.
  * Retourne les paires ayant la plus forte Entropie de Transfert.
  */
-export async function computeTransferEntropy(history: { gagnants: number[] }[], targetNumbers?: number[]) {
+export function computeTransferEntropy(history: { gagnants: number[] }[], targetNumbers?: number[]) {
     const N = Math.min(history.length, 500); // 500 tirages max pour pertinence
     // CORRECTION : Le seuil de bruit ne doit pas être 0.005. 
     // Il doit être dérivé de la résolution théorique de l'entropie pour N échantillons : 1 / log2(N)
@@ -816,18 +816,11 @@ export async function computeTransferEntropy(history: { gagnants: number[] }[], 
     const results = [];
     const targets = targetNumbers && targetNumbers.length > 0 ? targetNumbers : Array.from({length: 90}, (_, i) => i + 1);
 
-    let loopCount = 0;
     for (const Y of targets) {
         const ySeries = occurrences[Y];
         
         for (let X = 1; X <= 90; X++) {
             if (X === Y) continue;
-            
-            // Redonner périodiquement la main au thread de rendu graphique pour fluidité absolue
-            loopCount++;
-            if (loopCount % 200 === 0) {
-                await new Promise(r => setTimeout(r, 0));
-            }
             
             const xSeries = occurrences[X];
             
@@ -1247,172 +1240,6 @@ export function computeContinuousWaveletTransform(signal: number[], scales: numb
     return coeffs;
 }
 
-/**
- * Single-level 1D Discrete Wavelet Transform (DWT) with periodic boundary conditions.
- */
-export function dwt1D(signal: number[], wavelet: 'haar' | 'db4'): { approx: number[]; detail: number[] } {
-    const N = signal.length;
-    // Pad to even length if odd
-    const padded = N % 2 !== 0 ? [...signal, signal[N - 1]] : signal;
-    const len = padded.length;
-    
-    const approx: number[] = [];
-    const detail: number[] = [];
-    
-    if (wavelet === 'haar') {
-        const h0 = 1.0 / Math.sqrt(2);
-        const h1 = 1.0 / Math.sqrt(2);
-        const g0 = 1.0 / Math.sqrt(2);
-        const g1 = -1.0 / Math.sqrt(2);
-        
-        for (let i = 0; i < len; i += 2) {
-            approx.push(padded[i] * h0 + padded[i+1] * h1);
-            detail.push(padded[i] * g0 + padded[i+1] * g1);
-        }
-    } else {
-        // Daubechies 4 (Db4) coefficients calculated deterministically
-        const sqrt3 = Math.sqrt(3);
-        const denom = 4.0 * Math.sqrt(2);
-        const h = [
-            (1.0 + sqrt3) / denom,
-            (3.0 + sqrt3) / denom,
-            (3.0 - sqrt3) / denom,
-            (1.0 - sqrt3) / denom
-        ];
-        const g = [h[3], -h[2], h[1], -h[0]];
-        
-        for (let i = 0; i < len; i += 2) {
-            let aSum = 0;
-            let dSum = 0;
-            for (let k = 0; k < 4; k++) {
-                const idx = (i + k) % len;
-                aSum += padded[idx] * h[k];
-                dSum += padded[idx] * g[k];
-            }
-            approx.push(aSum);
-            detail.push(dSum);
-        }
-    }
-    
-    return { approx, detail };
-}
-
-/**
- * Single-level 1D Inverse Discrete Wavelet Transform (IDWT).
- */
-export function idwt1D(approx: number[], detail: number[], wavelet: 'haar' | 'db4'): number[] {
-    const N = approx.length;
-    const signal: number[] = Array(N * 2).fill(0);
-    
-    if (wavelet === 'haar') {
-        const h0 = 1.0 / Math.sqrt(2);
-        const h1 = 1.0 / Math.sqrt(2);
-        const g0 = 1.0 / Math.sqrt(2);
-        const g1 = -1.0 / Math.sqrt(2);
-        
-        for (let i = 0; i < N; i++) {
-            signal[2 * i] = approx[i] * h0 + detail[i] * g0;
-            signal[2 * i + 1] = approx[i] * h1 + detail[i] * g1;
-        }
-    } else {
-        const sqrt3 = Math.sqrt(3);
-        const denom = 4.0 * Math.sqrt(2);
-        const h = [
-            (1.0 + sqrt3) / denom,
-            (3.0 + sqrt3) / denom,
-            (3.0 - sqrt3) / denom,
-            (1.0 - sqrt3) / denom
-        ];
-        const g = [h[3], -h[2], h[1], -h[0]];
-        
-        const len = N * 2;
-        for (let i = 0; i < N; i++) {
-            const idx2 = 2 * i;
-            for (let k = 0; k < 4; k++) {
-                const outIdx = (idx2 + k) % len;
-                signal[outIdx] += approx[i] * h[k] + detail[i] * g[k];
-            }
-        }
-    }
-    
-    return signal;
-}
-
-/**
- * Multi-level Discrete Wavelet Transform (DWT) Decomposition.
- */
-export function decomposeDWT(signal: number[], levels: number, wavelet: 'haar' | 'db4'): {
-    approxs: number[][];
-    details: number[][];
-} {
-    const approxs: number[][] = [];
-    const details: number[][] = [];
-    
-    let currentSig = [...signal];
-    for (let l = 0; l < levels; l++) {
-        if (currentSig.length < 4 && wavelet === 'db4') break;
-        if (currentSig.length < 2) break;
-        
-        const { approx, detail } = dwt1D(currentSig, wavelet);
-        approxs.push(approx);
-        details.push(detail);
-        currentSig = approx;
-    }
-    
-    return { approxs, details };
-}
-
-/**
- * Multi-level Inverse Discrete Wavelet Transform (IDWT) Reconstruction.
- */
-export function reconstructDWT(approxs: number[][], details: number[][], wavelet: 'haar' | 'db4'): number[] {
-    if (approxs.length === 0) return [];
-    
-    let currentApprox = approxs[approxs.length - 1];
-    for (let l = approxs.length - 1; l >= 0; l--) {
-        const detail = details[l];
-        currentApprox = idwt1D(currentApprox, detail, wavelet);
-    }
-    
-    return currentApprox;
-}
-
-/**
- * Wavelet Denoising using VisuShrink soft thresholding of detail coefficients.
- */
-export function denoiseSignalWavelet(signal: number[], wavelet: 'haar' | 'db4' = 'db4'): number[] {
-    const N = signal.length;
-    if (N < 4) return [...signal];
-    
-    const maxLevels = Math.min(4, Math.floor(Math.log2(N)));
-    if (maxLevels === 0) return [...signal];
-    
-    const { approxs, details } = decomposeDWT(signal, maxLevels, wavelet);
-    if (details.length === 0) return [...signal];
-    
-    // Level 1 details for noise estimation
-    const level1Details = details[0];
-    const absDetails = level1Details.map(x => Math.abs(x));
-    absDetails.sort((a, b) => a - b);
-    const medianAbs = absDetails[Math.floor(absDetails.length / 2)] || 0.0;
-    
-    // Normalization factor 0.6745 derived from Gaussian standard deviation
-    const sigma = Math.max(1e-5, medianAbs / 0.6745);
-    
-    // VisuShrink threshold
-    const threshold = sigma * Math.sqrt(2.0 * Math.log(N));
-    
-    const thresholdedDetails = details.map(levelDetails => {
-        return levelDetails.map(d => {
-            const absD = Math.abs(d);
-            if (absD <= threshold) return 0.0;
-            return Math.sign(d) * (absD - threshold);
-        });
-    });
-    
-    return reconstructDWT(approxs, thresholdedDetails, wavelet).slice(0, N);
-}
-
 export function runContinuousWaveletTransformAnalysis(history: { gagnants: number[] }[]) {
     const N = Math.min(history.length, 128);
     if (N < 10) {
@@ -1420,99 +1247,30 @@ export function runContinuousWaveletTransformAnalysis(history: { gagnants: numbe
             number: i + 1,
             energy: 50,
             resonance: false,
-            dominantPeriod: 12.0,
-            denoisedEnergy: 50,
-            transientEnergy: 50,
-            phaseShift: 50
+            dominantPeriod: 12.0
         }));
     }
     
     const data = history.slice(0, N);
     const scales = [1.5, 3.0, 6.0, 12.0];
-    const rawResults: Array<{
-        number: number;
-        denoisedCWTEnergy: number;
-        rawDetailEnergy: number;
-        dominantPeriod: number;
-        signalEntropy: number;
-    }> = [];
-    
-    let maxDenoisedCWTEnergy = 1e-9;
-    let maxRawDetailEnergy = 1e-9;
+    const results = [];
+    let globalMax = 0;
 
     for (let num = 1; num <= 90; num++) {
-        // Binary occurrence signal: 1 if hit, -1 if miss
         const signal = data.map(d => (d.gagnants.includes(num) ? 1 : -1));
+        const scaleEnergies = computeContinuousWaveletTransform(signal, scales);
+        const totalEnergy = scaleEnergies.reduce((sum, e) => sum + e, 0);
         
-        // 1. DWT decomposition & detail/transient energy computation (Haar & Db4 combined)
-        const dwtDb4 = decomposeDWT(signal, Math.min(4, Math.floor(Math.log2(N))), 'db4');
-        let rawDetailEnergy = 0;
-        if (dwtDb4.details.length > 0) {
-            let totalCoeffs = 0;
-            dwtDb4.details.forEach(levelDetails => {
-                levelDetails.forEach(coeff => {
-                    rawDetailEnergy += coeff * coeff;
-                    totalCoeffs++;
-                });
-            });
-            rawDetailEnergy = totalCoeffs > 0 ? (rawDetailEnergy / totalCoeffs) : 0;
-        }
-        
-        // 2. Wavelet Denoising using VisuShrink
-        const denoisedSignal = denoiseSignalWavelet(signal, 'db4');
-        
-        // 3. Compute continuous wavelet transform (CWT) on the denoised signal (protects from HF noise)
-        const scaleEnergies = computeContinuousWaveletTransform(denoisedSignal, scales);
-        const denoisedCWTEnergy = scaleEnergies.reduce((sum, e) => sum + e, 0);
-        
-        // Find dominant period
-        let maxEnergyVal = -1;
-        let dominantPeriod = 6.0;
-        scaleEnergies.forEach((energyVal, sIdx) => {
-            if (energyVal > maxEnergyVal) {
-                maxEnergyVal = energyVal;
-                dominantPeriod = scales[sIdx];
-            }
-        });
-        
-        // 4. Calculate occurrence probability for dynamic Shannon entropy
-        const hitCount = signal.filter(x => x === 1).length;
-        const p = Math.max(0.01, Math.min(0.99, hitCount / N));
-        // Shannon Entropy of the binary signal
-        const signalEntropy = -(p * Math.log(p) + (1.0 - p) * Math.log(1.0 - p)) / Math.log(2.0);
-        
-        if (denoisedCWTEnergy > maxDenoisedCWTEnergy) maxDenoisedCWTEnergy = denoisedCWTEnergy;
-        if (rawDetailEnergy > maxRawDetailEnergy) maxRawDetailEnergy = rawDetailEnergy;
-        
-        rawResults.push({
-            number: num,
-            denoisedCWTEnergy,
-            rawDetailEnergy,
-            dominantPeriod,
-            signalEntropy
-        });
+        if (totalEnergy > globalMax) globalMax = totalEnergy;
+        results.push({ number: num, raw: totalEnergy });
     }
     
-    return rawResults.map(r => {
-        const normDenoisedCWT = r.denoisedCWTEnergy / maxDenoisedCWTEnergy;
-        const normRawDetail = r.rawDetailEnergy / maxRawDetailEnergy;
-        
-        // Alpha blends smooth trend (CWT) with local transients (DWT details)
-        // High entropy (chaotic) -> alpha shifts toward details to capture sudden shifts
-        // Low entropy (regular cyclic) -> alpha shifts toward denoised spectral trends
-        const alpha = 0.2 + 0.6 * r.signalEntropy; // Deterministic [0.2, 0.8] mapping
-        const combinedEnergy = (1.0 - alpha) * normDenoisedCWT + alpha * normRawDetail;
-        
-        return {
-            number: r.number,
-            energy: Math.round(combinedEnergy * 100),
-            resonance: combinedEnergy > 0.8,
-            dominantPeriod: r.dominantPeriod,
-            denoisedEnergy: Math.round(normDenoisedCWT * 100),
-            transientEnergy: Math.round(normRawDetail * 100),
-            phaseShift: Math.round(normRawDetail * 100) // Phase shift magnitude aligns with detail energy
-        };
-    }).sort((a, b) => b.energy - a.energy);
+    return results.map(r => ({
+        number: r.number,
+        energy: Math.round((r.raw / (globalMax || 1)) * 100),
+        resonance: (r.raw / (globalMax || 1)) > 0.8,
+        dominantPeriod: 6.0
+    })).sort((a,b) => b.energy - a.energy);
 }
 
 export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varianceThreshold?: number): number[][] {

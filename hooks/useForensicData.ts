@@ -1,11 +1,10 @@
-import { isFirebaseConfigured, db, auth } from "../services/firebaseClient";
-import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import { useState, useEffect, useCallback } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { getPredictionHistoryAsync, linkPredictionToResult, findMatchingResultForPrediction } from '../services/predictionHistoryService';
 import { getLocalForensicReports, performForensicAnalysis, saveForensicReport, healForensicReport } from '../services/postPredictionAnalysisService';
 import { getPlatinumHistory, performPlatinumAudit } from '../services/metaAnalystService';
 import { PredictionHistoryItem, ForensicReport, PlatinumAudit } from '../types';
+import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { useToast } from '../components/ui/Toast';
 import { syncForensicReports } from '../services/syncService';
 
@@ -32,20 +31,18 @@ export const useForensicData = (drawName: string) => {
             currentReports = currentReports.filter((r) => r.drawName === drawName);
 
             // Charger depuis Cloud si possible
-            if (isFirebaseConfigured() && navigator.onLine) {
+            if (isSupabaseConfigured() && navigator.onLine) {
                 try {
-                    const user = auth?.currentUser;
-                    if (user) {
-                        const q = query(
-                            collection(db, 'forensic_reports'),
-                            where('draw_name', '==', drawName),
-                            orderBy('created_at', 'desc')
-                        );
-                        const snapshot = await getDocs(q);
-                        
-                        if (!snapshot.empty) {
-                            snapshot.forEach((docSnap) => {
-                                const cr = { id: docSnap.id, ...docSnap.data() } as any;
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (session) {
+                        const { data: cloudReports } = await supabase
+                            .from('forensic_reports')
+                            .select('*')
+                            .eq('draw_name', drawName)
+                            .order('created_at', { ascending: false });
+
+                        if (cloudReports && cloudReports.length > 0) {
+                            cloudReports.forEach((cr: any) => {
                                 const existingIdx = currentReports.findIndex((r) => r.id === cr.id || r.predictionId === cr.prediction_id);
                                 const mappedReport = { ...cr.report_data, id: cr.id, date: cr.draw_date };
                                 if (existingIdx >= 0) {
@@ -57,7 +54,7 @@ export const useForensicData = (drawName: string) => {
                         }
                     }
                 } catch (e) {
-                    // Ignorer les erreurs de synchronisation réseau cloud en arrière-plan
+                    console.error("Failed to fetch cloud forensic reports", e);
                 }
             }
 

@@ -4,8 +4,7 @@ import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { generateMasterPrediction } from "./prediction/predictionFacade";
 import { useNexusStore } from "../store/useNexusStore";
 import { detectGameRegime } from "./mathService";
-import { getAlgoWeights, getDefaultWeights } from "./prediction/weightsManager";
-import type { AlgoKey, AlgoWeights } from "../shared/prediction.types";
+import { getAlgoWeights } from "./prediction/weightsManager";
 import type {
   TrainingReport,
   TrainingResult,
@@ -21,76 +20,6 @@ const BacktestInputSchema = z.object({
     .min(5, "Sample size must be at least 5")
     .max(500, "Sample size too large"),
 });
-
-// Calibration analytique saine in-sample, sans aucune fuite de données futures
-const calibrateWeightsInSample = (
-  baseWeights: AlgoWeights,
-  historyAtThatTime: DrawResult[]
-): AlgoWeights => {
-  const calibrated = { ...baseWeights };
-  if (historyAtThatTime.length < 5) return calibrated;
-
-  // Analyse statistique in-sample pure sur historyAtThatTime
-  const recentHistory = historyAtThatTime.slice(0, 15);
-  
-  // 1. Calcul de l'entropie de Shannon récente sur l'occurrence des numéros
-  const counts: Record<number, number> = {};
-  let totalNumbers = 0;
-  recentHistory.forEach(d => {
-    d.gagnants.forEach(n => {
-      counts[n] = (counts[n] || 0) + 1;
-      totalNumbers++;
-    });
-  });
-  let shannonEntropy = 0;
-  Object.values(counts).forEach(c => {
-    const p = c / totalNumbers;
-    shannonEntropy -= p * Math.log2(p);
-  });
-  const maxEntropy = Math.log2(Math.min(90, totalNumbers || 1));
-  const normEntropy = maxEntropy > 0 ? shannonEntropy / maxEntropy : 0.85;
-
-  // 2. Détection du régime de jeu in-sample
-  const regime = detectGameRegime(historyAtThatTime);
-  const hurst = regime.hurst ? parseFloat(regime.hurst.toString()) : 0.5;
-
-  // 3. Ajustement statistique continu
-  const structuralModifier = 1.0 + (1.0 - normEntropy) * 0.4;
-  const chaosModifier = 1.0 + normEntropy * 0.4;
-  const persistenceModifier = 1.0 + (hurst - 0.5) * 0.4;
-  const antipersistenceModifier = 1.0 + (0.5 - hurst) * 0.4;
-
-  const keys = Object.keys(calibrated) as AlgoKey[];
-  keys.forEach((key) => {
-    let factor = 1.0;
-
-    if (["markov", "gapSequence", "frequency", "gapPattern", "sequencePattern"].includes(key)) {
-      factor *= structuralModifier;
-    }
-    if (["temporal", "bayes", "spectral", "advancedTopology", "isolationAnomaly"].includes(key)) {
-      factor *= chaosModifier;
-    }
-    if (["momentum", "gapTrend", "gapCadence"].includes(key)) {
-      factor *= persistenceModifier;
-    }
-    if (["derivedNeighbor", "affinity", "interMonthlyResonance"].includes(key)) {
-      factor *= antipersistenceModifier;
-    }
-
-    calibrated[key] = (calibrated[key] ?? baseWeights[key] ?? 1.0) * factor;
-  });
-
-  // Normalisation déterministe stricte
-  let sum = 0;
-  keys.forEach(k => { sum += calibrated[k]; });
-  if (sum > 0) {
-    keys.forEach(k => {
-      calibrated[k] = (calibrated[k] / sum) * 100;
-    });
-  }
-
-  return calibrated;
-};
 
 // Calcul des métriques de classification (Precision, Recall, F1)
 const calculateClassMetrics = (hits: number[], totalPredictions: number, drawWinnersSize: number = 5) => {
@@ -272,14 +201,7 @@ export const runBacktestTraining = async (
   let hwrl_total = 0;
   const confidencesAndOutcomes: { conf: number; outcome: number }[] = [];
   
-  // Variables pour le HASARD UNIFORME DE CONTRÔLE
-  const randomDistribution = { zero: 0, one: 0, two: 0, three: 0, four: 0, five: 0 };
-  let totalRandomHits = 0;
-  let randomAtLeastOneHitCount = 0;
-  const randomHitCountsArray: number[] = [];
-  const randomPredictedArrays: number[][] = [];
-
-  const baseWeightsBacktest = customWeights || (await getAlgoWeights(drawName));
+  const weightsToUse = customWeights || (await getAlgoWeights(drawName));
 
   let foldScores: number[] = [];
   const windowScores: number[] = [];
@@ -297,15 +219,12 @@ export const runBacktestTraining = async (
 
     const historyAtThatTime = allResults.slice(trainDataStart);
 
-    // Élimination de la fuite de données : calibration in-sample dynamique pour chaque fold
-    const foldWeights = customWeights || calibrateWeightsInSample(baseWeightsBacktest, historyAtThatTime);
-
     const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
     const prediction = await generateMasterPrediction(
       drawName,
       historyAtThatTime,
       temporalDepth,
-      foldWeights,
+      weightsToUse,
       undefined,
       undefined,
       skipTraining,
@@ -315,30 +234,6 @@ export const runBacktestTraining = async (
     const actual = targetDraw.gagnants;
     const hits = predicted.filter((n) => actual.includes(n));
     const hitCount = hits.length;
-
-    // HASARD UNIFORME DE CONTRÔLE (Baseline déterministe)
-    const baselinePrng = new LCG(`${drawName}_random_baseline_fold_${idx}_${realIdx}`);
-    const randomPredicted: number[] = [];
-    while (randomPredicted.length < drawWinnersSize) {
-      const num = Math.floor(baselinePrng.next() * 90) + 1;
-      if (!randomPredicted.includes(num)) {
-        randomPredicted.push(num);
-      }
-    }
-    const randomHits = randomPredicted.filter((n) => actual.includes(n));
-    const randomHitCount = randomHits.length;
-
-    totalRandomHits += randomHitCount;
-    if (randomHitCount > 0) randomAtLeastOneHitCount++;
-    randomHitCountsArray.push(randomHitCount);
-    randomPredictedArrays.push(randomPredicted);
-
-    if (randomHitCount === 0) randomDistribution.zero++;
-    else if (randomHitCount === 1) randomDistribution.one++;
-    else if (randomHitCount === 2) randomDistribution.two++;
-    else if (randomHitCount === 3) randomDistribution.three++;
-    else if (randomHitCount === 4) randomDistribution.four++;
-    else if (randomHitCount >= 5) randomDistribution.five++;
 
     // --- CONTINUOUS TOPOLOGICAL LYAPUNOV LOSS CALCULATION ---
     // 1. Calcul de l'Exposant de Lyapunov sur l'historique dispo (Divergence fractale temporelle)
@@ -619,60 +514,6 @@ export const runBacktestTraining = async (
   trainingResults.forEach(r => { if (r.topologicalLoss !== undefined) totalTopoLoss += r.topologicalLoss; });
   const avgTopoLoss = totalTests > 0 ? (totalTopoLoss / totalTests) : 0;
 
-  // Calcul MRR / NDCG pour le hasard uniforme
-  let totalRandomMRR = 0;
-  let totalRandomNDCG = 0;
-  for (let i = 0; i < randomPredictedArrays.length; i++) {
-    const pred = randomPredictedArrays[i];
-    const act = actualArrays[i];
-    let mrrVal = 0, dcgVal = 0, idcgVal = 0;
-    for (let r = 0; r < pred.length; r++) {
-      if (act.includes(pred[r])) {
-        if (mrrVal === 0) mrrVal = 1 / (r + 1);
-        dcgVal += 1 / Math.log2(r + 2);
-      }
-      if (r < act.length) idcgVal += 1 / Math.log2(r + 2);
-    }
-    totalRandomMRR += mrrVal;
-    totalRandomNDCG += idcgVal > 0 ? dcgVal / idcgVal : 0;
-  }
-  const randomMRR = totalTests > 0 ? totalRandomMRR / totalTests : 0;
-  const randomNDCG = totalTests > 0 ? totalRandomNDCG / totalTests : 0;
-
-  // Test d'hypothèse statistique (Z-test de proportions unilatéral pour le taux de succès)
-  const n1 = totalTests;
-  const n2 = totalTests;
-  const p1 = atLeastOneHitCount / (n1 || 1);
-  const p2 = randomAtLeastOneHitCount / (n2 || 1);
-  
-  let zScore = 0;
-  let pValue = 0.5;
-  
-  if (n1 > 0 && n2 > 0) {
-    const p_pooled = (atLeastOneHitCount + randomAtLeastOneHitCount) / (n1 + n2);
-    if (p_pooled > 0 && p_pooled < 1) {
-      const se = Math.sqrt(p_pooled * (1 - p_pooled) * (1 / n1 + 1 / n2));
-      zScore = (p1 - p2) / (se || Number.EPSILON);
-      
-      const getNormalCDF = (x: number) => {
-        const p_val = 0.2316419;
-        const b1 = 0.319381530;
-        const b2 = -0.356563782;
-        const b3 = 1.781477937;
-        const b4 = -1.821255978;
-        const b5 = 1.330274429;
-        const absX = Math.abs(x);
-        const t = 1.0 / (1.0 + p_val * absX);
-        const y = 1.0 - (((((b5 * t + b4) * t + b3) * t + b2) * t + b1) * t) * Math.exp(-0.5 * x * x) / Math.sqrt(2.0 * Math.PI);
-        return x >= 0 ? y : 1.0 - y;
-      };
-      
-      pValue = 1.0 - getNormalCDF(zScore);
-    }
-  }
-  
-  const isBetterThanRandom = p1 > p2 && pValue < 0.05;
-
   return {
     totalTests,
     totalHits: totalHitsAcc,
@@ -703,18 +544,5 @@ export const runBacktestTraining = async (
       successRate: [parseFloat(CIs.successRate[0].toFixed(1)), parseFloat(CIs.successRate[1].toFixed(1))],
       score: scoreCI, // IC empirique rigoureux
     },
-    randomBaseline: {
-      totalHits: totalRandomHits,
-      averageHits: parseFloat((totalRandomHits / (totalTests || 1)).toFixed(2)),
-      successRate: totalTests > 0 ? Math.round((randomAtLeastOneHitCount / totalTests) * 100) : 0,
-      winDistribution: randomDistribution,
-      mrr: parseFloat(randomMRR.toFixed(3)),
-      ndcg: parseFloat(randomNDCG.toFixed(3)),
-      significanceTest: {
-        isBetterThanRandom,
-        pValue: parseFloat(pValue.toFixed(4)),
-        zScore: parseFloat(zScore.toFixed(3)),
-      }
-    }
   };
 };

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { useNexusHistory, useNexusLoading } from "../../store/useNexusStore";
+import { useNexusStore } from "../../store/useNexusStore";
 import { NumberBall } from "../NumberBall";
 import { gapSequencePatternService } from "../../services/prediction/gapSequencePatternService";
 import { sequencePatternAnalyzer } from "../../services/prediction/sequencePatternAnalyzer";
@@ -38,8 +38,8 @@ import { lotteryService } from "../../services/lotteryService";
 import { generateMasterPrediction } from "../../services/predictionEngine";
 
 export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
-  const history = useNexusHistory();
-  const loading = useNexusLoading();
+  const history = useNexusStore((state) => state.history);
+  const loading = useNexusStore((state) => state.loading);
 
   const [selectedNum, setSelectedNum] = useState<number>(1);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -178,16 +178,11 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     }
   };
 
-  const historySignature = useMemo(() => {
-    if (!history || history.length === 0) return "";
-    return `${drawName}_${history.length}_${history[0]?.id || ""}`;
-  }, [drawName, history]);
-
   useEffect(() => {
-    if (historySignature) {
+    if (history && history.length > 0) {
       runCorrelationAnalysis(selectedCorrDraw);
     }
-  }, [historySignature, selectedCorrDraw]);
+  }, [drawName, history, selectedCorrDraw]);
 
   // Compute Gap Sequence Analysis report reactively on history or draw change
   const report = useMemo(() => {

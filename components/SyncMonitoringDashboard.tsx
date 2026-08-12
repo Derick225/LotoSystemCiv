@@ -11,12 +11,8 @@ import {
   XCircle,
   Activity,
   ChevronRight,
-  Cpu,
-  Clock,
-  Zap,
 } from "lucide-react";
 import { useSyncStatus } from "../hooks/useSyncStatus";
-import { useWorkManager } from "../hooks/useWorkManager";
 
 export const SyncMonitoringDashboard: React.FC = () => {
   const {
@@ -27,20 +23,6 @@ export const SyncMonitoringDashboard: React.FC = () => {
     lastChecked,
     checkStatus,
   } = useSyncStatus();
-
-  const {
-    isRunning: isWorkRunning,
-    lastSyncTimestamp,
-    nextScheduledTimestamp,
-    totalSyncCount,
-    triggerManualSync,
-    logs,
-  } = useWorkManager();
-
-  const handleWorkManagerTrigger = async () => {
-    await triggerManualSync();
-    checkStatus();
-  };
 
   const MetricRow = ({
     label,
@@ -56,92 +38,7 @@ export const SyncMonitoringDashboard: React.FC = () => {
   );
 
   return (
-    <div className="space-y-6">
-      {/* WorkManager Background Task Status Banner */}
-      <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden backdrop-blur-md">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-indigo-400">
-              <Cpu className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">
-                  Planificateur WorkManager (Arrière-plan)
-                </h3>
-                <span className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full border ${isOnline ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-rose-500/20 text-rose-300 border-rose-500/40'}`}>
-                  {isOnline ? 'En ligne' : 'Hors-ligne'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Synchronisation automatique des résultats de tirages dès que l'appareil est connecté à Internet.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleWorkManagerTrigger}
-            disabled={isWorkRunning || !isOnline}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs rounded-xl shadow-lg transition-all border border-indigo-400/30"
-          >
-            <Zap className={`w-4 h-4 ${isWorkRunning ? 'animate-spin text-amber-300' : 'text-amber-400'}`} />
-            <span>{isWorkRunning ? 'Mise à jour...' : 'Lancer le WorkManager'}</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-800 text-xs">
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Activity className="w-3 h-3 text-cyan-400" /> État Tâche
-            </div>
-            <div className="text-slate-200 font-bold">
-              {isWorkRunning ? 'Synchronisation...' : isOnline ? 'Actif (En attente)' : 'Inactif (Hors-ligne)'}
-            </div>
-          </div>
-
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Clock className="w-3 h-3 text-amber-400" /> Dernier Auto-Sync
-            </div>
-            <div className="text-slate-200 font-bold">
-              {lastSyncTimestamp ? new Date(lastSyncTimestamp).toLocaleTimeString() : 'Aucun'}
-            </div>
-          </div>
-
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-              <RefreshCw className="w-3 h-3 text-emerald-400" /> Prochain Auto-Sync
-            </div>
-            <div className="text-slate-200 font-bold">
-              {nextScheduledTimestamp && isOnline ? new Date(nextScheduledTimestamp).toLocaleTimeString() : 'Si connecté'}
-            </div>
-          </div>
-
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-              <CheckCircle className="w-3 h-3 text-indigo-400" /> Total Cycles
-            </div>
-            <div className="text-slate-200 font-bold">
-              {totalSyncCount} cycle(s)
-            </div>
-          </div>
-        </div>
-
-        {logs && logs.length > 0 && (
-          <div className="mt-3 text-[11px] text-slate-400 bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/80 flex justify-between items-center">
-            <span className="font-medium truncate max-w-md">
-              Dernière action : {logs[0].message}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
-              {new Date(logs[0].timestamp).toLocaleTimeString()}
-            </span>
-          </div>
-        )}
-      </div>
-
-      <div className="glass-card neural-border rounded-xl p-6 text-white font-mono relative overflow-hidden shadow-2xl">
+    <div className="glass-card neural-border rounded-xl p-6 text-white font-mono relative overflow-hidden shadow-2xl">
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 pointer-events-none mix-blend-screen"></div>
 
       <div className="flex justify-between items-center mb-6 relative z-10 border-b border-slate-700/50 pb-4">
@@ -229,7 +126,7 @@ export const SyncMonitoringDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Firebase Node */}
+        {/* Supabase Node */}
         <div className="bg-slate-800/50 rounded-lg p-5 border border-slate-700 relative overflow-hidden">
           <div
             className={`absolute top-0 left-0 w-full h-1 ${dbConnection === "connected" ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : dbConnection === "checking" ? "bg-amber-500" : "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"} rounded-t-lg opacity-80`}
@@ -238,7 +135,7 @@ export const SyncMonitoringDashboard: React.FC = () => {
             <Cloud
               className={`w-5 h-5 ${dbConnection === "connected" ? "text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]" : "text-slate-500"}`}
             />
-            <h3 className="font-semibold text-slate-200">Firebase Cloud</h3>
+            <h3 className="font-semibold text-slate-200">Supabase Cloud</h3>
           </div>
 
           <div className="flex items-center justify-center p-6 border border-slate-700/50 rounded bg-slate-900/50 mt-4 h-32 relative">
@@ -302,7 +199,6 @@ export const SyncMonitoringDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
     </div>
   );
 };

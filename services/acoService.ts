@@ -1,6 +1,7 @@
 import { DrawResult, AntColonyPath, OracleVocalContext } from '../types';
 import { useNexusStore } from '../store/useNexusStore';
 import { LCG } from '../utils/mathUtils';
+import { apiClient } from '../core/api/apiClient';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packHistory } from './workers/zeroCopy';
@@ -72,6 +73,39 @@ export const runAntColonyOptimization = async (
         q0,
         biasTargets: oracleTargets
     };
+
+    const useCloudEngine = useNexusStore.getState().useCloudEngine;
+    if (useCloudEngine) {
+        try {
+            console.log(`Tentative ACO via Supabase Edge Function (run-ml-models)...`);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Edge Function Timeout")), 5000)
+            );
+            
+            // Usage de apiClient.post pour une gestion globale des erreurs
+            const invokePromise = apiClient.post<{ bestPath?: { numbers: number[], confidence: number } }>('run-ml-models', {
+                model: 'aco', history: purifiedHistory.slice(0, 50), config
+            }, { suppressErrorLogging: true });
+
+            const data = await Promise.race([invokePromise, timeoutPromise]) as { bestPath?: { numbers: number[], confidence: number } };
+            
+            if (data && data.bestPath) {
+                const bestPathObj = data.bestPath;
+                const isOracle = oracleTargets.some(t => bestPathObj.numbers.includes(t));
+                const confidence = isOracle ? Math.min(99, bestPathObj.confidence + 10) : bestPathObj.confidence;
+                const optimizedBestPath: AntColonyPath = {
+                    numbers: bestPathObj.numbers,
+                    pheromoneDensity: confidence / 100.0,
+                    isOracleBiased: isOracle,
+                    confidence: confidence
+                };
+                const variations = generateVariations(bestPathObj.numbers, purifiedHistory, vocalContext, confidence);
+                return [optimizedBestPath, ...variations];
+            }
+        } catch (e) {
+            console.warn("Exception Edge Function ACO, fallback sur Worker local.");
+        }
+    }
 
     return new Promise((resolve) => {
         const worker = new Worker(new URL('./workers/aco.worker.ts?worker', import.meta.url), { type: 'module' });

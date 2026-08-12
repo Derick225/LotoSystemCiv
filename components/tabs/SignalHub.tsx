@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy, useEffect, useTransition } from "react";
+import React, { useState, Suspense, lazy, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { SmartInsights } from "../SmartInsights";
 import {
@@ -13,16 +13,11 @@ import {
   Compass,
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
+import { ChaosAttractor } from "../ChaosAttractor";
 import { calculateGapEfficiency } from "../../services/mathService";
 import { GapEfficiencyMeter } from "../GapEfficiencyMeter";
 import type { GapEfficiency } from "../../types";
 import { audioEngine } from "../../utils/audioEngine";
-
-// Three.js (~600 Ko+) ne doit pas alourdir le chunk de l'onglet Signaux au chargement :
-// on le charge à la demande, uniquement quand le widget est effectivement affiché.
-const ChaosAttractor = lazy(() =>
-  import("../ChaosAttractor").then((m) => ({ default: m.ChaosAttractor })),
-);
 
 const StatsTab = lazy(() =>
   import("./StatsTab").then((m) => ({ default: m.StatsTab })),
@@ -66,23 +61,8 @@ export const SignalHub: React.FC = () => {
   const currentDrawName = useNexusStore((state) => state.currentDrawName);
   const activeDraw = drawName || currentDrawName;
 
-  const [isPending, startTransition] = useTransition();
   const [activeSubTab, setActiveSubTab] = useState("stats");
   const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
-
-  // Préchargement en arrière-plan des sous-onglets lors de l'inactivité du navigateur
-  useEffect(() => {
-    const idleCallback = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 1000));
-    idleCallback(() => {
-      Object.values(subTabPreloaders).forEach((preload) => {
-        try {
-          preload();
-        } catch (e) {
-          console.warn("[SignalHub] Échec du préchargement en tâche de fond :", e);
-        }
-      });
-    });
-  }, []);
 
   useEffect(() => {
     if (history.length > 20) {
@@ -95,9 +75,7 @@ export const SignalHub: React.FC = () => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail?.subTab) {
-        startTransition(() => {
-          setActiveSubTab(customEvent.detail.subTab);
-        });
+        setActiveSubTab(customEvent.detail.subTab);
         const contentElement = document.getElementById("signal-content");
         if (contentElement)
           contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -150,14 +128,12 @@ export const SignalHub: React.FC = () => {
                     key={tab.id}
                     onClick={() => {
                       audioEngine.play("click");
-                      startTransition(() => {
-                        setActiveSubTab(tab.id);
-                      });
+                      setActiveSubTab(tab.id);
                     }}
                     onMouseEnter={() => subTabPreloaders[tab.id]?.()}
                     onTouchStart={() => subTabPreloaders[tab.id]?.()}
                     className={`
-                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 btn-reactive
+                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
                                             ${
                                               activeSubTab === tab.id
                                                 ? "bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"
@@ -232,15 +208,7 @@ export const SignalHub: React.FC = () => {
 
         {/* Sidebar Widget : Attracteur & GEI */}
         <div className="lg:col-span-4 space-y-6">
-          <Suspense
-            fallback={
-              <div className="h-[420px] flex items-center justify-center bg-slate-950 rounded-2xl border border-slate-900/80 animate-pulse text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                Chargement du moteur 3D...
-              </div>
-            }
-          >
-            <ChaosAttractor history={history} />
-          </Suspense>
+          <ChaosAttractor history={history} />
           <GapEfficiencyMeter data={geiData} />
 
           <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] md:rounded-2xl border border-slate-100 dark:border-slate-700 shadow-xl">

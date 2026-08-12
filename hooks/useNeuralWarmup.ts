@@ -56,15 +56,17 @@ export function useNeuralWarmup(isBooted: boolean): WarmupState {
       }
 
       try {
-        // 1. Initialisation LCG déterministe (synchronous, very fast)
+        // 1. Initialisation LCG déterministe
         initializeLcgForDraw(currentDrawName);
 
-        // 2. Concurrently execute asynchronous warmup tasks to minimize cumulative latency
-        await Promise.all([
-          workerService.warmup(currentDrawName).catch(() => null),
-          getAlgoWeights(currentDrawName).catch(() => null),
-          lotteryService.fetchHistory(currentDrawName).catch(() => null)
-        ]);
+        // 2. Pré-chauffage du Web Worker local (instanciation + JIT compile)
+        const workerRes = await workerService.warmup(currentDrawName);
+
+        // 3. Pré-chargement asynchrone des poids algorithmiques
+        await getAlgoWeights(currentDrawName).catch(() => null);
+
+        // 4. Pré-chargement SWR de l'historique de tirage
+        await lotteryService.fetchHistory(currentDrawName).catch(() => null);
 
         const latency = Math.round(performance.now() - startTime);
 

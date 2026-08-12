@@ -6,6 +6,12 @@ import {
   calculateCorrelationMatrixAsync,
   calculateSuccessionMatrixAsync,
 } from "../../services/mathService";
+import {
+  addToWatchlist,
+  removeFromWatchlist,
+  isInWatchlist,
+  saveTicket,
+} from "../../services/userPreferencesService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import type {
   ClusterPoint,
@@ -169,6 +175,21 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     };
   }, [selectedPoint, regularity]);
 
+  const handleToggleWatchlist = (num: number) => {
+    audioEngine.play("click");
+    if (isInWatchlist(num)) {
+      removeFromWatchlist(num);
+      showToast(`N°${num} retiré des favoris.`, "info");
+    } else {
+      if (addToWatchlist(num)) {
+        audioEngine.play("success");
+        showToast(`N°${num} ajouté aux favoris !`, "success");
+      } else {
+        audioEngine.play("error");
+        showToast("Limite de favoris atteinte.", "error");
+      }
+    }
+  };
 
   const handleGenerateFromCluster = async (clusterType: string) => {
     audioEngine.play("click");
@@ -206,6 +227,12 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     }
 
     if (bestTicket.length === 5) {
+      await saveTicket({
+        numbers: bestTicket,
+        drawName,
+        strategy: `Cluster ${clusterType}`,
+      });
+
       const breakdown: Record<number, Record<string, number>> = {};
       bestTicket.forEach((num) => {
         breakdown[num] = {
@@ -572,9 +599,31 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                     "{numberProfile.config.advice}"
                   </p>
                 </div>
+
+                <button
+                  onClick={() => handleToggleWatchlist(numberProfile.number)}
+                  className={`mt-auto w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg ${isInWatchlist(numberProfile.number) ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-indigo-600 text-white hover:bg-indigo-500"}`}
+                >
+                  <Star
+                    size={14}
+                    className={
+                      isInWatchlist(numberProfile.number) ? "fill-current" : ""
+                    }
+                  />
+                  {isInWatchlist(numberProfile.number)
+                    ? "Suivi Actif"
+                    : "Ajouter aux Favoris"}
+                </button>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="h-full bg-slate-50 dark:bg-slate-800/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center p-8 text-center opacity-60">
+              <Info size={40} className="text-slate-400 mb-4" />
+              <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
+                Sélectionnez un point sur la carte pour voir sa fiche technique.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

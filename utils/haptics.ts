@@ -4,14 +4,10 @@
  */
 export const hapticEngine = {
     /**
-     * Vérifie si l'API de vibration est disponible et autorisée par l'interaction utilisateur
+     * Vérifie si l'API de vibration est disponible
      */
     isSupported: (): boolean => {
-        if (typeof navigator === 'undefined' || !('vibrate' in navigator)) return false;
-        if (typeof navigator.userActivation !== 'undefined' && !navigator.userActivation.hasBeenActive) {
-            return false;
-        }
-        return true;
+        return typeof navigator !== 'undefined' && 'vibrate' in navigator;
     },
 
     /**
@@ -19,11 +15,7 @@ export const hapticEngine = {
      */
     tap: () => {
         if (hapticEngine.isSupported()) {
-            try {
-                navigator.vibrate(10);
-            } catch (e) {
-                // Ignore vibration errors if blocked by browser policy
-            }
+            navigator.vibrate(10);
         }
     },
 
@@ -32,11 +24,7 @@ export const hapticEngine = {
      */
     doubleTap: () => {
         if (hapticEngine.isSupported()) {
-            try {
-                navigator.vibrate([10, 50, 10]);
-            } catch (e) {
-                // Ignore
-            }
+            navigator.vibrate([10, 50, 10]);
         }
     },
 
@@ -45,11 +33,7 @@ export const hapticEngine = {
      */
     heavy: () => {
         if (hapticEngine.isSupported()) {
-            try {
-                navigator.vibrate([40, 20, 40]);
-            } catch (e) {
-                // Ignore
-            }
+            navigator.vibrate([40, 20, 40]);
         }
     },
 
@@ -58,12 +42,8 @@ export const hapticEngine = {
      */
     processing: () => {
         if (hapticEngine.isSupported()) {
-            try {
-                // Pattern rappelant un "battement de cœur" irrégulier d'un processeur
-                navigator.vibrate([10, 30, 15, 30, 8, 30, 20]);
-            } catch (e) {
-                // Ignore
-            }
+            // Pattern rappelant un "battement de cœur" irrégulier d'un processeur
+            navigator.vibrate([10, 30, 15, 30, 8, 30, 20]);
         }
     },
 
@@ -72,11 +52,7 @@ export const hapticEngine = {
      */
     successImpact: () => {
         if (hapticEngine.isSupported()) {
-            try {
-                navigator.vibrate([20, 40, 60, 40, 20, 10, 100]);
-            } catch (e) {
-                // Ignore
-            }
+            navigator.vibrate([20, 40, 60, 40, 20, 10, 100]);
         }
     }
 };

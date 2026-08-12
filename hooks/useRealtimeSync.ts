@@ -1,11 +1,9 @@
 import { useEffect } from 'react';
-import { db, isFirebaseConfigured } from '../services/firebaseClient';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { useNexusStore } from '../store/useNexusStore';
 import { useAuth } from './useAuth';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
-import { workManager } from '../services/workManager';
 
 export const useRealtimeSync = () => {
     const { session } = useAuth();
@@ -13,30 +11,31 @@ export const useRealtimeSync = () => {
     const refreshData = useNexusStore((state) => state.refreshData);
     const drawName = useNexusStore((state) => state.drawName);
 
-    // Initialisation et démarrage du WorkManager d'arrière-plan
-    useEffect(() => {
-        workManager.initialize();
-    }, []);
-
     useEffect(() => {
         if (!navigator.onLine || !drawName) return;
 
         let lastSyncTime = 0;
-        const MIN_SYNC_INTERVAL_MS = 60 * 1000;
+        const MIN_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute cool-down window to avoid duplicate triggers
 
         const triggerBackgroundSync = async () => {
             const now = Date.now();
             if (now - lastSyncTime < MIN_SYNC_INTERVAL_MS) {
+                console.log("[Background Sync] Cooldown active, skipping sync to optimize battery and network.");
                 return;
             }
             lastSyncTime = now;
 
+            console.log(`[Background Sync] App focus / visibility detected. Executing progressive background sync for: ${drawName}...`);
+
             try {
-                await workManager.scheduleDrawsSyncWork({
-                    force: false,
-                    drawNames: [drawName],
-                    triggerSource: 'REALTIME_SYNC_HOOK'
-                });
+                // 1. Refresh draw results silently in the background
+                await refreshData(drawName, true);
+
+                // 2. Perform background synchronization of predictions history
+                const { syncAllHistory } = await import('../services/predictionHistoryService');
+                await syncAllHistory(drawName);
+
+                console.log("[Background Sync] Progressive background sync successfully completed.");
             } catch (err) {
                 console.warn("[Background Sync] Error during background progressive sync:", err);
             }
@@ -55,6 +54,7 @@ export const useRealtimeSync = () => {
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('focus', handleFocus);
 
+        // Immediate check if already visible
         if (document.visibilityState === 'visible') {
             triggerBackgroundSync();
         }
@@ -66,28 +66,42 @@ export const useRealtimeSync = () => {
     }, [drawName, refreshData]);
 
     useEffect(() => {
-        if (!isFirebaseConfigured()) return;
+        if (!isSupabaseConfigured()) return;
 
-        const unsub = onSnapshot(collection(db, 'draw_results'), (snap) => {
-            snap.docChanges().forEach((change) => {
-                const newRecord = change.doc.data();
-                if (change.type === 'added') {
-                    audioEngine.play('success');
-                    showToast(`Nouveau tirage détecté : ${newRecord.draw_name} (${newRecord.date})`, "success");
-                } else if (change.type === 'modified') {
-                    showToast(`Tirage ${newRecord.draw_name} mis à jour dans le cloud.`, "info");
+        // --- 1. GLOBALE : Synchronisation des résultats de tirages en temps réel ---
+        const drawChannel = supabase
+            .channel('global-draw-results-sync')
+            .on('postgres_changes', 
+                { event: '*', schema: 'public', table: 'draw_results' }, 
+                (payload) => {
+                    const eventType = payload.eventType;
+                    const newRecord = payload.new as Record<string, unknown>;
+                    
+                    if (eventType === 'INSERT') {
+                        audioEngine.play('success');
+                        showToast(`Nouveau tirage détecté : ${newRecord.draw_name} (${newRecord.date})`, "success");
+                    } else if (eventType === 'UPDATE') {
+                        showToast(`Tirage ${newRecord.draw_name} mis à jour dans le cloud.`, "info");
+                    }
+                    
+                    // Si le tirage actuel ouvert est affecté ou modifié, on rafraîchit automatiquement l'interface
+                    if (drawName && newRecord && newRecord.draw_name === drawName) {
+                        refreshData(drawName, true);
+                    }
                 }
-
-                if (drawName && newRecord && newRecord.draw_name === drawName) {
-                    refreshData(drawName, true);
+            )
+            .subscribe((status, _err) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log("📡 Synchro Temps-Réel ACTIF [Public].");
                 }
             });
-        });
 
+        // 1.2 Événements locaux (Mode Hors-ligne, Backtesting, Simulations locaux)
         const handleLocalUpdated = (e: Event) => {
             const customEvent = e as CustomEvent;
             const targetDraw = customEvent.detail?.drawName || drawName;
             if (targetDraw && targetDraw === drawName) {
+                console.log(`[Local Sync Event] Refraîchissement des données pour : ${targetDraw}`);
                 refreshData(targetDraw, true);
             }
         };
@@ -95,34 +109,50 @@ export const useRealtimeSync = () => {
         window.addEventListener('DRAW_RESULTS_UPDATED', handleLocalUpdated);
 
         return () => {
-            unsub();
+            supabase.removeChannel(drawChannel);
             window.removeEventListener('DRAW_RESULTS_UPDATED', handleLocalUpdated);
         };
     }, [drawName, refreshData, showToast]);
 
     useEffect(() => {
-        if (!isFirebaseConfigured() || !session?.user) return;
+        if (!isSupabaseConfigured() || !session?.user) return;
 
-        const q = query(
-            collection(db, 'prediction_snapshots'),
-            where('user_id', '==', session.user.id)
-        );
-
-        const unsub = onSnapshot(q, (snap) => {
-            snap.docChanges().forEach((change) => {
-                if (change.type === 'modified') {
-                    const newRecord = change.doc.data();
-                    if (newRecord.status === 'ANALYZED') {
-                        audioEngine.play('success');
-                        showToast(`🧬 Autopsie terminée pour le tirage ${newRecord.draw_name}.`, 'success');
-                        if (drawName === newRecord.draw_name) refreshData(newRecord.draw_name as string, true);
-                    }
+        // --- 2. PRIVÉE : Synchronisation Autopsie & Événements Utilisateur ---
+        const privateChannel = supabase
+            .channel(`private-user-sync-${session.user.id}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'prediction_snapshots',
+                filter: `user_id=eq.${session.user.id}`
+            }, (payload) => {
+                const oldRecord = payload.old;
+                const newRecord = payload.new as Record<string, unknown>;
+                
+                if (oldRecord.status === 'PENDING' && newRecord.status === 'ANALYZED') {
+                    audioEngine.play('success');
+                    showToast(`🧬 Autopsie terminée pour le tirage ${newRecord.draw_name}.`, 'success');
+                    if (drawName === newRecord.draw_name) refreshData(newRecord.draw_name as string, true);
+                }
+            })
+            // Ecoute des modifications côté serveur des Prédictions pour un Sync multi-devices
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'predictions',
+                filter: `user_id=eq.${session.user.id}`
+            }, (payload) => {
+                 // Notification silencieuse ou rafraîchissement si l'utilisateur a généré sur un autre device
+                 console.log("Nouvelle prédiction détectée (Multi-Device).", payload.new);
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log("🔐 Synchro Temps-Réel ACTIF [Privé].");
                 }
             });
-        });
 
         return () => {
-            unsub();
+            supabase.removeChannel(privateChannel);
         };
     }, [session?.user, drawName, refreshData, showToast]);
 };

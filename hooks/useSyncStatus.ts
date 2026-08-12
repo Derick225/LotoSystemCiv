@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { testDatabaseConnection } from '../services/firebaseClient';
+import { testDatabaseConnection } from '../services/supabaseClient';
 import { keys } from 'idb-keyval';
 
 export function useSyncStatus() {
@@ -41,7 +41,7 @@ export function useSyncStatus() {
         else if (k.startsWith('forensic_report_')) forensics++;
         else if (k.startsWith('learning_session_')) learning++;
         else if (k.startsWith('prediction_snapshot_')) snapshots++;
-        else if (!k.startsWith('firebase:')) other++; 
+        else if (k !== 'supabase.auth.token') other++; 
       });
 
       let totalStorage = 'N/A';
