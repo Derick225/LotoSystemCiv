@@ -52,13 +52,13 @@ export async function handleProxyResults(req: Request, reqBody?: any): Promise<R
     return new Response(JSON.stringify(remoteData), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200
-    }
+    });
 
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("Proxy Results Error:", error)
-    return new Response(JSON.stringify({ success: false, error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error?.message || "Unknown error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

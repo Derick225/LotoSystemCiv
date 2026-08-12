@@ -316,7 +316,7 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
         boosting_multiplier: 1.0 + (exactHits * 0.05),
         prudence_mode_active: prudenceModeActive,
         updated_at: new Date().toISOString()
-    }, { onConflict: 'draw_name' }
+    }, { onConflict: 'draw_name' });
 
     // Insérer dans forensic_reports
     await supabase.from('forensic_reports').insert({
@@ -373,6 +373,6 @@ Fournis une analyse technique courte (2 phrases max) expliquant pourquoi la pré
     return new Response(JSON.stringify({ success: false, error: err.message || "Unknown error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

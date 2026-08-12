@@ -183,7 +183,7 @@ export async function handleAnalyzeDrift(req: Request, reqBody?: any): Promise<R
         logId: adjustmentLog?.id
     }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    }
+    });
 
   } catch (error) {
     const err = error as Error;
@@ -191,6 +191,6 @@ export async function handleAnalyzeDrift(req: Request, reqBody?: any): Promise<R
     return new Response(JSON.stringify({ success: false, error: err.message || "Unknown error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

@@ -440,7 +440,7 @@ export async function handleComputeNexusAnalytics(req: Request, reqBody?: any): 
                     last_draw_id: lastDraw.id,
                     result,
                     created_at: new Date().toISOString()
-                }, { onConflict: 'draw_name,task,last_draw_id' }
+                }, { onConflict: 'draw_name,task,last_draw_id' });
         }
     }
     
@@ -455,6 +455,6 @@ export async function handleComputeNexusAnalytics(req: Request, reqBody?: any): 
     return new Response(JSON.stringify({ success: false, error: err.message || "Unknown Error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

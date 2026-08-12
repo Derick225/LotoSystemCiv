@@ -104,7 +104,7 @@ export async function handlePaymentWebhook(req: Request, reqBody?: any): Promise
                 status: 'FAILED',
                 provider: 'CINETPAY',
                 created_at: new Date().toISOString()
-            }, { onConflict: 'transaction_id' }
+            }, { onConflict: 'transaction_id' });
         }
     }
 
@@ -112,11 +112,11 @@ export async function handlePaymentWebhook(req: Request, reqBody?: any): Promise
       JSON.stringify({ message: 'Webhook processed' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("[PAYMENT ERROR]", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error?.message || "Unknown error" }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     )
   }
-})
+}

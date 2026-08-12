@@ -51,7 +51,7 @@ export async function handleProcessRlhf(req: Request, reqBody?: any): Promise<Re
         return new Response(JSON.stringify({ error: "Invalid RLHF payload", details: validation.error.format() }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 400
-        }
+        });
     }
 
     const { predictionId, rating, drawName, actualHits, user_comment } = validation.data;
@@ -116,11 +116,11 @@ export async function handleProcessRlhf(req: Request, reqBody?: any): Promise<Re
         message: "Feedback RLHF traité avec succès."
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("RLHF Error:", error)
-    return new Response(JSON.stringify({ success: false, error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error?.message || "Unknown error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

@@ -209,10 +209,10 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
         message: `Sync OK : ${totalInserted} entrées.`
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
-  } catch (error: unknown) {
-    return new Response(JSON.stringify({ success: false, error: error.message }), {
+  } catch (error: any) {
+    return new Response(JSON.stringify({ success: false, error: error?.message || "Unknown error" }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

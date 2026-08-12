@@ -71,16 +71,16 @@ export async function handleInitPayment(req: Request, reqBody?: any): Promise<Re
         return new Response(JSON.stringify({ success: true, payment_url: data.data.payment_url }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200
-        }
+        });
     } else {
         throw new Error(`CinetPay Error: ${data.message} - ${data.description}`);
     }
 
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("Init Payment Error:", error)
-    return new Response(JSON.stringify({ success: false, error: error.message }), {
+    return new Response(JSON.stringify({ success: false, error: error?.message || "Unknown error" }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}

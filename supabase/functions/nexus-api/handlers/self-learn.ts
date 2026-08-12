@@ -380,7 +380,7 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
 
         const signalMatrix = computeSignalMatrix(trainingContext);
         const targets = validationSet.map(d => d.gagnants);
-        foldsData.push({ signalMatrix, targets }
+        foldsData.push({ signalMatrix, targets });
     }
 
     if (foldsData.length === 0) {
@@ -520,6 +520,6 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
     return new Response(JSON.stringify({ success: false, message: errorMessage, error: errorMessage }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    });
   }
-})
+}
