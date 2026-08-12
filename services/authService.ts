@@ -164,10 +164,10 @@ export const authService = {
    */
   isAdminUser: (user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; email?: string | null } | null): boolean => {
     if (!user) return false;
-    if (user.email && (user.email.includes('admin') || user.email === 'dieudonnekeric@gmail.com')) {
+    if (user.email && user.email === 'dieudonnekeric@gmail.com') {
       return true;
     }
-    if (user.app_metadata?.role === 'admin') {
+    if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
       return true;
     }
     return false;

@@ -217,11 +217,17 @@ export const UnifiedForensicRadarPanel: React.FC<
 
     const algoScores: Record<string, number> = {};
     const mockWeights: Record<string, number> = {};
+    const weights = globalWeights || {};
 
     algoList.forEach((a, idx) => {
       const varFactor = 0.7 + 0.5 * Math.abs(Math.sin(seed + idx * 2.3));
       algoScores[a.key] = Math.min(0.99, a.score * varFactor);
-      mockWeights[a.key] = 0.125;
+      
+      // Use real weight if defined, otherwise fall back to proportional distribution
+      const realWeight = weights[a.key as keyof typeof weights] !== undefined 
+        ? Number(weights[a.key as keyof typeof weights]) 
+        : 1 / algoList.length;
+      mockWeights[a.key] = realWeight;
     });
 
     const igResult = computeIntegratedGradients(

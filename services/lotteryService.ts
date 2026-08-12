@@ -178,13 +178,9 @@ export const lotteryService = {
     const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
     if (cached) return cached;
 
-    // ÉCHAPPEMENT DÉTERMINISTE : Si les requêtes échouent et qu'il n'y a pas de cache,
-    // on génère un jeu d'historique déterministe complet et riche de 250 tirages.
-    // Cette approche élimine toute possibilité d'erreur non gérée (Failed to fetch).
-    console.warn(`[LotteryService] Échec du réseau ou aucune donnée Firebase pour '${drawName}'. Génération du dataset de secours...`);
-    const fallbackData = generateDeterministicFallbackHistory(drawName);
-    await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
-    return fallbackData;
+    // Aucun échappement imaginaire ou inventé : retour d'un jeu vide comme demandé par l'utilisateur
+    console.warn(`[LotteryService] Aucun cache ni donnée Firebase réelle disponible pour '${drawName}'.`);
+    return [];
   }
 };
 
@@ -200,58 +196,6 @@ const getDrawTimestamp = (dateStr: string): number => {
     return isNaN(d.getTime()) ? 0 : d.getTime();
 };
 
-const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] => {
-  let hash = 0;
-  for (let i = 0; i < drawName.length; i++) {
-    hash = (hash << 5) - hash + drawName.charCodeAt(i);
-    hash |= 0;
-  }
-  let seed = Math.abs(hash || LOTTERY_CONSTANTS.SEED_PRIME);
-
-  const lcg = () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-
-  const results: DrawResult[] = [];
-  const baseDate = new Date();
-
-  for (let i = LOTTERY_CONSTANTS.FALLBACK_HISTORY_DEPTH; i >= 1; i--) {
-    const date = new Date(baseDate.getTime() - i * 24 * 60 * 60 * 1000);
-    const dayStr = String(date.getDate()).padStart(2, '0');
-    const monthStr = String(date.getMonth() + 1).padStart(2, '0');
-    const yearStr = date.getFullYear();
-    const formattedDate = `${dayStr}/${monthStr}/${yearStr}`;
-
-    const gagnantsPool = new Set<number>();
-    while (gagnantsPool.size < LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
-      const val = Math.floor(lcg() * LOTTERY_CONSTANTS.TOTAL_NUMBERS) + 1;
-      gagnantsPool.add(val);
-    }
-    const gagnants = Array.from(gagnantsPool).sort((a, b) => a - b);
-
-    const machinePool = new Set<number>();
-    while (machinePool.size < LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
-      const val = Math.floor(lcg() * LOTTERY_CONSTANTS.TOTAL_NUMBERS) + 1;
-      if (!gagnantsPool.has(val)) {
-        machinePool.add(val);
-      }
-    }
-    const machine = Array.from(machinePool).sort((a, b) => a - b);
-
-    results.push({
-      id: `deterministic-${drawName.replace(/\s+/g, '-')}-${i}-${formattedDate.replace(/\//g, '')}`,
-      drawName,
-      date: formattedDate,
-      gagnants,
-      machine,
-      version: 1
-    });
-  }
-
-  return results.reverse();
-};
-
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   if (!isFirebaseConfigured()) {
     // CORRECTIF CRITIQUE (contamination de données) : ce bloc générait auparavant de FAUX
@@ -263,10 +207,7 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
     //
     // Une "synchronisation" est par nature un aller chercher de vraies données externes. Sans
     // backend configuré, il n'y a rien de réel à synchroniser : on le dit clairement plutôt que
-    // d'inventer des résultats. Les données de démonstration (générées par
-    // generateDeterministicFallbackHistory) restent disponibles pour la simple consultation via
-    // fetchHistory, mais ne sont jamais présentées comme un "nouveau tirage synchronisé" et ne
-    // déclenchent jamais d'autopsie forensique ni d'auto-apprentissage.
+    // d'inventer des résultats. Les données de secours imaginaires ont été supprimées du système.
     const err = new AppError(
       "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
       "Aucune donnée n'est inventée ; configurez Firebase pour synchroniser de vrais résultats.",

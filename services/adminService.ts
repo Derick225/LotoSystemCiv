@@ -76,35 +76,36 @@ export const adminService = {
         try {
             const usersCol = collection(db, 'users');
             const snapshot = await getDocs(usersCol);
-            if (!snapshot.empty) {
-                const usersList: AdminUser[] = [];
-                snapshot.forEach(docSnap => {
-                    const data = docSnap.data();
-                    usersList.push({
-                        id: docSnap.id,
-                        email: data.email || '',
-                        last_sign_in: data.last_sign_in || data.lastSignIn || '',
-                        created_at: data.created_at || data.createdAt || '',
-                        role: data.role || 'user',
-                        subscription: data.subscription || null
-                    });
+            const usersList: AdminUser[] = [];
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data();
+                usersList.push({
+                    id: docSnap.id,
+                     email: data.email || '',
+                     last_sign_in: data.last_sign_in || data.lastSignIn || '',
+                     created_at: data.created_at || data.createdAt || '',
+                     role: data.role || 'user',
+                     subscription: data.subscription || null
                 });
-                return usersList;
-            }
-            return await fetchLocalUsers();
-        } catch {
-            return await fetchLocalUsers();
+            });
+            return usersList;
+        } catch (error) {
+            console.error("Failed to fetch users from Firestore:", error);
+            throw error;
         }
     },
 
     updateUserRole: async (userId: string, role: 'admin' | 'user'): Promise<boolean> => {
-        try {
-            if (isFirebaseConfigured()) {
+        if (isFirebaseConfigured()) {
+            try {
                 const userRef = doc(db, 'users', userId);
                 await updateDoc(userRef, { role });
                 return true;
+            } catch (error) {
+                console.error("Failed to update user role in Firestore:", error);
+                throw error;
             }
-        } catch { /* fallback local */ }
+        }
 
         try {
             const users = await fetchLocalUsers();
@@ -117,13 +118,16 @@ export const adminService = {
     },
 
     deleteUser: async (userId: string): Promise<boolean> => {
-        try {
-            if (isFirebaseConfigured()) {
+        if (isFirebaseConfigured()) {
+            try {
                 const userRef = doc(db, 'users', userId);
                 await deleteDoc(userRef);
                 return true;
+            } catch (error) {
+                console.error("Failed to delete user in Firestore:", error);
+                throw error;
             }
-        } catch { /* fallback local */ }
+        }
 
         try {
             const users = await fetchLocalUsers();

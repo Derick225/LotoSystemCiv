@@ -7,6 +7,7 @@ import {
   WifiOff,
   Maximize,
   Minimize,
+  Search,
 } from "lucide-react";
 import { MarqueeTicker } from "../ui/MarqueeTicker";
 import { useNexusStore } from "../../store/useNexusStore";
@@ -65,10 +66,19 @@ export const AppShell: React.FC<AppShellProps> = ({
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowPalette(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
 
@@ -282,6 +292,18 @@ export const AppShell: React.FC<AppShellProps> = ({
                 title={useNexusStore.getState().isSimpleView ? "Actuellement : Vue Simplifiée (Chiffres Clairs & Synthèse Vocale). Cliquez pour passer en Vue Scientifique." : "Actuellement : Vue Scientifique (Graphiques). Cliquez pour passer en Vue Simplifiée."}
               >
                 <span>{useNexusStore.getState().isSimpleView ? "🟢 Vue Simple" : "🔬 Vue Graphique"}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setShowPalette(true);
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 transition-all duration-300 shadow-md"
+                title="Recherche & Commandes (Ctrl+K)"
+              >
+                <Search size={16} />
+                <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">Recherche</span>
               </button>
 
               <InstallButton />

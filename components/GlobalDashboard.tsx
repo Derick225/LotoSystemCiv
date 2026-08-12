@@ -681,7 +681,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                 </div>
 
                 {/* Day Selector - Scrollable horizontal sur mobile */}
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2">
+                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2 snap-x snap-mandatory">
                   {uiDays.map((d) => (
                     <button
                       key={d}
@@ -692,7 +692,7 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                         });
                       }}
                       className={`
-                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0 btn-reactive
+                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0 btn-reactive snap-center
                                           ${
                                             selectedDay === d
                                               ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105"

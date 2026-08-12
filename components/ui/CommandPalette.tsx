@@ -41,28 +41,35 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       label: "Aller à la Station",
       icon: <LayoutGrid size={16} />,
       group: "Navigation",
-      action: () => onNavigate("home"),
+      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { view: 'home' } })),
     },
     {
       id: "nav-predictive",
-      label: "Aller aux Prédictions",
+      label: "Aller à l'Oracle",
       icon: <Activity size={16} />,
       group: "Navigation",
-      action: () => onNavigate("predictive"),
+      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Oracle' } })),
     },
     {
-      id: "nav-ensemble",
-      label: "Aller à l'Ensemble",
+      id: "nav-topologie",
+      label: "Aller à la Topologie",
       icon: <Terminal size={16} />,
       group: "Navigation",
-      action: () => onNavigate("ensemble"),
+      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Topologie' } })),
     },
     {
       id: "nav-backtest",
-      label: "Aller au Backtest",
+      label: "Aller aux Simulations",
       icon: <Zap size={16} />,
       group: "Navigation",
-      action: () => onNavigate("backtest"),
+      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Simulation' } })),
+    },
+    {
+      id: "nav-forensic",
+      label: "Aller au Forensic",
+      icon: <Activity size={16} />,
+      group: "Navigation",
+      action: () => window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { mainTab: 'Forensic' } })),
     },
     {
       id: "sys-scan",
@@ -87,7 +94,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       icon: <Terminal size={16} />,
       group: "Tirages",
       action: () => {
-        setDrawName(d.name);
+        window.dispatchEvent(new CustomEvent('CROSS_MODULE_NAVIGATE', { detail: { view: 'home', drawName: d.name } }));
       },
     })),
   ];
