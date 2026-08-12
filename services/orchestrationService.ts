@@ -857,25 +857,27 @@ export const runOrchestrationPipeline = (
 
   const top18 = [...selected, ...candidatesList.slice(0, 13)];
 
-  // --- STABILITY GATE ---
-  // Recalcul de l'indice de stabilité sur les candidats finaux
-  const top10Scores = selected.map(num => calibratedScores[num] || 0);
-  const top10Mean = top10Scores.reduce((a, b) => a + b, 0) / 10;
-  const top10Variance = top10Scores.reduce((sum, s) => sum + Math.pow(s - top10Mean, 2), 0) / 10;
-  const top10StdDev = Math.sqrt(top10Variance);
-  const scoreVariancePenalty = Math.min(0.25, Math.max(0, 0.12 - top10StdDev) * 2.0);
+  // --- STABILITY GATE (Robustesse de l'Inférence Continue) ---
+  const allScoresList = Object.values(calibratedScores);
+  const globalMeanScore = allScoresList.reduce((a, b) => a + b, 0) / (allScoresList.length || 1);
+  const globalVar = allScoresList.reduce((sum, s) => sum + Math.pow(s - globalMeanScore, 2), 0) / (allScoresList.length || 1);
+  const globalStd = Math.sqrt(globalVar) || 1e-6;
 
-  const top18Scores = top18.map(num => calibratedScores[num] || 0);
-  const sumTop3 = top18Scores.slice(0, 3).reduce((a, b) => a + b, 0);
-  const sumTop18 = top18Scores.reduce((a, b) => a + b, 0) || 1.0;
-  const concentrationRatio = sumTop3 / sumTop18;
-  const overConcentrationPenalty = Math.min(0.25, Math.max(0, concentrationRatio - 0.25) * 1.5);
+  const topScoresList = selected.map(num => calibratedScores[num] || 0);
+  const topMeanScore = topScoresList.reduce((a, b) => a + b, 0) / (topScoresList.length || 1);
 
-  const stabilityScore = Math.max(0.1, Math.min(1.0, 1.0 - scoreVariancePenalty - contradictionPenalty - overConcentrationPenalty));
+  // Signal-to-Noise Ratio (SNR) continu de la sélection top
+  const snrVal = (topMeanScore - globalMeanScore) / globalStd;
+  const snrStability = 1.0 / (1.0 + Math.exp(-snrVal));
 
-  // Si la stabilité est faible, lisser les prédictions pour élargir les chances
-  if (stabilityScore < 0.75) {
-    const spreadFactor = 0.4 * (1.0 - stabilityScore);
+  // Atténuation continue par le facteur de contradiction
+  const contradictionFactor = 1.0 / (1.0 + Math.exp(contradictionPenalty));
+
+  const stabilityScore = Math.max(0.1, Math.min(1.0, snrStability * contradictionFactor));
+
+  // Lissage continu adaptatif sans seuil abrupt
+  const spreadFactor = 0.4 * (1.0 - stabilityScore);
+  if (spreadFactor > 0.001) {
     for (let num = 1; num <= 90; num++) {
       calibratedScores[num] = calibratedScores[num] * (1.0 - spreadFactor) + globalMean * spreadFactor;
     }

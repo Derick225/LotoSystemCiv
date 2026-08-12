@@ -907,20 +907,23 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
 
     const candidates = candidatesList.slice(0, 10);
 
-    // --- CALIBRATION DE CONFIANCE ---
-    const top10Scores = selected.map(num => calibratedScores[num] || 0);
-    const top10Mean = top10Scores.reduce((a, b) => a + b, 0) / 10;
-    const top10Variance = top10Scores.reduce((sum, s) => sum + Math.pow(s - top10Mean, 2), 0) / 10;
-    const top10StdDev = Math.sqrt(top10Variance) || 0.001;
-    const scoreVariancePenalty = Math.min(0.25, Math.max(0, 0.12 - top10StdDev) * 2.0);
+    // --- CALIBRATION DE CONFIANCE (Robustesse de l'Inférence Continue) ---
+    const allScoresList = Object.values(calibratedScores);
+    const globalMeanScore = allScoresList.reduce((a, b) => a + b, 0) / (allScoresList.length || 1);
+    const globalVar = allScoresList.reduce((sum, s) => sum + Math.pow(s - globalMeanScore, 2), 0) / (allScoresList.length || 1);
+    const globalStd = Math.sqrt(globalVar) || 1e-6;
 
-    const top18 = [...selected, ...candidatesList.slice(0, 13)];
-    const top18Scores = top18.map(num => calibratedScores[num] || 0);
-    const sumTop3 = top18Scores.slice(0, 3).reduce((a, b) => a + b, 0);
-    const sumTop18 = top18Scores.reduce((a, b) => a + b, 0) || 1.0;
-    const overConcentrationPenalty = Math.min(0.25, Math.max(0, (sumTop3 / sumTop18) - 0.22) * 1.5);
+    const topScoresList = selected.map(num => calibratedScores[num] || 0);
+    const topMeanScore = topScoresList.reduce((a, b) => a + b, 0) / (topScoresList.length || 1);
 
-    const stabilityScore = Math.max(0.1, Math.min(1.0, 1.0 - scoreVariancePenalty - contradictionPenalty - overConcentrationPenalty));
+    // Signal-to-Noise Ratio (SNR) continu
+    const snrVal = (topMeanScore - globalMeanScore) / globalStd;
+    const snrStability = 1.0 / (1.0 + Math.exp(-snrVal));
+
+    // Atténuation par le facteur de contradiction
+    const contradictionFactor = 1.0 / (1.0 + Math.exp(contradictionPenalty));
+
+    const stabilityScore = Math.max(0.1, Math.min(1.0, snrStability * contradictionFactor));
 
     // Détermination de la tranche de confiance
     // expected value de hits de random = 0.27. Si stabilityScore est élevé, la prédiction est structurée/élevée.
