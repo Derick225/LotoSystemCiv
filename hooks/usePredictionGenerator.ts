@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../services/predictionEngine';
-import { savePredictionToHistory } from '../services/predictionHistoryService';
+import { savePredictionToHistory, getLatestPredictionForDraw } from '../services/predictionHistoryService';
 import { calculateShannonEntropy, detectGameRegime } from '../services/mathService';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';
 import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../shared/prediction.types';
@@ -150,8 +150,24 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [chaoticRatio, activeVolatility]);
 
     useEffect(() => {
+        let isMounted = true;
         setLastPrediction(null);
         lastInferenceStateRef.current = null;
+
+        // Chargement instantané de la dernière prédiction en cache local (Offline Fallback & Restauration Instantanée)
+        if (drawName) {
+            getLatestPredictionForDraw(drawName).then((cached) => {
+                if (isMounted && cached) {
+                    setLastPrediction(cached);
+                }
+            }).catch(e => {
+                console.warn("[Oracle Base] Erreur lecture cache prédiction:", e);
+            });
+        }
+
+        return () => {
+            isMounted = false;
+        };
     }, [drawName, setLastPrediction]);
 
     useEffect(() => {

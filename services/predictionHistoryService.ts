@@ -116,6 +116,85 @@ export const getPredictionHistoryAsync = async (drawName: string): Promise<Predi
     return all.filter(p => p.drawName?.toLowerCase() === drawName?.toLowerCase());
 };
 
+const LATEST_PRED_KEY_PREFIX = 'nexus_latest_prediction_';
+
+/**
+ * Récupère la dernière prédiction persistée pour un tirage donné (IndexedDB + localStorage fallback).
+ * Permet un chargement instantané hors-ligne (Offline Fallback) avec isolation stricte du tirage.
+ */
+export const getLatestPredictionForDraw = async (drawName: string): Promise<Prediction | null> => {
+    if (!drawName) return null;
+    const cleanDraw = drawName.trim().toLowerCase();
+    const key = `${LATEST_PRED_KEY_PREFIX}${cleanDraw}`;
+    
+    // 1. Essai IndexedDB
+    try {
+        const cached = await get(key);
+        if (cached) {
+            const parsed = typeof cached === 'string' ? JSON.parse(cached) : cached;
+            if (parsed && Array.isArray(parsed.suggestedNumbers)) {
+                return parsed as Prediction;
+            }
+        }
+    } catch (e) {
+        console.warn(`[Storage] Échec lecture IndexedDB pour ${key}:`, e);
+    }
+
+    // 2. Essai localStorage de secours
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            const raw = window.localStorage.getItem(key);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && Array.isArray(parsed.suggestedNumbers)) {
+                    return parsed as Prediction;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn(`[Storage] Échec lecture localStorage pour ${key}:`, e);
+    }
+
+    // 3. Fallback sur l'historique local complet
+    try {
+        const history = await getPredictionHistoryAsync(drawName);
+        if (history.length > 0 && history[0]?.prediction) {
+            return history[0].prediction;
+        }
+    } catch (e) {
+        console.warn(`[Storage] Échec lecture fallback historique pour ${drawName}:`, e);
+    }
+
+    return null;
+};
+
+/**
+ * Sauvegarde la dernière prédiction générée pour un tirage (IndexedDB + localStorage).
+ * 100% Déterministe et strictement isolé par drawName.
+ */
+export const saveLatestPredictionForDraw = async (drawName: string, prediction: Prediction): Promise<void> => {
+    if (!drawName || !prediction) return;
+    const cleanDraw = drawName.trim().toLowerCase();
+    const key = `${LATEST_PRED_KEY_PREFIX}${cleanDraw}`;
+    const payload = JSON.stringify(prediction);
+
+    // IndexedDB persistant
+    try {
+        await set(key, payload);
+    } catch (e) {
+        console.warn(`[Storage] Échec écriture IndexedDB pour ${key}:`, e);
+    }
+
+    // localStorage persistant synchrone
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(key, payload);
+        }
+    } catch (e) {
+        console.warn(`[Storage] Échec écriture localStorage pour ${key}:`, e);
+    }
+};
+
 export const findPredictionsByDate = async (drawName: string, date: string): Promise<PredictionHistoryItem[]> => {
     const all = await getPredictionHistoryAsync(drawName);
     return all.filter(p => {
@@ -198,6 +277,9 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   } catch (e) {
        console.error("Critical storage error:", e);
   }
+
+  // Enregistrement persistant transparent dans le cache local indexé par drawName (Offline Fallback)
+  saveLatestPredictionForDraw(drawName, prediction).catch(e => console.warn("Latest prediction cache failed", e));
   
   // Automate sync in background
   syncAllHistory(drawName).catch(e => console.error("Auto-sync prediction history failed", e));

@@ -54,6 +54,8 @@ export const calculateScores = (
     features,
     advancedMetrics,
     history,
+    weights: { ...weights },
+    algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },
     deterministicSeed: history.length > 0 ? new Date(history[0].date).getTime() : Date.now(),
     maxFreq: Math.max(1, ...Array.from(features.freqMap || [])),

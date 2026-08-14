@@ -168,7 +168,13 @@ export const finalizePredictionPayload = async (
   enhancedMetrics: EnhancedMetrics,
   features: ExtractedFeatures,
   shrinkageApplied: boolean,
-  shrinkageFactor: number
+  shrinkageFactor: number,
+  dnaSieveMetrics?: {
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+    affinityPercent?: Record<number, number>;
+    multipliers?: Record<number, number>;
+  }
 ): Promise<Prediction> => {
   const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
   
@@ -200,6 +206,8 @@ export const finalizePredictionPayload = async (
     analysisText = `Mode Prudence activé : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
   } else if (shrinkageApplied) {
     analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
+  } else if (dnaSieveMetrics && dnaSieveMetrics.dominantAlgos.length > 0) {
+    analysisText = `Prédiction Oracle Base filtrée à travers le Tamis de l'ADN Algorithmique (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(' • ')} — Concordance: ${dnaSieveMetrics.dnaConcordanceMean}%).`;
   } else {
     analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
   }
@@ -238,6 +246,7 @@ export const finalizePredictionPayload = async (
     shrinkageFactor,
     shrinkageFactorMap: undefined,
     shrinkageVerification: null,
+    dnaSieve: dnaSieveMetrics,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
       spatialSigma: 1.5,

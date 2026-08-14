@@ -13,6 +13,7 @@ export {
   scorePredictionNumbers,
   rescoreWithAdjustments,
   applyPredictionDenoising,
+  applyPredictionDnaSieve,
   selectPredictionNumbers,
   computeAdvancedMetrics,
   yieldToUi,

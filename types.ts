@@ -102,6 +102,12 @@ export interface Prediction {
   aiRationale?: string;
   aiStrategicAdvice?: string;
   isLocalFallback?: boolean;
+  dnaSieve?: {
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+    affinityPercent?: Record<number, number>;
+    multipliers?: Record<number, number>;
+  };
 }
 
 export interface PredictionFeedback {
@@ -582,6 +588,10 @@ export interface SpatialCluster {
 export interface ForestVote {
   candidate: number;
   score: number;
+  rawScore?: number;
+  dnaAffinity?: number;
+  dnaMultiplier?: number;
+  isDnaBoosted?: boolean;
   votes: { temporal: number; spatial: number; structural: number };
   decisionPath: DecisionNode;
   features: { isConsensusTrap: boolean; values?: number[] };

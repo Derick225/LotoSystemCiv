@@ -31,6 +31,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const regularity = useNexusStore((state) => state.regularity);
   const nexusLoading = useNexusStore((state) => state.loading);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
 
   const [cyclicData, setCyclicData] = useState<CyclicCandidate[]>([]);
   const [seasonalData, setSeasonalData] = useState<
@@ -82,10 +83,11 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           setDecayTrendData(dayAff.slice(0, 6));
         }
 
-        // 3.5 Résonance Inter-Mensuelle (Pilier 1)
+        // 3.5 Résonance Inter-Mensuelle tamisée par l'ADN algorithmique du moment (Pilier 1)
         const resonanceDetail = getCrossMonthResonanceAnalysis(
           history,
           drawName,
+          globalWeights,
         );
         if (isMounted.current) {
           setCrossMonthResonance(resonanceDetail);
@@ -227,43 +229,31 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Info card */}
             <div className="lg:w-5/12 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400 border border-indigo-500/20">
+                <div className="p-2 bg-indigo-500/10 rounded-xl text-amber-400 border border-amber-500/20">
                   <Sparkles size={16} />
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-400">
-                  Stratégie Analytique — Pilier 1
+                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-400">
+                  Tamis de l'ADN Algorithmique Actif
                 </span>
               </div>
               <h3 className="text-xl font-black text-white uppercase tracking-tight">
-                Résonance Inter-Mensuelle
+                Résonance Inter-Mensuelle & Tamis ADN
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Analyse stochastique de l'excitation de cohorte. Le système a
-                identifié une transition temporelle majeure entre le mois de{" "}
-                <strong className="text-indigo-300 font-bold">
-                  {crossMonthResonance.sourceMonthName}
-                </strong>{" "}
-                et le mois en cours (
-                <span className="text-white font-bold">
-                  {crossMonthResonance.currentMonthName}
-                </span>
-                ) avec un coefficient de similarité de{" "}
+                Les candidats de résonance ({crossMonthResonance.sourceMonthName} →{" "}
+                <span className="text-white font-bold">{crossMonthResonance.currentMonthName}</span>, similarité{" "}
                 <strong className="text-emerald-400 font-mono">
                   {(crossMonthResonance.correlation * 100).toFixed(1)}%
-                </strong>
-                .
+                </strong>) sont filtrés et pondérés à travers le profil génomique des algorithmes actifs.
               </p>
 
               <div className="p-3.5 rounded-2xl bg-indigo-950/20 border border-indigo-500/10 space-y-1.5">
-                <div className="flex items-center gap-2 text-[10px] font-black text-indigo-300 uppercase tracking-wide">
-                  <Activity size={12} /> Impact Prédictif Direct
+                <div className="flex items-center justify-between text-[10px] font-black text-indigo-300 uppercase tracking-wide">
+                  <span className="flex items-center gap-1.5"><Activity size={12} /> Concordance ADN Moyenne</span>
+                  <span className="text-emerald-400 font-mono font-bold">{crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean || 50}%</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Les numéros gagnants et machines de{" "}
-                  {crossMonthResonance.sourceMonthName} projettent un élan
-                  d'excitation de <strong>20%</strong> dans le vecteur final de
-                  la modélisation temporelle, optimisant ainsi l'alignement
-                  continu des prédictions.
+                  Chaque numéro voit son score de projection mensuelle modulé en continu selon son affinité avec les algorithmes dominants du moment ({crossMonthResonance.dnaSieveInfo?.dominantAlgos?.join(', ') || 'Global'}).
                 </p>
               </div>
             </div>
@@ -271,23 +261,40 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Visual graph and numbers */}
             <div className="lg:w-7/12 w-full space-y-6">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-3">
-                  Vecteur d'émergence (Cohorte Gagnants + Machines)
-                </span>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
+                    Sélection Élite Tamisée (Cohorte Gagnants + Machines)
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                    Tamis Actif
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   {crossMonthResonance.topNumbers.slice(0, 8).map((item) => (
                     <div
                       key={item.number}
-                      className="flex items-center gap-2 px-3 py-2 bg-slate-950/40 hover:bg-slate-950/60 border border-slate-800/80 hover:border-indigo-500/30 rounded-2xl transition-all duration-300"
+                      className="flex items-center gap-2 px-3 py-2 bg-slate-950/40 hover:bg-slate-950/60 border border-slate-800/80 hover:border-indigo-500/30 rounded-2xl transition-all duration-300 relative overflow-hidden"
                     >
                       <NumberBall number={item.number} size="sm" />
-                      <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">
-                          Résonance
-                        </span>
-                        <span className="text-xs font-mono font-black text-emerald-400">
-                          {item.score}%
-                        </span>
+                      <div className="flex flex-col flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">
+                            Tamis
+                          </span>
+                          {item.isDnaBoosted && (
+                            <span className="text-[7px] font-bold text-amber-400 uppercase bg-amber-400/10 px-1 rounded">
+                              +ADN
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xs font-mono font-black text-emerald-400">
+                            {item.score}%
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-400">
+                            ({item.dnaCompatibility}%)
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}

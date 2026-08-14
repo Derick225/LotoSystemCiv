@@ -17,7 +17,10 @@ type TwinCandidate = {
 };
 
 type InterMonthlyResonanceCache = {
-  scores: Record<number, number>;
+  scores: Record<number, number>; // Sieved scores passed through active algorithmic DNA
+  rawScores: Record<number, number>; // Unsieved raw temporal projections
+  dnaMultipliers: Record<number, number>; // DNA sieve continuous multipliers
+  dnaAffinity: Record<number, number>; // Normalized DNA compatibility percentage
   median: number;
   mad: number;
   iqr: number;
@@ -32,10 +35,14 @@ type InterMonthlyResonanceCache = {
   totalSignalMass: number;
   concentrationTop5: number;
   signalDetected: boolean;
+  dnaSieveActive: boolean;
 };
 
 const DEFAULT_CACHE: InterMonthlyResonanceCache = {
   scores: {},
+  rawScores: {},
+  dnaMultipliers: {},
+  dnaAffinity: {},
   median: 0,
   mad: 1,
   iqr: 1,
@@ -50,6 +57,7 @@ const DEFAULT_CACHE: InterMonthlyResonanceCache = {
   totalSignalMass: 0,
   concentrationTop5: 0,
   signalDetected: false,
+  dnaSieveActive: false,
 };
 
 const clamp = (v: number, min: number, max: number): number =>
@@ -68,6 +76,83 @@ const uniqueValidNumbers = (arr: unknown): number[] => {
     }
   }
   return out;
+};
+
+/**
+ * Calculates continuous DNA compatibility signal for each candidate number.
+ * Sifts numbers through the active algorithmic DNA (current weights & feature matrices).
+ */
+const computeDnaSieveSignal = (ctx: AlgorithmContext): { rawDna: Float64Array; multipliers: Float64Array; affinityPercent: Float64Array } => {
+  const rawDna = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
+  const multipliers = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
+  const affinityPercent = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
+  const weights = (ctx.weights || ctx.algoWeights || {}) as Record<string, number>;
+  const features = ctx.features;
+
+  if (!features) {
+    multipliers.fill(1.0);
+    affinityPercent.fill(50.0);
+    return { rawDna, multipliers, affinityPercent };
+  }
+
+  const maxFreq = Math.max(1, ctx.maxFreq || 1);
+  const maxMarkov = Math.max(0.001, ctx.maxMarkov || 0.001);
+  const maxMachine = Math.max(0.001, ctx.maxMachineTransfer || 0.001);
+
+  // Active genome weights with uniform minimum
+  const wFreq = Math.max(0.001, weights[AlgoKey.FREQUENCY] ?? 1.0);
+  const wMarkov = Math.max(0.001, weights[AlgoKey.MARKOV] ?? 1.0);
+  const wMomentum = Math.max(0.001, weights[AlgoKey.MOMENTUM] ?? 1.0);
+  const wMachine = Math.max(0.001, (weights as Record<string, number>).machine_bias ?? weights[AlgoKey.BAYES] ?? 1.0);
+  const wGaps = Math.max(0.001, weights[AlgoKey.GAPS] ?? 1.0);
+  const wAffinity = Math.max(0.001, weights[AlgoKey.AFFINITY] ?? 1.0);
+  const wSpectral = Math.max(0.001, weights[AlgoKey.SPECTRAL] ?? 1.0);
+
+  const totalW = wFreq + wMarkov + wMomentum + wMachine + wGaps + wAffinity + wSpectral;
+
+  let sumDna = 0;
+  for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+    const sFreq = (features.freqMap?.[n] ?? 0) / maxFreq;
+    const sMarkov = (features.markovMap?.[n] ?? 0) / maxMarkov;
+    const sMachine = (features.machineTransferMap?.[n] ?? 0) / maxMachine;
+    const rawMom = features.momentumMap?.[n] ?? 0;
+    const sMomentum = 1.0 / (1.0 + Math.exp(-rawMom));
+    const gapVal = features.gapsMap?.[n] ?? 0;
+    const sGap = Math.exp(-gapVal / 18.0);
+    const sAffinity = features.shadowProbabilityMap?.[n] ?? 0;
+    const sSpectral = features.networkCorrelationMap?.[n] ?? 0;
+
+    const weightedComposite =
+      (wFreq * sFreq +
+        wMarkov * sMarkov +
+        wMomentum * sMomentum +
+        wMachine * sMachine +
+        wGaps * sGap +
+        wAffinity * sAffinity +
+        wSpectral * sSpectral) /
+      totalW;
+
+    rawDna[n] = weightedComposite;
+    sumDna += weightedComposite;
+  }
+
+  const meanDna = sumDna / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
+  let varDna = 0;
+  for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+    varDna += Math.pow(rawDna[n] - meanDna, 2);
+  }
+  const stdDevDna = Math.sqrt(varDna / LOTTERY_CONSTANTS.TOTAL_NUMBERS) || 1e-6;
+
+  for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+    const zDna = (rawDna[n] - meanDna) / stdDevDna;
+    // Continuous differential sieve function centered at 1.0 in range [0.1, 1.9]
+    const sieveMultiplier = 2.0 / (1.0 + Math.exp(-1.1 * zDna));
+    multipliers[n] = clamp(sieveMultiplier, 0.1, 1.9);
+    // Continuous compatibility percentage in [0, 100]
+    affinityPercent[n] = clamp((1.0 / (1.0 + Math.exp(-1.5 * zDna))) * 100, 0, 100);
+  }
+
+  return { rawDna, multipliers, affinityPercent };
 };
 
 const parseDateStrict = (dateStr: string): Date | null => {
@@ -360,12 +445,35 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       }
     }
 
-    const { median, iqr, mad } = computeRobustStats(rawScores);
-    const concentrationTop5 = computeTop5Concentration(rawScores);
+    // --- APPLICATION DU TAMIS DE L'ADN ALGORITHMIQUE DU MOMENT ---
+    const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity } = computeDnaSieveSignal(ctx);
+
+    const sievedScores: Record<number, number> = {};
+    const dnaMultipliersRecord: Record<number, number> = {};
+    const dnaAffinityRecord: Record<number, number> = {};
+
+    for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
+      const raw = rawScores[i] || 0;
+      const mult = dnaMultipliers[i] || 1.0;
+      const aff = dnaAffinity[i] || 50.0;
+
+      dnaMultipliersRecord[i] = mult;
+      dnaAffinityRecord[i] = aff;
+
+      // Tamisage continu : combinaison différentiable de la projection mensuelle et de l'ADN actif
+      // Modulation douce : 30% d'inertie brute temporelle + 70% de modulation par le tamis d'ADN
+      sievedScores[i] = raw * (0.30 + 0.70 * mult);
+    }
+
+    const { median, iqr, mad } = computeRobustStats(sievedScores);
+    const concentrationTop5 = computeTop5Concentration(sievedScores);
     const signalDetected = matchedSourcePeriods > 0 && totalSignalMass > 0;
 
     ctx.pluginCache[cacheKey] = {
-      scores: rawScores,
+      scores: sievedScores,
+      rawScores,
+      dnaMultipliers: dnaMultipliersRecord,
+      dnaAffinity: dnaAffinityRecord,
       median,
       mad,
       iqr,
@@ -380,6 +488,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       totalSignalMass,
       concentrationTop5,
       signalDetected,
+      dnaSieveActive: true,
     };
   },
 
@@ -397,16 +506,23 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
         confidence: 0.5,
         metadata: {
           rawVal: 0,
+          sievedVal: 0,
+          dnaMultiplier: 1.0,
+          dnaAffinity: 50.0,
           topTwinDate: 'N/A',
           periodsAnalyzed: 0,
           matchedSourcePeriods: 0,
           totalProjectedNumbers: 0,
           signalDetected: false,
+          dnaSieveActive: false,
         },
       };
     }
 
-    const rawVal = Number.isFinite(cache.scores[num]) ? cache.scores[num] : 0;
+    const sievedVal = Number.isFinite(cache.scores[num]) ? cache.scores[num] : 0;
+    const rawVal = Number.isFinite(cache.rawScores[num]) ? cache.rawScores[num] : sievedVal;
+    const dnaMult = Number.isFinite(cache.dnaMultipliers[num]) ? cache.dnaMultipliers[num] : 1.0;
+    const dnaAff = Number.isFinite(cache.dnaAffinity[num]) ? cache.dnaAffinity[num] : 50.0;
     const median = Number.isFinite(cache.median) ? cache.median : 0;
 
     // Normalization scale using robust estimator: 1.4826 * MAD or IQR
@@ -415,8 +531,8 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     let score = 50.0;
 
     if (cache.signalDetected) {
-      // Z-score relative to robust median and MAD
-      const zRobust = (rawVal - median) / robustScale;
+      // Z-score relative to robust median and MAD of sieved distribution
+      const zRobust = (sievedVal - median) / robustScale;
 
       // Hurst-informed slope tuning
       let hurst = Number(ctx.statisticalBounds?.hurstExponent);
@@ -429,7 +545,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
 
     score = clamp(score, 0.0, 100.0);
 
-    // Continuous confidence derivation
+    // Continuous confidence derivation enriched by DNA compatibility
     const evidenceRatio =
       cache.periodsAnalyzed > 0
         ? cache.matchedSourcePeriods / (cache.matchedSourcePeriods + Math.sqrt(cache.periodsAnalyzed) + 1)
@@ -442,13 +558,16 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       0.4,
       1.0
     );
+    const dnaSieveConfidenceBonus = clamp((dnaMult - 0.5) / 1.5, 0.0, 0.2);
 
     const confidenceRaw =
-      0.20 +
-      0.30 * evidenceRatio +
+      0.15 +
+      0.25 * evidenceRatio +
       0.25 * twinQualityTerm +
       0.15 * signalMassTerm +
-      0.10 * concentrationPenalty;
+      0.10 * concentrationPenalty +
+      0.10 * (dnaAff / 100.0) +
+      dnaSieveConfidenceBonus;
 
     const confidence = clamp(confidenceRaw, 0.2, 0.95);
 
@@ -457,6 +576,9 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       confidence: Number(confidence.toFixed(3)),
       metadata: {
         rawVal: Number(rawVal.toFixed(3)),
+        sievedVal: Number(sievedVal.toFixed(3)),
+        dnaMultiplier: Number(dnaMult.toFixed(3)),
+        dnaAffinity: Number(dnaAff.toFixed(1)),
         topTwinDate: cache.topTwinDate,
         topTwinIndex: cache.topTwinIndex,
         topTwinQuality: Number(cache.topTwinQuality.toFixed(3)),
@@ -468,6 +590,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
         totalSignalMass: Number(cache.totalSignalMass.toFixed(2)),
         concentrationTop5: Number(cache.concentrationTop5.toFixed(3)),
         signalDetected: cache.signalDetected,
+        dnaSieveActive: cache.dnaSieveActive,
       },
     };
   },

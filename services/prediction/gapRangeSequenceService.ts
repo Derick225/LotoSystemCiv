@@ -1,5 +1,7 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { AlgoWeights } from '../../shared/prediction.types';
+import { calculateDnaSieveWeights } from '../temporalAnalysisService';
 
 export type GapRangeStep = 5 | 10 | 'combined';
 
@@ -29,7 +31,15 @@ export interface GapRangeSequenceReport {
   lastDrawBinLabels: string[];
   bins: GapRangeBinInfo[];
   topPredictedBins: GapRangeBinInfo[];
-  scoresByNumber: Record<number, number>;
+  scoresByNumber: Record<number, number>; // Sieved scores passed through active algorithmic DNA
+  rawScoresByNumber: Record<number, number>; // Raw Markov transition scores
+  dnaMultipliers: Record<number, number>; // Continuous DNA sieve multipliers
+  dnaAffinity: Record<number, number>; // Normalized DNA compatibility percentage
+  dnaSieveInfo: {
+    active: boolean;
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+  };
   currentGapsByNumber: Record<number, { gap: number; binIndex: number; binLabel: string }>;
   transitionMatrix: number[][]; // [sourceBin][targetBin] transition counts
   resolutionWeights?: { step5Weight: number; step10Weight: number };
@@ -96,17 +106,19 @@ export function getTotalBins(step: GapRangeStep): number {
 export const gapRangeSequenceService = {
   /**
     * Analyzes the historical sequence of gap ranges and computes transition probabilities.
+    * Sifts candidates through the active Algorithmic DNA.
     */
   analyzeGapRangePatterns(
     drawName: string,
     history: DrawResult[],
     step: GapRangeStep = 'combined',
-    maxNumber: number = 90
+    maxNumber: number = 90,
+    weights?: AlgoWeights
   ): GapRangeSequenceReport {
     // 0. Handle multi-resolution fusion ('combined')
     if (step === 'combined') {
-      const report5 = this.analyzeGapRangePatterns(drawName, history, 5, maxNumber);
-      const report10 = this.analyzeGapRangePatterns(drawName, history, 10, maxNumber);
+      const report5 = this.analyzeGapRangePatterns(drawName, history, 5, maxNumber, weights);
+      const report10 = this.analyzeGapRangePatterns(drawName, history, 10, maxNumber, weights);
 
       // Entropy-based dynamic information weighting (AGENTS.md: zero magic numbers)
       const totalBins5 = getTotalBins(5);
@@ -134,10 +146,15 @@ export const gapRangeSequenceService = {
 
       // Fused scores per number
       const scoresByNumber: Record<number, number> = {};
+      const rawScoresByNumber: Record<number, number> = {};
       for (let num = 1; num <= maxNumber; num++) {
         const s5 = report5.scoresByNumber[num] ?? 50;
         const s10 = report10.scoresByNumber[num] ?? 50;
         scoresByNumber[num] = parseFloat((step5Weight * s5 + step10Weight * s10).toFixed(2));
+
+        const r5 = report5.rawScoresByNumber[num] ?? s5;
+        const r10 = report10.rawScoresByNumber[num] ?? s10;
+        rawScoresByNumber[num] = parseFloat((step5Weight * r5 + step10Weight * r10).toFixed(2));
       }
 
       // Merge top predicted bins representation from both scales
@@ -151,6 +168,10 @@ export const gapRangeSequenceService = {
         bins: report10.bins,
         topPredictedBins: report10.topPredictedBins,
         scoresByNumber,
+        rawScoresByNumber,
+        dnaMultipliers: report10.dnaMultipliers,
+        dnaAffinity: report10.dnaAffinity,
+        dnaSieveInfo: report10.dnaSieveInfo,
         currentGapsByNumber: report10.currentGapsByNumber,
         transitionMatrix: report10.transitionMatrix,
         resolutionWeights: { step5Weight, step10Weight },
@@ -339,15 +360,36 @@ export const gapRangeSequenceService = {
     const varianceProb = probs.reduce((acc, p) => acc + Math.pow(p - meanProb, 2), 0) / totalBins;
     const stdProb = Math.sqrt(varianceProb) || Number.EPSILON;
 
+    // Calcul du Tamis de l'ADN Algorithmique Actuel (ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
+    const { multipliers: dnaMultArray, affinityPercent: dnaAffArray, dominantAlgos } = calculateDnaSieveWeights(isolatedHistory, weights);
+
+    const rawScoresByNumber: Record<number, number> = {};
     const scoresByNumber: Record<number, number> = {};
+    const dnaMultipliers: Record<number, number> = {};
+    const dnaAffinity: Record<number, number> = {};
+
+    let sumDnaAffinity = 0;
     for (let num = 1; num <= maxNumber; num++) {
       const binIdx = currentGapsByNumber[num].binIndex;
       const prob = binProbabilities[binIdx];
 
       const z = (prob - meanProb) / stdProb;
-      const score = 100.0 / (1.0 + Math.exp(-3.0 * z));
-      scoresByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, score)).toFixed(2));
+      const rawMarkovScore = 100.0 / (1.0 + Math.exp(-3.0 * z));
+      const mult = dnaMultArray[num] ?? 1.0;
+      const aff = dnaAffArray[num] ?? 50.0;
+
+      rawScoresByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, rawMarkovScore)).toFixed(2));
+      dnaMultipliers[num] = mult;
+      dnaAffinity[num] = aff;
+
+      // Tamisage continu : 35% d'inertie de séquence de tranche + 65% de sélection par l'ADN algorithmique actif
+      const sievedScore = rawMarkovScore * (0.35 + 0.65 * mult);
+      scoresByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, sievedScore)).toFixed(2));
+
+      sumDnaAffinity += aff;
     }
+
+    const dnaConcordanceMean = maxNumber > 0 ? Math.round(sumDnaAffinity / maxNumber) : 50;
 
     return {
       drawName,
@@ -359,6 +401,14 @@ export const gapRangeSequenceService = {
       bins,
       topPredictedBins,
       scoresByNumber,
+      rawScoresByNumber,
+      dnaMultipliers,
+      dnaAffinity,
+      dnaSieveInfo: {
+        active: true,
+        dominantAlgos,
+        dnaConcordanceMean,
+      },
       currentGapsByNumber,
       transitionMatrix,
       sequenceMatches: sequenceMatches.slice(0, 10)

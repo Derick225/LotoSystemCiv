@@ -28,7 +28,13 @@ export const gapRangeSequencePlugin: AlgorithmPlugin = {
     const history = ctx.history;
     const step: GapRangeStep = 'combined'; // Multi-resolution fusion (5 & 10)
 
-    const report = gapRangeSequenceService.analyzeGapRangePatterns(drawName, history, step, 90);
+    const report = gapRangeSequenceService.analyzeGapRangePatterns(
+      drawName,
+      history,
+      step,
+      90,
+      ctx.weights
+    );
 
     ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.GAP_BAND_SEQUENCE] = report;

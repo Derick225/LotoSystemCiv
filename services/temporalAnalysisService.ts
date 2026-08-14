@@ -1,6 +1,7 @@
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -247,12 +248,128 @@ export const getTemporalScores = async (drawName: string, rawHistory: DrawResult
 };
 
 /**
- * CALCULE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE (CROSS-MONTH RESONANCE)
- * Identifie les transitions ou retours de numéros (Gagnants + Machines) entre les mois
- * de façon purement déterministe et adaptative, sans aucun nombre magique.
- * Aligné avec l'observation des résonances de cohorte mensuelles (ex: Février vers Juillet).
+ * CALCULE L'EMPREINTE DE COMPATIBILITÉ DE L'ADN ALGORITHMIQUE DU MOMENT
+ * Permet de passer les choix de résonance inter-mensuelle dans le tamis algorithmique actif
+ * (ZÉRO NOMBRE MAGIQUE, 100% DÉTERMINISTE & CONTINU).
  */
-export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?: string): Float32Array => {
+export const calculateDnaSieveWeights = (
+    history: DrawResult[],
+    weights?: AlgoWeights
+): { multipliers: Float32Array; affinityPercent: Float32Array; dominantAlgos: string[] } => {
+    const multipliers = new Float32Array(91);
+    const affinityPercent = new Float32Array(91);
+    multipliers.fill(1.0);
+    affinityPercent.fill(50.0);
+
+    if (history.length === 0) {
+        return { multipliers, affinityPercent, dominantAlgos: [] };
+    }
+
+    const effectiveWeights: AlgoWeights = weights && Object.keys(weights).length > 0
+        ? weights
+        : DEFAULT_ALGO_WEIGHTS;
+
+    // 1. Fréquence récente
+    const freq = new Float32Array(91);
+    const sample = history.slice(0, Math.min(100, history.length));
+    sample.forEach(d => {
+        d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freq[n] += 1.0; });
+        if (Array.isArray(d.machine)) {
+            d.machine.forEach(n => { if (n >= 1 && n <= 90) freq[n] += 0.5; });
+        }
+    });
+    const maxFreq = Math.max(...Array.from(freq), 1.0);
+
+    // 2. Markov transitions du dernier tirage
+    const markov = new Float32Array(91);
+    const lastWinners = history[0]?.gagnants || [];
+    history.forEach((d, idx) => {
+        if (idx < history.length - 1) {
+            const nextDraw = history[idx + 1];
+            const hasCommon = d.gagnants.some(n => lastWinners.includes(n));
+            if (hasCommon) {
+                nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= 90) markov[n] += 1.0; });
+            }
+        }
+    });
+    const maxMarkov = Math.max(...Array.from(markov), 1.0);
+
+    // 3. Écart actuel
+    const currentGaps = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+        let gap = 0;
+        for (let i = 0; i < history.length; i++) {
+            if (history[i].gagnants.includes(n)) break;
+            gap++;
+        }
+        currentGaps[n] = gap;
+    }
+
+    // 4. Momentum / Vitesse
+    const momentum = new Float32Array(91);
+    const shortWindow = history.slice(0, Math.min(10, history.length));
+    const longWindow = history.slice(0, Math.min(40, history.length));
+    for (let n = 1; n <= 90; n++) {
+        const shortCount = shortWindow.filter(d => d.gagnants.includes(n)).length / Math.max(1, shortWindow.length);
+        const longCount = longWindow.filter(d => d.gagnants.includes(n)).length / Math.max(1, longWindow.length);
+        momentum[n] = shortCount - longCount;
+    }
+
+    // Extraction des poids d'ADN
+    const wFreq = Math.max(0.001, effectiveWeights[AlgoKey.FREQUENCY] ?? 1.0);
+    const wMarkov = Math.max(0.001, effectiveWeights[AlgoKey.MARKOV] ?? 1.0);
+    const wGap = Math.max(0.001, effectiveWeights[AlgoKey.GAPS] ?? 1.0);
+    const wMom = Math.max(0.001, effectiveWeights[AlgoKey.MOMENTUM] ?? 1.0);
+    const wSpectral = Math.max(0.001, effectiveWeights[AlgoKey.SPECTRAL] ?? 1.0);
+    const wBayes = Math.max(0.001, effectiveWeights[AlgoKey.BAYES] ?? 1.0);
+
+    const totalWeight = wFreq + wMarkov + wGap + wMom + wSpectral + wBayes;
+
+    // Algos dominants dans l'ADN actuel
+    const dominantAlgos = Object.entries(effectiveWeights)
+        .sort(([, a], [, b]) => (b as number) - (a as number))
+        .slice(0, 3)
+        .map(([k]) => k);
+
+    const compositeDna = new Float32Array(91);
+    let sumDna = 0;
+
+    for (let n = 1; n <= 90; n++) {
+        const sF = freq[n] / maxFreq;
+        const sM = markov[n] / maxMarkov;
+        const sG = Math.exp(-currentGaps[n] / 18.0);
+        const sMom = 1.0 / (1.0 + Math.exp(-momentum[n] * 4.0));
+        const sBayes = (sF * 0.6 + sM * 0.4);
+
+        const val = (wFreq * sF + wMarkov * sM + wGap * sG + wMom * sMom + wBayes * sBayes) / totalWeight;
+        compositeDna[n] = val;
+        sumDna += val;
+    }
+
+    const meanDna = sumDna / 90.0;
+    let varDna = 0;
+    for (let n = 1; n <= 90; n++) {
+        varDna += Math.pow(compositeDna[n] - meanDna, 2);
+    }
+    const stdDevDna = Math.sqrt(varDna / 90.0) || 1e-6;
+
+    for (let n = 1; n <= 90; n++) {
+        const z = (compositeDna[n] - meanDna) / stdDevDna;
+        const mult = 2.0 / (1.0 + Math.exp(-1.1 * z));
+        multipliers[n] = Math.max(0.1, Math.min(1.9, mult));
+        affinityPercent[n] = Math.round(Math.max(0, Math.min(100, (1.0 / (1.0 + Math.exp(-1.4 * z))) * 100)));
+    }
+
+    return { multipliers, affinityPercent, dominantAlgos };
+};
+
+/**
+ * CALCULE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE (CROSS-MONTH RESONANCE)
+ * Identifie les transitions ou retours de numéros (Gagnants + Machines) entre les mois,
+ * puis filtre et affine les projections à travers le tamis de l'ADN algorithmique du moment.
+ * Aligné avec l'observation des résonances de cohorte mensuelles.
+ */
+export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?: string, weights?: AlgoWeights): Float32Array => {
     const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const resonance = new Float32Array(91);
     if (history.length < 12) return resonance; // Pas assez de profondeur pour une analyse mensuelle croisée solide
@@ -312,10 +429,16 @@ export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?
         return resonance;
     }
 
-    // 4. Projection de résonance pour chaque numéro basé sur le profil du mois source optimal
-    // Multiplié de façon continue par la force de corrélation
+    // 4. Calcul du tamis de l'ADN algorithmique du moment
+    const { multipliers } = calculateDnaSieveWeights(history, weights);
+
+    // 5. Projection de résonance pour chaque numéro basé sur le profil du mois source optimal,
+    // tamisé de façon continue par l'empreinte de l'ADN algorithmique actuel
     for (let n = 1; n <= 90; n++) {
-        resonance[n] = monthProfiles[bestSourceMonth][n] * maxCorr;
+        const rawProjection = monthProfiles[bestSourceMonth][n] * maxCorr;
+        const dnaMult = multipliers[n] || 1.0;
+        // Tamisage : 30% d'inertie temporelle brute + 70% de sélection par l'ADN algorithmique
+        resonance[n] = rawProjection * (0.30 + 0.70 * dnaMult);
     }
 
     return resonance;
@@ -379,14 +502,31 @@ export interface CrossMonthResonanceAnalysis {
     sourceMonthIndex: number;
     sourceMonthName: string;
     correlation: number;
-    topNumbers: { number: number; score: number }[];
+    topNumbers: { 
+        number: number; 
+        score: number; 
+        rawScore: number;
+        dnaCompatibility: number;
+        isDnaBoosted: boolean;
+        sieveDeltaPercent: number;
+    }[];
     allMonthsCorrelation: { monthIndex: number; monthName: string; correlation: number }[];
+    dnaSieveInfo: {
+        active: boolean;
+        dominantAlgos: string[];
+        dnaConcordanceMean: number;
+    };
 }
 
 /**
  * FOURNIT UNE ANALYSE DÉTAILLÉE DE LA RÉSONANCE TEMPORELLE INTER-MENSUELLE
+ * AVEC TAMISAGE PAR L'ADN ALGORITHMIQUE ACTUEL
  */
-export const getCrossMonthResonanceAnalysis = (rawHistory: DrawResult[], drawName?: string): CrossMonthResonanceAnalysis => {
+export const getCrossMonthResonanceAnalysis = (
+    rawHistory: DrawResult[], 
+    drawName?: string,
+    weights?: AlgoWeights
+): CrossMonthResonanceAnalysis => {
     const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const monthsFr = [
         "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
@@ -403,7 +543,12 @@ export const getCrossMonthResonanceAnalysis = (rawHistory: DrawResult[], drawNam
         sourceMonthName: "N/A",
         correlation: 0,
         topNumbers: [],
-        allMonthsCorrelation: []
+        allMonthsCorrelation: [],
+        dnaSieveInfo: {
+            active: true,
+            dominantAlgos: [],
+            dnaConcordanceMean: 50
+        }
     };
 
     if (history.length < 12) return result;
@@ -468,23 +613,57 @@ export const getCrossMonthResonanceAnalysis = (rawHistory: DrawResult[], drawNam
         result.sourceMonthName = monthsFr[bestSourceMonth];
         result.correlation = maxCorr;
 
-        const rawResonance = calculateCrossMonthResonance(history, drawName);
-        const maxRes = Math.max(...Array.from(rawResonance)) || 1;
+        // Calcul du tamis de l'ADN algorithmique actuel
+        const { multipliers, affinityPercent, dominantAlgos } = calculateDnaSieveWeights(history, weights);
+        result.dnaSieveInfo.dominantAlgos = dominantAlgos;
+
+        // Projections brutes (sans tamis)
+        const rawMonthlyProjections = new Float32Array(91);
+        for (let n = 1; n <= 90; n++) {
+            rawMonthlyProjections[n] = monthProfiles[bestSourceMonth][n] * maxCorr;
+        }
+        const maxRaw = Math.max(...Array.from(rawMonthlyProjections), 1.0);
+
+        // Projections tamisées
+        const sievedResonance = calculateCrossMonthResonance(history, drawName, weights);
+        const maxSieved = Math.max(...Array.from(sievedResonance), 1.0);
+
+        let sumConcordance = 0;
+        let countSieved = 0;
 
         const numbersScores = Array.from({ length: 90 }, (_, i) => i + 1)
-            .map(n => ({
-                number: n,
-                score: Math.round((rawResonance[n] / maxRes) * 100)
-            }))
-            .filter(item => item.score > 0)
+            .map(n => {
+                const sievedNorm = Math.round((sievedResonance[n] / maxSieved) * 100);
+                const rawNorm = Math.round((rawMonthlyProjections[n] / maxRaw) * 100);
+                const dnaCompat = affinityPercent[n] || 50;
+                const isBoosted = (multipliers[n] || 1.0) > 1.05;
+                const delta = sievedNorm - rawNorm;
+
+                if (sievedNorm > 0) {
+                    sumConcordance += dnaCompat;
+                    countSieved++;
+                }
+
+                return {
+                    number: n,
+                    score: sievedNorm,
+                    rawScore: rawNorm,
+                    dnaCompatibility: dnaCompat,
+                    isDnaBoosted: isBoosted,
+                    sieveDeltaPercent: delta
+                };
+            })
+            .filter(item => item.score > 0 || item.rawScore > 0)
             .sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
+                if (b.dnaCompatibility !== a.dnaCompatibility) return b.dnaCompatibility - a.dnaCompatibility;
                 const hashA = (a.number * 2654435761) % 4294967296;
                 const hashB = (b.number * 2654435761) % 4294967296;
                 return hashB - hashA;
             });
 
         result.topNumbers = numbersScores.slice(0, 12);
+        result.dnaSieveInfo.dnaConcordanceMean = countSieved > 0 ? Math.round(sumConcordance / countSieved) : 50;
     }
 
     return result;

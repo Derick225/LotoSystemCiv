@@ -47,7 +47,11 @@ export async function handleOptimizeWeights(req: Request, reqBody?: any): Promis
       if (!error && data) {
         currentWeights = data.weights;
       } else {
-        currentWeights = { frequency: 0.15, gap: 0.15, spectral: 0.1, markov: 0.1, bayes: 0.1, momentum: 0.1, affinity: 0.1, spatial: 0.05, temporal: 0.05, fractal: 0.05, machine_bias: 0.05 };
+        const defaultAlgoKeys = ['frequency', 'gap', 'spectral', 'markov', 'bayes', 'momentum', 'affinity', 'spatial', 'temporal', 'fractal', 'machine_bias'];
+        currentWeights = defaultAlgoKeys.reduce((acc, k) => {
+          acc[k] = 1.0 / defaultAlgoKeys.length;
+          return acc;
+        }, {} as Record<string, number>);
       }
     }
 

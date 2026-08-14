@@ -19,23 +19,22 @@ const getGridPos = (val: number) => {
     return { row, col };
 };
 
+const ALL_GENOME_KEYS = [...GENOME_KEYS, 'machine_bias'];
+
 // Normalize weight genomes to sum to 1.0 continuously
 const normalizeGenomeWeights = (weights: Record<string, number>) => {
     const normalized: Record<string, number> = {};
+    const defaultUniformVal = 1.0 / ALL_GENOME_KEYS.length;
     let total = 0;
     
-    for (const key of GENOME_KEYS) {
-        normalized[key] = Math.max(0.01, weights[key] !== undefined ? weights[key] : 0.1);
+    for (const key of ALL_GENOME_KEYS) {
+        normalized[key] = Math.max(0.001, weights[key] !== undefined ? weights[key] : defaultUniformVal);
         total += normalized[key];
     }
     
-    const mBias = Math.max(0.01, weights.machine_bias !== undefined ? weights.machine_bias : 0.05);
-    total += mBias;
-    
-    for (const key of GENOME_KEYS) {
-        normalized[key] = normalized[key] / total;
+    for (const key of ALL_GENOME_KEYS) {
+        normalized[key] = normalized[key] / (total || 1.0);
     }
-    normalized.machine_bias = mBias / total;
     return normalized;
 };
 
@@ -403,9 +402,14 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
             lockAcquired = true
         }
     } else {
+        const uniformInitialWeights = ALL_GENOME_KEYS.reduce((acc, k) => {
+            acc[k] = 1.0 / ALL_GENOME_KEYS.length;
+            return acc;
+        }, {} as Record<string, number>);
+
         const { error: insertError } = await supabase.from('algo_weights').insert({
             draw_name: drawName,
-            weights: { frequency: 0.15, gap: 0.15, spectral: 0.1, markov: 0.1, bayes: 0.1, momentum: 0.1, affinity: 0.1, spatial: 0.05, temporal: 0.05, fractal: 0.05, machine_bias: 0.05 },
+            weights: uniformInitialWeights,
             updated_at: new Date().toISOString()
         })
         if (!insertError) lockAcquired = true
@@ -415,19 +419,10 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
         return new Response(JSON.stringify({ success: false, message: "Apprentissage déjà en cours (Lock)" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
     }
 
-    const defaultWeights: Record<string, number> = {
-        frequency: 0.15,
-        gap: 0.15,
-        spectral: 0.1,
-        markov: 0.1,
-        bayes: 0.1,
-        momentum: 0.1,
-        affinity: 0.1,
-        spatial: 0.05,
-        temporal: 0.05,
-        fractal: 0.05,
-        machine_bias: 0.05
-    };
+    const defaultWeights: Record<string, number> = ALL_GENOME_KEYS.reduce((acc, k) => {
+        acc[k] = 1.0 / ALL_GENOME_KEYS.length;
+        return acc;
+    }, {} as Record<string, number>);
 
     let bestW = { ...defaultWeights, ...(current?.weights || {}) };
     let bestScore = evaluateGenome(bestW, foldsData)

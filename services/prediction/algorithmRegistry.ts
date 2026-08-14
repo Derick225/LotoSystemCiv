@@ -16,6 +16,10 @@ export interface AlgorithmContext {
   advancedMetrics: EnhancedMetrics;
   history: DrawResult[];
   
+  // ADN ALGORITHMIQUE ACTUEL DU MOMENT
+  weights?: import('../../shared/prediction.types').AlgoWeights;
+  algoWeights?: import('../../shared/prediction.types').AlgoWeights;
+
   // CACHE DE CORRÉLATION ET PRÉCALCUL POUR RENDEMENT PHÉNOMÉNAL
   pluginCache?: PluginCacheData;
 

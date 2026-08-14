@@ -62,12 +62,18 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
 }) => {
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
   const nexusLoading = useNexusStore((state) => state.loading);
 
   const [candidates, setCandidates] = useState<ForestVote[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<ForestVote | null>(
     null,
   );
+  const [dnaSieveInfo, setDnaSieveInfo] = useState<{
+    active: boolean;
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+  } | null>(null);
   const [localLoading, setLocalLoading] = useState(true);
   const [filterMode, setFilterMode] = useState<FilterMode>("consensus");
   const [globalImportance, setGlobalImportance] = useState<
@@ -80,14 +86,16 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
     if (history.length < 40) return;
     setLocalLoading(true);
     try {
-      // Lancement du Worker Forest avec le mode sélectionné
-      const { votes, dataset } = await runDecisionForest(
+      // Lancement du Worker Forest avec le mode sélectionné et tamisage ADN
+      const { votes, dataset, dnaSieveInfo: sieveData } = await runDecisionForest(
         history,
         filterMode,
         selectedFeatures,
         drawName,
+        globalWeights
       );
       setCandidates(votes);
+      setDnaSieveInfo(sieveData || null);
 
       if (votes.length > 0) {
         // Par défaut, on sélectionne le meilleur candidat
@@ -108,7 +116,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
     } finally {
       setLocalLoading(false);
     }
-  }, [history, filterMode, selectedFeatures, showToast, drawName]);
+  }, [history, filterMode, selectedFeatures, showToast, drawName, globalWeights]);
 
   useEffect(() => {
     if (history.length >= 40) {
@@ -214,9 +222,17 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                       ? "Mode Équilibre"
                       : "Vote Consensus"}
                 </h3>
-                <span className="text-[9px] font-black tracking-widest text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full mt-1 inline-block">
-                  Fuzzy Soft Forest v5.0
-                </span>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <span className="text-[9px] font-black tracking-widest text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full inline-block">
+                    Fuzzy Soft Forest v5.0
+                  </span>
+                  {dnaSieveInfo && (
+                    <span className="text-[9px] font-black tracking-widest text-amber-300 uppercase bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                      <Sparkles size={10} className="text-amber-400" />
+                      Tamis ADN : {dnaSieveInfo.dominantAlgos.slice(0, 2).join(' • ') || 'Actif'} ({dnaSieveInfo.dnaConcordanceMean}%)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none mb-4">
@@ -296,9 +312,9 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 }}
                 className={`w-full flex items-center justify-between p-4 rounded-3xl border transition-all transform active:scale-95 ${selectedCandidate?.candidate === c.candidate ? `${theme.bg} ${theme.border} text-white shadow-lg scale-105` : "bg-slate-50 dark:bg-slate-900 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
               >
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 min-w-0 flex-1">
                   <span
-                    className={`text-[10px] font-black w-4 ${selectedCandidate?.candidate === c.candidate ? "text-white/70" : "text-slate-400"}`}
+                    className={`text-[10px] font-black w-4 shrink-0 ${selectedCandidate?.candidate === c.candidate ? "text-white/70" : "text-slate-400"}`}
                   >
                     #{idx + 1}
                   </span>
@@ -307,19 +323,29 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                     size="sm"
                     selected={selectedCandidate?.candidate === c.candidate}
                   />
-                  <div className="text-left">
-                    <div className="font-black text-sm">
-                      Numéro {c.candidate}
+                  <div className="text-left min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-sm">
+                        Numéro {c.candidate}
+                      </span>
+                      {c.isDnaBoosted && (
+                        <span className="text-[9px] font-black tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md shrink-0">
+                          +{Math.round(((c.dnaMultiplier ?? 1) - 1) * 100)}% ADN
+                        </span>
+                      )}
                     </div>
                     <div
-                      className={`text-xs font-medium ${selectedCandidate?.candidate === c.candidate ? "text-white/80" : "text-slate-400"}`}
+                      className={`text-xs font-medium flex items-center gap-1.5 flex-wrap ${selectedCandidate?.candidate === c.candidate ? "text-white/80" : "text-slate-400"}`}
                     >
-                      {c.score}% d'approbation
+                      <span className="font-bold">{c.score}%</span>
+                      <span className="text-[10px] opacity-70">
+                        (Forêt: {c.rawScore ?? c.score}% • ADN: {c.dnaAffinity ?? 50}%)
+                      </span>
                     </div>
                   </div>
                 </div>
                 {selectedCandidate?.candidate === c.candidate && (
-                  <Check size={16} className="text-white" />
+                  <Check size={16} className="text-white shrink-0 ml-2" />
                 )}
               </button>
             ))}
@@ -353,15 +379,25 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   </div>
 
                   <div className="flex-1 text-center md:text-left">
-                    <div className="text-6xl font-black text-white mb-2">
-                      {selectedCandidate.score}%
+                    <div className="flex flex-wrap items-baseline gap-3 justify-center md:justify-start">
+                      <div className="text-6xl font-black text-white mb-2">
+                        {selectedCandidate.score}%
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pb-2">
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-slate-300">
+                          Forêt Brute : {selectedCandidate.rawScore ?? selectedCandidate.score}%
+                        </span>
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center gap-1">
+                          <Sparkles size={10} /> Tamis ADN : {selectedCandidate.dnaAffinity ?? 50}% (x{selectedCandidate.dnaMultiplier ?? 1.0})
+                        </span>
+                      </div>
                     </div>
                     <h4 className="text-lg font-bold text-slate-300 mb-6">
-                      De probabilité estimée par la forêt
+                      De probabilité estimée après tamisage par l'ADN Algorithmique
                     </h4>
 
-                    <div className="bg-black/30 p-6 rounded-3xl border border-white/10 backdrop-blur-md">
-                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                    <div className="bg-black/30 p-6 rounded-3xl border border-white/10 backdrop-blur-md space-y-3">
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                         <Sparkles size={12} /> Pourquoi ce choix ?
                       </h5>
                       <p className="text-sm text-white font-medium leading-relaxed">
@@ -371,6 +407,14 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                             ? "Ce numéro est dans le 'ventre mou' statistique. Il n'est pas sous les projecteurs, ce qui le rend moins sujet aux corrections brutales de probabilité."
                             : "Ce numéro coche toutes les cases logiques : fréquence élevée récemment, bon écart temporel et validation par les algorithmes de voisinage."}
                       </p>
+                      {selectedCandidate.isDnaBoosted && (
+                        <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/20 p-3 rounded-2xl flex items-center gap-2.5">
+                          <Sparkles size={16} className="text-amber-400 shrink-0" />
+                          <span>
+                            <strong>Validation Tamis ADN :</strong> Amplification de +{Math.round(((selectedCandidate.dnaMultiplier ?? 1) - 1) * 100)}% due à une forte concordance avec les moteurs algorithmiques actifs du moment ({dnaSieveInfo?.dominantAlgos.slice(0, 3).join(', ') || 'Actifs'}).
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

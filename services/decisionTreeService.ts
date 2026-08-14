@@ -3,6 +3,8 @@ import { calculateFractalIndex } from './mathService';
 import { useNexusStore } from '../store/useNexusStore';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packMatrix, packArray } from './workers/zeroCopy';
+import { calculateDnaSieveWeights } from './temporalAnalysisService';
+import type { AlgoWeights } from '../shared/prediction.types';
 
 export const FEATURES_LABELS = [
   'Critical Gap', 'Frequency', 'Shadow',
@@ -417,11 +419,17 @@ export const runDecisionForest = async (
   rawHistory: DrawResult[],
   mode: 'consensus' | 'average' | 'shadow' = 'consensus',
   activeFeatures: string[] = FEATURES_LABELS,
-  drawName?: string
+  drawName?: string,
+  weights?: AlgoWeights
 ): Promise<{ 
   votes: ForestVote[], 
   dataset: { features: number[]; class: number; weight: number }[],
-  diagnostics?: DecisionForestDiagnostics
+  diagnostics?: DecisionForestDiagnostics,
+  dnaSieveInfo?: {
+    active: boolean;
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+  }
 }> => {
   const startTime = Date.now();
   if (!rawHistory || rawHistory.length === 0) return { votes: [], dataset: [] };
@@ -580,7 +588,15 @@ export const runDecisionForest = async (
   });
 
   // 5. Délégation au Web Worker
-  const votesAndDataset = await new Promise<{ votes: ForestVote[], dataset: { features: number[]; class: number; weight: number }[] }>((resolve, reject) => {    
+  const votesAndDataset = await new Promise<{ 
+    votes: ForestVote[], 
+    dataset: { features: number[]; class: number; weight: number }[],
+    dnaSieveInfo?: {
+      active: boolean;
+      dominantAlgos: string[];
+      dnaConcordanceMean: number;
+    }
+  }>((resolve, reject) => {    
     const worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
     
     const timeout = setTimeout(() => {
@@ -599,6 +615,9 @@ export const runDecisionForest = async (
         return;
       }
 
+      // Calcul du Tamis de l'ADN Algorithmique Actuel (ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
+      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos } = calculateDnaSieveWeights(history, weights);
+
       // Calcul des distances de Mahalanobis pour le Mode Ombre
       const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);
 
@@ -606,13 +625,25 @@ export const runDecisionForest = async (
         const num = v.number !== undefined ? v.number : v.class;
         const cand = candidates.find(c => c.number === num);
         const mDist = mahalanobisMap[num] || 0;
+        const rawScore = Math.round(v.score);
+        const dnaMult = dnaMultipliers[num] ?? 1.0;
+        const dnaAff = dnaAffinity[num] ?? 50.0;
+
+        // Tamisage différentiable continu par l'ADN algorithmique du moment:
+        // 35% d'inertie de l'arbre + 65% de modulation continue par l'ADN actif
+        const sievedScore = Math.max(0, Math.min(100, Math.round(rawScore * (0.35 + 0.65 * dnaMult))));
+        const isDnaBoosted = dnaMult > 1.05;
 
         // Génération du chemin de décision sur l'arbre primaire
         const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], activeFeatures);
 
         return {
           candidate: num,
-          score: Math.round(v.score),
+          score: sievedScore,
+          rawScore,
+          dnaAffinity: Math.round(dnaAff),
+          dnaMultiplier: parseFloat(dnaMult.toFixed(2)),
+          isDnaBoosted,
           votes: { temporal: Math.round(mDist * 10), spatial: 0, structural: 0 },
           decisionPath: pathTrace,
           features: { 
@@ -622,26 +653,31 @@ export const runDecisionForest = async (
         };
       });
 
-      // Mappage d'affinité continue basé sur le Z-score et Mahalanobis
-      const scores = finalVotes.map(v => v.score / 100.0);
+      // Mappage d'affinité continue basé sur le Z-score, Mahalanobis et Tamis ADN
+      const scores = finalVotes.map(v => (v.rawScore ?? v.score) / 100.0);
       const meanScore = calculateMean(scores);
       const stdScore = calculateStdDev(scores, meanScore);
 
       const affinityArray = finalVotes.map(v => {
-        const normalizedScore = v.score / 100.0;
+        const normalizedScore = (v.rawScore ?? v.score) / 100.0;
         const zScore = (normalizedScore - meanScore) / stdScore;
-        let affinity = 0;
+        let baseAffinity = 0;
 
         if (mode === 'consensus') {
-          affinity = 1.0 / (1.0 + Math.exp(-1.0 * zScore));
+          baseAffinity = 1.0 / (1.0 + Math.exp(-1.0 * zScore));
         } else if (mode === 'average') {
-          affinity = Math.exp(-0.5 * Math.pow(zScore, 2));
+          baseAffinity = Math.exp(-0.5 * Math.pow(zScore, 2));
         } else {
           // Mode Ombre : Pondération par la distance de Mahalanobis D_M(x)
           const mDist = mahalanobisMap[v.candidate] || 1.0;
-          affinity = (1.0 / (1.0 + Math.exp(-0.5 * zScore))) * (1.0 + Math.log1p(mDist)); 
+          baseAffinity = (1.0 / (1.0 + Math.exp(-0.5 * zScore))) * (1.0 + Math.log1p(mDist)); 
         }
-        return { vote: v, affinity };
+
+        const dnaMult = v.dnaMultiplier ?? 1.0;
+        // Tamisage de l'affinité de classement par l'ADN algorithmique
+        const sievedAffinity = baseAffinity * (0.35 + 0.65 * dnaMult);
+
+        return { vote: v, affinity: sievedAffinity };
       });
 
       const sortedByAffinity = affinityArray
@@ -669,7 +705,21 @@ export const runDecisionForest = async (
         weight: d.weight
       }));
 
-      resolve({ votes: sortedByAffinity.slice(0, 20), dataset: formattedDataset });    
+      let sumDnaAffinity = 0;
+      for (let n = 1; n <= 90; n++) {
+        sumDnaAffinity += dnaAffinity[n] ?? 50;
+      }
+      const dnaConcordanceMean = Math.round(sumDnaAffinity / 90);
+
+      resolve({ 
+        votes: sortedByAffinity.slice(0, 20), 
+        dataset: formattedDataset,
+        dnaSieveInfo: {
+          active: true,
+          dominantAlgos,
+          dnaConcordanceMean
+        }
+      });    
     };
 
     worker.onerror = (err) => { 
@@ -727,7 +777,8 @@ export const runDecisionForest = async (
   return {
     votes: votesAndDataset.votes,
     dataset: votesAndDataset.dataset,
-    diagnostics
+    diagnostics,
+    dnaSieveInfo: votesAndDataset.dnaSieveInfo
   };
 };
 

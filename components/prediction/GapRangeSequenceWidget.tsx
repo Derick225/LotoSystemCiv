@@ -52,15 +52,16 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   const [minScoreCutoff, setMinScoreCutoff] = useState<number>(50);
   const [filterBinIndex, setFilterBinIndex] = useState<number | "all">("all");
 
-  // Compute Gap Range Sequence analysis dynamically
+  // Compute Gap Range Sequence analysis dynamically with Active Algorithmic DNA weights
   const report = useMemo(() => {
     return gapRangeSequenceService.analyzeGapRangePatterns(
       drawName,
       history,
       step,
       90,
+      globalWeights
     );
-  }, [drawName, history, step]);
+  }, [drawName, history, step, globalWeights]);
 
   const activeBin = useMemo(() => {
     if (selectedBinIndex !== null && report.bins[selectedBinIndex]) {
@@ -69,7 +70,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     return report.topPredictedBins[0] || report.bins[0];
   }, [selectedBinIndex, report]);
 
-  // Refined & Optimized Differentiable Fusion for "Survivants de l'ADN Algorithmique"
+  // Refined & Optimized Differentiable Fusion for "Survivants de l'ADN Algorithmique" & Décision Tamisée
   const { survivingNumbers, populationStats, totalFavoredCandidateCount } = useMemo(() => {
     // 1. Dynamic Favored Bin Selection (Dynamic Mean Probability Mass Cutoff)
     const totalBinsCount = report.bins.length;
@@ -91,11 +92,11 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     const totalFavoredCount = candidateList.length;
 
     const items = candidateList.map((num) => {
-      // a. Markov Score derived from gap range probability distribution
-      const markovScore = report.scoresByNumber[num] ?? 50;
+      // a. Raw Markov Score derived from gap range transition probability distribution
+      const rawMarkovScore = report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
 
-      // b. DNA Breakdown Score derived from active global weights
-      let dnaScore = 50;
+      // b. DNA Breakdown Score derived from active global weights & last prediction matrix
+      let dnaScore = report.dnaAffinity?.[num] ?? 50;
       if (lastPrediction?.breakdown?.[num]) {
         let totalVal = 0;
         let totalW = 0;
@@ -104,16 +105,24 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           totalVal += (val || 0) * w;
           totalW += w;
         }
-        dnaScore = totalW > 0 ? totalVal / totalW : 50;
-      } else {
-        dnaScore = markovScore;
+        if (totalW > 0) {
+          dnaScore = (totalVal / totalW);
+        }
       }
 
-      // c. Continuous Logistic Bayesian Fusion (Zero magic numbers)
-      const zMarkov = (markovScore - 50.0) / 15.0;
+      // c. Continuous DNA Sieve multiplier from the active algorithmic DNA (ZÉRO NOMBRE MAGIQUE)
+      const dnaMultiplier = report.dnaMultipliers?.[num] ?? 1.0;
+      const dnaAffinity = report.dnaAffinity?.[num] ?? Math.round(dnaScore);
+
+      // d. Continuous Differentiable Sieved Decision Score:
+      // Combines raw transition likelihood modulated continuously by the active DNA Sieve
+      const zMarkov = (rawMarkovScore - 50.0) / 15.0;
       const zDna = (dnaScore - 50.0) / 15.0;
-      const zFused = 0.5 * zMarkov + 0.5 * zDna;
-      const fusedScore = 100.0 / (1.0 + Math.exp(-2.2 * zFused));
+      const zFused = 0.40 * zMarkov + 0.60 * zDna;
+      const baseFused = 100.0 / (1.0 + Math.exp(-2.4 * zFused));
+
+      // Sift through the continuous DNA multiplier (0.35 baseline + 0.65 DNA profile)
+      const sievedScore = Math.max(0, Math.min(100, baseFused * (0.35 + 0.65 * dnaMultiplier)));
 
       const gapInfo = report.currentGapsByNumber?.[num] || {
         gap: 0,
@@ -121,25 +130,34 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         binLabel: "?",
       };
 
-      // Consensus Tag Classification
+      // Continuous Consensus & Sieve Decision Tag
       let tag = "Survivant Standard";
       let tagColor = "text-slate-400 bg-slate-800/60 border-slate-700/50";
-      if (fusedScore >= 70 && markovScore >= 60) {
-        tag = "🔥 Convergence Absolue";
-        tagColor = "text-amber-300 bg-amber-500/20 border-amber-500/30";
-      } else if (dnaScore >= 65) {
+      let isDnaBoosted = dnaMultiplier > 1.05;
+
+      if (sievedScore >= 70 && rawMarkovScore >= 60 && dnaAffinity >= 65) {
+        tag = "🔥 Convergence Tamisée Élite";
+        tagColor = "text-amber-300 bg-amber-500/20 border-amber-500/30 shadow-amber-500/10";
+      } else if (dnaAffinity >= 70) {
         tag = "⚡ Signal ADN Dominant";
         tagColor = "text-indigo-300 bg-indigo-500/20 border-indigo-500/30";
-      } else if (markovScore >= 65) {
-        tag = "🎯 Probabilité Écart";
+      } else if (rawMarkovScore >= 65) {
+        tag = "🎯 Transition Écart";
         tagColor = "text-emerald-300 bg-emerald-500/20 border-emerald-500/30";
+      } else if (isDnaBoosted) {
+        tag = "✨ Tamisé ADN +";
+        tagColor = "text-cyan-300 bg-cyan-500/20 border-cyan-500/30";
       }
 
       return {
         num,
-        score: parseFloat(fusedScore.toFixed(1)),
-        markovScore: parseFloat(markovScore.toFixed(1)),
+        score: parseFloat(sievedScore.toFixed(1)),
+        rawMarkovScore: parseFloat(rawMarkovScore.toFixed(1)),
+        markovScore: parseFloat(rawMarkovScore.toFixed(1)),
         dnaScore: parseFloat(dnaScore.toFixed(1)),
+        dnaAffinity,
+        dnaMultiplier: parseFloat(dnaMultiplier.toFixed(2)),
+        isDnaBoosted,
         gap: gapInfo.gap,
         binLabel: gapInfo.binLabel,
         binIndex: gapInfo.binIndex,
@@ -162,9 +180,10 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       if (sortMode === "fused") {
         if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
       } else if (sortMode === "markov") {
-        if (Math.abs(b.markovScore - a.markovScore) > 1e-6)
-          return b.markovScore - a.markovScore;
+        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-6)
+          return b.rawMarkovScore - a.rawMarkovScore;
       } else if (sortMode === "dna") {
+        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-6) return b.dnaAffinity - a.dnaAffinity;
         if (Math.abs(b.dnaScore - a.dnaScore) > 1e-6) return b.dnaScore - a.dnaScore;
       } else if (sortMode === "gap") {
         if (b.gap !== a.gap) return b.gap - a.gap;
@@ -180,13 +199,18 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         ? filtered.reduce((acc, curr) => acc + curr.score, 0) / filtered.length
         : 0;
 
+    const avgDnaAffinity =
+      filtered.length > 0
+        ? filtered.reduce((acc, curr) => acc + curr.dnaAffinity, 0) / filtered.length
+        : 50;
+
     const retentionPercent =
       totalFavoredCount > 0
         ? ((filtered.length / totalFavoredCount) * 100).toFixed(0)
         : "0";
 
     const topConvergenceCount = filtered.filter((item) =>
-      item.tag.includes("Convergence"),
+      item.tag.includes("Convergence") || item.score >= 70,
     ).length;
 
     return {
@@ -194,6 +218,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       totalFavoredCandidateCount: totalFavoredCount,
       populationStats: {
         avgScore: parseFloat(avgScore.toFixed(1)),
+        avgDnaAffinity: Math.round(avgDnaAffinity),
         retentionPercent,
         topConvergenceCount,
         rejectedCount: Math.max(0, totalFavoredCount - filtered.length),
@@ -424,15 +449,17 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h4 className="text-sm font-black text-white uppercase tracking-wider">
-                  Survivants de l'ADN Algorithmique
+                  Décision & Survivants de l'ADN Algorithmique
                 </h4>
                 <span className="px-2.5 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-300 rounded-full font-black border border-emerald-500/30 shadow-sm">
                   {survivingNumbers.length} Numéros
                 </span>
+                <span className="px-2 py-0.5 text-[9px] bg-amber-500/15 text-amber-300 rounded-full font-bold border border-amber-500/25 flex items-center gap-1">
+                  <Sparkles size={10} /> Tamis ADN Actif
+                </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Convergence bayésienne entre les probabilités d'écarts
-                Markoviennes et la rétropropagation de l'ADN algorithmique.
+                Filtrage différentiable continu : les choix de tranches d'écarts sont passés dans le tamis de l'ADN algorithmique actuel ({report.dnaSieveInfo?.dominantAlgos?.join(', ') || 'Global'}).
               </p>
             </div>
           </div>
@@ -641,6 +668,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 score,
                 markovScore,
                 dnaScore,
+                dnaAffinity,
+                dnaMultiplier,
                 gap,
                 binLabel,
                 tag,
@@ -693,7 +722,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
 
                       <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
                         <span>Markov: <strong className="text-emerald-400">{markovScore}</strong></span>
-                        <span>ADN: <strong className="text-indigo-300">{dnaScore}</strong></span>
+                        <span className="flex items-center gap-1">
+                          ADN: <strong className="text-indigo-300">{dnaAffinity}%</strong>
+                          <span className={`text-[8px] font-black px-1 rounded ${dnaMultiplier >= 1.0 ? 'text-amber-300 bg-amber-500/10' : 'text-slate-500 bg-slate-800'}`}>
+                            {dnaMultiplier}x
+                          </span>
+                        </span>
                       </div>
                     </div>
                   </div>
