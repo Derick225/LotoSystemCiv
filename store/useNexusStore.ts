@@ -223,7 +223,16 @@ export const useNexusStore = create<NexusState>()(
         }
       },
 
-      setDrawName: (name) => set({ drawName: name, currentDrawName: name }),
+      setDrawName: (name) => {
+        set({ drawName: name, currentDrawName: name });
+        if (name) {
+          getAlgoWeights(name).then((weights) => {
+            if (get().drawName === name) {
+              set({ globalWeights: weights });
+            }
+          }).catch(() => {});
+        }
+      },
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
       setFocusMode: (focus) => set({ isFocusMode: focus }),

@@ -1,7 +1,7 @@
 import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { getAlgoWeights, normalizeWeights } from "./weightsManager";
+import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
@@ -283,8 +283,17 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
 };
 
 export const resolvePredictionWeights = async (context: PredictionRuntimeContext): Promise<AlgoWeights> => {
-  let weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
+  // 1. Poids de base (soit forcés, soit entraînés pour ce tirage, soit égaux par défaut)
+  const initialWeights = context.weightsToUse || (await getAlgoWeights(context.drawName));
+
+  // 2. Renforcement chronologique basé sur l'analyse de l'historique et des subsistances du tirage sélectionné
+  let weights = computeChronologicalAlgoReinforcement(
+    context.drawName,
+    context.history.slice(0, context.validTemporalDepth),
+    initialWeights
+  );
   
+  // 3. Entraînement continu Micro-SGD propre au tirage actif
   if (!context.skipTraining && context.history.length >= 10) {
     const currentEntropyResult = calculateShannonEntropy(context.history);
     const currentEntropy = currentEntropyResult.normalized;
@@ -297,7 +306,7 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
       context.useSpatioTemporalHawkes
     );
   }
-  return weights;
+  return normalizeWeights(weights);
 };
 
 export const computeAdvancedMetricsBundle = async (context: PredictionRuntimeContext): Promise<EnhancedMetrics> => {

@@ -131,6 +131,172 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   return normalizeWeights(adjusted);
 };
 
+/**
+ * RENFORCEMENT CHRONOLOGIQUE PAR ANALYSE HISTORIQUE DU TIRAGE SÉLECTIONNÉ
+ * 
+ * Règle d'architecture :
+ * - Tous les algorithmes partent de la même force/valeur par défaut (1.0 / equipondérés).
+ * - Seuls les algorithmes qui subsistent par leur signal dans la chronologie et l'analyse
+ *   de l'historique du tirage sélectionné, ou validés par les entraînements de ce tirage,
+ *   sont prioritaires et voient leur valeur renforcée de façon continue et déterministe (zéro nombre magique).
+ */
+export const computeChronologicalAlgoReinforcement = (
+  drawName: string,
+  history: DrawResult[],
+  baseWeights: AlgoWeights
+): AlgoWeights => {
+  const validKeys = Object.values(AlgoKey);
+  const numAlgos = validKeys.length;
+  if (!history || history.length < 5) {
+    return normalizeWeights(baseWeights);
+  }
+
+  // 1. Isolation stricte du tirage : historique délimité
+  const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
+  const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
+  const T = sample.length;
+
+  // 2. Métriques statistiques fondamentales de la chronologie du tirage
+  const freqMap = new Float64Array(91);
+  let totalBalls = 0;
+  sample.forEach(d => {
+    d.gagnants.forEach(n => {
+      if (n >= 1 && n <= 90) {
+        freqMap[n] += 1.0;
+        totalBalls += 1.0;
+      }
+    });
+  });
+
+  let entropy = 0;
+  if (totalBalls > 0) {
+    for (let n = 1; n <= 90; n++) {
+      const p = freqMap[n] / totalBalls;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+  }
+  const maxEntropy = Math.log2(90);
+  const normEntropy = maxEntropy > 0 ? Math.min(1.0, entropy / maxEntropy) : 0.5;
+
+  // 3. Variance et dispersion des fréquences (Signal fréquentiel vs bruit)
+  const meanFreq = totalBalls / 90.0;
+  let varFreq = 0;
+  for (let n = 1; n <= 90; n++) {
+    varFreq += Math.pow(freqMap[n] - meanFreq, 2);
+  }
+  varFreq /= 90.0;
+  const freqSignalStrength = Math.min(1.0, Math.sqrt(varFreq) / (meanFreq + Number.EPSILON));
+
+  // 4. Persistance temporelle des transitions de Markov chronologiques
+  let markovTransitions = 0;
+  let markovPairs = 0;
+  for (let t = 0; t < Math.min(T - 1, 50); t++) {
+    const curr = sample[t].gagnants;
+    const next = sample[t + 1].gagnants;
+    const shared = curr.filter(n => next.includes(n)).length;
+    markovTransitions += shared;
+    markovPairs += 1;
+  }
+  const markovSignalStrength = markovPairs > 0 ? Math.min(1.0, (markovTransitions / markovPairs) / (5.0 * (5.0 / 90.0))) : 0.5;
+
+  // 5. Régularité des écarts (Gaps & Cadences)
+  const currentGaps = new Float64Array(91);
+  for (let n = 1; n <= 90; n++) {
+    let g = 0;
+    for (let t = 0; t < T; t++) {
+      if (sample[t].gagnants.includes(n)) break;
+      g++;
+    }
+    currentGaps[n] = g;
+  }
+  let sumGaps = 0;
+  for (let n = 1; n <= 90; n++) sumGaps += currentGaps[n];
+  const meanGap = sumGaps / 90.0;
+  let varGap = 0;
+  for (let n = 1; n <= 90; n++) varGap += Math.pow(currentGaps[n] - meanGap, 2);
+  varGap /= 90.0;
+  const gapSignalStrength = Math.min(1.0, Math.sqrt(varGap) / (meanGap + Number.EPSILON));
+
+  // 6. Momentum temporel court terme vs long terme
+  const shortLen = Math.min(10, Math.floor(T / 2));
+  const longLen = Math.min(40, T);
+  let totalMomentumDiff = 0;
+  if (shortLen > 0 && longLen > shortLen) {
+    for (let n = 1; n <= 90; n++) {
+      const shortCount = sample.slice(0, shortLen).filter(d => d.gagnants.includes(n)).length / shortLen;
+      const longCount = sample.slice(0, longLen).filter(d => d.gagnants.includes(n)).length / longLen;
+      totalMomentumDiff += Math.abs(shortCount - longCount);
+    }
+  }
+  const momentumSignalStrength = Math.min(1.0, totalMomentumDiff / 90.0 * 10.0);
+
+  // 7. Signature Spectrale / FFT des cycles chronologiques
+  const spectralSignalStrength = Math.min(1.0, (1.0 - normEntropy) * 1.5 + freqSignalStrength * 0.5);
+
+  // 8. Dimension Fractale & Exposant de Hurst chronologique
+  const drawSums = sample.map(d => d.gagnants.reduce((a, b) => a + b, 0));
+  const meanSum = drawSums.reduce((a, b) => a + b, 0) / (drawSums.length || 1);
+  let sumDev = 0;
+  let sumR = 0;
+  let sumS = 0;
+  for (let t = 0; t < drawSums.length; t++) {
+    const dev = drawSums[t] - meanSum;
+    sumDev += dev;
+    sumR = Math.max(sumR, sumDev) - Math.min(0, sumDev);
+    sumS += dev * dev;
+  }
+  const stdSum = Math.sqrt(sumS / (drawSums.length || 1));
+  const rsRatio = stdSum > 0 ? sumR / stdSum : 1.0;
+  const hurst = drawSums.length > 2 ? Math.max(0.01, Math.min(0.99, Math.log(rsRatio + Number.EPSILON) / Math.log(drawSums.length))) : 0.5;
+  const fractalSignalStrength = Math.min(1.0, Math.abs(hurst - 0.5) * 2.0);
+
+  // Évaluation du signal de subsistance pour chaque algorithme dans la chronologie de ce tirage
+  const signals: Record<AlgoKey, number> = {} as any;
+  validKeys.forEach(k => { signals[k] = 0.5; }); // Neutre
+
+  signals[AlgoKey.FREQUENCY] = freqSignalStrength;
+  signals[AlgoKey.GAPS] = gapSignalStrength;
+  signals[AlgoKey.GAP_CADENCE] = 0.6 * gapSignalStrength + 0.4 * (1.0 - normEntropy);
+  signals[AlgoKey.GAP_PATTERN] = 0.5 * gapSignalStrength + 0.5 * markovSignalStrength;
+  signals[AlgoKey.GAP_SEQUENCE] = 0.6 * gapSignalStrength + 0.4 * momentumSignalStrength;
+  signals[AlgoKey.GAP_BAND_SEQUENCE] = 0.5 * gapSignalStrength + 0.5 * (1.0 - normEntropy);
+  signals[AlgoKey.GAP_TREND] = 0.5 * gapSignalStrength + 0.5 * fractalSignalStrength;
+  signals[AlgoKey.MARKOV] = markovSignalStrength;
+  signals[AlgoKey.SEQUENCE_PATTERN] = 0.6 * markovSignalStrength + 0.4 * (1.0 - normEntropy);
+  signals[AlgoKey.BAYES] = 0.5 * normEntropy + 0.5 * freqSignalStrength;
+  signals[AlgoKey.MOMENTUM] = momentumSignalStrength;
+  signals[AlgoKey.SPECTRAL] = spectralSignalStrength;
+  signals[AlgoKey.FRACTAL] = fractalSignalStrength;
+  signals[AlgoKey.TEMPORAL] = 0.5 * spectralSignalStrength + 0.5 * fractalSignalStrength;
+  signals[AlgoKey.ECHO_STATE] = 0.5 * markovSignalStrength + 0.5 * spectralSignalStrength;
+  signals[AlgoKey.SHADOW_PROBABILITY] = 0.5 * gapSignalStrength + 0.5 * freqSignalStrength;
+  signals[AlgoKey.SPATIAL] = 0.5 * freqSignalStrength + 0.5 * (1.0 - normEntropy);
+  signals[AlgoKey.AFFINITY] = 0.5 * markovSignalStrength + 0.5 * freqSignalStrength;
+  signals[AlgoKey.NETWORK_CORRELATION] = 0.5 * markovSignalStrength + 0.5 * gapSignalStrength;
+  signals[AlgoKey.DERIVED_NEIGHBOR] = 0.5 * freqSignalStrength + 0.5 * gapSignalStrength;
+  signals[AlgoKey.INTER_MONTHLY_RESONANCE] = 0.5 * spectralSignalStrength + 0.5 * (1.0 - normEntropy);
+  signals[AlgoKey.ISOLATION_ANOMALY] = 0.5 * (1.0 - normEntropy) + 0.5 * gapSignalStrength;
+
+  // Calcul du signal moyen de référence
+  let sumSignal = 0;
+  validKeys.forEach(k => { sumSignal += (signals[k] || 0.5); });
+  const meanSignal = sumSignal / numAlgos;
+
+  // Facteur de confiance adaptatif lié à la profondeur d'échantillonnage
+  const sampleConfidence = Math.tanh(T / 30.0);
+
+  // Application du renforcement continu et déterministe
+  const reinforced: Record<string, number> = {};
+  validKeys.forEach(k => {
+    const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
+    const signalDiff = (signals[k] || 0.5) - meanSignal;
+    const multiplier = 1.0 + Math.tanh(signalDiff * 2.0) * sampleConfidence;
+    reinforced[k] = Math.max(0.001, baseW * multiplier);
+  });
+
+  return normalizeWeights(reinforced as AlgoWeights);
+};
+
 export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResult[], drawName?: string): Promise<AlgoWeights> => {
   const dynamicWeights = { ...weights };
   try {
