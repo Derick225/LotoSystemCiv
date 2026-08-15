@@ -14,6 +14,7 @@ import {
   Clock,
   Navigation,
   Brain,
+  Dna,
 } from "lucide-react";
 import { useToast } from "./ui/Toast";
 import { LocalErrorBoundary } from "./ui/LocalErrorBoundary";
@@ -37,6 +38,10 @@ const ForensicHub = lazyWithRetry(
   () => import("./tabs/ForensicHub"),
   "ForensicHub",
 );
+const GenomicAuditTab = lazyWithRetry(
+  () => import("./tabs/GenomicAuditTab").then((m) => ({ default: m.GenomicAuditTab })),
+  "GenomicAuditTab",
+);
 
 // Preloaders pour chargement prédictif au survol
 const tabPreloaders: Record<MainTab, () => Promise<unknown>> = {
@@ -46,6 +51,7 @@ const tabPreloaders: Record<MainTab, () => Promise<unknown>> = {
   Oracle: () => import("./tabs/OracleHub"),
   Simulation: () => import("./tabs/SimulationTab"),
   Forensic: () => import("./tabs/ForensicHub"),
+  Genomique: () => import("./tabs/GenomicAuditTab"),
 };
 
 type MainTab =
@@ -54,7 +60,8 @@ type MainTab =
   | "Topologie"
   | "Oracle"
   | "Simulation"
-  | "Forensic";
+  | "Forensic"
+  | "Genomique";
 
 export const DrawDetails: React.FC = () => {
   const drawName = useNexusStore((state) => state.drawName);
@@ -149,6 +156,12 @@ export const DrawDetails: React.FC = () => {
       icon: Microscope,
       label: "Forensic",
       desc: "Audit Post-Tirage",
+    },
+    {
+      id: "Genomique",
+      icon: Dna,
+      label: "Audit Génomique",
+      desc: "Audit ADN & Efficience",
     },
   ];
 
@@ -374,6 +387,9 @@ export const DrawDetails: React.FC = () => {
             )}
             {activeMainTab === "Forensic" && (
               <ForensicHub drawName={drawName} />
+            )}
+            {activeMainTab === "Genomique" && (
+              <GenomicAuditTab drawName={drawName} />
             )}
           </Suspense>
         </LocalErrorBoundary>
