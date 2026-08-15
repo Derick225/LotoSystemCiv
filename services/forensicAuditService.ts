@@ -2054,6 +2054,27 @@ export const generateForensicReport = (
 
   const postMortemStabilityScore = Math.min(100, Math.round(100 * (1.0 - 0.2 * (1.0 / Math.sqrt(history.length)) - 0.1 * (drawAnomalyScore * (1.0 - drawAnomalyScore)))));
 
+  // Structured Narrative Synthesis (Deterministic & Objective)
+  const verdictLabels: Record<string, string> = {
+    anomalousdraw: "Tirage réel atypique (Déviance de distribution observée)",
+    recentoverfit: "Sur-ajustement d'inertie à court terme (Recent-bias dominant)",
+    overconfidence: "Sur-calibration de confiance du modèle",
+    structuralmisalignment: "Désalignement structurel / Faible dispersion spatiale",
+    regimebreak: "Rupture de distribution statistique / Transition de phase",
+    normalnoise: "Fluctuation stochastique standard (Bruit blanc régulier)"
+  };
+
+  const aiAnalysis = [
+    `Mode d'Inférence : ${verdictLabels[verdict] || verdict}.`,
+    `Tirage réel : Somme=${sum} (${sumZ > 0 ? '+' : ''}${sumZ.toFixed(2)}σ), Amplitude=${amplitude} (${ampZ > 0 ? '+' : ''}${ampZ.toFixed(2)}σ), Indice AC=${ac} (${acZ > 0 ? '+' : ''}${acZ.toFixed(2)}σ), Impairs=${odds}/5.`,
+    `Divergence KL du consensus : ${kl_divergence.toFixed(4)} nats (Entropie historique : ${historyEntropy.toFixed(2)}).`,
+    `Stabilité Post-Mortem : ${postMortemStabilityScore}/100 • Sévérité : ${severity.toUpperCase()}.`
+  ].join(" ");
+
+  const recommendations = recommendedAdjustments.map(adj => 
+    `[${adj.action.toUpperCase()}] ${adj.target} (amplitude: ${(adj.magnitude * 100).toFixed(1)}%) : ${adj.reason}`
+  );
+
   return {
     id,
     drawName: history[0]?.drawName || "Loto",
@@ -2064,6 +2085,8 @@ export const generateForensicReport = (
     timestamp: new Date().toISOString(),
     combo,
     forensicScore,
+    aiAnalysis,
+    recommendations,
     metrics: {
       sum,
       amplitude,

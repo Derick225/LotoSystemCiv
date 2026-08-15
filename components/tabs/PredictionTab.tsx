@@ -11,6 +11,7 @@ import { PredictionFeatureLab } from "../prediction/PredictionFeatureLab";
 import { PredictionNetworkDiagnostic } from "../prediction/PredictionNetworkDiagnostic";
 import { PredictionComputationOverlay } from "../prediction/PredictionComputationOverlay";
 import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
+import { PredictionVectorPortfolio } from "../prediction/PredictionVectorPortfolio";
 import {
   Activity,
   Target,
@@ -740,6 +741,15 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               <NeuralHeatmapGrid
                 breakdown={lastPrediction.breakdown}
                 suggestedNumbers={lastPrediction.suggestedNumbers}
+              />
+            </div>
+
+            {/* Multi-Vector Strategic Portfolio */}
+            <div className="lg:col-span-12">
+              <PredictionVectorPortfolio
+                prediction={lastPrediction}
+                history={history}
+                drawName={drawName}
               />
             </div>
 

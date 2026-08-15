@@ -215,11 +215,46 @@ export const finalizePredictionPayload = async (
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
 
   const breakdownRecord: Record<number, Record<string, number>> = {};
+  const explainabilityRecord: Record<number, any> = {};
+
   denoisedScores.forEach(curr => {
     breakdownRecord[curr.num] = curr.breakdown;
+    if (curr.explainability) {
+      explainabilityRecord[curr.num] = {
+        shapValues: curr.explainability.shapValues || {},
+        topologicalTension: curr.explainability.topologicalTension ?? 0,
+        dnaOrbitingIndex: curr.explainability.dnaOrbitingIndex ?? 0,
+        narrativeInterpretation: curr.explainability.narrativeInterpretation
+      };
+    }
   });
 
   const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
+
+  // Calcul continu et objectif de l'alignement de réalité (Reality Alignment)
+  // Basé sur la conformité de la somme totale, la distribution de parité et la régularité topologique
+  const historyDraws = context.history.slice(0, context.validTemporalDepth);
+  const meanHistSum = historyDraws.length > 0
+    ? historyDraws.reduce((acc, d) => acc + d.gagnants.reduce((a, b) => a + b, 0), 0) / historyDraws.length
+    : 227.5;
+  const stdHistSum = historyDraws.length > 1
+    ? Math.sqrt(historyDraws.reduce((acc, d) => acc + Math.pow(d.gagnants.reduce((a, b) => a + b, 0) - meanHistSum, 2), 0) / (historyDraws.length - 1))
+    : 45.0;
+  const currentSum = selection.reduce((a, b) => a + b, 0);
+  const zSum = Math.abs(currentSum - meanHistSum) / (stdHistSum || 1.0);
+  const sumLikelihood = Math.exp(-0.5 * Math.pow(zSum, 2));
+
+  const evens = selection.filter(n => n % 2 === 0).length;
+  const parityLikelihood = Math.exp(-0.5 * Math.pow((evens - 2.5) / 1.118, 2));
+
+  const realityAlignment = Math.round(
+    Math.max(10, Math.min(99,
+      (stabilityScore * 0.40) +
+      (sumLikelihood * 100 * 0.30) +
+      (parityLikelihood * 100 * 0.20) +
+      ((diversityMetrics?.diversityScore ? (diversityMetrics.diversityScore / 100) : 0.8) * 100 * 0.10)
+    ))
+  );
 
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
@@ -233,7 +268,7 @@ export const finalizePredictionPayload = async (
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
-    realityAlignment: 82,
+    realityAlignment,
     realityAlignmentNote: HONEST_NOTE,
     adversarialApplied: context.adversarialMode,
     challengedNumbers: [],
@@ -241,7 +276,7 @@ export const finalizePredictionPayload = async (
     diversityMetrics,
     adversarialSurvivalScore: adversarialResult.survivalScore,
     adversarialRisks: adversarialResult.risks,
-    explainabilityData: {},
+    explainabilityData: explainabilityRecord,
     shrinkageApplied,
     shrinkageFactor,
     shrinkageFactorMap: undefined,

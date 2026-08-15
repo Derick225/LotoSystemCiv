@@ -35,6 +35,8 @@ class OfflineQueueService {
     }
   }
 
+  private queueSequence = 0;
+
   /**
    * Enregistre un élément dans la queue locale IndexedDB et tente une synchronisation si en ligne
    */
@@ -43,7 +45,8 @@ class OfflineQueueService {
     drawName: string,
     payload: Record<string, any>
   ): Promise<void> {
-    const id = payload.id || `queue_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    this.queueSequence = (this.queueSequence + 1) % 1000000;
+    const id = payload.id || `queue_${type}_${Date.now()}_${this.queueSequence}`;
     const queueItem: OfflineQueueItem = {
       id,
       type,

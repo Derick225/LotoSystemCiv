@@ -24,6 +24,9 @@ import {
   ChevronDown,
   Microscope,
   Link as LinkIcon,
+  Copy,
+  Check,
+  Download,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { supabase } from "../../services/supabaseClient";
@@ -79,6 +82,32 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const [localHistory, setLocalHistory] = useState<PredictionHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [isCopiedInference, setIsCopiedInference] = useState(false);
+
+  const handleCopyInferenceTicket = (numbers: number[]) => {
+    audioEngine.play("click");
+    const text = numbers.join(" - ");
+    navigator.clipboard.writeText(text);
+    setIsCopiedInference(true);
+    showToast(`Sélection IA copiée : ${text}`, "success");
+    setTimeout(() => setIsCopiedInference(false), 2000);
+  };
+
+  const handleExportInferenceJSON = (predData: Record<string, any>) => {
+    audioEngine.play("click");
+    const blob = new Blob([JSON.stringify({ drawName, timestamp: new Date().toISOString(), ...predData }, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ia_prediction_${drawName.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Fiche IA exportée.", "success");
+  };
 
   const loadHistoryData = useCallback(async () => {
     setLoadingHistory(true);
@@ -963,7 +992,32 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       ))}
                     </div>
 
-                    <div className="flex justify-center pt-2 pb-6">
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2 pb-6">
+                      <button
+                        onClick={() => handleCopyInferenceTicket(prediction.suggestedNumbers)}
+                        className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer border border-slate-700"
+                      >
+                        {isCopiedInference ? (
+                          <>
+                            <Check size={14} className="text-emerald-400" />
+                            <span className="text-emerald-400">Copié !</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} />
+                            <span>Copier Ticket</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => handleExportInferenceJSON(prediction)}
+                        className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer border border-slate-700"
+                      >
+                        <Download size={14} />
+                        <span>Export JSON</span>
+                      </button>
+
                       <button
                         onClick={async () => {
                           audioEngine.play("click");

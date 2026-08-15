@@ -26,6 +26,9 @@ import {
   CheckCircle2,
   Calculator,
   Play,
+  Copy,
+  Check,
+  Download,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 
@@ -52,6 +55,44 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({
   const [fusionResult, setFusionResult] = useState<FusionResult | null>(null);
   const [isFusing, setIsFusing] = useState(false);
   const [step, setStep] = useState(0);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleCopyTicket = (numbers: number[]) => {
+    audioEngine.play("click");
+    const text = numbers.join(" - ");
+    navigator.clipboard.writeText(text);
+    setIsCopied(true);
+    showToast(`Ticket Convergence copié : ${text}`, "success");
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const handleExportJSON = () => {
+    if (!fusionResult) return;
+    audioEngine.play("click");
+    const data = {
+      drawName,
+      timestamp: new Date().toISOString(),
+      method: selectionMethod,
+      finalTicket: fusionResult.finalTicket,
+      confidence: fusionResult.confidence,
+      entropy: fusionResult.entropy,
+      kalmanGains: fusionResult.kalmanGains,
+      variances: fusionResult.variances,
+      convergedNumbers: fusionResult.convergedNumbers,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `convergence_${drawName.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Fiche de Convergence exportée.", "success");
+  };
 
   // Simulation de backtesting rapide
   const [isBacktesting, setIsBacktesting] = useState(false);
@@ -1088,12 +1129,40 @@ export const ConvergenceTab: React.FC<{ drawName: string }> = ({
                     showTitle={false}
                   />
 
-                  <button
-                    onClick={handleSave}
-                    className="w-full mt-6 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 hover:shadow-indigo-500/20"
-                  >
-                    <Save size={16} /> Enregistrer la prédiction
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+                    <button
+                      onClick={() => handleCopyTicket(fusionResult.finalTicket)}
+                      className="py-3.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 border border-slate-200 dark:border-slate-700"
+                    >
+                      {isCopied ? (
+                        <>
+                          <Check size={16} className="text-emerald-500" />
+                          <span className="text-emerald-500">Copié !</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={16} />
+                          <span>Copier Ticket</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleExportJSON}
+                      className="py-3.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 border border-slate-200 dark:border-slate-700"
+                    >
+                      <Download size={16} />
+                      <span>Export JSON</span>
+                    </button>
+
+                    <button
+                      onClick={handleSave}
+                      className="py-3.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all active:scale-95"
+                    >
+                      <Save size={16} />
+                      <span>Enregistrer</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

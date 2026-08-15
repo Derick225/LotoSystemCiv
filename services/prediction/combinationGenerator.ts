@@ -252,21 +252,21 @@ export const calculateCombinationEnergyDetailed = (
     recentBiasPenalty = Math.min(7.5, neighborsCount * 1.5);
   }
 
-  // 10. Pénalité de Profil de similarité excessive
+  // 10. Pénalité de Profil de similarité excessive (Mapping Sigmoïdal Continu)
   let profileSimilarityPenalty = 0.0;
   if (breakdownsMap && combo.length >= 2) {
     for (let i = 0; i < combo.length; i++) {
       for (let j = i + 1; j < combo.length; j++) {
         const sim = getProfileSimilarity(combo[i], combo[j], breakdownsMap);
-        if (sim > 0.75) {
-          profileSimilarityPenalty += 6.0 * sim;
-        }
+        // Sigmoïde logistique continue centrée à 0.65 pour un gradient doux et continu
+        const simExcessWeight = 1.0 / (1.0 + Math.exp(-12.0 * (sim - 0.65)));
+        profileSimilarityPenalty += 6.0 * sim * simExcessWeight;
       }
     }
     profileSimilarityPenalty = Math.min(15.0, profileSimilarityPenalty);
   }
 
-  // 11. Pénalité d'Algorithme dominant répété (Anti-concentration de familles)
+  // 11. Pénalité d'Algorithme dominant répété (Anti-concentration de familles continue)
   let dominantFamilyPenalty = 0.0;
   if (breakdownsMap && combo.length >= 2) {
     const familyCounts: Record<string, number> = {};
@@ -277,14 +277,14 @@ export const calculateCombinationEnergyDetailed = (
       }
     }
     for (const count of Object.values(familyCounts)) {
-      if (count >= 2) {
-        dominantFamilyPenalty += (count - 1) * 4.0;
-      }
+      // Softplus continu pour une transition douce
+      const softExcess = Math.log(1.0 + Math.exp(2.0 * (count - 1.5))) / 2.0;
+      dominantFamilyPenalty += softExcess * 3.5;
     }
     dominantFamilyPenalty = Math.min(15.0, dominantFamilyPenalty);
   }
 
-  // 12. Pénalité de Concentration par décennie
+  // 12. Pénalité de Concentration par décennie continue
   let decadeConcentrationPenalty = 0.0;
   if (combo.length >= 2) {
     const decCounts: Record<number, number> = {};
@@ -293,19 +293,20 @@ export const calculateCombinationEnergyDetailed = (
       decCounts[d] = (decCounts[d] || 0) + 1;
     }
     for (const count of Object.values(decCounts)) {
-      if (count >= 2) {
-        decadeConcentrationPenalty += (count - 1) * 3.0;
-      }
+      const softExcess = Math.log(1.0 + Math.exp(2.0 * (count - 1.5))) / 2.0;
+      decadeConcentrationPenalty += softExcess * 2.8;
     }
     decadeConcentrationPenalty = Math.min(12.0, decadeConcentrationPenalty);
   }
 
-  // 13. Pénalité de Quota souple d'outsiders
+  // 13. Pénalité de Quota souple d'outsiders (Loss pseudo-Huber continue)
   let outsiderQuotaPenalty = 0.0;
   if (topPool && topPool.length > 0 && combo.length === DRAW_SIZE) {
     const currentOutsiders = combo.filter(n => !topPool.includes(n)).length;
-    const diff = Math.abs(currentOutsiders - targetOutsiders);
-    outsiderQuotaPenalty = diff * 4.0;
+    const deltaOut = currentOutsiders - targetOutsiders;
+    // Pseudo-Huber loss : sqrt(1 + delta^2) - 1
+    const huberLoss = Math.sqrt(1.0 + Math.pow(deltaOut, 2.0)) - 1.0;
+    outsiderQuotaPenalty = huberLoss * 4.0;
   }
 
   const totalEnergy = 

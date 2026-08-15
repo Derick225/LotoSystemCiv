@@ -558,6 +558,7 @@ interface PendingWorkerTask {
 let activePredictionWorker: InstanceType<typeof PredictionWorker> | null = null;
 const pendingWorkerTasks = new Map<string, PendingWorkerTask>();
 
+let workerTaskSequence = 0;
 const getOrCreatePredictionWorker = (): InstanceType<typeof PredictionWorker> => {
   if (!activePredictionWorker) {
     activePredictionWorker = new PredictionWorker();
@@ -605,7 +606,8 @@ const runLocalPredictionViaWorker = async (
     return new Promise<Prediction>((resolve, reject) => {
       try {
         const worker = getOrCreatePredictionWorker();
-        const taskId = `MASTER_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        workerTaskSequence = (workerTaskSequence + 1) % 1000000;
+        const taskId = `MASTER_${Date.now()}_${workerTaskSequence}`;
 
         const timeoutId = setTimeout(() => {
           pendingWorkerTasks.delete(taskId);
