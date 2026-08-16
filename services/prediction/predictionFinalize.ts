@@ -11,6 +11,7 @@ import { TUNING } from "./microSgd";
 import { HONEST_NOTE } from "./predictionScenarios";
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
+import { generateXAPNarratives } from "./xapExplainabilityService";
 
 const TICKET_SIZE = 5;
 
@@ -217,15 +218,44 @@ export const finalizePredictionPayload = async (
   const breakdownRecord: Record<number, Record<string, number>> = {};
   const explainabilityRecord: Record<number, any> = {};
 
+  const scoresMap: Record<number, number> = {};
+  const shapMap: Record<number, Record<string, number>> = {};
+
   denoisedScores.forEach(curr => {
     breakdownRecord[curr.num] = curr.breakdown;
+    scoresMap[curr.num] = curr.score;
     if (curr.explainability) {
+      shapMap[curr.num] = curr.explainability.shapValues || {};
       explainabilityRecord[curr.num] = {
         shapValues: curr.explainability.shapValues || {},
         topologicalTension: curr.explainability.topologicalTension ?? 0,
         dnaOrbitingIndex: curr.explainability.dnaOrbitingIndex ?? 0,
         narrativeInterpretation: curr.explainability.narrativeInterpretation
       };
+    }
+  });
+
+  // Calcul des explications narratives XAP vectorielles déterministes (AGENTS.md)
+  const xapExplanations = generateXAPNarratives(
+    selection,
+    scoresMap,
+    shapMap,
+    explainabilityRecord,
+    features.machineTransferMap
+  );
+
+  selection.forEach(num => {
+    if (xapExplanations[num]) {
+      if (!explainabilityRecord[num]) {
+        explainabilityRecord[num] = {
+          shapValues: shapMap[num] || {},
+          topologicalTension: 0,
+          dnaOrbitingIndex: 0,
+        };
+      }
+      explainabilityRecord[num].narrativeInterpretation = xapExplanations[num].narrativeText;
+      explainabilityRecord[num].physicsArchetype = xapExplanations[num].physicsArchetype;
+      explainabilityRecord[num].topDrivers = xapExplanations[num].topDrivers;
     }
   });
 

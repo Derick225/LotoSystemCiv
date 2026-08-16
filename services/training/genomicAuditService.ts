@@ -278,6 +278,8 @@ export const runGenomicAudit = async (
       category = "Topologie & Réseau";
     } else if ([AlgoKey.BAYES].includes(key)) {
       category = "Inférence Probabiliste";
+    } else if ([AlgoKey.MACHINE_TRANSFER].includes(key)) {
+      category = "Transfert & Machine";
     }
 
     rawGeneMetrics.push({

@@ -146,19 +146,21 @@ export const ExplainabilityDrawer: React.FC = () => {
               </div>
 
               {/* Narrative Context */}
-              <div className="bg-indigo-50 dark:bg-indigo-900/10 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800">
-                <h3 className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-2">
-                  <Cpu size={14} className="text-indigo-500" /> Synthèse
-                  Déterministe
-                </h3>
-                <p className="text-xs text-indigo-800 dark:text-indigo-300 leading-relaxed font-medium">
-                  Le numéro {inspectingNumber} émerge avec une contribution
-                  primaire dominée par {shapData[0]?.algo || "N/A"} et{" "}
-                  {shapData[1]?.algo || "N/A"}. Sa résonance spectrale (DNA
-                  Orbiting) de {expData.dnaOrbitingIndex.toFixed(4)} confirme sa
-                  convergence absolue vers l'attracteur central du tirage,
-                  propulsant ce candidat en zone de haute fiabilité
-                  stochastique.
+              <div className="bg-indigo-50 dark:bg-indigo-900/10 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <Cpu size={14} className="text-indigo-500" /> Synthèse XAP Déterministe
+                  </h3>
+                  {expData.physicsArchetype && (
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] uppercase tracking-wider">
+                      {expData.physicsArchetype}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed font-medium">
+                  {expData.narrativeInterpretation || (
+                    `Le numéro ${inspectingNumber} émerge avec une contribution primaire dominée par ${shapData[0]?.algo || "N/A"} et ${shapData[1]?.algo || "N/A"}. Sa résonance spectrale de ${expData.dnaOrbitingIndex?.toFixed(4) || "0.0000"} confirme sa convergence vers l'attracteur central du tirage.`
+                  )}
                 </p>
               </div>
             </div>

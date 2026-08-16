@@ -7,6 +7,7 @@ import { MultiLevelConfusionMatrix } from "../MultiLevelConfusionMatrix";
 import { UnifiedForensicRadarPanel } from "../UnifiedForensicRadarPanel";
 import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
+import { ClosedLoopAutopsyPanel } from "../ClosedLoopAutopsyPanel";
 import {
   Target,
   Trash2,
@@ -22,6 +23,7 @@ import {
   Sparkles,
   Sliders,
   Filter,
+  Zap,
 } from "lucide-react";
 import { ForensicReport } from "../../types";
 import { useForensicData } from "../../hooks/useForensicData";
@@ -30,7 +32,7 @@ import { audioEngine } from "../../utils/audioEngine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { generateLearningSession, applyForensicAdjustments } from "../../services/forensicTrainingBridge";
 
-type ForensicTab = "audits" | "confusion" | "timeline" | "radar" | "timemachine";
+type ForensicTab = "audits" | "closedloop" | "confusion" | "timeline" | "radar" | "timemachine";
 
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
   ({ drawName }) => {
@@ -238,6 +240,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
           <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 overflow-x-auto custom-scrollbar">
             {[
               { id: "audits", label: "Autopsies & Rapports", icon: BookOpen, count: reports.length },
+              { id: "closedloop", label: "Boucle Fermée & Auto-Correction", icon: Zap },
               { id: "confusion", label: "Matrice de Proximité & Confusion", icon: Compass },
               { id: "timeline", label: "Frise Chronologique", icon: Activity },
               { id: "radar", label: "Radar Macro/Micro & SHAP", icon: Radar },
@@ -439,6 +442,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
                 </div>
               )}
             </div>
+          )}
+
+          {/* TAB 1.5: CLOSED LOOP AUTOPSY & DNA AUTO-CORRECTION */}
+          {activeTab === "closedloop" && (
+            <ClosedLoopAutopsyPanel drawName={drawName} />
           )}
 
           {/* TAB 2: MATRICE DE CONFUSION & PROXIMITÉ */}

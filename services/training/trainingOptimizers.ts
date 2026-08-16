@@ -2,6 +2,9 @@ import { AlgoWeights } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { evaluateGenomeFitness } from "./trainingEvaluation";
 import { normalizeWeights } from "../prediction/weightsManager";
+import { runContinuousGradientOptimizer } from "./trainingContinuousGradient";
+
+export { runContinuousGradientOptimizer };
 
 // Résolveur de système linéaire robuste via Élimination de Gauss avec pivotement partiel
 function solveLinearSystem(A: number[][], B: number[]): number[] {
@@ -462,9 +465,9 @@ export const runMetaOptimizer = async (
   rand: () => number,
   onTelemetry?: (data: any) => void
 ): Promise<AlgoWeights> => {
-  const metaGenerations = Math.max(3, Math.floor(generations / 3));
+  const metaGenerations = Math.max(3, Math.floor(generations / 4));
 
-  // Exécutions parallèles découplées
+  // Exécutions parallèles découplées des 4 optimiseurs (Darwin, PSO, Bayesian Kriging, Continuous Gradient)
   const geneticWeights = await runGeneticOptimizer(
     currentWeights,
     breakdownsByDraw,
@@ -498,6 +501,17 @@ export const runMetaOptimizer = async (
     rand
   );
 
+  const gradientWeights = await runContinuousGradientOptimizer(
+    currentWeights,
+    breakdownsByDraw,
+    actualWinnersByDraw,
+    hurstExponent,
+    entropy,
+    algoKeys,
+    metaGenerations,
+    rand
+  );
+
   const evalGen = evaluateGenomeFitness(
     geneticWeights,
     breakdownsByDraw,
@@ -519,22 +533,34 @@ export const runMetaOptimizer = async (
     hurstExponent,
     algoKeys
   );
+  const evalGrad = evaluateGenomeFitness(
+    gradientWeights,
+    breakdownsByDraw,
+    actualWinnersByDraw,
+    hurstExponent,
+    algoKeys
+  );
 
-  // Softargmax pour fusionner de façon continue selon les fitness relatives
-  const maxFitness = Math.max(evalGen.fitness, evalPso.fitness, evalBayes.fitness);
+  // Softargmax pour fusionner de façon continue selon les fitness relatives (AGENTS.md)
+  const maxFitness = Math.max(evalGen.fitness, evalPso.fitness, evalBayes.fitness, evalGrad.fitness);
   const expGen = Math.exp(evalGen.fitness - maxFitness);
   const expPso = Math.exp(evalPso.fitness - maxFitness);
   const expBayes = Math.exp(evalBayes.fitness - maxFitness);
-  const sumExp = expGen + expPso + expBayes;
+  const expGrad = Math.exp(evalGrad.fitness - maxFitness);
+  const sumExp = expGen + expPso + expBayes + expGrad;
 
   const wGen = expGen / sumExp;
   const wPso = expPso / sumExp;
   const wBayes = expBayes / sumExp;
+  const wGrad = expGrad / sumExp;
 
   const blended: any = {};
   algoKeys.forEach((k) => {
     blended[k] =
-      geneticWeights[k] * wGen + psoWeights[k] * wPso + bayesianWeights[k] * wBayes;
+      geneticWeights[k] * wGen +
+      psoWeights[k] * wPso +
+      bayesianWeights[k] * wBayes +
+      gradientWeights[k] * wGrad;
   });
 
   const bestWeights = normalizeWeights(blended);

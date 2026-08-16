@@ -43,8 +43,8 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
   const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
 
   const [optimizerType, setOptimizerType] = useState<
-    "genetic" | "pso" | "bayesian" | "meta"
-  >("genetic");
+    "genetic" | "pso" | "bayesian" | "meta" | "gradient"
+  >("gradient");
   const [generations, setGenerations] = useState<number>(20);
   const [sampleSize, setSampleSize] = useState<number>(30);
 
@@ -257,10 +257,11 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
             disabled={isEvolving}
             className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none uppercase tracking-wider"
           >
+            <option value="gradient">Descente de Gradient Continue (SGD)</option>
+            <option value="meta">Omni-Méta Hybride (Ensemble 4-Moteurs)</option>
             <option value="genetic">Darwin (Algorithme Génétique)</option>
             <option value="pso">PSO (Essaim Particulaire)</option>
             <option value="bayesian">Bayes (Processus Gaussien GPR)</option>
-            <option value="meta">Omni (Méta-Adaptatif Hybride)</option>
           </select>
         </div>
 

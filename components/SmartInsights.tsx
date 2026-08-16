@@ -9,6 +9,7 @@ import {
   Clock,
   Activity,
   BarChart2,
+  TrendingUp,
 } from "lucide-react";
 import { audioEngine } from "../utils/audioEngine";
 
@@ -27,9 +28,9 @@ export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
     let subTab = "stats";
 
     // Routage intelligent basé sur l'ID de l'insight
-    if (insight.id.includes("vol-")) {
+    if (insight.id.includes("vol-") || insight.id.includes("hurst-")) {
       mainTab = "Signaux";
-      subTab = "math"; // Volatilité -> Maths
+      subTab = "math"; // Volatilité / Hurst -> Maths
     } else if (insight.id.includes("spec-") || insight.id.includes("hybrid-")) {
       mainTab = "Signaux";
       subTab = "spectral"; // Spectral -> Spectral
@@ -87,6 +88,7 @@ export const SmartInsights: React.FC<SmartInsightsProps> = ({ drawName }) => {
         if (insight.id.includes("clock")) theme.icon = Clock;
         if (insight.id.includes("spec")) theme.icon = Activity;
         if (insight.id.includes("gap")) theme.icon = BarChart2;
+        if (insight.id.includes("hurst")) theme.icon = TrendingUp;
 
         return (
           <div

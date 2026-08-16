@@ -11,6 +11,7 @@ import {
   BookOpen,
   Box,
   Compass,
+  Cpu,
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
 import { ChaosAttractor } from "../ChaosAttractor";
@@ -40,6 +41,9 @@ const TemporalTab = lazy(() =>
 const ClusteringTab = lazy(() =>
   import("./ClusteringTab").then((m) => ({ default: m.ClusteringTab })),
 );
+const MachineTransferTab = lazy(() =>
+  import("./MachineTransferTab").then((m) => ({ default: m.MachineTransferTab })),
+);
 const AcademyTab = lazy(() =>
   import("./AcademyTab").then((m) => ({ default: m.AcademyTab })),
 );
@@ -52,6 +56,7 @@ const subTabPreloaders: Record<string, () => Promise<unknown>> = {
   math: () => import("./MathTab"),
   temporal: () => import("./TemporalTab"),
   cluster: () => import("./ClusteringTab"),
+  machine: () => import("./MachineTransferTab"),
   academy: () => import("./AcademyTab"),
 };
 
@@ -104,6 +109,12 @@ export const SignalHub: React.FC = () => {
       label: "Markov & Clusters",
       icon: Box,
       color: "text-cyan-500",
+    },
+    {
+      id: "machine",
+      label: "Transfert Machine",
+      icon: Cpu,
+      color: "text-cyan-400",
     },
     {
       id: "academy",
@@ -199,6 +210,9 @@ export const SignalHub: React.FC = () => {
                 )}
                 {activeSubTab === "cluster" && (
                   <ClusteringTab drawName={activeDraw} />
+                )}
+                {activeSubTab === "machine" && (
+                  <MachineTransferTab drawName={activeDraw} />
                 )}
                 {activeSubTab === "academy" && <AcademyTab />}
               </Suspense>

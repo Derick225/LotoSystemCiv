@@ -36,6 +36,7 @@ import {
   runPSOOptimizer,
   runBayesianOptimizer,
   runMetaOptimizer,
+  runContinuousGradientOptimizer,
 } from "./training/trainingOptimizers";
 
 import {
@@ -91,7 +92,7 @@ export const evolveNeuralDNACore = async (
   drawName: string,
   fullHistory: DrawResult[],
   currentWeights: AlgoWeights,
-  options: { generations: number; sampleSize: number; optimizerType?: "genetic" | "pso" | "bayesian" | "meta" },
+  options: { generations: number; sampleSize: number; optimizerType?: "genetic" | "pso" | "bayesian" | "meta" | "gradient" },
   onTelemetry?: (data: any) => void
 ): Promise<{
   bestWeights: AlgoWeights;
@@ -248,6 +249,19 @@ export const evolveNeuralDNACore = async (
       break;
     case "bayesian":
       bestGenome = await runBayesianOptimizer(
+        currentWeights,
+        breakdownsByDraw,
+        actualWinnersByDraw,
+        hurstExponent,
+        entropyVal,
+        algoKeys,
+        totalGenerations,
+        rand,
+        onTelemetry
+      );
+      break;
+    case "gradient":
+      bestGenome = await runContinuousGradientOptimizer(
         currentWeights,
         breakdownsByDraw,
         actualWinnersByDraw,
