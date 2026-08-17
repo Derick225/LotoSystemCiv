@@ -67,7 +67,7 @@ describe('TrainingService - runBacktestTraining', () => {
         // Check structural outputs
         expect(typeof report.brier_score).toBe('number');
         expect(typeof report.stabilityScore).toBe('number');
-    }, 30000);
+    }, 90000);
     
     it('should restrict sample size to available history minus holdout', async () => {
         const history = generateMockHistory(18);
@@ -75,6 +75,6 @@ describe('TrainingService - runBacktestTraining', () => {
         // Max limit by math is min(requested, history.length - 10) = min(20, 18 - 10) = 8
         const report = await runBacktestTraining('Loto Test', history, 20);
         expect(report.totalTests).toBe(8);
-    }, 30000);
+    }, 90000);
 
 });

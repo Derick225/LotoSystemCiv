@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { DrawResult } from "../../types";
 import { NumberBall } from "../NumberBall";
 import { formatDate, syncDrawExternal } from "../../services/lotteryService";
@@ -30,7 +30,6 @@ import { useToast } from "../ui/Toast";
 import { ListSkeleton } from "../skeletons/ListSkeleton";
 import { SimilarityFinder } from "../SimilarityFinder";
 import { HeatmapCalendar } from "../HeatmapCalendar";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { audioEngine } from "../../utils/audioEngine";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFluxMath } from "../../hooks/useFluxMath";
@@ -362,14 +361,28 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
     return total / purifiedHistory.length;
   }, [speedStats.meanSum, purifiedHistory]);
 
-  const parentRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(40);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const rowVirtualizer = useVirtualizer({
-    count: filteredHistory.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => (window.innerWidth < 768 ? 160 : 135),
-    overscan: 6,
-  });
+  // Reset pagination on filter or cohort changes
+  useEffect(() => {
+    setVisibleCount(40);
+  }, [searchTerm, cyberFilter, currentDrawName, filteredHistory.length]);
+
+  // Infinite scroll observer
+  useEffect(() => {
+    if (!loadMoreRef.current || visibleCount >= filteredHistory.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 40, filteredHistory.length));
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [visibleCount, filteredHistory.length]);
 
   const handleSimilarity = useCallback((d: DrawResult) => {
     setSimilarityTarget(d);
@@ -378,7 +391,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   if (loading && history.length === 0) return <ListSkeleton />;
 
   return (
-    <div className="space-y-4 md:space-y-6 animate-fade-in pb-4 w-full max-w-7xl mx-auto px-1 md:px-0 h-[calc(100dvh-210px)] md:h-[calc(100dvh-220px)] flex flex-col">
+    <div className="space-y-4 md:space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-1 md:px-0">
       {/* Top Header KPI & Stats Bar */}
       <div className="bg-slate-900/90 text-white p-4 sm:p-5 rounded-[2rem] border border-slate-800/80 shadow-2xl relative overflow-hidden shrink-0">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -884,44 +897,56 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
         </div>
       )}
 
-      {/* VIRTUALIZED LIST VIEW */}
+      {/* DRAW LIST VIEW */}
       {viewMode === "list" && (
-        <div
-          ref={parentRef}
-          className="flex-1 w-full overflow-y-auto overflow-x-hidden min-h-0 bg-transparent scrollbar-hide py-1"
-        >
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
-          >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const draw = filteredHistory[virtualRow.index];
-              return (
+        <div className="space-y-3 w-full animate-fade-in">
+          {filteredHistory.length === 0 ? (
+            <div className="text-center py-16 bg-white dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-slate-800">
+              <Activity className="mx-auto text-slate-400 mb-3" size={32} />
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                Aucun tirage ne correspond aux filtres actifs
+              </p>
+            </div>
+          ) : (
+            <>
+              {filteredHistory.slice(0, visibleCount).map((draw, index) => (
+                <DrawRowCard
+                  key={draw.id || `${draw.date}_${index}`}
+                  draw={draw}
+                  index={index}
+                  totalCount={filteredHistory.length}
+                  meanSum={globalMeanSum}
+                  onSimilarity={handleSimilarity}
+                />
+              ))}
+
+              {visibleCount < filteredHistory.length && (
                 <div
-                  key={draw ? `${draw.id}_${virtualRow.key}` : virtualRow.key}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
+                  ref={loadMoreRef}
+                  className="flex flex-col sm:flex-row justify-center items-center gap-3 pt-6 pb-8"
                 >
-                  <DrawRowCard
-                    draw={draw}
-                    index={virtualRow.index}
-                    totalCount={filteredHistory.length}
-                    meanSum={globalMeanSum}
-                    onSimilarity={handleSimilarity}
-                  />
+                  <button
+                    onClick={() =>
+                      setVisibleCount((prev) =>
+                        Math.min(prev + 40, filteredHistory.length)
+                      )
+                    }
+                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2"
+                  >
+                    <span>
+                      Charger plus de tirages ({filteredHistory.length - visibleCount} restants)
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setVisibleCount(filteredHistory.length)}
+                    className="px-5 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-black uppercase tracking-widest rounded-2xl border border-slate-200 dark:border-slate-700 transition-all active:scale-95"
+                  >
+                    Tout afficher ({filteredHistory.length})
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
