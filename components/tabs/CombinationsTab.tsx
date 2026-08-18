@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   generateAbbreviatedWheel,
   generateFullWheel,
+  type WheelDiagnostics,
 } from "../../services/combinatoricsService";
 import { calculateACValue } from "../../services/mathService";
 import { runAntColonyOptimization } from "../../services/acoService";
@@ -65,7 +66,9 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
   const [inputs, setInputs] = useState<{ val: string; isBanker: boolean }[]>(
     Array(12).fill({ val: "", isBanker: false }),
   );
-  const [systemType, setSystemType] = useState<"full" | "reduced">("reduced");
+  const [systemType, setSystemType] = useState<
+    "full" | "reduced" | "entropy_optimal"
+  >("entropy_optimal");
   const [guarantee, setGuarantee] = useState<3 | 4 | 5>(3);
 
   // Filters
@@ -77,6 +80,8 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
   const [generatedTickets, setGeneratedTickets] = useState<GeneratedTicket[]>(
     [],
   );
+  const [wheelDiagnostics, setWheelDiagnostics] =
+    useState<WheelDiagnostics | null>(null);
   const [acoPaths, setAcoPaths] = useState<AntColonyPath[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState(0);
@@ -196,30 +201,36 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
           return;
         }
         baseTickets = generateFullWheel(pool, 5);
+        setWheelDiagnostics(null);
       } else {
-        // Système réduit avec support des Bankers
-        // Note: Si des bankers sont définis, ils sont forcés dans chaque ticket
+        const wheelMode =
+          systemType === "entropy_optimal" ? "entropy_optimal" : "reduced";
         if (uniqueBankers.length > 0) {
-          // Génération manuelle avec bankers
-          // On génère des tickets de taille (5 - nbBankers) à partir du reste du pool
           const subPool = pool.filter((n) => !uniqueBankers.includes(n));
           const subSize = 5 - uniqueBankers.length;
-          // On utilise generateFullWheel sur le subPool pour la garantie réduite
-          // (Approximation: un système réduit complet avec bankers est complexe,
-          // ici on fait un full wheel du reste pour garantir la couverture, ou on pourrait utiliser generateAbbreviatedWheel sur le reste)
-          const subTickets = generateAbbreviatedWheel(
+          const { tickets: subTickets, diagnostics } = generateAbbreviatedWheel(
             subPool,
             [],
             subSize,
             guarantee === 5
               ? subSize
               : Math.max(2, guarantee - uniqueBankers.length),
+            wheelMode,
           );
           baseTickets = subTickets.map((t) =>
             [...uniqueBankers, ...t].sort((a, b) => a - b),
           );
+          setWheelDiagnostics(diagnostics);
         } else {
-          baseTickets = generateAbbreviatedWheel(pool, [], 5, guarantee);
+          const { tickets, diagnostics } = generateAbbreviatedWheel(
+            pool,
+            [],
+            5,
+            guarantee,
+            wheelMode,
+          );
+          baseTickets = tickets;
+          setWheelDiagnostics(diagnostics);
         }
       }
 
@@ -562,27 +573,33 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
               {/* RIGHT: System Settings */}
               <div className="space-y-8 flex flex-col justify-center">
                 <div className="space-y-4">
-                  <div className="flex gap-4">
+                  <div className="flex flex-col sm:flex-row gap-4">
                     <div className="flex-1 space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase">
                         Système
                       </label>
-                      <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
+                      <div className="grid grid-cols-3 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl gap-1">
                         <button
-                          onClick={() => setSystemType("full")}
-                          className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${systemType === "full" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500"}`}
+                          onClick={() => setSystemType("entropy_optimal")}
+                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "entropy_optimal" ? "bg-indigo-600 shadow text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
                         >
-                          Intégral
+                          Entropique
                         </button>
                         <button
                           onClick={() => setSystemType("reduced")}
-                          className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${systemType === "reduced" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500"}`}
+                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "reduced" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
                         >
                           Réduit
                         </button>
+                        <button
+                          onClick={() => setSystemType("full")}
+                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "full" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                        >
+                          Intégral
+                        </button>
                       </div>
                     </div>
-                    {systemType === "reduced" && (
+                    {systemType !== "full" && (
                       <div className="flex-1 space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase">
                           Garantie
@@ -647,6 +664,59 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
           {/* Results Area */}
           {generatedTickets.length > 0 && (
             <div className="space-y-4 animate-slide-up">
+              {/* Wheel Diagnostics Bar */}
+              {wheelDiagnostics && (
+                <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono text-white">
+                  <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div className="text-[10px] text-slate-400 font-sans uppercase font-bold">
+                      Efficacité Schönheim
+                    </div>
+                    <div className="text-sm font-black text-indigo-400 mt-1">
+                      {wheelDiagnostics.generatedTicketsCount} / {wheelDiagnostics.schonheimLowerBound}{" "}
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        (Borne Inf.)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div className="text-[10px] text-slate-400 font-sans uppercase font-bold">
+                      Couverture Scénarios
+                    </div>
+                    <div className="text-sm font-black text-emerald-400 mt-1">
+                      {wheelDiagnostics.coverageRatio}%{" "}
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        ({wheelDiagnostics.coveredScenariosCount}/{wheelDiagnostics.scenariosCount})
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div className="text-[10px] text-slate-400 font-sans uppercase font-bold">
+                      Taux de Compression
+                    </div>
+                    <div className="text-sm font-black text-purple-400 mt-1">
+                      {wheelDiagnostics.compressionRatio}%{" "}
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        vs {wheelDiagnostics.totalCombinationsFull}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div className="text-[10px] text-slate-400 font-sans uppercase font-bold">
+                      Dispersion Entropique
+                    </div>
+                    <div className="text-sm font-black text-amber-400 mt-1">
+                      {wheelDiagnostics.meanEntropy.toFixed(3)}{" "}
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        Shannon H
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between px-2">
                 <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                   <ShieldCheck size={14} className="text-emerald-500" />{" "}

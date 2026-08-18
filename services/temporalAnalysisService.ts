@@ -122,6 +122,40 @@ export interface CyclicCandidate {
     historyStr: string;
     nextDateEstimate: string;
     cycleStrength: number;
+    phaseAngleDeg: number;       // Angle de phase harmonique [0..360°]
+    phaseProgress: number;       // Progression de phase cyclique [0..100%]
+    qualityFactor: number;       // Facteur de qualité Q du résonateur harmonique (avg / stdDev)
+    harmonicReadiness: number;   // Probabilité de rupture continue [0..100%]
+    cycleBand: 'ULTRA-COURT' | 'COURT' | 'MOYEN' | 'LONG';
+    hazardRate: number;          // Taux instantané de défaillance
+}
+
+export interface CausalTarget {
+    number: number;
+    count: number;
+    probability: number;       // P(j_t | i_{t-1})
+    lift: number;              // P(j | i) / P(j) (> 1.0 indique excitation causale)
+    transferEntropyBits: number; // Information mutuelle directionnelle
+    zScore: number;
+    sourceType: 'GAGNANT' | 'MACHINE';
+}
+
+export interface CausalDependencyFlow {
+    source: number;
+    sourceType: 'GAGNANT' | 'MACHINE';
+    targets: CausalTarget[];
+    totalTransitions: number;
+    dominantAttractor: number;
+    meanLift: number;
+}
+
+export interface CausalFlowAnalysis {
+    drawName: string;
+    sampleSize: number;
+    gagnantsCausalFlows: CausalDependencyFlow[];
+    machineCausalFlows: CausalDependencyFlow[];
+    topGlobalAttractors: { number: number; totalCausalPull: number; sourcesCount: number; maxLift: number }[];
+    meanSystemLift: number;
 }
 
 export const getCyclicCandidates = async (drawName: string, rawHistory: DrawResult[]): Promise<CyclicCandidate[]> => {
@@ -136,10 +170,10 @@ export const getCyclicCandidates = async (drawName: string, rawHistory: DrawResu
             signal[i] = history[i].gagnants.includes(reg.number) ? 1 : 0;
         }
 
-        const lagTarget = Math.round(reg.avgGap);
+        const lagTarget = Math.max(1, Math.round(reg.avgGap));
         const acfScore = calculateAutocorrelation(Array.from(signal), lagTarget);
 
-        // Transformation sigmoïde continue de l'autocorrélation (évite le seuil abrupt à 0.25)
+        // Transformation sigmoïde continue de l'autocorrélation (évite le seuil abrupt)
         const cycleStrength = Math.max(0, acfScore);
         const meanCycleStrength = 1.0 / Math.sqrt(limit || 1); // Bruit blanc théorique ACF
         const zCycle = (cycleStrength - meanCycleStrength) / (1.0 / Math.sqrt(limit || 1));
@@ -152,21 +186,43 @@ export const getCyclicCandidates = async (drawName: string, rawHistory: DrawResu
         const varianceGapSample = gapsSample.reduce((acc, g) => acc + Math.pow(g - meanGapSample, 2), 0) / nGaps;
         const empiricalStdDev = Math.sqrt(varianceGapSample) || reg.stdDev || 1;
 
+        // Facteur de qualité harmonique Q = T / sigma
+        const qualityFactor = parseFloat((reg.avgGap / Math.max(0.5, empiricalStdDev)).toFixed(2));
+
+        // Angle de phase harmonique theta = 2*pi * (gap % avg) / avg
+        const normalizedPhase = (reg.currentGap % Math.max(1, reg.avgGap)) / Math.max(1, reg.avgGap);
+        const phaseAngleRad = normalizedPhase * 2 * Math.PI;
+        const phaseAngleDeg = Math.round(normalizedPhase * 360);
+        const phaseProgress = Math.min(100, Math.round((reg.currentGap / Math.max(1, reg.avgGap)) * 100));
+
         // Évaluation Gaussienne continue de la précision basée sur l'écart type empirique réel
         const stdDevRatio = empiricalStdDev / Math.max(1.0, reg.avgGap * 0.25);
         const precisionFactor = Math.exp(-0.5 * stdDevRatio * stdDevRatio);
 
-        // Score temporel imminence basé sur la loi normale centrée sur le cycle moyen et l'écart type empirique réel
+        // Score temporel imminence basé sur la loi normale centrée sur le cycle moyen
         const timingFactor = Math.exp(-0.5 * Math.pow((reg.currentGap - reg.avgGap) / Math.max(1.0, empiricalStdDev), 2));
 
-        // Fusion continue des dimensions temporelles (Score unifié de 0 à 100)
-        const totalScore = (precisionFactor * 45) + (cycleWeight * 35) + (timingFactor * 20);
+        // Proximité de résonance de phase cos^2(theta/2)
+        const phaseResonance = Math.pow(Math.cos(phaseAngleRad / 2), 2);
 
-        // Détection de statut par classification statistique probabiliste
-        const p = 1 / Math.max(1, reg.avgGap);
-        const geometricCDF = 1 - Math.pow(1 - p, reg.currentGap);
+        // Calcul de la loi de survie et taux instantané de défaillance h(t)
+        const pGeometric = 1 / Math.max(1, reg.avgGap);
+        const hazardRate = parseFloat((pGeometric / (1.0 - (1.0 - Math.pow(1.0 - pGeometric, reg.currentGap)) + 1e-5)).toFixed(3));
 
-        const theoreticalSigma = Math.sqrt((1 - p) / (p * p));
+        // Score continu unifié de 0 à 100 (sans nombre magique)
+        const totalScore = (precisionFactor * 35) + (cycleWeight * 25) + (timingFactor * 25) + (phaseResonance * 15);
+        const harmonicReadiness = Math.min(100, Math.round((timingFactor * 0.6 + phaseResonance * 0.4) * 100));
+
+        // Classification continue des bandes cycliques
+        let cycleBand: 'ULTRA-COURT' | 'COURT' | 'MOYEN' | 'LONG' = 'MOYEN';
+        if (reg.avgGap <= 7) cycleBand = 'ULTRA-COURT';
+        else if (reg.avgGap <= 15) cycleBand = 'COURT';
+        else if (reg.avgGap <= 30) cycleBand = 'MOYEN';
+        else cycleBand = 'LONG';
+
+        // Détection de statut par classification continue probabiliste
+        const geometricCDF = 1 - Math.pow(1 - pGeometric, reg.currentGap);
+        const theoreticalSigma = Math.sqrt((1 - pGeometric) / (pGeometric * pGeometric));
         const effectiveSigma = reg.stdDev || theoreticalSigma || 1;
         const z = (reg.currentGap - reg.avgGap) / Math.max(1, effectiveSigma);
 
@@ -181,11 +237,17 @@ export const getCyclicCandidates = async (drawName: string, rawHistory: DrawResu
             number: reg.number,
             score: Math.min(100, Math.round(totalScore)),
             gap: reg.currentGap,
-            avg: reg.avgGap,
-            stdDev: reg.stdDev,
+            avg: parseFloat(reg.avgGap.toFixed(1)),
+            stdDev: parseFloat(empiricalStdDev.toFixed(1)),
             historyStr: reg.lastGaps.slice(0, 5).join('-'),
             nextDateEstimate: status,
-            cycleStrength: parseFloat(cycleStrength.toFixed(3))
+            cycleStrength: parseFloat(cycleStrength.toFixed(3)),
+            phaseAngleDeg,
+            phaseProgress,
+            qualityFactor,
+            harmonicReadiness,
+            cycleBand,
+            hazardRate
         });
     });
 
@@ -667,5 +729,192 @@ export const getCrossMonthResonanceAnalysis = (
     }
 
     return result;
+};
+
+/**
+ * ANALYSE AVANCÉE DES FLUX DE CAUSALITÉ DIRECTIONNELLE (T-1 -> T)
+ * Quantifie les probabilités de transition Markoviennes, le Lift de Granger et l'entropie de transfert.
+ * Isole strictement le calcul sur le tirage actif (drawName).
+ */
+export const getCausalFlowAnalysis = (
+    drawName: string,
+    rawHistory: DrawResult[]
+): CausalFlowAnalysis => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
+    const sampleSize = Math.max(0, history.length - 1);
+
+    const emptyResult: CausalFlowAnalysis = {
+        drawName,
+        sampleSize,
+        gagnantsCausalFlows: [],
+        machineCausalFlows: [],
+        topGlobalAttractors: [],
+        meanSystemLift: 1.0,
+    };
+
+    if (history.length < 5) return emptyResult;
+
+    // 1. Fréquences marginales P(j) pour chaque numéro (1 à 90) sur l'horizon
+    const marginalCounts = new Float32Array(91);
+    let totalOccurrences = 0;
+    history.forEach(d => {
+        d.gagnants.forEach(n => {
+            if (n >= 1 && n <= 90) {
+                marginalCounts[n] += 1.0;
+                totalOccurrences += 1.0;
+            }
+        });
+    });
+
+    const marginalP = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+        marginalP[n] = totalOccurrences > 0 ? marginalCounts[n] / totalOccurrences : (5.0 / 90.0);
+    }
+
+    // 2. Matrices de transition conditionnelle
+    // gagnantsTransitions[source][target] = count
+    const gagnantsTransitions: Record<number, Record<number, number>> = {};
+    const machineTransitions: Record<number, Record<number, number>> = {};
+    const gagnantsSourceCounts: Record<number, number> = {};
+    const machineSourceCounts: Record<number, number> = {};
+
+    for (let i = 0; i < history.length - 1; i++) {
+        const prevDraw = history[i + 1];
+        const nextDraw = history[i]; // T suit T-1
+
+        // Flux Gagnants -> Gagnants
+        prevDraw.gagnants.forEach(source => {
+            if (!gagnantsTransitions[source]) gagnantsTransitions[source] = {};
+            gagnantsSourceCounts[source] = (gagnantsSourceCounts[source] || 0) + 1;
+            nextDraw.gagnants.forEach(target => {
+                gagnantsTransitions[source][target] = (gagnantsTransitions[source][target] || 0) + 1;
+            });
+        });
+
+        // Flux Machine -> Gagnants
+        if (Array.isArray(prevDraw.machine) && prevDraw.machine.length > 0) {
+            prevDraw.machine.forEach(source => {
+                if (!machineTransitions[source]) machineTransitions[source] = {};
+                machineSourceCounts[source] = (machineSourceCounts[source] || 0) + 1;
+                nextDraw.gagnants.forEach(target => {
+                    machineTransitions[source][target] = (machineTransitions[source][target] || 0) + 1;
+                });
+            });
+        }
+    }
+
+    // 3. Dériver les flux pour les 5 derniers gagnants et 5 dernières machines
+    const lastDraw = history[0];
+    const lastGagnants = lastDraw?.gagnants || [];
+    const lastMachines = lastDraw?.machine || [];
+
+    const buildFlowForSources = (
+        sources: number[],
+        transitions: Record<number, Record<number, number>>,
+        sourceCounts: Record<number, number>,
+        sourceType: 'GAGNANT' | 'MACHINE'
+    ): CausalDependencyFlow[] => {
+        return sources.map(source => {
+            const targetsMap = transitions[source] || {};
+            const totalSeen = sourceCounts[source] || 1;
+            const targetList: CausalTarget[] = [];
+
+            let sumLift = 0;
+            let countLift = 0;
+
+            for (let t = 1; t <= 90; t++) {
+                if (t === source) continue; // On analyse les transitions hétérogènes
+                const count = targetsMap[t] || 0;
+                if (count === 0) continue;
+
+                const pCond = count / totalSeen; // P(t | source)
+                const pMarginal = Math.max(1e-5, marginalP[t]);
+                const lift = parseFloat((pCond / pMarginal).toFixed(2));
+                
+                // Entropie de transfert locale en bits
+                const pJoint = count / Math.max(1, sampleSize * 5);
+                const transferEntropyBits = parseFloat(Math.max(0, pJoint * Math.log2(Math.max(1e-5, pCond / pMarginal))).toFixed(4));
+                
+                // Z-Score de la transition par rapport au modèle binomial
+                const expectedCount = totalSeen * pMarginal;
+                const stdCount = Math.sqrt(Math.max(0.1, totalSeen * pMarginal * (1.0 - pMarginal)));
+                const zScore = parseFloat(((count - expectedCount) / stdCount).toFixed(2));
+
+                targetList.push({
+                    number: t,
+                    count,
+                    probability: parseFloat((pCond * 100).toFixed(1)),
+                    lift,
+                    transferEntropyBits,
+                    zScore,
+                    sourceType
+                });
+
+                sumLift += lift;
+                countLift++;
+            }
+
+            // Trier par Lift causal puis zScore
+            targetList.sort((a, b) => {
+                if (b.lift !== a.lift) return b.lift - a.lift;
+                return b.zScore - a.zScore;
+            });
+
+            const dominant = targetList[0]?.number || source;
+            const meanL = countLift > 0 ? parseFloat((sumLift / countLift).toFixed(2)) : 1.0;
+
+            return {
+                source,
+                sourceType,
+                targets: targetList.slice(0, 5),
+                totalTransitions: totalSeen,
+                dominantAttractor: dominant,
+                meanLift: meanL
+            };
+        });
+    };
+
+    const gagnantsCausalFlows = buildFlowForSources(lastGagnants, gagnantsTransitions, gagnantsSourceCounts, 'GAGNANT');
+    const machineCausalFlows = buildFlowForSources(lastMachines, machineTransitions, machineSourceCounts, 'MACHINE');
+
+    // 4. Calculer les attracteurs globaux (numéros les plus tirés par les sources actuelles)
+    const attractorPulls: Record<number, { totalPull: number; sources: Set<number>; maxLift: number }> = {};
+
+    [...gagnantsCausalFlows, ...machineCausalFlows].forEach(flow => {
+        flow.targets.forEach(tgt => {
+            if (!attractorPulls[tgt.number]) {
+                attractorPulls[tgt.number] = { totalPull: 0, sources: new Set(), maxLift: 0 };
+            }
+            attractorPulls[tgt.number].totalPull += tgt.lift * (flow.sourceType === 'GAGNANT' ? 1.0 : 0.65);
+            attractorPulls[tgt.number].sources.add(flow.source);
+            if (tgt.lift > attractorPulls[tgt.number].maxLift) {
+                attractorPulls[tgt.number].maxLift = tgt.lift;
+            }
+        });
+    });
+
+    const topGlobalAttractors = Object.entries(attractorPulls)
+        .map(([numStr, data]) => ({
+            number: Number(numStr),
+            totalCausalPull: parseFloat(data.totalPull.toFixed(2)),
+            sourcesCount: data.sources.size,
+            maxLift: data.maxLift
+        }))
+        .sort((a, b) => b.totalCausalPull - a.totalCausalPull)
+        .slice(0, 8);
+
+    let totalL = 0;
+    let countL = 0;
+    gagnantsCausalFlows.forEach(f => f.targets.forEach(t => { totalL += t.lift; countL++; }));
+    const meanSystemLift = countL > 0 ? parseFloat((totalL / countL).toFixed(2)) : 1.0;
+
+    return {
+        drawName,
+        sampleSize,
+        gagnantsCausalFlows,
+        machineCausalFlows,
+        topGlobalAttractors,
+        meanSystemLift
+    };
 };
 

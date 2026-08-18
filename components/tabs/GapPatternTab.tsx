@@ -91,12 +91,8 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const runCorrelationAnalysis = async (drawKey: string) => {
     setIsCalculatingCorr(true);
     try {
-      let drawNamesToAnalyze = [drawName];
-      if (drawKey === "all_4") {
-        drawNamesToAnalyze = ["Reveil", "Etoile", "Akwaba", "National"];
-      } else if (drawKey !== "current") {
-        drawNamesToAnalyze = [drawKey];
-      }
+      // Respect TIRAGE ISOLATION RULE: analyze strictly the isolated active draw history
+      const drawNamesToAnalyze = [drawName];
 
       const keys = [
         AlgoKey.GAPS,

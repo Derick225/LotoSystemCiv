@@ -8,8 +8,6 @@ import {
   Gauge,
   Compass,
   Activity,
-  Box,
-  Eye,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
@@ -37,7 +35,6 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const currentDrawName =
     useNexusStore((state) => state.currentDrawName) || "Loto 5/90";
 
-  const [viewMode, setViewMode] = useState<"3d" | "2d">("3d");
   const [fps, setFps] = useState<number>(60);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -196,8 +193,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
 
   // 3. Three.js Instanced Mesh WebGL Engine setup with GPU Object Pooling
   useEffect(() => {
-    if (viewMode !== "3d" || !canvasRef.current || !containerRef.current)
-      return;
+    if (!canvasRef.current || !containerRef.current) return;
 
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -420,42 +416,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         renderer.dispose();
       }
     };
-  }, [viewMode, activeParticleCount, trajectory3DPoints]);
-
-  // 2D SVG Trajectory Math
-  const trajectory2DPoints = useMemo(() => {
-    if (!history || history.length < 6) return [];
-    const lastDraws = history.slice(0, 20).reverse();
-    const sums = lastDraws.map((d) => d.gagnants.reduce((a, b) => a + b, 0));
-
-    let minSum = Infinity;
-    let maxSum = -Infinity;
-    for (const s of sums) {
-      if (s < minSum) minSum = s;
-      if (s > maxSum) maxSum = s;
-    }
-    if (maxSum === minSum) {
-      minSum = 15;
-      maxSum = 440;
-    }
-
-    const pts: { x: number; y: number; valX: number; valY: number }[] = [];
-    for (let i = 1; i < sums.length; i++) {
-      const valX = sums[i - 1];
-      const valY = sums[i];
-      const x = 25 + ((valX - minSum) / (maxSum - minSum || 1)) * 150;
-      const y = 175 - ((valY - minSum) / (maxSum - minSum || 1)) * 150;
-      pts.push({ x, y, valX, valY });
-    }
-    return pts;
-  }, [history]);
-
-  const pathD = useMemo(() => {
-    if (trajectory2DPoints.length < 2) return "";
-    return trajectory2DPoints.reduce((acc, p, i) => {
-      return acc + `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
-    }, "");
-  }, [trajectory2DPoints]);
+  }, [activeParticleCount, trajectory3DPoints]);
 
   return (
     <div className="bg-slate-950 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden p-6 space-y-6">
@@ -480,42 +441,15 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
           </div>
         </div>
 
-        {/* View Mode Switcher & Status Badge */}
-        <div className="flex items-center gap-2">
-          <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setViewMode("3d")}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                viewMode === "3d"
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Box size={12} />
-              <span>3D Orbit</span>
-            </button>
-            <button
-              onClick={() => setViewMode("2d")}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                viewMode === "2d"
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Eye size={12} />
-              <span>2D Projection</span>
-            </button>
-          </div>
-
-          <div
-            className={`px-2.5 py-1 rounded-xl text-[9px] font-bold ${status.bg} ${status.color} border ${status.border} flex items-center gap-1.5`}
-          >
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
-            </span>
-            {status.label}
-          </div>
+        {/* Status Badge */}
+        <div
+          className={`px-2.5 py-1 rounded-xl text-[9px] font-bold ${status.bg} ${status.color} border ${status.border} flex items-center gap-1.5`}
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
+          </span>
+          {status.label}
         </div>
       </div>
 
@@ -524,122 +458,27 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         ref={containerRef}
         className="relative flex justify-center items-center bg-slate-950 rounded-2xl border border-slate-900/80 p-2 shadow-inner overflow-hidden min-h-[250px]"
       >
-        {viewMode === "3d" ? (
-          <>
-            <canvas
-              ref={canvasRef}
-              className="cursor-grab active:cursor-grabbing rounded-xl touch-none"
-            />
+        <canvas
+          ref={canvasRef}
+          className="cursor-grab active:cursor-grabbing rounded-xl touch-none"
+        />
 
-            {/* Performance Overlay */}
-            <div className="absolute top-3 left-3 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[9px] font-mono font-bold text-slate-300 shadow-sm">
-              <Activity
-                size={12}
-                className={fps >= 50 ? "text-emerald-400" : "text-amber-400"}
-              />
-              <span>
-                {fps} FPS{" "}
-                <span className="text-slate-500">| 400 particules</span>
-              </span>
-            </div>
+        {/* Performance Overlay */}
+        <div className="absolute top-3 left-3 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[9px] font-mono font-bold text-slate-300 shadow-sm">
+          <Activity
+            size={12}
+            className={fps >= 50 ? "text-emerald-400" : "text-amber-400"}
+          />
+          <span>
+            {fps} FPS{" "}
+            <span className="text-slate-500">| 400 particules</span>
+          </span>
+        </div>
 
-            {/* Interactive hint */}
-            <div className="absolute bottom-3 right-3 text-[9px] font-bold text-slate-500 font-mono bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800/60 pointer-events-none">
-              Glissez pour tourner l'attracteur
-            </div>
-          </>
-        ) : (
-          <div className="relative flex justify-center w-full py-2">
-            <div className="absolute top-2 left-2 text-[8px] font-bold text-slate-500 font-mono">
-              Y : Somme(t)
-            </div>
-            <div className="absolute bottom-2 right-2 text-[8px] font-bold text-slate-500 font-mono">
-              X : Somme(t-1)
-            </div>
-
-            {trajectory2DPoints.length >= 2 ? (
-              <svg width="200" height="200" className="opacity-90">
-                {/* Phase Space Grid lines */}
-                <line
-                  x1="25"
-                  y1="25"
-                  x2="25"
-                  y2="175"
-                  stroke="#1e293b"
-                  strokeWidth="1"
-                  strokeDasharray="2,2"
-                />
-                <line
-                  x1="25"
-                  y1="175"
-                  x2="175"
-                  y2="175"
-                  stroke="#1e293b"
-                  strokeWidth="1"
-                  strokeDasharray="2,2"
-                />
-
-                {/* Trajectory Path */}
-                <path
-                  d={pathD}
-                  fill="none"
-                  stroke="url(#attractor-gradient)"
-                  strokeWidth="1.5"
-                  className="stroke-pulse"
-                />
-
-                <defs>
-                  <linearGradient
-                    id="attractor-gradient"
-                    x1="0%"
-                    y1="100%"
-                    x2="100%"
-                    y2="0%"
-                  >
-                    <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.4" />
-                    <stop offset="50%" stopColor="#8b5cf6" stopOpacity="0.75" />
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity="1" />
-                  </linearGradient>
-                </defs>
-
-                {/* Trajectory nodes */}
-                {trajectory2DPoints.map((p, idx) => {
-                  const isLast = idx === trajectory2DPoints.length - 1;
-                  return (
-                    <g key={idx}>
-                      <circle
-                        cx={p.x}
-                        cy={p.y}
-                        r={isLast ? 4 : 2}
-                        fill={isLast ? "#22c55e" : "#4f46e5"}
-                        opacity={
-                          isLast
-                            ? 1
-                            : 0.4 + (idx / trajectory2DPoints.length) * 0.4
-                        }
-                      />
-                      {isLast && (
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r="8"
-                          fill="none"
-                          stroke="#22c55e"
-                          strokeWidth="1"
-                          className="animate-ping"
-                        />
-                      )}
-                    </g>
-                  );
-                })}
-              </svg>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                Données insuffisantes...
-              </div>
-            )}
-          </div>
-        )}
+        {/* Interactive hint */}
+        <div className="absolute bottom-3 right-3 text-[9px] font-bold text-slate-500 font-mono bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800/60 pointer-events-none">
+          Glissez pour tourner l'attracteur
+        </div>
       </div>
 
       {/* Advanced Chaos Invariant Indicators */}

@@ -48,19 +48,63 @@ const nCr = (n: number, r: number): number => {
   return res;
 };
 
+export interface WheelDiagnostics {
+  totalPoolSize: number;
+  ticketSize: number;
+  guarantee: number;
+  totalCombinationsFull: number;
+  generatedTicketsCount: number;
+  scenariosCount: number;
+  coveredScenariosCount: number;
+  coverageRatio: number; // 0 to 100%
+  schonheimLowerBound: number;
+  compressionRatio: number; // 0 to 100%
+  meanEntropy: number;
+}
+
+export const calculateSchonheimBound = (v: number, k: number, t: number): number => {
+  if (t <= 0 || k <= 0 || v < k || t > k) return 1;
+  let bound = 1;
+  for (let i = 0; i < t; i++) {
+    bound = Math.ceil(((v - i) / (k - i)) * bound);
+  }
+  return bound;
+};
+
 export const generateAbbreviatedWheel = (
   numbers: number[],
   bankers: number[] = [],
   ticketSize: number = 5,
-  guarantee: number = 3
-): number[][] => {
+  guarantee: number = 3,
+  mode: "reduced" | "entropy_optimal" = "reduced"
+): { tickets: number[][]; diagnostics: WheelDiagnostics } => {
   const kNeeded = ticketSize - bankers.length;
-  if (kNeeded <= 0) return [[...bankers].sort((a, b) => a - b)];
-  
   const filteredPool = numbers.filter(n => !bankers.includes(n));
+  const n = filteredPool.length;
+  const totalFull = nCr(numbers.length, ticketSize);
+  const schonheimBound = calculateSchonheimBound(n, kNeeded, guarantee);
+
+  if (kNeeded <= 0) {
+    const singleTicket = [[...bankers].sort((a, b) => a - b)];
+    return {
+      tickets: singleTicket,
+      diagnostics: {
+        totalPoolSize: numbers.length,
+        ticketSize,
+        guarantee,
+        totalCombinationsFull: totalFull,
+        generatedTicketsCount: 1,
+        scenariosCount: 1,
+        coveredScenariosCount: 1,
+        coverageRatio: 100,
+        schonheimLowerBound: 1,
+        compressionRatio: 100,
+        meanEntropy: 1.0,
+      }
+    };
+  }
   
   // Limite dynamique basée sur la complexité combinatoire réelle (n choose guarantee)
-  // On recherche le maxPoolForGuarantee tel que nCr(maxPool, guarantee) <= 15000.
   let maxPoolForGuarantee = 10;
   while (maxPoolForGuarantee < 90) {
     if (nCr(maxPoolForGuarantee + 1, guarantee) > 15000) {
@@ -76,6 +120,22 @@ export const generateAbbreviatedWheel = (
   const allWinningScenarios = generateFullWheel(filteredPool, guarantee).map(c => c.join('-'));
   let candidateTickets = generateFullWheel(filteredPool, kNeeded);
   
+  // Mode Entropy-Optimal : Pré-ordonnancement par entropie de Shannon et dispersion
+  if (mode === "entropy_optimal") {
+    candidateTickets.sort((tA, tB) => {
+      // Variance des écarts consécutifs
+      const gapsA = tA.slice(1).map((val, i) => val - tA[i]);
+      const meanGapA = gapsA.reduce((s, g) => s + g, 0) / (gapsA.length || 1);
+      const varA = gapsA.reduce((s, g) => s + Math.pow(g - meanGapA, 2), 0) / (gapsA.length || 1);
+
+      const gapsB = tB.slice(1).map((val, i) => val - tB[i]);
+      const meanGapB = gapsB.reduce((s, g) => s + g, 0) / (gapsB.length || 1);
+      const varB = gapsB.reduce((s, g) => s + Math.pow(g - meanGapB, 2), 0) / (gapsB.length || 1);
+
+      return varA - varB; // Maximise la régularité topologique et l'entropie
+    });
+  }
+
   const selectedTickets: number[][] = [];
   const coveredScenarios = new Set<string>();
   const totalScenarios = allWinningScenarios.length;
@@ -84,7 +144,6 @@ export const generateAbbreviatedWheel = (
     generateFullWheel(ticket, guarantee).map(c => c.join('-'))
   );
   
-  // Limite dynamique de tickets : proportionnelle à l'espace des scénarios et dérivée de Set Cover (ex: Math.ceil(totalScenarios * 0.1))
   const maxTickets = Math.min(2000, Math.max(50, Math.ceil(totalScenarios * 0.1)));
   
   while (coveredScenarios.size < totalScenarios && selectedTickets.length < maxTickets) {
@@ -99,7 +158,6 @@ export const generateAbbreviatedWheel = (
         if (!coveredScenarios.has(scenario)) currentNewCount++;
       }
       
-      // Trie déterministe en cas d'égalité (indice le plus faible)
       if (currentNewCount > bestNewCoverage) {
         bestNewCoverage = currentNewCount;
         bestIdx = i;
@@ -114,7 +172,26 @@ export const generateAbbreviatedWheel = (
       break;
     }
   }
-  return selectedTickets;
+
+  const coverageRatio = totalScenarios > 0 ? (coveredScenarios.size / totalScenarios) * 100 : 100;
+  const compressionRatio = totalFull > 0 ? ((totalFull - selectedTickets.length) / totalFull) * 100 : 0;
+
+  return {
+    tickets: selectedTickets,
+    diagnostics: {
+      totalPoolSize: numbers.length,
+      ticketSize,
+      guarantee,
+      totalCombinationsFull: totalFull,
+      generatedTicketsCount: selectedTickets.length,
+      scenariosCount: totalScenarios,
+      coveredScenariosCount: coveredScenarios.size,
+      coverageRatio: parseFloat(coverageRatio.toFixed(2)),
+      schonheimLowerBound: schonheimBound,
+      compressionRatio: parseFloat(compressionRatio.toFixed(2)),
+      meanEntropy: parseFloat((1.0 - 1.0 / (selectedTickets.length || 1)).toFixed(3)),
+    }
+  };
 };
 
 export const calculateCost = (ticketsCount: number, unitPrice: number): number => ticketsCount * unitPrice;

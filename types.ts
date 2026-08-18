@@ -822,6 +822,14 @@ export interface PythonAnalysisResult {
   distribution?: Record<number, number>;
   featureImportances?: { feature: string; importance: number }[];
   featureInteractions?: { f1: string; f2: string; strength: number }[];
+  kernelDiagnostics?: {
+    rkhsEnergy: number;
+    spectralRadius: number;
+    rbfBandwidth: number;
+    maternLength: number;
+    hawkesBeta: number;
+    kernelMatrixHeatmap?: number[][];
+  };
 }
 
 export interface NotebookCell {
@@ -843,6 +851,12 @@ export interface FusionResult {
   biasWeightsUsed?: { logic: number; physics: number; intuition: number };
   kalmanGains?: { logic: number; physics: number; intuition: number };
   variances?: { logic: number; physics: number; intuition: number };
+  crossCovariance?: {
+    covLP: number;
+    covLI: number;
+    covPI: number;
+    fisherGain: number;
+  };
   method?: string;
 }
 

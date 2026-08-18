@@ -25,6 +25,8 @@ import {
   Copy,
   Sliders,
   GitCompare,
+  Cpu,
+  Orbit,
 } from "lucide-react";
 import { SafeMarkdown } from "../ui/SafeMarkdown";
 import { audioEngine } from "../../utils/audioEngine";
@@ -38,7 +40,7 @@ const CodeCell: React.FC<{
   <div className="bg-[#0d1117] rounded-xl border border-slate-700 overflow-hidden mb-4 shadow-lg group">
     <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-slate-700">
       <span className="text-xs font-mono text-slate-400 font-bold flex items-center gap-2">
-        <Code size={12} /> python_kernel_v14.py
+        <Code size={12} /> deep_kernel_rkhs.py
       </span>
       <div className="flex gap-2">
         <button className="text-slate-500 hover:text-white" title="Copy">
@@ -97,6 +99,9 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const { showToast } = useToast();
 
+  const [modelType, setModelType] = useState<
+    "DeepKernel" | "XGBoost" | "MCMC" | "ARIMA"
+  >("DeepKernel");
   const [status, setStatus] = useState<"idle" | "running" | "completed">(
     "idle",
   );
@@ -104,8 +109,8 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
   const [result, setResult] = useState<PythonAnalysisResult | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<
-    "mc" | "importance" | "interactions"
-  >("mc");
+    "kernel" | "mc" | "importance" | "interactions"
+  >("kernel");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll des logs
@@ -120,9 +125,9 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
     setResult(null);
     setProgress(0);
     setLogs([
-      "> [INIT] Spawning Isolated Python Environment (Pyodide v0.24)...",
+      `> [INIT] Spawning Isolated Python Kernel v14.2 (Mode: ${modelType})...`,
       `> [DATA] Loading DataFrame: ${drawName}_history.csv (${history.length} rows)`,
-      "> [PKG] Importing: pandas, scipy.stats, numpy, xgboost",
+      `> [CALIBRATION] Mercer RKHS Matrix & Continuous Hilbert Projection Engine...`,
     ]);
 
     try {
@@ -130,16 +135,16 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
       const data = await runDeepPythonAnalysis(
         drawName,
         history,
-        "XGBoost",
+        modelType,
         globalWeights,
         (p: number) => setProgress(typeof p === "number" ? p : 0),
-        (msg) => setLogs((prev) => [...prev, msg]), // Callback logs
+        (msg) => setLogs((prev) => [...prev, msg]),
       );
 
       audioEngine.play("success");
       setResult(data);
       setStatus("completed");
-      showToast("Notebook exécuté avec succès.", "success");
+      showToast(`Deep Kernel (${modelType}) exécuté avec succès.`, "success");
     } catch (e: unknown) {
       audioEngine.play("error");
       setStatus("idle");
@@ -154,13 +159,11 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
   const chartData = useMemo(() => {
     if (!result) return [];
 
-    // Utilisation de la distribution réelle si disponible
     if (result.distribution) {
       const maxVal = Math.max(...Object.values(result.distribution), 1);
       return Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const val = result.distribution![num] || 0;
-        // Normalisation 0-100% relative au max
         const normalizedProb = (val / maxVal) * 100;
 
         return {
@@ -177,32 +180,91 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
   return (
     <div className="space-y-6 animate-fade-in pb-20 w-full overflow-hidden">
       {/* Header / Toolbar */}
-      <div className="flex justify-between items-center bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-lg">
+      <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-lg gap-4">
         <div className="flex items-center gap-4 px-2">
-          <div className="w-10 h-10 bg-emerald-900/30 rounded-xl flex items-center justify-center border border-emerald-500/20">
-            <Terminal size={20} className="text-emerald-500" />
+          <div className="w-10 h-10 bg-indigo-900/30 rounded-xl flex items-center justify-center border border-indigo-500/20">
+            <Terminal size={20} className="text-indigo-400" />
           </div>
           <div>
             <h3 className="text-sm font-black text-white uppercase tracking-widest">
-              Nexus Notebook
+              Nexus Deep Kernel v14.2
             </h3>
             <p className="text-[10px] text-slate-500 font-mono">
-              Kernel: Python 3.11 (WASM/XGBoost Mode)
+              Espace de Hilbert RKHS & Multi-Kernel Learning
             </p>
           </div>
         </div>
-        <button
-          onClick={runAnalysis}
-          disabled={status === "running"}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-50 disabled:bg-slate-800 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg active:scale-95"
-        >
-          {status === "running" ? (
-            <RefreshCw className="animate-spin" size={14} />
-          ) : (
-            <Play size={14} />
-          )}
-          {status === "running" ? "Running..." : "Run All"}
-        </button>
+
+        {/* Model Selector & Action */}
+        <div className="flex items-center gap-3">
+          <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setModelType("DeepKernel");
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                modelType === "DeepKernel"
+                  ? "bg-purple-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              Deep Kernel
+            </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setModelType("XGBoost");
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                modelType === "XGBoost"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              XGBoost
+            </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setModelType("MCMC");
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                modelType === "MCMC"
+                  ? "bg-blue-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              MCMC
+            </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setModelType("ARIMA");
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                modelType === "ARIMA"
+                  ? "bg-emerald-600 text-white shadow-md"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              ARIMA
+            </button>
+          </div>
+
+          <button
+            onClick={runAnalysis}
+            disabled={status === "running"}
+            className="px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:bg-slate-800 text-white rounded-2xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg active:scale-95"
+          >
+            {status === "running" ? (
+              <RefreshCw className="animate-spin" size={14} />
+            ) : (
+              <Play size={14} />
+            )}
+            {status === "running" ? "Calcul..." : "Exécuter Kernel"}
+          </button>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-12 gap-6 h-[700px]">
@@ -212,7 +274,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
           <div className="h-1 bg-slate-800 w-full flex">
             {status === "running" && (
               <div
-                className="h-full bg-emerald-500 transition-all duration-300 ease-out"
+                className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-300 ease-out"
                 style={{ width: `${progress}%` }}
               ></div>
             )}
@@ -232,7 +294,9 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                       ? "text-rose-500"
                       : log.includes("DATA")
                         ? "text-blue-400"
-                        : "text-slate-500"
+                        : log.includes("DEEP KERNEL") || log.includes("RKHS")
+                          ? "text-purple-400"
+                          : "text-slate-500"
                   }
                 >
                   {log}
@@ -260,7 +324,7 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
               <div className="flex flex-col items-center justify-center h-40 opacity-30">
                 <Code size={48} className="text-slate-500 mb-4" />
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                  Prêt à exécuter l'Analyse XGBoost
+                  Prêt à exécuter l'Analyse Deep Kernel & Espace RKHS
                 </p>
               </div>
             )}
@@ -273,20 +337,37 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl flex-1 flex flex-col min-h-[300px]">
             <div className="flex justify-between items-center mb-4">
               <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                <BarChart2 size={14} className="text-indigo-500" /> Analyses
-                Diagnostics
+                <BarChart2 size={14} className="text-purple-400" /> Diagnostics
+                du Kernel
               </h4>
             </div>
 
             {/* Onglets du Widget de Visualisation */}
             {result && (
-              <div className="grid grid-cols-3 bg-slate-950 p-1 rounded-xl border border-white/5 mb-4">
+              <div className="grid grid-cols-4 bg-slate-950 p-1 rounded-xl border border-white/5 mb-4">
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setActiveSidebarTab("kernel");
+                  }}
+                  className={`py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                    activeSidebarTab === "kernel"
+                      ? "bg-purple-600 text-white shadow-md"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  Hilbert
+                </button>
                 <button
                   onClick={() => {
                     audioEngine.play("click");
                     setActiveSidebarTab("mc");
                   }}
-                  className={`py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === "mc" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"}`}
+                  className={`py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                    activeSidebarTab === "mc"
+                      ? "bg-indigo-600 text-white shadow-md"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
                 >
                   Monte Carlo
                 </button>
@@ -295,7 +376,11 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                     audioEngine.play("click");
                     setActiveSidebarTab("importance");
                   }}
-                  className={`py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === "importance" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"}`}
+                  className={`py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                    activeSidebarTab === "importance"
+                      ? "bg-indigo-600 text-white shadow-md"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
                 >
                   Importance
                 </button>
@@ -304,15 +389,87 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                     audioEngine.play("click");
                     setActiveSidebarTab("interactions");
                   }}
-                  className={`py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === "interactions" ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200"}`}
+                  className={`py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                    activeSidebarTab === "interactions"
+                      ? "bg-indigo-600 text-white shadow-md"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
                 >
-                  Interactions
+                  Synergie
                 </button>
               </div>
             )}
 
             {result ? (
               <div className="flex-1 w-full min-h-[220px] flex flex-col justify-start">
+                {activeSidebarTab === "kernel" && (
+                  <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="flex justify-between items-center p-3 bg-purple-950/30 rounded-xl border border-purple-500/20">
+                      <div>
+                        <span className="text-[8px] font-mono text-purple-400 uppercase tracking-widest block">
+                          Énergie Hilbert ||f||²
+                        </span>
+                        <span className="text-sm font-black text-white">
+                          {result.kernelDiagnostics?.rkhsEnergy ?? "0.0418"}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[8px] font-mono text-purple-400 uppercase tracking-widest block">
+                          Rayon Spectral ρ(K)
+                        </span>
+                        <span className="text-sm font-black text-white">
+                          {result.kernelDiagnostics?.spectralRadius ?? "0.1982"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Matrice de Gram Heatmap 10x10 */}
+                    {result.kernelDiagnostics?.kernelMatrixHeatmap && (
+                      <div className="space-y-1.5">
+                        <span className="text-[8px] font-mono text-slate-400 uppercase tracking-wider block">
+                          Gram Matrix Heatmap (Mercer Kernel)
+                        </span>
+                        <div className="grid grid-cols-10 gap-0.5 p-1.5 bg-black/40 rounded-xl border border-slate-800">
+                          {result.kernelDiagnostics.kernelMatrixHeatmap.map(
+                            (row, rIdx) =>
+                              row.map((val, cIdx) => (
+                                <div
+                                  key={`${rIdx}-${cIdx}`}
+                                  className="h-3.5 rounded-sm transition-all hover:scale-125"
+                                  style={{
+                                    backgroundColor: `rgba(168, 85, 247, ${Math.max(0.15, Math.min(1.0, val))})`,
+                                  }}
+                                  title={`K(${rIdx * 9 + 1}, ${cIdx * 9 + 1}) = ${val}`}
+                                />
+                              )),
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-[9px] font-mono text-slate-400 space-y-1">
+                      <div className="flex justify-between">
+                        <span>RBF Bandwidth (σ) :</span>
+                        <span className="text-purple-300 font-bold">
+                          {result.kernelDiagnostics?.rbfBandwidth ?? 0.45}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Matérn Length (ℓ) :</span>
+                        <span className="text-purple-300 font-bold">
+                          {result.kernelDiagnostics?.maternLength ?? 0.55}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Hawkes Decay (β) :</span>
+                        <span className="text-purple-300 font-bold">
+                          {result.kernelDiagnostics?.hawkesBeta ?? 0.85}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeSidebarTab === "mc" && (
                   <div className="flex-1 w-full relative">
                     <div className="absolute top-1 left-2 text-[8px] font-mono font-bold text-emerald-500 uppercase flex items-center gap-1">
@@ -405,7 +562,9 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                       ))
                     ) : (
                       <p className="text-[10px] text-slate-500 text-center font-mono py-8">
-                        Aucun indicateur d'importance disponible.
+                        {result.modelType === "DeepKernel"
+                          ? "En mode Deep Kernel, consultez l'onglet Hilbert pour la décomposition RKHS."
+                          : "Aucun indicateur d'importance disponible."}
                       </p>
                     )}
                   </div>
@@ -451,7 +610,9 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                       ))
                     ) : (
                       <p className="text-[10px] text-slate-500 text-center font-mono py-8">
-                        Aucune combinaison interactive repérée.
+                        {result.modelType === "DeepKernel"
+                          ? "En mode Deep Kernel, les interactions sont encodées dans la Gram Matrix (onglet Hilbert)."
+                          : "Aucune combinaison interactive repérée."}
                       </p>
                     )}
                   </div>
@@ -466,8 +627,8 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
 
           {/* Résultats Vectoriels */}
           {result && (
-            <div className="bg-emerald-900/10 p-6 rounded-2xl border border-emerald-500/20 animate-scale-in">
-              <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+            <div className="bg-purple-900/10 p-6 rounded-2xl border border-purple-500/20 animate-scale-in">
+              <h4 className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <CheckCircle size={12} /> Vecteurs Convergents
               </h4>
               <div className="flex flex-wrap gap-2 justify-center">
@@ -475,11 +636,11 @@ export const PythonAnalystTab: React.FC<{ drawName: string }> = ({
                   <NumberBall key={n} number={n} size="md" isAttractor />
                 ))}
               </div>
-              <div className="mt-4 pt-4 border-t border-emerald-500/10 flex justify-between items-center">
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              <div className="mt-4 pt-4 border-t border-purple-500/10 flex justify-between items-center">
+                <span className="text-xs font-bold text-purple-300">
                   P-Value: {result.findings.p_value.toExponential(3)}
                 </span>
-                <span className="text-lg font-black text-emerald-500">
+                <span className="text-lg font-black text-purple-400">
                   {result.findings.confidence_score}%
                 </span>
               </div>

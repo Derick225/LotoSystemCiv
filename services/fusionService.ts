@@ -216,7 +216,7 @@ export const calculateFusion = (
   lastPrediction: Prediction | null,
   weights: AlgoWeights,
   biases: { logic: number; physics: number; intuition: number } = { logic: 1.0, physics: 1.0, intuition: 1.0 },
-  selectionMethod: 'map' | 'balanced' | 'harmonic_consensus' = 'map'
+  selectionMethod: 'map' | 'balanced' | 'harmonic_consensus' | 'quantum_bayesian' = 'map'
 ): FusionResult => {
   const vPython = calculatePythonVector(history);
   const vQuantum = calculateQuantumVector(spectral);
@@ -257,6 +257,23 @@ export const calculateFusion = (
   const stdQ = Math.sqrt(varQ);
   const stdO = Math.sqrt(varO);
 
+  // Calcul continu des cross-covariances réelles entre capteurs (Zéro nombre magique)
+  let covLP = 0, covLI = 0, covPI = 0;
+  for (let i = 1; i <= 90; i++) {
+    const dP = (mPython.get(i) || 0) - medianP;
+    const dQ = (mQuantum.get(i) || 0) - medianQ;
+    const dO = (mOracle.get(i) || 0) - medianO;
+    covLP += dP * dQ;
+    covLI += dP * dO;
+    covPI += dQ * dO;
+  }
+  covLP /= 90.0;
+  covLI /= 90.0;
+  covPI /= 90.0;
+
+  // Information de Fisher du système multi-capteurs fusionné : I(theta) = Tr(Sigma^-1)
+  const fisherGain = Math.log(1.0 + (1.0 / varP + 1.0 / varQ + 1.0 / varO));
+
   // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Kalman pour situations de forte variance
   // Calcule l'entropie cumulée des trois signaux pour adapter la régularisation (zéro nombre magique)
   const combinedScores = new Float64Array(91);
@@ -284,7 +301,7 @@ export const calculateFusion = (
     const sQ = mQuantum.get(i) || 0;
     const sO = mOracle.get(i) || 0;
     
-    // 1. Mise à jour de l'état : x_est = (K * Z) ou formule consensus harmonique
+    // 1. Mise à jour de l'état : x_est = (K * Z) ou formule consensus harmonique ou symbiose quantique-bayésienne
     let kalmanState = 0;
     if (selectionMethod === 'harmonic_consensus') {
       const eps = 1e-4;
@@ -294,6 +311,17 @@ export const calculateFusion = (
       
       const invSum = (kalmanGainP / sP_norm) + (kalmanGainQ / sQ_norm) + (kalmanGainO / sO_norm);
       kalmanState = 1.0 / invSum;
+    } else if (selectionMethod === 'quantum_bayesian') {
+      // Log-opinion pooling continue avec régularisation Dirichlet
+      const eps = 1e-3;
+      const logP = Math.log(Math.max(eps, sP) + 1.0);
+      const logQ = Math.log(Math.max(eps, sQ) + 1.0);
+      const logO = Math.log(Math.max(eps, sO) + 1.0);
+      const pooledLog = (kalmanGainP * logP) + (kalmanGainQ * logQ) + (kalmanGainO * logO);
+      // Facteur d'amplification d'accord mutuel
+      const dispersion = Math.abs(sP - sQ) + Math.abs(sP - sO) + Math.abs(sQ - sO);
+      const agreementFactor = Math.exp(-dispersion / (avgStd * 3.0 + Number.EPSILON));
+      kalmanState = (Math.exp(pooledLog) - 1.0) * (1.0 + agreementFactor);
     } else {
       kalmanState = (sP * kalmanGainP) + (sQ * kalmanGainQ) + (sO * kalmanGainO);
     }
@@ -397,6 +425,12 @@ export const calculateFusion = (
     biasWeightsUsed: { logic: W_PYTHON, physics: W_QUANTUM, intuition: W_ORACLE },
     kalmanGains: { logic: kalmanGainP, physics: kalmanGainQ, intuition: kalmanGainO },
     variances: { logic: varP, physics: varQ, intuition: varO },
+    crossCovariance: {
+      covLP: parseFloat(covLP.toFixed(3)),
+      covLI: parseFloat(covLI.toFixed(3)),
+      covPI: parseFloat(covPI.toFixed(3)),
+      fisherGain: parseFloat(fisherGain.toFixed(3))
+    },
     method: selectionMethod
   };
 };

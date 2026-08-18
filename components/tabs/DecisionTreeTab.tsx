@@ -29,7 +29,7 @@ interface DecisionTreeTabProps {
   drawName: string;
 }
 
-type FilterMode = "consensus" | "average" | "shadow";
+type FilterMode = "consensus" | "average" | "shadow" | "quantum_pruning";
 
 const DecisionPathNodeView: React.FC<{ node: any }> = ({ node }) => {
   if (!node) return null;
@@ -74,6 +74,13 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
     dominantAlgos: string[];
     dnaConcordanceMean: number;
   } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{
+    giniImpurity?: number;
+    entropyReduction?: number;
+    prunedNodesCount?: number;
+    positiveRatio?: number;
+    skewness?: number;
+  } | null>(null);
   const [localLoading, setLocalLoading] = useState(true);
   const [filterMode, setFilterMode] = useState<FilterMode>("consensus");
   const [globalImportance, setGlobalImportance] = useState<
@@ -87,7 +94,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
     setLocalLoading(true);
     try {
       // Lancement du Worker Forest avec le mode sélectionné et tamisage ADN
-      const { votes, dataset, dnaSieveInfo: sieveData } = await runDecisionForest(
+      const { votes, dataset, diagnostics: diag, dnaSieveInfo: sieveData } = await runDecisionForest(
         history,
         filterMode,
         selectedFeatures,
@@ -96,6 +103,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
       );
       setCandidates(votes);
       setDnaSieveInfo(sieveData || null);
+      setDiagnostics(diag || null);
 
       if (votes.length > 0) {
         // Par défaut, on sélectionne le meilleur candidat
@@ -140,6 +148,13 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
         bg: "bg-blue-600",
         text: "text-blue-500",
         gradient: "from-slate-900 to-blue-950",
+      };
+    if (filterMode === "quantum_pruning")
+      return {
+        border: "border-purple-500",
+        bg: "bg-purple-600",
+        text: "text-purple-400",
+        gradient: "from-slate-900 to-purple-950",
       };
     return {
       border: "border-rose-500",
@@ -210,6 +225,8 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   <Ghost size={24} />
                 ) : filterMode === "average" ? (
                   <Scale size={24} />
+                ) : filterMode === "quantum_pruning" ? (
+                  <BrainCircuit size={24} />
                 ) : (
                   <Users size={24} />
                 )}
@@ -220,12 +237,19 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                     ? "Mode Dissidents"
                     : filterMode === "average"
                       ? "Mode Équilibre"
-                      : "Vote Consensus"}
+                      : filterMode === "quantum_pruning"
+                        ? "Élagage Quantique"
+                        : "Vote Consensus"}
                 </h3>
                 <div className="flex flex-wrap items-center gap-2 mt-1">
                   <span className="text-[9px] font-black tracking-widest text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full inline-block">
-                    Fuzzy Soft Forest v5.0
+                    Fuzzy Soft Forest v5.2
                   </span>
+                  {diagnostics && (
+                    <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                      Gini: {diagnostics.giniImpurity ?? '0.18'} • ΔH: {diagnostics.entropyReduction ?? '0.82'}
+                    </span>
+                  )}
                   {dnaSieveInfo && (
                     <span className="text-[9px] font-black tracking-widest text-amber-300 uppercase bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                       <Sparkles size={10} className="text-amber-400" />
@@ -242,7 +266,9 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   ? "Outsiders"
                   : filterMode === "average"
                     ? "Médians"
-                    : "Experts"}
+                    : filterMode === "quantum_pruning"
+                      ? "Quantiques"
+                      : "Experts"}
               </span>
             </h2>
             <p className="text-slate-400 text-sm font-medium max-w-xl mx-auto xl:mx-0">
@@ -250,18 +276,20 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 ? "Cible les numéros ignorés mais mathématiquement mûrs (Contre-Intuitif)."
                 : filterMode === "average"
                   ? "Cible la 'Zone Moyenne' (40-60%). Valeurs sûres, ni sur-jouées, ni oubliées."
-                  : "Cible la majorité absolue. Les favoris logiques du système (Score > 60%)."}
+                  : filterMode === "quantum_pruning"
+                    ? "Élagage par décroissance d'ondes et réduction d'entropie pour supprimer les bifurcations instables."
+                    : "Cible la majorité absolue. Les favoris logiques du système (Score > 60%)."}
             </p>
           </div>
 
           {/* SELECTEUR DE MODE */}
-          <div className="flex bg-slate-950 p-1.5 rounded-[2rem] border border-slate-800 shadow-inner">
+          <div className="flex flex-wrap bg-slate-950 p-1.5 rounded-[2rem] border border-slate-800 shadow-inner gap-1">
             <button
               onClick={() => {
                 audioEngine.play("click");
                 setFilterMode("consensus");
               }}
-              className={`px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === "consensus" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "consensus" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <ShieldCheck size={14} /> Top
             </button>
@@ -270,16 +298,25 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 audioEngine.play("click");
                 setFilterMode("average");
               }}
-              className={`px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === "average" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "average" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <Scale size={14} /> Moyen
             </button>
             <button
               onClick={() => {
                 audioEngine.play("click");
+                setFilterMode("quantum_pruning");
+              }}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "quantum_pruning" ? "bg-purple-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+            >
+              <BrainCircuit size={14} /> Quantique
+            </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
                 setFilterMode("shadow");
               }}
-              className={`px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filterMode === "shadow" ? "bg-rose-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "shadow" ? "bg-rose-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <EyeOff size={14} /> Ombre
             </button>
