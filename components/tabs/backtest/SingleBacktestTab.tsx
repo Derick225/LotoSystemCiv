@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   runSurvivalSimulation,
   BacktestReport,
@@ -11,6 +11,15 @@ import {
   ThumbsUp,
   ThumbsDown,
   Activity,
+  ShieldCheck,
+  TrendingUp,
+  BarChart3,
+  Sliders,
+  Sparkles,
+  Layers,
+  ArrowDownRight,
+  ArrowUpRight,
+  Zap,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -20,8 +29,12 @@ import {
   CartesianGrid,
   XAxis,
   YAxis,
+  Legend,
+  BarChart,
+  Bar,
 } from "recharts";
 import { audioEngine } from "../../../utils/audioEngine";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface SingleBacktestTabProps {
   drawName: string;
@@ -41,6 +54,7 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
     const [initialBankroll, setInitialBankroll] = useState<number>(50000);
     const [unitBet, setUnitBet] = useState<number>(200);
     const [payoutModel, setPayoutModel] = useState<string>("LEGACY");
+    const [activeChartTab, setActiveChartTab] = useState<"EQUITY" | "UNDERWATER" | "HITS">("EQUITY");
 
     const isMounted = useRef(true);
     useEffect(() => {
@@ -94,35 +108,113 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
       payoutModel,
     ]);
 
+    // Enhanced Risk Metrics & Underwater Drawdown Series
+    const enhancedAnalytics = useMemo(() => {
+      if (!report || !report.history || report.history.length === 0) return null;
+
+      let peak = initialBankroll;
+      const historyWithUnderwater = report.history.map((step, idx) => {
+        if (step.balance > peak) peak = step.balance;
+        const drawdownPct = peak > 0 ? ((step.balance - peak) / peak) * 100 : 0;
+        return {
+          ...step,
+          drawIndex: idx + 1,
+          peak,
+          drawdownPct: Number(drawdownPct.toFixed(2)),
+        };
+      });
+
+      // Returns array
+      const profits = report.history.map((h) => h.profit);
+      const sortedProfits = [...profits].sort((a, b) => a - b);
+      
+      // VaR 95% (5th percentile of profit)
+      const var95Index = Math.floor(sortedProfits.length * 0.05);
+      const var95 = sortedProfits[var95Index] || 0;
+      
+      // CVaR 95% (Expected Shortfall)
+      const tailLosses = sortedProfits.slice(0, Math.max(1, var95Index + 1));
+      const cvar95 = tailLosses.reduce((sum, v) => sum + v, 0) / tailLosses.length;
+
+      // Hit distribution
+      const hitsDistribution = [0, 1, 2, 3, 4, 5].map((hitNum) => {
+        const count = report.history.filter((h) => h.hits === hitNum).length;
+        return {
+          hit: `${hitNum} Num`,
+          count,
+          percentage: Number(((count / report.history.length) * 100).toFixed(1)),
+        };
+      });
+
+      // Calmar Ratio
+      const cagrEstimate = ((report.netProfit / initialBankroll) * 100);
+      const calmarRatio = report.maxDrawdown > 0 ? Number((cagrEstimate / report.maxDrawdown).toFixed(2)) : 0;
+
+      // Consecutive Wins / Losses calculation
+      let maxConsecutiveWins = 0;
+      let maxConsecutiveLosses = 0;
+      let curWins = 0;
+      let curLosses = 0;
+
+      report.history.forEach((h) => {
+        if (h.profit > 0) {
+          curWins++;
+          curLosses = 0;
+          if (curWins > maxConsecutiveWins) maxConsecutiveWins = curWins;
+        } else {
+          curLosses++;
+          curWins = 0;
+          if (curLosses > maxConsecutiveLosses) maxConsecutiveLosses = curLosses;
+        }
+      });
+
+      return {
+        chartData: historyWithUnderwater,
+        var95: Number(var95.toFixed(0)),
+        cvar95: Number(cvar95.toFixed(0)),
+        calmarRatio,
+        hitsDistribution,
+        maxConsecutiveWins,
+        maxConsecutiveLosses,
+      };
+    }, [report, initialBankroll]);
+
     return (
-      <div className="space-y-8 animate-slide-up">
+      <div className="space-y-8 animate-fade-in pb-16">
         {/* Control Card */}
-        <div className="bg-slate-900/80 p-8 md:p-10 rounded-3xl border border-slate-800/80 shadow-2xl text-center relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:rotate-12 transition-transform duration-500">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 p-8 md:p-10 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:rotate-12 transition-transform duration-500 pointer-events-none">
             <PiggyBank size={180} />
           </div>
           <div className="relative z-10">
-            <div className="inline-block p-5 bg-indigo-600/20 rounded-3xl border border-indigo-500/30 mb-6 shadow-lg shadow-indigo-600/10">
-              <PiggyBank size={40} className="text-indigo-400" />
-            </div>
-            <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-4">
-              Crash Test Financier
-            </h3>
-            <p className="text-slate-400 text-sm font-medium max-w-lg mx-auto mb-4 leading-relaxed">
-              Rejouez l'historique réel en appliquant l'ADN prédictif actuel. Configurez les règles de gestion de risque ci-dessous.
-            </p>
-            <div className="flex items-center justify-center gap-2 mb-8 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 py-2 px-4 rounded-full mx-auto w-fit text-[10px] font-black uppercase tracking-widest">
-              <Activity size={12} /> Mode Time Machine Strict : 100% Isolé (Zéro fuite du futur)
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3.5 bg-indigo-600/20 text-indigo-400 rounded-2xl border border-indigo-500/30">
+                  <PiggyBank size={28} />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">
+                    Simulation & Stress-Test Financier
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    Rejeu déterministe sur l'historique délimité de <strong className="text-emerald-400">{drawName}</strong> (Zéro fuite du futur)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 py-1.5 px-3.5 rounded-full text-[10px] font-black uppercase tracking-widest">
+                <ShieldCheck size={14} /> Isolation Stricte du Tirage
+              </div>
             </div>
 
             {/* Parameters Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto mb-8 text-left bg-slate-950/40 p-6 rounded-2xl border border-slate-800/60 shadow-inner">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto mb-8 text-left bg-slate-950/60 p-6 rounded-3xl border border-slate-800/80 shadow-inner">
               <div>
                 <label
                   htmlFor="sim-strategy"
-                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-1.5"
                 >
-                  Stratégie de Sizing
+                  Gestion des Mises
                 </label>
                 <select
                   id="sim-strategy"
@@ -131,10 +223,10 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
                     audioEngine.play("click");
                     setStrategy(e.target.value as BettingStrategy);
                   }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="FLAT">Mise Plate (Standard)</option>
-                  <option value="MARTINGALE">Martingale (Double après perte)</option>
+                  <option value="MARTINGALE">Martingale (Doublage dynamique)</option>
                   <option value="KELLY">Critère de Kelly (Scientifique)</option>
                   <option value="CONFIDENCE_SMART">Intelligente (Confiance IA)</option>
                 </select>
@@ -143,9 +235,9 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
               <div>
                 <label
                   htmlFor="sim-depth"
-                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-1.5"
                 >
-                  Période de Backtest (Tirages)
+                  Fenêtre de Tirages
                 </label>
                 <select
                   id="sim-depth"
@@ -154,7 +246,7 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
                     audioEngine.play("click");
                     setDepth(Number(e.target.value));
                   }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value={20}>20 derniers tirages</option>
                   <option value={50}>50 derniers tirages (Standard)</option>
@@ -166,9 +258,9 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
               <div>
                 <label
                   htmlFor="sim-bankroll"
-                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-1.5"
                 >
-                  Capital de Départ (F)
+                  Capital Initial (F)
                 </label>
                 <input
                   id="sim-bankroll"
@@ -180,14 +272,14 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
                   onChange={(e) => {
                     setInitialBankroll(Math.max(1000, Number(e.target.value)));
                   }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="sim-unitbet"
-                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-1.5"
                 >
                   Mise de Base (F)
                 </label>
@@ -201,16 +293,16 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
                   onChange={(e) => {
                     setUnitBet(Math.max(50, Number(e.target.value)));
                   }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label
                   htmlFor="sim-payout"
-                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2"
+                  className="block text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-1.5"
                 >
-                  Modèle de Gains (Cote de Gains)
+                  Barème de Gains & Cotes
                 </label>
                 <select
                   id="sim-payout"
@@ -219,7 +311,7 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
                     audioEngine.play("click");
                     setPayoutModel(e.target.value);
                   }}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="LEGACY">Classique (×15 / ×100 / ×1500 / ×15000)</option>
                   <option value="STANDARD">LONACI Standard (×15 / ×240 / ×2100 / ×15000 / ×40000)</option>
@@ -233,152 +325,284 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
               <button
                 onClick={handleRun}
                 disabled={simulating}
-                className="w-full py-5 bg-white hover:bg-indigo-50 text-slate-900 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-2xl flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group/btn"
+                className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 {simulating ? (
-                  <RefreshCw className="animate-spin text-indigo-600" size={18} />
+                  <RefreshCw className="animate-spin text-white" size={18} />
                 ) : (
-                  <Play size={18} className="fill-current group-hover/btn:scale-110 transition-transform" />
+                  <Play size={18} className="fill-current" />
                 )}
-                {simulating ? `Calcul en cours ${progress}%` : "Lancer la Simulation"}
+                {simulating ? `Rejeu Temporel (${progress}%)` : "Lancer le Crash Test"}
               </button>
               {simulating && (
                 <div className="absolute -bottom-2 left-2 right-2 h-1 bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-indigo-500 transition-all duration-300"
+                    className="h-full bg-emerald-500 transition-all duration-300"
                     style={{ width: `${progress}%` }}
-                  ></div>
+                  />
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {report && (
-          <div className="animate-scale-in space-y-6">
+        {report && enhancedAnalytics && (
+          <div className="animate-fade-in space-y-6">
             {/* Main KPI Card */}
             <div
-              className={`p-6 md:p-8 rounded-3xl border relative overflow-hidden shadow-2xl ${report.netProfit >= 0 ? "bg-gradient-to-br from-emerald-900/50 to-slate-900 border-emerald-500/30" : "bg-gradient-to-br from-rose-900/50 to-slate-900 border-rose-500/30"}`}
+              className={`p-6 md:p-8 rounded-3xl border relative overflow-hidden shadow-2xl ${
+                report.netProfit >= 0
+                  ? "bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-950 border-emerald-500/30"
+                  : "bg-gradient-to-br from-rose-950/40 via-slate-900 to-slate-950 border-rose-500/30"
+              }`}
             >
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-
               <div className="flex flex-col items-center text-center relative z-10">
                 <div
-                  className={`mb-6 p-4 rounded-full ${report.netProfit >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"}`}
+                  className={`mb-4 p-3.5 rounded-2xl ${
+                    report.netProfit >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                  }`}
                 >
-                  {report.netProfit >= 0 ? <ThumbsUp size={32} /> : <ThumbsDown size={32} />}
+                  {report.netProfit >= 0 ? <ThumbsUp size={28} /> : <ThumbsDown size={28} />}
                 </div>
 
-                <h4 className="text-xs font-black uppercase text-slate-400 mb-2 tracking-[0.3em]">
-                  Résultat Net
+                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em] mb-1">
+                  Résultat Net de la Simulation
                 </h4>
                 <div
-                  className={`text-6xl md:text-8xl font-black tracking-tighter ${report.netProfit >= 0 ? "text-emerald-400 drop-shadow-[0_0_30px_rgba(52,211,153,0.3)]" : "text-rose-400 drop-shadow-[0_0_30px_rgba(251,113,133,0.3)]"}`}
+                  className={`text-5xl md:text-7xl font-black font-mono tracking-tighter ${
+                    report.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"
+                  }`}
                 >
                   {report.netProfit > 0 ? "+" : ""}
                   {report.netProfit.toLocaleString()} F
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-12 w-full max-w-4xl">
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1">
+                {/* KPI Matrix 6-Blocks */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-8 w-full">
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
                       ROI Global
                     </div>
-                    <div className={`text-xl font-black ${report.roi >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <div className={`text-lg font-mono font-black ${report.roi >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {report.roi.toFixed(1)}%
                     </div>
                   </div>
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1">
-                      Précision
+
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
+                      Win Rate (≥1 Num)
                     </div>
-                    <div className="text-xl font-black text-amber-400">
+                    <div className="text-lg font-mono font-black text-amber-400">
                       {report.winRate.toFixed(1)}%
                     </div>
                   </div>
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1">
-                      Drawdown Max
+
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
+                      Max Drawdown
                     </div>
-                    <div className="text-xl font-black text-rose-400">
+                    <div className="text-lg font-mono font-black text-rose-400">
                       -{report.maxDrawdown}%
                     </div>
                   </div>
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1">
+
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
                       Sharpe Ratio
                     </div>
-                    <div className="text-xl font-black text-indigo-400">
+                    <div className="text-lg font-mono font-black text-indigo-400">
                       {report.sharpeRatio}
                     </div>
                   </div>
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1" title="Pénalise uniquement la volatilité négative">
+
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
                       Sortino Ratio
                     </div>
-                    <div className="text-xl font-black text-indigo-400">
+                    <div className="text-lg font-mono font-black text-cyan-400">
                       {report.sortinoRatio !== undefined ? report.sortinoRatio : "-"}
                     </div>
                   </div>
-                  <div className="bg-black/30 p-5 rounded-3xl border border-white/5">
-                    <div className="text-xs text-slate-500 uppercase font-black mb-1" title="Profit Net / Drawdown Max">
-                      Recovery Factor
+
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                    <div className="text-[9px] text-slate-400 uppercase font-black mb-1">
+                      Calmar Ratio
                     </div>
-                    <div className="text-xl font-black text-indigo-400">
-                      {report.recoveryFactor !== undefined ? report.recoveryFactor : "-"}
+                    <div className="text-lg font-mono font-black text-emerald-400">
+                      {enhancedAnalytics.calmarRatio}
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Chart Area */}
-            <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800 h-80 relative overflow-hidden">
-              <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2 absolute top-8 left-8 z-10">
-                <Activity size={14} /> Courbe de Capital
-              </h4>
-              <div className="w-full h-full flex justify-center items-center">
-                {report.history && report.history.length > 0 ? (
+            {/* Risk & Actuarial Metrics Section */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800">
+                <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                  Value at Risk (VaR 95%)
+                </span>
+                <span className="text-base font-mono font-black text-rose-400">
+                  {enhancedAnalytics.var95.toLocaleString()} F / tirage
+                </span>
+              </div>
+
+              <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800">
+                <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                  Expected Shortfall (CVaR 95%)
+                </span>
+                <span className="text-base font-mono font-black text-rose-500">
+                  {enhancedAnalytics.cvar95.toLocaleString()} F
+                </span>
+              </div>
+
+              <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800">
+                <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                  Max Gains Consécutifs
+                </span>
+                <span className="text-base font-mono font-black text-emerald-400">
+                  {enhancedAnalytics.maxConsecutiveWins} tirages
+                </span>
+              </div>
+
+              <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800">
+                <span className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                  Max Pertes Consécutives
+                </span>
+                <span className="text-base font-mono font-black text-amber-400">
+                  {enhancedAnalytics.maxConsecutiveLosses} tirages
+                </span>
+              </div>
+            </div>
+
+            {/* Interactive Multi-View Chart */}
+            <div className="bg-slate-900/80 p-6 md:p-8 rounded-3xl shadow-xl border border-slate-800 space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <Activity size={16} className="text-indigo-400" /> Analyse Graphique Multi-Échelles
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Trajectoire de capital, drawdown sous-marin et distribution des hits
+                  </p>
+                </div>
+
+                <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                  <button
+                    onClick={() => setActiveChartTab("EQUITY")}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                      activeChartTab === "EQUITY"
+                        ? "bg-indigo-600 text-white shadow-md"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Capital
+                  </button>
+                  <button
+                    onClick={() => setActiveChartTab("UNDERWATER")}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                      activeChartTab === "UNDERWATER"
+                        ? "bg-rose-600 text-white shadow-md"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Drawdown %
+                  </button>
+                  <button
+                    onClick={() => setActiveChartTab("HITS")}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                      activeChartTab === "HITS"
+                        ? "bg-amber-600 text-white shadow-md"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Hits
+                  </button>
+                </div>
+              </div>
+
+              <div className="h-72 w-full">
+                {activeChartTab === "EQUITY" && (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={report.history} margin={{ top: 20, right: 0, left: 0, bottom: 0 }}>
+                    <AreaChart data={enhancedAnalytics.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                       <defs>
-                        <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <linearGradient id="eqProfit" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
                           <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
-                        <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                        </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" opacity={0.5} />
+                      <XAxis dataKey="drawIndex" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#64748b", fontSize: 10 }} domain={["auto", "auto"]} />
                       <Tooltip
                         contentStyle={{
-                          borderRadius: "16px",
-                          border: "none",
                           backgroundColor: "#0f172a",
-                          color: "#fff",
-                          fontSize: "10px",
-                          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
+                          borderColor: "#334155",
+                          borderRadius: "12px",
+                          fontSize: "11px",
                         }}
-                        formatter={(value: number) => [`${value.toLocaleString()} F`, "Capital"]}
+                        formatter={(val: number) => [`${val.toLocaleString()} F`, "Capital"]}
                       />
-                      <XAxis dataKey="date" hide />
-                      <YAxis hide domain={["auto", "auto"]} />
                       <Area
                         type="monotone"
                         dataKey="balance"
-                        stroke={report.netProfit >= 0 ? "#10b981" : "#f43f5e"}
-                        strokeWidth={3}
-                        fill={`url(#${report.netProfit >= 0 ? "colorProfit" : "colorLoss"})`}
-                        animationDuration={1500}
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        fill="url(#eqProfit)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
-                ) : (
-                  <span className="text-slate-500 text-xs text-center relative z-20">
-                    Données insuffisantes
-                  </span>
+                )}
+
+                {activeChartTab === "UNDERWATER" && (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={enhancedAnalytics.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" opacity={0.5} />
+                      <XAxis dataKey="drawIndex" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#f43f5e", fontSize: 10 }} domain={[-100, 0]} unit="%" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#0f172a",
+                          borderColor: "#334155",
+                          borderRadius: "12px",
+                          fontSize: "11px",
+                        }}
+                        formatter={(val: number) => [`${val}%`, "Drawdown"]}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="drawdownPct"
+                        stroke="#f43f5e"
+                        strokeWidth={2}
+                        fill="url(#ddGrad)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+
+                {activeChartTab === "HITS" && (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={enhancedAnalytics.hitsDistribution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" opacity={0.5} />
+                      <XAxis dataKey="hit" tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#0f172a",
+                          borderColor: "#334155",
+                          borderRadius: "12px",
+                          fontSize: "11px",
+                        }}
+                      />
+                      <Bar dataKey="count" fill="#f59e0b" radius={[8, 8, 0, 0]} name="Occurrences" />
+                    </BarChart>
+                  </ResponsiveContainer>
                 )}
               </div>
             </div>
