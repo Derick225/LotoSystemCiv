@@ -33,18 +33,38 @@ export const getUniqueSortedNumbers = (numbers: (string | number | null | undefi
  */
 export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string }>(drawName: string, history: T[]): T[] => {
     if (!history || !Array.isArray(history)) return [];
-    const normalizedTarget = drawName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    if (normalizedTarget === "all_combined" || normalizedTarget === "all") {
+    
+    const normalizeString = (str: string) =>
+        str
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[\s\-_/]+/g, " ");
+
+    const normalizedTarget = normalizeString(drawName);
+    if (normalizedTarget === "all combined" || normalizedTarget === "all" || normalizedTarget === "all_combined") {
         return history;
     }
+
+    const targetWords = normalizedTarget.split(" ").filter(w => w.length >= 3);
+
     const purified = history.reduce((acc: T[], d: any) => {
         const name = d.drawName || d.draw_name;
         if (!name) {
             // Fix corrupted items from cache by forcing the correct drawName
             acc.push({ ...d, drawName, draw_name: drawName } as T);
         } else {
-            const nameStr = String(name).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (nameStr === normalizedTarget || normalizedTarget.includes(nameStr) || nameStr.includes(normalizedTarget)) {
+            const nameStr = normalizeString(String(name));
+            const nameWords = nameStr.split(" ").filter(w => w.length >= 3);
+            const hasCommonSignificantWord = targetWords.some(tw => nameWords.includes(tw));
+
+            if (
+                nameStr === normalizedTarget ||
+                normalizedTarget.includes(nameStr) ||
+                nameStr.includes(normalizedTarget) ||
+                hasCommonSignificantWord
+            ) {
                 acc.push({ ...d, drawName: name, draw_name: name } as T);
             }
         }

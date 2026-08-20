@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ExpertTuningPanel } from "./ExpertTuningPanel";
 import { DrawManagement } from "./DrawManagement";
 import { TrainingTab } from "../tabs/TrainingTab";
@@ -25,7 +25,20 @@ import { useNexusStore } from "../../store/useNexusStore";
 export const AdminPanel: React.FC = () => {
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const navigateToModule = useNexusStore((state) => state.navigateToModule);
-  const [selectedDraw, setSelectedDraw] = useState<string>(ALL_DRAWS[0].name);
+  const storeDrawName = useNexusStore((state) => state.drawName);
+  const setDrawName = useNexusStore((state) => state.setDrawName);
+  const refreshData = useNexusStore((state) => state.refreshData);
+
+  const [selectedDraw, setSelectedDraw] = useState<string>(() => {
+    return storeDrawName || ALL_DRAWS[0].name;
+  });
+
+  useEffect(() => {
+    if (selectedDraw) {
+      setDrawName(selectedDraw);
+      refreshData(selectedDraw, false);
+    }
+  }, [selectedDraw, setDrawName, refreshData]);
 
   // Ensure active tab starts at tuning if empty
   const currentTab = (activeSubTab || "tuning") as

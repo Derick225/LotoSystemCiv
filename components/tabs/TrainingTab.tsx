@@ -110,12 +110,49 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     hitDistribution: { zero: number; one: number; two: number; three: number; four: number; five: number };
   } | null>(null);
   
+  // Dedicated Draw-Specific History State
+  const [localHistory, setLocalHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+
   // Ref for terminal auto-scroll
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
+  // Synchronisation stricte de l'historique isolé pour ce tirage
+  useEffect(() => {
+    let isMounted = true;
+    const syncDrawData = async () => {
+      setIsLoadingHistory(true);
+      try {
+        const { fetchResults } = await import("../../services/lotteryService");
+        const { data } = await fetchResults(drawName);
+        if (isMounted && data && Array.isArray(data) && data.length > 0) {
+          setLocalHistory(data);
+          const currentStoreHistory = useNexusStore.getState().history;
+          const purifiedStore = purifyHistoryForDraw(drawName, currentStoreHistory);
+          if (purifiedStore.length < 15 && data.length >= 15) {
+            useNexusStore.setState({ history: data, drawName });
+          }
+        }
+      } catch (err) {
+        console.warn("[TrainingTab] Impossible de synchroniser l'historique :", err);
+      } finally {
+        if (isMounted) setIsLoadingHistory(false);
+      }
+    };
+    syncDrawData();
+    return () => {
+      isMounted = false;
+    };
+  }, [drawName]);
+
   const cleanHistory = useMemo(() => {
-    return purifyHistoryForDraw(drawName, history);
-  }, [drawName, history]);
+    const rawSource = localHistory.length > 0 ? localHistory : history;
+    const purified = purifyHistoryForDraw(drawName, rawSource);
+    if (purified.length === 0 && localHistory.length > 0) {
+      return localHistory;
+    }
+    return purified;
+  }, [drawName, localHistory, history]);
 
   useEffect(() => {
     let isMounted = true;
@@ -135,7 +172,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   useEffect(() => {
     if (cleanHistory.length > 0) {
-      setSampleSize((prev) => Math.max(15, Math.min(prev, cleanHistory.length - 2)));
+      setSampleSize((prev) => Math.max(15, Math.min(prev, Math.max(15, cleanHistory.length - 2))));
     }
   }, [cleanHistory]);
 
@@ -179,8 +216,29 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   };
 
   const startTraining = async () => {
-    if (cleanHistory.length < 15) {
-      showToast("Un minimum de 15 tirages réels est exigé pour entraîner le réseau.", "error");
+    let effectiveHistory = cleanHistory;
+
+    // Tentative de récupération directe d'urgence si le tableau local n'est pas encore saturé
+    if (effectiveHistory.length < 15) {
+      try {
+        const { fetchResults } = await import("../../services/lotteryService");
+        const { data } = await fetchResults(drawName, true);
+        if (data && Array.isArray(data) && data.length >= 15) {
+          const purified = purifyHistoryForDraw(drawName, data);
+          effectiveHistory = purified.length >= 15 ? purified : data;
+          setLocalHistory(effectiveHistory);
+          useNexusStore.setState({ history: effectiveHistory, drawName });
+        }
+      } catch (e) {
+        console.warn("[TrainingTab] Erreur lors du fetch d'urgence :", e);
+      }
+    }
+
+    if (effectiveHistory.length < 15) {
+      showToast(
+        `Un minimum de 15 tirages réels est exigé pour entraîner le réseau (${effectiveHistory.length} trouvé(s)).`,
+        "error"
+      );
       audioEngine.play("error");
       return;
     }
@@ -190,14 +248,14 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     setLogs([]);
     addLog(`Démarrage de l'optimiseur : ${optimizerType.toUpperCase()}`);
     addLog(`Isolement strict du tirage : ${drawName} (Zéro contamination inter-tirages)`);
-    addLog(`Échantillon historique délimité : ${sampleSize} tirages`);
+    addLog(`Échantillon historique délimité : ${Math.min(sampleSize, effectiveHistory.length)} tirages (Total disponible: ${effectiveHistory.length})`);
     addLog(`Calcul du gradient & fonction de perte multi-têtes...`);
     audioEngine.play("scan");
 
     try {
       const result = await evolveNeuralDNA(
         drawName,
-        { generations, sampleSize, optimizerType },
+        { generations, sampleSize: Math.min(sampleSize, effectiveHistory.length), optimizerType },
         (data) => {
           // Synthetic continuous loss metrics computation for real-time visualization
           const fitness = data.bestFitness;
@@ -314,8 +372,23 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   // Instant Automated Benchmark Runner
   const handleRunBenchmark = async () => {
-    if (cleanHistory.length < 10) {
-      showToast("Historique insuffisant pour le benchmark rapide (minimum 10 tirages).", "error");
+    let effectiveHistory = cleanHistory;
+    if (effectiveHistory.length < 10) {
+      try {
+        const { fetchResults } = await import("../../services/lotteryService");
+        const { data } = await fetchResults(drawName, true);
+        if (data && Array.isArray(data) && data.length >= 10) {
+          const purified = purifyHistoryForDraw(drawName, data);
+          effectiveHistory = purified.length >= 10 ? purified : data;
+          setLocalHistory(effectiveHistory);
+        }
+      } catch (e) {
+        console.warn("[TrainingTab] Erreur lors du fetch pour benchmark :", e);
+      }
+    }
+
+    if (effectiveHistory.length < 10) {
+      showToast(`Historique insuffisant pour le benchmark rapide (${effectiveHistory.length}/10 tirages).`, "error");
       return;
     }
     setIsBenchmarking(true);
@@ -324,8 +397,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     try {
       const result = await runAutomatedBacktestSimulation(
         drawName,
-        cleanHistory,
-        Math.min(50, cleanHistory.length - 2)
+        effectiveHistory,
+        Math.min(50, effectiveHistory.length - 2)
       );
       setBenchmarkResult({
         score: result.efficiencyScore,
@@ -402,9 +475,20 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">
             Entraînement du Réseau & Ajustement des Poids
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Tirage actif isolé : <strong className="text-emerald-400">{drawName}</strong> • Zéro nombre magique • Descente de gradient continue
-          </p>
+          <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
+            <span>
+              Tirage actif isolé : <strong className="text-emerald-400">{drawName}</strong>
+            </span>
+            <span className="text-slate-600">•</span>
+            <span className="flex items-center gap-1.5 font-mono">
+              <span className={`w-2 h-2 rounded-full ${cleanHistory.length >= 15 ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+              <strong className={cleanHistory.length >= 15 ? 'text-white' : 'text-amber-400'}>
+                {isLoadingHistory ? 'Chargement...' : `${cleanHistory.length} tirages disponibles`}
+              </strong>
+            </span>
+            <span className="text-slate-600">•</span>
+            <span>Zéro nombre magique</span>
+          </div>
         </div>
 
         {/* Global Action Tools */}
