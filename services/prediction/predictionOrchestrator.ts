@@ -406,7 +406,8 @@ export const applyPredictionDnaSieve = (
 } => {
   const { multipliers, affinityPercent, dominantAlgos } = calculateDnaSieveWeights(
     context.history,
-    weights
+    weights,
+    context.drawName
   );
 
   let sumAffinity = 0;

@@ -360,8 +360,8 @@ export const gapRangeSequenceService = {
     const varianceProb = probs.reduce((acc, p) => acc + Math.pow(p - meanProb, 2), 0) / totalBins;
     const stdProb = Math.sqrt(varianceProb) || Number.EPSILON;
 
-    // Calcul du Tamis de l'ADN Algorithmique Actuel (ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
-    const { multipliers: dnaMultArray, affinityPercent: dnaAffArray, dominantAlgos } = calculateDnaSieveWeights(isolatedHistory, weights);
+    // Calcul du Tamis de l'ADN Algorithmique Actuel (Tamis ADN Actif - ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
+    const { multipliers: dnaMultArray, affinityPercent: dnaAffArray, dominantAlgos } = calculateDnaSieveWeights(isolatedHistory, weights, drawName);
 
     const rawScoresByNumber: Record<number, number> = {};
     const scoresByNumber: Record<number, number> = {};

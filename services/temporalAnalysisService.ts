@@ -309,35 +309,67 @@ export const getTemporalScores = async (drawName: string, rawHistory: DrawResult
     return scores;
 };
 
+export const ALGO_LABELS: Record<string, string> = {
+    [AlgoKey.FREQUENCY]: 'Fréquence',
+    [AlgoKey.GAPS]: 'Écart',
+    [AlgoKey.SPECTRAL]: 'Spectral',
+    [AlgoKey.MARKOV]: 'Markov',
+    [AlgoKey.BAYES]: 'Bayes',
+    [AlgoKey.MOMENTUM]: 'Momentum',
+    [AlgoKey.AFFINITY]: 'Affinité',
+    [AlgoKey.SPATIAL]: 'Spatial',
+    [AlgoKey.TEMPORAL]: 'Temporel',
+    [AlgoKey.FRACTAL]: 'Fractal',
+    [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
+    [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
+    [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
+    [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir',
+    [AlgoKey.GAP_PATTERN]: 'Motif Écart',
+    [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
+    [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
+    [AlgoKey.GAP_TREND]: 'Tendance Écarts',
+    [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Résonance Inter-Mensuelle',
+    [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation',
+    [AlgoKey.GAP_BAND_SEQUENCE]: 'Bandes d\'Écart',
+    [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
+};
+
 /**
- * CALCULE L'EMPREINTE DE COMPATIBILITÉ DE L'ADN ALGORITHMIQUE DU MOMENT
- * Permet de passer les choix de résonance inter-mensuelle dans le tamis algorithmique actif
- * (ZÉRO NOMBRE MAGIQUE, 100% DÉTERMINISTE & CONTINU).
+ * CALCULE L'EMPREINTE DE COMPATIBILITÉ DE L'ADN ALGORITHMIQUE ACTIF DU TIRAGE (TAMIS ADN ACTIF)
+ * Évalue continûment le profil ADN complet (17+ gènes algorithmiques) pour le tirage actif.
+ * ZÉRO NOMBRE MAGIQUE, 100% DÉTERMINISTE, DIFFÉRENTIABLE ET STRICTEMENT ISOLÉ.
  */
 export const calculateDnaSieveWeights = (
-    history: DrawResult[],
-    weights?: AlgoWeights
+    rawHistory: DrawResult[],
+    weights?: AlgoWeights,
+    drawName?: string
 ): { multipliers: Float32Array; affinityPercent: Float32Array; dominantAlgos: string[] } => {
     const multipliers = new Float32Array(91);
     const affinityPercent = new Float32Array(91);
     multipliers.fill(1.0);
     affinityPercent.fill(50.0);
 
-    if (history.length === 0) {
-        return { multipliers, affinityPercent, dominantAlgos: [] };
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
+
+    if (!history || history.length === 0) {
+        return { multipliers, affinityPercent, dominantAlgos: ['Global'] };
     }
 
     const effectiveWeights: AlgoWeights = weights && Object.keys(weights).length > 0
         ? weights
         : DEFAULT_ALGO_WEIGHTS;
 
-    // 1. Fréquence récente
+    const N = 90;
+    const sampleSize = Math.min(120, history.length);
+    const sample = history.slice(0, sampleSize);
+
+    // 1. Fréquence récente (Gagnants + 0.5 * Machines)
     const freq = new Float32Array(91);
-    const sample = history.slice(0, Math.min(100, history.length));
     sample.forEach(d => {
-        d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freq[n] += 1.0; });
+        d.gagnants.forEach(n => { if (n >= 1 && n <= N) freq[n] += 1.0; });
         if (Array.isArray(d.machine)) {
-            d.machine.forEach(n => { if (n >= 1 && n <= 90) freq[n] += 0.5; });
+            d.machine.forEach(n => { if (n >= 1 && n <= N) freq[n] += 0.5; });
         }
     });
     const maxFreq = Math.max(...Array.from(freq), 1.0);
@@ -350,74 +382,180 @@ export const calculateDnaSieveWeights = (
             const nextDraw = history[idx + 1];
             const hasCommon = d.gagnants.some(n => lastWinners.includes(n));
             if (hasCommon) {
-                nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= 90) markov[n] += 1.0; });
+                nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= N) markov[n] += 1.0; });
             }
         }
     });
     const maxMarkov = Math.max(...Array.from(markov), 1.0);
 
-    // 3. Écart actuel
+    // 3. Écarts actuels et écarts moyens par numéro
     const currentGaps = new Float32Array(91);
-    for (let n = 1; n <= 90; n++) {
-        let gap = 0;
+    const avgGaps = new Float32Array(91);
+    for (let n = 1; n <= N; n++) {
+        let currentGap = 0;
+        let found = false;
+        let gapSum = 0;
+        let occurrences = 0;
+        let lastIdx = 0;
+
         for (let i = 0; i < history.length; i++) {
-            if (history[i].gagnants.includes(n)) break;
-            gap++;
+            if (history[i].gagnants.includes(n)) {
+                if (!found) {
+                    currentGap = i;
+                    found = true;
+                }
+                if (occurrences > 0) {
+                    gapSum += (i - lastIdx);
+                }
+                lastIdx = i;
+                occurrences++;
+            }
         }
-        currentGaps[n] = gap;
+        currentGaps[n] = found ? currentGap : history.length;
+        avgGaps[n] = occurrences > 1 ? gapSum / (occurrences - 1) : 18.0; // 90 / 5 = 18 espérance théorique
     }
 
     // 4. Momentum / Vitesse
     const momentum = new Float32Array(91);
     const shortWindow = history.slice(0, Math.min(10, history.length));
     const longWindow = history.slice(0, Math.min(40, history.length));
-    for (let n = 1; n <= 90; n++) {
+    for (let n = 1; n <= N; n++) {
         const shortCount = shortWindow.filter(d => d.gagnants.includes(n)).length / Math.max(1, shortWindow.length);
         const longCount = longWindow.filter(d => d.gagnants.includes(n)).length / Math.max(1, longWindow.length);
         momentum[n] = shortCount - longCount;
     }
 
-    // Extraction des poids d'ADN
-    const wFreq = Math.max(0.001, effectiveWeights[AlgoKey.FREQUENCY] ?? 1.0);
-    const wMarkov = Math.max(0.001, effectiveWeights[AlgoKey.MARKOV] ?? 1.0);
-    const wGap = Math.max(0.001, effectiveWeights[AlgoKey.GAPS] ?? 1.0);
-    const wMom = Math.max(0.001, effectiveWeights[AlgoKey.MOMENTUM] ?? 1.0);
-    const wSpectral = Math.max(0.001, effectiveWeights[AlgoKey.SPECTRAL] ?? 1.0);
-    const wBayes = Math.max(0.001, effectiveWeights[AlgoKey.BAYES] ?? 1.0);
+    // 5. Transfert Machine -> Gagnants (Stochastique)
+    const machineTransfer = new Float32Array(91);
+    const lastMachines = Array.isArray(history[0]?.machine) ? history[0].machine : [];
+    if (lastMachines.length > 0) {
+        history.forEach((d, idx) => {
+            if (idx < history.length - 1 && Array.isArray(d.machine)) {
+                const hadMachine = d.machine.some(m => lastMachines.includes(m));
+                if (hadMachine) {
+                    history[idx + 1].gagnants.forEach(n => { if (n >= 1 && n <= N) machineTransfer[n] += 1.0; });
+                }
+            }
+        });
+    }
+    const maxMachine = Math.max(...Array.from(machineTransfer), 1.0);
 
-    const totalWeight = wFreq + wMarkov + wGap + wMom + wSpectral + wBayes;
+    // 6. Affinité de co-occurrence avec le dernier tirage
+    const affinity = new Float32Array(91);
+    history.forEach(d => {
+        const shared = d.gagnants.filter(n => lastWinners.includes(n)).length;
+        if (shared > 0) {
+            d.gagnants.forEach(n => { if (n >= 1 && n <= N) affinity[n] += shared; });
+        }
+    });
+    const maxAffinity = Math.max(...Array.from(affinity), 1.0);
 
-    // Algos dominants dans l'ADN actuel
-    const dominantAlgos = Object.entries(effectiveWeights)
-        .sort(([, a], [, b]) => (b as number) - (a as number))
+    // 7. Intensité continue de Hawkes (Processus ponctuel auto-excité)
+    const hawkes = new Float32Array(91);
+    const muHawkes = 5.0 / 90.0;
+    for (let n = 1; n <= N; n++) {
+        const beta = Math.log(2) / Math.max(1.0, avgGaps[n]);
+        const alpha = 0.45 * beta;
+        let sumExcitement = 0;
+        history.slice(0, 30).forEach((d, k) => {
+            if (d.gagnants.includes(n)) {
+                sumExcitement += Math.exp(-beta * (k + 1));
+            }
+        });
+        hawkes[n] = muHawkes + alpha * sumExcitement;
+    }
+    const maxHawkes = Math.max(...Array.from(hawkes), 1.0);
+
+    // 8. Énergie Spectrale / Harmonique
+    const spectral = new Float32Array(91);
+    const harmonicPeriods = [3, 5, 7, 9, 12, 18];
+    for (let n = 1; n <= N; n++) {
+        let powerSum = 0;
+        harmonicPeriods.forEach(p => {
+            let cosSum = 0;
+            let sinSum = 0;
+            sample.forEach((d, t) => {
+                if (d.gagnants.includes(n)) {
+                    const theta = (2 * Math.PI * t) / p;
+                    cosSum += Math.cos(theta);
+                    sinSum += Math.sin(theta);
+                }
+            });
+            powerSum += (cosSum * cosSum + sinSum * sinSum);
+        });
+        spectral[n] = powerSum;
+    }
+    const maxSpectral = Math.max(...Array.from(spectral), 1.0);
+
+    // 9. Extraction et Normalisation continue des poids d'ADN
+    const geneKeys = Object.values(AlgoKey);
+    let totalWeight = 0;
+    const activeWeightsMap: Record<string, number> = {};
+
+    geneKeys.forEach(k => {
+        const rawW = Number(effectiveWeights[k]);
+        const safeW = typeof rawW === 'number' && !isNaN(rawW) && rawW > 0 ? rawW : 0.05;
+        activeWeightsMap[k] = safeW;
+        totalWeight += safeW;
+    });
+
+    if (totalWeight <= 0) totalWeight = 1.0;
+
+    // Algos dominants dans l'ADN actif avec labels en français
+    const dominantAlgos = Object.entries(activeWeightsMap)
+        .sort(([, a], [, b]) => b - a)
         .slice(0, 3)
-        .map(([k]) => k);
+        .map(([k]) => ALGO_LABELS[k] || k);
 
+    // 10. Matrice de composition génomique différentiable continue
     const compositeDna = new Float32Array(91);
     let sumDna = 0;
 
-    for (let n = 1; n <= 90; n++) {
-        const sF = freq[n] / maxFreq;
-        const sM = markov[n] / maxMarkov;
-        const sG = Math.exp(-currentGaps[n] / 18.0);
+    for (let n = 1; n <= N; n++) {
+        const sFreq = freq[n] / maxFreq;
+        const sMarkov = markov[n] / maxMarkov;
+        const sGap = Math.exp(-currentGaps[n] / Math.max(1.0, avgGaps[n]));
         const sMom = 1.0 / (1.0 + Math.exp(-momentum[n] * 4.0));
-        const sBayes = (sF * 0.6 + sM * 0.4);
+        const sMachine = machineTransfer[n] / maxMachine;
+        const sAff = affinity[n] / maxAffinity;
+        const sHawkes = hawkes[n] / maxHawkes;
+        const sSpectral = spectral[n] / maxSpectral;
+        const sBayes = (sFreq * 0.6 + sMarkov * 0.4);
+        const sSpatial = 1.0 / (1.0 + Math.exp(-Math.abs(n - 45.5) / 15.0));
+        const sFractal = 0.5 + 0.5 * Math.tanh((sFreq - 0.5) * 2.0);
 
-        const val = (wFreq * sF + wMarkov * sM + wGap * sG + wMom * sMom + wBayes * sBayes) / totalWeight;
+        let geneSum = 0;
+        geneSum += (activeWeightsMap[AlgoKey.FREQUENCY] || 1.0) * sFreq;
+        geneSum += (activeWeightsMap[AlgoKey.MARKOV] || 1.0) * sMarkov;
+        geneSum += (activeWeightsMap[AlgoKey.GAPS] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.MOMENTUM] || 1.0) * sMom;
+        geneSum += (activeWeightsMap[AlgoKey.MACHINE_TRANSFER] || 1.0) * sMachine;
+        geneSum += (activeWeightsMap[AlgoKey.AFFINITY] || 1.0) * sAff;
+        geneSum += (activeWeightsMap[AlgoKey.TEMPORAL] || 1.0) * sHawkes;
+        geneSum += (activeWeightsMap[AlgoKey.SPECTRAL] || 1.0) * sSpectral;
+        geneSum += (activeWeightsMap[AlgoKey.BAYES] || 1.0) * sBayes;
+        geneSum += (activeWeightsMap[AlgoKey.SPATIAL] || 1.0) * sSpatial;
+        geneSum += (activeWeightsMap[AlgoKey.FRACTAL] || 1.0) * sFractal;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_SEQUENCE] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_CADENCE] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_TREND] || 1.0) * sMom;
+        geneSum += (activeWeightsMap[AlgoKey.SHADOW_PROBABILITY] || 1.0) * (1.0 - sFreq);
+
+        const val = geneSum / totalWeight;
         compositeDna[n] = val;
         sumDna += val;
     }
 
     const meanDna = sumDna / 90.0;
     let varDna = 0;
-    for (let n = 1; n <= 90; n++) {
+    for (let n = 1; n <= N; n++) {
         varDna += Math.pow(compositeDna[n] - meanDna, 2);
     }
     const stdDevDna = Math.sqrt(varDna / 90.0) || 1e-6;
 
-    for (let n = 1; n <= 90; n++) {
+    for (let n = 1; n <= N; n++) {
         const z = (compositeDna[n] - meanDna) / stdDevDna;
-        const mult = 2.0 / (1.0 + Math.exp(-1.1 * z));
+        const mult = 2.0 / (1.0 + Math.exp(-1.2 * z));
         multipliers[n] = Math.max(0.1, Math.min(1.9, mult));
         affinityPercent[n] = Math.round(Math.max(0, Math.min(100, (1.0 / (1.0 + Math.exp(-1.4 * z))) * 100)));
     }
@@ -491,8 +629,8 @@ export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?
         return resonance;
     }
 
-    // 4. Calcul du tamis de l'ADN algorithmique du moment
-    const { multipliers } = calculateDnaSieveWeights(history, weights);
+    // 4. Calcul du tamis de l'ADN algorithmique du moment (Tamis ADN Actif)
+    const { multipliers } = calculateDnaSieveWeights(history, weights, drawName);
 
     // 5. Projection de résonance pour chaque numéro basé sur le profil du mois source optimal,
     // tamisé de façon continue par l'empreinte de l'ADN algorithmique actuel
@@ -675,8 +813,8 @@ export const getCrossMonthResonanceAnalysis = (
         result.sourceMonthName = monthsFr[bestSourceMonth];
         result.correlation = maxCorr;
 
-        // Calcul du tamis de l'ADN algorithmique actuel
-        const { multipliers, affinityPercent, dominantAlgos } = calculateDnaSieveWeights(history, weights);
+        // Calcul du tamis de l'ADN algorithmique actuel (Tamis ADN Actif)
+        const { multipliers, affinityPercent, dominantAlgos } = calculateDnaSieveWeights(history, weights, drawName);
         result.dnaSieveInfo.dominantAlgos = dominantAlgos;
 
         // Projections brutes (sans tamis)

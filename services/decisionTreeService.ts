@@ -618,8 +618,8 @@ export const runDecisionForest = async (
         return;
       }
 
-      // Calcul du Tamis de l'ADN Algorithmique Actuel (ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
-      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos } = calculateDnaSieveWeights(history, weights);
+      // Calcul du Tamis de l'ADN Algorithmique Actuel (Tamis ADN Actif - ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
+      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos } = calculateDnaSieveWeights(history, weights, activeDrawName);
 
       // Calcul des distances de Mahalanobis pour le Mode Ombre
       const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);

@@ -1,6 +1,7 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
 import { LOTTERY_CONSTANTS } from '../../lotteryService';
+import { calculateDnaSieveWeights } from '../../temporalAnalysisService';
 
 type HistoryDraw = {
   date: string;
@@ -80,76 +81,32 @@ const uniqueValidNumbers = (arr: unknown): number[] => {
 
 /**
  * Calculates continuous DNA compatibility signal for each candidate number.
- * Sifts numbers through the active algorithmic DNA (current weights & feature matrices).
+ * Sifts numbers through the active algorithmic DNA (current weights & feature matrices)
+ * using the unified system-wide calculateDnaSieveWeights engine.
  */
 const computeDnaSieveSignal = (ctx: AlgorithmContext): { rawDna: Float64Array; multipliers: Float64Array; affinityPercent: Float64Array } => {
   const rawDna = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const multipliers = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const affinityPercent = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const weights = (ctx.weights || ctx.algoWeights || {}) as Record<string, number>;
-  const features = ctx.features;
 
-  if (!features) {
+  // Use the canonical 17+ gene DNA Sieve engine
+  const dnaReport = calculateDnaSieveWeights(
+    (ctx.history || []) as any,
+    weights as any,
+    ctx.drawName || ''
+  );
+
+  if (!dnaReport || !dnaReport.multipliers) {
     multipliers.fill(1.0);
     affinityPercent.fill(50.0);
     return { rawDna, multipliers, affinityPercent };
   }
 
-  const maxFreq = Math.max(1, ctx.maxFreq || 1);
-  const maxMarkov = Math.max(0.001, ctx.maxMarkov || 0.001);
-  const maxMachine = Math.max(0.001, ctx.maxMachineTransfer || 0.001);
-
-  // Active genome weights with uniform minimum
-  const wFreq = Math.max(0.001, weights[AlgoKey.FREQUENCY] ?? 1.0);
-  const wMarkov = Math.max(0.001, weights[AlgoKey.MARKOV] ?? 1.0);
-  const wMomentum = Math.max(0.001, weights[AlgoKey.MOMENTUM] ?? 1.0);
-  const wMachine = Math.max(0.001, (weights as Record<string, number>).machine_bias ?? weights[AlgoKey.BAYES] ?? 1.0);
-  const wGaps = Math.max(0.001, weights[AlgoKey.GAPS] ?? 1.0);
-  const wAffinity = Math.max(0.001, weights[AlgoKey.AFFINITY] ?? 1.0);
-  const wSpectral = Math.max(0.001, weights[AlgoKey.SPECTRAL] ?? 1.0);
-
-  const totalW = wFreq + wMarkov + wMomentum + wMachine + wGaps + wAffinity + wSpectral;
-
-  let sumDna = 0;
   for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
-    const sFreq = (features.freqMap?.[n] ?? 0) / maxFreq;
-    const sMarkov = (features.markovMap?.[n] ?? 0) / maxMarkov;
-    const sMachine = (features.machineTransferMap?.[n] ?? 0) / maxMachine;
-    const rawMom = features.momentumMap?.[n] ?? 0;
-    const sMomentum = 1.0 / (1.0 + Math.exp(-rawMom));
-    const gapVal = features.gapsMap?.[n] ?? 0;
-    const sGap = Math.exp(-gapVal / 18.0);
-    const sAffinity = features.shadowProbabilityMap?.[n] ?? 0;
-    const sSpectral = features.networkCorrelationMap?.[n] ?? 0;
-
-    const weightedComposite =
-      (wFreq * sFreq +
-        wMarkov * sMarkov +
-        wMomentum * sMomentum +
-        wMachine * sMachine +
-        wGaps * sGap +
-        wAffinity * sAffinity +
-        wSpectral * sSpectral) /
-      totalW;
-
-    rawDna[n] = weightedComposite;
-    sumDna += weightedComposite;
-  }
-
-  const meanDna = sumDna / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
-  let varDna = 0;
-  for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
-    varDna += Math.pow(rawDna[n] - meanDna, 2);
-  }
-  const stdDevDna = Math.sqrt(varDna / LOTTERY_CONSTANTS.TOTAL_NUMBERS) || 1e-6;
-
-  for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
-    const zDna = (rawDna[n] - meanDna) / stdDevDna;
-    // Continuous differential sieve function centered at 1.0 in range [0.1, 1.9]
-    const sieveMultiplier = 2.0 / (1.0 + Math.exp(-1.1 * zDna));
-    multipliers[n] = clamp(sieveMultiplier, 0.1, 1.9);
-    // Continuous compatibility percentage in [0, 100]
-    affinityPercent[n] = clamp((1.0 / (1.0 + Math.exp(-1.5 * zDna))) * 100, 0, 100);
+    multipliers[n] = dnaReport.multipliers[n] ?? 1.0;
+    affinityPercent[n] = dnaReport.affinityPercent[n] ?? 50.0;
+    rawDna[n] = (dnaReport.multipliers[n] ?? 1.0) / 2.0;
   }
 
   return { rawDna, multipliers, affinityPercent };
