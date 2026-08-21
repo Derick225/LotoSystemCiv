@@ -1155,8 +1155,10 @@ export const calculateBenfordCompliance = (numbers: number[]): { score: number, 
         deviation += Math.abs(observed - expected);
     }
     
-    // Adjusted scaling factor for deviation 
-    const score = Math.max(0, Math.round(100 - (deviation * 50))); 
+    // Score derived from L1 deviation normalized by its theoretical maximum.
+    // Max possible deviation = 2.0 (each of 9 terms bounded by max(observed,expected) <= 1)
+    // score = 100 * (1 - deviation / 2)
+    const score = Math.max(0, Math.round(100 - (deviation / 2.0) * 100)); 
     return { score, distribution };
 };
 

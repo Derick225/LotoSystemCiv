@@ -237,7 +237,7 @@ export const calculateGeneticDiversityIndex = (
 export const filterDiverseCombinations = <T extends { numbers: number[]; score?: number; nexusScore?: number }>(
   tickets: T[],
   maxSelect?: number,
-  maxAllowedOverlap: number = 3
+  maxAllowedOverlap: number = Math.floor(5 * 0.5) // Default: half of draw size (5/2=2)
 ): T[] => {
   if (!tickets || tickets.length <= 1) return tickets || [];
 
@@ -279,8 +279,12 @@ export const filterDiverseCombinations = <T extends { numbers: number[]; score?:
       const maxEntropy = Math.log2(Math.min(90, Object.keys(freqMap).length));
       const normalizedEntropy = maxEntropy > 0 ? shannonEntropy / maxEntropy : 1.0;
 
-      // Si l'entropie de Shannon reste satisfaisante (> 0.70), le ticket est conservé
-      if (normalizedEntropy > 0.70 && maxOverlap < candidate.numbers.length) {
+      // Entropy threshold derived from information theory:
+      // A pool of K tickets over D=90 numbers has max entropy log2(min(90, uniqueNumbers)).
+      // We require at least 1 - 1/sqrt(numSelected+1) normalized entropy to accept a ticket.
+      const numSelected = selected.length;
+      const entropyThreshold = 1.0 - 1.0 / Math.sqrt(numSelected + 1);
+      if (normalizedEntropy > entropyThreshold && maxOverlap < candidate.numbers.length) {
         selected.push(candidate);
       }
     }

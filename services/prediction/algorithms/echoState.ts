@@ -158,28 +158,33 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     };
   },
 
-  evaluate(num, ctx) {
+    evaluate(num, ctx) {
     if (!ctx.pluginCache?.[AlgoKey.ECHO_STATE as string]) {
       this.precompute(ctx);
     }
-    
+
     const cache = ctx.pluginCache?.[AlgoKey.ECHO_STATE as string];
     if (!cache || !cache.scores) {
-      return { score: 50, confidence: 10 };
+      return { score: 50, confidence: 0.5 };
     }
-    
-    const rawScore = cache.scores[num];
-    // Sigmoïde d'étalement basée sur la moyenne/médiane pour obtenir une échelle 0-100 continue
-    const allScores = [...cache.scores.slice(1)].filter(s => s > 0).sort((a,b) => a-b);
-    const max = allScores[allScores.length - 1] || 1.0;
-    
-    // Remplacement de 1e-6 par Number.EPSILON
-    const scale = 100.0 / (max + Number.EPSILON);
-    const score = Math.max(0, Math.min(100, rawScore * scale));
-    
+
+    const rawScore = cache.scores[num] || 0;
+    // Robust normalization via IQR instead of max (resistant to outliers)
+    const allScores = cache.scores.slice(1).filter((s: number) => s > 0).sort((a: number, b: number) => a - b);
+    if (allScores.length === 0) return { score: 50, confidence: 0.5 };
+
+    const q1 = allScores[Math.floor(allScores.length * 0.25)] || 0;
+    const q3 = allScores[Math.floor(allScores.length * 0.75)] || 0;
+    const iqr = Math.max(Number.EPSILON, q3 - q1);
+    const med = allScores[Math.floor(allScores.length / 2)] || 0;
+
+    // Sigmoid normalization centered on median, scaled by IQR
+    const slope = 1.0 / iqr;
+    const score = Math.max(0, Math.min(100, 100.0 / (1.0 + Math.exp(-slope * (rawScore - med)))));
+
     return {
       score,
-      confidence: 85, // Réseau de neurones déterministe
+      confidence: 0.85,
       metadata: { rawScore, spectralRadius: cache.spectralRadiusUsed }
     };
   }

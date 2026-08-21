@@ -2,30 +2,26 @@ import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { evaluateKDE, standardNormalCDF, gaussianKernel, calculateSilvermanBandwidth } from '../../kdeService';
 
-// Deterministic rescaled range Hurst Exponent helper for individual gap sequences
+// Corrected R/S Hurst Exponent: uses proper cumulative deviation from mean
 function calculateHurstExponent(seq: number[]): number {
   const N = seq.length;
-  if (N < 4) return 0.5; // Neutral default for short series
+  if (N < 4) return 0.5;
 
   const mean = seq.reduce((a, b) => a + b, 0) / N;
+  // Cumulative deviation series (centered)
+  const cumDev: number[] = [];
+  let running = 0;
   let sumSq = 0;
-  let maxZ = -Infinity;
-  let minZ = Infinity;
-  let currentZ = 0;
-
   for (let i = 0; i < N; i++) {
-    const diff = seq[i] - mean;
-    sumSq += diff * diff;
-    currentZ += diff;
-    if (currentZ > maxZ) maxZ = currentZ;
-    if (currentZ < minZ) minZ = currentZ;
+    running += seq[i] - mean;
+    cumDev.push(running);
+    sumSq += (seq[i] - mean) ** 2;
   }
 
-  const R = maxZ - minZ;
+  const R = Math.max(...cumDev) - Math.min(...cumDev);
   const S = Math.sqrt(sumSq / N) || Number.EPSILON;
-  const RS = R / S;
-  const hurst = Math.log(RS) / Math.log(N);
-  
+  const hurst = Math.log(R / S + Number.EPSILON) / Math.log(N);
+
   return isNaN(hurst) || !isFinite(hurst) ? 0.5 : Math.max(0.01, Math.min(0.99, hurst));
 }
 

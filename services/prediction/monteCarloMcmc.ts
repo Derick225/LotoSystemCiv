@@ -71,10 +71,10 @@ for (let i = 0; i < resolvedMcIterations; i++) {
         const scoredNumbers = calculateScores(baseFeatures, perturbedWeights, baseBundle, history);
         const suggestedNumbers = scoredNumbers.slice(0, 5).map(s => s.num).sort((a,b)=>a-b);
         const candidates = scoredNumbers.slice(5, 15).map(s => s.num);
-        
+
         const breakdown: Record<number, Record<string, number>> = {};
         scoredNumbers.forEach(s => { breakdown[s.num] = s.breakdown || {}; });
-        
+
         const pred: Prediction = {
             suggestedNumbers,
             candidates,
@@ -84,18 +84,22 @@ for (let i = 0; i < resolvedMcIterations; i++) {
             timestamp: Date.now(),
             diversityMetrics: calculateGeneticDiversityIndex(suggestedNumbers, breakdown)
         };
-        let topScores: number[] = [];
-        for (let n = 1; n <= 90; n++) {
-            let s = 0;
-            if (pred.breakdown[n]) {
-                Object.values(pred.breakdown[n]).forEach(v => { s += v; });
-            }
-            topScores.push(s);
-        }
-        topScores.sort((a,b) => b - a);
-        const top5Avg = topScores.slice(0, 5).reduce((a,b)=>a+b, 0) / 5;
-        const next15Avg = topScores.slice(5, 20).reduce((a,b)=>a+b, 0) / 15;
-        const proposedEnergy = (top5Avg - next15Avg) / (top5Avg || 1);
+
+        // Log-likelihood energy: sum of log-scores for top-5 minus entropy penalty
+        // This is a proper probabilistic objective vs the fragile top5/next15 heuristic
+        const totalScore = scoredNumbers.reduce((s, x) => s + x.score, 0) || 1;
+        let logLikelihood = 0;
+        suggestedNumbers.forEach(n => {
+            const s = scoredNumbers.find(x => x.num === n);
+            const p = Math.max(Number.EPSILON, (s?.score || 0) / totalScore);
+            logLikelihood += Math.log(p);
+        });
+        // Entropy regularization: penalize degenerate distributions (all mass on 1 number)
+        const entropyPenalty = scoredNumbers.reduce((acc, x) => {
+            const p = Math.max(Number.EPSILON, x.score / totalScore);
+            return acc - p * Math.log(p);
+        }, 0);
+        const proposedEnergy = logLikelihood + 0.1 * entropyPenalty;
 
         if (i === 0) {
             currentStateVector = proposedVector;

@@ -140,9 +140,10 @@ export async function runSimulationCore(config: SimulationConfig) {
 
       // Cote moyenne dynamique calculée depuis l'historique des gains
       const recentWins = simHistory.filter(h => h.hits >= 2);
-      const avgPayoutOdds = recentWins.length > 0 
-        ? recentWins.reduce((sum, h) => sum + (h.profit + h.bet) / h.bet, 0) / recentWins.length 
-        : 15.0; // Fallback mathématique (Loto rang 2)
+      const avgPayoutOdds = recentWins.length > 0
+        ? recentWins.reduce((sum, h) => sum + (h.profit + h.bet) / h.bet, 0) / recentWins.length
+        // Fallback: theoretical expected payout = 1/p where p = theoreticalProb (fair odds)
+        : 1.0 / theoreticalProb;
       
       const b = avgPayoutOdds - 1;
       let f = b > 0 ? (b * p - q) / b : 0;
@@ -165,9 +166,10 @@ export async function runSimulationCore(config: SimulationConfig) {
       const theoreticalProb = (10 * 98770) / 43949268;
       const recentForm = rollingDraws > 0 ? rollingWins / rollingDraws : theoreticalProb;
       
-      // Multiplicateur continu exponentiel (Zéro seuil arbitraire)
+      // formZ weight: 1/log(rollingDraws+2) ensures influence decays as sample grows
       const formZ = recentForm > 0 ? Math.log(recentForm / theoreticalProb) : 0;
-      const continuousMultiplier = Math.exp(modelConfidence + formZ * 0.1);
+      const formWeight = rollingDraws > 0 ? 1.0 / Math.log(rollingDraws + 2) : 0.1;
+      const continuousMultiplier = Math.exp(modelConfidence + formZ * formWeight);
       
       bet = Math.floor(UNIT_BET * continuousMultiplier);
       

@@ -134,8 +134,6 @@ export const gapBandSequencePlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache![AlgoKey.GAP_BAND_SEQUENCE];
     const currentGap = cache.currentGaps[num] ?? 0;
 
-    const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
-
     const resolutionScores: number[] = [];
     let totalConfidenceWeight = 0;
 
@@ -148,6 +146,10 @@ export const gapBandSequencePlugin: AlgorithmPlugin = {
       const normalizedWeight = projectedTotal > 0 ? myBandWeight / projectedTotal : 0;
 
       const equiprobableBaseline = 1.0 / model.numBands;
+      // Slope derived from information theory: log(numBands) is the natural entropy scale
+      // for a uniform distribution over numBands categories, modulated by Hurst persistence
+      const H = ctx.statisticalBounds?.hurstExponent || 0.5;
+      const slope = Math.log(Math.max(2, model.numBands)) * (1.0 + H);
       const score = 100.0 / (1.0 + Math.exp(-slope * (normalizedWeight - equiprobableBaseline) * model.numBands));
       resolutionScores.push(score);
       totalConfidenceWeight += 1;

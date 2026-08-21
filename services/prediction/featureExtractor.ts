@@ -294,12 +294,10 @@ export const extractFeatures = async (
           if (markovMap[nextNum] > maxMarkov) maxMarkov = markovMap[nextNum];
         }
 
-        // ============================================================================
-        // Température Softmax de la Matrice de Markov (T = 1.3)
-        // Accentue le contraste entre les transitions à haute probabilité et le bruit
-        // ============================================================================
-        const MARKOV_TEMPERATURE = 1.3;
-        let sumSoftmax = 0;
+        // Température Softmax dérivée de l'entropie de Shannon locale :
+      // T = 1 + H_normalized (H=0 → T=1 fort contraste, H=1 → T=2 lissage maximal)
+      const MARKOV_TEMPERATURE = 1.0 + e;
+      let sumSoftmax = 0;
         for (let nextNum = DOMAIN_MIN; nextNum <= DOMAIN_MAX; nextNum++) {
           markovMap[nextNum] = Math.exp((markovMap[nextNum] - maxMarkov) / MARKOV_TEMPERATURE);
           sumSoftmax += markovMap[nextNum];

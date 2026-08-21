@@ -17,14 +17,18 @@ export const frequencyPlugin: AlgorithmPlugin = {
     const values = Array.from(ctx.features.freqMap).slice(1).filter(v => v > 0);
     let cacheVal;
     if (values.length === 0) {
-      cacheVal = { median: 0, iqr: 1.0 };
+      cacheVal = { median: 0, iqr: 1.0, sampleSize: 0 };
     } else {
       const sorted = [...values].sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
-      const q1 = sorted[Math.floor(sorted.length * 0.25)];
-      const q3 = sorted[Math.floor(sorted.length * 0.75)];
-      const iqr = Math.max(Number.EPSILON, q3 - q1);
-      cacheVal = { median, iqr };
+      const n = sorted.length;
+      // Interpolated median for even-length arrays (more precise than floor-only)
+      const mid = Math.floor(n / 2);
+      const median = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      const q1 = sorted[Math.floor(n * 0.25)];
+      const q3 = sorted[Math.floor(n * 0.75)];
+      // IQR floored at 1/sqrt(N) to prevent over-sharpening on small samples
+      const iqr = Math.max(1.0 / Math.sqrt(Math.max(1, ctx.history?.length || 1)), q3 - q1);
+      cacheVal = { median, iqr, sampleSize: n };
     }
     ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.FREQUENCY] = cacheVal;
@@ -48,7 +52,9 @@ export const frequencyPlugin: AlgorithmPlugin = {
     const median = cache.median;
     const iqr = cache.iqr;
     
-    const slope = 1.0 / iqr;
+    // Slope scaled by sqrt(sampleSize) to sharpen discrimination as history grows
+    const sampleSize = cache.sampleSize || 1;
+    const slope = Math.sqrt(sampleSize) / (iqr * Math.sqrt(90));
     const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawFreq - median)));
     
     const score = Math.max(0.0, Math.min(100.0, normalizedScore));

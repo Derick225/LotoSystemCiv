@@ -67,8 +67,13 @@ export const applyForensicAdjustments = async (
   const volatility = (gameRegimeInfo?.volatility || 50.0) / 100.0;
   const prudenceFactor = Math.exp(-(entropy + volatility));
 
+  // Age decay half-life derived from the number of reports used:
+  // lambda = log(2) / numReports ensures the oldest report has weight ~0.5 of the newest
+  const numReports = sortedReports.length || 1;
+  const decayLambda = Math.log(2) / numReports;
+
   sortedReports.forEach((report, index) => {
-    const ageDecay = Math.exp(-0.25 * index) * prudenceFactor;
+    const ageDecay = Math.exp(-decayLambda * index) * prudenceFactor;
 
     if (report.missedOpportunities) {
       report.missedOpportunities.forEach(opp => {
@@ -80,7 +85,9 @@ export const applyForensicAdjustments = async (
           if (opp.bestAlgo) {
             const algoKey = opp.bestAlgo as AlgoKey;
             if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
-            dynamicWeightModifiers[num][algoKey] = (dynamicWeightModifiers[num][algoKey] || 0) + 0.15 * ageDecay;
+            // Modifier amplitude = 1/numAlgos ensures scale-invariance across algo count
+            const numAlgos = Object.keys(AlgoKey).length || 1;
+            dynamicWeightModifiers[num][algoKey] = (dynamicWeightModifiers[num][algoKey] || 0) + (1.0 / numAlgos) * ageDecay;
           }
         }
       });
@@ -112,7 +119,8 @@ export const applyForensicAdjustments = async (
               driftScores[num] = (driftScores[num] || 0) + factor * score * breakdownVal * ageDecay;
             }
             if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
-            dynamicWeightModifiers[num][algo] = (dynamicWeightModifiers[num][algo] || 0) + factor * score * 0.1 * ageDecay;
+            const numAlgos2 = Object.keys(AlgoKey).length || 1;
+            dynamicWeightModifiers[num][algo] = (dynamicWeightModifiers[num][algo] || 0) + factor * score * (1.0 / numAlgos2) * ageDecay;
           }
         }
       });

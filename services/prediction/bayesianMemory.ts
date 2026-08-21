@@ -39,10 +39,16 @@ export const getBayesianMemoryAsync = async (drawName: string): Promise<Bayesian
  */
 export const saveBayesianMemoryAsync = async (drawName: string, observations: BayesianObservation[]): Promise<void> => {
     try {
+        // Memory limit derived from sqrt(N_algos * N_domain) to balance coverage vs storage
+        // For 22 algos and 90 numbers: sqrt(22*90) ~= 45, rounded up to nearest power of 2 = 64
+        const numAlgos = observations.length > 0 && observations[0].weights
+            ? Object.keys(observations[0].weights).length
+            : 22;
+        const memoryLimit = Math.pow(2, Math.ceil(Math.log2(Math.sqrt(numAlgos * 90))));
         const sorted = [...observations]
             .filter(o => o && o.weights && typeof o.score === 'number')
             .sort((a, b) => b.score - a.score)
-            .slice(0, 100);
+            .slice(0, memoryLimit);
 
         memoryStore.set(drawName, sorted);
         await set(`bayesian_mem_${drawName}`, sorted);
@@ -81,10 +87,14 @@ export const getBayesianMemory = (drawName: string): BayesianObservation[] => {
  * @param observations Liste des observations.
  */
 export const saveBayesianMemory = (drawName: string, observations: BayesianObservation[]) => {
+    const numAlgos = observations.length > 0 && observations[0].weights
+        ? Object.keys(observations[0].weights).length
+        : 22;
+    const memoryLimit = Math.pow(2, Math.ceil(Math.log2(Math.sqrt(numAlgos * 90))));
     const sorted = [...observations]
         .filter(o => o && o.weights && typeof o.score === 'number')
         .sort((a, b) => b.score - a.score)
-        .slice(0, 100);
+        .slice(0, memoryLimit);
     memoryStore.set(drawName, sorted);
     saveBayesianMemoryAsync(drawName, sorted).catch(() => {});
 };

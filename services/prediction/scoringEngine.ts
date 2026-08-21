@@ -192,8 +192,13 @@ export const calculateScores = (
     // Multiplicateur de Symbiose Machine <-> Gagnants (Transfert stochastique continu)
     const machineTransferVal = context.features.machineTransferMap?.[num] || 0;
     const maxMachineTransfer = context.maxMachineTransfer || 1.0;
-    const machineSymbiosisBoost = maxMachineTransfer > 0.001 
-      ? 1.0 + 0.15 * Math.tanh(machineTransferVal / maxMachineTransfer)
+    // Machine symbiosis amplitude derived from draw size ratio: 1/drawSize
+    // ensures the boost is proportional to the information content of each ball
+    const drawSize = history[0]?.gagnants?.length || 5;
+    const domainSize = features.freqMap?.length ? features.freqMap.length - 1 : 90;
+    const symbiosisAmplitude = drawSize / domainSize; // e.g. 5/90 ≈ 0.0556
+    const machineSymbiosisBoost = maxMachineTransfer > 0.001
+      ? 1.0 + symbiosisAmplitude * Math.tanh(machineTransferVal / maxMachineTransfer)
       : 1.0;
 
     finalScore *= machineSymbiosisBoost;

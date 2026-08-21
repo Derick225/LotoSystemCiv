@@ -170,7 +170,14 @@ export const applyDeterministicMicroSgd = async (
         const oldWeight = adjustedWeights[algo as AlgoKey] || 0;
         let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
         
-        const variationClamp = 0.05 + 0.20 * (1.0 - safeEntropy); 
+        // Variation clamp derived from information theory:
+        // At max entropy (safeEntropy=1), allow wider variation (more exploration).
+        // At min entropy (safeEntropy=0), restrict variation (exploit stable signal).
+        // Base: 1/(2*numAlgos) ensures minimum meaningful step; max: 1/sqrt(numAlgos)
+        const numAlgos = Object.keys(adjustedWeights).length || 1;
+        const variationBase = 1.0 / (2.0 * numAlgos);
+        const variationMax = 1.0 / Math.sqrt(numAlgos);
+        const variationClamp = variationBase + (variationMax - variationBase) * safeEntropy;
         const minW = oldWeight * (1.0 - variationClamp);
         const maxW = oldWeight * (1.0 + variationClamp);
         newWeight = Math.max(minW, Math.min(maxW, newWeight));

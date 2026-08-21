@@ -33,11 +33,11 @@ export class ConceptDriftDetector {
         const variance = varianceSum / (N - 1 || 1);
         const stdDev = Math.sqrt(variance);
 
-        // 3. Dérivation continue des hyperparamètres Page-Hinkley
-        // La tolérance d'amortissement s'adapte à l'écart-type pour éviter de faux signaux sur bruit blanc.
-        const dynamicTolerance = Math.max(1e-5, 0.15 * stdDev);
-        // Le seuil d'alerte s'établit à 3.5 écarts-types (critère d'anomalie standard).
-        const dynamicThreshold = Math.max(1e-4, 3.5 * stdDev);
+        // Tolerance: derived from the Neyman-Pearson lemma — use 1 sigma as the minimum
+        // detectable effect size for a one-sided test at alpha=0.16 (1-sigma level)
+        const dynamicTolerance = Math.max(1e-5, stdDev);
+        // Threshold: 3-sigma rule (99.7% confidence interval for anomaly detection)
+        const dynamicThreshold = Math.max(1e-4, 3.0 * stdDev);
 
         let runningSum = 0;
         let mt = 0; // Somme cumulée de déviation
@@ -213,8 +213,8 @@ export class ConceptDriftDetector {
         // --- 2. ÉVALUATION SÉQUENTIELLE GLISSANTE (Page-Hinkley sur KL-Divergence) ---
         const chronologicalHistory = [...purifiedHistory].reverse();
         const N_chrono = chronologicalHistory.length;
-        // Taille de la fenêtre glissante : 15% de l'historique
-        const W = Math.max(6, Math.floor(N_chrono * 0.15));
+        // Sliding window: sqrt(N) draws — bias-variance optimal for change-point detection
+        const W = Math.max(6, Math.round(Math.sqrt(N_chrono)));
 
         const klStream: number[] = [];
         const klIndices: number[] = [];

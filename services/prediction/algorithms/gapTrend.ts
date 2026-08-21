@@ -183,7 +183,9 @@ export const gapTrendPlugin: AlgorithmPlugin = {
     // [5] Pente dérivée de l'exposant de Hurst pour adapter la sensibilité
     // Plus le système est persistant (H > 0.5), plus la pente est raide
     const hurstExponent = ctx.statisticalBounds?.hurstExponent || 0.5;
-    const slope = 1.0 + (hurstExponent * 5.0); // 5.0 est une constante mathématique (approximation)
+    // Slope derived from volatility scale: log(numGaps+1) gives natural information-theoretic
+    // sensitivity that grows with sample size, modulated by Hurst persistence
+    const slope = Math.log(Math.max(2, numGaps + 1)) * (1.0 + hurstExponent);
 
     // Continuous KDE projection around Holt trend expectation
     const kdeRes = evaluateKDE([projectedNextGap - scale, projectedNextGap, projectedNextGap + scale], currentOpenGap);

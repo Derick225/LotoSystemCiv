@@ -48,24 +48,28 @@ export const temporalPlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache![AlgoKey.TEMPORAL];
     const tempVal = cache.tempScores[num] || 0.0;
     const poissonVal = cache.poissonScores[num] || 0.0;
-    
-    // safe geometric values using Number.EPSILON to guarantee continuous transition
+
+    // Adaptive weights derived from Hurst exponent:
+    // High persistence (H→1): temporal trend dominates; high randomness (H→0): Poisson dominates
+    const H = ctx.statisticalBounds?.hurstExponent ?? 0.5;
+    const wTemporal = 0.3 + 0.4 * H;       // [0.3, 0.7]
+    const wPoisson  = 1.0 - wTemporal;      // [0.3, 0.7]
+
     const safeTemp = Math.max(Number.EPSILON, tempVal);
     const safePoisson = Math.max(Number.EPSILON, poissonVal);
-    
-    // Weighted geometric mean: exponent 0.6 for temporal, 0.4 for Poisson
-    const fusedVal = Math.pow(safeTemp, 0.6) * Math.pow(safePoisson, 0.4);
+
+    const fusedVal = Math.pow(safeTemp, wTemporal) * Math.pow(safePoisson, wPoisson);
     const score = Math.max(0.0, Math.min(100.0, fusedVal));
 
     return {
       score,
       confidence: 0.95,
-      metadata: { 
-        tempVal: parseFloat(tempVal.toFixed(4)), 
+      metadata: {
+        tempVal: parseFloat(tempVal.toFixed(4)),
         poissonVal: parseFloat(poissonVal.toFixed(4)),
-        weightTemporal: 0.6,
-        weightPoisson: 0.4,
-        fusionMethod: 'Weighted Geometric Mean with Epsilon Floor'
+        weightTemporal: parseFloat(wTemporal.toFixed(4)),
+        weightPoisson: parseFloat(wPoisson.toFixed(4)),
+        fusionMethod: 'Adaptive Weighted Geometric Mean (Hurst-derived)'
       }
     };
   }

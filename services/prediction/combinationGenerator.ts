@@ -212,44 +212,47 @@ export const calculateCombinationEnergyDetailed = (
   }
 
   // 8. Pénalité Spatiale de Proximité fine (densité et clusters locaux)
+  // Proximity threshold derived from domain geometry: sqrt(DOMAIN_SIZE/DRAW_SIZE) ≈ 4.24
+  // Window derived from expected gap between draws: DOMAIN_SIZE/DRAW_SIZE = 18
   let spatialClusteringPenalty = 0.0;
   if (combo.length >= 2) {
     const sortedCombo = [...combo].sort((a, b) => a - b);
+    const proximityThreshold = Math.round(Math.sqrt(DOMAIN_SIZE / DRAW_SIZE)); // ~4
+    const windowSize = Math.round(DOMAIN_SIZE / DRAW_SIZE);                    // ~18
+    const pairPenaltyUnit = 1.0 / DRAW_SIZE;   // 0.2 per close pair
+    const clusterPenaltyUnit = 1.0 / DRAW_SIZE; // 0.2 per extra number in window
+
     let adjacentClosePairs = 0;
     for (let i = 0; i < sortedCombo.length - 1; i++) {
       const diff = sortedCombo[i + 1] - sortedCombo[i];
-      if (diff <= 2) {
-        adjacentClosePairs++;
-      }
+      if (diff <= proximityThreshold) adjacentClosePairs++;
     }
-    spatialClusteringPenalty += adjacentClosePairs * 2.5;
+    spatialClusteringPenalty += adjacentClosePairs * (pairPenaltyUnit * 12.5);
 
     for (let i = 0; i < sortedCombo.length; i++) {
       let countInWindow = 1;
       for (let j = i + 1; j < sortedCombo.length; j++) {
-        if (sortedCombo[j] - sortedCombo[i] <= 12) {
-          countInWindow++;
-        }
+        if (sortedCombo[j] - sortedCombo[i] <= windowSize) countInWindow++;
       }
       if (countInWindow >= 3) {
-        spatialClusteringPenalty += 3.0 * (countInWindow - 2);
+        spatialClusteringPenalty += clusterPenaltyUnit * 15.0 * (countInWindow - 2);
       }
     }
     spatialClusteringPenalty = Math.min(15.0, spatialClusteringPenalty);
   }
 
   // 9. Pénalité Recent-Bias (Adjacence de voisinage T-1)
+  // Unit penalty derived from draw size: 1/DRAW_SIZE ensures scale-invariance
   let recentBiasPenalty = 0.0;
   if (lastDraw && lastDraw.length > 0 && combo.length > 0) {
     let neighborsCount = 0;
     for (const num of combo) {
       for (const prev of lastDraw) {
-        if (Math.abs(num - prev) === 1) {
-          neighborsCount++;
-        }
+        if (Math.abs(num - prev) === 1) neighborsCount++;
       }
     }
-    recentBiasPenalty = Math.min(7.5, neighborsCount * 1.5);
+    const unitPenalty = 7.5 / DRAW_SIZE; // Scale-invariant: 1.5 for DRAW_SIZE=5
+    recentBiasPenalty = Math.min(7.5, neighborsCount * unitPenalty);
   }
 
   // 10. Pénalité de Profil de similarité excessive (Mapping Sigmoïdal Continu)
