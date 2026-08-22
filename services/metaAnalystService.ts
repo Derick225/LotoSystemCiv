@@ -190,13 +190,29 @@ export async function generatePlatinumPredictionCore(
     const breakdowns = masterPred.breakdown || {};
     const localFeatures = await extractFeatures(drawName, history);
 
-    // Extraction du Tamis de l'ADN Algorithmique Actuel
+    // Extraction du Tamis de l'ADN Algorithmique Actuel (t) et du Tirage Précédent (t-1)
     const dnaReport = calculateDnaSieveWeights(history, weights, drawName);
-    const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna } = dnaReport;
+    const prevDnaReport = history.length > 1 
+        ? calculateDnaSieveWeights(history.slice(1), weights, drawName) 
+        : dnaReport;
+
+    const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna, meanDna } = dnaReport;
+    const prevMultipliers = prevDnaReport.multipliers;
+
+    // Calcul de l'accélération de tamisage différentiable ΔM_n = M_n(t) - M_n(t-1)
+    const rawDeltaSieve = new Float64Array(MAX_NUM + 1);
+    let maxDeltaSieve = 1e-6;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const delta = (dnaMultipliers[i] ?? 1.0) - (prevMultipliers[i] ?? 1.0);
+        const positiveDelta = Math.max(0, delta);
+        rawDeltaSieve[i] = positiveDelta;
+        if (positiveDelta > maxDeltaSieve) maxDeltaSieve = positiveDelta;
+    }
+    const stdDeltaSieve = standardizeVector(rawDeltaSieve);
     
     // Intensité continue du tamisage dérivée du SNR de l'ADN
-    const snrDna = (stdDevDna || 0.1) / 0.1;
-    const dynamicSieveIntensity = sigmoid(1.5 * (snrDna - 1.0));
+    const snrDna = (stdDevDna || 0.1) / (meanDna || 1.0);
+    const dynamicSieveIntensity = sigmoid(1.5 * ((snrDna * 10.0) - 1.0));
     const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
 
     // 2. VECTORISATION STANDARDISÉE DES TENSEURS DE BASE
@@ -377,49 +393,109 @@ export async function generatePlatinumPredictionCore(
         return Math.max(45, Math.min(96, prob));
     };
 
-    // SCÉNARIO ALPHA : ALPHA CORE (Pic de Résonance Quantique Invariant)
-    const alphaNumbers = greedyDeterministicSelection(normalizedVector, DRAW_SIZE, 0.0, entropyScore);
-    const alphaProb = computeScenarioProbability(alphaNumbers, normalizedVector, 70);
+    // Helper de calcul continu de l'empreinte spectrale d'un scénario sur les 6 Macro-Familles
+    const computeScenarioMacroFingerprint = (numbers: number[]) => {
+        const definitions = [
+            { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', getVal: (n: number) => (stdFreq[n] + stdMarkov[n]) / 2.0 },
+            { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', getVal: (n: number) => stdGap[n] },
+            { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', getVal: (n: number) => stdMomentum[n] },
+            { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', getVal: (n: number) => stdSpectral[n] },
+            { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', getVal: (n: number) => (stdSpatial[n] + stdFractal[n]) / 2.0 },
+            { key: 'MACHINE_BAYES', name: 'Machine & Bayes', getVal: (n: number) => (stdBayes[n] + (rawDeltaSieve[n] > 0 ? 0.5 : 0)) }
+        ];
+        
+        let totalEnergy = 0;
+        const rawEnergies = definitions.map(def => {
+            let energy = 0;
+            numbers.forEach(n => {
+                energy += Math.max(0.05, def.getVal(n) + 2.0); // Décalage positif régularisé
+            });
+            totalEnergy += energy;
+            return { def, energy };
+        });
+
+        return rawEnergies.map(({ def, energy }) => ({
+            familyKey: def.key,
+            familyName: def.name,
+            energyPct: parseFloat(((energy / (totalEnergy || 1.0)) * 100).toFixed(1))
+        }));
+    };
+
+    // SCÉNARIO ALPHA : ALPHA CORE (Pondération stricte sur les gènes à fort MRR)
+    const alphaVector = new Float64Array(MAX_NUM + 1);
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const dnaAffScore = (dnaAffinity[i] ?? 50) / 100.0;
+        const mrrPriors = (stdFreq[i] * 1.3 + stdMarkov[i] * 1.2 + stdGap[i] * 1.1) / 3.6;
+        alphaVector[i] = (normalizedVector[i] * 0.4) + ((mrrPriors + 2.0) * 0.3 * (1.0 + dnaAffScore * 0.5));
+    }
+    const normAlpha = normalizeVector(alphaVector);
+    const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0.0, entropyScore);
+    const alphaProb = computeScenarioProbability(alphaNumbers, normAlpha, 72);
     scenarios.push({
         id: 'alpha',
         name: 'Alpha Core',
-        description: 'Convergence maximale. Sélection déterministe gloutonne sur le pic de résonance unifié absolu.',
+        description: 'Convergence maximale. Pondération stricte sur les gènes à fort MRR et pic de résonance invariant.',
         numbers: alphaNumbers,
         probability: alphaProb,
         risk: alphaProb >= 82 ? 'LOW' : 'MEDIUM',
-        color: '#10b981'
+        color: '#10b981',
+        genomicProfile: {
+            focus: 'Pondération stricte sur les gènes à fort MRR',
+            mrrBoost: 1.45,
+            entropyRegimeAdaptive: false,
+            macroFingerprint: computeScenarioMacroFingerprint(alphaNumbers)
+        }
     });
 
     // SCÉNARIO BETA : BETA FLOW (Harmonique Orbitale Déphasée)
+    const betaVector = new Float64Array(MAX_NUM + 1);
+    for (let i = 1; i <= MAX_NUM; i++) {
+        betaVector[i] = (normalizedVector[i] * 0.6) + ((stdSpectral[i] + 2.0) * 0.4);
+    }
+    const normBeta = normalizeVector(betaVector);
     const betaPhase = (Math.PI / 4.0) * freqPhase;
-    const betaNumbers = greedyDeterministicSelection(normalizedVector, DRAW_SIZE, betaPhase, entropyScore);
-    const betaProb = computeScenarioProbability(betaNumbers, normalizedVector, 65);
+    const betaNumbers = greedyDeterministicSelection(normBeta, DRAW_SIZE, betaPhase, entropyScore);
+    const betaProb = computeScenarioProbability(betaNumbers, normBeta, 65);
     scenarios.push({
         id: 'beta',
         name: 'Beta Flow',
-        description: 'Intègre les vecteurs secondaires via un décalage de phase trigonométrique harmonique.',
+        description: 'Intègre les harmoniques secondaires via un décalage de phase trigonométrique orbital.',
         numbers: betaNumbers,
         probability: betaProb,
         risk: betaProb >= 75 ? 'LOW' : 'MEDIUM',
-        color: '#6366f1'
+        color: '#6366f1',
+        genomicProfile: {
+            focus: 'Harmonique orbitale et alignement de phase spectral',
+            entropyRegimeAdaptive: false,
+            macroFingerprint: computeScenarioMacroFingerprint(betaNumbers)
+        }
     });
 
-    // SCÉNARIO GAMMA : GAMMA BURST (Accélération Cinétique / Momentum Pur)
+    // SCÉNARIO GAMMA : GAMMA BURST (Amplification sur les numéros à forte accélération de tamisage ΔM_n > 0)
     const gammaVector = new Float64Array(MAX_NUM + 1);
     for (let i = 1; i <= MAX_NUM; i++) {
-        gammaVector[i] = (normalizedVector[i] * (1.0 - gammaRatio)) + (normalizedMomentum[i] * gammaRatio);
+        const momentumComp = (stdMomentum[i] + 2.0) * gammaRatio;
+        const sieveAccComp = (stdDeltaSieve[i] + 2.0) * 1.5; // Amplification directe de l'accélération de tamisage ΔM_n > 0
+        gammaVector[i] = (normalizedVector[i] * (1.0 - gammaRatio) * 0.4) + (momentumComp * 0.3) + (sieveAccComp * 0.3);
     }
+    const normGamma = normalizeVector(gammaVector);
     const gammaPhase = (Math.PI / 2.0) * freqPhase;
-    const gammaNumbers = greedyDeterministicSelection(gammaVector, DRAW_SIZE, gammaPhase, entropyScore);
-    const gammaProb = computeScenarioProbability(gammaNumbers, gammaVector, 58);
+    const gammaNumbers = greedyDeterministicSelection(normGamma, DRAW_SIZE, gammaPhase, entropyScore);
+    const gammaProb = computeScenarioProbability(gammaNumbers, normGamma, 58);
     scenarios.push({
         id: 'gamma',
         name: 'Gamma Burst',
-        description: 'Cible la vélocité et l\'accélération statistique pure (Momentum absolu).',
+        description: 'Amplification sur les numéros à forte accélération de tamisage (ΔM_n > 0) et momentum pur.',
         numbers: gammaNumbers,
         probability: gammaProb,
         risk: gammaProb >= 75 ? 'MEDIUM' : 'HIGH',
-        color: '#f43f5e'
+        color: '#f43f5e',
+        genomicProfile: {
+            focus: 'Amplification cinétique sur accélération de tamisage ΔM_n > 0',
+            sieveAccelerationDelta: parseFloat(maxDeltaSieve.toFixed(3)),
+            entropyRegimeAdaptive: false,
+            macroFingerprint: computeScenarioMacroFingerprint(gammaNumbers)
+        }
     });
 
     // SCÉNARIO DELTA : DELTA CONVERGENCE (Restitution d'Écart Asymétrique)
@@ -427,9 +503,10 @@ export async function generatePlatinumPredictionCore(
     for (let i = 1; i <= MAX_NUM; i++) {
         deltaVector[i] = (normalizedVector[i] * (1.0 - deltaRatio)) + (normalizedGap[i] * deltaRatio);
     }
+    const normDelta = normalizeVector(deltaVector);
     const deltaPhase = (3.0 * Math.PI / 4.0) * freqPhase;
-    const deltaNumbers = greedyDeterministicSelection(deltaVector, DRAW_SIZE, deltaPhase, entropyScore);
-    const deltaProb = computeScenarioProbability(deltaNumbers, deltaVector, 60);
+    const deltaNumbers = greedyDeterministicSelection(normDelta, DRAW_SIZE, deltaPhase, entropyScore);
+    const deltaProb = computeScenarioProbability(deltaNumbers, normDelta, 60);
     scenarios.push({
         id: 'delta',
         name: 'Delta Convergence',
@@ -437,7 +514,12 @@ export async function generatePlatinumPredictionCore(
         numbers: deltaNumbers,
         probability: deltaProb,
         risk: deltaProb >= 75 ? 'MEDIUM' : 'HIGH',
-        color: '#f59e0b'
+        color: '#f59e0b',
+        genomicProfile: {
+            focus: 'Restitution d\'écart asymétrique et bascule de cycle',
+            entropyRegimeAdaptive: false,
+            macroFingerprint: computeScenarioMacroFingerprint(deltaNumbers)
+        }
     });
 
     // SCÉNARIO EPSILON : EPSILON FORENSIC (Correction Agentique Résiduelle)
@@ -497,22 +579,28 @@ export async function generatePlatinumPredictionCore(
         numbers: epsilonNumbers,
         probability: epsilonProb,
         risk: epsilonProb >= 75 ? 'LOW' : 'MEDIUM',
-        color: '#8b5cf6'
+        color: '#8b5cf6',
+        genomicProfile: {
+            focus: 'Correction agentique médico-légale et compensation des dérives',
+            entropyRegimeAdaptive: false,
+            macroFingerprint: computeScenarioMacroFingerprint(epsilonNumbers)
+        }
     });
 
-    // SCÉNARIO ZETA : ZETA ADVERSARIAL (Inversion de Boltzmann / Anti-Consensus)
+    // SCÉNARIO ZETA : ZETA ADVERSARIAL (Exploitation des gènes contre-cycliques en régime de haute entropie)
     const zetaVector = new Float64Array(MAX_NUM + 1);
     const { mean: meanNorm, stdDev: stdNorm } = statsVector;
+    const entropyAmplifier = 1.0 + 2.0 * Math.max(0, entropyScore - 0.45); // Amplification proportionnelle continue à l'entropie de Shannon
 
     for (let i = 1; i <= MAX_NUM; i++) {
         const z = (normalizedVector[i] - meanNorm) / stdNorm;
         // Inversion continue de Boltzmann tempérée par l'entropie
         const boltzmannInv = safeExp(-0.8 * z * (1.0 - 0.5 * entropyScore));
-        const antiConsensus = boltzmannInv * 50.0;
-        const gapModulation = normalizedGap[i] * 0.3;
-        const spectralModulation = normalizedSpectral[i] * 0.2;
+        const antiConsensus = boltzmannInv * 50.0 * entropyAmplifier;
+        const counterCyclicGap = (1.0 - Math.min(1.0, (normalizedGap[i] / 100.0))) * 30.0 * entropyAmplifier;
+        const shadowAffinity = (1.0 - (dnaAffinity[i] / 100.0)) * 25.0 * entropyAmplifier;
         
-        zetaVector[i] = antiConsensus + gapModulation + spectralModulation;
+        zetaVector[i] = antiConsensus + counterCyclicGap + shadowAffinity;
     }
 
     const normZeta = normalizeVector(zetaVector);
@@ -522,11 +610,16 @@ export async function generatePlatinumPredictionCore(
     scenarios.push({
         id: 'zeta',
         name: 'Zeta Adversarial',
-        description: 'Contre-mesure Anti-Consensus. Remodelage continu des probabilités pour éviter la sédimentation.',
+        description: 'Exploitation des gènes contre-cycliques et anti-consensus en régime de haute entropie.',
         numbers: zetaNumbers,
         probability: zetaProb,
         risk: zetaProb >= 70 ? 'HIGH' : 'MEDIUM',
-        color: '#f97316'
+        color: '#f97316',
+        genomicProfile: {
+            focus: 'Contre-mesure anti-consensus et gènes contre-cycliques à haute entropie',
+            entropyRegimeAdaptive: true,
+            macroFingerprint: computeScenarioMacroFingerprint(zetaNumbers)
+        }
     });
 
     // 7. COHÉRENCE GLOBALE ET FINALISATION

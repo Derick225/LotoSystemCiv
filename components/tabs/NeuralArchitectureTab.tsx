@@ -194,11 +194,21 @@ export const NeuralArchitectureTab: React.FC = () => {
       };
     });
 
+    const pathCentrality =
+      sortedPath.reduce((acc, num) => {
+        const node = nodes.find((n) => n.id === num);
+        return acc + (node ? node.centrality / maxCentrality : 0.5);
+      }, 0) / sortedPath.length;
+    const computedConfidence = Math.max(
+      40,
+      Math.min(98, Math.round(50 + pathCentrality * 45)),
+    );
+
     const predictionObj: Prediction = {
       suggestedNumbers: sortedPath,
       candidates: sortedPath,
-      confidence: 80, // Arbitrary confidence
-      analysis: `Architecture Neural Path (Source #${selectedNodeId})`,
+      confidence: computedConfidence,
+      analysis: `Architecture Neural Path (Source #${selectedNodeId}, Centralité: ${(pathCentrality * 100).toFixed(1)}%)`,
       breakdown: breakdown,
       timestamp: Date.now(),
     };

@@ -110,6 +110,17 @@ export interface Prediction {
     dnaConcordanceMean: number;
     affinityPercent?: Record<number, number>;
     multipliers?: Record<number, number>;
+    entropyBits?: number;
+    sieveIntensitySNR?: number;
+    elitesCount?: number;
+    shadowsCount?: number;
+    retentionRatePct?: number;
+    macroFamilies?: {
+      familyKey: string;
+      familyName: string;
+      currentWeightPct: number;
+      sieveEnergyPct: number;
+    }[];
   };
 }
 
@@ -646,6 +657,17 @@ export interface PlatinumScenario {
   probability: number;
   risk: "LOW" | "MEDIUM" | "HIGH";
   color: string;
+  genomicProfile?: {
+    focus: string;
+    mrrBoost?: number;
+    sieveAccelerationDelta?: number;
+    entropyRegimeAdaptive?: boolean;
+    macroFingerprint?: {
+      familyKey: string;
+      familyName: string;
+      energyPct: number;
+    }[];
+  };
 }
 
 export interface PlatinumAudit {

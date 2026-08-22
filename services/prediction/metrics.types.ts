@@ -49,5 +49,16 @@ export interface EnhancedMetrics {
   // NOUVEAU : Bornes statistiques dynamiques pour remplacer les nombres magiques
   statisticalBounds?: StatisticalBounds;
   
+  // Couplage Déterministe ADN & Tamisage (DnaSieve)
+  dnaSieve?: {
+    multipliers: Record<number, number>;
+    affinityPercent: Record<number, number>;
+    dominantAlgos: string[];
+    compositeDna?: Float32Array;
+    dnaConcordanceMean?: number;
+    entropyBits?: number;
+    sieveIntensitySNR?: number;
+  };
+  
   [key: string]: unknown;
 }

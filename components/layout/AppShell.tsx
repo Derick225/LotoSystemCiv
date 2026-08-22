@@ -64,10 +64,19 @@ export const AppShell: React.FC<AppShellProps> = ({
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
 
@@ -365,8 +374,30 @@ export const AppShell: React.FC<AppShellProps> = ({
         <CommandPalette
           isOpen={showPalette}
           onClose={() => setShowPalette(false)}
-          onNavigate={(v) => setViewMode(v as ViewMode)}
-          onAction={() => {}}
+          onNavigate={(v) => {
+            if (v === "home" || v === "admin") {
+              setViewMode(v as ViewMode);
+            } else {
+              window.dispatchEvent(
+                new CustomEvent("CROSS_MODULE_NAVIGATE", {
+                  detail: { view: "home", mainTab: v },
+                }),
+              );
+            }
+          }}
+          onAction={(action) => {
+            if (action === "settings") {
+              if (isAdmin) {
+                setViewMode("admin");
+              } else {
+                window.dispatchEvent(
+                  new CustomEvent("CROSS_MODULE_NAVIGATE", {
+                    detail: { view: "home", mainTab: "intelligence" },
+                  }),
+                );
+              }
+            }
+          }}
         />
       </Suspense>
     </div>

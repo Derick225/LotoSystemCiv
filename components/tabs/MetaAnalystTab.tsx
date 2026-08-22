@@ -12,6 +12,7 @@ import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
 import { TicketXRay } from "../TicketXRay";
 import { PredictionComputationOverlay } from "../prediction/PredictionComputationOverlay";
+import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import {
   Activity,
   Layers,
@@ -101,9 +102,35 @@ const ScenarioCard = React.memo<{
         <h3 className="text-lg font-black text-white uppercase tracking-tight mb-1">
           {scenario.name}
         </h3>
-        <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+        <p className="text-[10px] text-slate-400 font-medium leading-relaxed mb-3">
           {scenario.description}
         </p>
+
+        {scenario.genomicProfile && (
+          <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[9px] space-y-1">
+            <div className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Dna size={12} className="text-indigo-400 shrink-0" />
+              <span className="truncate">{scenario.genomicProfile.focus}</span>
+            </div>
+            <div className="flex flex-wrap gap-1 pt-1">
+              {scenario.genomicProfile.mrrBoost && (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono font-bold">
+                  MRR +{(scenario.genomicProfile.mrrBoost * 100 - 100).toFixed(0)}%
+                </span>
+              )}
+              {scenario.genomicProfile.sieveAccelerationDelta && (
+                <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono font-bold">
+                  ΔM_n &gt; 0 (+{scenario.genomicProfile.sieveAccelerationDelta})
+                </span>
+              )}
+              {scenario.genomicProfile.entropyRegimeAdaptive && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono font-bold">
+                  Haute Entropie
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-6 space-y-4">
@@ -931,17 +958,42 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         </AnimatePresence>
       </div>
 
-      {/* 4. SCENARIO SELECTOR */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {result.scenarios.map((scenario) => (
-          <ScenarioCard
-            key={scenario.id}
-            scenario={scenario}
-            isSelected={selectedScenarioId === scenario.id}
-            onClick={() => handleScenarioClick(scenario.id)}
-            onSave={() => handleSave(scenario)}
-          />
-        ))}
+      {/* 4. RADAR GÉNOMIQUE & SCÉNARIOS STRATÉGIQUES PLATINUM */}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Radio className="text-indigo-400" size={22} />
+            <div>
+              <h3 className="text-base font-black text-white uppercase tracking-wider">
+                6 Scénarios Stratégiques Platinum &amp; Empreinte Spectrale
+              </h3>
+              <p className="text-xs text-slate-400">
+                Superposition déterministe de l'ADN réel du tirage ({drawName}) et du profil spectrale de chaque scénario.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <UnifiedDnaSieveRadar
+          drawName={drawName}
+          initialViewMode="RADAR"
+          scenarios={result.scenarios}
+          selectedScenarioId={selectedScenarioId}
+          onSelectScenarioId={handleScenarioClick}
+        />
+
+        {/* SCENARIO SELECTOR */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {result.scenarios.map((scenario) => (
+            <ScenarioCard
+              key={scenario.id}
+              scenario={scenario}
+              isSelected={selectedScenarioId === scenario.id}
+              onClick={() => handleScenarioClick(scenario.id)}
+              onSave={() => handleSave(scenario)}
+            />
+          ))}
+        </div>
       </div>
 
       {/* 4. DEEP INSPECTION (Conditional) */}

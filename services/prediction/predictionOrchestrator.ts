@@ -121,7 +121,7 @@ export const computeAdvancedMetrics = async (
     resistanceScores, gapVelocityScores, leaderSuccessionScores,
     aiIntuitionScores, fractalResonanceScores, spatialHotSpots,
     symbioticClusterScores, anomalyScores, hawkesExcitationScores,
-    topologicalLyapunovScores
+    topologicalLyapunovScores, dnaSievePrior
   ] = await Promise.all([
     Promise.resolve().then(() => calculatePoissonScores(localHistoryContext)),
     Promise.resolve().then(() => calculateBayesianScore(localHistoryContext, hyperparameters.bayesWindowRatio)),
@@ -139,7 +139,8 @@ export const computeAdvancedMetrics = async (
       ? calculateSpatioTemporalHawkes(localHistoryContext, drawName)
       : calculateHawkesExcitation(localHistoryContext)
     ),
-    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon))
+    Promise.resolve().then(() => calculateTopologicalLyapunov(localHistoryContext, hyperparameters.lyapunovHorizon)),
+    Promise.resolve().then(() => calculateDnaSieveWeights(localHistoryContext, undefined, drawName))
   ]);
 
   for (const k in gapVelocityScores) {
@@ -148,6 +149,9 @@ export const computeAdvancedMetrics = async (
   for (const k in hawkesExcitationScores) {
     hawkesExcitationScores[k] *= ((hyperparameters.hawkesDecay || TUNING.DEFAULT_HAWKES_DECAY) / TUNING.DEFAULT_HAWKES_DECAY);
   }
+
+  const snr = (dnaSievePrior.stdDevDna || 0.1) / (dnaSievePrior.meanDna || 1.0);
+  const sieveIntensitySNR = parseFloat(Math.min(99.9, Math.max(10.0, snr * 250)).toFixed(1));
 
   return {
     ...metrics,
@@ -164,7 +168,16 @@ export const computeAdvancedMetrics = async (
     symbioticClusters: symbioticClusterScores,
     anomaly: anomalyScores,
     hawkesExcitation: hawkesExcitationScores,
-    topologicalLyapunov: topologicalLyapunovScores
+    topologicalLyapunov: topologicalLyapunovScores,
+    dnaSieve: {
+      multipliers: dnaSievePrior.multipliers,
+      affinityPercent: dnaSievePrior.affinityPercent,
+      dominantAlgos: dnaSievePrior.dominantAlgos,
+      compositeDna: dnaSievePrior.compositeDna,
+      dnaConcordanceMean: dnaSievePrior.dnaConcordanceMean,
+      entropyBits: dnaSievePrior.entropyBits,
+      sieveIntensitySNR
+    }
   };
 };
 
@@ -389,6 +402,7 @@ export const applyPredictionDenoising = async (
 /**
  * Applique le Tamis de l'ADN Algorithmique Actuel (DnaSieve)
  * Modulation différentiable continue par les poids et résonances dominantes
+ * Couplé directement avec le Radar Macro-Algorithmique et la sélection
  * (ZÉRO NOMBRE MAGIQUE, 100% CONTINU & DÉTERMINISTE).
  */
 export const applyPredictionDnaSieve = (
@@ -402,15 +416,29 @@ export const applyPredictionDnaSieve = (
     dnaConcordanceMean: number;
     multipliers: Record<number, number>;
     affinityPercent: Record<number, number>;
+    entropyBits: number;
+    sieveIntensitySNR: number;
+    elitesCount: number;
+    shadowsCount: number;
+    retentionRatePct: number;
+    macroFamilies: {
+      familyKey: string;
+      familyName: string;
+      currentWeightPct: number;
+      sieveEnergyPct: number;
+    }[];
   };
 } => {
-  const { multipliers, affinityPercent, dominantAlgos } = calculateDnaSieveWeights(
+  const dnaReport = calculateDnaSieveWeights(
     context.history,
     weights,
     context.drawName
   );
+  const { multipliers, affinityPercent, dominantAlgos, entropyBits, meanDna, stdDevDna } = dnaReport;
 
   let sumAffinity = 0;
+  let elitesCount = 0;
+  let shadowsCount = 0;
   const multipliersRecord: Record<number, number> = {};
   const affinityRecord: Record<number, number> = {};
 
@@ -419,10 +447,14 @@ export const applyPredictionDnaSieve = (
     const dnaMult = multipliers[num] ?? 1.0;
     const dnaAff = affinityPercent[num] ?? 50.0;
     sumAffinity += dnaAff;
+    
+    if (dnaMult >= 1.12) elitesCount++;
+    else if (dnaMult <= 0.88) shadowsCount++;
+
     multipliersRecord[num] = parseFloat(dnaMult.toFixed(3));
     affinityRecord[num] = Math.round(dnaAff);
 
-    // Tamisage différentiable continu par l'ADN algorithmique du moment (ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE):
+    // Tamisage différentiable continu par l'ADN algorithmique du moment:
     // 35% d'inertie du score vectoriel + 65% de modulation continue par le tamis ADN actif
     const modulationFactor = 0.35 + 0.65 * dnaMult;
     const modulatedScore = sn.score * modulationFactor;
@@ -437,6 +469,41 @@ export const applyPredictionDnaSieve = (
   });
 
   const dnaConcordanceMean = Math.round(sumAffinity / Math.max(1, scores.length));
+  const snr = (stdDevDna || 0.1) / (meanDna || 1.0);
+  const sieveIntensitySNR = parseFloat(Math.min(99.9, Math.max(10.0, snr * 250)).toFixed(1));
+  const retentionRatePct = parseFloat(((elitesCount / 90) * 100).toFixed(1));
+
+  // Dérivation vectorielle des 6 macro-familles pour le Radar Algorithmique
+  const macroFamilyDefinitions = [
+    { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', algos: ['frequency', 'markov', 'affinity', 'cohort'] },
+    { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', algos: ['gaps', 'gap_sequence', 'gap_cadence', 'gap_trend', 'gap_band_sequence'] },
+    { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', algos: ['temporal', 'inter_monthly_resonance', 'isolation_anomaly', 'cross_entropy'] },
+    { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', algos: ['spectral'] },
+    { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', algos: ['spatial', 'fractal'] },
+    { key: 'MACHINE_BAYES', name: 'Machine & Bayes', algos: ['machine_transfer', 'bayes', 'shadow_probability', 'consecutive'] }
+  ];
+
+  const totalWeightsSum = Object.values(weights).reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0) || 1.0;
+
+  const macroFamilies = macroFamilyDefinitions.map(fam => {
+    let famWeightSum = 0;
+    fam.algos.forEach(algo => {
+      famWeightSum += (weights as Record<string, number>)[algo] || 0;
+    });
+    const currentWeightPct = parseFloat(((famWeightSum / totalWeightsSum) * 100).toFixed(1));
+    
+    // Énergie du tamisage dérivée de la concordance ADN et des multiplicateurs
+    const sieveEnergyPct = parseFloat(
+      Math.min(100, Math.max(5, currentWeightPct * (0.8 + 0.4 * (dnaConcordanceMean / 50)))).toFixed(1)
+    );
+
+    return {
+      familyKey: fam.key,
+      familyName: fam.name,
+      currentWeightPct,
+      sieveEnergyPct
+    };
+  });
 
   return {
     sievedScores,
@@ -444,7 +511,13 @@ export const applyPredictionDnaSieve = (
       dominantAlgos,
       dnaConcordanceMean,
       multipliers: multipliersRecord,
-      affinityPercent: affinityRecord
+      affinityPercent: affinityRecord,
+      entropyBits: entropyBits || 0,
+      sieveIntensitySNR,
+      elitesCount,
+      shadowsCount,
+      retentionRatePct,
+      macroFamilies
     }
   };
 };

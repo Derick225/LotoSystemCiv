@@ -175,6 +175,17 @@ export const finalizePredictionPayload = async (
     dnaConcordanceMean: number;
     affinityPercent?: Record<number, number>;
     multipliers?: Record<number, number>;
+    entropyBits?: number;
+    sieveIntensitySNR?: number;
+    elitesCount?: number;
+    shadowsCount?: number;
+    retentionRatePct?: number;
+    macroFamilies?: {
+      familyKey: string;
+      familyName: string;
+      currentWeightPct: number;
+      sieveEnergyPct: number;
+    }[];
   }
 ): Promise<Prediction> => {
   const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);

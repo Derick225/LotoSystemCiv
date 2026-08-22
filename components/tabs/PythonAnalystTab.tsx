@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Code,
   Copy,
+  Check,
   Sliders,
   GitCompare,
   Cpu,
@@ -36,51 +37,70 @@ const CodeCell: React.FC<{
   content: string;
   onExecute?: () => void;
   isExecuting?: boolean;
-}> = ({ content, onExecute, isExecuting }) => (
-  <div className="bg-[#0d1117] rounded-xl border border-slate-700 overflow-hidden mb-4 shadow-lg group">
-    <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-slate-700">
-      <span className="text-xs font-mono text-slate-400 font-bold flex items-center gap-2">
-        <Code size={12} /> deep_kernel_rkhs.py
-      </span>
-      <div className="flex gap-2">
-        <button className="text-slate-500 hover:text-white" title="Copy">
-          <Copy size={12} />
-        </button>
-        {onExecute && (
+}> = ({ content, onExecute, isExecuting }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      audioEngine.play("click");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+    }
+  };
+
+  return (
+    <div className="bg-[#0d1117] rounded-xl border border-slate-700 overflow-hidden mb-4 shadow-lg group">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-slate-700">
+        <span className="text-xs font-mono text-slate-400 font-bold flex items-center gap-2">
+          <Code size={12} /> deep_kernel_rkhs.py
+        </span>
+        <div className="flex gap-2">
           <button
-            onClick={onExecute}
-            disabled={isExecuting}
-            className="text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+            onClick={handleCopy}
+            className="text-slate-500 hover:text-white transition-colors flex items-center gap-1"
+            title="Copier le code"
           >
-            {isExecuting ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <Play size={14} />
-            )}
+            {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
           </button>
-        )}
+          {onExecute && (
+            <button
+              onClick={onExecute}
+              disabled={isExecuting}
+              className="text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+            >
+              {isExecuting ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="p-4 overflow-x-auto font-mono text-sm leading-relaxed">
+        <pre className="text-slate-300 col-span-1">
+          <code
+            dangerouslySetInnerHTML={{
+              __html: content
+                .replace(/import/g, '<span class="text-purple-400">import</span>')
+                .replace(/from/g, '<span class="text-purple-400">from</span>')
+                .replace(/def /g, '<span class="text-blue-400">def </span>')
+                .replace(/return/g, '<span class="text-purple-400">return</span>')
+                .replace(
+                  /#.*/g,
+                  (match) =>
+                    `<span class="text-slate-500 italic">${match}</span>`,
+                ),
+            }}
+          />
+        </pre>
       </div>
     </div>
-    <div className="p-4 overflow-x-auto font-mono text-sm leading-relaxed">
-      <pre className="text-slate-300 col-span-1">
-        <code
-          dangerouslySetInnerHTML={{
-            __html: content
-              .replace(/import/g, '<span class="text-purple-400">import</span>')
-              .replace(/from/g, '<span class="text-purple-400">from</span>')
-              .replace(/def /g, '<span class="text-blue-400">def </span>')
-              .replace(/return/g, '<span class="text-purple-400">return</span>')
-              .replace(
-                /#.*/g,
-                (match) =>
-                  `<span class="text-slate-500 italic">${match}</span>`,
-              ),
-          }}
-        />
-      </pre>
-    </div>
-  </div>
-);
+  );
+};
 
 // Composant Output Console
 const OutputCell: React.FC<{ content: string }> = ({ content }) => (
