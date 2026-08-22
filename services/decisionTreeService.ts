@@ -311,7 +311,7 @@ const extractNumericFeatures = (
   
   const trapFeature = 1.0 / (1.0 + Math.exp(-(zConsensus - datasetStats.trapThresholdZ)));
 
-  // D. Norm Gap (Pression de retard asymétrique cumulée)
+  // D. Norm Gap (Pression de retard asymétrique cumulée continue via logistique)
   const normGapFeature = 1.0 / (1.0 + Math.exp(-zGap));
 
   const allFeatures = [
@@ -328,7 +328,7 @@ const extractNumericFeatures = (
 };
 
 /**
- * Construit la carte de consensus (fréquence globale normalisée).
+ * Construit la carte de consensus (fréquence globale normalisée de manière robuste).
  */
 export const buildConsensusMap = (history: DrawResult[]): Record<number, number> => {
   const consensusMap: Record<number, number> = {};
@@ -432,6 +432,8 @@ export const runDecisionForest = async (
     active: boolean;
     dominantAlgos: string[];
     dnaConcordanceMean: number;
+    sieveIntensityPercent?: number;
+    entropyBits?: number;
   }
 }> => {
   const startTime = Date.now();
@@ -598,6 +600,8 @@ export const runDecisionForest = async (
       active: boolean;
       dominantAlgos: string[];
       dnaConcordanceMean: number;
+      sieveIntensityPercent?: number;
+      entropyBits?: number;
     }
   }>((resolve, reject) => {    
     const worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
@@ -619,7 +623,12 @@ export const runDecisionForest = async (
       }
 
       // Calcul du Tamis de l'ADN Algorithmique Actuel (Tamis ADN Actif - ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
-      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos } = calculateDnaSieveWeights(history, weights, activeDrawName);
+      const dnaReport = calculateDnaSieveWeights(history, weights, activeDrawName);
+      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna } = dnaReport;
+
+      // Intensité du tamisage différentiable continu basée sur le SNR de l'ADN
+      const snrDna = (stdDevDna || 0.1) / 0.1;
+      const dynamicSieveIntensity = 1.0 / (1.0 + Math.exp(-1.5 * (snrDna - 1.0)));
 
       // Calcul des distances de Mahalanobis pour le Mode Ombre
       const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);
@@ -632,9 +641,15 @@ export const runDecisionForest = async (
         const dnaMult = dnaMultipliers[num] ?? 1.0;
         const dnaAff = dnaAffinity[num] ?? 50.0;
 
-        // Tamisage différentiable continu par l'ADN algorithmique du moment:
-        // 35% d'inertie de l'arbre + 65% de modulation continue par l'ADN actif
-        const sievedScore = Math.max(0, Math.min(100, Math.round(rawScore * (0.35 + 0.65 * dnaMult))));
+        // Tamisage différentiable continu par l'ADN algorithmique du moment
+        // Modulation continue dérivée du SNR de l'ADN sans seuil arbitraire :
+        const sievedScore = Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(rawScore * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult))
+          )
+        );
         const isDnaBoosted = dnaMult > 1.05;
 
         // Génération du chemin de décision sur l'arbre primaire
@@ -683,7 +698,7 @@ export const runDecisionForest = async (
 
         const dnaMult = v.dnaMultiplier ?? 1.0;
         // Tamisage de l'affinité de classement par l'ADN algorithmique
-        const sievedAffinity = baseAffinity * (0.35 + 0.65 * dnaMult);
+        const sievedAffinity = baseAffinity * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult);
 
         return { vote: v, affinity: sievedAffinity };
       });
@@ -718,6 +733,7 @@ export const runDecisionForest = async (
         sumDnaAffinity += dnaAffinity[n] ?? 50;
       }
       const dnaConcordanceMean = Math.round(sumDnaAffinity / 90);
+      const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
 
       resolve({ 
         votes: sortedByAffinity.slice(0, 20), 
@@ -725,7 +741,9 @@ export const runDecisionForest = async (
         dnaSieveInfo: {
           active: true,
           dominantAlgos,
-          dnaConcordanceMean
+          dnaConcordanceMean,
+          sieveIntensityPercent,
+          entropyBits: dnaReport.entropyBits
         }
       });    
     };

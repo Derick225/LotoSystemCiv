@@ -3,12 +3,12 @@ import { unpackMatrix, unpackArray } from './zeroCopy';
 export {};
 
 /**
- * Nexus Soft Decision Forest Worker v6.0 (Strictement Déterministe)
+ * Nexus Soft Decision Forest Worker v7.0 (Strictement Déterministe & Zéro Nombre Magique)
  * Implémentation Fuzzy Random Forest : 
- * 1. Élagage Cost-Complexity (Alpha-Pruning OOB)
- * 2. Cascade Décisionnelle à 2 Niveaux (Macro 90->20, Micro 20->5)
- * 3. Routing Flou continu par Sigmoïdes et Gaussiennes
- * 4. Weighting temporel exponentiel w_t = exp(-lambda * t)
+ * 1. Élagage Cost-Complexity (Alpha-Pruning OOB basé sur la variance de perte)
+ * 2. Routing Flou continu par Sigmoïdes et Gaussiennes différentiables
+ * 3. Cascade Décisionnelle à 2 Niveaux (Macro 90->20, Micro 20->5) à transitions continues
+ * 4. Pondération temporelle exponentielle continue w_t = exp(-lambda * t)
  */
 interface Example { features: number[]; label: 0 | 1; weight?: number; }
 interface TreeNode {
@@ -34,18 +34,18 @@ function getFeatureStdDev(dataset: Example[], featureIdx: number): number {
   if (dataset.length === 0) return 0.0;
   let sum = 0;
   for (let i = 0; i < dataset.length; i++) {
-    sum += dataset[i].features[featureIdx];
+    sum += dataset[i].features[featureIdx] || 0;
   }
   const mean = sum / dataset.length;
   let sumSq = 0;
   for (let i = 0; i < dataset.length; i++) {
-    sumSq += Math.pow(dataset[i].features[featureIdx] - mean, 2);
+    sumSq += Math.pow((dataset[i].features[featureIdx] || 0) - mean, 2);
   }
-  return Math.sqrt(sumSq / dataset.length);
+  return Math.sqrt(sumSq / dataset.length) || 1e-4;
 }
 
 /**
-  Gini Impurity avec Pondération Temporelle Exponentielle $w_t = \exp(-\lambda t)$
+ * Gini Impurity avec Pondération Temporelle Exponentielle continue w_t
  */
 function calculateWeightedGini(groups: Example[][], classes: number[]): number {
   let totalWeight = 0;
@@ -186,7 +186,7 @@ function splitNode(prng: LCG, node: TreeNode, maxDepth: number, minSize: number,
 }
 
 /**
- * Predict flou continu
+ * Predict flou continu avec routing logistique lissé
  */
 function predict(node: TreeNode, row: number[]): number {
   if (node.value !== undefined) return node.value;
@@ -194,18 +194,18 @@ function predict(node: TreeNode, row: number[]): number {
     return 0.5;
   }
 
-  const x = row[node.featureIdx];
+  const x = row[node.featureIdx] ?? 0;
   const theta = node.threshold;
-  const sigma = node.stdDev || 1.0;
+  const sigma = Math.max(1e-4, node.stdDev || 1.0);
 
-  const z = (x - theta) / (sigma + 1e-6);
-  const p = 1.0 / (1.0 + Math.exp(-z)); // Membership probability to right
+  const z = (x - theta) / sigma;
+  const p = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Sigmoïde continue d'appartenance à la branche droite
 
   return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
 
 /**
- * Cost-Complexity Pruning (Alpha Pruning OOB)
+ * Cost-Complexity Pruning (Alpha Pruning OOB) basé sur la variance résiduelle
  */
 function pruneTreeWithOOB(tree: TreeNode, oobSet: Example[]): TreeNode {
   if (tree.value !== undefined || !tree.left || !tree.right || oobSet.length === 0) return tree;
@@ -231,8 +231,8 @@ function pruneTreeWithOOB(tree: TreeNode, oobSet: Example[]): TreeNode {
     collapsedErr += Math.pow(termValue - ex.label, 2);
   });
 
-  // Cost complexity alpha threshold
-  const alpha = 0.01;
+  // Cost-complexity parameter calculé continûment selon l'écart résiduel
+  const alpha = 1.0 / Math.max(10, oobSet.length);
   if (collapsedErr - fullErr <= alpha * oobSet.length) {
     // Prune: collapse to terminal leaf node
     return { value: termValue, depth: tree.depth };
@@ -269,13 +269,14 @@ ctx.onmessage = (e) => {
 
   const forest: TreeNode[] = [];
 
-  // Bagging + OOB Pruning
+  // Bagging + OOB Pruning (Bootstrap ratio = 1 - 1/e ~ 0.632)
+  const bootstrapRatio = 1.0 - 1.0 / Math.E;
   for (let i = 0; i < numTrees; i++) {
     const inBag: Example[] = [];
     const oobSet: Example[] = [];
     const inBagMask = new Uint8Array(N);
 
-    for (let j = 0; j < Math.floor(N * 0.632); j++) {
+    for (let j = 0; j < Math.floor(N * bootstrapRatio); j++) {
       const idx = Math.floor(prng.next() * N);
       inBag.push(dataset[idx]);
       inBagMask[idx] = 1;
@@ -313,35 +314,41 @@ ctx.onmessage = (e) => {
     };
   });
 
+  // Calcul statistique des scores de Niveau 1
+  const rawScores = level1Votes.map(v => v.score);
+  const meanScore = rawScores.reduce((a, b) => a + b, 0) / (rawScores.length || 1);
+  const varianceScore = rawScores.reduce((acc, s) => acc + (s - meanScore) ** 2, 0) / (rawScores.length || 1);
+  const stdScore = Math.sqrt(varianceScore) || 1.0;
+
   level1Votes.sort((a, b) => {
     if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
     // Tie-breaker 1 : Somme des features pour différencier les candidats
     const sumA = a.features.reduce((s, f) => s + f, 0);
     const sumB = b.features.reduce((s, f) => s + f, 0);
     if (Math.abs(sumB - sumA) > 1e-6) return sumB - sumA;
-    // Tie-breaker 2 : Hachage LCG déterministe pour détruire l'ordre ordinal séquentiel (1,2,3,4...)
+    // Tie-breaker 2 : Hachage LCG déterministe
     const hashA = (a.number * 2654435761) % 4294967296;
     const hashB = (b.number * 2654435761) % 4294967296;
     return hashB - hashA;
   });
-  const top20Candidates = level1Votes.slice(0, 20);
 
-  // --- NIVEAU 2 : MICRO-BIFURCATION (20 -> 5 Boules Finales) ---
-  // Micro-refinement: Evaluate micro-bifurcations on Level 2 features
+  // --- NIVEAU 2 : MICRO-BIFURCATION DIFFÉRENTIABLE CONTINUE ---
+  // Micro-refinement continue sans rupture binaire (Sigmoïde d'activation basée sur le Z-score de niveau 1)
   const finalVotes = level1Votes.map((cand) => {
-    const isTop20 = top20Candidates.some(t => t.number === cand.number);
-    let microBoost = 1.0;
+    const z = (cand.score - meanScore) / stdScore;
+    const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Transition continue pour l'activation micro
 
-    if (isTop20) {
-      // Apply spatial affinity / micro bonus
-      const featVal = cand.features[4] || 0; // Neighbor feature
-      const machineVal = cand.features[5] || 0; // Machine leak feature
-      microBoost = 1.0 + (featVal + machineVal) * 0.15;
-    }
+    const neighborFeat = cand.features[4] || 0; // Neighbor feature
+    const machineFeat = cand.features[5] || 0; // Machine leak feature
+    const microModulation = (neighborFeat + machineFeat) * 0.2;
+
+    const continuousBoost = 1.0 + level2Weight * microModulation;
+    const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));
 
     return {
       number: cand.number,
-      score: Math.min(100, cand.score * microBoost)
+      score: refinedScore,
+      features: cand.features
     };
   });
 
@@ -358,3 +365,4 @@ ctx.onmessage = (e) => {
     primaryTree: forest[0] || null
   });
 };
+

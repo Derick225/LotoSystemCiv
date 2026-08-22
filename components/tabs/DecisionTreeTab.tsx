@@ -73,6 +73,8 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
     active: boolean;
     dominantAlgos: string[];
     dnaConcordanceMean: number;
+    sieveIntensityPercent?: number;
+    entropyBits?: number;
   } | null>(null);
   const [diagnostics, setDiagnostics] = useState<{
     giniImpurity?: number;
@@ -243,7 +245,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 </h3>
                 <div className="flex flex-wrap items-center gap-2 mt-1">
                   <span className="text-[9px] font-black tracking-widest text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full inline-block">
-                    Fuzzy Soft Forest v5.2
+                    Fuzzy Soft Forest v7.0 (Strictement Déterministe)
                   </span>
                   {diagnostics && (
                     <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
@@ -253,7 +255,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   {dnaSieveInfo && (
                     <span className="text-[9px] font-black tracking-widest text-amber-300 uppercase bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                       <Sparkles size={10} className="text-amber-400" />
-                      Tamis ADN : {dnaSieveInfo.dominantAlgos.slice(0, 2).join(' • ') || 'Actif'} ({dnaSieveInfo.dnaConcordanceMean}%)
+                      Tamis ADN : {dnaSieveInfo.dominantAlgos.slice(0, 2).join(' • ') || 'Actif'} ({dnaSieveInfo.dnaConcordanceMean}% • Tamisage: {dnaSieveInfo.sieveIntensityPercent ?? 60}%)
                     </span>
                   )}
                 </div>

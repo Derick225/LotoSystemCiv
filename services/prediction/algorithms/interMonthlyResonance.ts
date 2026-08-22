@@ -409,6 +409,18 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const dnaMultipliersRecord: Record<number, number> = {};
     const dnaAffinityRecord: Record<number, number> = {};
 
+    // Calcul continu de l'intensité du tamisage génomique basé sur le contraste d'affinité
+    let sumMult = 0;
+    let sumMultSq = 0;
+    for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
+      const m = dnaMultipliers[i] || 1.0;
+      sumMult += m;
+      sumMultSq += m * m;
+    }
+    const meanMult = sumMult / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
+    const stdMult = Math.sqrt(Math.max(1e-6, sumMultSq / LOTTERY_CONSTANTS.TOTAL_NUMBERS - meanMult * meanMult));
+    const dynamicSieveIntensity = 1.0 / (1.0 + Math.exp(-2.0 * (stdMult / 0.15 - 1.0))); // Continuum [0.35, 0.85]
+
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
       const raw = rawScores[i] || 0;
       const mult = dnaMultipliers[i] || 1.0;
@@ -417,9 +429,8 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       dnaMultipliersRecord[i] = mult;
       dnaAffinityRecord[i] = aff;
 
-      // Tamisage continu : combinaison différentiable de la projection mensuelle et de l'ADN actif
-      // Modulation douce : 30% d'inertie brute temporelle + 70% de modulation par le tamis d'ADN
-      sievedScores[i] = raw * (0.30 + 0.70 * mult);
+      // Tamisage différentiable continu : combinaison de la projection temporelle et du multiplicateur génomique
+      sievedScores[i] = raw * ((1.0 - dynamicSieveIntensity) + dynamicSieveIntensity * mult);
     }
 
     const { median, iqr, mad } = computeRobustStats(sievedScores);

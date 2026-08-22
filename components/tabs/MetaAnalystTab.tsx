@@ -30,6 +30,8 @@ import {
   CheckCircle2,
   History,
   Cpu,
+  Dna,
+  ShieldCheck,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -495,10 +497,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
       {/* 1. MISSION CONTROL HEADER */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-            Cohérence
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <span>Cohérence</span>
+            <ShieldCheck size={14} className="text-emerald-400" />
           </span>
-          <div className="text-2xl font-black text-white flex items-center gap-2">
+          <div className="mt-2 text-2xl font-black text-white flex items-center gap-2">
             {result.coherence}%
             <Activity
               size={16}
@@ -507,36 +510,67 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
               }
             />
           </div>
-        </div>
-        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-            Entropie
+          <span className="text-[9px] font-mono text-slate-500 mt-1">
+            H = {result.entropy.toFixed(3)} bit/sym
           </span>
-          <div className="text-2xl font-black text-white flex items-center gap-2">
-            {result.entropy.toFixed(2)}
-            <Radio size={16} className="text-indigo-500" />
-          </div>
         </div>
+
         <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
-            Régime
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <span>Tamis ADN Actif</span>
+            <Dna size={14} className="text-violet-400" />
+          </span>
+          <div className="mt-2 text-2xl font-black text-violet-400 flex items-center gap-2">
+            {result.dnaSieveInfo?.dnaConcordanceMean ?? 50}%
+          </div>
+          <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
+            Intensité : {result.dnaSieveInfo?.sieveIntensityPercent ?? 50}%
+          </span>
+        </div>
+
+        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <span>Régime</span>
+            <span className="text-[9px] font-mono text-slate-400">
+              {result.regimeProbabilities?.stable ?? 0}% S
+            </span>
           </span>
           <div
-            className={`text-xl font-black uppercase ${result.regime === "STABLE" ? "text-emerald-400" : result.regime === "CHAOTIC" ? "text-rose-400" : "text-amber-400"}`}
+            className={`mt-2 text-xl font-black uppercase ${result.regime === "STABLE" ? "text-emerald-400" : result.regime === "CHAOTIC" ? "text-rose-400" : "text-amber-400"}`}
           >
             {result.regime}
           </div>
+          {result.regimeProbabilities && (
+            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex mt-2">
+              <div
+                className="bg-emerald-500 h-full"
+                style={{ width: `${result.regimeProbabilities.stable}%` }}
+                title={`Stable: ${result.regimeProbabilities.stable}%`}
+              />
+              <div
+                className="bg-amber-500 h-full"
+                style={{ width: `${result.regimeProbabilities.transition}%` }}
+                title={`Transition: ${result.regimeProbabilities.transition}%`}
+              />
+              <div
+                className="bg-rose-500 h-full"
+                style={{ width: `${result.regimeProbabilities.chaotic}%` }}
+                title={`Chaotique: ${result.regimeProbabilities.chaotic}%`}
+              />
+            </div>
+          )}
         </div>
+
         <button
           onClick={runAnalysis}
-          className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl flex flex-col items-center justify-center text-white transition-colors group"
+          className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl p-4 flex flex-col items-center justify-center text-white transition-colors group shadow-lg shadow-indigo-600/20 active:scale-95"
         >
           <RefreshCw
             size={20}
             className="mb-1 group-hover:rotate-180 transition-transform duration-300"
           />
           <span className="text-xs font-black uppercase tracking-widest">
-            Re-Scan
+            Re-Scan Déterministe
           </span>
         </button>
       </div>

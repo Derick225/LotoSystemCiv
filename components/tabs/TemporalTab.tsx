@@ -277,24 +277,24 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-gradient-to-r from-slate-900/60 via-indigo-950/30 to-slate-900/60 p-6 md:p-8 rounded-3xl border border-indigo-500/20 shadow-2xl relative overflow-hidden"
+          className="bg-gradient-to-br from-slate-900/80 via-indigo-950/40 to-slate-900/90 p-6 md:p-8 rounded-3xl border border-indigo-500/30 shadow-2xl relative overflow-hidden"
         >
           <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
-            <Dna size={160} className="text-indigo-400" />
+            <Dna size={180} className="text-indigo-400" />
           </div>
 
           <div className="flex flex-col lg:flex-row gap-8 items-start relative z-10">
             {/* Info Card & DNA Sieve Breakdown */}
             <div className="lg:w-5/12 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-amber-500/10 rounded-2xl text-amber-400 border border-amber-500/30">
-                  <Dna size={20} />
+                <div className="p-2.5 bg-amber-500/10 rounded-2xl text-amber-400 border border-amber-500/30 shadow-inner">
+                  <Dna size={22} />
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-400 block">
                     Couplage Cohorte & Génome Algorithmique
                   </span>
-                  <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
                     Résonance Inter-Mensuelle & Tamis ADN
                   </h3>
                 </div>
@@ -305,26 +305,49 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <span className="text-white font-bold">{crossMonthResonance.currentMonthName}</span>, similarité cosinus{" "}
                 <strong className="text-emerald-400 font-mono">
                   {(crossMonthResonance.correlation * 100).toFixed(1)}%
-                </strong>). Les projections brutes sont filtrées par un tamis génomique à 6 dimensions mathématiques continues.
+                </strong>). Les projections multivariées de cohorte sont filtrées par le tamis continu de l'ADN algorithmique actif.
               </p>
 
-              {/* Concordance Gauge */}
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-indigo-500/20 space-y-2">
+              {/* Concordance Gauge & Telemetry Box */}
+              <div className="p-4 rounded-2xl bg-slate-950/70 border border-indigo-500/20 space-y-3">
                 <div className="flex items-center justify-between text-[11px] font-black text-indigo-300 uppercase tracking-wide">
                   <span className="flex items-center gap-1.5"><Activity size={14} className="text-emerald-400" /> Concordance ADN Moyenne</span>
                   <span className="text-emerald-400 font-mono font-bold text-sm">{crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean || 50}%</span>
                 </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden p-0.5">
                   <div 
-                    className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400"
+                    className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 rounded-full transition-all duration-700"
                     style={{ width: `${crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean || 50}%` }}
                   />
                 </div>
-                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
-                  <span>Algorithmes Dominants :</span>
-                  <span className="text-amber-400 font-bold font-mono">
-                    {crossMonthResonance.dnaSieveInfo?.dominantAlgos?.join(" • ") || "Global"}
+                <div className="grid grid-cols-2 gap-2 pt-1 text-[10px] border-t border-slate-800/80">
+                  <div>
+                    <span className="text-slate-500 uppercase font-black block">Intensité Tamis :</span>
+                    <span className="text-amber-400 font-mono font-bold">
+                      {crossMonthResonance.dnaSieveInfo?.sieveIntensityPercent ?? 65}%
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-500 uppercase font-black block">Entropie Shannon :</span>
+                    <span className="text-cyan-300 font-mono font-bold">
+                      {crossMonthResonance.dnaSieveInfo?.entropyBits ?? 3.9} bits
+                    </span>
+                  </div>
+                </div>
+                <div className="pt-1">
+                  <span className="text-[10px] text-slate-400 block mb-1.5 font-bold uppercase tracking-wider">
+                    Gènes Dominants Actifs :
                   </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {crossMonthResonance.dnaSieveInfo?.dominantAlgos?.map((algo, i) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-mono font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded-lg"
+                      >
+                        {algo}
+                      </span>
+                    )) || <span className="text-slate-500 text-xs">Génome Global</span>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -337,7 +360,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     Sélection Élite Tamisée (Brut vs Tamisé)
                   </span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1">
-                    <Sparkles size={10} /> Transfert Continu Tanh
+                    <Sparkles size={10} /> Transfert Continu Boltzmann & Tamis ADN
                   </span>
                 </div>
 
@@ -345,7 +368,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   {crossMonthResonance.topNumbers.slice(0, 8).map((item) => (
                     <div
                       key={item.number}
-                      className="p-3 bg-slate-950/60 hover:bg-slate-950/80 border border-slate-800 hover:border-indigo-500/40 rounded-2xl transition-all duration-300 flex flex-col justify-between gap-2 group"
+                      className="p-3 bg-slate-950/70 hover:bg-slate-950/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl transition-all duration-300 flex flex-col justify-between gap-2 group shadow-sm"
                     >
                       <div className="flex items-center justify-between">
                         <NumberBall number={item.number} size="sm" />
@@ -383,28 +406,32 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5">
                   {crossMonthResonance.allMonthsCorrelation.map((m) => {
                     const isPeak = m.monthIndex === crossMonthResonance.sourceMonthIndex;
+                    const isCurrent = m.monthIndex === crossMonthResonance.currentMonthIndex;
                     return (
                       <div
                         key={m.monthIndex}
                         className={`p-2 rounded-xl border flex flex-col justify-between transition-all ${
                           isPeak
                             ? "bg-indigo-500/20 border-indigo-500/40 shadow-[0_0_10px_rgba(99,102,241,0.2)]"
+                            : isCurrent
+                            ? "bg-slate-900/60 border-slate-700/60"
                             : "bg-slate-950/40 border-slate-800/50"
                         }`}
                       >
                         <div className="flex justify-between items-center mb-0.5">
                           <span
                             className={`text-[8px] font-black uppercase tracking-tight ${
-                              isPeak ? "text-indigo-300 font-bold" : "text-slate-500"
+                              isPeak ? "text-indigo-300 font-bold" : isCurrent ? "text-slate-300" : "text-slate-500"
                             }`}
                           >
                             {m.monthName.slice(0, 4)}
                           </span>
                           {isPeak && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
+                          {isCurrent && <span className="text-[7px] font-mono font-bold text-indigo-400 uppercase">Actuel</span>}
                         </div>
                         <span
                           className={`text-[11px] font-mono font-bold ${
-                            isPeak ? "text-emerald-400" : "text-slate-400"
+                            isPeak ? "text-emerald-400" : isCurrent ? "text-slate-300" : "text-slate-400"
                           }`}
                         >
                           {(m.correlation * 100).toFixed(0)}%

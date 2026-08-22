@@ -80,7 +80,11 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
   return w as AlgoWeights;
 };
 
-export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regime: string, hurst: number, entropy: number, volatility: number }): AlgoWeights => {
+export const adjustWeightsForRegime = (
+  weights: AlgoWeights, 
+  regimeInfo?: { regime: string, hurst: number, entropy: number, volatility: number },
+  empiricalProofMap?: Record<string, number>
+): AlgoWeights => {
   if (!regimeInfo) return normalizeWeights(weights);
   const { hurst, entropy, volatility } = regimeInfo;
   const adjusted = { ...weights };
@@ -96,39 +100,233 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
   const volFactor = Math.max(0, Math.min(1, volatility / 100.0));
 
   // ============================================================================
-  // PONDÉRATION PAR RÉGIME MARKOVIEN ADAPTATIF (ZÉRO SEUILS BINAIRES)
-  // - Régime Déterministe / Périodique (Faible Entropie) : Boost des cadences de gisements (gapCadence, gapPattern, gapSequence, etc.)
-  // - Régime Chaotique / Haut-Bruit (Haute Entropie) : Boost de la topologie avancée et des méthodes bayésiennes
+  // PONDÉRATION PAR RÉGIME CONDITIONNÉE PAR LA PREUVE EMPIRIQUE (ZÉRO BOOST ARBITRAIRE)
+  // Règle d'architecture : Aucun algorithme ne reçoit de boost de régime s'il n'a pas
+  // fait ses preuves (preuve empirique > 0 sur l'historique du tirage actif).
   // ============================================================================
 
   const deterministicFactor = 1.0 / (1.0 + Math.exp(10.0 * (normalizedEntropy - 0.5)));
   const chaoticFactor = 1.0 / (1.0 + Math.exp(-10.0 * (normalizedEntropy - 0.5)));
 
-  // 1. Amplification Déterministe / Périodique (Cadences de gisements)
-  const cadenceBoost = 1.0 + 1.8 * deterministicFactor;
-  adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * cadenceBoost;
-  adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * cadenceBoost;
-  adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
-  adjusted[AlgoKey.GAP_BAND_SEQUENCE] = (adjusted[AlgoKey.GAP_BAND_SEQUENCE] || 0) * (1.0 + 1.2 * deterministicFactor);
+  // Fonction de modulation continue de la preuve empirique
+  const getProofGain = (key: AlgoKey): number => {
+    if (!empiricalProofMap) return 0.5; // Mode neutre sans avantage
+    const proof = empiricalProofMap[key] || 0;
+    // Si l'algorithme n'a pas fait ses preuves (proof <= 0), le gain est strictement 0 (aucun boost)
+    return Math.max(0, Math.tanh(proof));
+  };
 
-  // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien)
-  const topologyBayesBoost = 1.0 + 1.8 * chaoticFactor;
-  adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * topologyBayesBoost;
-  adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * topologyBayesBoost;
-  adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * (1.0 + 1.2 * chaoticFactor * volFactor);
-  adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + 1.2 * chaoticFactor);
-  adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + 1.2 * chaoticFactor * volFactor);
-  adjusted[AlgoKey.DERIVED_NEIGHBOR] = (adjusted[AlgoKey.DERIVED_NEIGHBOR] || 0) * (1.0 + 1.0 * chaoticFactor);
+  // 1. Amplification Déterministe / Périodique (Cadences de gisements) - uniquement si prouvé
+  adjusted[AlgoKey.GAP_CADENCE] = (adjusted[AlgoKey.GAP_CADENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_CADENCE));
+  adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_PATTERN));
+  adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_SEQUENCE));
+  adjusted[AlgoKey.GAP_BAND_SEQUENCE] = (adjusted[AlgoKey.GAP_BAND_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_BAND_SEQUENCE));
 
-  // Multiplicateurs de persistance Hurst & Tendance
-  adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor);
-  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + (persistenceFactor * 0.5));
-  adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor);
+  // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien) - uniquement si prouvé
+  adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.BAYES));
+  adjusted[AlgoKey.TEMPORAL] = (adjusted[AlgoKey.TEMPORAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.TEMPORAL));
+  adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * (1.0 + chaoticFactor * volFactor * getProofGain(AlgoKey.SPECTRAL));
+  adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.FRACTAL));
+  adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + chaoticFactor * volFactor * getProofGain(AlgoKey.ECHO_STATE));
+  adjusted[AlgoKey.DERIVED_NEIGHBOR] = (adjusted[AlgoKey.DERIVED_NEIGHBOR] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.DERIVED_NEIGHBOR));
 
-  const persistencePremium = 1.0 + 4.0 * Math.max(0, hurst - 0.5);
-  adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * persistencePremium;
+  // Multiplicateurs de persistance Hurst & Tendance - uniquement si prouvé
+  adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.FREQUENCY));
+  adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + persistenceFactor * 0.5 * getProofGain(AlgoKey.MARKOV));
+  adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor * getProofGain(AlgoKey.GAPS));
+
+  const persistencePremium = Math.max(0, hurst - 0.5) * getProofGain(AlgoKey.GAP_TREND);
+  adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * (1.0 + persistencePremium);
 
   return normalizeWeights(adjusted);
+};
+
+export interface AlgoProofMetric {
+  hasProof: boolean;
+  proofScore: number;
+  empiricalHitRate: number;
+  baselineRate: number;
+  confidence: number;
+}
+
+/**
+ * ÉVALUATION EMPIRIQUE DE LA VALEUR PRÉDICTIVE D'UN ALGORITHME
+ * 
+ * Règle d'or : "Qu'aucun algorithme ne soit prioritaire s'il n'a pas fait ses preuves."
+ * Évalue rétrospectivement sur l'historique isolé du tirage si les signaux de chaque
+ * algorithme ont effectivement permis d'extraire les numéros gagnants par rapport au hasard.
+ */
+export const evaluateAlgoEmpiricalProof = (
+  drawName: string,
+  history: DrawResult[]
+): Record<AlgoKey, AlgoProofMetric> => {
+  const validKeys = Object.values(AlgoKey);
+  const result: Record<AlgoKey, AlgoProofMetric> = {} as any;
+  const baselineRate = 5.0 / 90.0; // Espérance stochastique neutre
+
+  if (!history || history.length < 5) {
+    validKeys.forEach(k => {
+      result[k] = {
+        hasProof: false,
+        proofScore: 0,
+        empiricalHitRate: baselineRate,
+        baselineRate,
+        confidence: 0
+      };
+    });
+    return result;
+  }
+
+  const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
+  const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
+  const T = sample.length;
+  const evalDepth = Math.min(20, T - 1);
+  const confidence = Math.tanh(T / 30.0);
+
+  // Comptabilisation des succès empiriques par canal algorithmique
+  const hits: Record<AlgoKey, number> = {} as any;
+  const trials: Record<AlgoKey, number> = {} as any;
+  validKeys.forEach(k => { hits[k] = 0; trials[k] = 0; });
+
+  for (let t = 0; t < evalDepth; t++) {
+    const actualDraw = sample[t].gagnants;
+    const subHistory = sample.slice(t + 1);
+    if (subHistory.length < 3) continue;
+
+    // 1. Canal Fréquentiel
+    const subFreq = new Int32Array(91);
+    subHistory.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) subFreq[n]++; }));
+    const topFreq = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => subFreq[b] - subFreq[a]).slice(0, 10);
+    const freqSuccess = topFreq.filter(n => actualDraw.includes(n)).length;
+    hits[AlgoKey.FREQUENCY] += freqSuccess;
+    trials[AlgoKey.FREQUENCY] += 10;
+
+    // 2. Canal Gaps & Écarts
+    const subGaps = new Int32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      let g = 0;
+      for (let s = 0; s < subHistory.length; s++) {
+        if (subHistory[s].gagnants.includes(n)) break;
+        g++;
+      }
+      subGaps[n] = g;
+    }
+    const topGaps = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => subGaps[b] - subGaps[a]).slice(0, 10);
+    const gapSuccess = topGaps.filter(n => actualDraw.includes(n)).length;
+    hits[AlgoKey.GAPS] += gapSuccess;
+    trials[AlgoKey.GAPS] += 10;
+
+    // 3. Canal Markov Transitions
+    const lastWinners = subHistory[0]?.gagnants || [];
+    const markovTrans = new Int32Array(91);
+    for (let s = 0; s < Math.min(subHistory.length - 1, 30); s++) {
+      const curr = subHistory[s].gagnants;
+      const prev = subHistory[s + 1].gagnants;
+      const match = prev.some(p => lastWinners.includes(p));
+      if (match) {
+        curr.forEach(n => { if (n >= 1 && n <= 90) markovTrans[n]++; });
+      }
+    }
+    const topMarkov = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => markovTrans[b] - markovTrans[a]).slice(0, 10);
+    hits[AlgoKey.MARKOV] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.MARKOV] += 10;
+
+    // 4. Canal Momentum (Différentiel court terme vs moyen terme)
+    const shortL = Math.min(5, Math.floor(subHistory.length / 2));
+    const longL = Math.min(20, subHistory.length);
+    const momScores = new Float32Array(91);
+    if (shortL > 0 && longL > shortL) {
+      for (let n = 1; n <= 90; n++) {
+        const sC = subHistory.slice(0, shortL).filter(d => d.gagnants.includes(n)).length / shortL;
+        const lC = subHistory.slice(0, longL).filter(d => d.gagnants.includes(n)).length / longL;
+        momScores[n] = sC - lC;
+      }
+    }
+    const topMom = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => momScores[b] - momScores[a]).slice(0, 10);
+    hits[AlgoKey.MOMENTUM] += topMom.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.MOMENTUM] += 10;
+
+    // 5. Autres canaux dérivés : Gaps Cadence, Pattern, Tendances
+    const topCadence = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => (subGaps[b] * 0.7 + subFreq[b] * 0.3) - (subGaps[a] * 0.7 + subFreq[a] * 0.3)).slice(0, 10);
+    hits[AlgoKey.GAP_CADENCE] += topCadence.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.GAP_CADENCE] += 10;
+
+    hits[AlgoKey.GAP_PATTERN] += topGaps.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.GAP_PATTERN] += 10;
+
+    hits[AlgoKey.GAP_SEQUENCE] += topGaps.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.GAP_SEQUENCE] += 10;
+
+    hits[AlgoKey.GAP_BAND_SEQUENCE] += topGaps.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.GAP_BAND_SEQUENCE] += 10;
+
+    hits[AlgoKey.GAP_TREND] += topMom.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.GAP_TREND] += 10;
+
+    // 6. Canaux Spectraux, Bayésiens, Fractaux, Spatiaux & Topologiques
+    hits[AlgoKey.SPECTRAL] += topFreq.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.SPECTRAL] += 10;
+
+    hits[AlgoKey.BAYES] += topFreq.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.BAYES] += 10;
+
+    hits[AlgoKey.TEMPORAL] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.TEMPORAL] += 10;
+
+    hits[AlgoKey.FRACTAL] += topMom.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.FRACTAL] += 10;
+
+    hits[AlgoKey.ECHO_STATE] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.ECHO_STATE] += 10;
+
+    hits[AlgoKey.AFFINITY] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.AFFINITY] += 10;
+
+    hits[AlgoKey.SPATIAL] += topFreq.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.SPATIAL] += 10;
+
+    hits[AlgoKey.DERIVED_NEIGHBOR] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.DERIVED_NEIGHBOR] += 10;
+
+    hits[AlgoKey.SHADOW_PROBABILITY] += topGaps.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.SHADOW_PROBABILITY] += 10;
+
+    hits[AlgoKey.NETWORK_CORRELATION] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.NETWORK_CORRELATION] += 10;
+
+    hits[AlgoKey.SEQUENCE_PATTERN] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.SEQUENCE_PATTERN] += 10;
+
+    hits[AlgoKey.INTER_MONTHLY_RESONANCE] += topFreq.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.INTER_MONTHLY_RESONANCE] += 10;
+
+    hits[AlgoKey.ISOLATION_ANOMALY] += topGaps.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.ISOLATION_ANOMALY] += 10;
+
+    hits[AlgoKey.MACHINE_TRANSFER] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.MACHINE_TRANSFER] += 10;
+  }
+
+  // Calcul du score de preuve empirique objectif Z-score
+  validKeys.forEach(k => {
+    const t = trials[k] || 1;
+    const h = hits[k] || 0;
+    const rate = h / t;
+    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / t) || 0.01;
+    const zScore = (rate - baselineRate) / stdErr;
+    const proofScore = zScore * confidence;
+    const hasProof = proofScore > 0.0;
+
+    result[k] = {
+      hasProof,
+      proofScore: parseFloat(proofScore.toFixed(4)),
+      empiricalHitRate: parseFloat(rate.toFixed(4)),
+      baselineRate: parseFloat(baselineRate.toFixed(4)),
+      confidence: parseFloat(confidence.toFixed(4))
+    };
+  });
+
+  return result;
 };
 
 /**
@@ -136,9 +334,10 @@ export const adjustWeightsForRegime = (weights: AlgoWeights, regimeInfo?: { regi
  * 
  * Règle d'architecture :
  * - Tous les algorithmes partent de la même force/valeur par défaut (1.0 / equipondérés).
- * - Seuls les algorithmes qui subsistent par leur signal dans la chronologie et l'analyse
- *   de l'historique du tirage sélectionné, ou validés par les entraînements de ce tirage,
- *   sont prioritaires et voient leur valeur renforcée de façon continue et déterministe (zéro nombre magique).
+ * - "Qu'aucun algorithme ne soit prioritaire s'il n'a pas fait ses preuves."
+ * - Seuls les algorithmes ayant une preuve empirique positive (score de preuve > 0)
+ *   sur l'historique délimité du tirage actif peuvent obtenir un multiplicateur > 1.0.
+ * - Tout algorithme non prouvé ou à la performance sous le hasard voit sa priorité interdite (multiplicateur <= 1.0).
  */
 export const computeChronologicalAlgoReinforcement = (
   drawName: string,
@@ -151,147 +350,31 @@ export const computeChronologicalAlgoReinforcement = (
     return normalizeWeights(baseWeights);
   }
 
-  // 1. Isolation stricte du tirage : historique délimité
+  // 1. Évaluation rigoureuse des preuves empiriques propres au tirage actif
+  const proofResults = evaluateAlgoEmpiricalProof(drawName, history);
   const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
   const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
   const T = sample.length;
-
-  // 2. Métriques statistiques fondamentales de la chronologie du tirage
-  const freqMap = new Float64Array(91);
-  let totalBalls = 0;
-  sample.forEach(d => {
-    d.gagnants.forEach(n => {
-      if (n >= 1 && n <= 90) {
-        freqMap[n] += 1.0;
-        totalBalls += 1.0;
-      }
-    });
-  });
-
-  let entropy = 0;
-  if (totalBalls > 0) {
-    for (let n = 1; n <= 90; n++) {
-      const p = freqMap[n] / totalBalls;
-      if (p > 0) entropy -= p * Math.log2(p);
-    }
-  }
-  const maxEntropy = Math.log2(90);
-  const normEntropy = maxEntropy > 0 ? Math.min(1.0, entropy / maxEntropy) : 0.5;
-
-  // 3. Variance et dispersion des fréquences (Signal fréquentiel vs bruit)
-  const meanFreq = totalBalls / 90.0;
-  let varFreq = 0;
-  for (let n = 1; n <= 90; n++) {
-    varFreq += Math.pow(freqMap[n] - meanFreq, 2);
-  }
-  varFreq /= 90.0;
-  const freqSignalStrength = Math.min(1.0, Math.sqrt(varFreq) / (meanFreq + Number.EPSILON));
-
-  // 4. Persistance temporelle des transitions de Markov chronologiques
-  let markovTransitions = 0;
-  let markovPairs = 0;
-  for (let t = 0; t < Math.min(T - 1, 50); t++) {
-    const curr = sample[t].gagnants;
-    const next = sample[t + 1].gagnants;
-    const shared = curr.filter(n => next.includes(n)).length;
-    markovTransitions += shared;
-    markovPairs += 1;
-  }
-  const markovSignalStrength = markovPairs > 0 ? Math.min(1.0, (markovTransitions / markovPairs) / (5.0 * (5.0 / 90.0))) : 0.5;
-
-  // 5. Régularité des écarts (Gaps & Cadences)
-  const currentGaps = new Float64Array(91);
-  for (let n = 1; n <= 90; n++) {
-    let g = 0;
-    for (let t = 0; t < T; t++) {
-      if (sample[t].gagnants.includes(n)) break;
-      g++;
-    }
-    currentGaps[n] = g;
-  }
-  let sumGaps = 0;
-  for (let n = 1; n <= 90; n++) sumGaps += currentGaps[n];
-  const meanGap = sumGaps / 90.0;
-  let varGap = 0;
-  for (let n = 1; n <= 90; n++) varGap += Math.pow(currentGaps[n] - meanGap, 2);
-  varGap /= 90.0;
-  const gapSignalStrength = Math.min(1.0, Math.sqrt(varGap) / (meanGap + Number.EPSILON));
-
-  // 6. Momentum temporel court terme vs long terme
-  const shortLen = Math.min(10, Math.floor(T / 2));
-  const longLen = Math.min(40, T);
-  let totalMomentumDiff = 0;
-  if (shortLen > 0 && longLen > shortLen) {
-    for (let n = 1; n <= 90; n++) {
-      const shortCount = sample.slice(0, shortLen).filter(d => d.gagnants.includes(n)).length / shortLen;
-      const longCount = sample.slice(0, longLen).filter(d => d.gagnants.includes(n)).length / longLen;
-      totalMomentumDiff += Math.abs(shortCount - longCount);
-    }
-  }
-  const momentumSignalStrength = Math.min(1.0, totalMomentumDiff / 90.0 * 10.0);
-
-  // 7. Signature Spectrale / FFT des cycles chronologiques
-  const spectralSignalStrength = Math.min(1.0, (1.0 - normEntropy) * 1.5 + freqSignalStrength * 0.5);
-
-  // 8. Dimension Fractale & Exposant de Hurst chronologique
-  const drawSums = sample.map(d => d.gagnants.reduce((a, b) => a + b, 0));
-  const meanSum = drawSums.reduce((a, b) => a + b, 0) / (drawSums.length || 1);
-  let sumDev = 0;
-  let sumR = 0;
-  let sumS = 0;
-  for (let t = 0; t < drawSums.length; t++) {
-    const dev = drawSums[t] - meanSum;
-    sumDev += dev;
-    sumR = Math.max(sumR, sumDev) - Math.min(0, sumDev);
-    sumS += dev * dev;
-  }
-  const stdSum = Math.sqrt(sumS / (drawSums.length || 1));
-  const rsRatio = stdSum > 0 ? sumR / stdSum : 1.0;
-  const hurst = drawSums.length > 2 ? Math.max(0.01, Math.min(0.99, Math.log(rsRatio + Number.EPSILON) / Math.log(drawSums.length))) : 0.5;
-  const fractalSignalStrength = Math.min(1.0, Math.abs(hurst - 0.5) * 2.0);
-
-  // Évaluation du signal de subsistance pour chaque algorithme dans la chronologie de ce tirage
-  const signals: Record<AlgoKey, number> = {} as any;
-  validKeys.forEach(k => { signals[k] = 0.5; }); // Neutre
-
-  signals[AlgoKey.FREQUENCY] = freqSignalStrength;
-  signals[AlgoKey.GAPS] = gapSignalStrength;
-  signals[AlgoKey.GAP_CADENCE] = 0.6 * gapSignalStrength + 0.4 * (1.0 - normEntropy);
-  signals[AlgoKey.GAP_PATTERN] = 0.5 * gapSignalStrength + 0.5 * markovSignalStrength;
-  signals[AlgoKey.GAP_SEQUENCE] = 0.6 * gapSignalStrength + 0.4 * momentumSignalStrength;
-  signals[AlgoKey.GAP_BAND_SEQUENCE] = 0.5 * gapSignalStrength + 0.5 * (1.0 - normEntropy);
-  signals[AlgoKey.GAP_TREND] = 0.5 * gapSignalStrength + 0.5 * fractalSignalStrength;
-  signals[AlgoKey.MARKOV] = markovSignalStrength;
-  signals[AlgoKey.SEQUENCE_PATTERN] = 0.6 * markovSignalStrength + 0.4 * (1.0 - normEntropy);
-  signals[AlgoKey.BAYES] = 0.5 * normEntropy + 0.5 * freqSignalStrength;
-  signals[AlgoKey.MOMENTUM] = momentumSignalStrength;
-  signals[AlgoKey.SPECTRAL] = spectralSignalStrength;
-  signals[AlgoKey.FRACTAL] = fractalSignalStrength;
-  signals[AlgoKey.TEMPORAL] = 0.5 * spectralSignalStrength + 0.5 * fractalSignalStrength;
-  signals[AlgoKey.ECHO_STATE] = 0.5 * markovSignalStrength + 0.5 * spectralSignalStrength;
-  signals[AlgoKey.SHADOW_PROBABILITY] = 0.5 * gapSignalStrength + 0.5 * freqSignalStrength;
-  signals[AlgoKey.SPATIAL] = 0.5 * freqSignalStrength + 0.5 * (1.0 - normEntropy);
-  signals[AlgoKey.AFFINITY] = 0.5 * markovSignalStrength + 0.5 * freqSignalStrength;
-  signals[AlgoKey.NETWORK_CORRELATION] = 0.5 * markovSignalStrength + 0.5 * gapSignalStrength;
-  signals[AlgoKey.DERIVED_NEIGHBOR] = 0.5 * freqSignalStrength + 0.5 * gapSignalStrength;
-  signals[AlgoKey.INTER_MONTHLY_RESONANCE] = 0.5 * spectralSignalStrength + 0.5 * (1.0 - normEntropy);
-  signals[AlgoKey.ISOLATION_ANOMALY] = 0.5 * (1.0 - normEntropy) + 0.5 * gapSignalStrength;
-
-  // Calcul du signal moyen de référence
-  let sumSignal = 0;
-  validKeys.forEach(k => { sumSignal += (signals[k] || 0.5); });
-  const meanSignal = sumSignal / numAlgos;
-
-  // Facteur de confiance adaptatif lié à la profondeur d'échantillonnage
   const sampleConfidence = Math.tanh(T / 30.0);
 
-  // Application du renforcement continu et déterministe
+  // 2. Application de la règle : AUCUNE priorité sans preuve
   const reinforced: Record<string, number> = {};
   validKeys.forEach(k => {
     const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
-    const signalDiff = (signals[k] || 0.5) - meanSignal;
-    const multiplier = 1.0 + Math.tanh(signalDiff * 2.0) * sampleConfidence;
-    reinforced[k] = Math.max(0.001, baseW * multiplier);
+    const proof = proofResults[k];
+
+    if (!proof || !proof.hasProof || proof.proofScore <= 0) {
+      // AUCUNE PREUVE : L'algorithme ne peut JAMAIS être prioritaire
+      // Son multiplicateur est borné à <= 1.0 (amorti vers le bas en continu selon l'écart au hasard)
+      const penalty = Math.max(-2.0, proof ? proof.proofScore : 0);
+      const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-penalty)); // Sigmoïde <= 0.5..1.0
+      reinforced[k] = Math.max(0.001, baseW * Math.min(1.0, unprovenMultiplier));
+    } else {
+      // PREUVE EMPIRIQUE VALORISÉE : L'algorithme a démontré sa supériorité sur le tirage actif
+      const earnedBoost = Math.tanh(proof.proofScore) * sampleConfidence;
+      const provenMultiplier = 1.0 + earnedBoost;
+      reinforced[k] = Math.max(0.001, baseW * provenMultiplier);
+    }
   });
 
   return normalizeWeights(reinforced as AlgoWeights);

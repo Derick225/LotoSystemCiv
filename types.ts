@@ -624,6 +624,18 @@ export interface PlatinumResult {
   coherence: number; // 0-100 (Entropie inversée)
   regime: "STABLE" | "CHAOTIC" | "TRANSITION";
   entropy: number;
+  dnaSieveInfo?: {
+    active: boolean;
+    dominantAlgos: string[];
+    dnaConcordanceMean: number;
+    sieveIntensityPercent?: number;
+    entropyBits?: number;
+  };
+  regimeProbabilities?: {
+    stable: number;
+    transition: number;
+    chaotic: number;
+  };
 }
 
 export interface PlatinumScenario {

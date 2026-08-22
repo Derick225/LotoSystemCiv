@@ -8,6 +8,7 @@ import {
   normalizeWeights,
   getAlgoWeights,
   saveAlgoWeights,
+  evaluateAlgoEmpiricalProof,
 } from "../../services/predictionEngine";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
@@ -439,12 +440,18 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     audioEngine.play("success");
   };
 
+  // Évaluation continue de la preuve empirique pour le tirage actif
+  const algoProofs = useMemo(() => {
+    return evaluateAlgoEmpiricalProof(drawName, cleanHistory);
+  }, [drawName, cleanHistory]);
+
   // Differential Genome Calculations (Live vs Original)
   const differentialGenome = Object.keys(liveWeights).map((key) => {
     const original = (originalWeights as any)[key] || 0;
     const current = (liveWeights as any)[key] || 0;
     const delta = current - original;
     const deltaPercent = original > 0 ? (delta / original) * 100 : 0;
+    const proof = algoProofs[key as AlgoKey];
     return {
       key,
       label: formatLabel(key),
@@ -453,6 +460,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       delta: Number((delta * 100).toFixed(2)),
       deltaPercent: Number(deltaPercent.toFixed(1)),
       absDelta: Math.abs(delta),
+      hasProof: proof?.hasProof || false,
+      proofScore: proof?.proofScore || 0,
     };
   }).sort((a, b) => b.current - a.current);
 
@@ -854,9 +863,20 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                           className="p-2.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-indigo-500/40 transition-all flex items-center justify-between"
                         >
                           <div className="space-y-0.5">
-                            <span className="text-xs font-bold text-slate-300 block truncate max-w-[130px]">
-                              {gene.label}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-slate-300 block truncate max-w-[130px]">
+                                {gene.label}
+                              </span>
+                              {gene.hasProof ? (
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title={`Algorithme validé par preuve empirique sur ce tirage (Score Z: +${gene.proofScore})`}>
+                                  Prouvé
+                                </span>
+                              ) : (
+                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700" title="Aucune priorité accordée : cet algorithme n'a pas encore fait ses preuves sur ce tirage.">
+                                  Neutre
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[10px] font-mono text-slate-500">
                               Initial : {gene.original}% ➔ Actuel : <strong className="text-white">{gene.current}%</strong>
                             </span>

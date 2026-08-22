@@ -459,7 +459,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Filtrage différentiable continu : les choix de tranches d'écarts sont passés dans le tamis de l'ADN algorithmique actuel ({report.dnaSieveInfo?.dominantAlgos?.join(', ') || 'Global'}).
+                Filtrage différentiable continu : les transitions d'écarts de tranches sont tamisées par l'ADN algorithmique ({report.dnaSieveInfo?.dominantAlgos?.join(', ') || 'Global'}).
               </p>
             </div>
           </div>
@@ -598,6 +598,34 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 Écart
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Telemetry & Mathematical Diagnostics */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 font-mono">Concordance ADN</span>
+            <span className="font-bold text-indigo-300 font-mono">
+              {report.dnaSieveInfo?.dnaConcordanceMean ?? 50}%
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 font-mono">Intensité Tamisage (SNR)</span>
+            <span className="font-bold text-emerald-400 font-mono">
+              {report.dnaSieveInfo?.sieveIntensityPercent ?? 55}%
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 font-mono">Entropie Shannon</span>
+            <span className="font-bold text-amber-300 font-mono">
+              {report.entropyBits ?? 0} bits
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 font-mono">Markov Ordre 2</span>
+            <span className="font-bold text-cyan-300 font-mono">
+              {report.markovOrder2Confidence ? `${report.markovOrder2Confidence}%` : 'Actif'}
+            </span>
           </div>
         </div>
 

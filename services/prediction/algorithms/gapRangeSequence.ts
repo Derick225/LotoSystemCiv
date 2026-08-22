@@ -64,7 +64,10 @@ export const gapRangeSequencePlugin: AlgorithmPlugin = {
         topPredictedBins: report.topPredictedBins.slice(0, 3).map((b: { label: string; probability: number }) => ({
           label: b.label,
           probability: Number((b.probability * 100).toFixed(1))
-        }))
+        })),
+        entropyBits: report.entropyBits,
+        markovOrder2Confidence: report.markovOrder2Confidence,
+        dnaSieveInfo: report.dnaSieveInfo
       }
     };
   }

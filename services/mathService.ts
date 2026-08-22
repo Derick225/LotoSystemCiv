@@ -1013,8 +1013,8 @@ export const calculateVolatility = (history: DrawResult[]): { score: number; sta
     return { score, status: score > 60 ? 'Chaos' : score > 30 ? 'Volatile' : 'Stable' };
 };
 
-export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number } => {
-    if (history.length === 0) return { normalized: 0 };
+export const calculateShannonEntropy = (history: DrawResult[]): { normalized: number; raw?: number } => {
+    if (history.length === 0) return { normalized: 0, raw: 0 };
     
     const freq = new Float32Array(91);
     let total = 0;
@@ -1028,7 +1028,7 @@ export const calculateShannonEntropy = (history: DrawResult[]): { normalized: nu
         }
     }
     
-    if (total === 0) return { normalized: 0 };
+    if (total === 0) return { normalized: 0, raw: 0 };
     
     let entropy = 0;
     for (let i = 1; i <= 90; i++) {
@@ -1039,7 +1039,7 @@ export const calculateShannonEntropy = (history: DrawResult[]): { normalized: nu
     }
     
     const maxEntropy = Math.log2(90); 
-    return { normalized: entropy / maxEntropy };
+    return { normalized: entropy / maxEntropy, raw: entropy };
 };
 
 export const calculateChiSquare = (observed: Record<number, number>, totalObservations: number): ChiSquareMetric => {

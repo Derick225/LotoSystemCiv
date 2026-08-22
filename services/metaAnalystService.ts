@@ -5,49 +5,102 @@ import { getAlgoWeights, generateMasterPrediction } from './predictionEngine';
 import { useNexusStore } from '../store/useNexusStore';
 import { extractFeatures } from './prediction/featureExtractor';
 import { getLocalForensicReports } from './postPredictionAnalysisService';
+import { calculateDnaSieveWeights } from './temporalAnalysisService';
 import { EnhancedMetrics } from './prediction/metrics.types';
 
 // ═══════════════════════════════════════════════════════════════
-// CONSTANTS & CONFIGURATION
+// CONSTANTS & MATHEMATICAL FOUNDATIONS
 // ═══════════════════════════════════════════════════════════════
 const MAX_NUM = 90;
 const DRAW_SIZE = 5;
 
-// Helper mathématique pour éviter les overflows de Math.exp dans les sigmoïdes
-const safeExp = (x: number): number => Math.exp(Math.max(-100, Math.min(100, x)));
+/**
+ * Exponentielle sécurisée pour éviter les débordements flottants IEEE-754.
+ */
+const safeExp = (x: number): number => Math.exp(Math.max(-50, Math.min(50, x)));
+
+/**
+ * Fonction logistique continue (Sigmoïde standard).
+ */
+const sigmoid = (z: number): number => 1.0 / (1.0 + safeExp(-z));
 
 // ═══════════════════════════════════════════════════════════════
-// MATH KERNEL (PURE FUNCTIONS)
+// MATH KERNEL (PURE DETERMINISTIC FUNCTIONS)
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * Normalisation continue d'un vecteur flottant vers l'intervalle [0, 100].
+ */
 const normalizeVector = (vector: Float64Array): Float64Array => {
     let max = 0;
-    for (let i = 0; i < vector.length; i++) if (vector[i] > max) max = vector[i];
-    if (max === 0) return vector;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        if (vector[i] > max) max = vector[i];
+    }
+    if (max <= Number.EPSILON) return vector;
     
     const normalized = new Float64Array(vector.length);
-    for (let i = 0; i < vector.length; i++) {
-        normalized[i] = (vector[i] / max) * 100;
+    const invMax = 100.0 / max;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        normalized[i] = vector[i] * invMax;
     }
     return normalized;
 };
 
-const computeVectorEntropy = (vector: Float64Array): number => {
+/**
+ * Calcule les statistiques de base (Moyenne, Écart-Type) d'un vecteur sur [1, MAX_NUM].
+ */
+const computeVectorStats = (vector: Float64Array): { mean: number; stdDev: number; sum: number } => {
     let sum = 0;
-    for (let i = 1; i <= MAX_NUM; i++) sum += vector[i];
-    if (sum === 0) return 1.0;
-    
-    let entropy = 0;
     for (let i = 1; i <= MAX_NUM; i++) {
-        const p = vector[i] / sum;
-        if (p > 0) entropy -= p * Math.log(p);
+        sum += vector[i];
     }
-    const maxEntropy = Math.log(MAX_NUM);
-    return entropy / maxEntropy;
+    const mean = sum / MAX_NUM;
+    let sumSq = 0;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const diff = vector[i] - mean;
+        sumSq += diff * diff;
+    }
+    const variance = sumSq / MAX_NUM;
+    const stdDev = Math.sqrt(variance) || 1.0;
+    return { mean, stdDev, sum };
 };
 
 /**
- * Sélection Gloutonne Déterministe basée sur le score (pondéré par un cycle trigonométrique continu).
- * Remplace tout concept de température et de tirage aléatoire !
+ * Standardisation par Z-score continu suivie d'un étalement logistique doux.
+ */
+const standardizeVector = (vector: Float64Array): Float64Array => {
+    const { mean, stdDev } = computeVectorStats(vector);
+    const result = new Float64Array(MAX_NUM + 1);
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const z = (vector[i] - mean) / stdDev;
+        result[i] = sigmoid(z) * 100.0;
+    }
+    return result;
+};
+
+/**
+ * Calcule l'Entropie Informationnelle Normalisée de Shannon H in [0, 1].
+ */
+const computeVectorEntropy = (vector: Float64Array): number => {
+    let sum = 0;
+    for (let i = 1; i <= MAX_NUM; i++) sum += vector[i];
+    if (sum <= Number.EPSILON) return 1.0;
+    
+    let entropy = 0;
+    const invSum = 1.0 / sum;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const p = vector[i] * invSum;
+        if (p > 0) {
+            entropy -= p * Math.log(p);
+        }
+    }
+    const maxEntropy = Math.log(MAX_NUM);
+    return Math.max(0.0, Math.min(1.0, entropy / maxEntropy));
+};
+
+/**
+ * Sélection Gloutonne Strictement Déterministe basée sur le score modulé par harmoniques de Fourier continues.
+ * ZÉRO HASARD, 100% REPRODUCTIBLE, TIE-BREAKER PAR HACHAGE LCG DÉTERMINISTE.
  */
 const greedyDeterministicSelection = (
     vector: Float64Array,
@@ -55,26 +108,41 @@ const greedyDeterministicSelection = (
     phaseShift: number = 0.0,
     entropy: number = 0.5
 ): number[] => {
-    const candidates: { n: number, score: number }[] = [];
-    // Dynamic exploration parameters continuously derived from the entropy score
+    const candidates: { n: number; score: number; raw: number }[] = [];
+    
+    // Paramètres d'exploration dynamique continûment dérivés de l'entropie de Shannon
     const dynamicAmp = 0.05 + 0.20 * entropy;
-    const dynamicFreq = 0.05 + 0.10 * (1.0 - entropy);
+    const dynamicFreq = (2.0 * Math.PI / MAX_NUM) * (1.0 + 0.5 * entropy);
     
     for (let i = 1; i <= MAX_NUM; i++) {
         const rawScore = vector[i];
         if (rawScore > 0) {
-            const modulation = 1.0 + dynamicAmp * Math.sin(i * dynamicFreq + phaseShift);
+            const harmonic = Math.sin(i * dynamicFreq + phaseShift);
+            const modulation = 1.0 + dynamicAmp * harmonic;
             const adjustedScore = rawScore * modulation;
-            candidates.push({ n: i, score: adjustedScore });
+            candidates.push({ n: i, score: adjustedScore, raw: rawScore });
         }
     }
     
-    candidates.sort((a, b) => b.score - a.score);
+    // Tri déterministe avec multi-niveaux de tie-breaking sans aléatoire
+    candidates.sort((a, b) => {
+        if (Math.abs(b.score - a.score) > 1e-6) {
+            return b.score - a.score;
+        }
+        if (Math.abs(b.raw - a.raw) > 1e-6) {
+            return b.raw - a.raw;
+        }
+        // Hachage LCG déterministe invariant
+        const hashA = (a.n * 2654435761) >>> 0;
+        const hashB = (b.n * 2654435761) >>> 0;
+        return hashB - hashA;
+    });
+    
     return candidates.slice(0, count).map(c => c.n).sort((a, b) => a - b);
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PLATINUM ENGINE
+// PLATINUM ENGINE (META-ANALYST FLAGSHIP)
 // ═══════════════════════════════════════════════════════════════
 export async function generatePlatinumPredictionCore(
     drawName: string,
@@ -88,8 +156,9 @@ export async function generatePlatinumPredictionCore(
     _useSpatioTemporalHawkes: boolean = true,
     preloadedForensicReports?: ForensicReport[]
 ): Promise<PlatinumResult> {
+    // 0. ISOLATION ABSOLUE DU TIRAGE
     const history = purifyHistoryForDraw(drawName, rawHistory);
-    if (history.length < 10) throw new Error("Dataset insuffisant.");
+    if (history.length < 10) throw new Error("Dataset insuffisant pour l'inférence Platinum.");
     
     onProgress?.(5, "Calibrage du réseau de neurones artificiels...");
 
@@ -100,9 +169,8 @@ export async function generatePlatinumPredictionCore(
         shannonEntropyFilter: userOptions?.shannonEntropyFilter ?? false,
     };
 
-    // 1. ACQUISITION DES SIGNAUX BRUTS
+    // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS
     const weights = await getAlgoWeights(drawName);
-    // Correction: useNexusStore est un hook Zustand, on utilise getState() directement
     const finalTemporalDepth = temporalDepth ?? useNexusStore.getState().temporalDepth ?? 100;
     
     const masterPred = await generateMasterPrediction(
@@ -116,97 +184,132 @@ export async function generatePlatinumPredictionCore(
         false,
         undefined,
         false,
-        (p, msg) => { onProgress?.(Math.round(p * 0.7), msg); }
+        (p, msg) => { onProgress?.(Math.round(p * 0.65), msg); }
     );
 
-    let breakdowns = masterPred.breakdown || {};
+    const breakdowns = masterPred.breakdown || {};
     const localFeatures = await extractFeatures(drawName, history);
 
-    // 2. CONSTRUCTION DU VECTEUR CONSENSUS
-    const consensusVector = new Float64Array(MAX_NUM + 1);
-    const momentumVector = new Float64Array(MAX_NUM + 1);
-    const gapVector = new Float64Array(MAX_NUM + 1);
-    const spectralVector = new Float64Array(MAX_NUM + 1);
+    // Extraction du Tamis de l'ADN Algorithmique Actuel
+    const dnaReport = calculateDnaSieveWeights(history, weights, drawName);
+    const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna } = dnaReport;
     
-    let maxRawSum = Number.EPSILON;
-    let maxFractalSpectral = Number.EPSILON;
-    let maxQuantumAi = Number.EPSILON;
-    
-    const rawSums = new Float64Array(MAX_NUM + 1);
-    const fracSpec = new Float64Array(MAX_NUM + 1);
-    const quantAi = new Float64Array(MAX_NUM + 1);
+    // Intensité continue du tamisage dérivée du SNR de l'ADN
+    const snrDna = (stdDevDna || 0.1) / 0.1;
+    const dynamicSieveIntensity = sigmoid(1.5 * (snrDna - 1.0));
+    const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
+
+    // 2. VECTORISATION STANDARDISÉE DES TENSEURS DE BASE
+    const rawFreqVector = new Float64Array(MAX_NUM + 1);
+    const rawGapVector = new Float64Array(MAX_NUM + 1);
+    const rawMomentumVector = new Float64Array(MAX_NUM + 1);
+    const rawSpectralVector = new Float64Array(MAX_NUM + 1);
+    const rawMarkovVector = new Float64Array(MAX_NUM + 1);
+    const rawBayesVector = new Float64Array(MAX_NUM + 1);
+    const rawFractalVector = new Float64Array(MAX_NUM + 1);
+    const rawSpatialVector = new Float64Array(MAX_NUM + 1);
 
     for (let i = 1; i <= MAX_NUM; i++) {
         const bd = breakdowns[i] || {};
-        const freq = bd.frequency || (localFeatures.freqMap[i] * (100 / history.length)) || 0;
+        rawFreqVector[i] = bd.frequency || (localFeatures.freqMap[i] * (100 / history.length)) || 0;
         const currentGap = localFeatures.gapsMap[i] || 0;
-        const gap = bd.gap || (currentGap > 0 ? (history.length / currentGap) : 0);
-        const momentum = bd.momentum || (localFeatures.momentumMap[i] * 10) || 0;
-        const spectral = bd.spectral || (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
-        const ai = bd.bayes || 0;
-        const fractal = bd.fractal || 0;
-        const bayes = bd.bayes || 0;
-        const markov = bd.markov || (localFeatures.markovMap[i] * 10) || 0;
-        const temporal = bd.temporal || 0;
-        const spatial = bd.spatial || 0;
-        const affinity = bd.affinity || 0;
-
-        momentumVector[i] = momentum;
-        gapVector[i] = gap;
-        spectralVector[i] = spectral;
-
-        const rawSum = freq + gap + momentum + spectral + ai + fractal + bayes + markov + temporal + spatial + affinity;
-        rawSums[i] = rawSum;
-        if (rawSum > maxRawSum) maxRawSum = rawSum;
-
-        const fs = fractal * spectral;
-        fracSpec[i] = fs;
-        if (fs > maxFractalSpectral) maxFractalSpectral = fs;
-
-        const qa = spatial * ai;
-        quantAi[i] = qa;
-        if (qa > maxQuantumAi) maxQuantumAi = qa;
+        rawGapVector[i] = bd.gap || (currentGap > 0 ? (history.length / currentGap) : 0);
+        rawMomentumVector[i] = bd.momentum || (localFeatures.momentumMap[i] * 10) || 0;
+        rawSpectralVector[i] = bd.spectral || (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
+        rawMarkovVector[i] = bd.markov || (localFeatures.markovMap[i] * 10) || 0;
+        rawBayesVector[i] = bd.bayes || 0;
+        rawFractalVector[i] = bd.fractal || 0;
+        rawSpatialVector[i] = bd.spatial || 0;
     }
 
-    onProgress?.(75, "Agrégation non-linéaire tensorielle...");
+    const stdFreq = standardizeVector(rawFreqVector);
+    const stdGap = standardizeVector(rawGapVector);
+    const stdMomentum = standardizeVector(rawMomentumVector);
+    const stdSpectral = standardizeVector(rawSpectralVector);
+    const stdMarkov = standardizeVector(rawMarkovVector);
+    const stdBayes = standardizeVector(rawBayesVector);
+    const stdFractal = standardizeVector(rawFractalVector);
+    const stdSpatial = standardizeVector(rawSpatialVector);
+
+    onProgress?.(70, "Agrégation non-linéaire tensorielle & Couplage thermodynamique...");
+
+    // 3. COUPLAGE THERMODYNAMIQUE & SYNERGIE DE COUVERTURE
+    const rawSums = new Float64Array(MAX_NUM + 1);
+    const fracSpec = new Float64Array(MAX_NUM + 1);
+    const quantAi = new Float64Array(MAX_NUM + 1);
     
-    // CALCUL CONTINU DE L'ENTROPIE DES INPUTS POUR ADAPTER LA SYNERGIE
-    const inputEntropy = computeVectorEntropy(normalizeVector(rawSums));
-    const chaoticWeight = 1.0 / (1.0 + safeExp(-10.0 * (inputEntropy - 0.5)));
-    const synergyWeightFractal = 0.75 * (1.0 - chaoticWeight) + 0.25 * chaoticWeight;
-    const synergyWeightQuantum = 0.25 * (1.0 - chaoticWeight) + 0.75 * chaoticWeight;
+    let maxRawSum = Number.EPSILON;
+    let maxFracSpec = Number.EPSILON;
+    let maxQuantAi = Number.EPSILON;
 
     for (let i = 1; i <= MAX_NUM; i++) {
-        const activation = 1.0 - (1.0 / (1.0 + Math.pow(rawSums[i] / maxRawSum, 2)));
-        const synergyFractalSpectral = fracSpec[i] / maxFractalSpectral;
-        const synergyQuantumAi = quantAi[i] / maxQuantumAi;
+        const sumVal = (
+            stdFreq[i] * 1.2 +
+            stdGap[i] * 1.1 +
+            stdMomentum[i] * 1.15 +
+            stdSpectral[i] * 1.05 +
+            stdMarkov[i] * 1.1 +
+            stdBayes[i] * 1.0 +
+            stdFractal[i] * 1.0 +
+            stdSpatial[i] * 1.0
+        );
+        rawSums[i] = sumVal;
+        if (sumVal > maxRawSum) maxRawSum = sumVal;
+
+        const fs = stdFractal[i] * stdSpectral[i];
+        fracSpec[i] = fs;
+        if (fs > maxFracSpec) maxFracSpec = fs;
+
+        const qa = stdSpatial[i] * stdBayes[i];
+        quantAi[i] = qa;
+        if (qa > maxQuantAi) maxQuantAi = qa;
+    }
+
+    // Calcul continu de l'entropie des inputs pour le couplage thermodynamique
+    const inputEntropy = computeVectorEntropy(normalizeVector(rawSums));
+    const thermoBeta = sigmoid(10.0 * (inputEntropy - 0.5));
+    const weightFractal = 0.75 * (1.0 - thermoBeta) + 0.25 * thermoBeta;
+    const weightQuantum = 0.25 * (1.0 - thermoBeta) + 0.75 * thermoBeta;
+
+    const consensusVector = new Float64Array(MAX_NUM + 1);
+
+    for (let i = 1; i <= MAX_NUM; i++) {
+        const normSum = rawSums[i] / maxRawSum;
+        // Activation sigmoïdale douce continue
+        const activation = sigmoid(3.0 * (normSum - 0.5));
         
-        // Pondération dynamique par exponentiation continue modulée par l'entropie
-        const combinedSynergy = (synergyFractalSpectral * synergyWeightFractal) + (synergyQuantumAi * synergyWeightQuantum);
-        const synergyMultiplier = safeExp(combinedSynergy);
+        const normFracSpec = fracSpec[i] / maxFracSpec;
+        const normQuantAi = quantAi[i] / maxQuantAi;
+        
+        const combinedSynergy = (normFracSpec * weightFractal) + (normQuantAi * weightQuantum);
+        const synergyMultiplier = safeExp(0.6 * (combinedSynergy - 0.5));
 
         let score = activation * rawSums[i] * synergyMultiplier;
 
+        // Modulations contextuelles symbiotiques continues
         if (symbioticContext?.spatialHotZones?.includes(i)) {
             score *= (1.0 + (symbioticContext.spatialHotZones.length / MAX_NUM));
         }
         if (symbioticContext?.forestVotes?.[i]) {
             score *= (1.0 + symbioticContext.forestVotes[i]);
         }
-        consensusVector[i] = score;
+
+        // Tamisage différentiable continu par l'ADN algorithmique actif
+        const dnaMult = dnaMultipliers[i] ?? 1.0;
+        const sievedScore = score * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult);
+
+        consensusVector[i] = sievedScore;
     }
 
-    // Optimisation: Boucle native au lieu de Array.from().reduce()
+    // Fallback de sécurité invariant
     let vectorSum = 0;
-    for(let i=1; i<=MAX_NUM; i++) vectorSum += consensusVector[i];
-    const isFlat = vectorSum <= Number.EPSILON;
-
-    if (isFlat) {
+    for (let i = 1; i <= MAX_NUM; i++) vectorSum += consensusVector[i];
+    if (vectorSum <= Number.EPSILON) {
         masterPred.suggestedNumbers.forEach(n => {
             if (n >= 1 && n <= MAX_NUM) consensusVector[n] += maxRawSum;
         });
         masterPred.candidates.forEach((n, idx) => {
-            if (n >= 1 && n <= MAX_NUM) consensusVector[n] += maxRawSum * safeExp(-idx / masterPred.candidates.length);
+            if (n >= 1 && n <= MAX_NUM) consensusVector[n] += maxRawSum * safeExp(-idx / (masterPred.candidates.length || 1));
         });
         for (let i = 1; i <= MAX_NUM; i++) {
             if (consensusVector[i] === 0) consensusVector[i] = 1.0 + Math.abs(Math.sin((i * Math.PI) / MAX_NUM));
@@ -215,117 +318,133 @@ export async function generatePlatinumPredictionCore(
 
     let normalizedVector = normalizeVector(consensusVector);
 
+    // 4. FILTRE DE SHANNON DIFFÉRENTIABLE CONTINU (SANS SEUIL ABRUPT)
     if (opts.shannonEntropyFilter) {
-        let sumConsensus = 0;
-        for (let i = 1; i <= MAX_NUM; i++) sumConsensus += normalizedVector[i];
-        const meanConsensus = sumConsensus / MAX_NUM;
+        const { mean: meanConsensus, stdDev: stdConsensus } = computeVectorStats(normalizedVector);
         const filteredVector = new Float64Array(MAX_NUM + 1);
         
         for (let i = 1; i <= MAX_NUM; i++) {
-            if (normalizedVector[i] < meanConsensus * 0.75) {
-                filteredVector[i] = normalizedVector[i] * 0.15;
-            } else {
-                filteredVector[i] = normalizedVector[i] * (1.0 + (normalizedVector[i] / (sumConsensus + Number.EPSILON)));
-            }
+            const z = (normalizedVector[i] - meanConsensus) / stdConsensus;
+            // Transition continue de débruitage : les signaux sous la moyenne sont amortis continûment
+            const gate = sigmoid(2.5 * z);
+            filteredVector[i] = normalizedVector[i] * (gate + (1.0 - gate) * 0.2);
         }
         normalizedVector = normalizeVector(filteredVector);
     }
 
-    const normalizedMomentum = normalizeVector(momentumVector);
-    const normalizedGap = normalizeVector(gapVector);
-    const normalizedSpectral = normalizeVector(spectralVector);
+    const normalizedMomentum = normalizeVector(rawMomentumVector);
+    const normalizedGap = normalizeVector(rawGapVector);
+    const normalizedSpectral = normalizeVector(rawSpectralVector);
 
-    // 3. ANALYSE DU RÉGIME
-    onProgress?.(80, "Analyse d'entropie du régime...");
+    // 5. ANALYSE STATISTIQUE DU RÉGIME CONTINU (PROBABILITÉS DOUCES)
+    onProgress?.(80, "Analyse d'entropie du régime & Décomposition de phase...");
     const entropyScore = computeVectorEntropy(normalizedVector);
 
     const pivot = opts.regimePivot;
-    const stableThresh = pivot - 0.08;
-    const chaoticThresh = pivot + 0.08;
+    const regimeSigma = 0.05;
     
-    // Sécurisation des sigmoïdes avec safeExp
-    const pStable = 1.0 - (1.0 / (1.0 + safeExp(-20 * (entropyScore - stableThresh))));
-    const pChaotic = 1.0 / (1.0 + safeExp(-20 * (entropyScore - chaoticThresh)));
+    // Probabilités douces continues par sigmoïdes
+    const pStable = sigmoid(-20.0 * (entropyScore - (pivot - regimeSigma)));
+    const pChaotic = sigmoid(20.0 * (entropyScore - (pivot + regimeSigma)));
+    const pTransition = Math.max(0, 1.0 - pStable - pChaotic);
 
     let regime: 'STABLE' | 'TRANSITION' | 'CHAOTIC' = 'TRANSITION';
-    if (pStable < 0.5) regime = 'STABLE';
-    if (pChaotic > 0.5) regime = 'CHAOTIC';
+    if (pStable > pChaotic && pStable > pTransition) regime = 'STABLE';
+    else if (pChaotic > pStable && pChaotic > pTransition) regime = 'CHAOTIC';
 
-    // 4. GÉNÉRATION DES SCÉNARIOS STRATÉGIQUES
-    onProgress?.(85, "Génération des scénarios stratégiques...");
+    // 6. GÉNÉRATION DES 6 SCÉNARIOS STRATÉGIQUES HYPER-CONVERGENTS
+    onProgress?.(85, "Génération des scénarios stratégiques déterministes...");
     const scenarios: PlatinumScenario[] = [];
     const freqPhase = opts.phaseFrequency;
 
-    // Dynamically calculate variance properties to build continuous blending weights (Zero Magic Numbers)
-    let sumVector = 0, sumMomentum = 0, sumGap = 0;
-    for (let i = 1; i <= MAX_NUM; i++) {
-        sumVector += normalizedVector[i];
-        sumMomentum += normalizedMomentum[i];
-        sumGap += normalizedGap[i];
-    }
-    const meanVector = sumVector / MAX_NUM;
-    const meanMomentum = sumMomentum / MAX_NUM;
-    const meanGapVal = sumGap / MAX_NUM;
-    
-    let varVector = 0, varMomentum = 0, varGap = 0;
-    for (let i = 1; i <= MAX_NUM; i++) {
-        varVector += Math.pow(normalizedVector[i] - meanVector, 2);
-        varMomentum += Math.pow(normalizedMomentum[i] - meanMomentum, 2);
-        varGap += Math.pow(normalizedGap[i] - meanGapVal, 2);
-    }
-    const stdVector = Math.sqrt(varVector / MAX_NUM) || 1;
-    const stdMomentum = Math.sqrt(varMomentum / MAX_NUM) || 1;
-    const stdGapVal = Math.sqrt(varGap / MAX_NUM) || 1;
-    
-    const gammaRatio = stdMomentum / (stdVector + stdMomentum + Number.EPSILON);
-    const deltaRatio = stdGapVal / (stdVector + stdGapVal + Number.EPSILON);
+    // Ratios d'harmoniques de variance
+    const statsVector = computeVectorStats(normalizedVector);
+    const statsMomentum = computeVectorStats(normalizedMomentum);
+    const statsGap = computeVectorStats(normalizedGap);
 
-    // Mappings continus pour les probabilités et risques dérivés de la cohérence de l'échantillon (1 - entropyScore)
-    const baseCoherence = 1.0 - entropyScore;
-    const alphaProb = Math.round(75 + 20 * baseCoherence);
-    const betaProb = Math.round(65 + 15 * baseCoherence);
-    const gammaProb = Math.round(50 + 20 * baseCoherence);
-    const deltaProb = Math.round(55 + 18 * baseCoherence);
+    const gammaRatio = statsMomentum.stdDev / (statsVector.stdDev + statsMomentum.stdDev + Number.EPSILON);
+    const deltaRatio = statsGap.stdDev / (statsVector.stdDev + statsGap.stdDev + Number.EPSILON);
 
+    // Fonction de calcul continu de probabilité de scénario basée sur la densité d'énergie
+    const computeScenarioProbability = (selectedNums: number[], targetVector: Float64Array, baseWeight: number): number => {
+        let setSum = 0;
+        for (const num of selectedNums) {
+            setSum += targetVector[num] || 0;
+        }
+        const meanScore = setSum / (selectedNums.length || 1);
+        const coherenceBonus = (1.0 - entropyScore) * 20.0;
+        const prob = Math.round(baseWeight + (meanScore / 100.0) * 15.0 + coherenceBonus);
+        return Math.max(45, Math.min(96, prob));
+    };
+
+    // SCÉNARIO ALPHA : ALPHA CORE (Pic de Résonance Quantique Invariant)
+    const alphaNumbers = greedyDeterministicSelection(normalizedVector, DRAW_SIZE, 0.0, entropyScore);
+    const alphaProb = computeScenarioProbability(alphaNumbers, normalizedVector, 70);
     scenarios.push({
-        id: 'alpha', name: 'Alpha Core',
-        description: 'Convergence maximale. Sélection déterministe gloutonne sur le pic de résonance quantique absolu.',
-        numbers: greedyDeterministicSelection(normalizedVector, DRAW_SIZE, 0.0, entropyScore),
-        probability: alphaProb, risk: alphaProb > 85 ? 'LOW' : 'MEDIUM', color: '#10b981'
+        id: 'alpha',
+        name: 'Alpha Core',
+        description: 'Convergence maximale. Sélection déterministe gloutonne sur le pic de résonance unifié absolu.',
+        numbers: alphaNumbers,
+        probability: alphaProb,
+        risk: alphaProb >= 82 ? 'LOW' : 'MEDIUM',
+        color: '#10b981'
     });
 
+    // SCÉNARIO BETA : BETA FLOW (Harmonique Orbitale Déphasée)
+    const betaPhase = (Math.PI / 4.0) * freqPhase;
+    const betaNumbers = greedyDeterministicSelection(normalizedVector, DRAW_SIZE, betaPhase, entropyScore);
+    const betaProb = computeScenarioProbability(betaNumbers, normalizedVector, 65);
     scenarios.push({
-        id: 'beta', name: 'Beta Flow',
-        description: 'Intègre les vecteurs secondaires via un décalage de phase trigonométrique modéré.',
-        numbers: greedyDeterministicSelection(normalizedVector, DRAW_SIZE, (Math.PI / 4) * freqPhase, entropyScore),
-        probability: betaProb, risk: betaProb > 75 ? 'LOW' : 'MEDIUM', color: '#6366f1'
+        id: 'beta',
+        name: 'Beta Flow',
+        description: 'Intègre les vecteurs secondaires via un décalage de phase trigonométrique harmonique.',
+        numbers: betaNumbers,
+        probability: betaProb,
+        risk: betaProb >= 75 ? 'LOW' : 'MEDIUM',
+        color: '#6366f1'
     });
 
+    // SCÉNARIO GAMMA : GAMMA BURST (Accélération Cinétique / Momentum Pur)
     const gammaVector = new Float64Array(MAX_NUM + 1);
     for (let i = 1; i <= MAX_NUM; i++) {
         gammaVector[i] = (normalizedVector[i] * (1.0 - gammaRatio)) + (normalizedMomentum[i] * gammaRatio);
     }
+    const gammaPhase = (Math.PI / 2.0) * freqPhase;
+    const gammaNumbers = greedyDeterministicSelection(gammaVector, DRAW_SIZE, gammaPhase, entropyScore);
+    const gammaProb = computeScenarioProbability(gammaNumbers, gammaVector, 58);
     scenarios.push({
-        id: 'gamma', name: 'Gamma Burst',
+        id: 'gamma',
+        name: 'Gamma Burst',
         description: 'Cible la vélocité et l\'accélération statistique pure (Momentum absolu).',
-        numbers: greedyDeterministicSelection(gammaVector, DRAW_SIZE, (Math.PI / 2) * freqPhase, entropyScore),
-        probability: gammaProb, risk: gammaProb > 75 ? 'MEDIUM' : 'HIGH', color: '#f43f5e'
+        numbers: gammaNumbers,
+        probability: gammaProb,
+        risk: gammaProb >= 75 ? 'MEDIUM' : 'HIGH',
+        color: '#f43f5e'
     });
 
+    // SCÉNARIO DELTA : DELTA CONVERGENCE (Restitution d'Écart Asymétrique)
     const deltaVector = new Float64Array(MAX_NUM + 1);
     for (let i = 1; i <= MAX_NUM; i++) {
         deltaVector[i] = (normalizedVector[i] * (1.0 - deltaRatio)) + (normalizedGap[i] * deltaRatio);
     }
+    const deltaPhase = (3.0 * Math.PI / 4.0) * freqPhase;
+    const deltaNumbers = greedyDeterministicSelection(deltaVector, DRAW_SIZE, deltaPhase, entropyScore);
+    const deltaProb = computeScenarioProbability(deltaNumbers, deltaVector, 60);
     scenarios.push({
-        id: 'delta', name: 'Delta Convergence',
-        description: 'Théorie des écarts asymétriques pour cibler les corrections imminentes.',
-        numbers: greedyDeterministicSelection(deltaVector, DRAW_SIZE, (3 * Math.PI / 4) * freqPhase, entropyScore),
-        probability: deltaProb, risk: deltaProb > 75 ? 'MEDIUM' : 'HIGH', color: '#f59e0b'
+        id: 'delta',
+        name: 'Delta Convergence',
+        description: 'Théorie des écarts asymétriques pour cibler les corrections de rupture imminentes.',
+        numbers: deltaNumbers,
+        probability: deltaProb,
+        risk: deltaProb >= 75 ? 'MEDIUM' : 'HIGH',
+        color: '#f59e0b'
     });
 
-    // Scénario Epsilon
+    // SCÉNARIO EPSILON : EPSILON FORENSIC (Correction Agentique Résiduelle)
     const epsilonVector = new Float64Array(MAX_NUM + 1);
-    for (let i = 1; i <= MAX_NUM; i++) epsilonVector[i] = normalizedVector[i] * 0.4;
+    for (let i = 1; i <= MAX_NUM; i++) {
+        epsilonVector[i] = normalizedVector[i] * 0.4;
+    }
     
     try {
         onProgress?.(90, "Calcul des corrections agentiques (Epsilon)...");
@@ -337,23 +456,26 @@ export async function generatePlatinumPredictionCore(
             const recencyWeight = safeExp(-0.25 * index);
             
             report.missedOpportunities?.forEach((miss: any) => {
-                if (miss.number >= 1 && miss.number <= MAX_NUM) epsilonVector[miss.number] += 45 * recencyWeight * gain;
+                if (miss.number >= 1 && miss.number <= MAX_NUM) {
+                    epsilonVector[miss.number] += 40.0 * recencyWeight * gain;
+                }
             });
             
             report.nearMisses?.forEach((nm: any) => {
                 if (nm.actual >= 1 && nm.actual <= MAX_NUM) {
-                    epsilonVector[nm.actual] += 35 * recencyWeight * gain;
+                    epsilonVector[nm.actual] += 30.0 * recencyWeight * gain;
                     const left = nm.actual > 1 ? nm.actual - 1 : MAX_NUM;
                     const right = nm.actual < MAX_NUM ? nm.actual + 1 : 1;
-                    epsilonVector[left] += 15 * recencyWeight * gain;
-                    epsilonVector[right] += 15 * recencyWeight * gain;
+                    epsilonVector[left] += 12.0 * recencyWeight * gain;
+                    epsilonVector[right] += 12.0 * recencyWeight * gain;
                 }
             });
             
             report.algorithmicDrift?.forEach((drift: any) => {
-                const driftActivation = 1.0 / (1.0 + safeExp(-0.5 * (drift.driftScore - 20)));
+                const driftScore = drift.driftScore || 0;
+                const driftActivation = sigmoid(0.2 * (driftScore - 15.0));
                 for (let i = 1; i <= MAX_NUM; i++) {
-                    const deterministicNoise = 5.0 * (1.0 + Math.sin(drift.driftScore * i));
+                    const deterministicNoise = 4.0 * (1.0 + Math.sin(driftScore * i));
                     const correction = driftActivation * deterministicNoise * recencyWeight * gain;
                     if (drift.direction === 'underestimating') epsilonVector[i] += correction;
                     else if (drift.direction === 'overestimating') epsilonVector[i] -= correction * 0.5;
@@ -364,41 +486,54 @@ export async function generatePlatinumPredictionCore(
         console.error("Forensic integration failed", e);
     }
 
-    const epsilonProb = Math.round(68 + 17 * baseCoherence);
+    const normEpsilon = normalizeVector(epsilonVector);
+    const epsilonPhase = Math.PI * freqPhase;
+    const epsilonNumbers = greedyDeterministicSelection(normEpsilon, DRAW_SIZE, epsilonPhase, entropyScore);
+    const epsilonProb = computeScenarioProbability(epsilonNumbers, normEpsilon, 64);
     scenarios.push({
-        id: 'epsilon', name: 'Epsilon Forensic',
+        id: 'epsilon',
+        name: 'Epsilon Forensic',
         description: 'Adaptation Agentique & Forensic. Corrige la dérive de l\'ADN algorithmique sur les cycles récents.',
-        numbers: greedyDeterministicSelection(normalizeVector(epsilonVector), DRAW_SIZE, Math.PI * freqPhase, entropyScore),
-        probability: epsilonProb, risk: epsilonProb > 75 ? 'LOW' : 'MEDIUM', color: '#8b5cf6'
+        numbers: epsilonNumbers,
+        probability: epsilonProb,
+        risk: epsilonProb >= 75 ? 'LOW' : 'MEDIUM',
+        color: '#8b5cf6'
     });
 
-    // Scénario Zeta
+    // SCÉNARIO ZETA : ZETA ADVERSARIAL (Inversion de Boltzmann / Anti-Consensus)
     const zetaVector = new Float64Array(MAX_NUM + 1);
+    const { mean: meanNorm, stdDev: stdNorm } = statsVector;
+
     for (let i = 1; i <= MAX_NUM; i++) {
-        const cw = normalizedVector[i];
-        const moderation = 1.0 / (1.0 + safeExp(-0.1 * (cw - 40)));
-        const componentHigh = (100 - cw) * (1.0 - moderation) + normalizedGap[i] * moderation;
-        const componentLow = cw * (1.0 + (1.0 - moderation)) + normalizedSpectral[i] * moderation;
-        const baseline = 10.0 + 7.5 * (1.0 + Math.cos(i * 0.618));
+        const z = (normalizedVector[i] - meanNorm) / stdNorm;
+        // Inversion continue de Boltzmann tempérée par l'entropie
+        const boltzmannInv = safeExp(-0.8 * z * (1.0 - 0.5 * entropyScore));
+        const antiConsensus = boltzmannInv * 50.0;
+        const gapModulation = normalizedGap[i] * 0.3;
+        const spectralModulation = normalizedSpectral[i] * 0.2;
         
-        // Continuous transition to avoid conditional threshold jump at cw > 5
-        const cwActivation = 1.0 / (1.0 + safeExp(-2.0 * (cw - 5.0)));
-        const blendedLow = cwActivation * componentLow + (1.0 - cwActivation) * baseline;
-        zetaVector[i] = (moderation * componentHigh) + ((1.0 - moderation) * blendedLow);
+        zetaVector[i] = antiConsensus + gapModulation + spectralModulation;
     }
 
-    const zetaProb = Math.round(50 + 25 * entropyScore);
+    const normZeta = normalizeVector(zetaVector);
+    const zetaPhase = (5.0 * Math.PI / 4.0) * freqPhase;
+    const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, zetaPhase, entropyScore);
+    const zetaProb = computeScenarioProbability(zetaNumbers, normZeta, 52);
     scenarios.push({
-        id: 'zeta', name: 'Zeta Adversarial',
+        id: 'zeta',
+        name: 'Zeta Adversarial',
         description: 'Contre-mesure Anti-Consensus. Remodelage continu des probabilités pour éviter la sédimentation.',
-        numbers: greedyDeterministicSelection(normalizeVector(zetaVector), DRAW_SIZE, (5 * Math.PI / 4) * freqPhase, entropyScore),
-        probability: zetaProb, risk: zetaProb > 70 ? 'HIGH' : 'MEDIUM', color: '#f97316'
+        numbers: zetaNumbers,
+        probability: zetaProb,
+        risk: zetaProb >= 70 ? 'HIGH' : 'MEDIUM',
+        color: '#f97316'
     });
 
-    // 5. CALCUL DE LA COHÉRENCE GLOBALE
+    // 7. COHÉRENCE GLOBALE ET FINALISATION
     onProgress?.(95, "Calcul de la cohérence et finalisation...");
-    const coherence = Math.round((1 - entropyScore) * 100);
+    const coherence = Math.round((1.0 - entropyScore) * 100);
 
+    // Remplissage sécurisé déterministe si un scénario est incomplet
     const defaultNumbers = masterPred?.suggestedNumbers || [];
     scenarios.forEach(s => {
         if (s.numbers.length < DRAW_SIZE) {
@@ -408,14 +543,20 @@ export async function generatePlatinumPredictionCore(
                 if (n && !s.numbers.includes(n)) s.numbers.push(n);
             }
             let fallback = 1;
-            while (s.numbers.length < DRAW_SIZE && fallback <= 90) {
+            while (s.numbers.length < DRAW_SIZE && fallback <= MAX_NUM) {
                 if (!s.numbers.includes(fallback)) s.numbers.push(fallback);
                 fallback++;
             }
         }
     });
 
-    const seed = `${drawName}_${entropyScore}_${scenarios.map(s => s.numbers.join(',')).join('|')}`;
+    // Calcul de la concordance moyenne de l'ADN
+    let sumDnaAff = 0;
+    for (let i = 1; i <= MAX_NUM; i++) sumDnaAff += dnaAffinity[i] ?? 50;
+    const dnaConcordanceMean = Math.round(sumDnaAff / MAX_NUM);
+
+    // ID Déterministe
+    const seed = `${drawName}_${entropyScore.toFixed(4)}_${scenarios.map(s => s.numbers.join(',')).join('|')}`;
     let hashVal = 0;
     for (let i = 0; i < seed.length; i++) {
         hashVal = (hashVal << 5) - hashVal + seed.charCodeAt(i);
@@ -434,12 +575,24 @@ export async function generatePlatinumPredictionCore(
         scenarios,
         coherence,
         regime,
-        entropy: entropyScore
+        entropy: entropyScore,
+        dnaSieveInfo: {
+            active: true,
+            dominantAlgos,
+            dnaConcordanceMean,
+            sieveIntensityPercent,
+            entropyBits: dnaReport.entropyBits
+        },
+        regimeProbabilities: {
+            stable: Number((pStable * 100).toFixed(1)),
+            transition: Number((pTransition * 100).toFixed(1)),
+            chaotic: Number((pChaotic * 100).toFixed(1))
+        }
     };
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PERSISTENCE
+// PERSISTENCE & AUDIT
 // ═══════════════════════════════════════════════════════════════
 const storageKey = (name: string) => `platinum_hyper_${name}`;
 
@@ -491,7 +644,7 @@ export const performPlatinumAudit = (
         actualDraw: actualResult.gagnants,
         bestTimeline: bestScenarioId,
         bestScore: bestHits,
-        syncScore: Math.round((bestHits / 5) * 100),
+        syncScore: Math.round((bestHits / DRAW_SIZE) * 100),
         timelinePerformance: performances,
         verdict: bestHits >= 3 ? "Succès Confirmé" : bestHits >= 1 ? "Signal Partiel" : "Divergence"
     };
