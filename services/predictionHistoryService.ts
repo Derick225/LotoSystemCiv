@@ -20,6 +20,150 @@ const TIME_CONSTANTS = {
   MAX_LOOKAHEAD_MS: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
+// CONSTANTES DE RÉTENTION TEMPORELLE & OPTIMISATION DU STOCKAGE LOCAL
+export const STORAGE_RETENTION_CONSTANTS = {
+  RETENTION_DAYS_DEFAULT: 90,
+  DAY_IN_MS: 24 * 60 * 60 * 1000,
+  RETENTION_PERIOD_MS: 90 * 24 * 60 * 60 * 1000,
+  AUTO_PURGE_ENABLED_KEY: 'lotopro_auto_purge_90d_enabled',
+  LAST_PURGE_TIMESTAMP_KEY: 'lotopro_last_prediction_purge_ts',
+} as const;
+
+/**
+ * Vérifie si l'option de purge automatique des logs > 90 jours est activée (actif par défaut pour optimiser le stockage).
+ */
+export const isAutoPurgeEnabled = (): boolean => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = window.localStorage.getItem(STORAGE_RETENTION_CONSTANTS.AUTO_PURGE_ENABLED_KEY);
+      if (val === null) return true; // Actif par défaut pour protéger l'espace de stockage
+      return val === 'true';
+    }
+  } catch (e) {
+    console.warn('[Storage] Erreur lecture statut auto-purge:', e);
+  }
+  return true;
+};
+
+/**
+ * Active ou désactive l'option de purge automatique des logs > 90 jours.
+ */
+export const setAutoPurgeEnabled = (enabled: boolean): void => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_RETENTION_CONSTANTS.AUTO_PURGE_ENABLED_KEY, enabled ? 'true' : 'false');
+    }
+  } catch (e) {
+    console.warn('[Storage] Erreur écriture statut auto-purge:', e);
+  }
+};
+
+/**
+ * Récupère l'horodatage de la dernière purge de logs exécutée.
+ */
+export const getLastPurgeTimestamp = (): number | null => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = window.localStorage.getItem(STORAGE_RETENTION_CONSTANTS.LAST_PURGE_TIMESTAMP_KEY);
+      return val ? parseInt(val, 10) : null;
+    }
+  } catch (e) {
+    console.warn('[Storage] Erreur lecture horodatage purge:', e);
+  }
+  return null;
+};
+
+/**
+ * Calcule le nombre d'inférences ayant plus de 90 jours (ou maxAgeDays) dans le stockage local.
+ */
+export const getOldPredictionsCount = async (
+  drawName?: string,
+  maxAgeDays: number = STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT
+): Promise<{ oldItemsCount: number; totalCount: number; oldestTimestamp: number | null; cutoffTimestamp: number }> => {
+  const cutoffTimestamp = Date.now() - maxAgeDays * STORAGE_RETENTION_CONSTANTS.DAY_IN_MS;
+  const all = await getLocalHistory();
+  const filtered = drawName ? all.filter(p => p.drawName?.toLowerCase() === drawName.toLowerCase()) : all;
+  
+  const oldItems = filtered.filter(p => p.timestamp < cutoffTimestamp);
+  const oldestTimestamp = filtered.length > 0 ? filtered[filtered.length - 1].timestamp : null;
+
+  return {
+    oldItemsCount: oldItems.length,
+    totalCount: filtered.length,
+    oldestTimestamp,
+    cutoffTimestamp,
+  };
+};
+
+/**
+ * Purge les logs de prédictions ayant plus de 90 jours pour optimiser le stockage local.
+ * Respecte l'isolation stricte par tirage si drawName est spécifié.
+ */
+export const purgeOldPredictionLogs = async (
+  drawName?: string,
+  maxAgeDays: number = STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT
+): Promise<{ purgedCount: number; remainingCount: number }> => {
+  const cutoffTimestamp = Date.now() - maxAgeDays * STORAGE_RETENTION_CONSTANTS.DAY_IN_MS;
+  const all = await getLocalHistory();
+  const targetItems = drawName ? all.filter(p => p.drawName?.toLowerCase() === drawName.toLowerCase()) : all;
+  const oldItems = targetItems.filter(p => p.timestamp < cutoffTimestamp);
+
+  if (oldItems.length > 0) {
+    const { delMany } = await import('idb-keyval');
+    const keysToDelete: string[] = [];
+    for (const item of oldItems) {
+      keysToDelete.push(`${HISTORY_KEY_PREFIX}${item.id}`);
+      keysToDelete.push(`prediction_snapshot_${item.id}`);
+    }
+    if (keysToDelete.length > 0) {
+      await delMany(keysToDelete);
+    }
+
+    // Tentative de suppression distante sur Supabase si l'utilisateur est connecté
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const ids = oldItems.map(p => p.id);
+        await supabase.from('predictions').delete().in('id', ids);
+        await supabase.from('prediction_snapshots').delete().in('id', ids);
+      }
+    } catch (e) {
+      // Ignorer silencieusement en mode hors-ligne
+    }
+  }
+
+  // Enregistrer l'horodatage de la purge
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_RETENTION_CONSTANTS.LAST_PURGE_TIMESTAMP_KEY, String(Date.now()));
+    }
+  } catch (e) {
+    // Ignorer
+  }
+
+  return {
+    purgedCount: oldItems.length,
+    remainingCount: targetItems.length - oldItems.length,
+  };
+};
+
+/**
+ * Exécute la purge automatique en arrière-plan si l'option est activée.
+ */
+export const autoPurgePredictionLogsIfEnabled = async (
+  drawName?: string,
+  maxAgeDays: number = STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT
+): Promise<{ purgedCount: number }> => {
+  if (!isAutoPurgeEnabled()) {
+    return { purgedCount: 0 };
+  }
+  const result = await purgeOldPredictionLogs(drawName, maxAgeDays);
+  if (result.purgedCount > 0) {
+    console.info(`[Storage Optimizer] Purge automatique : ${result.purgedCount} log(s) de prédictions (> ${maxAgeDays} jours) nettoyé(s) pour optimiser le stockage local.`);
+  }
+  return { purgedCount: result.purgedCount };
+};
+
 const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
   const items: PredictionHistoryItem[] = [];
   try {
@@ -262,11 +406,25 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   }
   const deterministicId = getDeterministicUUID(`pred_${Math.abs(hashVal)}_${Date.now()}`);
 
+  const resolvedEngineType: "local" | "cloud" =
+    prediction.engineType ||
+    (prediction.isLocalFallback
+      ? "local"
+      : prediction.aiRationale || prediction.aiStrategicAdvice || (prediction.mathModelSummary && (prediction.mathModelSummary.includes("Cloud") || prediction.mathModelSummary.includes("Gemini")))
+      ? "cloud"
+      : "local");
+
+  const normalizedPrediction: Prediction = {
+    ...prediction,
+    engineType: resolvedEngineType,
+  };
+
   const newItem: PredictionHistoryItem = {
     id: deterministicId,
     timestamp: Date.now(),
     drawName,
-    prediction,
+    prediction: normalizedPrediction,
+    engineType: resolvedEngineType,
     drawResultId: drawResultId || null
   };
 
@@ -287,6 +445,9 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   // Save forensic snapshot
   savePredictionSnapshot(newItem.id, drawName, prediction, metrics).catch(e => console.error("Snapshot save failed", e));
   
+  // Purge automatique en tâche de fond des logs de plus de 90 jours
+  autoPurgePredictionLogsIfEnabled(drawName).catch(e => console.warn("Auto-purge background task warning:", e));
+
   return newItem;
 };
 

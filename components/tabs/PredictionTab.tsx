@@ -185,43 +185,27 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               checkNetworkAndAuth={checkNetworkAndAuth}
             />
 
-            {/* Selector of Execution Engine */}
-            <div className="w-full max-w-md mx-auto mb-6 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-4 text-left">
+            {/* Architecture Badge: Pure Local Deterministic Engine */}
+            <div className="w-full max-w-md mx-auto mb-6 p-4 rounded-2xl bg-indigo-50/50 dark:bg-slate-900/60 border border-indigo-100 dark:border-indigo-900/40 flex items-center justify-between gap-4 text-left shadow-sm">
               <div className="space-y-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 dark:text-indigo-400 block">
-                  Moteur d'Exécution
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">
+                    Architecture Moteur
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-black uppercase border border-emerald-500/20">
+                    100% Local
+                  </span>
+                </div>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                  Moteur Déterministe Embarqué (19 Algorithmes)
                 </span>
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-                  {useCloudEngine
-                    ? "Cloud Supabase (10 Algos)"
-                    : "Calcul Local Intégral (19 Algos)"}
-                </span>
-                <span className="text-[9px] text-slate-400 block leading-normal">
-                  {useCloudEngine
-                    ? "Délégation haute performance aux serveurs de calcul."
-                    : "Moteur local complet avec les 19 modèles mathématiques d'écarts."}
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 block leading-normal">
+                  Exécution 100% autonome dans le navigateur via Web Workers (Markov, Poisson, Hawkes, FFT, Entropie). Zéro latence Cloud.
                 </span>
               </div>
-              <label className="relative flex items-center shrink-0 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useCloudEngine}
-                  onChange={(e) => {
-                    try {
-                      audioEngine.play("click");
-                    } catch (err) {}
-                    setUseCloudEngine(e.target.checked);
-                    showToast(
-                      e.target.checked
-                        ? "Moteur Cloud Supabase activé."
-                        : "Calcul Local Intégral activé.",
-                      "info",
-                    );
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-6 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600" />
-              </label>
+              <div className="w-10 h-10 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-500/20">
+                <Cpu size={20} />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-8">
@@ -296,38 +280,17 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </div>
           </div>
 
-          {/* New inline engine switch */}
-          <div className="flex items-center gap-2.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-150 dark:border-slate-850">
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Moteur
-            </span>
-            <button
-              onClick={() => {
-                try {
-                  audioEngine.play("click");
-                } catch (err) {}
-                setUseCloudEngine(false);
-                showToast(
-                  "Calcul Local Intégral (19 Algos) sélectionné",
-                  "info",
-                );
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${!useCloudEngine ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold"}`}
-            >
-              Local (19 Algos)
-            </button>
-            <button
-              onClick={() => {
-                try {
-                  audioEngine.play("click");
-                } catch (err) {}
-                setUseCloudEngine(true);
-                showToast("Cloud Supabase (10 Algos) sélectionné", "info");
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${useCloudEngine ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-black" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-bold"}`}
-            >
-              Cloud
-            </button>
+          {/* Local Deterministic Engine Status Badge */}
+          <div className="flex items-center gap-3 px-4 py-2 bg-emerald-500/10 dark:bg-emerald-950/40 rounded-2xl border border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+            <Cpu size={16} className="animate-pulse shrink-0" />
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black uppercase tracking-wider">
+                Moteur Local Déterministe
+              </span>
+              <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono">
+                19 Algorithmes • 100% In-Browser
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 w-full md:w-auto">

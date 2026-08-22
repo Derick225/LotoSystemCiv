@@ -6,6 +6,10 @@ import {
   linkPredictionToResult,
   deletePrediction,
   findMatchingResultForPrediction,
+  isAutoPurgeEnabled,
+  setAutoPurgeEnabled,
+  purgeOldPredictionLogs,
+  STORAGE_RETENTION_CONSTANTS,
 } from "../services/predictionHistoryService";
 import {
   performForensicAnalysis,
@@ -30,6 +34,8 @@ import {
   ChevronDown,
   Activity,
   Clock,
+  Database,
+  HardDrive,
 } from "lucide-react";
 import { useToast } from "./ui/Toast";
 import { PredictionForensics } from "./PredictionForensics";
@@ -54,8 +60,66 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     null,
   );
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
+  const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
   const attemptedLinksRef = useRef<Set<string>>(new Set());
   const isLinkingRef = useRef(false);
+
+  const oldLogsStats = React.useMemo(() => {
+    const cutoff = Date.now() - STORAGE_RETENTION_CONSTANTS.RETENTION_PERIOD_MS;
+    const oldItems = history.filter((item) => item.timestamp < cutoff);
+    return {
+      count: oldItems.length,
+      cutoff,
+    };
+  }, [history]);
+
+  const handleToggleAutoPurge = async () => {
+    audioEngine.play("click");
+    const nextVal = !autoPurgeEnabled;
+    setAutoPurgeState(nextVal);
+    setAutoPurgeEnabled(nextVal);
+    if (nextVal) {
+      showToast("Purge automatique activée (logs > 90 jours).", "success");
+      try {
+        setIsPurgingOldLogs(true);
+        const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+        if (purgedCount > 0) {
+          await loadData();
+          showToast(`${purgedCount} ancien(s) log(s) nettoyé(s).`, "info");
+        }
+      } catch (err) {
+        console.warn("Auto-purge error:", err);
+      } finally {
+        setIsPurgingOldLogs(false);
+      }
+    } else {
+      showToast("Purge automatique désactivée.", "info");
+    }
+  };
+
+  const handleManualPurgeOldLogs = async () => {
+    audioEngine.play("click");
+    if (oldLogsStats.count === 0) {
+      showToast("Aucun log de plus de 90 jours à purger.", "info");
+      return;
+    }
+    if (!confirm(`Purger ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours ?`)) {
+      return;
+    }
+    try {
+      setIsPurgingOldLogs(true);
+      const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+      await loadData();
+      audioEngine.play("success");
+      showToast(`${purgedCount} log(s) purgé(s) avec succès.`, "success");
+    } catch (err) {
+      console.error("Purge error:", err);
+      showToast("Erreur lors de la purge des anciens logs.", "error");
+    } finally {
+      setIsPurgingOldLogs(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -259,24 +323,53 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
             Historique Inférence
           </h3>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
             <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Hit
             <div className="w-2 h-2 rounded-full bg-amber-500 ml-2"></div> Near
             Miss (+/- 1)
           </div>
+
+          <button
+            onClick={handleToggleAutoPurge}
+            title="Activer ou désactiver la purge automatique des logs > 90 jours"
+            className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all border cursor-pointer ${
+              autoPurgeEnabled
+                ? "bg-indigo-950/40 text-indigo-300 border-indigo-500/40"
+                : "bg-slate-900/50 text-slate-400 border-slate-800 hover:text-slate-200"
+            }`}
+          >
+            <Clock size={12} className={autoPurgeEnabled ? "text-indigo-400" : "text-slate-500"} />
+            <span>Auto-Purge 90j : {autoPurgeEnabled ? "Actif" : "Inactif"}</span>
+          </button>
+
+          <button
+            onClick={handleManualPurgeOldLogs}
+            disabled={isPurgingOldLogs || history.length === 0}
+            title="Purger immédiatement les logs ayant plus de 90 jours"
+            className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 text-amber-400 hover:text-amber-300 bg-amber-950/30 border border-amber-900/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Database size={12} />
+            <span>{isPurgingOldLogs ? "Purge..." : "Purger >90j"}</span>
+            {oldLogsStats.count > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                {oldLogsStats.count}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={() => {
               audioEngine.play("click");
-              if (confirm("Vider l'historique ?")) {
+              if (confirm("Vider l'historique complet pour ce tirage ?")) {
                 clearPredictionHistory(drawName);
                 setHistory([]);
                 audioEngine.play("success");
               }
             }}
-            className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-2 transition-colors"
+            className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Trash2 size={14} /> Reset Journal
+            <Trash2 size={13} /> Reset
           </button>
         </div>
       </div>

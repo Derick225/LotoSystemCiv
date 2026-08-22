@@ -246,7 +246,10 @@ export const usePredictionGenerator = (drawName: string) => {
                 (progress, step) => {
                     setComputingProgress(progress);
                     setComputingStep(step);
-                }
+                },
+                undefined,
+                undefined,
+                false // Pure Local Execution (Zéro Cloud) pour Oracle Base
             );
             
             setLastPrediction(res);

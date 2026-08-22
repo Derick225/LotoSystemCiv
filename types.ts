@@ -65,6 +65,7 @@ export interface PredictionHistoryItem {
   prediction: Prediction;
   drawResultId: string | null;
   feedback?: PredictionFeedback;
+  engineType?: "local" | "cloud";
 }
 
 export interface Prediction {
@@ -74,6 +75,8 @@ export interface Prediction {
   analysis: string;
   breakdown: Record<number, ScoreBreakdown>;
   timestamp: number;
+  engineType?: "local" | "cloud";
+  mathModelSummary?: string;
   symbiosisFactor?: number;
   realityAlignment?: number;
   adversarialApplied?: boolean;

@@ -27,6 +27,17 @@ import {
   Copy,
   Check,
   Download,
+  FileText,
+  ShieldCheck,
+  Filter,
+  ArrowUpDown,
+  Zap,
+  Cpu,
+  Layers,
+  X,
+  Scale,
+  Database,
+  HardDrive,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { supabase } from "../../services/supabaseClient";
@@ -46,9 +57,14 @@ import {
   getPredictionHistoryAsync,
   deletePrediction,
   findMatchingResultForPrediction,
+  isAutoPurgeEnabled,
+  setAutoPurgeEnabled,
+  purgeOldPredictionLogs,
+  STORAGE_RETENTION_CONSTANTS,
 } from "../../services/predictionHistoryService";
 import type { Prediction, PredictionHistoryItem } from "../../types";
 import { NumberBall } from "../NumberBall";
+import { ExportService } from "../../services/exportService";
 
 interface BacktestResult {
   drawId: string;
@@ -78,11 +94,85 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     "inference" | "backtest" | "audit_log"
   >("inference");
 
-  // State for local audit log
+  // State for local audit log / Forensic Log
   const [localHistory, setLocalHistory] = useState<PredictionHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [isCopiedInference, setIsCopiedInference] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [forensicFilter, setForensicFilter] = useState<"all" | "verified" | "pending" | "hits" | "high_precision">("all");
+  const [forensicEngineFilter, setForensicEngineFilter] = useState<"all" | "local" | "cloud">("all");
+  const [forensicDateFilter, setForensicDateFilter] = useState<"all" | "today" | "7d" | "30d" | "custom">("all");
+  const [forensicCustomDate, setForensicCustomDate] = useState<string>("");
+  const [forensicSort, setForensicSort] = useState<"recent" | "precision_desc" | "confidence_desc">("recent");
+  const [showEngineComparison, setShowEngineComparison] = useState<boolean>(true);
+  const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
+  const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
+
+  // Statistiques d'âge des logs pour l'optimisation du stockage local
+  const oldLogsStats = useMemo(() => {
+    const cutoff = Date.now() - STORAGE_RETENTION_CONSTANTS.RETENTION_PERIOD_MS;
+    const oldItems = localHistory.filter((item) => item.timestamp < cutoff);
+    return {
+      count: oldItems.length,
+      cutoff,
+      retentionDays: STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT,
+    };
+  }, [localHistory]);
+
+  const handleToggleAutoPurge = async () => {
+    audioEngine.play("click");
+    const nextVal = !autoPurgeEnabled;
+    setAutoPurgeState(nextVal);
+    setAutoPurgeEnabled(nextVal);
+    if (nextVal) {
+      showToast("Purge automatique activée : les logs > 90 jours sont automatiquement nettoyés.", "success");
+      // Déclencher un nettoyage immédiat si activé
+      try {
+        setIsPurgingOldLogs(true);
+        const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+        if (purgedCount > 0) {
+          await loadHistoryData();
+          showToast(`${purgedCount} ancien(s) log(s) de plus de 90 jours nettoyé(s).`, "info");
+        }
+      } catch (err) {
+        console.warn("Auto-purge immediate run warning:", err);
+      } finally {
+        setIsPurgingOldLogs(false);
+      }
+    } else {
+      showToast("Purge automatique désactivée : conservation illimitée des logs.", "info");
+    }
+  };
+
+  const handleManualPurgeOldLogs = async () => {
+    audioEngine.play("click");
+    if (oldLogsStats.count === 0) {
+      showToast("Aucun log ayant plus de 90 jours n'a été détecté dans le registre local.", "info");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Confirmer la purge de ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours pour le tirage "${drawName}" ?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsPurgingOldLogs(true);
+      const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+      await loadHistoryData();
+      audioEngine.play("success");
+      showToast(`${purgedCount} log(s) de prédictions (> 90 jours) purgé(s) avec succès.`, "success");
+    } catch (err) {
+      console.error("Erreur purge manuelle:", err);
+      showToast("Erreur lors de la purge des anciens logs.", "error");
+    } finally {
+      setIsPurgingOldLogs(false);
+    }
+  };
 
   const handleCopyInferenceTicket = (numbers: number[]) => {
     audioEngine.play("click");
@@ -106,7 +196,43 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast("Fiche IA exportée.", "success");
+    showToast("Fiche IA exportée en JSON.", "success");
+  };
+
+  const handleExportNeuralPredictionPDF = async (pred: any) => {
+    if (!pred || !pred.suggestedNumbers) return;
+    try {
+      audioEngine.play("click");
+      setIsExportingPDF(true);
+      await ExportService.generateNeuralPredictionPDF({
+        drawName,
+        suggestedNumbers: pred.suggestedNumbers,
+        candidates: pred.candidates,
+        confidence: pred.confidence,
+        analysis: pred.analysis,
+        mathModelSummary: pred.mathModelSummary,
+        stabilityScore: pred.stabilityScore,
+        diversityScore: pred.diversityScore ?? pred.diversityMetrics?.diversityScore,
+        realityAlignment: pred.realityAlignment,
+        adversarialSurvivalScore: pred.adversarialSurvivalScore,
+        adversarialRisks: pred.adversarialRisks,
+        challengedNumbers: pred.challengedNumbers,
+        aiRationale: pred.aiRationale,
+        aiStrategicAdvice: pred.aiStrategicAdvice,
+        xapExp: pred.xapExp,
+        aiWeights: pred.aiWeights,
+        hyperparameters: pred.hyperparameters,
+        isLocalFallback: pred.isLocalFallback,
+        timestamp: Date.now(),
+      });
+      showToast("Rapport d'Inférence IA Neural exporté en PDF.", "success");
+      audioEngine.play("success");
+    } catch (err) {
+      console.error("PDF Export error:", err);
+      showToast("Erreur lors de la génération du PDF.", "error");
+    } finally {
+      setIsExportingPDF(false);
+    }
   };
 
   const loadHistoryData = useCallback(async () => {
@@ -122,10 +248,199 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   }, [drawName]);
 
   useEffect(() => {
-    if (activeMode === "audit_log") {
-      loadHistoryData();
+    loadHistoryData();
+  }, [loadHistoryData]);
+
+  // Forensic Log computed comparison items
+  const forensicEntries = useMemo(() => {
+    return localHistory.map((item) => {
+      const res = item.drawResultId
+        ? history.find((r) => r.id === item.drawResultId)
+        : findMatchingResultForPrediction(item, history);
+      const hits = res
+        ? item.prediction.suggestedNumbers.filter((n) =>
+            res.gagnants.includes(n),
+          )
+        : [];
+      const nearMisses = res
+        ? item.prediction.suggestedNumbers.filter(
+            (n) =>
+              !res.gagnants.includes(n) &&
+              res.gagnants.some((gn) => Math.abs(gn - n) === 1),
+          )
+        : [];
+      const precisionPct = res && item.prediction.suggestedNumbers.length > 0
+        ? Math.round((hits.length / item.prediction.suggestedNumbers.length) * 100)
+        : 0;
+
+      const engineType: "local" | "cloud" =
+        item.engineType ||
+        item.prediction?.engineType ||
+        (item.prediction?.isLocalFallback
+          ? "local"
+          : item.prediction?.aiRationale ||
+              item.prediction?.aiStrategicAdvice ||
+              (item.prediction?.mathModelSummary &&
+                (item.prediction.mathModelSummary.includes("Cloud") ||
+                  item.prediction.mathModelSummary.includes("Gemini")))
+            ? "cloud"
+            : "local");
+
+      return {
+        item,
+        res,
+        hits,
+        nearMisses,
+        precisionPct,
+        engineType,
+      };
+    });
+  }, [localHistory, history]);
+
+  // Filtered & sorted forensic items
+  const filteredForensicEntries = useMemo(() => {
+    let list = [...forensicEntries];
+
+    // 1. Engine filter (Local vs Cloud)
+    if (forensicEngineFilter !== "all") {
+      list = list.filter((e) => e.engineType === forensicEngineFilter);
     }
-  }, [activeMode, loadHistoryData]);
+
+    // 2. Date filter
+    if (forensicDateFilter !== "all") {
+      const now = Date.now();
+      list = list.filter((e) => {
+        const itemDate = new Date(e.item.timestamp);
+        if (forensicDateFilter === "today") {
+          const today = new Date();
+          return (
+            itemDate.getDate() === today.getDate() &&
+            itemDate.getMonth() === today.getMonth() &&
+            itemDate.getFullYear() === today.getFullYear()
+          );
+        }
+        if (forensicDateFilter === "7d") {
+          return now - e.item.timestamp <= 7 * 24 * 60 * 60 * 1000;
+        }
+        if (forensicDateFilter === "30d") {
+          return now - e.item.timestamp <= 30 * 24 * 60 * 60 * 1000;
+        }
+        if (forensicDateFilter === "custom" && forensicCustomDate) {
+          const [year, month, day] = forensicCustomDate.split("-").map(Number);
+          return (
+            itemDate.getFullYear() === year &&
+            itemDate.getMonth() === month - 1 &&
+            itemDate.getDate() === day
+          );
+        }
+        return true;
+      });
+    }
+
+    // 3. Status filter
+    if (forensicFilter === "verified") {
+      list = list.filter((e) => e.res !== null && e.res !== undefined);
+    } else if (forensicFilter === "pending") {
+      list = list.filter((e) => !e.res);
+    } else if (forensicFilter === "hits") {
+      list = list.filter((e) => e.hits.length >= 1);
+    } else if (forensicFilter === "high_precision") {
+      list = list.filter((e) => e.hits.length >= 2);
+    }
+
+    // 4. Sorting
+    if (forensicSort === "precision_desc") {
+      list.sort((a, b) => b.precisionPct - a.precisionPct || b.hits.length - a.hits.length);
+    } else if (forensicSort === "confidence_desc") {
+      list.sort((a, b) => (b.item.prediction.confidence || 0) - (a.item.prediction.confidence || 0));
+    } else {
+      list.sort((a, b) => b.item.timestamp - a.item.timestamp);
+    }
+    return list;
+  }, [forensicEntries, forensicEngineFilter, forensicDateFilter, forensicCustomDate, forensicFilter, forensicSort]);
+
+  // Engine comparative analytics (Local vs Cloud)
+  const engineComparisonStats = useMemo(() => {
+    const localEntries = forensicEntries.filter((e) => e.engineType === "local");
+    const cloudEntries = forensicEntries.filter((e) => e.engineType === "cloud");
+
+    const localVerified = localEntries.filter((e) => e.res);
+    const cloudVerified = cloudEntries.filter((e) => e.res);
+
+    const localAvgPrecision =
+      localVerified.length > 0
+        ? localVerified.reduce((acc, e) => acc + e.precisionPct, 0) / localVerified.length
+        : 0;
+    const cloudAvgPrecision =
+      cloudVerified.length > 0
+        ? cloudVerified.reduce((acc, e) => acc + e.precisionPct, 0) / cloudVerified.length
+        : 0;
+
+    const localHits = localEntries.reduce((acc, e) => acc + (e.res ? e.hits.length : 0), 0);
+    const cloudHits = cloudEntries.reduce((acc, e) => acc + (e.res ? e.hits.length : 0), 0);
+
+    const localNear = localEntries.reduce((acc, e) => acc + (e.res ? e.nearMisses.length : 0), 0);
+    const cloudNear = cloudEntries.reduce((acc, e) => acc + (e.res ? e.nearMisses.length : 0), 0);
+
+    const localAvgConf =
+      localEntries.length > 0
+        ? localEntries.reduce((acc, e) => acc + (e.item.prediction.confidence || 0), 0) / localEntries.length
+        : 0;
+    const cloudAvgConf =
+      cloudEntries.length > 0
+        ? cloudEntries.reduce((acc, e) => acc + (e.item.prediction.confidence || 0), 0) / cloudEntries.length
+        : 0;
+
+    return {
+      local: {
+        total: localEntries.length,
+        verified: localVerified.length,
+        avgPrecision: localAvgPrecision,
+        hits: localHits,
+        nearMisses: localNear,
+        avgConfidence: localAvgConf,
+      },
+      cloud: {
+        total: cloudEntries.length,
+        verified: cloudVerified.length,
+        avgPrecision: cloudAvgPrecision,
+        hits: cloudHits,
+        nearMisses: cloudNear,
+        avgConfidence: cloudAvgConf,
+      },
+    };
+  }, [forensicEntries]);
+
+  const handleExportForensicLogPDF = async () => {
+    if (forensicEntries.length === 0) {
+      showToast("Aucune entrée d'audit à exporter.", "info");
+      return;
+    }
+    try {
+      audioEngine.play("click");
+      setIsExportingPDF(true);
+      await ExportService.generateForensicLogPDF({
+        drawName,
+        items: forensicEntries.map((e) => ({
+          timestamp: e.item.timestamp,
+          suggestedNumbers: e.item.prediction.suggestedNumbers,
+          confidence: e.item.prediction.confidence,
+          result: e.res,
+          hits: e.hits,
+          nearMisses: e.nearMisses,
+          precisionPct: e.precisionPct,
+          analysis: e.item.prediction.analysis,
+        })),
+      });
+      showToast("Registre Forensic Log exporté en PDF.", "success");
+      audioEngine.play("success");
+    } catch (err) {
+      console.error("Forensic log PDF export error:", err);
+      showToast("Erreur lors de l'exportation du journal Forensic.", "error");
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
 
   // Continuous Parameters for deterministic control
   const [skipTraining, setSkipTraining] = useState<boolean>(false); // default to false (enable active learning)
@@ -156,6 +471,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     aiConfidence?: number;
     aiStrategicAdvice?: string;
     isLocalFallback?: boolean;
+    engineType?: "local" | "cloud";
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -443,6 +759,11 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         skipTraining,
         adversarialMode,
         forcedOutsiderCount,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        true // Cloud-First execution for Prédiction IA
       );
 
       setPrediction({
@@ -453,8 +774,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           predictionData.analysis ||
           "Inférence hybride complétée à partir de la matrice d'alignement.",
         mathModelSummary: isLocalFallback
-          ? "Inférence Hybride • Moteur Cybernétique Local"
-          : "Inférence Hybride • Oracle IA Gemini + Modèles",
+          ? "Inférence IA • Secours Local (Cloud Non Configuré)"
+          : "Inférence Cloud IA • Oracle Gemini Pro + Supabase Edge Engine",
         xapExp: predictionData.xapExp,
         realityAlignment: predictionData.realityAlignment,
         adversarialApplied: predictionData.adversarialApplied,
@@ -471,6 +792,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         aiConfidence,
         aiStrategicAdvice,
         isLocalFallback,
+        engineType: isLocalFallback ? "local" : "cloud",
       });
       audioEngine.play("success");
       showToast("Convergence Hybride IA complétée.", "success");
@@ -738,8 +1060,13 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                                 }
                             `}
             >
-              <History size={14} />
-              <span>Journal d'Audit</span>
+              <ShieldCheck size={14} />
+              <span>Forensic Log</span>
+              {localHistory.length > 0 && (
+                <span className="bg-white/20 text-white px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold">
+                  {localHistory.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -795,40 +1122,28 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 </div>
               </label>
 
-              {/* Toggle 2: Execution Engine Mode */}
-              <label
-                className="flex items-start gap-3 cursor-pointer select-none group"
+              {/* Identifier: Cloud IA & Neural Edge Engine */}
+              <div
+                className="flex items-start gap-3 select-none"
                 style={{ minHeight: "44px" }}
               >
-                <div className="relative flex items-center h-5 mt-1.5 shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={useCloudEngine}
-                    onChange={(e) => {
-                      audioEngine.play("click");
-                      setUseCloudEngine(e.target.checked);
-                      showToast(
-                        e.target.checked
-                          ? "Moteur Cloud Supabase activé (10 Algos)."
-                          : "Moteur Local Intégral activé (19 Algos).",
-                        "info",
-                      );
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-checked:after:bg-white" />
+                <div className="w-9 h-9 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  <Zap size={18} className="animate-pulse text-fuchsia-400" />
                 </div>
                 <div className="space-y-1">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-indigo-400 group-hover:text-indigo-300 transition-colors block">
-                    Moteur Cloud Supabase
-                  </span>
-                  <span className="text-[10px] text-slate-500 block leading-normal">
-                    {useCloudEngine
-                      ? "Délègue la prédiction à l'Edge Function Supabase (10 Algos)."
-                      : "Calcul local intégral haute fidélité (19 Algos d'Écarts complexes)."}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-fuchsia-400 block">
+                      Moteur Cloud IA
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 text-[8px] font-black uppercase border border-fuchsia-500/30">
+                      Gemini Pro + Edge
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 block leading-normal">
+                    Délègue l'inférence neuronale et le raisonnement sémantique aux serveurs Cloud haute performance.
                   </span>
                 </div>
-              </label>
+              </div>
 
               {/* Slider: Outsider Count */}
               <div className="space-y-2">
@@ -1019,6 +1334,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       </button>
 
                       <button
+                        onClick={() => handleExportNeuralPredictionPDF(prediction)}
+                        disabled={isExportingPDF}
+                        className="px-5 py-3 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-200 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer border border-indigo-700/60 disabled:opacity-50"
+                      >
+                        <FileText size={14} className="text-indigo-400" />
+                        <span>{isExportingPDF ? "Génération PDF..." : "Exporter PDF"}</span>
+                      </button>
+
+                      <button
                         onClick={async () => {
                           audioEngine.play("click");
 
@@ -1064,22 +1388,30 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             adversarialSurvivalScore:
                               prediction.adversarialSurvivalScore,
                             adversarialRisks: prediction.adversarialRisks,
+                            engineType: prediction.isLocalFallback ? "local" : "cloud",
+                            mathModelSummary: prediction.mathModelSummary,
+                            isLocalFallback: prediction.isLocalFallback,
+                            aiWeights: prediction.aiWeights,
+                            aiRationale: prediction.aiRationale,
+                            aiStrategicAdvice: prediction.aiStrategicAdvice,
+                            xapExp: prediction.xapExp,
                           };
 
                           await savePredictionToHistory(
                             drawName,
                             predictionObj,
                           );
+                          loadHistoryData();
                           showToast(
-                            "Prédiction enregistrée dans le Journal d'Audit.",
+                            "Prédiction enregistrée dans le Journal d'Audit / Forensic Log.",
                             "success",
                           );
                           audioEngine.play("success");
                         }}
                         className="px-6 py-3 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:scale-[1.03] active:scale-95 cursor-pointer border border-fuchsia-400/20"
                       >
-                        <History size={14} />
-                        Enregistrer dans le Journal d'Audit
+                        <ShieldCheck size={14} />
+                        Enregistrer dans le Forensic Log
                       </button>
                     </div>
 
@@ -2110,158 +2442,716 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         </div>
       )}
 
-      {/* Journal d'Audit Mode */}
+      {/* Forensic Log Panel */}
       {activeMode === "audit_log" && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center bg-slate-900/40 p-6 rounded-3xl border border-slate-800/80">
+          {/* Header & Global Actions */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/30 p-6 rounded-[2rem] border border-slate-800/80 shadow-xl gap-4">
             <div className="space-y-1">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-1.5">
-                <History size={14} className="text-fuchsia-400" />
-                Journal d'Audit Local
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Historique des inférences du moteur neural et recalibration
-                stochastique.
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-fuchsia-500/10 text-fuchsia-400 rounded-lg border border-fuchsia-500/20">
+                  <ShieldCheck size={16} />
+                </span>
+                <h3 className="text-sm font-black uppercase tracking-widest text-slate-100 flex items-center gap-2">
+                  Forensic Log
+                  <span className="text-[10px] font-mono font-bold text-fuchsia-400 bg-fuchsia-500/10 px-2 py-0.5 rounded border border-fuchsia-500/20">
+                    {drawName}
+                  </span>
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+                Registre médico-légal des inférences passées et validation empirique continue face aux tirages officiels.
               </p>
             </div>
-            <button
-              onClick={async () => {
-                audioEngine.play("click");
-                if (
-                  confirm(
-                    "Voulez-vous vider l'historique de l'audit pour ce tirage ?",
-                  )
-                ) {
-                  const { clearPredictionHistory } =
-                    await import("../../services/predictionHistoryService");
-                  await clearPredictionHistory(drawName);
-                  loadHistoryData();
-                  showToast("Historique de l'audit réinitialisé.", "info");
-                }
-              }}
-              className="text-[10px] font-black text-slate-400 hover:text-rose-400 uppercase tracking-widest flex items-center gap-2 transition-colors border border-slate-850 hover:border-rose-950/40 bg-slate-950/20 px-3 py-2 rounded-xl"
-            >
-              <Trash2 size={12} />
-              Vider le Journal
-            </button>
+
+            <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+              <button
+                onClick={handleToggleAutoPurge}
+                title="Activer ou désactiver la purge automatique des inférences ayant plus de 90 jours pour optimiser le stockage local"
+                className={`px-3.5 py-2.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all rounded-xl border cursor-pointer ${
+                  autoPurgeEnabled
+                    ? "bg-indigo-950/50 text-indigo-300 border-indigo-500/50 shadow-sm ring-1 ring-indigo-500/30"
+                    : "bg-slate-950/60 text-slate-500 border-slate-800 hover:text-slate-300"
+                }`}
+              >
+                <Clock size={13} className={autoPurgeEnabled ? "text-indigo-400" : "text-slate-600"} />
+                <span>Auto-Purge 90j : {autoPurgeEnabled ? "Actif" : "Désactivé"}</span>
+              </button>
+
+              <button
+                onClick={handleManualPurgeOldLogs}
+                disabled={isPurgingOldLogs || localHistory.length === 0}
+                title="Purger manuellement les logs de prédictions ayant plus de 90 jours"
+                className="px-3.5 py-2.5 text-[10px] font-black text-amber-400 hover:text-amber-200 uppercase tracking-widest flex items-center gap-2 transition-colors border border-amber-900/40 hover:border-amber-700/60 bg-amber-950/30 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Database size={13} />
+                <span>{isPurgingOldLogs ? "Purge..." : "Purger >90j"}</span>
+                {oldLogsStats.count > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    {oldLogsStats.count}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setShowEngineComparison(!showEngineComparison);
+                }}
+                className={`px-3.5 py-2.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all rounded-xl border ${
+                  showEngineComparison
+                    ? "bg-fuchsia-950/40 text-fuchsia-300 border-fuchsia-700/50 shadow-sm"
+                    : "bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200"
+                }`}
+              >
+                <Scale size={13} />
+                <span>{showEngineComparison ? "Masquer Comparatif" : "Analyse Comparative"}</span>
+              </button>
+
+              <button
+                onClick={handleExportForensicLogPDF}
+                disabled={isExportingPDF || forensicEntries.length === 0}
+                className="flex-1 lg:flex-none px-4 py-2.5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed border border-fuchsia-400/30"
+              >
+                <FileText size={14} />
+                <span>{isExportingPDF ? "Génération PDF..." : "Exporter Forensic Log (PDF)"}</span>
+              </button>
+
+              <button
+                onClick={async () => {
+                  audioEngine.play("click");
+                  if (
+                    confirm(
+                      `Voulez-vous réinitialiser l'intégralité du registre Forensic Log pour le tirage "${drawName}" ?`,
+                    )
+                  ) {
+                    const { clearPredictionHistory } =
+                      await import("../../services/predictionHistoryService");
+                    await clearPredictionHistory(drawName);
+                    loadHistoryData();
+                    showToast("Registre Forensic Log réinitialisé.", "info");
+                  }
+                }}
+                disabled={localHistory.length === 0}
+                className="px-3.5 py-2.5 text-[10px] font-black text-slate-400 hover:text-rose-400 uppercase tracking-widest flex items-center gap-2 transition-colors border border-slate-800 hover:border-rose-900/50 bg-slate-950/60 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Trash2 size={13} />
+                <span>Tout Vider</span>
+              </button>
+            </div>
           </div>
 
+          {/* Comparative Analytics Panel (Local vs Cloud) */}
+          {forensicEntries.length > 0 && showEngineComparison && (
+            <div className="bg-gradient-to-br from-slate-900/90 via-slate-950/90 to-indigo-950/40 p-5 rounded-2xl border border-slate-800/80 shadow-lg space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Scale size={16} className="text-fuchsia-400" />
+                  <h4 className="text-xs font-black uppercase tracking-widest text-slate-200">
+                    Analyse Comparative des Moteurs : Local Déterministe vs Cloud IA
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-mono text-slate-400">
+                    Registre complet : {forensicEntries.length} inférences
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Local Engine Card */}
+                <div
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setForensicEngineFilter(forensicEngineFilter === "local" ? "all" : "local");
+                  }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                    forensicEngineFilter === "local"
+                      ? "bg-emerald-950/30 border-emerald-500/80 ring-1 ring-emerald-500/40"
+                      : "bg-slate-950/60 border-slate-800/80 hover:border-emerald-500/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+                        <Cpu size={14} />
+                      </span>
+                      <div>
+                        <div className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                          Moteur Local (Oracle Base)
+                          {forensicEngineFilter === "local" && (
+                            <span className="text-[8px] bg-emerald-500 text-slate-950 px-1.5 py-0.2 rounded font-black">
+                              ACTIF
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-slate-400">
+                          100% Déterministe • Zéro Hasard • Web Workers
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-lg font-black text-emerald-400 font-mono">
+                      {engineComparisonStats.local.total}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-850">
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Précision
+                      </span>
+                      <span className="text-sm font-black text-emerald-400 font-mono">
+                        {engineComparisonStats.local.avgPrecision.toFixed(1)}%
+                      </span>
+                      <span className="text-[8px] text-slate-500 block">
+                        ({engineComparisonStats.local.verified} vérifiées)
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Exact Hits
+                      </span>
+                      <span className="text-sm font-black text-white font-mono">
+                        {engineComparisonStats.local.hits}
+                      </span>
+                      <span className="text-[8px] text-amber-400 block">
+                        +{engineComparisonStats.local.nearMisses} voisins
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Confiance Moy.
+                      </span>
+                      <span className="text-sm font-black text-cyan-400 font-mono">
+                        {engineComparisonStats.local.avgConfidence.toFixed(1)}%
+                      </span>
+                      <span className="text-[8px] text-slate-500 block">stochastique</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cloud Engine Card */}
+                <div
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setForensicEngineFilter(forensicEngineFilter === "cloud" ? "all" : "cloud");
+                  }}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                    forensicEngineFilter === "cloud"
+                      ? "bg-fuchsia-950/30 border-fuchsia-500/80 ring-1 ring-fuchsia-500/40"
+                      : "bg-slate-950/60 border-slate-800/80 hover:border-fuchsia-500/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 bg-fuchsia-500/10 text-fuchsia-400 rounded-lg border border-fuchsia-500/20">
+                        <Zap size={14} />
+                      </span>
+                      <div>
+                        <div className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                          Moteur Cloud IA (Prédiction IA)
+                          {forensicEngineFilter === "cloud" && (
+                            <span className="text-[8px] bg-fuchsia-500 text-white px-1.5 py-0.2 rounded font-black">
+                              ACTIF
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-slate-400">
+                          Oracle Gemini Pro • Supabase Edge • XAP Neural
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-lg font-black text-fuchsia-400 font-mono">
+                      {engineComparisonStats.cloud.total}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-850">
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Précision
+                      </span>
+                      <span className="text-sm font-black text-fuchsia-400 font-mono">
+                        {engineComparisonStats.cloud.avgPrecision.toFixed(1)}%
+                      </span>
+                      <span className="text-[8px] text-slate-500 block">
+                        ({engineComparisonStats.cloud.verified} vérifiées)
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Exact Hits
+                      </span>
+                      <span className="text-sm font-black text-white font-mono">
+                        {engineComparisonStats.cloud.hits}
+                      </span>
+                      <span className="text-[8px] text-amber-400 block">
+                        +{engineComparisonStats.cloud.nearMisses} voisins
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[8.5px] font-semibold text-slate-400 uppercase block">
+                        Confiance Moy.
+                      </span>
+                      <span className="text-sm font-black text-cyan-400 font-mono">
+                        {engineComparisonStats.cloud.avgConfidence.toFixed(1)}%
+                      </span>
+                      <span className="text-[8px] text-slate-500 block">stochastique</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Forensic Key Statistics / KPI Dashboard */}
+          {forensicEntries.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-between">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity size={12} className="text-indigo-400" />
+                  Inférences Actives
+                </span>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-white">
+                    {filteredForensicEntries.length}
+                  </span>
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    ({filteredForensicEntries.filter((e) => e.res).length} vérifiées)
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-between">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Target size={12} className="text-emerald-400" />
+                  Précision Moyenne
+                </span>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-emerald-400">
+                    {filteredForensicEntries.filter((e) => e.res).length > 0
+                      ? (
+                          filteredForensicEntries
+                            .filter((e) => e.res)
+                            .reduce((acc, e) => acc + e.precisionPct, 0) /
+                          filteredForensicEntries.filter((e) => e.res).length
+                        ).toFixed(1)
+                      : "0.0"}
+                    %
+                  </span>
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    / ticket
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-between">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Award size={12} className="text-fuchsia-400" />
+                  Exact Hits & Voisins
+                </span>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-fuchsia-400">
+                    {filteredForensicEntries.reduce(
+                      (acc, e) => acc + (e.res ? e.hits.length : 0),
+                      0,
+                    )}
+                  </span>
+                  <span className="text-[10px] font-semibold text-amber-400">
+                    +
+                    {filteredForensicEntries.reduce(
+                      (acc, e) => acc + (e.res ? e.nearMisses.length : 0),
+                      0,
+                    )}{" "}
+                    voisins
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-between">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Compass size={12} className="text-cyan-400" />
+                  Confiance Moyenne
+                </span>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-cyan-400">
+                    {filteredForensicEntries.length > 0
+                      ? (
+                          filteredForensicEntries.reduce(
+                            (acc, e) => acc + (e.item.prediction.confidence || 0),
+                            0,
+                          ) / filteredForensicEntries.length
+                        ).toFixed(1)
+                      : "0.0"}
+                    %
+                  </span>
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    stochastique
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Filtering & Sorting Controls Bar */}
+          {forensicEntries.length > 0 && (
+            <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-3.5 shadow-sm">
+              {/* Row 1: Engine Filter */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/60 pb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mr-1">
+                    <Layers size={13} className="text-indigo-400" />
+                    Moteur :
+                  </span>
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setForensicEngineFilter("all");
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      forensicEngineFilter === "all"
+                        ? "bg-slate-100 text-slate-950 shadow-md"
+                        : "bg-slate-950/70 text-slate-400 hover:text-slate-200 border border-slate-800"
+                    }`}
+                  >
+                    Tous les Moteurs ({forensicEntries.length})
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setForensicEngineFilter("local");
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                      forensicEngineFilter === "local"
+                        ? "bg-emerald-600 text-white shadow-md shadow-emerald-950/50"
+                        : "bg-slate-950/70 text-emerald-400 hover:bg-emerald-950/30 border border-emerald-900/40"
+                    }`}
+                  >
+                    <Cpu size={12} />
+                    Local Déterministe ({engineComparisonStats.local.total})
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setForensicEngineFilter("cloud");
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                      forensicEngineFilter === "cloud"
+                        ? "bg-fuchsia-600 text-white shadow-md shadow-fuchsia-950/50"
+                        : "bg-slate-950/70 text-fuchsia-400 hover:bg-fuchsia-950/30 border border-fuchsia-900/40"
+                    }`}
+                  >
+                    <Zap size={12} />
+                    Cloud IA Gemini ({engineComparisonStats.cloud.total})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                    <ArrowUpDown size={12} />
+                    Tri :
+                  </span>
+                  <select
+                    value={forensicSort}
+                    onChange={(e) => {
+                      audioEngine.play("click");
+                      setForensicSort(e.target.value as any);
+                    }}
+                    className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] font-bold rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-fuchsia-500 cursor-pointer"
+                  >
+                    <option value="recent">Plus récent d'abord</option>
+                    <option value="precision_desc">Précision / Hits décroissant</option>
+                    <option value="confidence_desc">Confiance décroissante</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Date & Status Filters */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Date Filter group */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+                    <Calendar size={12} className="text-cyan-400" />
+                    Période :
+                  </span>
+                  {(
+                    [
+                      { id: "all", label: "Toutes dates" },
+                      { id: "today", label: "Aujourd'hui" },
+                      { id: "7d", label: "7 Jours" },
+                      { id: "30d", label: "30 Jours" },
+                    ] as const
+                  ).map((dateTab) => (
+                    <button
+                      key={dateTab.id}
+                      onClick={() => {
+                        audioEngine.play("click");
+                        setForensicDateFilter(dateTab.id);
+                        setForensicCustomDate("");
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[9.5px] font-bold uppercase transition-all cursor-pointer ${
+                        forensicDateFilter === dateTab.id && !forensicCustomDate
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-850"
+                      }`}
+                    >
+                      {dateTab.label}
+                    </button>
+                  ))}
+
+                  <div className="flex items-center gap-1 bg-slate-950/80 px-2 py-0.5 rounded-lg border border-slate-800">
+                    <input
+                      type="date"
+                      value={forensicCustomDate}
+                      onChange={(e) => {
+                        audioEngine.play("click");
+                        setForensicCustomDate(e.target.value);
+                        setForensicDateFilter("custom");
+                      }}
+                      className="bg-transparent text-slate-300 text-[9.5px] font-mono focus:outline-none cursor-pointer"
+                    />
+                    {forensicCustomDate && (
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setForensicCustomDate("");
+                          setForensicDateFilter("all");
+                        }}
+                        className="text-slate-400 hover:text-rose-400 p-0.5"
+                        title="Effacer la date personnalisée"
+                      >
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status Filter group */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 mr-1">
+                    <Filter size={12} />
+                    Résultat :
+                  </span>
+                  {(
+                    [
+                      { id: "all", label: `Tous (${filteredForensicEntries.length})` },
+                      {
+                        id: "verified",
+                        label: `Vérifiés (${filteredForensicEntries.filter((e) => e.res).length})`,
+                      },
+                      {
+                        id: "pending",
+                        label: `En Attente (${filteredForensicEntries.filter((e) => !e.res).length})`,
+                      },
+                      {
+                        id: "hits",
+                        label: `Hits ≥1 (${filteredForensicEntries.filter((e) => e.hits.length >= 1).length})`,
+                      },
+                      {
+                        id: "high_precision",
+                        label: `Précision ≥2 (${filteredForensicEntries.filter((e) => e.hits.length >= 2).length})`,
+                      },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        audioEngine.play("click");
+                        setForensicFilter(tab.id);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[9.5px] font-bold uppercase transition-all cursor-pointer ${
+                        forensicFilter === tab.id
+                          ? "bg-fuchsia-600 text-white shadow-sm"
+                          : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-850"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Row 3: Storage Optimization & Retention Status */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-800/40 text-[10px] text-slate-400">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="flex items-center gap-1.5 font-bold text-slate-300">
+                    <HardDrive size={12} className="text-indigo-400" />
+                    Stockage Local :
+                  </span>
+                  <span className="font-mono text-slate-400">
+                    {localHistory.length} prédictions enregistrées
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span className={`inline-flex items-center gap-1 font-semibold ${
+                    autoPurgeEnabled ? "text-indigo-300" : "text-slate-500"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${autoPurgeEnabled ? "bg-indigo-400 animate-pulse" : "bg-slate-600"}`} />
+                    Auto-Purge 90j {autoPurgeEnabled ? "activée" : "désactivée"}
+                  </span>
+                  {oldLogsStats.count > 0 && (
+                    <>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-amber-400 font-bold flex items-center gap-1">
+                        <Clock size={11} />
+                        {oldLogsStats.count} log(s) &gt; 90 jours
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {oldLogsStats.count > 0 && (
+                  <button
+                    onClick={handleManualPurgeOldLogs}
+                    disabled={isPurgingOldLogs}
+                    className="text-[9.5px] font-black text-amber-300 hover:text-amber-200 uppercase tracking-wider flex items-center gap-1 hover:underline cursor-pointer disabled:opacity-50"
+                  >
+                    <Database size={11} />
+                    <span>Nettoyer les {oldLogsStats.count} anciens logs</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Forensic Entries Content */}
           {loadingHistory ? (
             <div className="flex flex-col items-center justify-center py-24 gap-4 animate-pulse">
               <RefreshCw className="animate-spin text-fuchsia-500" />
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Chargement des registres d'audit...
+                Reconstitution du journal médico-légal...
               </p>
             </div>
-          ) : localHistory.length === 0 ? (
+          ) : filteredForensicEntries.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-950/20 rounded-[2rem] border border-dashed border-slate-800 text-center p-6">
               <div className="p-4 bg-fuchsia-500/5 rounded-full border border-fuchsia-500/10 mb-4 animate-pulse">
-                <History size={32} className="text-slate-500" />
+                <ShieldCheck size={32} className="text-slate-500" />
               </div>
-              <h4 className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Aucun Registre Détecté
+              <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest">
+                {localHistory.length === 0
+                  ? "Aucun Registre Détecté"
+                  : "Aucune Entrée ne Correspond aux Filtres"}
               </h4>
               <p className="text-xs text-slate-500 max-w-sm mt-2 leading-relaxed">
-                Lancez une inférence stochastique dans l'onglet "Inférence
-                Directe" et enregistrez-la pour consigner vos premières données
-                d'audit.
+                {localHistory.length === 0
+                  ? 'Générez une inférence dans l\'onglet "Oracle Base" (Local) ou "Prédiction IA" (Cloud) et enregistrez-la pour alimenter le Forensic Log.'
+                  : "Modifiez les filtres de moteur (Local vs Cloud) ou de date ci-dessus pour afficher vos inférences."}
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {localHistory.map((item) => {
+              {filteredForensicEntries.map(({ item, res, hits, nearMisses, precisionPct, engineType }) => {
                 const d = new Date(item.timestamp);
-                const res = item.drawResultId
-                  ? history.find((r) => r.id === item.drawResultId)
-                  : findMatchingResultForPrediction(item, history);
-                const hits = res
-                  ? item.prediction.suggestedNumbers.filter((n) =>
-                      res.gagnants.includes(n),
-                    )
-                  : [];
-                const nearMisses = res
-                  ? item.prediction.suggestedNumbers.filter(
-                      (n) =>
-                        !res.gagnants.includes(n) &&
-                        res.gagnants.some((gn) => Math.abs(gn - n) === 1),
-                    )
-                  : [];
                 const isExpanded = expandedItem === item.id;
+                const isCloud = engineType === "cloud";
 
                 return (
                   <div
                     key={item.id}
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setExpandedItem(isExpanded ? null : item.id);
-                    }}
-                    className={`bg-slate-900/20 rounded-2xl border shadow-sm overflow-hidden group transition-all cursor-pointer ${isExpanded ? "border-fuchsia-500/80 ring-1 ring-fuchsia-500/30" : "border-slate-800/80 hover:border-indigo-500/40"}`}
+                    className={`bg-slate-900/20 rounded-2xl border shadow-sm overflow-hidden transition-all ${
+                      isExpanded
+                        ? isCloud
+                          ? "border-fuchsia-500/80 ring-1 ring-fuchsia-500/30"
+                          : "border-emerald-500/80 ring-1 ring-emerald-500/30"
+                        : "border-slate-800/80 hover:border-indigo-500/40"
+                    }`}
                   >
-                    <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-800/40">
-                      <div className="p-6 md:w-3/5 space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <div className="text-sm font-black text-white">
-                                {d.toLocaleDateString("fr-FR")}
-                              </div>
-                              <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-full border border-slate-800/40">
-                                <Clock size={10} />
-                                {d.toLocaleTimeString("fr-FR", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <span className="text-[10px] font-semibold text-fuchsia-400 uppercase tracking-wider">
-                                Confiance {item.prediction.confidence}%
-                              </span>
-                              <span className="text-[9px] font-bold text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded uppercase border border-slate-900">
-                                IA Inférence
-                              </span>
-                              {res ? (
-                                hits.length > 0 ? (
-                                  <span className="text-[9px] font-black bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                                    <CheckCircle2 size={10} />
-                                    Exacte ({hits.length} Hit
-                                    {hits.length > 1 ? "s" : ""})
-                                  </span>
-                                ) : (
-                                  <span className="text-[9px] font-semibold bg-slate-950 text-slate-500 px-2 py-0.5 rounded border border-slate-900 uppercase tracking-wider flex items-center gap-1">
-                                    <AlertCircle size={10} />0 Hit
-                                  </span>
-                                )
-                              ) : (
-                                <span className="text-[9px] font-semibold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                                  <HelpCircle size={10} />
-                                  En attente du tirage
-                                </span>
-                              )}
-                            </div>
+                    <div
+                      onClick={() => {
+                        audioEngine.play("click");
+                        setExpandedItem(isExpanded ? null : item.id);
+                      }}
+                      className="p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 cursor-pointer hover:bg-slate-900/30 transition-colors"
+                    >
+                      {/* Left: Metadata & Engine Badges */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Engine Type Tag */}
+                          {isCloud ? (
+                            <span className="px-2.5 py-0.5 rounded-md bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 text-[9px] font-black uppercase flex items-center gap-1 shadow-sm">
+                              <Zap size={10} />
+                              Cloud IA Gemini
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase flex items-center gap-1 shadow-sm">
+                              <Cpu size={10} />
+                              Local Déterministe
+                            </span>
+                          )}
+
+                          <div className="text-sm font-black text-white">
+                            {d.toLocaleDateString("fr-FR", {
+                              weekday: "short",
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
                           </div>
-                          <div
-                            className={`p-2 rounded-full transition-transform ${isExpanded ? "rotate-180 bg-slate-800/60 text-fuchsia-400" : "text-slate-500"}`}
-                          >
-                            <ChevronDown size={14} />
+                          <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800/60 font-mono">
+                            <Clock size={10} />
+                            {d.toLocaleTimeString("fr-FR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })}
                           </div>
+                          <span className="text-[10px] font-mono font-bold text-cyan-400 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">
+                            Confiance {item.prediction.confidence}%
+                          </span>
                         </div>
 
-                        <div className="flex gap-2 flex-wrap pt-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {res ? (
+                            hits.length > 0 ? (
+                              <span className="text-[10px] font-black bg-emerald-500/10 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30 uppercase tracking-wider flex items-center gap-1.5 animate-pulse">
+                                <CheckCircle2 size={11} />
+                                {hits.length} Exact Hit{hits.length > 1 ? "s" : ""}{" "}
+                                ({precisionPct}% Précision)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold bg-slate-950 text-slate-500 px-2.5 py-0.5 rounded-full border border-slate-900 uppercase tracking-wider flex items-center gap-1">
+                                <AlertCircle size={11} />0 Hit (0.0% Précision)
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-[10px] font-semibold bg-amber-500/10 text-amber-400 px-2.5 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                              <HelpCircle size={11} />
+                              En attente du tirage officiel
+                            </span>
+                          )}
+
+                          {nearMisses.length > 0 && (
+                            <span className="text-[9px] font-bold text-amber-300 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
+                              <Zap size={10} />
+                              {nearMisses.length} Voisin{nearMisses.length > 1 ? "s" : ""} (+/-1)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Middle: Predicted Selection */}
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">
+                          Sélection Prédite
+                        </span>
+                        <div className="flex gap-1.5 flex-wrap">
                           {item.prediction.suggestedNumbers.map((n) => {
                             const isHit = res?.gagnants.includes(n);
                             const isNear =
                               !isHit &&
-                              res?.gagnants.some(
-                                (gn) => Math.abs(gn - n) === 1,
-                              );
+                              res?.gagnants.some((gn) => Math.abs(gn - n) === 1);
                             return (
                               <div key={n} className="relative">
                                 {isHit && (
-                                  <div className="absolute -inset-1 bg-fuchsia-500/30 rounded-full blur animate-pulse" />
+                                  <div className="absolute -inset-1 bg-emerald-500/30 rounded-full blur animate-pulse" />
                                 )}
                                 {isNear && (
-                                  <div className="absolute -inset-1 bg-amber-500/20 rounded-full blur animate-pulse" />
+                                  <div className="absolute -inset-1 bg-amber-500/20 rounded-full blur" />
                                 )}
                                 <NumberBall
                                   number={n}
@@ -2274,152 +3164,208 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                         </div>
                       </div>
 
-                      <div className="p-6 md:w-2/5 flex flex-col justify-center bg-slate-950/25">
+                      {/* Right: Official Result (if verified) & Action Tools */}
+                      <div className="flex items-center gap-4 self-stretch lg:self-center justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-800/50">
                         {res ? (
-                          <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">
-                                Tirage Réel ({res.date})
-                              </span>
-                              <span
-                                className={`text-[9px] font-black px-2 py-0.5 rounded ${hits.length >= 2 ? "bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20" : "bg-slate-900 text-slate-400"}`}
-                              >
-                                {hits.length} HIT{hits.length > 1 ? "S" : ""}
-                              </span>
-                            </div>
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">
+                              Gagnants Officiels ({res.date})
+                            </span>
                             <div className="flex gap-1 flex-wrap">
-                              {res.gagnants.map((n) => {
+                              {res.gagnants.map((gn) => {
                                 const isHit =
-                                  item.prediction.suggestedNumbers.includes(n);
+                                  item.prediction.suggestedNumbers.includes(gn);
                                 return (
                                   <div
-                                    key={n}
-                                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black border transition-all ${isHit ? "bg-fuchsia-600 border-fuchsia-400 text-white shadow-lg" : "bg-slate-900 border-slate-850 text-slate-500"}`}
+                                    key={gn}
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black border transition-all ${
+                                      isHit
+                                        ? "bg-emerald-600 border-emerald-400 text-white shadow-md shadow-emerald-900/30 ring-1 ring-emerald-400"
+                                        : "bg-slate-950 border-slate-850 text-slate-500"
+                                    }`}
                                   >
-                                    {n}
+                                    {gn}
                                   </div>
                                 );
                               })}
                             </div>
-                            {nearMisses.length > 0 && (
-                              <div className="text-[8px] font-black text-amber-400/80 uppercase tracking-tight flex items-center gap-1 mt-1">
-                                ⚡ {nearMisses.length} Near Miss
-                                {nearMisses.length > 1 ? "es" : ""} (+/- 1)
-                                détecté
-                              </div>
-                            )}
                           </div>
                         ) : (
-                          <div className="flex flex-col items-center justify-center h-full relative py-4 group">
-                            <div className="flex flex-col items-center justify-center gap-2 opacity-30 text-slate-500 group-hover:opacity-100 transition-opacity">
-                              <AlertCircle size={20} />
-                              <span className="text-[9px] font-black uppercase tracking-wider">
-                                Tirage en Attente
-                              </span>
-                            </div>
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                audioEngine.play("click");
-                                if (
-                                  confirm(
-                                    "Supprimer cette entrée du registre ?",
-                                  )
-                                ) {
-                                  await deletePrediction(item.id);
-                                  loadHistoryData();
-                                  showToast("Entrée supprimée.", "info");
-                                  audioEngine.play("success");
-                                }
-                              }}
-                              className="absolute inset-0 bg-rose-950/60 text-rose-400 border border-rose-900/40 hover:bg-rose-900 hover:text-white rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest text-[9px] opacity-0 group-hover:opacity-100 transition-all z-10"
-                            >
-                              <Trash2 size={12} /> Supprimer du registre
-                            </button>
+                          <div className="text-[10px] text-slate-500 italic">
+                            Tirage non encore publié
                           </div>
                         )}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExportNeuralPredictionPDF({
+                                ...item.prediction,
+                                timestamp: item.timestamp,
+                              });
+                            }}
+                            title="Exporter la fiche d'inférence en PDF"
+                            className="p-2 text-indigo-400 hover:text-indigo-200 bg-indigo-950/40 hover:bg-indigo-900/60 rounded-xl border border-indigo-800/40 transition-all cursor-pointer"
+                          >
+                            <FileText size={14} />
+                          </button>
+
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              audioEngine.play("click");
+                              if (confirm("Supprimer cette entrée du registre Forensic ?")) {
+                                await deletePrediction(item.id);
+                                loadHistoryData();
+                                showToast("Entrée supprimée du Forensic Log.", "info");
+                              }
+                            }}
+                            title="Supprimer cette entrée"
+                            className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 hover:bg-rose-950/30 rounded-xl border border-slate-800 hover:border-rose-900/40 transition-all cursor-pointer"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+
+                          <div
+                            className={`p-2 rounded-full transition-transform text-slate-500 ${
+                              isExpanded ? "rotate-180 bg-slate-800 text-fuchsia-400" : ""
+                            }`}
+                          >
+                            <ChevronDown size={14} />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
+                    {/* Detailed Collapsible Forensic Breakdown */}
                     {isExpanded && (
                       <div
-                        className="border-t border-slate-800/40 p-4 bg-slate-950/10 cursor-default space-y-4"
+                        className="border-t border-slate-800/60 p-5 bg-slate-950/30 cursor-default space-y-4"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="bg-slate-950/40 p-3.5 rounded-xl border border-slate-850/40">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-850">
                             <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                              Algorithme ou Modèle
+                              Moteur & Modèle Mathématique
                             </span>
-                            <span className="text-[9.5px] font-mono font-bold text-indigo-400 block">
-                              {item.prediction.analysis ||
-                                "Inférence Stochastique Bayesienne Local"}
-                            </span>
-                          </div>
-                          <div className="bg-slate-950/40 p-3.5 rounded-xl border border-slate-850/40">
-                            <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1 font-sans">
-                              Indices et Profils
-                            </span>
-                            <span className="text-[9.5px] font-mono font-bold text-fuchsia-400 block flex items-center gap-2">
-                              <span>
-                                Index Stabilité:{" "}
-                                {item.prediction.stabilityScore || 100}%
-                              </span>
-                              {item.prediction.diversityMetrics
-                                ?.diversityScore !== undefined && (
-                                <span className="text-slate-500">
-                                  • Diversité:{" "}
-                                  {(
-                                    item.prediction.diversityMetrics
-                                      .diversityScore * 100
-                                  ).toFixed(0)}
-                                  %
+                            <div className="flex items-center gap-1.5 mb-1">
+                              {isCloud ? (
+                                <span className="px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 text-[8.5px] font-black uppercase flex items-center gap-1">
+                                  <Zap size={9} /> Cloud IA
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[8.5px] font-black uppercase flex items-center gap-1">
+                                  <Cpu size={9} /> Local Base
                                 </span>
                               )}
+                            </div>
+                            <span className="text-[10px] font-mono font-bold text-indigo-400 block leading-tight">
+                              {item.prediction.mathModelSummary ||
+                                item.prediction.analysis ||
+                                (isCloud
+                                  ? "Inférence Cloud IA • Oracle Gemini Pro + Supabase Edge Engine"
+                                  : "Inférence Déterministe Local • Web Workers & ACO")}
                             </span>
+                          </div>
+
+                          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-850">
+                            <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                              Indices de Fiabilité Stochastique
+                            </span>
+                            <div className="text-[10px] font-mono font-bold text-fuchsia-400 space-y-0.5">
+                              <div>Index de Stabilité : {item.prediction.stabilityScore || 100}%</div>
+                              {item.prediction.realityAlignment !== undefined && (
+                                <div className="text-cyan-400">
+                                  Alignement Réel : {item.prediction.realityAlignment}%
+                                </div>
+                              )}
+                              {item.prediction.adversarialSurvivalScore !== undefined && (
+                                <div className="text-amber-400">
+                                  Survie Adversariale : {item.prediction.adversarialSurvivalScore}%
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-850">
+                            <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                              Vérification Empirique
+                            </span>
+                            <div className="text-[10px] font-bold space-y-0.5">
+                              <div className={res ? "text-emerald-400" : "text-amber-400"}>
+                                {res ? `Résultat du tirage : ${res.date}` : "En attente du résultat officiel"}
+                              </div>
+                              <div className="text-slate-400">
+                                Exact Hits : <strong className="text-white">{hits.length}</strong> /{" "}
+                                {item.prediction.suggestedNumbers.length}
+                              </div>
+                              <div className="text-slate-400">
+                                Near-Misses : <strong className="text-amber-300">{nearMisses.length}</strong>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
+                        {/* Breakdown per number */}
                         {item.prediction.breakdown && (
-                          <div className="space-y-1.5 bg-slate-950/60 p-3.5 rounded-xl border border-slate-850/60">
+                          <div className="space-y-2 bg-slate-950/80 p-3.5 rounded-xl border border-slate-850">
                             <span className="text-[8.5px] font-black text-slate-400 uppercase tracking-wider block">
-                              Densité de force d'inférence par numéro
+                              Densité d'Importance des Features XAP par Numéro
                             </span>
-                            <div className="flex gap-4 flex-wrap">
+                            <div className="flex gap-3 flex-wrap">
                               {Object.entries(item.prediction.breakdown).map(
-                                ([num, metrics]: [string, any]) => (
-                                  <div
-                                    key={num}
-                                    className="text-[9px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2 py-1 rounded flex items-center gap-1.5"
-                                  >
-                                    <span className="font-bold text-white bg-indigo-950 border border-indigo-900 w-4 h-4 rounded flex items-center justify-center text-[8px]">
-                                      {num}
-                                    </span>
-                                    <span>
-                                      XAP:{" "}
-                                      <strong className="text-fuchsia-400">
-                                        {(metrics.xap || 20).toFixed(0)}%
-                                      </strong>
-                                    </span>
-                                  </div>
-                                ),
+                                ([num, metrics]: [string, any]) => {
+                                  const n = parseInt(num, 10);
+                                  const isHit = res?.gagnants.includes(n);
+                                  return (
+                                    <div
+                                      key={num}
+                                      className={`text-[9px] font-mono px-2.5 py-1.5 rounded-lg flex items-center gap-2 border ${
+                                        isHit
+                                          ? "bg-emerald-950/40 border-emerald-700/50 text-emerald-300"
+                                          : "bg-slate-900 border-slate-800 text-slate-400"
+                                      }`}
+                                    >
+                                      <span
+                                        className={`font-bold w-5 h-5 rounded-md flex items-center justify-center text-[9px] ${
+                                          isHit
+                                            ? "bg-emerald-600 text-white"
+                                            : "bg-indigo-950 border border-indigo-900 text-indigo-300"
+                                        }`}
+                                      >
+                                        {num}
+                                      </span>
+                                      <span>
+                                        XAP:{" "}
+                                        <strong className={isHit ? "text-emerald-400" : "text-fuchsia-400"}>
+                                          {(metrics.xap || 20).toFixed(0)}%
+                                        </strong>
+                                      </span>
+                                      {metrics.stability && (
+                                        <span className="text-slate-500">
+                                          Stab: {metrics.stability}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                },
                               )}
                             </div>
                           </div>
                         )}
 
+                        {/* Entropic / Adversarial Risks */}
                         {item.prediction.adversarialRisks &&
                           item.prediction.adversarialRisks.length > 0 && (
-                            <div className="bg-rose-950/10 border border-rose-900/30 p-3 rounded-xl">
-                              <span className="text-[8.5px] font-black text-rose-400 uppercase tracking-wider block mb-1">
-                                Analyse des risques d'entropie
+                            <div className="bg-rose-950/15 border border-rose-900/30 p-3 rounded-xl space-y-1">
+                              <span className="text-[8.5px] font-black text-rose-400 uppercase tracking-wider block">
+                                Diagnostics d'Entropie & Risques Stochastiques
                               </span>
-                              <ul className="list-disc list-inside space-y-1 text-[9px] text-rose-300/80">
-                                {item.prediction.adversarialRisks.map(
-                                  (risk, idx) => (
-                                    <li key={idx}>{risk}</li>
-                                  ),
-                                )}
+                              <ul className="list-disc list-inside space-y-0.5 text-[9px] text-rose-300/80">
+                                {item.prediction.adversarialRisks.map((risk, idx) => (
+                                  <li key={idx}>{risk}</li>
+                                ))}
                               </ul>
                             </div>
                           )}

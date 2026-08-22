@@ -668,6 +668,8 @@ export const generateMasterPrediction = async (
   isForensicOptimized: boolean = false,
   onProgress?: (progress: number, message: string) => void,
   preloadedForensicReports?: ForensicReport[],
+  useSpatioTemporalHawkesOverride?: boolean,
+  useCloudEngineOverride?: boolean,
 ): Promise<Prediction> => {
   const context = buildPredictionRequestContext(
     drawName,
@@ -681,7 +683,9 @@ export const generateMasterPrediction = async (
     forcedOutsiderCount,
     isForensicOptimized,
     onProgress,
-    preloadedForensicReports
+    preloadedForensicReports,
+    useSpatioTemporalHawkesOverride,
+    useCloudEngineOverride
   );
 
   // SCÉNARIO A — Dataset insuffisant (Moins de 12 tirages)

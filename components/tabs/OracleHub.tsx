@@ -98,6 +98,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     {
       id: "ai_prediction",
       label: "Prédiction IA",
+      tag: "Cloud",
       icon: <BrainCircuit size={16} />,
       color: "text-fuchsia-500",
       bg: "hover:bg-fuchsia-50",
@@ -126,6 +127,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     {
       id: "oracle",
       label: "Oracle Base",
+      tag: "Local",
       icon: <Sparkles size={16} />,
       color: "text-violet-500",
       bg: "hover:bg-violet-50",
@@ -183,6 +185,21 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                     {tab.icon}
                   </span>
                   <span>{tab.label}</span>
+                  {tab.tag && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-md text-[8px] font-black tracking-normal ${
+                        tab.tag === "Local"
+                          ? subTab === tab.id
+                            ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30"
+                            : "bg-slate-200 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400"
+                          : subTab === tab.id
+                            ? "bg-fuchsia-500/20 text-fuchsia-600 dark:text-fuchsia-300 border border-fuchsia-500/30"
+                            : "bg-slate-200 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400"
+                      }`}
+                    >
+                      {tab.tag}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

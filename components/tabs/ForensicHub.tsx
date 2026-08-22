@@ -56,6 +56,51 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
     const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(
       null,
     );
+    const [isExportingPDF, setIsExportingPDF] = useState(false);
+
+    const handleExportPDF = async () => {
+      try {
+        setIsExportingPDF(true);
+        audioEngine.play("click");
+        const { generateForensicLogPDF } = await import("../../services/exportService");
+        
+        const items = reports.map((rep) => {
+          const matchedDraw = rep.drawResultId ? history.find((h) => h.id === rep.drawResultId) : undefined;
+          const actualGagnants = rep.combo || matchedDraw?.gagnants || [];
+          const suggested = rep.matches?.map((m) => m.predicted) || [];
+          const exactHits = rep.matches ? rep.matches.filter((m) => m.errorType === "Hit").map((m) => m.predicted) : [];
+          const nearMisses = rep.matches ? rep.matches.filter((m) => m.errorType === "Voisin").map((m) => m.predicted) : [];
+
+          return {
+            timestamp: rep.timestamp ? new Date(rep.timestamp).getTime() : Date.now(),
+            suggestedNumbers: suggested,
+            confidence: rep.forensicScore || (100 - (rep.suspicionScore || 15)),
+            result: actualGagnants.length > 0 ? {
+              id: rep.drawResultId || `rep-${rep.id}`,
+              drawName,
+              date: rep.date || matchedDraw?.date || "Tirage Officiel",
+              gagnants: actualGagnants,
+            } : null,
+            hits: exactHits,
+            nearMisses: nearMisses,
+            precisionPct: suggested.length > 0 ? (exactHits.length / suggested.length) * 100 : 0,
+            analysis: rep.aiAnalysis || "Rapport d'Autopsie Médico-Légale",
+          };
+        });
+
+        await generateForensicLogPDF({
+          drawName,
+          items,
+        });
+        showToast("Forensic Log exporté en PDF avec succès !", "success");
+        audioEngine.play("success");
+      } catch (err) {
+        console.error("PDF Export Error:", err);
+        showToast("Erreur lors de l'export PDF du Forensic Log", "error");
+      } finally {
+        setIsExportingPDF(false);
+      }
+    };
 
     const handleSync = async () => {
       try {
@@ -287,7 +332,17 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
               title="Exporter les autopsies en JSON"
             >
               <Download size={14} />
-              <span>Export</span>
+              <span>JSON</span>
+            </button>
+
+            <button
+              onClick={handleExportPDF}
+              disabled={isExportingPDF || reports.length === 0}
+              className="px-3.5 py-2.5 bg-fuchsia-950/60 hover:bg-fuchsia-900/60 text-fuchsia-300 rounded-xl text-xs font-bold transition-all border border-fuchsia-800/40 flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+              title="Exporter le Forensic Log complet en PDF"
+            >
+              <FileText size={14} />
+              <span>{isExportingPDF ? "PDF..." : "PDF"}</span>
             </button>
 
             <button
