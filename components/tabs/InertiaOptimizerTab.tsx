@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -18,6 +18,9 @@ import {
   AlertCircle,
   CheckCircle2,
   History,
+  Zap,
+  Layers,
+  ArrowUpRight,
 } from "lucide-react";
 import {
   ScatterChart,
@@ -32,28 +35,45 @@ import {
 import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
 import { saveTicket } from "../../services/userPreferencesService";
+import {
+  computeSystemInertiaMetrics,
+  computeInertiaVectorScores,
+  resolveOptimizedInertiaVector,
+  runDeterministicInertiaBacktest,
+  SystemInertiaMetrics,
+  InertiaOscillatorScore,
+  InertiaResolvedVector,
+  InertiaBacktestResult,
+} from "../../services/prediction/systemInertiaEngine";
 
 // Custom Type-Safe Tooltip for the Phase Portrait
 const CustomTooltip = ({ active, payload }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="bg-slate-950/95 text-white p-4 rounded-2xl border border-white/10 shadow-2xl backdrop-blur-md text-[10px] space-y-1.5 font-mono max-w-[220px]">
-        <p className="font-sans font-black text-xs text-cyan-400 flex items-center gap-1.5">
-          <Target size={12} className="text-cyan-400" />
-          Numéro {data.num}
-        </p>
-        <div className="h-px bg-white/5 my-1" />
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-          <span className="text-slate-400">Score Inertie :</span>
+      <div className="bg-slate-950/95 text-white p-4 rounded-2xl border border-cyan-500/20 shadow-2xl backdrop-blur-md text-[10px] space-y-1.5 font-mono max-w-[240px]">
+        <div className="flex items-center justify-between">
+          <p className="font-sans font-black text-xs text-cyan-400 flex items-center gap-1.5">
+            <Target size={13} className="text-cyan-400" />
+            Numéro {String(data.num).padStart(2, "0")}
+          </p>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-bold">
+            Z = {data.zScore > 0 ? `+${data.zScore}` : data.zScore}
+          </span>
+        </div>
+        <div className="h-px bg-white/10 my-1" />
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px]">
+          <span className="text-slate-400">Score d'Inertie :</span>
           <span className="text-right font-black text-cyan-300">
             {data.score}%
           </span>
-          <span className="text-slate-400">Attr. Phase :</span>
-          <span className="text-right text-slate-200">{data.y}</span>
-          <span className="text-slate-400">Pot. Rétro :</span>
+          <span className="text-slate-400">Potentiel U(g) :</span>
           <span className="text-right text-slate-200">{data.x}</span>
-          <span className="text-slate-400">Amortiss. :</span>
+          <span className="text-slate-400">Attraction A(f) :</span>
+          <span className="text-right text-slate-200">{data.y}</span>
+          <span className="text-slate-400">Cohérence C(H) :</span>
+          <span className="text-right text-indigo-300">{data.coherence}</span>
+          <span className="text-slate-400">Amortiss. Δ(ζ) :</span>
           <span className="text-right text-pink-400">{data.damping}</span>
         </div>
       </div>
@@ -76,306 +96,90 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   const [dampingRatio, setDampingRatio] = useState<number>(0.5); // ζ: Physical damping coefficient
 
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizedVector, setOptimizedVector] = useState<{
-    primary: number[];
-    secondary: number[];
-    globalStability: number;
-    equationUsed: string;
-  } | null>(null);
+  const [optimizedVector, setOptimizedVector] = useState<InertiaResolvedVector | null>(null);
 
   // Backtesting stats state for retroactive audits
   const [isBacktesting, setIsBacktesting] = useState<boolean>(false);
-  const [backtestStats, setBacktestStats] = useState<{
-    trials: number;
-    primaryHitsAvg: number;
-    successRate: number;
-    details: {
-      drawDate: string;
-      winners: number[];
-      hits: number;
-      matched: number[];
-    }[];
-    bestDamping: number;
-  } | null>(null);
+  const [backtestStats, setBacktestStats] = useState<InertiaBacktestResult | null>(null);
 
-  // Auto-discover the safe number range based on history (Tirage Isolation and No Magic Numbers rules)
-  const safeMaxNum = useMemo(() => {
-    let discoveredMaxNum = 0;
-    history.forEach((draw: any) => {
-      if (Array.isArray(draw.gagnants)) {
-        draw.gagnants.forEach((n: number) => {
-          if (n > discoveredMaxNum) discoveredMaxNum = n;
-        });
-      }
-    });
-    return discoveredMaxNum > 0 ? discoveredMaxNum : 90;
-  }, [history]);
-
-  // Reset results when draw parameters are updated
+  // Reset results when draw parameters are updated (Tirage Isolation rule)
   useEffect(() => {
     setOptimizedVector(null);
     setBacktestStats(null);
   }, [drawName]);
 
-  const hurst = globalRegime?.hurst || 0.5;
+  const hurst = globalRegime?.hurst ?? 0.5;
 
   // 100% Deterministic Statistical Computation based on the active history (Tirage Isolation)
-  const computedMetrics = useMemo(() => {
-    if (!history || history.length === 0) {
-      return {
-        frequencies: {} as Record<number, number>,
-        gaps: {} as Record<number, number>,
-        shannonEntropy: 0.5,
-        volatility: 25,
-        meanFreq: 0,
-        stdDevFreq: 1,
-        meanGap: 10,
-        alpha: 0.5,
-        beta: 0.5,
-        gamma: 0.5,
-      };
-    }
+  const computedMetrics: SystemInertiaMetrics = useMemo(() => {
+    return computeSystemInertiaMetrics(history, drawName, hurst);
+  }, [history, drawName, hurst]);
 
-    const frequencies: Record<number, number> = {};
-    const gaps: Record<number, number> = {};
-
-    for (let num = 1; num <= safeMaxNum; num++) {
-      frequencies[num] = 0;
-      gaps[num] = history.length;
-    }
-
-    history.forEach((draw, index) => {
-      if (Array.isArray(draw.gagnants)) {
-        draw.gagnants.forEach((num) => {
-          if (num >= 1 && num <= safeMaxNum) {
-            frequencies[num]++;
-            if (gaps[num] === history.length) {
-              gaps[num] = index;
-            }
-          }
-        });
-      }
-    });
-
-    const totalSamples = Object.values(frequencies).reduce((a, b) => a + b, 0);
-    const meanFreq = totalSamples / safeMaxNum;
-
-    let varianceSum = 0;
-    Object.values(frequencies).forEach((count) => {
-      varianceSum += Math.pow(count - meanFreq, 2);
-    });
-    const stdDevFreq = Math.sqrt(varianceSum / safeMaxNum) || 1;
-
-    const meanGap = Object.values(gaps).reduce((a, b) => a + b, 0) / safeMaxNum;
-
-    // Shannon Entropy to calculate continuous system coupling
-    let shannonEntropy = 0;
-    Object.values(frequencies).forEach((c) => {
-      if (c > 0 && totalSamples > 0) {
-        const p = c / totalSamples;
-        shannonEntropy -= p * Math.log2(p);
-      }
-    });
-    const normalizedEntropy =
-      shannonEntropy / Math.max(Number.EPSILON, Math.log2(safeMaxNum));
-
-    const coefficientOfVariation = meanFreq > 0 ? stdDevFreq / meanFreq : 0;
-
-    // Alpha (Viscosité): hyperbolic tangent function mapping CV to [0,1]
-    const alpha = Math.tanh(coefficientOfVariation);
-
-    // Beta (Masse Thermique): sine projection mapping of Fractal memory Hurst [0,1]
-    const beta = Math.sin(hurst * (Math.PI / 2.0));
-
-    // Gamma (Couplage): exponential decay of Shannon entropy [0,1]
-    const gamma = Math.exp(-normalizedEntropy);
-
-    return {
-      frequencies,
-      gaps,
-      shannonEntropy: normalizedEntropy,
-      meanFreq,
-      stdDevFreq,
-      meanGap,
-      alpha,
-      beta,
-      gamma,
-    };
-  }, [history, safeMaxNum, hurst]);
-
-  // Type-safe deterministic scorer using physics parameters and adjustable modifiers
-  const computeScoresWithParams = React.useCallback(
-    (
-      metrics: typeof computedMetrics,
-      options: {
-        viscosityGain: number;
-        massGain: number;
-        couplingGain: number;
-        dampingRatio: number;
-      },
-    ) => {
-      const {
-        frequencies,
-        gaps,
-        shannonEntropy,
-        meanFreq,
-        stdDevFreq,
-        meanGap,
-        alpha,
-        beta,
-        gamma,
-      } = metrics;
-      const scores: {
-        num: number;
-        score: number;
-        attraction: number;
-        potential: number;
-        coherence: number;
-        dampingCorrection: number;
-      }[] = [];
-
-      // Apply adjustable gains continuously to computed physics constants
-      const calAlpha = Math.min(
-        1.0,
-        Math.max(0.0, alpha * options.viscosityGain),
-      );
-      const calBeta = Math.min(1.0, Math.max(0.0, beta * options.massGain));
-      const calGamma = Math.min(
-        1.0,
-        Math.max(0.0, gamma * options.couplingGain),
-      );
-      const zeta = options.dampingRatio;
-
-      const rawItems: {
-        num: number;
-        rawScore: number;
-        attraction: number;
-        potential: number;
-        coherence: number;
-        dampingCorrection: number;
-      }[] = [];
-
-      let sumRawScores = 0;
-
-      for (let num = 1; num <= safeMaxNum; num++) {
-        const f = frequencies[num] || 0;
-        const g = gaps[num] || 0;
-
-        // 1. Phase Attraction (Sigmoid transition)
-        const attraction =
-          1.0 / (1.0 + Math.exp(-(f - meanFreq) / Math.max(0.1, stdDevFreq)));
-
-        // 2. Poisson Recovery Potential (Continuous Exponential Decay)
-        const potential = 1.0 - Math.exp(-g / Math.max(1, meanGap));
-
-        // 3. Fractal Coherence Weight (with continuous Hurst mapping)
-        const coherence = Math.tanh((hurst * (g + 1)) / Math.max(1, meanGap));
-
-        // 4. Second-order system damping correction (Underdamped vs Overdamped smooth blending)
-        const omegaD = Math.sqrt(Math.abs(1.0 - zeta * zeta));
-        const underdamped =
-          Math.cos(omegaD * (g / Math.max(1, meanGap)) * Math.PI) *
-          Math.exp(-zeta * (g / Math.max(1, meanGap)));
-        const overdamped = -Math.exp(
-          -(g / Math.max(1, meanGap * Math.max(0.1, zeta))),
-        );
-
-        // Continuous blending sigmoid at zeta = 1.0 (transition width k = 15.0)
-        const blendWeight = 1.0 / (1.0 + Math.exp(-15.0 * (zeta - 1.0)));
-        const dampingCorrection =
-          (1.0 - blendWeight) * underdamped + blendWeight * overdamped;
-
-        // Continuous damping weight derived from Shannon Entropy, Hurst, and zeta (No magic constants)
-        const wDampingFactor =
-          (0.15 + 0.2 * (1.0 - shannonEntropy)) * (1.0 - Math.abs(hurst - 0.5));
-        const wDamping =
-          wDampingFactor *
-          (1.0 - Math.abs(zeta - 1.0) / (zeta + 1.0 + Number.EPSILON));
-
-        // Continuous combination free of magic numbers or abrupt logic pathways
-        const rawScore =
-          calAlpha * potential +
-          (1.0 - calAlpha) * attraction +
-          calBeta * coherence * (1.0 - shannonEntropy) * calGamma +
-          wDamping * dampingCorrection;
-
-        sumRawScores += rawScore;
-        rawItems.push({
-          num,
-          rawScore,
-          attraction,
-          potential,
-          coherence,
-          dampingCorrection,
-        });
-      }
-
-      const meanRawScore = sumRawScores / safeMaxNum;
-
-      // Dynamic standard deviation of raw scores to adjust scaling factor continuously (No magic 4.5 and 0.52)
-      let varRawScores = 0;
-      rawItems.forEach((item) => {
-        varRawScores += Math.pow(item.rawScore - meanRawScore, 2);
-      });
-      const stdDevRawScores = Math.sqrt(varRawScores / safeMaxNum) || 0.1;
-      const dynamicScale = 1.0 / stdDevRawScores;
-
-      rawItems.forEach((item) => {
-        const score = Math.max(
-          1.0,
-          Math.min(
-            99.0,
-            100 *
-              (1.0 /
-                (1.0 +
-                  Math.exp(-dynamicScale * (item.rawScore - meanRawScore)))),
-          ),
-        );
-        scores.push({
-          num: item.num,
-          score,
-          attraction: item.attraction,
-          potential: item.potential,
-          coherence: item.coherence,
-          dampingCorrection: item.dampingCorrection,
-        });
-      });
-
-      return scores;
-    },
-    [safeMaxNum, hurst],
-  );
-
-  // High fidelity phase space coordinate dataset for Recharts
-  const scatterData = useMemo(() => {
-    const scores = computeScoresWithParams(computedMetrics, {
-      viscosityGain,
-      massGain,
-      couplingGain,
-      dampingRatio,
-    });
-
-    return scores.map((item) => ({
-      num: item.num,
-      x: Number(item.potential.toFixed(3)), // Poisson Potential mapped horizontally
-      y: Number(item.attraction.toFixed(3)), // Phase Attraction mapped vertically
-      score: Number(item.score.toFixed(1)),
-      damping: Number(item.dampingCorrection.toFixed(3)),
-    }));
-  }, [
-    computedMetrics,
+  const currentModifiers = useMemo(() => ({
     viscosityGain,
     massGain,
     couplingGain,
     dampingRatio,
-    computeScoresWithParams,
-  ]);
+  }), [viscosityGain, massGain, couplingGain, dampingRatio]);
+
+  // High fidelity phase space coordinate dataset for Recharts
+  const oscillatorScores: InertiaOscillatorScore[] = useMemo(() => {
+    return computeInertiaVectorScores(computedMetrics, currentModifiers);
+  }, [computedMetrics, currentModifiers]);
+
+  const scatterData = useMemo(() => {
+    return oscillatorScores.map((item) => ({
+      num: item.num,
+      x: item.restoringPotential, // Restoring Potential mapped horizontally
+      y: item.phaseAttraction,    // Phase Attraction mapped vertically
+      score: item.score,
+      coherence: item.fractalCoherence,
+      damping: item.dampingCorrection,
+      zScore: item.zScore,
+      action: item.hamiltonianAction,
+    }));
+  }, [oscillatorScores]);
+
+  // Cybernetic Calibration Presets
+  const applyPreset = useCallback((type: "neutral" | "trend" | "critical" | "underdamped") => {
+    audioEngine.play("click");
+    switch (type) {
+      case "neutral":
+        setViscosityGain(1.0);
+        setMassGain(1.0);
+        setCouplingGain(1.0);
+        setDampingRatio(0.5);
+        showToast("Profil appliqué : Équilibre Harmonique Standard", "info");
+        break;
+      case "trend":
+        setViscosityGain(1.75);
+        setMassGain(1.5);
+        setCouplingGain(0.7);
+        setDampingRatio(0.35);
+        showToast("Profil appliqué : Persistance Forte (Suivi de Tendance)", "info");
+        break;
+      case "critical":
+        setViscosityGain(0.8);
+        setMassGain(1.0);
+        setCouplingGain(1.6);
+        setDampingRatio(1.0);
+        showToast("Profil appliqué : Amortissement Critique (Anti-Dispersion)", "info");
+        break;
+      case "underdamped":
+        setViscosityGain(1.2);
+        setMassGain(1.8);
+        setCouplingGain(1.2);
+        setDampingRatio(0.2);
+        showToast("Profil appliqué : Sous-Amorti (Résonance Cyclique)", "info");
+        break;
+    }
+  }, [showToast]);
 
   // Handle complete, deterministic system optimization calculations
   const triggerOptimization = () => {
     if (history.length < 10) {
       showToast(
-        "Historique insuffisant pour calibrer l'inertie stochastique (min. 10 tirages).",
+        "Historique insuffisant pour calibrer l'inertie stochastique (min. 10 tirages requis).",
         "error",
       );
       audioEngine.play("error");
@@ -386,53 +190,25 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     setIsOptimizing(true);
 
     const calcTimeout = Math.max(
-      800,
-      Math.round(computedMetrics.shannonEntropy * 1500),
+      600,
+      Math.round(computedMetrics.shannonEntropyNormalized * 1200),
     );
 
     setTimeout(() => {
-      const scores = computeScoresWithParams(computedMetrics, {
-        viscosityGain,
-        massGain,
-        couplingGain,
-        dampingRatio,
-      });
-
-      // Decouple top scores deterministically
-      scores.sort((a, b) => b.score - a.score);
-
-      const primary = scores
-        .slice(0, 5)
-        .map((x) => x.num)
-        .sort((a, b) => a - b);
-      const secondary = scores
-        .slice(5, 15)
-        .map((x) => x.num)
-        .sort((a, b) => a - b);
-
-      const avgSelectedScore =
-        scores.slice(0, 5).reduce((acc, x) => acc + x.score, 0) / 5;
-      const globalStability = Math.round(avgSelectedScore);
-
-      setOptimizedVector({
-        primary,
-        secondary,
-        globalStability,
-        equationUsed: `I_n(\\alpha^c,\\beta^c,\\gamma^c) = \\alpha^c P_n(g) + (1-\\alpha^c) A_n(f) + \\beta^c \\tanh\\left(\\frac{H(g+1)}{\\mu_g}\\right)(1-S_H)\\gamma^c + 0.2\\delta_d(\\zeta)`,
-      });
-
+      const resolved = resolveOptimizedInertiaVector(oscillatorScores, computedMetrics);
+      setOptimizedVector(resolved);
       setIsOptimizing(false);
       audioEngine.play("success");
-      showToast("Optimisation quadratique de l'inertie achevée.", "success");
+      showToast("Optimisation de l'inertie de système achevée.", "success");
     }, calcTimeout);
   };
 
   // Advanced retroactive backtesting simulation (Time-Machine simulation)
   const runInertiaBacktest = async () => {
     audioEngine.play("click");
-    if (history.length < 15) {
+    if (history.length < 12) {
       showToast(
-        "Dataset insuffisant pour rétropoler l'inertie (min. 15 tirages requis).",
+        "Dataset insuffisant pour rétropoler l'inertie (min. 12 tirages requis).",
         "error",
       );
       return;
@@ -442,130 +218,21 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("loading");
 
     try {
-      await new Promise((r) => setTimeout(r, 1500));
-
-      const trialsCount = Math.min(8, history.length - 10);
-      const detailsList: any[] = [];
-      let totalPrimaryHits = 0;
-      let successTrialsCount = 0;
-
-      for (let j = trialsCount; j >= 1; j--) {
-        const targetDraw = history[j - 1]; // Targeted real historical draw
-        const historicalWindow = history.slice(j); // Cut-off history slice before target
-
-        // Compute retro history metrics
-        const histFrequencies: Record<number, number> = {};
-        const histGaps: Record<number, number> = {};
-        for (let num = 1; num <= safeMaxNum; num++) {
-          histFrequencies[num] = 0;
-          histGaps[num] = historicalWindow.length;
-        }
-
-        historicalWindow.forEach((draw, index) => {
-          if (Array.isArray(draw.gagnants)) {
-            draw.gagnants.forEach((num) => {
-              if (num >= 1 && num <= safeMaxNum) {
-                histFrequencies[num]++;
-                if (histGaps[num] === historicalWindow.length) {
-                  histGaps[num] = index;
-                }
-              }
-            });
-          }
-        });
-
-        const totalSamples = Object.values(histFrequencies).reduce(
-          (a, b) => a + b,
-          0,
-        );
-        const meanFreq = totalSamples / safeMaxNum;
-        let varianceSum = 0;
-        Object.values(histFrequencies).forEach((count) => {
-          varianceSum += Math.pow(count - meanFreq, 2);
-        });
-        const stdDevFreq = Math.sqrt(varianceSum / safeMaxNum) || 1;
-        const meanGap =
-          Object.values(histGaps).reduce((a, b) => a + b, 0) / safeMaxNum;
-
-        let shannonEntropy = 0;
-        Object.values(histFrequencies).forEach((c) => {
-          if (c > 0 && totalSamples > 0) {
-            const p = c / totalSamples;
-            shannonEntropy -= p * Math.log2(p);
-          }
-        });
-        const normalizedEntropy =
-          shannonEntropy / Math.max(Number.EPSILON, Math.log2(safeMaxNum));
-        const coefficientOfVariation = meanFreq > 0 ? stdDevFreq / meanFreq : 0;
-
-        const alphaVal = Math.tanh(coefficientOfVariation);
-        const betaVal = Math.sin(hurst * (Math.PI / 2.0));
-        const gammaVal = Math.exp(-normalizedEntropy);
-
-        const sliceMetrics = {
-          frequencies: histFrequencies,
-          gaps: histGaps,
-          shannonEntropy: normalizedEntropy,
-          meanFreq,
-          stdDevFreq,
-          meanGap,
-          alpha: alphaVal,
-          beta: betaVal,
-          gamma: gammaVal,
-        };
-
-        const scores = computeScoresWithParams(sliceMetrics, {
-          viscosityGain,
-          massGain,
-          couplingGain,
-          dampingRatio,
-        });
-
-        scores.sort((a, b) => b.score - a.score);
-        const primaryPredicted = scores.slice(0, 5).map((x) => x.num);
-
-        const realWinners = targetDraw.gagnants || [];
-        const matched = primaryPredicted.filter((num) =>
-          realWinners.includes(num),
-        );
-        const hitsCount = matched.length;
-
-        totalPrimaryHits += hitsCount;
-        if (hitsCount >= 1) {
-          successTrialsCount++;
-        }
-
-        detailsList.push({
-          drawDate: targetDraw.date || `Tirage -${j}`,
-          winners: realWinners,
-          hits: hitsCount,
-          matched,
-        });
-      }
-
-      const primaryHitsAvg = totalPrimaryHits / trialsCount;
-      const successRate = (successTrialsCount / trialsCount) * 100;
-
-      // Continuous interpolation of best recommended damping with dynamic center based on entropy (No magic numbers)
-      const dynamicCenter = 0.5 + 0.5 * computedMetrics.shannonEntropy;
-      const bestDamping =
-        0.1 + 1.5 / (1.0 + Math.exp(-4.0 * (dampingRatio - dynamicCenter)));
-
-      setBacktestStats({
-        trials: trialsCount,
-        primaryHitsAvg: Number(primaryHitsAvg.toFixed(2)),
-        successRate: Number(successRate.toFixed(1)),
-        details: detailsList,
-        bestDamping,
-      });
-
+      await new Promise((r) => setTimeout(r, 900));
+      const result = await runDeterministicInertiaBacktest(
+        history,
+        drawName,
+        currentModifiers,
+        hurst
+      );
+      setBacktestStats(result);
       audioEngine.play("success");
       showToast(
-        `Rétro-audit de l'inertie complété sur ${trialsCount} tirages virtuels.`,
+        `Rétro-audit de l'inertie complété sur ${result.trials} tirages virtuels.`,
         "success",
       );
     } catch (err: any) {
-      showToast("Échec de la simulation rétroactive: " + err.message, "error");
+      showToast("Échec du rétro-audit : " + err.message, "error");
     } finally {
       setIsBacktesting(false);
     }
@@ -578,7 +245,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
       await saveTicket({
         numbers: optimizedVector.primary,
         drawName,
-        strategy: `Inertie Optimisée (${optimizedVector.globalStability}%)`,
+        strategy: `Inertie Système Optimisée (${optimizedVector.globalStability}%)`,
       });
       audioEngine.play("success");
       showToast("Ticket d'inertie optimal mémorisé avec succès.", "success");
@@ -598,48 +265,50 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Info Banner */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/40 p-6 rounded-[2rem] border border-white/5 shadow-2xl relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-[80px] pointer-events-none group-hover:bg-cyan-500/10 transition-all duration-700" />
-        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-indigo-500/5 rounded-full blur-[60px] pointer-events-none" />
+    <div className="space-y-6" id="system-inertia-optimizer-root">
+      {/* Top Cybernetic Banner */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/40 p-6 rounded-[2rem] border border-cyan-500/20 shadow-2xl relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-72 h-72 bg-cyan-500/10 rounded-full blur-[90px] pointer-events-none group-hover:bg-cyan-500/15 transition-all duration-700" />
+        <div className="absolute -bottom-10 -left-10 w-52 h-52 bg-indigo-500/10 rounded-full blur-[70px] pointer-events-none" />
 
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="p-2 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+              <span className="p-2 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/30 shadow-inner">
                 <Gauge size={18} className="animate-pulse" />
               </span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400 bg-cyan-500/5 px-2.5 py-1 rounded-md border border-cyan-500/10">
-                Calibration Amortie Continue v11.5
+              <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400 bg-cyan-500/5 px-2.5 py-1 rounded-md border border-cyan-500/20">
+                Moteur Cybernétique du 2nd Ordre
+              </span>
+              <span className="text-[10px] font-mono text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-white/5">
+                N_max = {computedMetrics.safeMaxNum}
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
-              Optimiseur d’Inertie de Système
+              Inertie Système &amp; Oscillateurs Amortis
             </h2>
             <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-              Ajuste de façon différentielle les forces de viscosité temporelle
-              et d'amortissement cinétique des oscillateurs pour corriger les
-              dérives de Poisson sur{" "}
-              <span className="text-white font-bold">{drawName}</span>.
+              Résolution différentielle continue des potentiels de renouvellement de Poisson, de l'impulsion cinétique et des équations harmoniques d'amortissement sur{" "}
+              <span className="text-cyan-300 font-bold">{drawName}</span>.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3 w-full lg:w-auto">
             <button
+              id="btn-trigger-inertia-backtest"
               onClick={runInertiaBacktest}
               disabled={isBacktesting || isOptimizing}
-              className="flex-1 lg:flex-none px-5 py-4 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2.5 border border-white/5 transition-all disabled:opacity-50 active:scale-95 cursor-pointer"
+              className="flex-1 lg:flex-none px-5 py-3.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2.5 border border-white/10 transition-all disabled:opacity-50 active:scale-95 cursor-pointer shadow-lg"
             >
               {isBacktesting ? (
                 <>
-                  <RotateCcw size={14} className="animate-spin" />
+                  <RotateCcw size={14} className="animate-spin text-pink-400" />
                   <span>Rétro-audit...</span>
                 </>
               ) : (
                 <>
                   <History size={14} className="text-pink-400" />
-                  <span>Rétro-Audit</span>
+                  <span>Rétro-Audit (Time Machine)</span>
                 </>
               )}
             </button>
@@ -648,12 +317,12 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               id="btn-trigger-inertia-optimizer"
               onClick={triggerOptimization}
               disabled={isOptimizing || isBacktesting}
-              className="flex-1 lg:flex-none px-8 py-4 bg-gradient-to-r from-cyan-650 to-indigo-650 hover:from-cyan-550 hover:to-indigo-550 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all duration-300 hover:scale-[1.02] shadow-xl shadow-cyan-500/10 border border-cyan-400/25 active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="flex-1 lg:flex-none px-7 py-3.5 bg-gradient-to-r from-cyan-600 via-indigo-600 to-cyan-500 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all duration-300 hover:scale-[1.02] shadow-xl shadow-cyan-500/20 border border-cyan-400/30 active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               {isOptimizing ? (
                 <>
                   <RotateCcw size={14} className="animate-spin" />
-                  <span>Calcul Matriciel...</span>
+                  <span>Résolution Matricielle...</span>
                 </>
               ) : (
                 <>
@@ -665,10 +334,43 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
 
             <button
               onClick={resetControls}
-              title="Réinitialiser"
-              className="p-4 bg-slate-900/60 text-slate-400 hover:text-white rounded-2xl border border-white/5 flex items-center justify-center transition-colors active:scale-95 cursor-pointer hover:bg-slate-800"
+              title="Réinitialiser les paramètres"
+              className="p-3.5 bg-slate-900/80 text-slate-400 hover:text-white rounded-2xl border border-white/10 flex items-center justify-center transition-colors active:scale-95 cursor-pointer hover:bg-slate-800"
             >
               <RotateCcw size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Presets Row */}
+        <div className="mt-5 pt-4 border-t border-white/5 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 font-sans">
+            <Zap size={12} className="text-cyan-400" /> Profils Cybernétiques :
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => applyPreset("neutral")}
+              className="px-3 py-1 bg-slate-900/80 hover:bg-cyan-950/60 text-slate-300 hover:text-cyan-300 border border-white/10 hover:border-cyan-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+            >
+              Harmonique Neutre (ζ=0.5)
+            </button>
+            <button
+              onClick={() => applyPreset("trend")}
+              className="px-3 py-1 bg-slate-900/80 hover:bg-indigo-950/60 text-slate-300 hover:text-indigo-300 border border-white/10 hover:border-indigo-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+            >
+              Persistance &amp; Tendance (α+, β+)
+            </button>
+            <button
+              onClick={() => applyPreset("critical")}
+              className="px-3 py-1 bg-slate-900/80 hover:bg-amber-950/60 text-slate-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+            >
+              Amortissement Critique (ζ=1.0)
+            </button>
+            <button
+              onClick={() => applyPreset("underdamped")}
+              className="px-3 py-1 bg-slate-900/80 hover:bg-pink-950/60 text-slate-300 hover:text-pink-300 border border-white/10 hover:border-pink-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+            >
+              Sous-Amorti Résonant (ζ=0.2)
             </button>
           </div>
         </div>
@@ -680,13 +382,12 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
         <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-white/5 shadow-xl space-y-6 flex flex-col justify-between">
           <div className="space-y-6">
             <div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1 font-sans">
                 <Sliders size={14} className="text-cyan-400" />
-                Courbes de Frottement Réglables
+                Coefficients Différentiables d'Inertie
               </h3>
               <p className="text-[10px] text-slate-500 leading-normal">
-                Ajustez les coefficients scalaires continus pour adapter le flux
-                d'amortissement aux lois physiques.
+                Modulation continue des tenseurs de viscosité, de masse et d'amortissement sans bifurcation.
               </p>
             </div>
 
@@ -695,10 +396,10 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center text-[10px]">
                   <span className="font-bold text-slate-400 uppercase tracking-wider">
-                    Multiplicateur de Viscosité (α-gain)
+                    Viscosité Temporelle (α-gain)
                   </span>
                   <span className="font-mono text-cyan-400 font-black">
-                    {(computedMetrics.alpha * viscosityGain).toFixed(4)}
+                    {(computedMetrics.alphaViscosity * viscosityGain).toFixed(4)}
                   </span>
                 </div>
                 <input
@@ -714,8 +415,8 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   className="w-full h-1.5 bg-slate-800 accent-cyan-500 rounded-lg cursor-pointer"
                 />
                 <div className="flex justify-between text-[8px] text-slate-500 uppercase font-mono">
-                  <span>Gain: {viscosityGain.toFixed(2)}x</span>
-                  <span>Viscosité : {computedMetrics.alpha.toFixed(2)}</span>
+                  <span>Gain : {viscosityGain.toFixed(2)}x</span>
+                  <span>Base α : {computedMetrics.alphaViscosity.toFixed(3)}</span>
                 </div>
               </div>
 
@@ -723,10 +424,10 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center text-[10px]">
                   <span className="font-bold text-slate-400 uppercase tracking-wider">
-                    Masse Thermique (β-gain)
+                    Masse Thermique Hurst (β-gain)
                   </span>
                   <span className="font-mono text-indigo-400 font-black">
-                    {(computedMetrics.beta * massGain).toFixed(4)}
+                    {(computedMetrics.betaThermalMass * massGain).toFixed(4)}
                   </span>
                 </div>
                 <input
@@ -742,8 +443,8 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   className="w-full h-1.5 bg-slate-800 accent-indigo-500 rounded-lg cursor-pointer"
                 />
                 <div className="flex justify-between text-[8px] text-slate-500 uppercase font-mono">
-                  <span>Gain: {massGain.toFixed(2)}x</span>
-                  <span>Masse : {computedMetrics.beta.toFixed(2)}</span>
+                  <span>Gain : {massGain.toFixed(2)}x</span>
+                  <span>Base β : {computedMetrics.betaThermalMass.toFixed(3)}</span>
                 </div>
               </div>
 
@@ -754,7 +455,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                     Couplage d'Entropie (γ-gain)
                   </span>
                   <span className="font-mono text-fuchsia-400 font-black">
-                    {(computedMetrics.gamma * couplingGain).toFixed(4)}
+                    {(computedMetrics.gammaCoupling * couplingGain).toFixed(4)}
                   </span>
                 </div>
                 <input
@@ -770,8 +471,8 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   className="w-full h-1.5 bg-slate-800 accent-fuchsia-500 rounded-lg cursor-pointer"
                 />
                 <div className="flex justify-between text-[8px] text-slate-500 uppercase font-mono">
-                  <span>Gain: {couplingGain.toFixed(2)}x</span>
-                  <span>Couplage: {computedMetrics.gamma.toFixed(2)}</span>
+                  <span>Gain : {couplingGain.toFixed(2)}x</span>
+                  <span>Base γ : {computedMetrics.gammaCoupling.toFixed(3)}</span>
                 </div>
               </div>
 
@@ -779,14 +480,23 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               <div className="space-y-1.5 pt-2 border-t border-white/5">
                 <div className="flex justify-between items-center text-[10px]">
                   <span className="font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1">
-                    <Waves size={10} className="animate-pulse" /> Coefficient
-                    d'Amortissement (ζ)
+                    <Waves size={10} className="animate-pulse" /> Amortissement Oscillatoire (ζ)
                   </span>
                   <span
-                    className={`font-mono font-black ${dampingRatio < 1.0 ? "text-emerald-400" : "text-amber-400"}`}
+                    className={`font-mono font-black ${
+                      Math.abs(dampingRatio - 1.0) < 0.05
+                        ? "text-cyan-400"
+                        : dampingRatio < 1.0
+                        ? "text-emerald-400"
+                        : "text-amber-400"
+                    }`}
                   >
                     {dampingRatio.toFixed(2)}{" "}
-                    {dampingRatio < 1.0 ? "(Sous-Amorti)" : "(Sur-Amorti)"}
+                    {Math.abs(dampingRatio - 1.0) < 0.05
+                      ? "(Critique)"
+                      : dampingRatio < 1.0
+                      ? "(Sous-Amorti)"
+                      : "(Sur-Amorti)"}
                   </span>
                 </div>
                 <input
@@ -803,31 +513,36 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 />
                 <p className="text-[8px] text-slate-500 leading-normal font-mono">
                   {dampingRatio < 1.0
-                    ? "ζ < 1.0 : Régime oscillatoire périodique. Cible la résonance cyclique des retours."
-                    : "ζ ≥ 1.0 : Dissipation thermique continue. Pénalise exponentiellement les grands écarts."}
+                    ? "ζ < 1.0 : Régime oscillatoire pseudo-périodique. Cible la résonance cyclique des retours."
+                    : Math.abs(dampingRatio - 1.0) < 0.05
+                    ? "ζ = 1.0 : Amortissement critique. Convergence optimale sans sur-oscillation."
+                    : "ζ > 1.0 : Dissipation thermique continue. Pénalise exponentiellement les grands écarts."}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="pt-4 border-t border-white/5 bg-slate-950/25 p-4 rounded-2xl space-y-2">
+          <div className="pt-4 border-t border-white/5 bg-slate-950/40 p-4 rounded-2xl space-y-2">
             <div className="flex items-center gap-1.5 text-slate-400">
               <Info size={12} className="text-cyan-500" />
               <span className="text-[9px] font-black uppercase tracking-wider font-sans">
-                État Stochastique Global
+                Invariants Physiques Découverts
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-normal font-mono">
-              Shannon Entropy relative :{" "}
-              <span className="text-slate-300 font-bold">
-                {(computedMetrics.shannonEntropy * 100).toFixed(1)}%
-              </span>
-              . Friction de viscosité d'onde :{" "}
-              <span className="text-slate-300 font-bold">
-                {computedMetrics.alpha.toFixed(3)}
-              </span>
-              .
-            </p>
+            <div className="grid grid-cols-2 gap-2 text-[9px] font-mono text-slate-400">
+              <div>
+                Pulsation ω₀ : <strong className="text-slate-200">{computedMetrics.naturalFrequencyOmega0.toFixed(3)} rad</strong>
+              </div>
+              <div>
+                Entropie S_H : <strong className="text-slate-200">{(computedMetrics.shannonEntropyNormalized * 100).toFixed(1)}%</strong>
+              </div>
+              <div>
+                Écart Moyen μ_g : <strong className="text-slate-200">{computedMetrics.meanGap.toFixed(1)}</strong>
+              </div>
+              <div>
+                Hurst H : <strong className="text-slate-200">{computedMetrics.baseHurst.toFixed(3)}</strong>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -835,42 +550,38 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
         <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-white/5 shadow-xl flex flex-col justify-between">
           <div className="space-y-4">
             <div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1">
-                <Compass
-                  size={14}
-                  className="text-indigo-400 animate-spin-slow"
-                />
-                Phase Space Portrait des États
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1 font-sans">
+                <Compass size={14} className="text-cyan-400" />
+                Portrait d'Espace de Phase [U(g) vs A(f)]
               </h3>
               <p className="text-[10px] text-slate-500 leading-normal">
-                Visualisation d'attraction en temps réel dans le plan [Poisson
-                Potential vs Phase Attraction].
+                Projection 2D des attracteurs d'inertie : Potentiel de renouvellement $U_n$ (axe X) vs Attraction de phase $A_n$ (axe Y).
               </p>
             </div>
 
             {/* Interactive Recharts Scatter plot */}
-            <div className="h-[210px] w-full mt-2 relative">
+            <div className="h-[220px] w-full mt-2 relative">
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart
                   margin={{ top: 10, right: 10, bottom: 20, left: -20 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.02)"
+                    stroke="rgba(255,255,255,0.03)"
                   />
                   <XAxis
                     type="number"
                     dataKey="x"
-                    name="Poisson Potential"
+                    name="Potentiel U(g)"
                     domain={[0, 1]}
                     stroke="#475569"
                     style={{ fontSize: 8, fontFamily: "monospace" }}
-                    tickFormatter={(v) => `P:${v.toFixed(1)}`}
+                    tickFormatter={(v) => `U:${v.toFixed(1)}`}
                   />
                   <YAxis
                     type="number"
                     dataKey="y"
-                    name="Phase Attraction"
+                    name="Attraction A(f)"
                     domain={[0, 1]}
                     stroke="#475569"
                     style={{ fontSize: 8, fontFamily: "monospace" }}
@@ -879,31 +590,26 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   <RechartsTooltip
                     cursor={{
                       strokeDasharray: "3 3",
-                      stroke: "rgba(255,255,255,0.1)",
+                      stroke: "rgba(6,182,212,0.2)",
                     }}
                     content={<CustomTooltip />}
                   />
-                  <Scatter name="Frictions de Masse" data={scatterData}>
-                    {scatterData.map((entry, _index) => {
-                      const isPrimary = optimizedVector?.primary.includes(
-                        entry.num,
-                      );
-                      const isSecondary = optimizedVector?.secondary.includes(
-                        entry.num,
-                      );
+                  <Scatter name="Oscillateurs d'Inertie" data={scatterData}>
+                    {scatterData.map((entry) => {
+                      const isPrimary = optimizedVector?.primary.includes(entry.num);
+                      const isSecondary = optimizedVector?.secondary.includes(entry.num);
 
-                      let color = "rgba(100, 116, 139, 0.5)"; // Default translucent slate-500
+                      let color = "rgba(100, 116, 139, 0.45)";
                       let radius = 4;
 
-                      // Scale radius dynamically based on continuous score strength
                       if (isPrimary) {
-                        color = "#06b6d4"; // Vibrant Cyan
-                        radius = 10;
+                        color = "#06b6d4"; // Cyan Primaire
+                        radius = 9;
                       } else if (isSecondary) {
-                        color = "#818cf8"; // Indigo
-                        radius = 7;
+                        color = "#818cf8"; // Indigo Secondaire
+                        radius = 6.5;
                       } else if (entry.score > 70) {
-                        color = "rgba(236, 72, 153, 0.4)"; // Soft pink for strong candidates
+                        color = "rgba(236, 72, 153, 0.5)";
                         radius = 5.5;
                       }
 
@@ -912,42 +618,38 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                           key={`ball-cell-${entry.num}`}
                           fill={color}
                           r={radius}
-                          className="transition-all duration-305 cursor-pointer hover:stroke-white hover:stroke-1"
+                          className="transition-all duration-300 cursor-pointer hover:stroke-white hover:stroke-1"
                         />
                       );
                     })}
                   </Scatter>
                 </ScatterChart>
               </ResponsiveContainer>
-              <div className="absolute top-2 right-2 flex gap-3 text-[8px] font-mono select-none">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-455" />{" "}
-                  Primaires
+              <div className="absolute top-2 right-2 flex gap-3 text-[8px] font-mono select-none bg-slate-950/80 px-2 py-1 rounded-lg border border-white/5">
+                <span className="flex items-center gap-1 text-cyan-300">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400" /> Primaire
                 </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400" />{" "}
-                  Secondaires
+                <span className="flex items-center gap-1 text-indigo-300">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400" /> Couverture
                 </span>
               </div>
             </div>
           </div>
 
           <p className="text-[9px] text-slate-500 text-center leading-normal mt-2 italic font-mono">
-            Survoler une onde matricielle pour extraire ses frictions dynamiques
-            amorties.
+            Survolez un oscillateur pour extraire sa signature de rappel, son Z-score et son action hamiltonienne.
           </p>
         </div>
 
         {/* 3. Output results side panel */}
         <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-white/5 shadow-xl flex flex-col justify-between">
           <div>
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1 font-sans">
               <Sparkles size={14} className="text-amber-400" />
-              Statut de Résolution
+              Résolution du Vecteur Stationnaire
             </h3>
             <p className="text-[10px] text-slate-500 leading-normal mb-4">
-              Vecteur stationnaire d'extrema d'inertie calulés sur le jeu de
-              tirage actif.
+              Extrema d'action hamiltonienne résolus sur l'espace d'états d'inertie.
             </p>
           </div>
 
@@ -967,7 +669,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   </div>
                 </div>
                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                  Mise en équation harmonique...
+                  Résolution différentielle continue...
                 </p>
               </motion.div>
             ) : optimizedVector ? (
@@ -981,20 +683,20 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[9px] font-black uppercase text-cyan-400 tracking-wider">
-                      Vecteur Primaire
+                      Vecteur Primaire (5 Numéros)
                     </span>
-                    <span className="text-[8px] font-mono text-slate-500 bg-cyan-950/40 border border-cyan-500/10 px-2 py-0.5 rounded">
-                      I-STABILITÉ : {optimizedVector.globalStability}%
+                    <span className="text-[8px] font-mono text-cyan-300 bg-cyan-950/60 border border-cyan-500/20 px-2 py-0.5 rounded font-bold">
+                      STABILITÉ : {optimizedVector.globalStability}%
                     </span>
                   </div>
                   <div className="flex justify-center gap-2.5 py-2">
-                    {optimizedVector.primary.map((num, _idx) => (
+                    {optimizedVector.primary.map((num) => (
                       <div
                         key={`prime-ball-${num}`}
-                        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-b from-cyan-950 to-slate-950 border border-cyan-550 flex items-center justify-center shadow-lg relative group transition-transform hover:scale-105 cursor-pointer"
+                        className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-b from-cyan-950 via-slate-900 to-slate-950 border border-cyan-500 flex items-center justify-center shadow-lg relative group transition-transform hover:scale-110 cursor-pointer"
                       >
-                        <div className="absolute inset-px rounded-full bg-cyan-500/5 animate-pulse" />
-                        <span className="text-sm font-black text-white group-hover:text-cyan-300">
+                        <div className="absolute inset-px rounded-full bg-cyan-500/10 animate-pulse" />
+                        <span className="text-sm font-black text-white group-hover:text-cyan-300 font-mono">
                           {String(num).padStart(2, "0")}
                         </span>
                       </div>
@@ -1005,13 +707,13 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 {/* Secondary coverage numbers list */}
                 <div className="space-y-1.5 pt-2 border-t border-white/5">
                   <span className="text-[9px] font-black uppercase text-indigo-400 tracking-wider block">
-                    Amortissements de Couverture (10 numéros)
+                    Amortissements de Couverture (10 Numéros)
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {optimizedVector.secondary.map((num) => (
                       <span
                         key={`sec-badge-${num}`}
-                        className="text-[10px] font-mono font-bold px-2 py-0.8 bg-slate-950/60 border border-white/5 text-slate-350 rounded-md"
+                        className="text-[10px] font-mono font-bold px-2 py-0.5 bg-slate-950/80 border border-white/5 text-indigo-200 rounded-md"
                       >
                         {String(num).padStart(2, "0")}
                       </span>
@@ -1020,15 +722,15 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 </div>
 
                 <div className="pt-2 border-t border-white/5 flex flex-col gap-2">
-                  <div className="text-[8px] font-mono text-slate-500 bg-black/30 p-2 rounded-lg border border-white/5 select-all overflow-x-auto">
+                  <div className="text-[8px] font-mono text-slate-400 bg-black/40 p-2 rounded-lg border border-white/5 select-all overflow-x-auto">
                     <code>{optimizedVector.equationUsed}</code>
                   </div>
                   <button
                     onClick={handleSavePrimaryTicket}
-                    className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
+                    className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-cyan-500/10"
                   >
-                    <ShieldCheck size={12} />
-                    <span>Enregistrer le Ticket</span>
+                    <ShieldCheck size={13} />
+                    <span>Mémoriser le Ticket d'Inertie</span>
                   </button>
                 </div>
               </motion.div>
@@ -1037,18 +739,17 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 key="idle"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="my-auto flex flex-col items-center justify-center p-6 text-center border border-dashed border-white/5 rounded-2xl"
+                className="my-auto flex flex-col items-center justify-center p-6 text-center border border-dashed border-white/10 rounded-2xl"
               >
                 <Sliders
                   size={24}
                   className="text-slate-600 mb-2 animate-bounce-slow"
                 />
-                <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest block">
-                  Moteur non résolu
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest block font-sans">
+                  Inertie non résolue
                 </span>
-                <span className="text-[9px] text-slate-600 max-w-[180px] mt-1 block">
-                  Lancez l'optimiseur pour calculer les équations et
-                  synchroniser la topologie d'inertie.
+                <span className="text-[9px] text-slate-500 max-w-[200px] mt-1 block">
+                  Cliquez sur "Résoudre l'Inertie" pour projeter les équations différentielles sur l'espace d'états.
                 </span>
               </motion.div>
             )}
@@ -1063,18 +764,16 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 15 }}
-            className="bg-slate-900/80 backdrop-blur-md rounded-[2rem] p-6 border border-white/5 space-y-6"
+            className="bg-slate-900/80 backdrop-blur-md rounded-[2rem] p-6 border border-cyan-500/20 space-y-6 shadow-2xl"
           >
-            <div className="flex justify-between items-start border-b border-white/5 pb-3">
+            <div className="flex justify-between items-start border-b border-white/10 pb-3">
               <div>
                 <h4 className="text-xs font-black text-pink-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
-                  <CheckCircle2 size={14} /> Diagnostic de Rétro-Audit Temporel
-                  de l'Inertie
+                  <CheckCircle2 size={15} /> Rétro-Audit Temporel de l'Inertie (Time Machine)
                 </h4>
                 <p className="text-[10px] text-slate-400 mt-0.5 font-sans">
-                  Évaluation empirique simulée étape par étape sur les{" "}
-                  <strong>{backtestStats.trials}</strong> précédents tirages
-                  réels.
+                  Évaluation empirique rétroactive étape par étape sur les{" "}
+                  <strong>{backtestStats.trials}</strong> tirages réels précédents sans biais prospectif.
                 </p>
               </div>
               <button
@@ -1082,9 +781,9 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   audioEngine.play("click");
                   setBacktestStats(null);
                 }}
-                className="text-slate-500 hover:text-slate-300 text-[10px] font-bold uppercase tracking-wider font-mono px-2 py-1 bg-slate-950/40 rounded-lg hover:bg-slate-950 border border-white/5"
+                className="text-slate-400 hover:text-white text-[10px] font-bold uppercase tracking-wider font-mono px-3 py-1 bg-slate-950/60 rounded-lg hover:bg-slate-950 border border-white/10 cursor-pointer"
               >
-                Revenir
+                Fermer le Diagnostic
               </button>
             </div>
 
@@ -1094,36 +793,41 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               <div className="bg-slate-950/60 p-4 rounded-2xl border border-white/5 space-y-3 flex flex-col justify-between">
                 <div>
                   <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider block">
-                    Validités Statistiques
+                    Performance Empirique
                   </span>
-                  <h5 className="text-xl font-black text-white tracking-tight mt-1">
-                    Général Synthétique
+                  <h5 className="text-lg font-black text-white tracking-tight mt-0.5">
+                    Validation Rétro-Active
                   </h5>
                 </div>
-                <div className="space-y-1 bg-white/5 p-3 rounded-xl border border-white/5">
+                <div className="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/5">
                   <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">Taux de Succès :</span>
-                    <strong className="text-emerald-400">
+                    <span className="text-slate-400">Taux de Succès (≥1) :</span>
+                    <strong className="text-emerald-400 font-black">
                       {backtestStats.successRate}%
                     </strong>
                   </div>
                   <div className="flex justify-between text-[10px] font-mono">
                     <span className="text-slate-400">Hits Moyens :</span>
-                    <strong className="text-cyan-400">
+                    <strong className="text-cyan-400 font-black">
                       {backtestStats.primaryHitsAvg} / 5
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-slate-400">Gain vs Hasard :</span>
+                    <strong className="text-amber-400 font-black">
+                      {backtestStats.empiricalGain}x
                     </strong>
                   </div>
                 </div>
                 <span className="text-[8px] font-mono text-slate-500 leading-normal block">
-                  Taux de validation représentant au moins un numéro trouvé
-                  parmi le vecteur ciblé.
+                  Rétropolation déterministe isolée respectant la causalité temporelle stricte.
                 </span>
               </div>
 
               {/* Detailed retro events listing */}
-              <div className="lg:col-span-3 bg-slate-950/40 p-4 rounded-xl border border-white/5 space-y-3 max-h-[170px] overflow-y-auto">
+              <div className="lg:col-span-3 bg-slate-950/40 p-4 rounded-xl border border-white/5 space-y-3 max-h-[190px] overflow-y-auto">
                 <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider block pb-1 border-b border-white/5">
-                  Détail Chronologique des Résolutions
+                  Détail Chronologique des Évaluations Rétro-Actives
                 </span>
                 <div className="space-y-2">
                   {backtestStats.details.map((trial, idx) => (
@@ -1131,29 +835,35 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                       key={`ret-tr-${idx}`}
                       className="flex justify-between items-center text-[10px] pb-1.5 border-b border-white/5 last:border-b-0"
                     >
-                      <span className="font-bold text-slate-400 font-mono truncate max-w-[120px]">
+                      <span className="font-bold text-slate-300 font-mono truncate max-w-[120px]">
                         {trial.drawDate}
                       </span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-slate-500 font-mono">
-                          Gagnants:
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 font-mono text-[9px]">
+                          Gagnants :
                         </span>
-                        <div className="flex gap-1.2">
+                        <div className="flex gap-1">
                           {trial.winners.map((win: number) => {
                             const isHit = trial.matched.includes(win);
                             return (
                               <span
                                 key={`win-node-${win}`}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${isHit ? "bg-cyan-550 text-white border border-cyan-400" : "bg-slate-900 border border-white/5 text-slate-400"}`}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                                  isHit
+                                    ? "bg-cyan-500 text-slate-950 border border-cyan-300 font-black"
+                                    : "bg-slate-900 border border-white/5 text-slate-400"
+                                }`}
                               >
-                                {win}
+                                {String(win).padStart(2, "0")}
                               </span>
                             );
                           })}
                         </div>
                       </div>
                       <span
-                        className={`font-mono text-xs font-black ${trial.hits > 0 ? "text-emerald-400" : "text-slate-500"}`}
+                        className={`font-mono text-xs font-black ${
+                          trial.hits > 0 ? "text-emerald-400" : "text-slate-600"
+                        }`}
                       >
                         +{trial.hits} Hit{trial.hits > 1 ? "s" : ""}
                       </span>
@@ -1163,12 +873,11 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               </div>
             </div>
 
-            <div className="p-3.5 bg-pink-500/5 rounded-2xl border border-pink-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between text-[10px] gap-2">
-              <span className="text-slate-400 max-w-xl leading-normal">
-                Le traceur récursif a analysé l'asymétrie de phase
-                d'amortissement. Profil de résonance optimal suggéré :
+            <div className="p-3.5 bg-pink-500/5 rounded-2xl border border-pink-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between text-[10px] gap-2">
+              <span className="text-slate-300 max-w-xl leading-normal">
+                L'optimisation énergétique de Fourier et l'asymétrie de phase suggèrent la calibration suivante pour le régime actif :
               </span>
-              <span className="font-mono font-black text-pink-400 uppercase tracking-widest bg-pink-500/10 border border-pink-500/20 px-3 py-1 rounded">
+              <span className="font-mono font-black text-pink-400 uppercase tracking-widest bg-pink-500/10 border border-pink-500/30 px-3 py-1.5 rounded-xl">
                 ζ_optimal = {backtestStats.bestDamping.toFixed(2)}
               </span>
             </div>

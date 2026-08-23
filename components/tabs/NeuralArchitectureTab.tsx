@@ -9,6 +9,7 @@ import {
   Grid,
   Share2,
   RefreshCw,
+  Sliders,
 } from "lucide-react";
 import { NumberBall } from "../NumberBall";
 import { saveTicket } from "../../services/userPreferencesService";
@@ -18,6 +19,8 @@ import { useToast } from "../ui/Toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { LCG } from "../../utils/mathUtils";
+import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
+
 
 interface NodeData {
   id: number;
@@ -56,6 +59,8 @@ export const NeuralArchitectureTab: React.FC = () => {
   const [generatedPath, setGeneratedPath] = useState<number[]>([]);
   const [minStrength, setMinStrength] = useState(15);
   const [isWalking, setIsWalking] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
+
 
   // --- ANALYSE DES DONNÉES (Construction du Graphe) ---
   useEffect(() => {
@@ -235,10 +240,19 @@ export const NeuralArchitectureTab: React.FC = () => {
           </p>
         </div>
 
-        {/* Stats Globales */}
-        <div className="flex gap-4">
+        {/* Stats Globales & Actions */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsAuditOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 active:scale-95"
+            title="Inspecter et ajuster les poids des 19 couches neuronales"
+          >
+            <Sliders size={14} />
+            <span>Audit des Poids</span>
+          </button>
+
           <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 text-center">
-            <div className="text-xs font-black text-slate-500 uppercase">
+            <div className="text-[10px] font-black text-slate-500 uppercase">
               Nœuds Actifs
             </div>
             <div className="text-lg font-black text-white">
@@ -246,7 +260,7 @@ export const NeuralArchitectureTab: React.FC = () => {
             </div>
           </div>
           <div className="bg-black/30 px-4 py-2 rounded-xl border border-white/5 text-center">
-            <div className="text-xs font-black text-slate-500 uppercase">
+            <div className="text-[10px] font-black text-slate-500 uppercase">
               Densité
             </div>
             <div className="text-lg font-black text-emerald-400">
@@ -255,6 +269,7 @@ export const NeuralArchitectureTab: React.FC = () => {
           </div>
         </div>
       </div>
+
 
       <div className="grid lg:grid-cols-12 gap-8">
         {/* GRILLE (Main Visualization) */}
@@ -483,6 +498,34 @@ export const NeuralArchitectureTab: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Modal Dashboard d'Audit des Poids Neuronaux */}
+      <AnimatePresence>
+        {isAuditOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="w-full max-w-5xl my-auto"
+            >
+              <NeuralWeightsAuditDashboard
+                isModal={true}
+                onClose={() => setIsAuditOpen(false)}
+                onApplySuccess={() => {
+                  setIsAuditOpen(false);
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
+

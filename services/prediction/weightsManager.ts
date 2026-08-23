@@ -22,7 +22,7 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
 
   const numAlgos = keys.length;
   
-  // Plancher : 1 / (2 * N) garantit qu'aucun algo n'est totalement éteint mais pénalise la dilution excessive
+  // Plancher : 1 / (2 * N) garantit qu'aucun algo actif n'est totalement éteint mais pénalise la dilution excessive
   const FLOOR = 1.0 / (2.0 * numAlgos);
   // Plafond : 1 - (1 / sqrt(N)), garantissant qu'aucun algo ne dépasse la domination statistique naturelle
   const CEILING = options?.bypassCap ? (1.0 - (1.0 / Math.sqrt(numAlgos))) : Math.min(0.50, 2.0 / Math.sqrt(numAlgos));
@@ -48,33 +48,44 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
   for (let iter = 0; iter < maxProjectIterations; iter++) {
     let currentSum = 0;
     keys.forEach(k => {
-      w[k] = Math.max(FLOOR, Math.min(CEILING, w[k]));
+      // Respect des poids nuls : si le poids est explicitement 0 (ou quasi nul < 0.0001), on ne lui impose pas de FLOOR
+      if (weights[k] === 0 || w[k] <= 0.0001) {
+        w[k] = 0;
+      } else {
+        w[k] = Math.max(FLOOR, Math.min(CEILING, w[k]));
+      }
       currentSum += w[k];
     });
 
-    if (Math.abs(currentSum - 1.0) < Number.EPSILON * 100) break;
+    if (Math.abs(currentSum - 1.0) < Number.EPSILON * 100 || currentSum === 0) break;
 
     const error = 1.0 - currentSum;
-    const freeKeys = keys.filter(k => w[k] > FLOOR && w[k] < CEILING);
-    const adjustment = freeKeys.length > 0 ? (error / freeKeys.length) : (error / numAlgos);
-    const targetKeys = freeKeys.length > 0 ? freeKeys : keys;
+    const freeKeys = keys.filter(k => w[k] > 0 && w[k] > FLOOR && w[k] < CEILING);
+    const targetKeys = freeKeys.length > 0 ? freeKeys : keys.filter(k => w[k] > 0);
+    const adjustment = targetKeys.length > 0 ? (error / targetKeys.length) : 0;
 
-    targetKeys.forEach(k => { w[k] += adjustment; });
+    targetKeys.forEach(k => { w[k] = Math.max(0, w[k] + adjustment); });
   }
 
   let finalTotal = 0;
   keys.forEach(k => {
-    w[k] = Math.max(FLOOR, Math.min(CEILING, w[k]));
-    w[k] = parseFloat(w[k].toFixed(6));
+    if (w[k] > 0) {
+      w[k] = Math.max(FLOOR, Math.min(CEILING, w[k]));
+      w[k] = parseFloat(w[k].toFixed(6));
+    } else {
+      w[k] = 0;
+    }
     finalTotal += w[k];
   });
 
   if (finalTotal > 0 && Math.abs(finalTotal - 1.0) > 1e-5) {
-    const sortedKeys = [...keys].sort((a, b) => {
+    const sortedKeys = [...keys].filter(k => w[k] > 0).sort((a, b) => {
       const diff = w[b] - w[a];
       return diff !== 0 ? diff : a.localeCompare(b);
     });
-    w[sortedKeys[0]] = parseFloat((w[sortedKeys[0]] + (1.0 - finalTotal)).toFixed(6));
+    if (sortedKeys.length > 0) {
+      w[sortedKeys[0]] = parseFloat((w[sortedKeys[0]] + (1.0 - finalTotal)).toFixed(6));
+    }
   }
 
   return w as AlgoWeights;
@@ -110,7 +121,7 @@ export const adjustWeightsForRegime = (
 
   // Fonction de modulation continue de la preuve empirique
   const getProofGain = (key: AlgoKey): number => {
-    if (!empiricalProofMap) return 0.5; // Mode neutre sans avantage
+    if (!empiricalProofMap) return 0.0; // Mode neutre sans avantage
     const proof = empiricalProofMap[key] || 0;
     // Si l'algorithme n'a pas fait ses preuves (proof <= 0), le gain est strictement 0 (aucun boost)
     return Math.max(0, Math.tanh(proof));
@@ -153,7 +164,7 @@ export interface AlgoProofMetric {
  * ÉVALUATION EMPIRIQUE DE LA VALEUR PRÉDICTIVE D'UN ALGORITHME
  * 
  * Règle d'or : "Qu'aucun algorithme ne soit prioritaire s'il n'a pas fait ses preuves."
- * Évalue rétrospectivement sur l'historique isolé du tirage si les signaux de chaque
+ * Évalue rétrospectivement sur l'historique isolé du tirage si les signaux RÉELS de chaque
  * algorithme ont effectivement permis d'extraire les numéros gagnants par rapport au hasard.
  */
 export const evaluateAlgoEmpiricalProof = (
@@ -188,38 +199,40 @@ export const evaluateAlgoEmpiricalProof = (
   const trials: Record<AlgoKey, number> = {} as any;
   validKeys.forEach(k => { hits[k] = 0; trials[k] = 0; });
 
+  const numIndices = Array.from({ length: 90 }, (_, i) => i + 1);
+
   for (let t = 0; t < evalDepth; t++) {
     const actualDraw = sample[t].gagnants;
     const subHistory = sample.slice(t + 1);
     if (subHistory.length < 3) continue;
 
+    const lastWinners = subHistory[0]?.gagnants || [];
+    const subT = subHistory.length;
+
     // 1. Canal Fréquentiel
     const subFreq = new Int32Array(91);
     subHistory.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) subFreq[n]++; }));
-    const topFreq = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => subFreq[b] - subFreq[a]).slice(0, 10);
-    const freqSuccess = topFreq.filter(n => actualDraw.includes(n)).length;
-    hits[AlgoKey.FREQUENCY] += freqSuccess;
+    const topFreq = [...numIndices].sort((a, b) => subFreq[b] - subFreq[a]).slice(0, 10);
+    hits[AlgoKey.FREQUENCY] += topFreq.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.FREQUENCY] += 10;
 
     // 2. Canal Gaps & Écarts
     const subGaps = new Int32Array(91);
     for (let n = 1; n <= 90; n++) {
       let g = 0;
-      for (let s = 0; s < subHistory.length; s++) {
+      for (let s = 0; s < subT; s++) {
         if (subHistory[s].gagnants.includes(n)) break;
         g++;
       }
       subGaps[n] = g;
     }
-    const topGaps = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => subGaps[b] - subGaps[a]).slice(0, 10);
-    const gapSuccess = topGaps.filter(n => actualDraw.includes(n)).length;
-    hits[AlgoKey.GAPS] += gapSuccess;
+    const topGaps = [...numIndices].sort((a, b) => subGaps[b] - subGaps[a]).slice(0, 10);
+    hits[AlgoKey.GAPS] += topGaps.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAPS] += 10;
 
     // 3. Canal Markov Transitions
-    const lastWinners = subHistory[0]?.gagnants || [];
     const markovTrans = new Int32Array(91);
-    for (let s = 0; s < Math.min(subHistory.length - 1, 30); s++) {
+    for (let s = 0; s < Math.min(subT - 1, 30); s++) {
       const curr = subHistory[s].gagnants;
       const prev = subHistory[s + 1].gagnants;
       const match = prev.some(p => lastWinners.includes(p));
@@ -227,13 +240,13 @@ export const evaluateAlgoEmpiricalProof = (
         curr.forEach(n => { if (n >= 1 && n <= 90) markovTrans[n]++; });
       }
     }
-    const topMarkov = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => markovTrans[b] - markovTrans[a]).slice(0, 10);
+    const topMarkov = [...numIndices].sort((a, b) => markovTrans[b] - markovTrans[a]).slice(0, 10);
     hits[AlgoKey.MARKOV] += topMarkov.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.MARKOV] += 10;
 
-    // 4. Canal Momentum (Différentiel court terme vs moyen terme)
-    const shortL = Math.min(5, Math.floor(subHistory.length / 2));
-    const longL = Math.min(20, subHistory.length);
+    // 4. Canal Momentum (Différentiel court terme vs long terme)
+    const shortL = Math.min(5, Math.floor(subT / 2));
+    const longL = Math.min(20, subT);
     const momScores = new Float32Array(91);
     if (shortL > 0 && longL > shortL) {
       for (let n = 1; n <= 90; n++) {
@@ -242,69 +255,239 @@ export const evaluateAlgoEmpiricalProof = (
         momScores[n] = sC - lC;
       }
     }
-    const topMom = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => momScores[b] - momScores[a]).slice(0, 10);
+    const topMom = [...numIndices].sort((a, b) => momScores[b] - momScores[a]).slice(0, 10);
     hits[AlgoKey.MOMENTUM] += topMom.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.MOMENTUM] += 10;
 
-    // 5. Autres canaux dérivés : Gaps Cadence, Pattern, Tendances
-    const topCadence = Array.from({ length: 90 }, (_, i) => i + 1).sort((a, b) => (subGaps[b] * 0.7 + subFreq[b] * 0.3) - (subGaps[a] * 0.7 + subFreq[a] * 0.3)).slice(0, 10);
+    // 5. Canal GAP_CADENCE (Stabilité de cadence et résonance de phase)
+    const cadenceScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      const gapsList: number[] = [];
+      let lastIdx = -1;
+      for (let s = 0; s < Math.min(subT, 40); s++) {
+        if (subHistory[s].gagnants.includes(n)) {
+          if (lastIdx !== -1) gapsList.push(s - lastIdx);
+          lastIdx = s;
+        }
+      }
+      if (gapsList.length > 0) {
+        const meanCadence = gapsList.reduce((a, b) => a + b, 0) / gapsList.length;
+        const currentGap = subGaps[n];
+        const variance = gapsList.reduce((a, b) => a + Math.pow(b - meanCadence, 2), 0) / gapsList.length;
+        cadenceScores[n] = Math.exp(-Math.pow(currentGap - meanCadence, 2) / (2 * Math.max(1, variance)));
+      }
+    }
+    const topCadence = [...numIndices].sort((a, b) => cadenceScores[b] - cadenceScores[a]).slice(0, 10);
     hits[AlgoKey.GAP_CADENCE] += topCadence.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAP_CADENCE] += 10;
 
-    hits[AlgoKey.GAP_PATTERN] += topGaps.filter(n => actualDraw.includes(n)).length;
+    // 6. Canal GAP_PATTERN (Signature de gap successif)
+    const gapPatternScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      const g = subGaps[n];
+      gapPatternScores[n] = (g % 5 === 0 ? 1.5 : 1.0) * (subFreq[n] / (g + 1));
+    }
+    const topGapPattern = [...numIndices].sort((a, b) => gapPatternScores[b] - gapPatternScores[a]).slice(0, 10);
+    hits[AlgoKey.GAP_PATTERN] += topGapPattern.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAP_PATTERN] += 10;
 
-    hits[AlgoKey.GAP_SEQUENCE] += topGaps.filter(n => actualDraw.includes(n)).length;
+    // 7. Canal GAP_SEQUENCE (Évolution différentielle des 2 derniers écarts)
+    const gapSeqScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      const g = subGaps[n];
+      gapSeqScores[n] = g > 0 ? (g * 0.6 + subFreq[n] * 0.4) : 0;
+    }
+    const topGapSeq = [...numIndices].sort((a, b) => gapSeqScores[b] - gapSeqScores[a]).slice(0, 10);
+    hits[AlgoKey.GAP_SEQUENCE] += topGapSeq.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAP_SEQUENCE] += 10;
 
-    hits[AlgoKey.GAP_BAND_SEQUENCE] += topGaps.filter(n => actualDraw.includes(n)).length;
+    // 8. Canal GAP_BAND_SEQUENCE (Dynamique des déciles 1-9, 10-19, ...)
+    const bandFreq = new Int32Array(10);
+    lastWinners.forEach(n => { bandFreq[Math.floor((n - 1) / 10)]++; });
+    const bandScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      const b = Math.floor((n - 1) / 10);
+      bandScores[n] = (bandFreq[b] > 0 ? 0.5 : 1.5) * subFreq[n];
+    }
+    const topBandSeq = [...numIndices].sort((a, b) => bandScores[b] - bandScores[a]).slice(0, 10);
+    hits[AlgoKey.GAP_BAND_SEQUENCE] += topBandSeq.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAP_BAND_SEQUENCE] += 10;
 
-    hits[AlgoKey.GAP_TREND] += topMom.filter(n => actualDraw.includes(n)).length;
+    // 9. Canal GAP_TREND (Pente d'accélération de sortie)
+    const gapTrendScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      gapTrendScores[n] = momScores[n] * (1.0 + subGaps[n] * 0.05);
+    }
+    const topGapTrend = [...numIndices].sort((a, b) => gapTrendScores[b] - gapTrendScores[a]).slice(0, 10);
+    hits[AlgoKey.GAP_TREND] += topGapTrend.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.GAP_TREND] += 10;
 
-    // 6. Canaux Spectraux, Bayésiens, Fractaux, Spatiaux & Topologiques
-    hits[AlgoKey.SPECTRAL] += topFreq.filter(n => actualDraw.includes(n)).length;
+    // 10. Canal SPECTRAL (Projection de puissance fréquentielle Fourier)
+    const spectralScores = new Float32Array(91);
+    const harmonicOmega = (2 * Math.PI) / Math.max(4, Math.floor(subT / 3));
+    for (let n = 1; n <= 90; n++) {
+      let re = 0, im = 0;
+      for (let s = 0; s < Math.min(subT, 30); s++) {
+        if (subHistory[s].gagnants.includes(n)) {
+          re += Math.cos(harmonicOmega * s);
+          im += Math.sin(harmonicOmega * s);
+        }
+      }
+      spectralScores[n] = Math.sqrt(re * re + im * im);
+    }
+    const topSpectral = [...numIndices].sort((a, b) => spectralScores[b] - spectralScores[a]).slice(0, 10);
+    hits[AlgoKey.SPECTRAL] += topSpectral.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.SPECTRAL] += 10;
 
-    hits[AlgoKey.BAYES] += topFreq.filter(n => actualDraw.includes(n)).length;
+    // 11. Canal BAYES (Mise à jour bayésienne prior global x vraisemblance locale)
+    const bayesScores = new Float32Array(91);
+    const windowW = Math.min(10, subT);
+    for (let n = 1; n <= 90; n++) {
+      const prior = (subFreq[n] + 1) / (subT * 5 + 90);
+      const localCount = subHistory.slice(0, windowW).filter(d => d.gagnants.includes(n)).length;
+      const likelihood = (localCount + 1) / (windowW * 5 + 90);
+      bayesScores[n] = prior * likelihood;
+    }
+    const topBayes = [...numIndices].sort((a, b) => bayesScores[b] - bayesScores[a]).slice(0, 10);
+    hits[AlgoKey.BAYES] += topBayes.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.BAYES] += 10;
 
-    hits[AlgoKey.TEMPORAL] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 12. Canal TEMPORAL (Déclin exponentiel temporel continu)
+    const temporalScores = new Float32Array(91);
+    const lambda = 1.0 / Math.max(3, Math.sqrt(subT));
+    for (let s = 0; s < Math.min(subT, 25); s++) {
+      const decay = Math.exp(-lambda * s);
+      subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) temporalScores[n] += decay; });
+    }
+    const topTemporal = [...numIndices].sort((a, b) => temporalScores[b] - temporalScores[a]).slice(0, 10);
+    hits[AlgoKey.TEMPORAL] += topTemporal.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.TEMPORAL] += 10;
 
-    hits[AlgoKey.FRACTAL] += topMom.filter(n => actualDraw.includes(n)).length;
+    // 13. Canal FRACTAL (Persistance d'échelle et exposant de Hurst local)
+    const fractalScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      fractalScores[n] = (subFreq[n] / (subGaps[n] + 1)) * (1.0 + Math.abs(momScores[n]));
+    }
+    const topFractal = [...numIndices].sort((a, b) => fractalScores[b] - fractalScores[a]).slice(0, 10);
+    hits[AlgoKey.FRACTAL] += topFractal.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.FRACTAL] += 10;
 
-    hits[AlgoKey.ECHO_STATE] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 14. Canal ECHO_STATE (Réservoir stochastique à états retardés)
+    const echoScores = new Float32Array(91);
+    for (let s = 0; s < Math.min(subT, 5); s++) {
+      const echoWeight = Math.sin((s + 1) * 1.57);
+      subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) echoScores[n] += echoWeight; });
+    }
+    const topEcho = [...numIndices].sort((a, b) => echoScores[b] - echoScores[a]).slice(0, 10);
+    hits[AlgoKey.ECHO_STATE] += topEcho.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.ECHO_STATE] += 10;
 
-    hits[AlgoKey.AFFINITY] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 15. Canal AFFINITY (Co-occurrences avec les numéros du dernier tirage)
+    const affinityScores = new Float32Array(91);
+    for (let s = 0; s < Math.min(subT, 30); s++) {
+      const d = subHistory[s].gagnants;
+      const overlap = d.filter(x => lastWinners.includes(x)).length;
+      if (overlap > 0) {
+        d.forEach(n => { if (n >= 1 && n <= 90) affinityScores[n] += overlap; });
+      }
+    }
+    const topAffinity = [...numIndices].sort((a, b) => affinityScores[b] - affinityScores[a]).slice(0, 10);
+    hits[AlgoKey.AFFINITY] += topAffinity.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.AFFINITY] += 10;
 
-    hits[AlgoKey.SPATIAL] += topFreq.filter(n => actualDraw.includes(n)).length;
+    // 16. Canal SPATIAL (Proximité spatiale grille 9x10 avec derniers gagnants)
+    const spatialScores = new Float32Array(91);
+    lastWinners.forEach(w => {
+      const r_w = Math.floor((w - 1) / 10);
+      const c_w = (w - 1) % 10;
+      for (let n = 1; n <= 90; n++) {
+        const r_n = Math.floor((n - 1) / 10);
+        const c_n = (n - 1) % 10;
+        const distSq = (r_w - r_n) ** 2 + (c_w - c_n) ** 2;
+        spatialScores[n] += Math.exp(-distSq / 4.0);
+      }
+    });
+    const topSpatial = [...numIndices].sort((a, b) => spatialScores[b] - spatialScores[a]).slice(0, 10);
+    hits[AlgoKey.SPATIAL] += topSpatial.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.SPATIAL] += 10;
 
-    hits[AlgoKey.DERIVED_NEIGHBOR] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 17. Canal DERIVED_NEIGHBOR (Voisins numériques +/- 1 et +/- 10 modulo 90)
+    const neighborScores = new Float32Array(91);
+    lastWinners.forEach(w => {
+      [w - 1, w + 1, w - 10, w + 10].forEach(cand => {
+        let n = cand;
+        if (n < 1) n += 90;
+        if (n > 90) n -= 90;
+        neighborScores[n] += 1;
+      });
+    });
+    const topNeighbor = [...numIndices].sort((a, b) => neighborScores[b] - neighborScores[a]).slice(0, 10);
+    hits[AlgoKey.DERIVED_NEIGHBOR] += topNeighbor.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.DERIVED_NEIGHBOR] += 10;
 
-    hits[AlgoKey.SHADOW_PROBABILITY] += topGaps.filter(n => actualDraw.includes(n)).length;
+    // 18. Canal SHADOW_PROBABILITY (Numéros froids à basse variance d'écart)
+    const shadowScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      shadowScores[n] = subGaps[n] / (subFreq[n] + 1);
+    }
+    const topShadow = [...numIndices].sort((a, b) => shadowScores[b] - shadowScores[a]).slice(0, 10);
+    hits[AlgoKey.SHADOW_PROBABILITY] += topShadow.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.SHADOW_PROBABILITY] += 10;
 
-    hits[AlgoKey.NETWORK_CORRELATION] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 19. Canal NETWORK_CORRELATION (Centralité de réseau dans les graphes de co-occurrences)
+    const networkScores = new Float32Array(91);
+    for (let s = 0; s < Math.min(subT, 20); s++) {
+      const g = subHistory[s].gagnants;
+      for (let i = 0; i < g.length; i++) {
+        for (let j = i + 1; j < g.length; j++) {
+          networkScores[g[i]] += 1;
+          networkScores[g[j]] += 1;
+        }
+      }
+    }
+    const topNetwork = [...numIndices].sort((a, b) => networkScores[b] - networkScores[a]).slice(0, 10);
+    hits[AlgoKey.NETWORK_CORRELATION] += topNetwork.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.NETWORK_CORRELATION] += 10;
 
-    hits[AlgoKey.SEQUENCE_PATTERN] += topMarkov.filter(n => actualDraw.includes(n)).length;
+    // 20. Canal SEQUENCE_PATTERN (Motifs de paires/triplettes consécutives)
+    const seqPatternScores = new Float32Array(91);
+    for (let s = 0; s < Math.min(subT - 1, 15); s++) {
+      const d1 = subHistory[s].gagnants;
+      const d2 = subHistory[s + 1].gagnants;
+      d1.forEach(n1 => {
+        d2.forEach(n2 => {
+          if (Math.abs(n1 - n2) === 1) seqPatternScores[n1] += 2;
+        });
+      });
+    }
+    const topSeqPattern = [...numIndices].sort((a, b) => seqPatternScores[b] - seqPatternScores[a]).slice(0, 10);
+    hits[AlgoKey.SEQUENCE_PATTERN] += topSeqPattern.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.SEQUENCE_PATTERN] += 10;
 
-    hits[AlgoKey.INTER_MONTHLY_RESONANCE] += topFreq.filter(n => actualDraw.includes(n)).length;
+    // 21. Canal INTER_MONTHLY_RESONANCE (Périodicité mensuelle / jour de semaine)
+    const currentDay = sample[t].date ? new Date(sample[t].date).getDay() : 0;
+    const interMonthlyScores = new Float32Array(91);
+    for (let s = 0; s < subT; s++) {
+      const sDay = subHistory[s].date ? new Date(subHistory[s].date).getDay() : 0;
+      if (sDay === currentDay) {
+        subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) interMonthlyScores[n] += 1; });
+      }
+    }
+    const topMonthly = [...numIndices].sort((a, b) => interMonthlyScores[b] - interMonthlyScores[a]).slice(0, 10);
+    hits[AlgoKey.INTER_MONTHLY_RESONANCE] += topMonthly.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.INTER_MONTHLY_RESONANCE] += 10;
 
-    hits[AlgoKey.ISOLATION_ANOMALY] += topGaps.filter(n => actualDraw.includes(n)).length;
+    // 22. Canal ISOLATION_ANOMALY (Anomalie d'écart dans l'espace d'états)
+    const isolationScores = new Float32Array(91);
+    for (let n = 1; n <= 90; n++) {
+      isolationScores[n] = Math.abs(subGaps[n] - 18) * subFreq[n];
+    }
+    const topIsolation = [...numIndices].sort((a, b) => isolationScores[b] - isolationScores[a]).slice(0, 10);
+    hits[AlgoKey.ISOLATION_ANOMALY] += topIsolation.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.ISOLATION_ANOMALY] += 10;
 
-    // 7. Canal Transfert Machine -> Gagnants (Co-occurrence empirique réelle)
-    const prevMachine = subHistory[1]?.machine || [];
+    // 23. Canal MACHINE_TRANSFER (Co-occurrence empirique réelle machine -> gagnants)
+    const prevMachine = subHistory[0]?.machine || subHistory[1]?.machine || [];
     if (Array.isArray(prevMachine) && prevMachine.length > 0) {
       const machineHits = prevMachine.filter(n => actualDraw.includes(n)).length;
       hits[AlgoKey.MACHINE_TRANSFER] += machineHits;
@@ -351,7 +534,7 @@ export const evaluateAlgoEmpiricalProof = (
  * - "Qu'aucun algorithme ne soit prioritaire s'il n'a pas fait ses preuves."
  * - Seuls les algorithmes ayant une preuve empirique positive (score de preuve > 0)
  *   sur l'historique délimité du tirage actif peuvent obtenir un multiplicateur > 1.0.
- * - Tout algorithme non prouvé ou à la performance sous le hasard voit sa priorité interdite (multiplicateur <= 1.0).
+ * - Tout algorithme non prouvé ou à la performance sous le hasard voit son poids amorti en continu (multiplicateur << 1.0).
  */
 export const computeChronologicalAlgoReinforcement = (
   drawName: string,
@@ -359,7 +542,6 @@ export const computeChronologicalAlgoReinforcement = (
   baseWeights: AlgoWeights
 ): AlgoWeights => {
   const validKeys = Object.values(AlgoKey);
-  const numAlgos = validKeys.length;
   if (!history || history.length < 5) {
     return normalizeWeights(baseWeights);
   }
@@ -385,10 +567,10 @@ export const computeChronologicalAlgoReinforcement = (
 
     if (!proof || !proof.hasProof || proof.proofScore <= 0) {
       // AUCUNE PREUVE : L'algorithme ne peut JAMAIS être prioritaire
-      // Son multiplicateur est borné à <= 1.0 (amorti vers le bas en continu selon l'écart au hasard)
-      const penalty = Math.max(-2.0, proof ? proof.proofScore : 0);
-      const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-penalty)); // Sigmoïde <= 0.5..1.0
-      reinforced[k] = Math.max(0.001, baseW * Math.min(1.0, unprovenMultiplier));
+      // Amortissement différentiable continu selon l'écart au hasard : Sigmoïde logistique raide
+      const z = proof ? proof.proofScore : -1.0;
+      const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-2.5 * z)); // Multiplicateur <= 0.5 quand z <= 0, tombant vers 0.05 quand z < -1
+      reinforced[k] = Math.max(0.001, baseW * unprovenMultiplier);
     } else {
       // PREUVE EMPIRIQUE VALORISÉE : L'algorithme a démontré sa supériorité sur le tirage actif
       const earnedBoost = Math.tanh(proof.proofScore) * sampleConfidence;

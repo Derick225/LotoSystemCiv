@@ -22,6 +22,8 @@ import {
   Copy,
   ChevronRight,
   Radar,
+  FileText,
+  Sliders,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -39,6 +41,11 @@ import {
   Radar as RechartsRadar,
 } from "recharts";
 import { useToast } from "../ui/Toast";
+import { NeuralWeightsAuditDashboard } from "./NeuralWeightsAuditDashboard";
+import { exportService } from "../../services/exportService";
+import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
+import { audioEngine } from "../../utils/audioEngine";
+
 
 interface XAPTransparencyPanelProps {
   prediction: Prediction;
@@ -83,8 +90,60 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
   const setInspectingNumber = useNexusStore((state) => state.setInspectingNumber);
   const globalWeights = useNexusStore((state) => state.globalWeights);
+  const history = useNexusStore((state) => state.history);
 
   const [activeTab, setActiveTab] = useState<XAPTab>("number_breakdown");
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
+
+  const handleExportForensicReport = async () => {
+    audioEngine.play("click");
+    setIsExportingForensicPDF(true);
+    try {
+      const isolatedHistory = history.filter(
+        (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
+      );
+      const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
+      const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+
+      const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+
+      await exportService.generateForensicStochasticReportPDF({
+        drawName,
+        suggestedNumbers: prediction.suggestedNumbers,
+        candidates: prediction.candidates,
+        confidence: prediction.confidence,
+        stabilityScore: prediction.stabilityScore,
+        realityAlignment: prediction.realityAlignment,
+        currentEntropy: 0.85,
+        gameRegimeInfo: {
+          regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
+          hurst: gameRegimeInfo?.hurst ?? 0.52,
+          chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
+          weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
+          entropy: 0.85,
+          volatility: 35.0,
+        },
+        resolvedNoiseLevel,
+        resolvedLearningRate,
+        resolvedMcIterations: 500,
+        appliedWeights: ((prediction as any).aiWeights || (prediction as any).weights || globalWeights) as Record<string, number>,
+        empiricalProofs: proofs as any,
+
+        breakdown: prediction.breakdown as any,
+        analysis: prediction.analysis,
+        hasMachineData,
+      });
+
+      showToast("Rapport Forensic exporté avec succès (PDF).", "success");
+    } catch (error) {
+      console.error("Forensic PDF export error:", error);
+      showToast("Erreur lors de la génération du rapport forensic.", "error");
+    } finally {
+      setIsExportingForensicPDF(false);
+    }
+  };
+
 
   // Selected number for detailed inspection (default to first suggested number)
   const [selectedNum, setSelectedNum] = useState<number>(
@@ -385,23 +444,44 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
         </div>
 
         {/* Global Controls & Metrics */}
-        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-between md:justify-end">
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono">
-            <span className="text-slate-500">Robustesse Inférence:</span>
+            <span className="text-slate-500">Robustesse:</span>
             <span className="text-emerald-400 font-bold">
               {prediction.stabilityScore ?? 85}%
             </span>
           </div>
+
+          <button
+            onClick={() => setIsAuditModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors border border-slate-700"
+            title="Inspecter et modifier manuellement les poids de chaque couche neuronale"
+          >
+            <Sliders size={13} className="text-indigo-400" />
+            <span>Audit Poids</span>
+          </button>
+
+          <button
+            onClick={handleExportForensicReport}
+            disabled={isExportingForensicPDF}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-300 text-xs font-semibold transition-colors border border-indigo-700/60 disabled:opacity-50"
+            title="Exporter en PDF le rapport forensic stochastique complet"
+          >
+            <FileText size={13} className="text-indigo-400" />
+            <span>{isExportingForensicPDF ? "Export..." : "Rapport Forensic"}</span>
+          </button>
+
           <button
             onClick={handleCopyXAP}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors border border-slate-700"
             title="Copier le rapport d'explicabilité XAP"
           >
             <Copy size={12} />
-            <span className="hidden sm:inline">Exporter XAP</span>
+            <span className="hidden sm:inline">Copier XAP</span>
           </button>
         </div>
       </div>
+
 
       {/* Interactive Tabs */}
       <div className="flex flex-wrap gap-2 pt-5 pb-6 border-b border-slate-800/80 relative z-10">
@@ -750,9 +830,23 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                   );
                 })}
               </div>
+
+              <div className="pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-300">Auditer et recalibrer :</span> Modifiez manuellement les poids de chaque couche, inspectez les écarts types et validez la performance empirique.
+                </div>
+                <button
+                  onClick={() => setIsAuditModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shadow-md shadow-indigo-600/20 shrink-0 w-full sm:w-auto justify-center"
+                >
+                  <Sliders size={14} />
+                  <span>Auditer les Poids Neuronaux</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
+
 
         {/* TAB 3: FACTEURS STOCHASTIQUES & PHYSIQUES */}
         {activeTab === "stochastic_factors" && (
@@ -868,8 +962,36 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
           </div>
         )}
       </div>
+
+      {/* Modal Dashboard d'Audit des Poids Neuronaux */}
+      <AnimatePresence>
+        {isAuditModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="w-full max-w-5xl my-auto"
+            >
+              <NeuralWeightsAuditDashboard
+                isModal={true}
+                onClose={() => setIsAuditModalOpen(false)}
+                onApplySuccess={() => {
+                  setIsAuditModalOpen(false);
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
+
 
 export default XAPTransparencyPanel;

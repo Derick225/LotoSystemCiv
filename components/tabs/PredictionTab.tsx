@@ -13,6 +13,9 @@ import { PredictionComputationOverlay } from "../prediction/PredictionComputatio
 import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import { PredictionVectorPortfolio } from "../prediction/PredictionVectorPortfolio";
 import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
+import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
+import { exportService } from "../../services/exportService";
+import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import {
   Activity,
   Target,
@@ -27,8 +30,10 @@ import {
   Cpu,
   WifiOff,
   Sparkles,
+  FileText,
+  Sliders,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 export const PredictionTab = React.memo<{ drawName: string }>(
   ({ drawName }) => {
@@ -61,6 +66,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(
     const [showCyberFlags, setShowCyberFlags] = useState(false);
     const [isTrainingDashboardOpen, setIsTrainingDashboardOpen] =
       useState(false);
+    const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
+    const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
 
     // Network and Authentication state wrappers
     const [networkState, setNetworkState] = useState<{
@@ -100,6 +107,71 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       runMonteCarlo,
       handleOptimizeWeights,
     } = usePredictionGenerator(drawName);
+
+    const handleTriggerForensicReport = useCallback(async () => {
+      audioEngine.play("click");
+      if (!lastPrediction) {
+        showToast("Veuillez d'abord générer une prédiction pour exporter le rapport forensic.", "info");
+        return;
+      }
+
+      setIsExportingForensicPDF(true);
+      try {
+        const isolatedHistory = history.filter(
+          (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
+        );
+        const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
+        const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+
+        const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+
+        await exportService.generateForensicStochasticReportPDF({
+          drawName,
+          suggestedNumbers: lastPrediction.suggestedNumbers,
+          candidates: lastPrediction.candidates,
+          confidence: lastPrediction.confidence,
+          stabilityScore: lastPrediction.stabilityScore,
+          realityAlignment: lastPrediction.realityAlignment,
+          currentEntropy: currentEntropy,
+          gameRegimeInfo: {
+            regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
+            hurst: gameRegimeInfo?.hurst ?? 0.52,
+            chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
+            weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
+            entropy: currentEntropy,
+            volatility: 35.0,
+          },
+          resolvedNoiseLevel,
+          resolvedLearningRate,
+          resolvedMcIterations,
+          appliedWeights: (optimizedWeights || globalWeights) as Record<string, number>,
+          empiricalProofs: proofs as any,
+          breakdown: lastPrediction.breakdown as any,
+          analysis: lastPrediction.analysis,
+          hasMachineData,
+        });
+
+        showToast("Rapport Forensic exporté avec succès (PDF).", "success");
+      } catch (error) {
+        console.error("Forensic export failed:", error);
+        showToast("Erreur lors de la génération du rapport forensic.", "error");
+      } finally {
+        setIsExportingForensicPDF(false);
+      }
+    }, [
+      lastPrediction,
+      drawName,
+      history,
+      currentEntropy,
+      gameRegimeInfo,
+      resolvedNoiseLevel,
+      resolvedLearningRate,
+      resolvedMcIterations,
+      optimizedWeights,
+      globalWeights,
+      showToast,
+    ]);
+
 
     const checkNetworkAndAuth = useCallback(async () => {
       setNetworkState((prev) => ({ ...prev, checkingConnection: true }));
@@ -293,11 +365,30 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+            <button
+              onClick={() => setIsAuditDashboardOpen(true)}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-slate-200 dark:border-slate-700"
+              title="Inspecter et modifier manuellement les poids de chaque couche neuronale"
+            >
+              <Sliders size={15} className="text-indigo-500" />
+              <span>Audit des Poids</span>
+            </button>
+
+            <button
+              onClick={handleTriggerForensicReport}
+              disabled={isExportingForensicPDF || isComputing}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-indigo-200 dark:border-indigo-800/80 shadow-sm disabled:opacity-50"
+              title="Exporter en PDF un récapitulatif détaillé de l'analyse stochastique, des pondérations et des écarts types"
+            >
+              <FileText size={15} className="text-indigo-600 dark:text-indigo-400" />
+              <span>{isExportingForensicPDF ? "Exportation..." : "Rapport Forensic"}</span>
+            </button>
+
             <button
               onClick={() => runInference()}
               disabled={isComputing}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider disabled:opacity-50 group"
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider disabled:opacity-50 shadow-md shadow-indigo-600/20 group"
             >
               {isComputing ? (
                 <RefreshCw className="animate-spin" size={16} />
@@ -307,10 +398,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   className="group-hover:rotate-180 transition-transform duration-500"
                 />
               )}
-              Relancer la génération
+              Relancer
             </button>
           </div>
         </div>
+
 
         {/* Computation Overlay & Results Grid Container */}
         <div className="relative min-h-[400px]">
@@ -684,9 +776,38 @@ export const PredictionTab = React.memo<{ drawName: string }>(
           onClose={() => setIsTrainingDashboardOpen(false)}
           drawName={drawName}
         />
+
+        {/* Modal Dashboard d'Audit des Poids Neuronaux */}
+        <AnimatePresence>
+          {isAuditDashboardOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="w-full max-w-5xl my-auto"
+              >
+                <NeuralWeightsAuditDashboard
+                  isModal={true}
+                  onClose={() => setIsAuditDashboardOpen(false)}
+                  onApplySuccess={() => {
+                    setIsAuditDashboardOpen(false);
+                    runInference();
+                  }}
+                />
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   },
 );
+
 
 export default PredictionTab;
