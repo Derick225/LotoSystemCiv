@@ -222,9 +222,11 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     const thermalForce = Math.min(100, (resolvedNoiseLevel / 2.0) * 100);
     const gWeights = (globalWeights || {}) as Record<string, number>;
     // 3. Hawkes Self-Excitation Impact:
-    const hawkesWeight = (gWeights["hawkes"] || gWeights["temporal"] || 0.1) * 100 * 1.5;
-    // 4. Machine Transfer Symbiosis:
-    const machineWeight = (gWeights["machine_transfer"] || gWeights["machineTransfer"] || gWeights["machine"] || 0.1) * 100 * 1.4;
+    const hawkesWeight = ((gWeights["hawkes"] || gWeights["temporal"] || 0.05) / Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0))) * 100;
+    // 4. Machine Transfer Symbiosis (Exact normalized weight percentage):
+    const rawMachineVal = gWeights["machine_transfer"] ?? gWeights["machineTransfer"] ?? gWeights["machine"] ?? 0;
+    const totalWeightsSum = Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0));
+    const machineWeight = (rawMachineVal / totalWeightsSum) * 100;
     // 5. Weyl Topological Regularity:
     const weylUniformity = Math.max(10, Math.min(99, (1.0 - weylDiscrepancy) * 100));
     // 6. Shannon Entropy Dispersion:
@@ -266,7 +268,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         name: "Transfert Machine ➔ Gagnants",
         value: `${machineWeight.toFixed(1)}%`,
         forcePct: Math.min(100, Math.round(machineWeight)),
-        status: machineWeight > 12 ? "Flux Cinématique Actif" : "Flux Découplé Stationnaire",
+        status: machineWeight > 5 ? "Flux Cinématique Actif" : machineWeight > 0.1 ? "Flux Découplé Stationnaire" : "Inactif (Désactivé / Non Prouvé sur ce Tirage)",
         description: "Amplification cinématique continue par transformation tanh du vecteur machine.",
         color: "text-emerald-400",
         barColor: "bg-emerald-500",

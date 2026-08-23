@@ -526,12 +526,16 @@ export const calculateDnaSieveWeights = (
 
     // 9. Extraction et Normalisation continue des poids d'ADN
     const geneKeys = Object.values(AlgoKey);
+    const hasMachineDataInHistory = history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
     let totalWeight = 0;
     const activeWeightsMap: Record<string, number> = {};
 
     geneKeys.forEach(k => {
         const rawW = Number(effectiveWeights[k]);
-        const safeW = typeof rawW === 'number' && !isNaN(rawW) && rawW > 0 ? rawW : 0.05;
+        let safeW = typeof rawW === 'number' && !isNaN(rawW) && rawW >= 0 ? rawW : 0.05;
+        if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+            safeW = 0.0;
+        }
         activeWeightsMap[k] = safeW;
         totalWeight += safeW;
     });

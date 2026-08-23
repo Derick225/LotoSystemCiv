@@ -303,19 +303,33 @@ export const evaluateAlgoEmpiricalProof = (
     hits[AlgoKey.ISOLATION_ANOMALY] += topGaps.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.ISOLATION_ANOMALY] += 10;
 
-    hits[AlgoKey.MACHINE_TRANSFER] += topMarkov.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.MACHINE_TRANSFER] += 10;
+    // 7. Canal Transfert Machine -> Gagnants (Co-occurrence empirique réelle)
+    const prevMachine = subHistory[1]?.machine || [];
+    if (Array.isArray(prevMachine) && prevMachine.length > 0) {
+      const machineHits = prevMachine.filter(n => actualDraw.includes(n)).length;
+      hits[AlgoKey.MACHINE_TRANSFER] += machineHits;
+      trials[AlgoKey.MACHINE_TRANSFER] += prevMachine.length;
+    }
   }
+
+  // Vérification de la présence effective de données machine sur l'historique du tirage
+  const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
 
   // Calcul du score de preuve empirique objectif Z-score
   validKeys.forEach(k => {
+    // Sécurité si aucune donnée machine sur ce tirage : essais par défaut pour forcer zScore négatif
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+      hits[k] = 0;
+      trials[k] = Math.max(10, sample.length * 5);
+    }
+
     const t = trials[k] || 1;
     const h = hits[k] || 0;
     const rate = h / t;
     const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / t) || 0.01;
     const zScore = (rate - baselineRate) / stdErr;
     const proofScore = zScore * confidence;
-    const hasProof = proofScore > 0.0;
+    const hasProof = proofScore > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachineDataInHistory);
 
     result[k] = {
       hasProof,
@@ -358,8 +372,14 @@ export const computeChronologicalAlgoReinforcement = (
   const sampleConfidence = Math.tanh(T / 30.0);
 
   // 2. Application de la règle : AUCUNE priorité sans preuve
+  const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
   const reinforced: Record<string, number> = {};
   validKeys.forEach(k => {
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+      reinforced[k] = 0.0; // Poids nul si aucune donnée machine enregistrée sur ce tirage
+      return;
+    }
+
     const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
     const proof = proofResults[k];
 

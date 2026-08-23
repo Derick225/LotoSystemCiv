@@ -73,8 +73,8 @@ export const machineTransferPlugin: AlgorithmPlugin = {
     const rawVal = ctx.features.machineTransferMap?.[num] || 0;
 
     if (!cache || !cache.hasMachineData) {
-      // Fallback continu neutre si le tirage n'a pas de données machine
-      return { score: 0.5, confidence: 0.5 };
+      // Score nul et confiance nulle si le tirage ne possède pas de données machine
+      return { score: 0.0, confidence: 0.0 };
     }
 
     const zScore = (rawVal - cache.median) / (cache.iqr || 1.0);
