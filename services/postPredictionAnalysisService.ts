@@ -69,15 +69,36 @@ export const getForensicReportByPredictionId = async (
   predictionId: string,
 ): Promise<ForensicReport | undefined> => {
   const reports = await getLocalForensicReports();
-  return reports.find((r) => r.predictionId === predictionId);
+  const matched = reports.find((r) => r.predictionId === predictionId);
+  if (matched?.id) {
+    const { getFullForensicReportById } = await import("./storageOptimizationService");
+    const full = await getFullForensicReportById(matched.id);
+    if (full) return full;
+  }
+  return matched;
+};
+
+export const getForensicReportById = async (
+  id: string
+): Promise<ForensicReport | null> => {
+  if (!id) return null;
+  const { getFullForensicReportById } = await import("./storageOptimizationService");
+  return getFullForensicReportById(id);
 };
 
 export const saveForensicReport = async (report: ForensicReport) => {
   try {
     const cacheKey = `nexus_forensic_report_${report.id}`;
     // Store in global cache for unified memory + idb access
-    // This allows getByDomain to work
     await globalCache.set(cacheKey, report, CACHE_TTL.LONG, report.drawName);
+
+    // Enregistrement par compression différentielle (En-tête condensé + payload détaillé)
+    try {
+      const { saveCompressedForensicReport } = await import("./storageOptimizationService");
+      await saveCompressedForensicReport(report);
+    } catch (compErr) {
+      console.warn("Compressed forensic report save warning:", compErr);
+    }
 
     // Dynamic Pruning: keep local DB clean and high-performing by keeping max 200 recent reports
     try {
@@ -235,10 +256,72 @@ export const syncForensicReportsWithCloud = async (): Promise<
   }
 };
 
-export const deleteForensicReportLocal = async (id: string) => {
+const DISMISSED_AUTOPSY_PREFIX = "dismissed_autopsy_";
+
+/**
+ * Enregistre l'ID d'une prédiction dont le rapport d'autopsie a été volontairement supprimé
+ * pour éviter toute régénération automatique intempestive en arrière-plan.
+ */
+export const markAutopsyDismissed = async (predictionId: string): Promise<void> => {
+  if (!predictionId) return;
+  try {
+    const { set: idbSet } = await import("idb-keyval");
+    await idbSet(`${DISMISSED_AUTOPSY_PREFIX}${predictionId}`, true);
+  } catch (e) {
+    console.warn("[Forensic] Impossible d'enregistrer l'exclusion d'autopsie:", e);
+  }
+};
+
+/**
+ * Récupère l'ensemble des IDs de prédictions dont l'autopsie a été définitivement supprimée.
+ */
+export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> => {
+  try {
+    const allK = await keys();
+    const dismissed = new Set<string>();
+    for (const k of allK) {
+      if (typeof k === "string" && k.startsWith(DISMISSED_AUTOPSY_PREFIX)) {
+        dismissed.add(k.substring(DISMISSED_AUTOPSY_PREFIX.length));
+      }
+    }
+    return dismissed;
+  } catch {
+    return new Set<string>();
+  }
+};
+
+/**
+ * Supprime définitivement un rapport d'autopsie de la base locale (IndexedDB + Cache mémoire).
+ */
+export const deleteForensicReportLocal = async (id: string, predictionId?: string) => {
   await del(`${FORENSIC_KEY_PREFIX}${id}`);
   await del(`nexus_forensic_report_${id}`);
+  await del(`nexus_forensic_index_${id}`);
+  await del(`nexus_forensic_detail_${id}`);
   await globalCache.invalidateByPrefix(`nexus_forensic_report_${id}`);
+  await globalCache.invalidateByPrefix(`nexus_forensic_index_${id}`);
+  if (predictionId) {
+    await markAutopsyDismissed(predictionId);
+  }
+};
+
+/**
+ * Supprime définitivement une collection de rapports d'autopsie en une opération par lot.
+ */
+export const deleteMultipleForensicReportsLocal = async (
+  items: { id: string; predictionId?: string }[]
+) => {
+  for (const item of items) {
+    await del(`${FORENSIC_KEY_PREFIX}${item.id}`);
+    await del(`nexus_forensic_report_${item.id}`);
+    await del(`nexus_forensic_index_${item.id}`);
+    await del(`nexus_forensic_detail_${item.id}`);
+    await globalCache.invalidateByPrefix(`nexus_forensic_report_${item.id}`);
+    await globalCache.invalidateByPrefix(`nexus_forensic_index_${item.id}`);
+    if (item.predictionId) {
+      await markAutopsyDismissed(item.predictionId);
+    }
+  }
 };
 
 // ============================================================================

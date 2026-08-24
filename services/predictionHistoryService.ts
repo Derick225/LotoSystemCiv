@@ -488,6 +488,15 @@ export const clearPredictionHistory = async (drawName: string) => {
 
 export const deletePrediction = async (id: string): Promise<void> => {
     await del(`${HISTORY_KEY_PREFIX}${id}`);
+    await del(`prediction_snapshot_${id}`);
+    
+    // Also delete any forensic report associated with this prediction to avoid orphans
+    try {
+        const { deleteForensicReportLocal } = await import('./postPredictionAnalysisService');
+        await deleteForensicReportLocal(`forensic_${id}`, id);
+    } catch {
+        // ignore
+    }
     
     // Attempt to delete from cloud if syncing is enabled
     try {
@@ -495,6 +504,33 @@ export const deletePrediction = async (id: string): Promise<void> => {
         if (user) {
             await supabase.from('predictions').delete().eq('id', id);
             await supabase.from('prediction_snapshots').delete().eq('id', id);
+        }
+    } catch(e) {
+        // ignore cloud delete error silently
+    }
+};
+
+export const deleteMultiplePredictions = async (ids: string[]): Promise<void> => {
+    if (!ids || ids.length === 0) return;
+    const { delMany } = await import('idb-keyval');
+    const keysToDelete = ids.flatMap(id => [
+        `${HISTORY_KEY_PREFIX}${id}`,
+        `prediction_snapshot_${id}`
+    ]);
+    await delMany(keysToDelete);
+
+    try {
+        const { deleteMultipleForensicReportsLocal } = await import('./postPredictionAnalysisService');
+        await deleteMultipleForensicReportsLocal(ids.map(id => ({ id: `forensic_${id}`, predictionId: id })));
+    } catch {
+        // ignore
+    }
+
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            await supabase.from('predictions').delete().in('id', ids);
+            await supabase.from('prediction_snapshots').delete().in('id', ids);
         }
     } catch(e) {
         // ignore cloud delete error silently

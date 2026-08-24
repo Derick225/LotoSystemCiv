@@ -5,6 +5,7 @@ import {
   clearPredictionHistory,
   linkPredictionToResult,
   deletePrediction,
+  deleteMultiplePredictions,
   findMatchingResultForPrediction,
   isAutoPurgeEnabled,
   setAutoPurgeEnabled,
@@ -16,6 +17,7 @@ import {
   saveForensicReport,
   getForensicReportByPredictionId,
   syncForensicReportsWithCloud,
+  getDismissedAutopsyPredictionIds,
 } from "../services/postPredictionAnalysisService";
 import type {
   PredictionHistoryItem,
@@ -36,11 +38,14 @@ import {
   Clock,
   Database,
   HardDrive,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { useToast } from "./ui/Toast";
 import { PredictionForensics } from "./PredictionForensics";
 import { useNexusStore } from "../store/useNexusStore";
 import { TicketXRay } from "./TicketXRay";
+import { StorageOptimizationModal } from "./StorageOptimizationModal";
 import { audioEngine } from "../utils/audioEngine";
 import { logError, AppError } from "../utils/AppError";
 
@@ -60,8 +65,12 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     null,
   );
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [isDeletingBatch, setIsDeletingBatch] = useState<boolean>(false);
   const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
   const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
+  const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
   const attemptedLinksRef = useRef<Set<string>>(new Set());
   const isLinkingRef = useRef(false);
 
@@ -147,11 +156,63 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     audioEngine.play("click");
-    if (confirm("Supprimer cette prédiction en attente ?")) {
+    if (confirm("Supprimer définitivement cette prédiction de l'historique ?")) {
       await deletePrediction(id);
       setHistory((prev) => prev.filter((h) => h.id !== id));
+      setSelectedItemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       audioEngine.play("success");
-      showToast("Prédiction supprimée.", "info");
+      showToast("Prédiction définitivement supprimée.", "info");
+    }
+  };
+
+  const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    audioEngine.play("click");
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    audioEngine.play("click");
+    if (selectedItemIds.size === history.length) {
+      setSelectedItemIds(new Set());
+    } else {
+      setSelectedItemIds(new Set(history.map((h) => h.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const count = selectedItemIds.size;
+    if (count === 0) return;
+    if (!confirm(`Supprimer définitivement les ${count} prédiction(s) sélectionnée(s) de l'historique ?`)) {
+      return;
+    }
+    try {
+      setIsDeletingBatch(true);
+      audioEngine.play("click");
+      const idsArray = Array.from(selectedItemIds);
+      await deleteMultiplePredictions(idsArray);
+      setHistory((prev) => prev.filter((h) => !selectedItemIds.has(h.id)));
+      setSelectedItemIds(new Set());
+      setIsSelectionMode(false);
+      audioEngine.play("success");
+      showToast(`${count} prédiction(s) supprimée(s) avec persistance.`, "success");
+    } catch (err) {
+      console.error("Batch delete error:", err);
+      showToast("Erreur lors de la suppression par lot.", "error");
+    } finally {
+      setIsDeletingBatch(false);
     }
   };
 
@@ -186,6 +247,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
         let changed = false;
         let forensicGenerated = false;
         try {
+          const dismissedPredictionIds = await getDismissedAutopsyPredictionIds();
+
           for (const item of history) {
             if (attemptedLinksRef.current.has(item.id)) {
               continue;
@@ -205,8 +268,8 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
               }
             }
 
-            // Automate Forensic Analysis if linked and no report exists
-            if (match) {
+            // Automate Forensic Analysis if linked, no report exists, and not dismissed
+            if (match && !dismissedPredictionIds.has(item.id)) {
               const existingReport = await getForensicReportByPredictionId(
                 item.id,
               );
@@ -314,20 +377,24 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in flex flex-col h-[700px]">
-      <div className="flex justify-between items-center px-2 shrink-0">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-2 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600">
+          <div className="p-2 bg-indigo-100 dark:bg-indigo-950/50 rounded-xl text-indigo-600 dark:text-indigo-400">
             <History size={20} />
           </div>
-          <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter">
-            Historique Inférence
-          </h3>
+          <div>
+            <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tighter text-sm">
+              Historique Inférence
+            </h3>
+            <span className="text-[10px] text-slate-500 font-mono">
+              {history.length} prédiction(s) enregistrée(s)
+            </span>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden lg:flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase mr-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Hit
-            <div className="w-2 h-2 rounded-full bg-amber-500 ml-2"></div> Near
-            Miss (+/- 1)
+            <div className="w-2 h-2 rounded-full bg-amber-500 ml-2"></div> Near Miss
           </div>
 
           <button
@@ -361,18 +428,82 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
           <button
             onClick={() => {
               audioEngine.play("click");
-              if (confirm("Vider l'historique complet pour ce tirage ?")) {
-                clearPredictionHistory(drawName);
+              setIsStorageModalOpen(true);
+            }}
+            title="Audit de Cohérence & Purge des Simulations Exploratoires"
+            className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 text-indigo-300 hover:text-indigo-200 bg-indigo-950/40 border border-indigo-800/40 transition-colors cursor-pointer"
+          >
+            <HardDrive size={12} />
+            <span>Audit & Optimisation</span>
+          </button>
+
+          {/* Mode sélection multiple */}
+          {history.length > 0 && (
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setIsSelectionMode(!isSelectionMode);
+                if (isSelectionMode) setSelectedItemIds(new Set());
+              }}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all border cursor-pointer ${
+                isSelectionMode
+                  ? "bg-indigo-600 text-white border-indigo-500"
+                  : "bg-slate-900/50 text-slate-400 border-slate-800 hover:text-slate-200"
+              }`}
+            >
+              <CheckSquare size={12} />
+              <span>{isSelectionMode ? "Annuler sélection" : "Sélectionner"}</span>
+            </button>
+          )}
+
+          <button
+            onClick={async () => {
+              audioEngine.play("click");
+              if (confirm("Vider définitivement l'historique complet pour ce tirage ?")) {
+                await clearPredictionHistory(drawName);
                 setHistory([]);
+                setSelectedItemIds(new Set());
                 audioEngine.play("success");
+                showToast("Historique vidé définitivement.", "info");
               }
             }}
-            className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors cursor-pointer px-2 py-1.5"
           >
             <Trash2 size={13} /> Reset
           </button>
         </div>
       </div>
+
+      {/* Barre d'action de sélection multiple */}
+      {isSelectionMode && history.length > 0 && (
+        <div className="flex items-center justify-between gap-3 p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-2xl animate-fade-in shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSelectAll}
+              className="text-xs font-bold text-indigo-300 hover:text-indigo-200 flex items-center gap-1.5 cursor-pointer"
+            >
+              {selectedItemIds.size === history.length ? (
+                <CheckSquare size={14} className="text-indigo-400" />
+              ) : (
+                <Square size={14} className="text-indigo-400" />
+              )}
+              <span>{selectedItemIds.size === history.length ? "Tout désélectionner" : "Tout sélectionner"}</span>
+            </button>
+            <span className="text-xs font-mono text-indigo-300/80">
+              {selectedItemIds.size} sélectionné(s)
+            </span>
+          </div>
+
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedItemIds.size === 0 || isDeletingBatch}
+            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition-all cursor-pointer"
+          >
+            <Trash2 size={13} />
+            <span>{isDeletingBatch ? "Suppression..." : `Supprimer (${selectedItemIds.size})`}</span>
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden">
         {history.length === 0 ? (
@@ -413,6 +544,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
                     )
                   : [];
                 const isExpanded = expandedItem === item.id;
+                const isSelected = selectedItemIds.has(item.id);
                 const dateObj = new Date(item.timestamp);
 
                 return (
@@ -431,49 +563,83 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
                   >
                     <div
                       onClick={() => {
-                        audioEngine.play("click");
-                        setExpandedItem(isExpanded ? null : item.id);
+                        if (isSelectionMode) {
+                          handleToggleSelect(item.id);
+                        } else {
+                          audioEngine.play("click");
+                          setExpandedItem(isExpanded ? null : item.id);
+                        }
                       }}
-                      className={`bg-white dark:bg-slate-900 rounded-2xl border shadow-sm overflow-hidden group transition-all cursor-pointer ${isExpanded ? "border-indigo-500 ring-1 ring-indigo-500/50" : "border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600"}`}
+                      className={`bg-white dark:bg-slate-900 rounded-2xl border shadow-sm overflow-hidden group transition-all cursor-pointer ${
+                        isSelected
+                          ? "border-indigo-500 ring-2 ring-indigo-500/50 bg-indigo-950/10"
+                          : isExpanded
+                          ? "border-indigo-500 ring-1 ring-indigo-500/50"
+                          : "border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600"
+                      }`}
                     >
                       <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-50 dark:divide-slate-700">
                         <div className="p-6 md:w-3/5">
                           <div className="flex justify-between items-start mb-6">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <div className="text-base font-black text-slate-800 dark:text-white">
-                                  {dateObj.toLocaleDateString("fr-FR")}
+                            <div className="flex items-center gap-3">
+                              {isSelectionMode && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleSelect(item.id, e)}
+                                  className="text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                                >
+                                  {isSelected ? (
+                                    <CheckSquare size={18} className="text-indigo-500" />
+                                  ) : (
+                                    <Square size={18} className="text-slate-500" />
+                                  )}
+                                </button>
+                              )}
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-base font-black text-slate-800 dark:text-white">
+                                    {dateObj.toLocaleDateString("fr-FR")}
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-900 px-2 py-0.5 rounded-full">
+                                    <Clock size={10} />
+                                    {dateObj.toLocaleTimeString("fr-FR", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-1 text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-900 px-2 py-0.5 rounded-full">
-                                  <Clock size={10} />
-                                  {dateObj.toLocaleTimeString("fr-FR", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-                                  Confiance {item.prediction.confidence}%
-                                </span>
-                                {item.drawResultId && (
-                                  <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-100 dark:border-emerald-500/20 uppercase">
-                                    <LinkIcon size={8} /> ID-LINKED
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                                    Confiance {item.prediction.confidence}%
                                   </span>
-                                )}
+                                  {item.drawResultId && (
+                                    <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-100 dark:border-emerald-500/20 uppercase">
+                                      <LinkIcon size={8} /> ID-LINKED
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
                               {res && (
                                 <button
                                   onClick={(e) => handleOpenAudit(e, res, item)}
-                                  className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all"
+                                  className="p-2.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 rounded-xl hover:bg-indigo-600 hover:text-white transition-all cursor-pointer"
+                                  title="Autopsie Forensique"
                                 >
                                   <Microscope size={18} />
                                 </button>
                               )}
+                              {/* Bouton de suppression unitaire direct */}
+                              <button
+                                onClick={(e) => handleDelete(e, item.id)}
+                                className="p-2.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-all cursor-pointer"
+                                title="Supprimer définitivement"
+                              >
+                                <Trash2 size={16} />
+                              </button>
                               <div
-                                className={`p-2 rounded-full transition-transform ${isExpanded ? "rotate-180 bg-slate-100 text-indigo-600" : "text-slate-400"}`}
+                                className={`p-2 rounded-full transition-transform ${isExpanded ? "rotate-180 bg-slate-100 dark:bg-slate-800 text-indigo-600" : "text-slate-400"}`}
                               >
                                 <ChevronDown size={16} />
                               </div>
@@ -762,6 +928,12 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
           }}
         />
       )}
+      <StorageOptimizationModal
+        drawName={drawName}
+        isOpen={isStorageModalOpen}
+        onClose={() => setIsStorageModalOpen(false)}
+        onDataChanged={loadData}
+      />
     </div>
   );
 };

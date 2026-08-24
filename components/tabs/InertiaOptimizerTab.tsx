@@ -40,10 +40,15 @@ import {
   computeInertiaVectorScores,
   resolveOptimizedInertiaVector,
   runDeterministicInertiaBacktest,
+  getPersistedInertiaCalibration,
+  savePersistedInertiaCalibration,
+  resetPersistedInertiaCalibration,
+  DEFAULT_INERTIA_CALIBRATION,
   SystemInertiaMetrics,
   InertiaOscillatorScore,
   InertiaResolvedVector,
   InertiaBacktestResult,
+  InertiaCalibrationModifiers,
 } from "../../services/prediction/systemInertiaEngine";
 
 // Custom Type-Safe Tooltip for the Phase Portrait
@@ -102,8 +107,13 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   const [isBacktesting, setIsBacktesting] = useState<boolean>(false);
   const [backtestStats, setBacktestStats] = useState<InertiaBacktestResult | null>(null);
 
-  // Reset results when draw parameters are updated (Tirage Isolation rule)
+  // Load persisted calibration for active draw on mount / draw change (Tirage Isolation Rule)
   useEffect(() => {
+    const saved = getPersistedInertiaCalibration(drawName);
+    setViscosityGain(saved.viscosityGain);
+    setMassGain(saved.massGain);
+    setCouplingGain(saved.couplingGain);
+    setDampingRatio(saved.dampingRatio);
     setOptimizedVector(null);
     setBacktestStats(null);
   }, [drawName]);
@@ -121,6 +131,23 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     couplingGain,
     dampingRatio,
   }), [viscosityGain, massGain, couplingGain, dampingRatio]);
+
+  // Helper to update state and persist for the active draw
+  const updateAndPersistModifiers = useCallback((patch: Partial<InertiaCalibrationModifiers>) => {
+    const nextModifiers: InertiaCalibrationModifiers = {
+      viscosityGain: patch.viscosityGain !== undefined ? patch.viscosityGain : viscosityGain,
+      massGain: patch.massGain !== undefined ? patch.massGain : massGain,
+      couplingGain: patch.couplingGain !== undefined ? patch.couplingGain : couplingGain,
+      dampingRatio: patch.dampingRatio !== undefined ? patch.dampingRatio : dampingRatio,
+    };
+
+    if (patch.viscosityGain !== undefined) setViscosityGain(patch.viscosityGain);
+    if (patch.massGain !== undefined) setMassGain(patch.massGain);
+    if (patch.couplingGain !== undefined) setCouplingGain(patch.couplingGain);
+    if (patch.dampingRatio !== undefined) setDampingRatio(patch.dampingRatio);
+
+    savePersistedInertiaCalibration(drawName, nextModifiers);
+  }, [drawName, viscosityGain, massGain, couplingGain, dampingRatio]);
 
   // High fidelity phase space coordinate dataset for Recharts
   const oscillatorScores: InertiaOscillatorScore[] = useMemo(() => {
@@ -145,35 +172,35 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("click");
     switch (type) {
       case "neutral":
-        setViscosityGain(1.0);
-        setMassGain(1.0);
-        setCouplingGain(1.0);
-        setDampingRatio(0.5);
-        showToast("Profil appliqué : Équilibre Harmonique Standard", "info");
+        updateAndPersistModifiers({ viscosityGain: 1.0, massGain: 1.0, couplingGain: 1.0, dampingRatio: 0.5 });
+        showToast(`Profil appliqué : Équilibre Harmonique Standard (${drawName})`, "info");
         break;
       case "trend":
-        setViscosityGain(1.75);
-        setMassGain(1.5);
-        setCouplingGain(0.7);
-        setDampingRatio(0.35);
-        showToast("Profil appliqué : Persistance Forte (Suivi de Tendance)", "info");
+        updateAndPersistModifiers({ viscosityGain: 1.75, massGain: 1.5, couplingGain: 0.7, dampingRatio: 0.35 });
+        showToast(`Profil appliqué : Persistance Forte (${drawName})`, "info");
         break;
       case "critical":
-        setViscosityGain(0.8);
-        setMassGain(1.0);
-        setCouplingGain(1.6);
-        setDampingRatio(1.0);
-        showToast("Profil appliqué : Amortissement Critique (Anti-Dispersion)", "info");
+        updateAndPersistModifiers({ viscosityGain: 0.8, massGain: 1.0, couplingGain: 1.6, dampingRatio: 1.0 });
+        showToast(`Profil appliqué : Amortissement Critique (${drawName})`, "info");
         break;
       case "underdamped":
-        setViscosityGain(1.2);
-        setMassGain(1.8);
-        setCouplingGain(1.2);
-        setDampingRatio(0.2);
-        showToast("Profil appliqué : Sous-Amorti (Résonance Cyclique)", "info");
+        updateAndPersistModifiers({ viscosityGain: 1.2, massGain: 1.8, couplingGain: 1.2, dampingRatio: 0.2 });
+        showToast(`Profil appliqué : Sous-Amorti Résonant (${drawName})`, "info");
         break;
     }
-  }, [showToast]);
+  }, [drawName, updateAndPersistModifiers, showToast]);
+
+  // Handler to apply the optimal damping factor (ζ_optimal) from Time Machine directly to the engine
+  const handleApplyOptimalDamping = () => {
+    if (!backtestStats) return;
+    const optimalZeta = backtestStats.bestDamping;
+    audioEngine.play("success");
+    updateAndPersistModifiers({ dampingRatio: optimalZeta });
+    showToast(
+      `Calibration critique appliquée : ζ = ${optimalZeta.toFixed(2)} mémorisé pour ${drawName}.`,
+      "success"
+    );
+  };
 
   // Handle complete, deterministic system optimization calculations
   const triggerOptimization = () => {
@@ -256,12 +283,14 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
 
   const resetControls = () => {
     audioEngine.play("click");
-    setViscosityGain(1.0);
-    setMassGain(1.0);
-    setCouplingGain(1.0);
-    setDampingRatio(0.5);
+    resetPersistedInertiaCalibration(drawName);
+    setViscosityGain(DEFAULT_INERTIA_CALIBRATION.viscosityGain);
+    setMassGain(DEFAULT_INERTIA_CALIBRATION.massGain);
+    setCouplingGain(DEFAULT_INERTIA_CALIBRATION.couplingGain);
+    setDampingRatio(DEFAULT_INERTIA_CALIBRATION.dampingRatio);
     setOptimizedVector(null);
     setBacktestStats(null);
+    showToast(`Paramètres d'inertie réinitialisés pour ${drawName}.`, "info");
   };
 
   return (
@@ -282,6 +311,10 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               </span>
               <span className="text-[10px] font-mono text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-white/5">
                 N_max = {computedMetrics.safeMaxNum}
+              </span>
+              <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/30 flex items-center gap-1">
+                <CheckCircle2 size={11} className="text-cyan-400" />
+                Calibration Dédiée : {drawName}
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
@@ -410,7 +443,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   value={viscosityGain}
                   onChange={(e) => {
                     audioEngine.play("click");
-                    setViscosityGain(Number(e.target.value));
+                    updateAndPersistModifiers({ viscosityGain: Number(e.target.value) });
                   }}
                   className="w-full h-1.5 bg-slate-800 accent-cyan-500 rounded-lg cursor-pointer"
                 />
@@ -438,7 +471,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   value={massGain}
                   onChange={(e) => {
                     audioEngine.play("click");
-                    setMassGain(Number(e.target.value));
+                    updateAndPersistModifiers({ massGain: Number(e.target.value) });
                   }}
                   className="w-full h-1.5 bg-slate-800 accent-indigo-500 rounded-lg cursor-pointer"
                 />
@@ -466,7 +499,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   value={couplingGain}
                   onChange={(e) => {
                     audioEngine.play("click");
-                    setCouplingGain(Number(e.target.value));
+                    updateAndPersistModifiers({ couplingGain: Number(e.target.value) });
                   }}
                   className="w-full h-1.5 bg-slate-800 accent-fuchsia-500 rounded-lg cursor-pointer"
                 />
@@ -507,7 +540,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   value={dampingRatio}
                   onChange={(e) => {
                     audioEngine.play("click");
-                    setDampingRatio(Number(e.target.value));
+                    updateAndPersistModifiers({ dampingRatio: Number(e.target.value) });
                   }}
                   className="w-full h-1.5 bg-slate-800 accent-pink-500 rounded-lg cursor-pointer"
                 />
@@ -873,13 +906,51 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               </div>
             </div>
 
-            <div className="p-3.5 bg-pink-500/5 rounded-2xl border border-pink-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between text-[10px] gap-2">
-              <span className="text-slate-300 max-w-xl leading-normal">
-                L'optimisation énergétique de Fourier et l'asymétrie de phase suggèrent la calibration suivante pour le régime actif :
-              </span>
-              <span className="font-mono font-black text-pink-400 uppercase tracking-widest bg-pink-500/10 border border-pink-500/30 px-3 py-1.5 rounded-xl">
-                ζ_optimal = {backtestStats.bestDamping.toFixed(2)}
-              </span>
+            <div className="p-4 bg-gradient-to-r from-pink-950/30 via-slate-900/60 to-cyan-950/30 rounded-2xl border border-pink-500/30 flex flex-col md:flex-row items-start md:items-center justify-between text-[10px] gap-4 shadow-xl">
+              <div className="space-y-1.5 max-w-xl">
+                <div className="flex items-center gap-2">
+                  <span className="p-1 bg-pink-500/20 text-pink-300 rounded-md">
+                    <Zap size={13} />
+                  </span>
+                  <span className="font-sans font-black uppercase tracking-wider text-white text-[11px]">
+                    Calibration Auto-Adaptative du Second Ordre
+                  </span>
+                  <span className="text-[9px] font-mono text-cyan-300 bg-slate-950 px-2 py-0.5 rounded border border-cyan-500/20">
+                    {drawName}
+                  </span>
+                </div>
+                <p className="text-slate-300 text-[10px] leading-relaxed">
+                  L'optimisation énergétique de Fourier et l'asymétrie de phase sur l'historique de <strong className="text-cyan-300">{drawName}</strong> identifient un amortissement critique idéal à <strong className="text-pink-400 font-mono">ζ = {backtestStats.bestDamping.toFixed(2)}</strong> (actuel : <span className="font-mono text-slate-300">{dampingRatio.toFixed(2)}</span>).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+                <div className="flex flex-col items-end">
+                  <span className="text-[8px] font-mono uppercase text-slate-400 tracking-wider">
+                    Amortissement suggéré
+                  </span>
+                  <span className="font-mono font-black text-pink-400 text-sm tracking-wider">
+                    ζ_optimal = {backtestStats.bestDamping.toFixed(2)}
+                  </span>
+                </div>
+
+                {Math.abs(dampingRatio - backtestStats.bestDamping) < 0.01 ? (
+                  <div className="px-4 py-2.5 bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-emerald-950/30">
+                    <CheckCircle2 size={14} className="text-emerald-400" />
+                    <span>ζ_optimal Actif &amp; Mémorisé</span>
+                  </div>
+                ) : (
+                  <button
+                    id="btn-apply-optimal-damping"
+                    onClick={handleApplyOptimalDamping}
+                    className="px-5 py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all duration-300 hover:scale-105 shadow-xl shadow-pink-600/30 border border-pink-400/40 cursor-pointer active:scale-95 animate-pulse"
+                    title={`Appliquer dynamiquement ζ = ${backtestStats.bestDamping.toFixed(2)} au moteur et le mémoriser pour ${drawName}`}
+                  >
+                    <Zap size={14} className="text-white" />
+                    <span>Appliquer ζ_optimal ({backtestStats.bestDamping.toFixed(2)}) au Moteur</span>
+                  </button>
+                )}
+              </div>
             </div>
           </motion.div>
         )}

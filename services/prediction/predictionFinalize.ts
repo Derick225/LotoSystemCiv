@@ -4,9 +4,10 @@ import { ExtractedFeatures } from "./featureExtractor";
 import { EnhancedMetrics } from "./metrics.types";
 import { calculateScores, ScoredNumber } from "./scoringEngine";
 import { normalizeWeights, getCalibratedHyperparameters } from "./weightsManager";
-import { calculateShannonEntropy } from "../mathService";
+import { calculateShannonEntropy, calculateTemporalDriftLearningRate } from "../mathService";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { evaluateAdversarialSurvival } from "./adversarialProxy";
+import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { TUNING } from "./microSgd";
 import { HONEST_NOTE } from "./predictionScenarios";
 import { logger } from "../../utils/logger";
@@ -205,11 +206,21 @@ export const finalizePredictionPayload = async (
   
   let calibratedConfidence = plattCalibratedProbability * 100.0 * calibratedParams.boosting_multiplier;
   
+  // Matrice de Confiance Dynamique par Profil Cyclique (Attracteur de Lyapunov vs Dispersion Stochastique)
+  const cyclicPhaseProfile = calculateCyclicPhaseProfileMatrix(
+    context.history,
+    enhancedMetrics?.topologicalLyapunov as Record<number, number>
+  );
+  calibratedConfidence *= cyclicPhaseProfile.confidenceModulator;
+
   if (shrinkageApplied) {
     calibratedConfidence *= shrinkageFactor;
   }
   
   const finalConfidence = Math.round(Math.max(1, Math.min(99, calibratedConfidence)));
+
+  // Calcul du diagnostic de dérive temporelle du taux d'apprentissage
+  const driftLearning = calculateTemporalDriftLearningRate(context.history, 1.0 / Math.sqrt(Math.max(10, context.history.length)), 10);
 
   let analysisText = "";
   if (context.adversarialMode) {
@@ -219,9 +230,9 @@ export const finalizePredictionPayload = async (
   } else if (shrinkageApplied) {
     analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
   } else if (dnaSieveMetrics && dnaSieveMetrics.dominantAlgos.length > 0) {
-    analysisText = `Prédiction Oracle Base filtrée à travers le Tamis de l'ADN Algorithmique (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(' • ')} — Concordance: ${dnaSieveMetrics.dnaConcordanceMean}%).`;
+    analysisText = `Prédiction Oracle Base filtrée à travers le Tamis de l'ADN Algorithmique (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(' • ')} — Concordance: ${dnaSieveMetrics.dnaConcordanceMean}%). Phase : ${cyclicPhaseProfile.phaseLabel}.`;
   } else {
-    analysisText = `Prédiction Oracle Base générée à partir de l'ADN Algorithmique du moment.`;
+    analysisText = `Prédiction Oracle Base (${cyclicPhaseProfile.phaseLabel}) générée à partir de l'ADN Algorithmique du moment.`;
   }
 
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
@@ -322,6 +333,14 @@ export const finalizePredictionPayload = async (
     shrinkageFactor,
     shrinkageFactorMap: undefined,
     shrinkageVerification: null,
+    cyclicPhaseProfile,
+    temporalDriftLearning: {
+      learningRate: driftLearning.learningRate,
+      klDivergence: driftLearning.klDivergence,
+      entropyVariance: driftLearning.entropyVariance,
+      lambda: driftLearning.lambda,
+      driftResistanceFactor: driftLearning.driftResistanceFactor
+    },
     dnaSieve: dnaSieveMetrics,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,

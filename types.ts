@@ -66,6 +66,10 @@ export interface PredictionHistoryItem {
   drawResultId: string | null;
   feedback?: PredictionFeedback;
   engineType?: "local" | "cloud";
+  isSimulation?: boolean;
+  isExploratory?: boolean;
+  simulationCategory?: 'WHAT_IF' | 'SCENARIO' | 'EXPLORATORY' | 'BACKTEST' | 'BENCHMARK';
+  scenarioName?: string;
 }
 
 export interface Prediction {
@@ -76,6 +80,10 @@ export interface Prediction {
   breakdown: Record<number, ScoreBreakdown>;
   timestamp: number;
   engineType?: "local" | "cloud";
+  isSimulation?: boolean;
+  isExploratory?: boolean;
+  simulationCategory?: 'WHAT_IF' | 'SCENARIO' | 'EXPLORATORY' | 'BACKTEST' | 'BENCHMARK';
+  scenarioName?: string;
   mathModelSummary?: string;
   symbiosisFactor?: number;
   realityAlignment?: number;
@@ -105,6 +113,30 @@ export interface Prediction {
   aiRationale?: string;
   aiStrategicAdvice?: string;
   isLocalFallback?: boolean;
+  cyclicPhaseProfile?: {
+    phase: 'PERIODIC_ATTRACTOR' | 'STOCHASTIC_DISPERSION' | 'TRANSITIONAL_ORBIT';
+    phaseLabel: string;
+    lyapunovExponent: number;
+    isChaotic: boolean;
+    stochasticDispersionIndex: number;
+    attractorTension: number;
+    confidenceModulator: number;
+    dominantMacroFamily: string;
+    macroFamilyWeights: {
+      attractorResonance: number;
+      stochasticDiffusion: number;
+      topologicalAffinity: number;
+    };
+    algoWeightModifiers: Partial<Record<string, number>>;
+    narrativeInterpretation: string;
+  };
+  temporalDriftLearning?: {
+    learningRate: number;
+    klDivergence: number;
+    entropyVariance: number;
+    lambda: number;
+    driftResistanceFactor: number;
+  };
   dnaSieve?: {
     dominantAlgos: string[];
     dnaConcordanceMean: number;
@@ -341,6 +373,68 @@ export interface ForensicReport {
   recommendedAdjustments?: ForensicActionableAdjustment[];
   warnings?: string[];
   postMortemStabilityScore?: number;
+}
+
+export interface CondensedForensicReport {
+  id: string;
+  drawName: string;
+  date: string;
+  predictionId?: string;
+  drawResultId?: string;
+  timestamp?: string;
+  matchesSummary: {
+    predicted: number;
+    actual: number | null;
+    errorType: "Hit" | "Voisin" | "Miroir" | "Shadow" | "Machine" | "None";
+    delta: string;
+  }[];
+  exactHitsCount: number;
+  nearMissesCount: number;
+  totalPredicted: number;
+  unifiedIntegrityIndex?: number; // UFI (0-100)
+  rmse?: number;
+  brier_score?: number;
+  kl_divergence?: number;
+  shannon_entropy?: number;
+  forensicScore?: number;
+  suspicionScore?: number;
+  failureMode?: ForensicFailureMode;
+  verdict?: ForensicFailureMode;
+  severity?: SeverityLevel;
+  aiAnalysisSummary?: string;
+  isCondensed: boolean;
+  hasFullPayload?: boolean;
+}
+
+export interface StorageAuditReport {
+  drawName?: string;
+  timestamp: number;
+  totalPredictionsCount: number;
+  realPredictionsCount: number;
+  exploratorySimulationsCount: number;
+  totalForensicReportsCount: number;
+  compressedReportsCount: number;
+  uncompressedReportsCount: number;
+  orphanSnapshotsCount: number;
+  orphanForensicCount: number;
+  estimatedTotalSizeKb: number;
+  estimatedSimulationsSizeKb: number;
+  estimatedReclaimableKb: number;
+  storageHealthScore: 'OPTIMAL' | 'MODERATE' | 'ATTENTION_REQUIRED';
+  compressionRatioPct: number;
+  exploratorySimulationIds: string[];
+  orphanSnapshotKeys: string[];
+  orphanForensicIds: string[];
+}
+
+export interface StorageOptimizationResult {
+  purgedSimulationsCount: number;
+  purgedSnapshotsCount: number;
+  purgedOrphanForensicCount: number;
+  compressedReportsCount: number;
+  bytesFreedKb: number;
+  auditBefore: StorageAuditReport;
+  auditAfter: StorageAuditReport;
 }
 
 export interface AlgorithmicAdjustment {

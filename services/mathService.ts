@@ -1863,4 +1863,128 @@ export const calculateStatisticalBounds = (history: DrawResult[]): {
     };
 };
 
+export interface TemporalDriftLearningRateResult {
+    learningRate: number;
+    baseLR: number;
+    klDivergence: number;
+    entropyVariance: number;
+    lambda: number;
+    localEntropy: number;
+    globalEntropy: number;
+    driftResistanceFactor: number;
+    rollingEntropies: number[];
+}
+
+/**
+ * Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
+ * Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
+ * - P : Distribution empirique locale des 10 derniers tirages
+ * - Q : Distribution de référence (historique complet / uniforme théorique)
+ * - λ : Amortissement proportionnel à la variance résiduelle de l'entropie de Shannon sur les sous-fenêtres
+ * ZÉRO NOMBRE MAGIQUE, 100% DIFFÉRENTIABLE ET DÉTERMINISTE (AGENTS.md).
+ */
+export const calculateTemporalDriftLearningRate = (
+    history: DrawResult[],
+    baseLR?: number,
+    windowSize: number = 10
+): TemporalDriftLearningRateResult => {
+    const N = history.length;
+    // Taux d'apprentissage de base sans nombre magique, proportionnel à l'inverse de sqrt(taille d'échantillon)
+    const effectiveBaseLR = baseLR !== undefined 
+        ? baseLR 
+        : 1.0 / Math.sqrt(Math.max(10, N));
+
+    if (N < 3) {
+        return {
+            learningRate: effectiveBaseLR,
+            baseLR: effectiveBaseLR,
+            klDivergence: 0,
+            entropyVariance: 0,
+            lambda: 1.0,
+            localEntropy: 1.0,
+            globalEntropy: 1.0,
+            driftResistanceFactor: 1.0,
+            rollingEntropies: [1.0]
+        };
+    }
+
+    const actualWindow = Math.min(N, Math.max(3, windowSize));
+    const localHistory = history.slice(0, actualWindow);
+
+    // 1. Calcul de la distribution empirique P (Locale) et Q (Globale de référence) sur le domaine [1, 90]
+    const pCounts = new Float64Array(91);
+    let pTotal = 0;
+    for (const d of localHistory) {
+        for (const num of d.gagnants) {
+            if (num >= 1 && num <= 90) {
+                pCounts[num]++;
+                pTotal++;
+            }
+        }
+    }
+
+    const qCounts = new Float64Array(91);
+    let qTotal = 0;
+    for (const d of history) {
+        for (const num of d.gagnants) {
+            if (num >= 1 && num <= 90) {
+                qCounts[num]++;
+                qTotal++;
+            }
+        }
+    }
+
+    const epsilon = 1e-9;
+    let klDiv = 0;
+    for (let i = 1; i <= 90; i++) {
+        const p = pTotal > 0 ? (pCounts[i] / pTotal) : (1.0 / 90.0);
+        const q = qTotal > 0 ? (qCounts[i] / qTotal) : (1.0 / 90.0);
+        // Lissage continu infinitésimal
+        const pSmooth = (p + epsilon) / (1.0 + 90 * epsilon);
+        const qSmooth = (q + epsilon) / (1.0 + 90 * epsilon);
+        klDiv += pSmooth * Math.log(pSmooth / qSmooth);
+    }
+    klDiv = Math.max(0, klDiv);
+
+    // 2. Variance résiduelle de l'entropie de Shannon sur les sous-fenêtres glissantes
+    const rollingEntropies: number[] = [];
+    const subWin = Math.min(3, localHistory.length);
+    for (let i = 0; i <= localHistory.length - subWin; i++) {
+        const chunk = localHistory.slice(i, i + subWin);
+        const ent = calculateShannonEntropy(chunk).normalized;
+        rollingEntropies.push(ent);
+    }
+
+    const meanEnt = rollingEntropies.reduce((a, b) => a + b, 0) / (rollingEntropies.length || 1);
+    let entVar = 0;
+    for (const e of rollingEntropies) {
+        entVar += Math.pow(e - meanEnt, 2);
+    }
+    entVar /= (rollingEntropies.length || 1);
+
+    const localEntropy = calculateShannonEntropy(localHistory).normalized;
+    const globalEntropy = calculateShannonEntropy(history).normalized;
+
+    // 3. Facteur d'amortissement lambda dérivé continûment de la variance résiduelle d'entropie et de la volatilité
+    const volatilityInfo = calculateVolatility(localHistory);
+    const volNorm = Math.tanh(volatilityInfo.score / 50.0);
+    const lambda = 1.0 + Math.tanh(entVar * 20.0) * (1.0 + volNorm);
+
+    // 4. Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
+    const driftResistanceFactor = 1.0 / (1.0 + lambda * klDiv);
+    const learningRate = effectiveBaseLR * driftResistanceFactor;
+
+    return {
+        learningRate,
+        baseLR: effectiveBaseLR,
+        klDivergence: klDiv,
+        entropyVariance: entVar,
+        lambda,
+        localEntropy,
+        globalEntropy,
+        driftResistanceFactor,
+        rollingEntropies
+    };
+};
+
 

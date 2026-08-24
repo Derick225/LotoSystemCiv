@@ -3,6 +3,7 @@ import { AlgoKey } from "../../shared/prediction.types";
 import { logger } from "../../utils/logger";
 import { normalizeWeights } from "../prediction/weightsManager";
 import { runForensicWorker } from "./trainingWorkers";
+import { calculateTemporalDriftLearningRate } from "../mathService";
 
 /**
  * Parseur de date local et robuste pour les formats DD/MM/YYYY et ISO.
@@ -68,8 +69,10 @@ export const applyOnlineLearningCore = async (
     Math.min(1.0, baseReward * 2.0 - 1.0 + rlhfSignal)
   );
 
-  // Modulation mathématique du Learning Rate
-  const baseLR = 0.05;
+  // Modulation mathématique du Learning Rate avec dérive temporelle continue
+  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
+  const baseLR = 1.0 / Math.sqrt(Math.max(10, purifiedHistory.length));
+  const driftLr = calculateTemporalDriftLearningRate(purifiedHistory, baseLR, 10);
   const signalStrength = Math.abs(totalSignal);
   const historyReliability = Math.max(
     0.2,
@@ -77,7 +80,7 @@ export const applyOnlineLearningCore = async (
   );
   // Plus de hits ou de rétroaction positive augmente la confiance
   const forensicConfidence = Math.max(0.5, Math.min(1.5, 1.0 + (hits - 2) * 0.1));
-  const learningRate = baseLR * signalStrength * historyReliability * forensicConfidence;
+  const learningRate = driftLr.learningRate * signalStrength * historyReliability * forensicConfidence;
 
   const newWeights: Record<string, number> = { ...currentWeights } as any;
   const algoKeys = Object.keys(currentWeights) as AlgoKey[];

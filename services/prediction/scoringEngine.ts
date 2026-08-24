@@ -9,6 +9,7 @@ import './coreAlgorithms';
 import { EnhancedMetrics } from './metrics.types';
 import { normalizeWeights } from "./weightsManager";
 import { logger } from "../../utils/logger";
+import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 
 export interface ScoredNumber {
   num: number;
@@ -152,6 +153,12 @@ export const calculateScores = (
   const H = context.statisticalBounds?.hurstExponent || 0.5;
   const RESONANCE_AMPLITUDE_MAX = Math.max(0, H);
 
+  // Matrice de profil cyclique (Attracteur Périodique vs Dispersion Stochastique)
+  const cyclicProfile = calculateCyclicPhaseProfileMatrix(
+    history,
+    context.advancedMetrics?.topologicalLyapunov as Record<number, number>
+  );
+
   // Étape 4 : Z-Score Robuste, Sigmoïde Logistique & Résonance Micro-ADN
   const masterScores: ScoredNumber[] = [];
   for (let i = 1; i <= N; i++) {
@@ -169,9 +176,10 @@ export const calculateScores = (
       const key = k as AlgoKey;
       let baseWeight = Number(effectiveWeights[key]) || 0;
       const weightModifier = context.advancedMetrics?.dynamicWeightModifiers?.[num]?.[key] || 0;
+      const cyclicModifier = cyclicProfile.algoWeightModifiers[key] || 0.0;
       
-      // La base prend l'Exponentielle de manière continue
-      baseWeight *= Math.exp(weightModifier);
+      // La base prend l'Exponentielle de manière continue (modifiers + phase cyclique)
+      baseWeight *= Math.exp(weightModifier + cyclicModifier);
       
       // On multiplie par la résonance du Micro-ADN local pour ce numéro
       baseWeight *= microDnaResonanceModulator;

@@ -2,7 +2,7 @@ import { ForensicReport, DrawResult, LearningSession, AlgoWeights, NeuralFeedbac
 import { AlgoKey } from '../shared/prediction.types';
 import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from './prediction/weightsManager';
 import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysisService';
-import { detectGameRegime } from './mathService';
+import { detectGameRegime, calculateTemporalDriftLearningRate } from './mathService';
 import { LCG } from '../utils/mathUtils';
 
 const generateDeterministicId = (prefix: string, index: number, seedStr: string): string => {
@@ -28,16 +28,14 @@ export const generateLearningSession = async (
   const currentWeights = await getAlgoWeights(drawName);
   const regime = detectGameRegime(history);
 
-  // Dynamic learning rate based on statistics (zero magic numbers)
-  // More history leads to a lower, more stable base learning rate
-  const baseLR = 1.0 / Math.sqrt(Math.max(10, history.length));
+  // Dynamic learning rate calibrated by temporal drift (KL Divergence & Shannon entropy variance)
+  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
+  const driftLrResult = calculateTemporalDriftLearningRate(history, 1.0 / Math.sqrt(Math.max(10, history.length)), 10);
   
-  // Continuous dampening of LR based on volatility
-  const volatilityDampening = 1.0 - Math.tanh(regime.volatility);
-  
-  // Hurst factor to continuously tune learning speed based on temporal persistence
+  // Continuous dampening based on volatility and temporal persistence
+  const volatilityDampening = 1.0 - Math.tanh(regime.volatility / 100.0);
   const hurstFactor = 0.5 + 0.5 * regime.hurst;
-  const learningRate = baseLR * volatilityDampening * hurstFactor;
+  const learningRate = driftLrResult.learningRate * volatilityDampening * hurstFactor;
 
   const adjustments: {
     algo: string;

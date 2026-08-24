@@ -231,16 +231,91 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
 
             <div className="p-5 bg-slate-900/70 rounded-2xl border border-white/5 space-y-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Taux d'Apprentissage (η)
+                Taux d'Apprentissage η(t)
               </span>
               <span className="text-2xl font-black font-mono text-amber-400 block">
-                {report.learningRate.toFixed(3)}
+                {(report.learningRate * 100).toFixed(2)}%
               </span>
-              <span className="text-[9px] text-slate-500 font-mono">
-                Régulation d'inertie Kalman
+              <span className="text-[9px] text-slate-500 font-mono truncate block">
+                {report.temporalDriftMetrics 
+                  ? `Résistance Dérive: ${(report.temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%` 
+                  : "Dérive Temporelle"}
               </span>
             </div>
           </div>
+
+          {/* DYNAMIC CYCLIC PHASE & TEMPORAL DRIFT DIAGNOSTIC */}
+          {report.cyclicPhaseProfile && (
+            <div className="p-6 bg-slate-900/60 rounded-3xl border border-white/5 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Compass size={16} className="text-indigo-400" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                    Matrice de Confiance Cyclique & Exposant de Lyapunov
+                  </h4>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                  report.cyclicPhaseProfile.phase === 'PERIODIC_ATTRACTOR'
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    : report.cyclicPhaseProfile.phase === 'STOCHASTIC_DISPERSION'
+                    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                    : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                }`}>
+                  {report.cyclicPhaseProfile.phaseLabel}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                {report.cyclicPhaseProfile.narrativeInterpretation}
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                <div className="p-3.5 bg-slate-950/60 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block mb-1">Résonance Attracteurs</span>
+                  <span className="text-base font-black font-mono text-emerald-400">
+                    {(report.cyclicPhaseProfile.macroFamilyWeights.attractorResonance * 100).toFixed(1)}%
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5 font-mono">
+                    Spectres, Fractales, Momentum
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-slate-950/60 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block mb-1">Diffusion Stochastique</span>
+                  <span className="text-base font-black font-mono text-cyan-400">
+                    {(report.cyclicPhaseProfile.macroFamilyWeights.stochasticDiffusion * 100).toFixed(1)}%
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5 font-mono">
+                    Cadence d'écarts, Markov, Bayes
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-slate-950/60 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block mb-1">Affinité Topologique</span>
+                  <span className="text-base font-black font-mono text-indigo-400">
+                    {(report.cyclicPhaseProfile.macroFamilyWeights.topologicalAffinity * 100).toFixed(1)}%
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5 font-mono">
+                    Réseau, Voisins, Transfert
+                  </span>
+                </div>
+              </div>
+
+              {report.temporalDriftMetrics && (
+                <div className="p-3.5 bg-indigo-950/30 rounded-xl border border-indigo-500/20 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                  <div className="flex items-center gap-2">
+                    <Activity size={14} className="text-indigo-400" />
+                    <span className="text-indigo-200 text-[11px] font-bold">Calibration η(t) = η0 / (1 + λ · D_KL) :</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-[10px] text-slate-400 flex-wrap">
+                    <span>D_KL(P||Q) : <strong className="text-white">{report.temporalDriftMetrics.klDivergence.toFixed(4)}</strong></span>
+                    <span>Var(Entropie H) : <strong className="text-white">{report.temporalDriftMetrics.entropyVariance.toFixed(5)}</strong></span>
+                    <span>Amortissement λ : <strong className="text-white">{report.temporalDriftMetrics.lambda.toFixed(3)}</strong></span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* COMPARAISON NUMÉROS SORTIS VS TOP PRÉDITS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

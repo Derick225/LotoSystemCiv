@@ -499,3 +499,68 @@ export const runDeterministicInertiaBacktest = async (
     empiricalGain: parseFloat(empiricalGain.toFixed(2)),
   };
 };
+
+export const DEFAULT_INERTIA_CALIBRATION: InertiaCalibrationModifiers = {
+  viscosityGain: 1.0,
+  massGain: 1.0,
+  couplingGain: 1.0,
+  dampingRatio: 0.5,
+};
+
+const getInertiaStorageKey = (drawName: string): string => {
+  const sanitized = (drawName || "default").trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
+  return `lotopro_inertia_calib_${sanitized}`;
+};
+
+/**
+ * Récupère la calibration d'inertie persistée pour un tirage spécifique (Tirage Isolation Rule).
+ */
+export const getPersistedInertiaCalibration = (drawName: string): InertiaCalibrationModifiers => {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return { ...DEFAULT_INERTIA_CALIBRATION };
+    }
+    const key = getInertiaStorageKey(drawName);
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return { ...DEFAULT_INERTIA_CALIBRATION };
+    const parsed = JSON.parse(raw);
+    return {
+      viscosityGain: typeof parsed.viscosityGain === "number" && !isNaN(parsed.viscosityGain) ? parsed.viscosityGain : 1.0,
+      massGain: typeof parsed.massGain === "number" && !isNaN(parsed.massGain) ? parsed.massGain : 1.0,
+      couplingGain: typeof parsed.couplingGain === "number" && !isNaN(parsed.couplingGain) ? parsed.couplingGain : 1.0,
+      dampingRatio: typeof parsed.dampingRatio === "number" && !isNaN(parsed.dampingRatio) ? parsed.dampingRatio : 0.5,
+    };
+  } catch (e) {
+    console.warn(`[InertiaStorage] Erreur lecture calibration pour ${drawName}:`, e);
+    return { ...DEFAULT_INERTIA_CALIBRATION };
+  }
+};
+
+/**
+ * Enregistre la calibration d'inertie persistée pour un tirage spécifique (Tirage Isolation Rule).
+ */
+export const savePersistedInertiaCalibration = (
+  drawName: string,
+  modifiers: InertiaCalibrationModifiers
+): void => {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    const key = getInertiaStorageKey(drawName);
+    window.localStorage.setItem(key, JSON.stringify(modifiers));
+  } catch (e) {
+    console.warn(`[InertiaStorage] Erreur écriture calibration pour ${drawName}:`, e);
+  }
+};
+
+/**
+ * Réinitialise la calibration d'inertie aux valeurs harmoniques par défaut pour un tirage spécifique.
+ */
+export const resetPersistedInertiaCalibration = (drawName: string): void => {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    const key = getInertiaStorageKey(drawName);
+    window.localStorage.removeItem(key);
+  } catch (e) {
+    console.warn(`[InertiaStorage] Erreur réinitialisation calibration pour ${drawName}:`, e);
+  }
+};

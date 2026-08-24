@@ -29,11 +29,13 @@ import {
 interface PredictionForensicsProps {
   report: ForensicReport;
   onClose: () => void;
+  onDelete?: (id: string) => void;
 }
 
 export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
   report,
   onClose,
+  onDelete,
 }) => {
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
@@ -43,19 +45,22 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
   const handleDeleteReport = async () => {
     if (
       !window.confirm(
-        "Êtes-vous sûr de vouloir supprimer définitivement ce rapport forensique ?",
+        "Êtes-vous sûr de vouloir supprimer définitivement ce rapport d'autopsie forensique ?",
       )
     )
       return;
     try {
-      audioEngine.play("success");
-      await deleteForensicReportLocal(report.id);
+      audioEngine.play("click");
+      await deleteForensicReportLocal(report.id, report.predictionId);
       if (isSupabaseConfigured()) await deleteForensicReportCloud(report.id);
-      showToast("Rapport supprimé", "success");
+      showToast("Rapport d'autopsie définitivement supprimé", "success");
+      if (onDelete) {
+        onDelete(report.id);
+      }
       onClose();
     } catch (error) {
       logError(error, { action: "delete_report_failed" });
-      showToast("Erreur lors de la suppression", "error");
+      showToast("Erreur lors de la suppression du rapport", "error");
     }
   };
 

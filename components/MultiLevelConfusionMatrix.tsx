@@ -11,6 +11,7 @@ import {
   Compass,
   Repeat,
   Crosshair,
+  Filter,
 } from "lucide-react";
 import { ForensicReport } from "../types";
 import { audioEngine } from "../utils/audioEngine";
@@ -30,6 +31,25 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [hoveredCell, setHoveredCell] = useState<{ num: number; stats: any } | null>(null);
+  const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+
+  // Dynamic max number calculation (e.g. 50 for EuroMillions, 90 for 5/90)
+  const maxNumber = useMemo(() => {
+    let maxFound = 90;
+    if (drawName.toLowerCase().includes("euromillions") || drawName.toLowerCase().includes("euro")) {
+      maxFound = 50;
+    } else if (drawName.toLowerCase().includes("powerball") || drawName.toLowerCase().includes("loto")) {
+      maxFound = 90;
+    }
+    reports.forEach((rep) => {
+      if (rep.combo) {
+        rep.combo.forEach((n) => {
+          if (n > maxFound) maxFound = n;
+        });
+      }
+    });
+    return maxFound;
+  }, [drawName, reports]);
 
   // Consolidation des catégories balistiques sur l'ensemble des rapports
   const consolidatedStats = useMemo(() => {
@@ -37,28 +57,34 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
     let neighbors1 = 0; // +/- 1
     let neighbors2 = 0; // +/- 2
     let sameDecade = 0;
-    let mirrors = 0; // 91 - n
+    let mirrors = 0; // (maxNumber + 1) - n
     let machineLeaks = 0;
     let pureMisses = 0;
     let totalPredicted = 0;
 
-    // Cartographie globale 1-90 des occurrences de hits et de proximités
+    // Cartographie globale 1-maxNumber des occurrences de hits et de proximités
     const numberPerformance: Record<
       number,
       {
         predictedCount: number;
         hitCount: number;
         nearCount: number;
+        mirrorCount: number;
+        decadeCount: number;
         actualAppearances: number;
+        reportsWithNum: string[];
       }
     > = {};
 
-    for (let i = 1; i <= 90; i++) {
+    for (let i = 1; i <= maxNumber; i++) {
       numberPerformance[i] = {
         predictedCount: 0,
         hitCount: 0,
         nearCount: 0,
+        mirrorCount: 0,
+        decadeCount: 0,
         actualAppearances: 0,
+        reportsWithNum: [],
       };
     }
 
@@ -67,7 +93,7 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       const actualSet = new Set(actualList);
       
       actualList.forEach((win) => {
-        if (win >= 1 && win <= 90) {
+        if (win >= 1 && win <= maxNumber && numberPerformance[win]) {
           numberPerformance[win].actualAppearances++;
         }
       });
@@ -82,9 +108,12 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       }
 
       preds.forEach((pred) => {
-        if (pred < 1 || pred > 90) return;
+        if (pred < 1 || pred > maxNumber || !numberPerformance[pred]) return;
         totalPredicted++;
         numberPerformance[pred].predictedCount++;
+        if (rep.id && !numberPerformance[pred].reportsWithNum.includes(rep.id)) {
+          numberPerformance[pred].reportsWithNum.push(rep.id);
+        }
 
         if (actualSet.has(pred)) {
           exactHits++;
@@ -92,7 +121,7 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
         } else {
           const directNear1 = actualSet.has(pred - 1) || actualSet.has(pred + 1);
           const directNear2 = !directNear1 && (actualSet.has(pred - 2) || actualSet.has(pred + 2));
-          const mirrorVal = 91 - pred;
+          const mirrorVal = (maxNumber + 1) - pred;
           const isMirror = actualSet.has(mirrorVal);
           const predDecade = Math.floor((pred - 1) / 10);
           const hasSameDecade = actualList.some(
@@ -107,8 +136,10 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
             numberPerformance[pred].nearCount += 0.5;
           } else if (isMirror) {
             mirrors++;
+            numberPerformance[pred].mirrorCount++;
           } else if (hasSameDecade) {
             sameDecade++;
+            numberPerformance[pred].decadeCount++;
           } else {
             pureMisses++;
           }
@@ -119,7 +150,6 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
     const safeTotal = Math.max(1, totalPredicted);
 
     // Calcul de l'Indice de Capture Proximale (ICP) continu
-    // ICP pondère les hits directs et les frôlements physiques dans l'espace topologique
     const proximalCaptureIndex = Math.min(
       100,
       Math.max(
@@ -154,7 +184,7 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
         miss: (pureMisses / safeTotal) * 100,
       },
     };
-  }, [reports]);
+  }, [reports, maxNumber]);
 
   const categories = [
     {
@@ -191,11 +221,11 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       borderColor: "border-cyan-500/30",
       bgLight: "bg-cyan-500/10",
       icon: Compass,
-      desc: "Zone de convergence à 2 unités sur le tore 1-90.",
+      desc: `Zone de convergence à 2 unités sur le tore 1-${maxNumber}.`,
     },
     {
       id: "mirror",
-      label: "Symétries Miroirs (91-n)",
+      label: `Symétries Miroirs (${maxNumber + 1}-n)`,
       count: consolidatedStats.mirrors,
       rate: consolidatedStats.rates.mirror,
       color: "bg-indigo-500",
@@ -242,8 +272,11 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
                 <Compass size={20} />
               </span>
               <div>
-                <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white">
+                <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2">
                   Matrice de Confusion Multi-Niveaux & Décomposition Balistique
+                  <span className="text-[10px] font-mono text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                    1 à {maxNumber}
+                  </span>
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Analyse des impacts exacts et résonances spectrales ({drawName}) sur {reports.length} tirages audités.
@@ -305,6 +338,7 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {categories.map((cat) => {
           const Icon = cat.icon;
+          const isFilterActive = selectedFilter === cat.id;
           return (
             <div
               key={cat.id}
@@ -312,11 +346,11 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
                 try {
                   audioEngine.play("click");
                 } catch (e) {}
-                setSelectedFilter(selectedFilter === cat.id ? "all" : cat.id);
+                setSelectedFilter(isFilterActive ? "all" : cat.id);
               }}
               className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
-                selectedFilter === cat.id
-                  ? `${cat.bgLight} ${cat.borderColor} ring-2 ring-indigo-500/40`
+                isFilterActive
+                  ? `${cat.bgLight} ${cat.borderColor} ring-2 ring-indigo-500/40 shadow-lg scale-102`
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-indigo-500/40"
               }`}
             >
@@ -342,16 +376,21 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
         })}
       </div>
 
-      {/* Topo-Resonance 1-90 Board Matrix */}
+      {/* Topo-Resonance Board Matrix */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2">
               <Sliders size={14} className="text-indigo-500" />
-              Grille de Résonance Balistique (1 à 90)
+              Grille de Résonance Balistique (1 à {maxNumber})
+              {selectedFilter !== "all" && (
+                <span className="text-[9px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                  Filtre actif : {categories.find(c => c.id === selectedFilter)?.label}
+                </span>
+              )}
             </h4>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Densité de capture des numéros lors des prédictions passées.
+              Densité de capture des numéros lors des prédictions passées. Cliquez sur un numéro pour voir ses rapports associés.
             </p>
           </div>
           <div className="flex items-center gap-3 text-[9px] font-bold text-slate-400 uppercase">
@@ -370,22 +409,38 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
           </div>
         </div>
 
-        {/* 90-Ball Matrix Grid */}
-        <div className="grid grid-cols-10 sm:grid-cols-15 md:grid-cols-18 gap-1.5 p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800/80">
-          {Array.from({ length: 90 }, (_, i) => {
+        {/* Matrix Grid (Responsive columns based on maxNumber) */}
+        <div className={`grid ${maxNumber <= 50 ? "grid-cols-10 sm:grid-cols-10 md:grid-cols-10" : "grid-cols-10 sm:grid-cols-15 md:grid-cols-18"} gap-1.5 p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800/80`}>
+          {Array.from({ length: maxNumber }, (_, i) => {
             const num = i + 1;
             const perf = consolidatedStats.numberPerformance[num] || {
               predictedCount: 0,
               hitCount: 0,
               nearCount: 0,
+              mirrorCount: 0,
+              decadeCount: 0,
               actualAppearances: 0,
+              reportsWithNum: [],
             };
+
+            // Filter check
+            let isDimmed = false;
+            if (selectedFilter === "exact" && perf.hitCount === 0) isDimmed = true;
+            if (selectedFilter === "near1" && perf.nearCount === 0) isDimmed = true;
+            if (selectedFilter === "near2" && perf.nearCount === 0) isDimmed = true;
+            if (selectedFilter === "mirror" && perf.mirrorCount === 0) isDimmed = true;
+            if (selectedFilter === "decade" && perf.decadeCount === 0) isDimmed = true;
+            if (selectedFilter === "miss" && perf.predictedCount === 0) isDimmed = true;
+
+            const isSelected = selectedNumber === num;
 
             let cellBg = "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800";
             if (perf.hitCount > 0) {
               cellBg = "bg-emerald-500 text-white font-black shadow-sm shadow-emerald-500/20 border-emerald-400";
             } else if (perf.nearCount > 0) {
               cellBg = "bg-teal-500/20 text-teal-600 dark:text-teal-300 font-bold border-teal-500/30";
+            } else if (perf.mirrorCount > 0) {
+              cellBg = "bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 font-bold border-indigo-500/30";
             } else if (perf.predictedCount > 0) {
               cellBg = "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20";
             }
@@ -393,9 +448,21 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
             return (
               <div
                 key={num}
+                onClick={() => {
+                  try {
+                    audioEngine.play("click");
+                  } catch (e) {}
+                  setSelectedNumber(selectedNumber === num ? null : num);
+                  if (perf.reportsWithNum.length > 0 && onSelectReport) {
+                    const firstRep = reports.find(r => r.id === perf.reportsWithNum[0]);
+                    if (firstRep) onSelectReport(firstRep);
+                  }
+                }}
                 onMouseEnter={() => setHoveredCell({ num, stats: perf })}
                 onMouseLeave={() => setHoveredCell(null)}
-                className={`h-7 rounded-lg border flex items-center justify-center text-[10px] font-mono transition-transform hover:scale-110 cursor-pointer ${cellBg}`}
+                className={`h-7 rounded-lg border flex items-center justify-center text-[10px] font-mono transition-transform hover:scale-110 cursor-pointer ${cellBg} ${
+                  isDimmed ? "opacity-20 scale-95" : "opacity-100"
+                } ${isSelected ? "ring-2 ring-indigo-500 scale-110 shadow-md" : ""}`}
                 title={`Numéro ${num}: ${perf.hitCount} hits, ${perf.nearCount} proximités, ${perf.predictedCount} prédictions`}
               >
                 {num}
@@ -406,7 +473,7 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
 
         {/* Hover inspection detail banner */}
         {hoveredCell ? (
-          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-between text-xs animate-fade-in">
+          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-between text-xs animate-fade-in flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-black flex items-center justify-center font-mono">
                 {hoveredCell.num}
@@ -415,12 +482,15 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
                 Audité {hoveredCell.stats.predictedCount} fois en prédiction
               </span>
             </div>
-            <div className="flex items-center gap-4 text-[11px] font-mono">
+            <div className="flex items-center gap-4 text-[11px] font-mono flex-wrap">
               <span className="text-emerald-500 font-bold">
-                {hoveredCell.stats.hitCount} Hits direct(s)
+                {hoveredCell.stats.hitCount} Hit(s) direct(s)
               </span>
               <span className="text-teal-500 font-bold">
                 {hoveredCell.stats.nearCount} Proximité(s) (±1/±2)
+              </span>
+              <span className="text-indigo-400 font-bold">
+                {hoveredCell.stats.mirrorCount} Miroir(s)
               </span>
               <span className="text-slate-400">
                 Sorti {hoveredCell.stats.actualAppearances} fois dans les tirages réels
@@ -436,3 +506,4 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
     </div>
   );
 };
+

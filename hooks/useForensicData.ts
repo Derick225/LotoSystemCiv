@@ -1,12 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { getPredictionHistoryAsync, linkPredictionToResult, findMatchingResultForPrediction } from '../services/predictionHistoryService';
-import { getLocalForensicReports, performForensicAnalysis, saveForensicReport, healForensicReport } from '../services/postPredictionAnalysisService';
+import { 
+    getLocalForensicReports, 
+    performForensicAnalysis, 
+    saveForensicReport, 
+    healForensicReport, 
+    getDismissedAutopsyPredictionIds,
+    deleteForensicReportLocal,
+    deleteMultipleForensicReportsLocal
+} from '../services/postPredictionAnalysisService';
 import { getPlatinumHistory, performPlatinumAudit } from '../services/metaAnalystService';
 import { PredictionHistoryItem, ForensicReport, PlatinumAudit } from '../types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { useToast } from '../components/ui/Toast';
-import { syncForensicReports } from '../services/syncService';
+import { syncForensicReports, deleteForensicReportCloud, deleteMultipleForensicReportsCloud } from '../services/syncService';
 
 export const useForensicData = (drawName: string) => {
     const history = useNexusStore((state) => state.history);
@@ -59,8 +67,9 @@ export const useForensicData = (drawName: string) => {
             }
 
             const existingReportIds = new Set(currentReports.map((r) => r.predictionId));
+            const dismissedPredictionIds = await getDismissedAutopsyPredictionIds();
 
-            // 2. Identifier les prédictions sans rapport
+            // 2. Identifier les prédictions sans rapport (et non expressément supprimées par l'utilisateur)
             const preds = await getPredictionHistoryAsync(drawName);
             const pending: PredictionHistoryItem[] = [];
             const analysisPromises: Promise<ForensicReport | null>[] = [];
@@ -74,7 +83,7 @@ export const useForensicData = (drawName: string) => {
             });
 
             for (const pred of preds.slice(0, 30)) {
-                if (existingReportIds.has(pred.id)) continue;
+                if (existingReportIds.has(pred.id) || dismissedPredictionIds.has(pred.id)) continue;
 
                 let actual = null;
                 if (pred.drawResultId) {
@@ -204,6 +213,38 @@ export const useForensicData = (drawName: string) => {
         return synced;
     }, [reports, showToast]);
 
+    const deleteReport = useCallback(async (id: string, predictionId?: string) => {
+        // Optimistic UI update
+        setReports(prev => prev.filter(r => r.id !== id));
+        try {
+            await deleteForensicReportLocal(id, predictionId);
+            if (isSupabaseConfigured()) {
+                await deleteForensicReportCloud(id);
+            }
+        } catch (e) {
+            console.error("Erreur suppression rapport:", e);
+            showToast("Erreur lors de la suppression du rapport", "error");
+            refreshData();
+        }
+    }, [refreshData, showToast]);
+
+    const deleteReports = useCallback(async (items: { id: string; predictionId?: string }[]) => {
+        if (!items || items.length === 0) return;
+        const idSet = new Set(items.map(i => i.id));
+        // Optimistic UI update
+        setReports(prev => prev.filter(r => !idSet.has(r.id)));
+        try {
+            await deleteMultipleForensicReportsLocal(items);
+            if (isSupabaseConfigured()) {
+                await deleteMultipleForensicReportsCloud(items.map(i => i.id));
+            }
+        } catch (e) {
+            console.error("Erreur suppression multiple rapports:", e);
+            showToast("Erreur lors de la suppression multiple", "error");
+            refreshData();
+        }
+    }, [refreshData, showToast]);
+
     return {
         reports,
         pendingPredictions,
@@ -213,6 +254,8 @@ export const useForensicData = (drawName: string) => {
         refreshData,
         refreshLocal: refreshData,
         setReports,
-        syncReports
+        syncReports,
+        deleteReport,
+        deleteReports
     };
 };

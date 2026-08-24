@@ -4,9 +4,10 @@ import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { extractFeatures, extractDrawNumbers } from './featureExtractor';
 import { computeAdvancedMetrics } from './predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
-import { calculateStatisticalBounds } from '../mathService';
+import { calculateStatisticalBounds, calculateTemporalDriftLearningRate, TemporalDriftLearningRateResult } from '../mathService';
 import { normalizeWeights } from './weightsManager';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
+import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -48,6 +49,8 @@ export interface ClosedLoopAutopsyReport {
   initialWeights: AlgoWeights;
   learningRate: number;
   summaryRemark: string;
+  cyclicPhaseProfile?: CyclicPhaseProfileResult;
+  temporalDriftMetrics?: TemporalDriftLearningRateResult;
 }
 
 /**
@@ -257,9 +260,17 @@ export const executeClosedLoopAutopsy = async (
   const brierScore = brierSum / 90.0;
   const calibrationAccuracy = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-brierScore * 20.0))));
 
-  // 7. Calcul du Gradient d'Erreur & Correction en Boucle Fermée pour chaque Gène
-  const rawLearningRate = 0.25 / (1.0 + Math.exp(5.0 * (brierScore - 0.05)));
-  const learningRate = Math.max(0.05, Math.min(0.5, rawLearningRate));
+  // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
+  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
+  const baseLR = 0.25 / (1.0 + Math.exp(5.0 * (brierScore - 0.05)));
+  const temporalDriftMetrics = calculateTemporalDriftLearningRate(priorHistory, baseLR, 10);
+  const learningRate = Math.max(0.02, Math.min(0.5, temporalDriftMetrics.learningRate));
+
+  // 7.5. Matrice de Profil Cyclique & Exposant de Lyapunov
+  const cyclicPhaseProfile = calculateCyclicPhaseProfileMatrix(
+    priorHistory,
+    advancedMetrics?.topologicalLyapunov as Record<number, number>
+  );
 
   const algoGradients: AlgoGradientBreakdown[] = [];
   const rawUpdatedWeights: Record<string, number> = {};
@@ -280,9 +291,13 @@ export const executeClosedLoopAutopsy = async (
     const signalGain = avgWinnerScore - meanScore;
     const gradient = -signalGain; // Négatif si le gène a fortement distingué les gagnants
 
-    // Mise à jour exponentielle (Softmax SGD)
+    // Modulation continue selon la phase cyclique du jeu
+    const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
+    const phaseMultiplier = Math.exp(phaseModifier * 0.5);
+
+    // Mise à jour exponentielle (Softmax SGD) régularisée par la résistance de dérive
     const currentW = normalizedCurrent[key] || (1.0 / numAlgos);
-    const updateMultiplier = Math.exp(-learningRate * gradient * 4.0);
+    const updateMultiplier = Math.exp(-learningRate * gradient * 4.0) * phaseMultiplier;
     const newWeight = currentW * updateMultiplier;
     rawUpdatedWeights[key] = newWeight;
 
@@ -308,8 +323,8 @@ export const executeClosedLoopAutopsy = async (
   // Tri par attribution décroissante
   algoGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
 
-  // 8. Synthèse Narrative
-  let summaryRemark = `Autopsie rétrospective du ${targetDraw.date} : `;
+  // 8. Synthèse Narrative Enrichie
+  let summaryRemark = `Autopsie rétrospective du ${targetDraw.date} (${cyclicPhaseProfile.phaseLabel}) : `;
   if (directHitsTop5.length >= 2) {
     summaryRemark += `Excellente résonance prédictive avec ${directHitsTop5.length} gagnants capturés directement dans le Top 5 (${directHitsTop5.join(', ')}). `;
   } else if (directHitsTop10.length >= 2) {
@@ -317,6 +332,7 @@ export const executeClosedLoopAutopsy = async (
   } else {
     summaryRemark += `Dispersion stochastique modérée. ${nearMisses.length} frôlements spatiaux/miroirs identifiés (${nearMisses.slice(0, 2).map((m) => m.actualWinner).join(', ')}). `;
   }
+  summaryRemark += `Taux d'apprentissage η(t) = ${(learningRate * 100).toFixed(2)}% (Résistance dérive: ${(temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%). `;
   summaryRemark += `Gènes leaders sur ce tirage : ${algoGradients.slice(0, 3).map((g) => g.label).join(', ')}.`;
 
   return {
@@ -340,5 +356,7 @@ export const executeClosedLoopAutopsy = async (
     initialWeights: normalizedCurrent,
     learningRate,
     summaryRemark,
+    cyclicPhaseProfile,
+    temporalDriftMetrics,
   };
 };

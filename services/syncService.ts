@@ -382,3 +382,10 @@ export const deleteForensicReportCloud = async (id: string) => {
     if (!user) return;
     await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
 };
+
+export const deleteMultipleForensicReportsCloud = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('forensic_reports').delete().in('id', ids).eq('user_id', user.id);
+};
