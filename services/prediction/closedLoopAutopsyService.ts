@@ -282,10 +282,29 @@ export const executeClosedLoopAutopsy = async (
     const meanScore = sumScore / 90.0;
 
     let attributionWinners = 0;
+    let totalTargetMass = 0;
     actualWinners.forEach((w) => {
+      // 1. Impact direct exact (Hit exact : distance = 0, masse = 1.0)
       attributionWinners += scores[w] || 0;
+      totalTargetMass += 1.0;
+
+      // 2. Intégration continue des frôlements spatiaux (Voisins immédiats +/- 1 sur tore circulaire)
+      const neighborMinus = w > 1 ? w - 1 : 90;
+      const neighborPlus = w < 90 ? w + 1 : 1;
+      const neighborGaussWeight = Math.exp(-0.5); // Noyau gaussien continu exp(-d^2/(2*sigma^2))
+      attributionWinners += (scores[neighborMinus] || 0) * neighborGaussWeight * 0.25;
+      attributionWinners += (scores[neighborPlus] || 0) * neighborGaussWeight * 0.25;
+      totalTargetMass += neighborGaussWeight * 0.5;
+
+      // 3. Résonance miroir décadaire
+      const mirror = getMirrorNumber(w);
+      if (mirror !== w) {
+        const mirrorWeight = Math.exp(-1.0) * 0.2;
+        attributionWinners += (scores[mirror] || 0) * mirrorWeight;
+        totalTargetMass += mirrorWeight;
+      }
     });
-    const avgWinnerScore = attributionWinners / (actualWinners.length || 1);
+    const avgWinnerScore = attributionWinners / (totalTargetMass || 1);
 
     // Gradient différentiel : gain relatif sur les gagnants vs bruit sur le reste
     const signalGain = avgWinnerScore - meanScore;
