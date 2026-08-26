@@ -33,13 +33,14 @@ import {
   Table,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
+import { AlgoKey } from "../../shared/prediction.types";
 import { lotteryService } from "../../services/lotteryService";
-import { generateMasterPrediction } from "../../services/predictionEngine";
+import { generateMasterPrediction, getAlgoWeights } from "../../services/predictionEngine";
 
 export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const history = useNexusStore((state) => state.history);
   const loading = useNexusStore((state) => state.loading);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
 
   const [selectedNum, setSelectedNum] = useState<number>(1);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -119,11 +120,16 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
         if (!gameHistory || gameHistory.length === 0) continue;
 
+        const effectiveWeights =
+          dName === drawName && globalWeights && Object.keys(globalWeights).length > 0
+            ? globalWeights
+            : await getAlgoWeights(dName);
+
         const predResult = await generateMasterPrediction(
           dName as any,
           gameHistory,
           100,
-          DEFAULT_ALGO_WEIGHTS,
+          effectiveWeights,
           undefined,
           undefined,
           true,

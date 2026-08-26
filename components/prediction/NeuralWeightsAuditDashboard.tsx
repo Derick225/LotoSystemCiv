@@ -288,6 +288,19 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     return initial;
   });
 
+  // Synchronisation continue dès que les poids globaux du tirage changent dans l'application
+  useEffect(() => {
+    if (globalWeights && Object.keys(globalWeights).length > 0) {
+      const next: Record<string, number> = {};
+      ALGO_REGISTRY.forEach((meta) => {
+        next[meta.key] = typeof (globalWeights as any)[meta.key] === "number"
+          ? (globalWeights as any)[meta.key]
+          : 1.0;
+      });
+      setLocalWeights(next);
+    }
+  }, [globalWeights]);
+
   // Locked weights state (pinned while normalizing others)
   const [lockedKeys, setLockedKeys] = useState<Record<string, boolean>>({});
   const [activeCategory, setActiveCategory] = useState<string>("all");

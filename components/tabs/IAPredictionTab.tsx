@@ -62,7 +62,9 @@ import {
   purgeOldPredictionLogs,
   STORAGE_RETENTION_CONSTANTS,
 } from "../../services/predictionHistoryService";
-import type { Prediction, PredictionHistoryItem } from "../../types";
+import type { Prediction, PredictionHistoryItem, AlgoWeights } from "../../types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
+import { getAlgoWeights, adjustWeightsForRegime, normalizeWeights } from "../../services/prediction/weightsManager";
 import { NumberBall } from "../NumberBall";
 import { ExportService } from "../../services/exportService";
 
@@ -499,107 +501,22 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     hurst: number,
     entropy: number,
     volatility: number,
+    currentWeights?: AlgoWeights,
   ) => {
-    const baseWeights: Record<string, number> = {
-      frequency: 1.0,
-      gap: 1.0,
-      spectral: 1.0,
-      markov: 1.0,
-      bayes: 1.0,
-      momentum: 1.0,
-      affinity: 1.0,
-      spatial: 1.0,
-      temporal: 1.0,
-      fractal: 1.0,
-      shadow: 1.0,
-      network: 1.0,
-      echo_state: 1.0,
-      gap_sequence: 1.0,
-      derived_neighbor: 1.0,
-      gap_pattern: 1.0,
-      sequence_pattern: 1.0,
-      gap_cadence: 1.0,
-      gap_trend: 1.0,
-    };
+    const baseWeights: AlgoWeights = currentWeights && Object.keys(currentWeights).length > 0
+      ? { ...currentWeights }
+      : (globalWeights && Object.keys(globalWeights).length > 0 ? { ...globalWeights } : { ...DEFAULT_ALGO_WEIGHTS });
+
+    const adjustedWeights = adjustWeightsForRegime(baseWeights, {
+      regime,
+      hurst,
+      entropy,
+      volatility,
+    });
 
     const hDiff = hurst - 0.5;
     const eDiff = entropy - 3.0;
-
-    // Volatility modulation (higher volatility -> favor agile models)
     const volMod = Math.max(-0.5, Math.min(0.5, volatility / 100.0));
-
-    const adjustedWeights = { ...baseWeights };
-
-    // Continuous mapping based on statistical indicators:
-    const trendFactor = 1.0 + 1.5 * hDiff - 0.5 * volMod;
-    adjustedWeights.frequency = Math.max(
-      0.1,
-      adjustedWeights.frequency * trendFactor,
-    );
-    adjustedWeights.momentum = Math.max(
-      0.1,
-      adjustedWeights.momentum * trendFactor,
-    );
-    adjustedWeights.gap_trend = Math.max(
-      0.1,
-      adjustedWeights.gap_trend * trendFactor,
-    );
-
-    const transitionFactor = 1.0 - 1.5 * hDiff + 0.8 * volMod;
-    adjustedWeights.markov = Math.max(
-      0.1,
-      adjustedWeights.markov * transitionFactor,
-    );
-    adjustedWeights.bayes = Math.max(
-      0.1,
-      adjustedWeights.bayes * transitionFactor,
-    );
-    adjustedWeights.shadow = Math.max(
-      0.1,
-      adjustedWeights.shadow * transitionFactor,
-    );
-    adjustedWeights.fractal = Math.max(
-      0.1,
-      adjustedWeights.fractal * (1.0 + Math.abs(hDiff)),
-    );
-
-    const chaoticFactor = 1.0 + 0.8 * eDiff + 1.2 * volMod;
-    adjustedWeights.spectral = Math.max(
-      0.1,
-      adjustedWeights.spectral * chaoticFactor,
-    );
-    adjustedWeights.echo_state = Math.max(
-      0.1,
-      adjustedWeights.echo_state * chaoticFactor,
-    );
-    adjustedWeights.gap_sequence = Math.max(
-      0.1,
-      adjustedWeights.gap_sequence * chaoticFactor,
-    );
-
-    const structureFactor = 1.0 - 0.8 * eDiff - 0.5 * volMod;
-    adjustedWeights.affinity = Math.max(
-      0.1,
-      adjustedWeights.affinity * structureFactor,
-    );
-    adjustedWeights.spatial = Math.max(
-      0.1,
-      adjustedWeights.spatial * structureFactor,
-    );
-    adjustedWeights.gap_pattern = Math.max(
-      0.1,
-      adjustedWeights.gap_pattern * structureFactor,
-    );
-    adjustedWeights.sequence_pattern = Math.max(
-      0.1,
-      adjustedWeights.sequence_pattern * structureFactor,
-    );
-
-    const sum = Object.values(adjustedWeights).reduce((a, b) => a + b, 0);
-    const normalizedWeights = {} as Record<string, number>;
-    for (const key in adjustedWeights) {
-      normalizedWeights[key] = (adjustedWeights[key] / sum) * 19.0;
-    }
 
     const persistenceProb = 1.0 / (1.0 + Math.exp(-35.0 * hDiff));
     const antipersistenceProb = 1.0 - persistenceProb;
@@ -639,7 +556,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     const strategicAdvice = `Favoriser continûment un ratio d'exposition de ${(persistenceProb * 100).toFixed(0)}% de numéros chauds d'inertie (historique récent) et ${(antipersistenceProb * 100).toFixed(0)}% d'écarts longs parvenus à maturité (rupture de phase).`;
 
     return {
-      weights: normalizedWeights,
+      weights: adjustedWeights as Record<string, number>,
       rationale,
       confidence: boundedConfidence,
       strategicAdvice,
@@ -710,12 +627,17 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           e.message?.includes("GEMINI_NOT_CONFIGURED")
         ) {
           // Gemini not configured - fallback to high-fidelity math optimizer
+          const activeBaseWeights = globalWeights && Object.keys(globalWeights).length > 0
+            ? globalWeights
+            : await getAlgoWeights(drawName);
+
           const localFb = generateSmartLocalWeightsFallback(
             drawName,
             regimeStr,
             hurstVal,
             entropyVal,
             volatilityVal,
+            activeBaseWeights,
           );
           aiWeights = localFb.weights;
           aiRationale = localFb.rationale;
@@ -731,12 +653,17 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
             "Could not fetch Gemini hybrid weights, falling back to local stochastics:",
             e,
           );
+          const activeBaseWeights = globalWeights && Object.keys(globalWeights).length > 0
+            ? globalWeights
+            : await getAlgoWeights(drawName);
+
           const localFb = generateSmartLocalWeightsFallback(
             drawName,
             regimeStr,
             hurstVal,
             entropyVal,
             volatilityVal,
+            activeBaseWeights,
           );
           aiWeights = localFb.weights;
           aiRationale = localFb.rationale;
@@ -838,20 +765,21 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");
 
+      const activeWeights = globalWeights && Object.keys(globalWeights).length > 0
+        ? globalWeights
+        : await getAlgoWeights(drawName);
+
       for (let i = 0; i < K; i++) {
         // Predict for targets using only past elements relative to i
         const histSlice = history.slice(i + 1);
         const targetDraw = history[i];
 
-        const weights = globalWeights
-          ? (globalWeights as any)[drawName]
-          : undefined;
         // Generate prediction on the sliced dataset
         const pred = await generateMasterPrediction(
           drawName,
           histSlice,
           temporalDepth,
-          weights,
+          activeWeights,
           undefined,
           undefined,
           skipTraining,

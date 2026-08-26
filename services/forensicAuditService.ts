@@ -23,6 +23,7 @@ import {
   EmpiricalCalibration,
   FALLBACK_CALIBRATION,
 } from "../shared/prediction.types";
+import { useNexusStore } from "../store/useNexusStore";
 
 export class InvalidInputError extends Error {
   constructor(message: string) {
@@ -1610,6 +1611,11 @@ export const generateForensicReport = (
   algoWeights: Record<AlgoKey, number> = DEFAULT_ALGO_WEIGHTS,
   predictionMatrix?: Record<number, ScoreBreakdown>,
 ): ForensicReport => {
+  const storeWeights = typeof window !== 'undefined' ? useNexusStore.getState?.()?.globalWeights : null;
+  const resolvedAlgoWeights = (algoWeights && Object.keys(algoWeights).length > 0 && algoWeights !== DEFAULT_ALGO_WEIGHTS)
+    ? algoWeights
+    : (storeWeights && Object.keys(storeWeights).length > 0 ? storeWeights : algoWeights || DEFAULT_ALGO_WEIGHTS);
+
   const sortedCombo = [...combo].sort((a, b) => a - b);
   const n = sortedCombo.length;
 
@@ -1661,9 +1667,9 @@ export const generateForensicReport = (
     let score = 0;
     if (predictionMatrix && predictionMatrix[i]) {
       const bd = predictionMatrix[i];
-      Object.keys(algoWeights).forEach((kKey) => {
+      Object.keys(resolvedAlgoWeights).forEach((kKey) => {
         const k = kKey as AlgoKey;
-        score += (algoWeights[k] || 0) * (bd[k] || 0);
+        score += (resolvedAlgoWeights[k] || 0) * (bd[k] || 0);
       });
     }
     pPred[i] = Math.exp(score / temp);
@@ -1691,7 +1697,7 @@ export const generateForensicReport = (
   }
 
   const errorGradients: Record<AlgoKey, number> = {} as any;
-  Object.keys(algoWeights).forEach((kKey) => {
+  Object.keys(resolvedAlgoWeights).forEach((kKey) => {
     const k = kKey as AlgoKey;
     let grad = 0;
     for (let i = 1; i <= DOMAIN_SIZE; i++) {

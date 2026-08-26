@@ -6,7 +6,7 @@ import { DrawResult, AlgoWeights, Prediction } from '../../types';
 import { EnhancedMetrics } from './metrics.types';
 import { SymbioticContext } from '../../types';
 import { generateMasterPredictionCore } from './predictionFacade';
-import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../../shared/prediction.types';
+import { AlgoKey } from '../../shared/prediction.types';
 import { DNAOptimizer } from '../training/DNAOptimizer';
 import { ParkMillerLCG } from './deterministicCore';
 
@@ -136,7 +136,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
     const top5 = topCands.slice(0, 5).sort((a,b) => a - b);
     const candidates = topCands.slice(5, 15);
 
-    const activeWeights = specificWeights || DEFAULT_ALGO_WEIGHTS;
+    const activeWeights = specificWeights;
     const optimizer = new DNAOptimizer(Object.keys(activeWeights) as AlgoKey[]);
     const dnaMatrix = top5.map(num => {
         const bdown = breakdownAcc[num] || {};

@@ -2,6 +2,7 @@ import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
+import { useNexusStore } from '../store/useNexusStore';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -380,9 +381,10 @@ export const calculateDnaSieveWeights = (
         };
     }
 
+    const storeWeights = typeof window !== 'undefined' ? useNexusStore.getState().globalWeights : null;
     const effectiveWeights: AlgoWeights = weights && Object.keys(weights).length > 0
         ? weights
-        : DEFAULT_ALGO_WEIGHTS;
+        : (storeWeights && Object.keys(storeWeights).length > 0 ? storeWeights : DEFAULT_ALGO_WEIGHTS);
 
     const N = 90;
     const sampleSize = Math.min(history.length, Math.max(30, Math.floor(history.length * 0.65)));

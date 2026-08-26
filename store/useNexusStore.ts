@@ -21,6 +21,7 @@ import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
 import {
   getAlgoWeights,
   saveAlgoWeights,
+  normalizeWeights,
 } from "../services/prediction/weightsManager";
 import { EmpiricalCalibration } from "../shared/prediction.types";
 
@@ -178,7 +179,7 @@ export const useNexusStore = create<NexusState>()(
           console.warn("Garbage collection skipped:", e);
         }
 
-        // Écouter l'hydratation cloud pour forcer le store à se recharger depuis IndexedDB
+        // Écouter l'hydratation cloud et les mises à jour de poids pour forcer le store à se synchroniser
         if (
           typeof window !== "undefined" &&
           !(window as any).__NEXUS_SYNC_REGISTERED__
@@ -197,6 +198,16 @@ export const useNexusStore = create<NexusState>()(
                 "Failed to rehydrate NexusStore on cloud hydration:",
                 e,
               );
+            }
+          });
+
+          window.addEventListener("NEXUS_WEIGHTS_UPDATED", (e: any) => {
+            const currentDraw = useNexusStore.getState().drawName;
+            if (e?.detail?.drawName === currentDraw && e?.detail?.weights) {
+              const currentWeights = useNexusStore.getState().globalWeights;
+              if (JSON.stringify(currentWeights) !== JSON.stringify(e.detail.weights)) {
+                set({ globalWeights: e.detail.weights });
+              }
             }
           });
         }
@@ -238,7 +249,16 @@ export const useNexusStore = create<NexusState>()(
       setFocusMode: (focus) => set({ isFocusMode: focus }),
       navigateToModule: (mainTab, subTab = null) =>
         set({ activeMainTab: mainTab, activeSubTab: subTab }),
-      setGlobalWeights: (weights) => set({ globalWeights: weights }),
+      setGlobalWeights: (weights) => {
+        const currentDraw = get().drawName;
+        const normalized = normalizeWeights(weights);
+        set({ globalWeights: normalized });
+        if (currentDraw) {
+          saveAlgoWeights(currentDraw, normalized).catch((err) => {
+            console.error("Failed to persist global weights:", err);
+          });
+        }
+      },
       setForensicOptimized: (opt) => set({ isForensicOptimized: opt }),
       setAutonomousAgentActive: (active) => {
         if (typeof window !== "undefined" && window.localStorage) {

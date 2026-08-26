@@ -1,5 +1,5 @@
 import { AlgoWeights } from '../../types';
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
+import { AlgoKey } from '../../shared/prediction.types';
 import { LCG } from '../../utils/mathUtils';
 import { normalizeWeights } from '../prediction/weightsManager';
 

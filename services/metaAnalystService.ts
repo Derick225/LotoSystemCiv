@@ -7,6 +7,7 @@ import { extractFeatures } from './prediction/featureExtractor';
 import { getLocalForensicReports } from './postPredictionAnalysisService';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
 import { EnhancedMetrics } from './prediction/metrics.types';
+import { AlgoKey } from '../shared/prediction.types';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & MATHEMATICAL FOUNDATIONS
@@ -170,7 +171,8 @@ export async function generatePlatinumPredictionCore(
     };
 
     // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS
-    const weights = await getAlgoWeights(drawName);
+    const storeWeights = useNexusStore.getState().globalWeights;
+    const weights = (storeWeights && Object.keys(storeWeights).length > 0) ? storeWeights : await getAlgoWeights(drawName);
     const finalTemporalDepth = temporalDepth ?? useNexusStore.getState().temporalDepth ?? 100;
     
     const masterPred = await generateMasterPrediction(
@@ -249,7 +251,7 @@ export async function generatePlatinumPredictionCore(
 
     onProgress?.(70, "Agrégation non-linéaire tensorielle & Couplage thermodynamique...");
 
-    // 3. COUPLAGE THERMODYNAMIQUE & SYNERGIE DE COUVERTURE
+    // 3. COUPLAGE THERMODYNAMIQUE & SYNERGIE DE COUVERTURE (Pondération dynamique synchronisée)
     const rawSums = new Float64Array(MAX_NUM + 1);
     const fracSpec = new Float64Array(MAX_NUM + 1);
     const quantAi = new Float64Array(MAX_NUM + 1);
@@ -260,14 +262,14 @@ export async function generatePlatinumPredictionCore(
 
     for (let i = 1; i <= MAX_NUM; i++) {
         const sumVal = (
-            stdFreq[i] * 1.2 +
-            stdGap[i] * 1.1 +
-            stdMomentum[i] * 1.15 +
-            stdSpectral[i] * 1.05 +
-            stdMarkov[i] * 1.1 +
-            stdBayes[i] * 1.0 +
-            stdFractal[i] * 1.0 +
-            stdSpatial[i] * 1.0
+            stdFreq[i] * (weights[AlgoKey.FREQUENCY] ?? 1.0) +
+            stdGap[i] * (weights[AlgoKey.GAPS] ?? 1.0) +
+            stdMomentum[i] * (weights[AlgoKey.MOMENTUM] ?? 1.0) +
+            stdSpectral[i] * (weights[AlgoKey.SPECTRAL] ?? 1.0) +
+            stdMarkov[i] * (weights[AlgoKey.MARKOV] ?? 1.0) +
+            stdBayes[i] * (weights[AlgoKey.BAYES] ?? 1.0) +
+            stdFractal[i] * (weights[AlgoKey.FRACTAL] ?? 1.0) +
+            stdSpatial[i] * (weights[AlgoKey.SPATIAL] ?? 1.0)
         );
         rawSums[i] = sumVal;
         if (sumVal > maxRawSum) maxRawSum = sumVal;
@@ -594,6 +596,7 @@ export async function generatePlatinumPredictionCore(
     // Inverse temperature thermodynamique dérivée de l'entropie de Shannon du vecteur de consensus
     const inverseTempBeta = (1.0 / (stdNorm || 1.0)) * (1.0 + Math.tanh(2.5 * (entropyScore - 0.5)));
     const entropyModulator = 1.0 + Math.tanh(2.0 * Math.max(0, entropyScore - 0.40));
+    const meanGapVal = statsGap.mean || (MAX_NUM / 5.0);
 
     for (let i = 1; i <= MAX_NUM; i++) {
         const zCons = (normalizedVector[i] - meanNorm) / (stdNorm || 1.0);
@@ -612,8 +615,13 @@ export async function generatePlatinumPredictionCore(
         // 4. Affinité d'ombre (Shadow affinity continue)
         const affVal = (dnaAffinity[i] ?? 50) / 100.0;
         const shadowAffinity = safeExp(-1.5 * affVal);
+
+        // 5. Amortissement harmonique de second ordre ζ (Inertie du système)
+        const currentGap = localFeatures.gapsMap[i] || 0;
+        const dampingPhase = (currentGap / (meanGapVal + Number.EPSILON)) * Math.PI;
+        const harmonicDampingZeta = safeExp(-entropyScore * (currentGap / (meanGapVal + Number.EPSILON))) * (1.0 + Math.cos(dampingPhase));
         
-        zetaVector[i] = (boltzmannAntiConsensus * 1.5) + (orthogonalResonance * 1.2) + (counterCyclicRestoration * 1.0) + (shadowAffinity * 0.8);
+        zetaVector[i] = (boltzmannAntiConsensus * 1.4) + (orthogonalResonance * 1.1) + (counterCyclicRestoration * 1.0) + (shadowAffinity * 0.8) + (harmonicDampingZeta * 0.7);
     }
 
     const normZeta = normalizeVector(zetaVector);
@@ -624,13 +632,13 @@ export async function generatePlatinumPredictionCore(
     scenarios.push({
         id: 'zeta',
         name: 'Zeta Adversarial',
-        description: 'Exploitation des gènes contre-cycliques, résonance orthogonale et anti-consensus en régime de haute entropie.',
+        description: 'Exploitation des gènes contre-cycliques, amortissement harmonique ζ de 2nd ordre et anti-consensus en régime de haute entropie.',
         numbers: zetaNumbers,
         probability: zetaProb,
         risk: zetaProb >= 72 ? 'HIGH' : 'MEDIUM',
         color: '#f97316',
         genomicProfile: {
-            focus: 'Contre-mesure anti-consensus, résonance orthogonale et gènes contre-cycliques',
+            focus: 'Contre-mesure anti-consensus, amortissement harmonique ζ et résonance orthogonale',
             entropyRegimeAdaptive: true,
             macroFingerprint: computeScenarioMacroFingerprint(zetaNumbers)
         }

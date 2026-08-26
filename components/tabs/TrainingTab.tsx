@@ -73,6 +73,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
   const refreshData = useNexusStore((state) => state.refreshData);
   const history = useNexusStore((state) => state.history);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
 
   // Active Sub-Tab Navigation
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>("training");
@@ -96,14 +97,20 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     bestGenome: AlgoWeights;
   }>>([]);
   
-  const [originalWeights, setOriginalWeights] = useState<AlgoWeights>(DEFAULT_ALGO_WEIGHTS);
-  const [liveWeights, setLiveWeights] = useState<AlgoWeights>(DEFAULT_ALGO_WEIGHTS);
+  const [originalWeights, setOriginalWeights] = useState<AlgoWeights>(() => {
+    return globalWeights && Object.keys(globalWeights).length > 0 ? globalWeights : DEFAULT_ALGO_WEIGHTS;
+  });
+  const [liveWeights, setLiveWeights] = useState<AlgoWeights>(() => {
+    return globalWeights && Object.keys(globalWeights).length > 0 ? globalWeights : DEFAULT_ALGO_WEIGHTS;
+  });
   const [finalReport, setFinalReport] = useState<TrainingReport | null>(null);
 
   // Modals & Drawers State
   const [isEvolutionDrawerOpen, setIsEvolutionDrawerOpen] = useState(false);
   const [isFineTuningOpen, setIsFineTuningOpen] = useState(false);
-  const [fineTuningWeights, setFineTuningWeights] = useState<AlgoWeights>(DEFAULT_ALGO_WEIGHTS);
+  const [fineTuningWeights, setFineTuningWeights] = useState<AlgoWeights>(() => {
+    return globalWeights && Object.keys(globalWeights).length > 0 ? globalWeights : DEFAULT_ALGO_WEIGHTS;
+  });
   const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState<{
     score: number;
@@ -117,6 +124,17 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   // Ref for terminal auto-scroll
   const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  // Synchronisation dynamique avec les poids globaux du tirage actif
+  useEffect(() => {
+    if (globalWeights && Object.keys(globalWeights).length > 0) {
+      setOriginalWeights(globalWeights);
+      if (status !== "running") {
+        setLiveWeights(globalWeights);
+        setFineTuningWeights(globalWeights);
+      }
+    }
+  }, [globalWeights, status]);
 
   // Synchronisation stricte de l'historique isolé pour ce tirage
   useEffect(() => {

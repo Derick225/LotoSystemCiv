@@ -995,16 +995,38 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
 };
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
+  const normalized = normalizeWeights(weights);
   // Update memory cache immediately
-  weightsCache.set(drawName, { weights, timestamp: Date.now() });
+  weightsCache.set(drawName, { weights: normalized, timestamp: Date.now() });
 
   try {
     if (typeof window !== 'undefined') {
-      const payload = { weights, updatedAt: new Date().toISOString() };
+      const payload = { weights: normalized, updatedAt: new Date().toISOString() };
       await set(`nexus_config_${drawName}`, payload);
+
+      // Diffuse l'événement pour notifier tous les composants et onglets en temps réel
+      window.dispatchEvent(
+        new CustomEvent('NEXUS_WEIGHTS_UPDATED', {
+          detail: { drawName, weights: normalized },
+        })
+      );
+
+      // Synchroniser le store si le tirage actif correspond
+      try {
+        const { useNexusStore } = await import('../../store/useNexusStore');
+        const activeDraw = useNexusStore.getState().drawName;
+        if (activeDraw === drawName) {
+          const currentStoreWeights = useNexusStore.getState().globalWeights;
+          if (JSON.stringify(currentStoreWeights) !== JSON.stringify(normalized)) {
+            useNexusStore.setState({ globalWeights: normalized });
+          }
+        }
+      } catch (err) {
+        // Silenced
+      }
     }
     if (isSupabaseConfigured()) {
-      await supabase.from('algo_weights').upsert({ draw_name: drawName, weights });
+      await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: normalized });
     }
   } catch (e) { /* Silenced */ }
 };

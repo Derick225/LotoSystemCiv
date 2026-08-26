@@ -319,6 +319,13 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
       context.useSpatioTemporalHawkes
     );
   }
+
+  // 4. Règle d'or : Aucun boost ou surestimation de MACHINE_TRANSFER sans présence de données machine réelles
+  const hasMachineData = context.history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  if (!hasMachineData) {
+    (weights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+  }
+
   return normalizeWeights(weights);
 };
 
