@@ -587,36 +587,50 @@ export async function generatePlatinumPredictionCore(
         }
     });
 
-    // SCÉNARIO ZETA : ZETA ADVERSARIAL (Exploitation des gènes contre-cycliques en régime de haute entropie)
+    // SCÉNARIO ZETA : ZETA ADVERSARIAL (Exploitation des gènes contre-cycliques en régime de haute entropie & Anti-Consensus)
     const zetaVector = new Float64Array(MAX_NUM + 1);
     const { mean: meanNorm, stdDev: stdNorm } = statsVector;
-    const entropyAmplifier = 1.0 + 2.0 * Math.max(0, entropyScore - 0.45); // Amplification proportionnelle continue à l'entropie de Shannon
+    
+    // Inverse temperature thermodynamique dérivée de l'entropie de Shannon du vecteur de consensus
+    const inverseTempBeta = (1.0 / (stdNorm || 1.0)) * (1.0 + Math.tanh(2.5 * (entropyScore - 0.5)));
+    const entropyModulator = 1.0 + Math.tanh(2.0 * Math.max(0, entropyScore - 0.40));
 
     for (let i = 1; i <= MAX_NUM; i++) {
-        const z = (normalizedVector[i] - meanNorm) / stdNorm;
-        // Inversion continue de Boltzmann tempérée par l'entropie
-        const boltzmannInv = safeExp(-0.8 * z * (1.0 - 0.5 * entropyScore));
-        const antiConsensus = boltzmannInv * 50.0 * entropyAmplifier;
-        const counterCyclicGap = (1.0 - Math.min(1.0, (normalizedGap[i] / 100.0))) * 30.0 * entropyAmplifier;
-        const shadowAffinity = (1.0 - (dnaAffinity[i] / 100.0)) * 25.0 * entropyAmplifier;
+        const zCons = (normalizedVector[i] - meanNorm) / (stdNorm || 1.0);
         
-        zetaVector[i] = antiConsensus + counterCyclicGap + shadowAffinity;
+        // 1. Inversion continue de Boltzmann tempérée par l'entropie
+        const boltzmannAntiConsensus = safeExp(-inverseTempBeta * zCons * (1.0 - 0.4 * entropyScore)) * entropyModulator;
+        
+        // 2. Projection en sous-espace orthogonal (résonance spectrale/fractale cachée vs consensus fréquence/markov)
+        const orthogonalSignal = ((stdSpectral[i] + stdFractal[i] + stdSpatial[i]) / 3.0) - ((stdFreq[i] + stdMarkov[i]) / 2.0);
+        const orthogonalResonance = sigmoid(2.0 * orthogonalSignal);
+        
+        // 3. Restitution contre-cyclique continue des écarts
+        const zGap = (normalizedGap[i] - statsGap.mean) / (statsGap.stdDev || 1.0);
+        const counterCyclicRestoration = sigmoid(1.5 * zGap);
+        
+        // 4. Affinité d'ombre (Shadow affinity continue)
+        const affVal = (dnaAffinity[i] ?? 50) / 100.0;
+        const shadowAffinity = safeExp(-1.5 * affVal);
+        
+        zetaVector[i] = (boltzmannAntiConsensus * 1.5) + (orthogonalResonance * 1.2) + (counterCyclicRestoration * 1.0) + (shadowAffinity * 0.8);
     }
 
     const normZeta = normalizeVector(zetaVector);
-    const zetaPhase = (5.0 * Math.PI / 4.0) * freqPhase;
+    const zetaPhase = (7.0 * Math.PI / 4.0) * freqPhase; // Phase anti-symétrique orthogonale
     const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, zetaPhase, entropyScore);
-    const zetaProb = computeScenarioProbability(zetaNumbers, normZeta, 52);
+    const dynamicBaseProb = Math.round(50 + entropyScore * 22);
+    const zetaProb = computeScenarioProbability(zetaNumbers, normZeta, dynamicBaseProb);
     scenarios.push({
         id: 'zeta',
         name: 'Zeta Adversarial',
-        description: 'Exploitation des gènes contre-cycliques et anti-consensus en régime de haute entropie.',
+        description: 'Exploitation des gènes contre-cycliques, résonance orthogonale et anti-consensus en régime de haute entropie.',
         numbers: zetaNumbers,
         probability: zetaProb,
-        risk: zetaProb >= 70 ? 'HIGH' : 'MEDIUM',
+        risk: zetaProb >= 72 ? 'HIGH' : 'MEDIUM',
         color: '#f97316',
         genomicProfile: {
-            focus: 'Contre-mesure anti-consensus et gènes contre-cycliques à haute entropie',
+            focus: 'Contre-mesure anti-consensus, résonance orthogonale et gènes contre-cycliques',
             entropyRegimeAdaptive: true,
             macroFingerprint: computeScenarioMacroFingerprint(zetaNumbers)
         }

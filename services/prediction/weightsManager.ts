@@ -486,12 +486,31 @@ export const evaluateAlgoEmpiricalProof = (
     hits[AlgoKey.ISOLATION_ANOMALY] += topIsolation.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.ISOLATION_ANOMALY] += 10;
 
-    // 23. Canal MACHINE_TRANSFER (Co-occurrence empirique réelle machine -> gagnants)
-    const prevMachine = subHistory[0]?.machine || subHistory[1]?.machine || [];
+    // 23. Canal MACHINE_TRANSFER (Co-occurrence empirique et transfert machine -> gagnants)
+    const machineScores = new Float32Array(91);
+    const prevMachine = subHistory[0]?.machine || [];
     if (Array.isArray(prevMachine) && prevMachine.length > 0) {
-      const machineHits = prevMachine.filter(n => actualDraw.includes(n)).length;
-      hits[AlgoKey.MACHINE_TRANSFER] += machineHits;
-      trials[AlgoKey.MACHINE_TRANSFER] += prevMachine.length;
+      for (let s = 0; s < Math.min(subT - 1, 20); s++) {
+        const mPrev = subHistory[s + 1]?.machine || [];
+        const wCurr = subHistory[s]?.gagnants || [];
+        if (mPrev.length > 0 && wCurr.length > 0) {
+          const decay = Math.exp(-s / 10.0);
+          mPrev.forEach(m => {
+            if (wCurr.includes(m)) machineScores[m] += decay * 1.5;
+            if (m > 1 && wCurr.includes(m - 1)) machineScores[m - 1] += decay * 0.5;
+            if (m < 90 && wCurr.includes(m + 1)) machineScores[m + 1] += decay * 0.5;
+          });
+        }
+      }
+      prevMachine.forEach(m => {
+        if (m >= 1 && m <= 90) machineScores[m] += 1.0;
+      });
+      const topMachine = [...numIndices].sort((a, b) => machineScores[b] - machineScores[a]).slice(0, 10);
+      hits[AlgoKey.MACHINE_TRANSFER] += topMachine.filter(n => actualDraw.includes(n)).length;
+      trials[AlgoKey.MACHINE_TRANSFER] += 10;
+    } else {
+      // Aucun essai si le tirage ne contient aucune donnée machine
+      trials[AlgoKey.MACHINE_TRANSFER] += 10;
     }
   }
 
@@ -500,10 +519,10 @@ export const evaluateAlgoEmpiricalProof = (
 
   // Calcul du score de preuve empirique objectif Z-score
   validKeys.forEach(k => {
-    // Sécurité si aucune donnée machine sur ce tirage : essais par défaut pour forcer zScore négatif
+    // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
     if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
       hits[k] = 0;
-      trials[k] = Math.max(10, sample.length * 5);
+      trials[k] = Math.max(10, sample.length * 10);
     }
 
     const t = trials[k] || 1;
