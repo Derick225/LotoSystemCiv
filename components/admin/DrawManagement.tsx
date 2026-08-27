@@ -36,6 +36,7 @@ import {
 import { DataIntegrityMonitor } from "./DataIntegrityMonitor";
 import { audioEngine } from "../../utils/audioEngine";
 import { useNexusStore } from "../../store/useNexusStore";
+import { isDrawWithoutMachine } from "../../constants";
 
 interface DrawManagementProps {
   drawName: string;
@@ -123,8 +124,11 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
   const handleSave = async () => {
     audioEngine.play("click");
+    const isWithoutMachine = isDrawWithoutMachine(drawName);
     const winNums = formWin.map(Number).filter((val) => !isNaN(val) && val > 0);
-    const macNums = formMac.map(Number).filter((val) => !isNaN(val) && val > 0);
+    const macNums = isWithoutMachine
+      ? []
+      : formMac.map(Number).filter((val) => !isNaN(val) && val > 0);
     const error = validateNumbers(winNums);
     if (error) {
       audioEngine.play("error");
@@ -144,7 +148,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
           drawName: drawName,
           date: formattedDate,
           gagnants: winNums,
-          machine: macNums.length === 5 ? macNums : undefined,
+          machine: (!isWithoutMachine && macNums.length === 5) ? macNums : undefined,
           version: 1,
         });
         audioEngine.play("success");
@@ -154,7 +158,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
           drawName: drawName,
           date: formattedDate,
           gagnants: winNums,
-          machine: macNums.length === 5 ? macNums : undefined,
+          machine: (!isWithoutMachine && macNums.length === 5) ? macNums : undefined,
           version: 1,
         });
         audioEngine.play("success");
@@ -278,12 +282,14 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
       // On prend les 5 premiers comme gagnants
       const winners = potentialNumbers.slice(0, 5);
 
-      // Les suivants comme machine (si dispo)
+      // Les suivants comme machine (si dispo et autorisé pour ce tirage)
       let machine: number[] = [];
-      if (potentialNumbers.length >= 10) {
-        machine = potentialNumbers.slice(5, 10);
-      } else if (potentialNumbers.length >= 6) {
-        machine = potentialNumbers.slice(5);
+      if (!isDrawWithoutMachine(drawName)) {
+        if (potentialNumbers.length >= 10) {
+          machine = potentialNumbers.slice(5, 10);
+        } else if (potentialNumbers.length >= 6) {
+          machine = potentialNumbers.slice(5);
+        }
       }
 
       let isValid = true;
@@ -830,27 +836,35 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                 <label className="text-xs font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
                   <span>Machine</span>
                   <span className="text-slate-500 flex items-center gap-1 text-[10px]">
-                    <Binary size={10} /> Opt.
+                    <Binary size={10} /> {isDrawWithoutMachine(drawName) ? "Non disponible" : "Opt."}
                   </span>
                 </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {formMac.map((val, idx) => (
-                    <input
-                      key={`mac-${idx}`}
-                      type="number"
-                      min="1"
-                      max="90"
-                      value={val}
-                      onChange={(e) => {
-                        const n = [...formMac];
-                        n[idx] = e.target.value;
-                        setFormMac(n);
-                      }}
-                      className="w-full aspect-square text-center font-bold text-sm md:text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all"
-                      placeholder="-"
-                    />
-                  ))}
-                </div>
+                {isDrawWithoutMachine(drawName) ? (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center">
+                    <p className="text-[11px] font-semibold text-slate-400">
+                      Ce tirage ({drawName}) ne comporte aucun numéro machine.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-5 gap-2">
+                    {formMac.map((val, idx) => (
+                      <input
+                        key={`mac-${idx}`}
+                        type="number"
+                        min="1"
+                        max="90"
+                        value={val}
+                        onChange={(e) => {
+                          const n = [...formMac];
+                          n[idx] = e.target.value;
+                          setFormMac(n);
+                        }}
+                        className="w-full aspect-square text-center font-bold text-sm md:text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all"
+                        placeholder="-"
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 flex gap-4">

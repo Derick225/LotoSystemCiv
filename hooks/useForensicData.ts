@@ -15,6 +15,12 @@ import { PredictionHistoryItem, ForensicReport, PlatinumAudit } from '../types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { useToast } from '../components/ui/Toast';
 import { syncForensicReports, deleteForensicReportCloud, deleteMultipleForensicReportsCloud } from '../services/syncService';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { parseDateSafely } from '../utils/dateUtils';
+
+const normalizeDrawStr = (s?: string): string => {
+    return (s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^(loto|ghana)\s+/i, "");
+};
 
 export const useForensicData = (drawName: string) => {
     const history = useNexusStore((state) => state.history);
@@ -27,16 +33,16 @@ export const useForensicData = (drawName: string) => {
     const [refreshKey, setRefreshKey] = useState(0);
 
     const loadData = useCallback(async () => {
-        if (storeDrawName && storeDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
-            console.warn(`[StrictDrawIsolationGuard] useForensicData loadData rejected because storeDrawName "${storeDrawName}" !== active drawName "${drawName}"`);
+        if (!drawName) {
             setLoading(false);
             return;
         }
         setLoading(true);
+        const cleanHistory = purifyHistoryForDraw(drawName, history);
         try {
             // 1. Charger les rapports locaux
             let currentReports = await getLocalForensicReports();
-            currentReports = currentReports.filter((r) => r.drawName === drawName);
+            currentReports = currentReports.filter((r) => normalizeDrawStr(r.drawName) === normalizeDrawStr(drawName));
 
             // Charger depuis Cloud si possible
             if (isSupabaseConfigured() && navigator.onLine) {
@@ -77,7 +83,7 @@ export const useForensicData = (drawName: string) => {
             // O(1) Lookups
             const historyById = new Map();
             const historyByDate = new Map();
-            history.forEach((h) => {
+            cleanHistory.forEach((h) => {
                 historyById.set(h.id, h);
                 historyByDate.set(h.date, h);
             });
@@ -90,23 +96,23 @@ export const useForensicData = (drawName: string) => {
                     actual = historyById.get(pred.drawResultId);
                 }
                 if (!actual) {
-                    const d = new Date(pred.timestamp);
+                    const d = parseDateSafely(pred.timestamp);
                     const predDateLocale = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
                     actual = historyByDate.get(predDateLocale);
 
                     // Centralized robust matching helper
                     if (!actual) {
-                        actual = findMatchingResultForPrediction(pred, history);
+                        actual = findMatchingResultForPrediction(pred, cleanHistory);
                     }
 
                     // Fallback date approximative
                     if (!actual) {
                         const predTime = pred.timestamp;
-                        const sortedHistory = [...history].sort(
-                            (a, b) => new Date(a.date.split("/").reverse().join("-")).getTime() - new Date(b.date.split("/").reverse().join("-")).getTime()
+                        const sortedHistory = [...cleanHistory].sort(
+                            (a, b) => parseDateSafely(a.date).getTime() - parseDateSafely(b.date).getTime()
                         );
                         actual = sortedHistory.find((d) => {
-                            const dTime = new Date(d.date.split("/").reverse().join("-")).getTime();
+                            const dTime = parseDateSafely(d.date).getTime();
                             const actualDrawTime = dTime + 21 * 3600 * 1000;
                             return actualDrawTime >= predTime && actualDrawTime - predTime < 7 * 24 * 3600 * 1000;
                         }) || null;
@@ -124,7 +130,7 @@ export const useForensicData = (drawName: string) => {
                             pred.id,
                             actual.id,
                             true, // Skip LLM for bulk syncs
-                            history
+                            cleanHistory
                         ).then(async (rep) => {
                             saveForensicReport(rep);
                             if (!pred.drawResultId) {

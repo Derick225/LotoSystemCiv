@@ -52,6 +52,33 @@ export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: s
     '19:55': { color: 'text-indigo-400', icon: '🌙', label: 'Twilight' }
 };
 
+/**
+ * Liste des tirages officiels ne disposant pas de numéros machine (notamment Fortune Thursday).
+ * Règle d'or : Fortune (Mercredi 13:00) dispose de numéros machine,
+ * tandis que Fortune Thursday (Jeudi 19:55) n'a AUCUN numéro machine.
+ */
+export const DRAWS_WITHOUT_MACHINE = ['Fortune Thursday'] as const;
+
+export const isDrawWithoutMachine = (drawName?: string | null): boolean => {
+  if (!drawName) return false;
+  const normalized = drawName
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^(loto|tirage)\s+/i, "")
+    .replace(/[\s\-_/]+/g, " ")
+    .trim();
+  return DRAWS_WITHOUT_MACHINE.some(d => {
+    const normD = d
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+    return normD === normalized;
+  });
+};
+
 // Liste plate pour les itérations rapides et les sélecteurs
 export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
     Object.entries(times).map(([time, name]) => ({

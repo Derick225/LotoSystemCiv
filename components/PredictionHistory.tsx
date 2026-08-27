@@ -19,6 +19,7 @@ import {
   syncForensicReportsWithCloud,
   getDismissedAutopsyPredictionIds,
 } from "../services/postPredictionAnalysisService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import type {
   PredictionHistoryItem,
   DrawResult,
@@ -276,6 +277,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
               if (!existingReport) {
                 attemptedLinksRef.current.add(item.id);
                 try {
+                  const cleanHistory = purifyHistoryForDraw(drawName, results);
                   const report = await performForensicAnalysis(
                     drawName,
                     match.date,
@@ -285,7 +287,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
                     item.id,
                     match.id,
                     true, // skipLLM for automated background analysis
-                    results,
+                    cleanHistory,
                   );
                   saveForensicReport(report);
                   forensicGenerated = true;
@@ -337,6 +339,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
       return;
     }
 
+    const cleanHistory = purifyHistoryForDraw(drawName, results);
     const report = await performForensicAnalysis(
       drawName,
       result.date,
@@ -346,7 +349,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
       predictionItem.id,
       result.id,
       true, // skip LLM by default, ForensicAutopsyView will load it when "Autopsy" tab is clicked
-      results,
+      cleanHistory,
     );
     saveForensicReport(report);
     setForensicReport(report);

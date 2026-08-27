@@ -332,11 +332,10 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
       try {
         setIsBatchApplying(true);
         audioEngine.play("click");
-        const currentHistory = history.filter((d) => d.drawName === drawName);
-        const validHistory = currentHistory.length > 0 ? currentHistory : history;
+        const cleanHistory = purifyHistoryForDraw(drawName, history);
 
         for (const rep of reports.slice(0, 10)) {
-          const session = await generateLearningSession(rep, validHistory);
+          const session = await generateLearningSession(rep, cleanHistory);
           await applyForensicAdjustments(session, undefined, false);
         }
 

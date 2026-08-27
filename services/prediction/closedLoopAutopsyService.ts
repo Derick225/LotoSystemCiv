@@ -8,6 +8,7 @@ import { calculateStatisticalBounds, calculateTemporalDriftLearningRate, Tempora
 import { normalizeWeights } from './weightsManager';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
+import { parseDateSafely } from '../../utils/dateUtils';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -105,7 +106,7 @@ export const executeClosedLoopAutopsy = async (
     weights: { ...currentWeights },
     algoWeights: { ...currentWeights },
     statisticalBounds: bounds,
-    deterministicSeed: new Date(targetDraw.date).getTime(),
+    deterministicSeed: parseDateSafely(targetDraw.date).getTime(),
     drawName,
     pluginCache: {},
   };
@@ -331,6 +332,11 @@ export const executeClosedLoopAutopsy = async (
       deltaPercent: 0,
     });
   });
+
+  const hasMachineData = priorHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  if (!hasMachineData) {
+    (rawUpdatedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+  }
 
   const correctedWeights = normalizeWeights(rawUpdatedWeights as AlgoWeights);
 

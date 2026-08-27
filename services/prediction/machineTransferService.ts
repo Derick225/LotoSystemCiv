@@ -1,6 +1,7 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { extractDrawNumbers } from './featureExtractor';
+import { isDrawWithoutMachine } from '../../constants';
 
 export interface MachineCandidate {
   number: number;
@@ -49,6 +50,22 @@ export const calculateMachineTransferReport = (
   drawName: string,
   rawHistory: DrawResult[]
 ): MachineTransferReport => {
+  if (isDrawWithoutMachine(drawName)) {
+    return {
+      drawName,
+      totalDrawsWithMachine: 0,
+      directTransferRate: 0,
+      meanTransfersPerDraw: 0,
+      hasMachineData: false,
+      latestMachineNumbers: [],
+      topHistoricalTransfers: [],
+      activeSieveCandidates: [],
+      crossAffinityMatrix: [],
+      lagDistribution: { lag1: 0, lag2: 0, lag3: 0, lag4Plus: 0 },
+      diagnosticRemark: `Le tirage officiel ${drawName} ne dispose d'aucun numéro machine (contrairement à Fortune du mercredi).`,
+    };
+  }
+
   const history = purifyHistoryForDraw(drawName, rawHistory);
   const totalDraws = history.length;
 

@@ -48,8 +48,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../utils/audioEngine";
 import { SLOT_CONFIG } from "../constants";
 
-import { GlobalMacroPredictionView } from "./GlobalMacroPredictionView";
-
 interface SummaryItem {
   time: string;
   name: string;
@@ -551,9 +549,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     const [selectedDay, setSelectedDay] = useState<string>(
       daysOrder[new Date().getDay()],
     );
-    const [dashboardTab, setDashboardTab] = useState<"schedule" | "macro">(
-      "schedule",
-    );
     const { data: summary = [], isLoading: loadingSummary } =
       useDailySummary(selectedDay);
 
@@ -833,51 +828,8 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
               <IsolatedNextDrawWidget />
             </div>
 
-            {/* TAB SELECTOR FOR THE HOME CONSOLE */}
-            <div className="flex gap-6 border-b border-slate-200/40 dark:border-slate-800 pb-3 mt-12 px-2 md:px-4">
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setDashboardTab("schedule");
-                }}
-                className={`text-xs md:text-sm font-black uppercase tracking-widest pb-3 relative transition-colors ${
-                  dashboardTab === "schedule"
-                    ? "text-indigo-500"
-                    : "text-slate-400 hover:text-slate-300"
-                }`}
-              >
-                Séquences du Jour
-                {dashboardTab === "schedule" && (
-                  <motion.div
-                    layoutId="dashboardTabUnderline"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500"
-                  />
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setDashboardTab("macro");
-                }}
-                className={`text-xs md:text-sm font-black uppercase tracking-widest pb-3 relative transition-colors ${
-                  dashboardTab === "macro"
-                    ? "text-indigo-500 animate-pulse"
-                    : "text-slate-400 hover:text-slate-300"
-                }`}
-              >
-                Convergence Globale (ALL)
-                {dashboardTab === "macro" && (
-                  <motion.div
-                    layoutId="dashboardTabUnderline"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500"
-                  />
-                )}
-              </button>
-            </div>
-
-            {dashboardTab === "schedule" ? (
-              <section className="mt-12 md:mt-16">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-8 md:mb-10 px-2 md:px-4">
+            <section className="mt-12 md:mt-16">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-8 md:mb-10 px-2 md:px-4">
                   <div className="text-center md:text-left w-full">
                     <h2 className="text-2xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">
                       Programme{" "}
@@ -1056,11 +1008,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                       })}
                 </div>
               </section>
-            ) : (
-              <div className="mt-12 md:mt-16">
-                <GlobalMacroPredictionView />
-              </div>
-            )}
 
             {/* Removed patterns and meta learning sections */}
           </>

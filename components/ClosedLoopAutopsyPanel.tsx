@@ -4,6 +4,7 @@ import {
   executeClosedLoopAutopsy,
   ClosedLoopAutopsyReport,
 } from "../services/prediction/closedLoopAutopsyService";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
 import {
@@ -38,11 +39,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
 
   // Filtrage strict par tirage (Tirage Isolation)
   const drawHistory = useMemo(() => {
-    return history.filter(
-      (d) =>
-        d.drawName &&
-        d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-    );
+    return purifyHistoryForDraw(drawName, history);
   }, [drawName, history]);
 
   const runAutopsy = async (index: number) => {
@@ -52,7 +49,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       const res = await executeClosedLoopAutopsy(
         drawName,
         index,
-        drawHistory.length > 0 ? drawHistory : history,
+        drawHistory,
         globalWeights
       );
       setReport(res);

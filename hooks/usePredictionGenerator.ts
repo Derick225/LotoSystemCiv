@@ -11,6 +11,7 @@ import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
 
 import { packHistory } from '../services/workers/zeroCopy';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { Prediction } from '../types';
 import { AlgoWeights } from '../types';
 
@@ -47,61 +48,43 @@ export const usePredictionGenerator = (drawName: string) => {
     const storeDrawName = useNexusStore(state => state.drawName);
     const regime = useNexusStore(state => state.regime);
 
-    // Strict Draw Isolation Guard check
-    const isIsolated = useMemo(() => {
-        if (!drawName || !storeDrawName) return true;
-        if (storeDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
-            return false;
-        }
-        if (history.length > 0) {
-            const firstDrawName = history[0].drawName || history[0].draw_name;
-            if (firstDrawName && firstDrawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
-                return false;
-            }
-        }
-        return true;
-    }, [storeDrawName, drawName, history]);
-
-    // Use the validated/purified values to avoid memory pollution
+    // Strict Draw Isolation: purify history for active draw
     const activeHistory = useMemo(() => {
-        if (!isIsolated) return [];
-        return history;
-    }, [isIsolated, history]);
+        if (!drawName) return [];
+        return purifyHistoryForDraw(drawName, history);
+    }, [drawName, history]);
+
+    const isIsolated = useMemo(() => {
+        return activeHistory.length > 0 || history.length === 0;
+    }, [activeHistory.length, history.length]);
 
     const activeSpectral = useMemo(() => {
-        if (!isIsolated) return [];
         return spectral;
-    }, [isIsolated, spectral]);
+    }, [spectral]);
 
     const activeCorrelationMatrix = useMemo(() => {
-        if (!isIsolated) return {};
         return correlationMatrix;
-    }, [isIsolated, correlationMatrix]);
+    }, [correlationMatrix]);
 
     const activeRegularity = useMemo(() => {
-        if (!isIsolated) return [];
         return regularity;
-    }, [isIsolated, regularity]);
+    }, [regularity]);
 
     const activeVolatility = useMemo(() => {
-        if (!isIsolated) return null;
         return volatility;
-    }, [isIsolated, volatility]);
+    }, [volatility]);
 
     const activeSymbioticContext = useMemo(() => {
-        if (!isIsolated) return null;
         return symbioticContext;
-    }, [isIsolated, symbioticContext]);
+    }, [symbioticContext]);
 
     const activeFractal = useMemo(() => {
-        if (!isIsolated) return [];
         return fractal;
-    }, [isIsolated, fractal]);
+    }, [fractal]);
 
     const activeRegime = useMemo(() => {
-        if (!isIsolated) return null;
         return regime;
-    }, [isIsolated, regime]);
+    }, [regime]);
 
     const currentEntropy = useMemo(() => {
         return activeRegime?.entropy || (activeHistory.length > 0 ? calculateShannonEntropy(activeHistory.slice(0, 10)).normalized : 0);

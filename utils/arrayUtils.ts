@@ -1,5 +1,6 @@
 
 import { LOTTERY_CONSTANTS } from "../services/lotteryService";
+import { isDrawWithoutMachine } from "../constants";
 
 /**
  * Prend un tableau de nombres (ou de chaînes de nombres) et retourne un tableau de nombres uniques triés.
@@ -23,13 +24,15 @@ export const getUniqueSortedNumbers = (numbers: (string | number | null | undefi
 
 /**
  * Assure une isolation hermétique totale en éliminant tout tirage
- * ne correspondant pas au nom de tirage spécifié (TIRAGE ISOLATION RULE).
+ * ne correspondant pas exactement au nom de tirage spécifié (TIRAGE ISOLATION RULE).
  * 
- * NOTE DE CONCEPTION (RÈGLE D'ISOLATION) :
- * L'utilisation de `normalize("NFD").replace(/[\u0300-\u036f]/g, "")` décompose les caractères accentués 
- * en leurs glyphes de base et supprime les marques diacritiques. Cela garantit une comparaison 
- * insensible aux accents et à la casse d'une manière déterministe, protégeant le système contre les 
- * divergences d'encodage de texte des plateformes d'import/export de l'historique de loterie.
+ * RÈGLE CRITIQUE D'ISOLATION :
+ * Ne JAMAIS confondre les tirages aux dénominations proches, notamment :
+ * - "Fortune" (Mercredi 13:00 - avec plateau Machine)
+ * - "Fortune Thursday" (Jeudi 19:55 - SANS plateau Machine)
+ * 
+ * L'isolation applique une normalisation rigoureuse (suppression des diacritiques, 
+ * des préfixes génériques 'loto'/'tirage' et des espaces superflus) avec comparaison EXACTE.
  */
 export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string }>(drawName: string, history: T[]): T[] => {
     if (!history || !Array.isArray(history)) return [];
@@ -40,14 +43,14 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
             .toLowerCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[\s\-_/]+/g, " ");
+            .replace(/^(loto|tirage)\s+/i, "")
+            .replace(/[\s\-_/]+/g, " ")
+            .trim();
 
     const normalizedTarget = normalizeString(drawName);
     if (normalizedTarget === "all combined" || normalizedTarget === "all" || normalizedTarget === "all_combined") {
         return history;
     }
-
-    const targetWords = normalizedTarget.split(" ").filter(w => w.length >= 3);
 
     const purified = history.reduce((acc: T[], d: any) => {
         const name = d.drawName || d.draw_name;
@@ -56,15 +59,7 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
             acc.push({ ...d, drawName, draw_name: drawName } as T);
         } else {
             const nameStr = normalizeString(String(name));
-            const nameWords = nameStr.split(" ").filter(w => w.length >= 3);
-            const hasCommonSignificantWord = targetWords.some(tw => nameWords.includes(tw));
-
-            if (
-                nameStr === normalizedTarget ||
-                normalizedTarget.includes(nameStr) ||
-                nameStr.includes(normalizedTarget) ||
-                hasCommonSignificantWord
-            ) {
+            if (nameStr === normalizedTarget) {
                 acc.push({ ...d, drawName: name, draw_name: name } as T);
             }
         }
@@ -92,6 +87,7 @@ export const validateAndSanitizeImportedHistory = (
 
     const seenDates = new Set<string>();
     const seenIds = new Set<string>();
+    const withoutMachine = isDrawWithoutMachine(targetDrawName);
 
     for (let idx = 0; idx < rawData.length; idx++) {
         const item = rawData[idx];
@@ -115,8 +111,8 @@ export const validateAndSanitizeImportedHistory = (
             continue;
         }
 
-        // Validation optionnelle des numéros machine
-        const machineRaw = Array.isArray(item.machine) ? item.machine : [];
+        // Validation optionnelle des numéros machine (stricte interdiction pour les tirages sans machine comme Fortune Thursday)
+        const machineRaw = (!withoutMachine && Array.isArray(item.machine)) ? item.machine : [];
         const validatedMachine = getUniqueSortedNumbers(machineRaw);
 
         // Clé unique pour éliminer les doublons
@@ -138,7 +134,7 @@ export const validateAndSanitizeImportedHistory = (
             drawName: targetDrawName,
             date: dateStr,
             gagnants: uniqueWinners,
-            machine: validatedMachine.length > 0 ? validatedMachine : undefined
+            machine: (!withoutMachine && validatedMachine.length > 0) ? validatedMachine : []
         });
     }
 

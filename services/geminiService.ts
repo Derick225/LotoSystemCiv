@@ -174,17 +174,34 @@ export const generateAutopsyAnalysis = async (
     
     const analysis = `Rapport d'autopsie forensic pour le tirage ${drawName} : La déviation quadratique moyenne (RMSE) s'établit à ${rmse.toFixed(3)}, reflétant un comportement conforme aux distributions théoriques. La conformité de Benford s'élève à ${benfordPct}%, écartant l'hypothèse de toute anomalie mécanique. Les impacts exacts (${exactHits}) et les frôlements (${nearMissesCount}) confirment un ciblage précis.`;
 
-    const recommendations = [
-        "Ajuster le coefficient de recalibrage de la cadence d'écart à +4.5%",
-        "Maintenir la régularisation de Poisson active à λ = 2.45 pour atténuer la variance",
-        "Augmenter le poids de la matrice d'affinité bilatérale"
-    ];
+    const recommendations: string[] = [];
+    if (exactHits >= 2) {
+        recommendations.push(`Maintenir l'ADN algorithmique dominant : ${exactHits} impacts directs confirmés.`);
+    } else if (nearMissesCount >= 2) {
+        recommendations.push(`Resserrer le filtre de diffusion spatiale pour convertir les ${nearMissesCount} frôlements.`);
+    } else {
+        recommendations.push(`Augmenter l'exploration stochastique par relaxation thermique face à la dispersion.`);
+    }
+
+    if (machineHits > 0) {
+        recommendations.push(`Intégrer le transfert machine : ${machineHits} numéro(s) transféré(s) vers le tirage machine.`);
+    } else if (machine.length === 0) {
+        recommendations.push(`Tirage sans numéros machine : isolation stricte des algorithmes de transfert active.`);
+    }
+
+    if (entropyCollapse) {
+        recommendations.push(`Effondrement d'entropie détecté : activer le régulateur d'inertie bayésienne.`);
+    } else {
+        recommendations.push(`Régularisation continue active (RMSE: ${rmse.toFixed(2)}) pour stabiliser la dérive.`);
+    }
+
+    const confidenceScore = Math.max(10, Math.min(100, Math.round(60 + exactHits * 8 + nearMissesCount * 4 - rmse * 1.2)));
 
     return {
         analysis,
         recommendations,
-        confidence: Math.round(75 + (exactHits * 5) - (rmse * 2)),
-        isBlackSwan: exactHits === 0 && nearMissesCount === 0
+        confidence: confidenceScore,
+        isBlackSwan: exactHits === 0 && nearMissesCount === 0 && rmse > 35
     };
 };
 

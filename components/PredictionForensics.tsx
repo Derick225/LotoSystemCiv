@@ -8,6 +8,7 @@ import { isSupabaseConfigured } from "../services/supabaseClient";
 import { useToast } from "./ui/Toast";
 import { applyBayesianForensicFeedback } from "../services/prediction/weightsManager";
 import { generateLearningSession, applyForensicAdjustments } from "../services/forensicTrainingBridge";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useNexusStore } from "../store/useNexusStore";
 import { audioEngine } from "../utils/audioEngine";
 import {
@@ -75,8 +76,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     try {
       setIsApplyingAdjustments(true);
       audioEngine.play("click");
-      const currentHistory = history.filter((d) => d.drawName === report.drawName);
-      const session = await generateLearningSession(report, currentHistory.length > 0 ? currentHistory : history);
+      const currentHistory = purifyHistoryForDraw(report.drawName, history);
+      const session = await generateLearningSession(report, currentHistory);
       await applyForensicAdjustments(session, undefined, false);
       setAdjustmentsApplied(true);
       showToast("Ajustements forensiques appliqués aux poids du modèle.", "success");

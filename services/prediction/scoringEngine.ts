@@ -10,6 +10,7 @@ import { EnhancedMetrics } from './metrics.types';
 import { normalizeWeights } from "./weightsManager";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
+import { parseDateSafely } from "../../utils/dateUtils";
 
 export interface ScoredNumber {
   num: number;
@@ -58,7 +59,7 @@ export const calculateScores = (
     weights: { ...weights },
     algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },
-    deterministicSeed: history.length > 0 ? new Date(history[0].date).getTime() : Date.now(),
+    deterministicSeed: history.length > 0 ? parseDateSafely(history[0].date).getTime() : 1234567890,
     maxFreq: Math.max(1, ...Array.from(features.freqMap || [])),
     maxMarkov: Math.max(0.001, ...Array.from(features.markovMap || [])),
     maxMachineTransfer: Math.max(0.001, ...Array.from(features.machineTransferMap || []))
