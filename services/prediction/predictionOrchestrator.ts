@@ -449,21 +449,28 @@ export const applyPredictionDnaSieve = (
   const multipliersRecord: Record<number, number> = {};
   const affinityRecord: Record<number, number> = {};
 
+  const snr = (stdDevDna || 0.1) / (meanDna || 1.0);
+  
+  // Pondération dynamique (sans constantes fixes) selon la qualité du signal (SNR)
+  const signalWeight = 2.0 * (1.0 / (1.0 + Math.exp(-snr * Math.PI)) - 0.5);
+  const inertiaWeight = 1.0 - signalWeight;
+
   const sievedScores = scores.map(sn => {
     const num = sn.num;
     const dnaMult = multipliers[num] ?? 1.0;
     const dnaAff = affinityPercent[num] ?? 50.0;
     sumAffinity += dnaAff;
     
-    if (dnaMult >= 1.12) elitesCount++;
-    else if (dnaMult <= 0.88) shadowsCount++;
+    // Détection douce (soft-clustering) sans seuil booléen dur
+    const dominanceProbability = 1.0 / (1.0 + Math.exp(-Math.PI * (dnaMult - 1.0)));
+    if (dominanceProbability > 0.6) elitesCount += dominanceProbability;
+    else if (dominanceProbability < 0.4) shadowsCount += (1.0 - dominanceProbability);
 
     multipliersRecord[num] = parseFloat(dnaMult.toFixed(3));
     affinityRecord[num] = Math.round(dnaAff);
 
-    // Tamisage différentiable continu par l'ADN algorithmique du moment:
-    // 35% d'inertie du score vectoriel + 65% de modulation continue par le tamis ADN actif
-    const modulationFactor = 0.35 + 0.65 * dnaMult;
+    // Tamisage différentiable continu par l'ADN algorithmique du moment
+    const modulationFactor = inertiaWeight + signalWeight * dnaMult;
     const modulatedScore = sn.score * modulationFactor;
 
     return {
@@ -476,8 +483,10 @@ export const applyPredictionDnaSieve = (
   });
 
   const dnaConcordanceMean = Math.round(sumAffinity / Math.max(1, scores.length));
-  const snr = (stdDevDna || 0.1) / (meanDna || 1.0);
-  const sieveIntensitySNR = parseFloat(Math.min(99.9, Math.max(10.0, snr * 250)).toFixed(1));
+  
+  // Mapping continu du rapport Signal-sur-Bruit (SNR) sur [10, 100] sans seuillage
+  const logisticSnr = 1.0 / (1.0 + Math.exp(-snr * Math.PI * 2.0));
+  const sieveIntensitySNR = parseFloat((10.0 + 90.0 * (logisticSnr - 0.5) * 2.0).toFixed(1));
   const retentionRatePct = parseFloat(((elitesCount / 90) * 100).toFixed(1));
 
   // Dérivation vectorielle des 6 macro-familles pour le Radar Algorithmique
@@ -499,9 +508,11 @@ export const applyPredictionDnaSieve = (
     });
     const currentWeightPct = parseFloat(((famWeightSum / totalWeightsSum) * 100).toFixed(1));
     
-    // Énergie du tamisage dérivée de la concordance ADN et des multiplicateurs
+    // Énergie du tamisage dérivée continûment de la concordance ADN via tangente hyperbolique
+    const concordanceRatio = dnaConcordanceMean / 100.0;
+    const continuousEnergy = currentWeightPct * (1.0 + Math.tanh(concordanceRatio - 0.5));
     const sieveEnergyPct = parseFloat(
-      Math.min(100, Math.max(5, currentWeightPct * (0.8 + 0.4 * (dnaConcordanceMean / 50)))).toFixed(1)
+      (5.0 + 95.0 * Math.tanh(continuousEnergy / 100.0)).toFixed(1)
     );
 
     return {

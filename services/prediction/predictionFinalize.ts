@@ -191,8 +191,9 @@ export const finalizePredictionPayload = async (
 ): Promise<Prediction> => {
   const sortedScores = [...denoisedScores].sort((a, b) => b.score - a.score);
   
+  const DOMAIN_SIZE = 90;
   let averageScore = sortedScores.slice(0, TICKET_SIZE).reduce((a, b) => a + (b.score || 0), 0) / TICKET_SIZE;
-  if (isNaN(averageScore) || averageScore <= 0) averageScore = 45;
+  if (isNaN(averageScore) || averageScore <= 0) averageScore = (DOMAIN_SIZE + 1) / 2.0;
 
   const currentEntropyResult = calculateShannonEntropy(context.history);
   const currentEntropy = currentEntropyResult.normalized;
@@ -297,14 +298,25 @@ export const finalizePredictionPayload = async (
   const sumLikelihood = Math.exp(-0.5 * Math.pow(zSum, 2));
 
   const evens = selection.filter(n => n % 2 === 0).length;
-  const parityLikelihood = Math.exp(-0.5 * Math.pow((evens - 2.5) / 1.118, 2));
+  const pEven = 45.0 / 90.0;
+  const expectedEvens = TICKET_SIZE * pEven;
+  const stdEvens = Math.sqrt(TICKET_SIZE * pEven * (1.0 - pEven));
+  const parityLikelihood = Math.exp(-0.5 * Math.pow((evens - expectedEvens) / (stdEvens || 1.0), 2));
+
+  const wStability = 0.40;
+  const wSum = 0.30;
+  const wParity = 0.20;
+  const wDiv = 0.10;
+  const normSumLikelihood = sumLikelihood * 100.0;
+  const normParityLikelihood = parityLikelihood * 100.0;
+  const normDiversity = diversityMetrics?.diversityScore ? diversityMetrics.diversityScore : 80.0;
 
   const realityAlignment = Math.round(
     Math.max(10, Math.min(99,
-      (stabilityScore * 0.40) +
-      (sumLikelihood * 100 * 0.30) +
-      (parityLikelihood * 100 * 0.20) +
-      ((diversityMetrics?.diversityScore ? (diversityMetrics.diversityScore / 100) : 0.8) * 100 * 0.10)
+      (stabilityScore * wStability) +
+      (normSumLikelihood * wSum) +
+      (normParityLikelihood * wParity) +
+      (normDiversity * wDiv)
     ))
   );
 
@@ -319,7 +331,7 @@ export const finalizePredictionPayload = async (
     analysis: analysisText,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
-    symbiosisFactor: context.symbioticContext ? 1.5 : 1.0,
+    symbiosisFactor: context.symbioticContext ? Math.min(2.0, 1.0 + (context.symbioticContext.affinityFactor || 0.5)) : 1.0,
     realityAlignment,
     realityAlignmentNote: HONEST_NOTE,
     adversarialApplied: context.adversarialMode,
@@ -344,11 +356,11 @@ export const finalizePredictionPayload = async (
     dnaSieve: dnaSieveMetrics,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
-      spatialSigma: 1.5,
-      gapVelocityWeight: 1.0,
-      bayesWindowRatio: 0.1,
+      spatialSigma: calibratedParams.spatial_sigma ?? (DOMAIN_SIZE / 60.0),
+      gapVelocityWeight: calibratedParams.gap_velocity_weight ?? 1.0,
+      bayesWindowRatio: calibratedParams.bayes_window_ratio ?? (TICKET_SIZE / (2.0 * 25.0)),
       sgdLearningRate: TUNING.DEFAULT_SGD_LEARNING_RATE,
-      lyapunovHorizon: 15,
+      lyapunovHorizon: calibratedParams.lyapunov_horizon ?? Math.min(30, Math.max(5, Math.round(context.validTemporalDepth * 0.75))),
       ...calibratedParams
     },
     hyperTuningLog: shrinkageApplied ? ["Scenario E : Activation Shrinkage pour resserrer les scores."] : [],

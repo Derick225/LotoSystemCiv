@@ -104,8 +104,12 @@ export const adjustWeightsForRegime = (
   const maxEntropy = Math.log2(90); 
   const normalizedEntropy = entropy > 1.0 ? Math.min(1.0, entropy / maxEntropy) : Math.max(0.0, Math.min(1.0, entropy));
 
+  // Paramétrage statistique de la pente sigmoïde basé sur l'énergie du système (Volatilité / Entropie)
+  const systemEnergy = Math.max(1.0, volatility / 10.0);
+  const transitionSteepness = Math.max(Math.E, maxEntropy * systemEnergy);
+
   // Amortissement Dynamique de Hurst (H) : Sigmoïde continue
-  const w_hurst = 0.5 * (1.0 + Math.tanh(4.0 * (hurst - 0.5)));
+  const w_hurst = 0.5 * (1.0 + Math.tanh(transitionSteepness * (hurst - 0.5)));
   const persistenceFactor = w_hurst;
   const meanReversionFactor = 1.0 - persistenceFactor;
   const volFactor = Math.max(0, Math.min(1, volatility / 100.0));
@@ -116,8 +120,8 @@ export const adjustWeightsForRegime = (
   // fait ses preuves (preuve empirique > 0 sur l'historique du tirage actif).
   // ============================================================================
 
-  const deterministicFactor = 1.0 / (1.0 + Math.exp(10.0 * (normalizedEntropy - 0.5)));
-  const chaoticFactor = 1.0 / (1.0 + Math.exp(-10.0 * (normalizedEntropy - 0.5)));
+  const deterministicFactor = 1.0 / (1.0 + Math.exp(transitionSteepness * (normalizedEntropy - 0.5)));
+  const chaoticFactor = 1.0 / (1.0 + Math.exp(-transitionSteepness * (normalizedEntropy - 0.5)));
 
   // Fonction de modulation continue de la preuve empirique
   const getProofGain = (key: AlgoKey): number => {
@@ -191,8 +195,11 @@ export const evaluateAlgoEmpiricalProof = (
   const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
   const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
   const T = sample.length;
-  const evalDepth = Math.min(20, T - 1);
-  const confidence = Math.tanh(T / 30.0);
+  // Profondeur d'évaluation empirique alignée sur l'espérance mathématique (90/5 = 18)
+  const expectedMeanGap = 90.0 / 5.0; 
+  const evalDepth = Math.min(Math.ceil(expectedMeanGap * 1.5), T - 1);
+  // Fonction de confiance temporelle basée sur le cycle théorique
+  const confidence = Math.tanh(T / expectedMeanGap);
 
   // Comptabilisation des succès empiriques par canal algorithmique
   const hits: Record<AlgoKey, number> = {} as any;

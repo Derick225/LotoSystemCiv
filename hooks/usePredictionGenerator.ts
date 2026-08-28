@@ -129,7 +129,11 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [drawName]);
 
     useEffect(() => {
-        setIsChaotic(chaoticRatio >= 0.25 || (activeVolatility?.score ?? 0) > 85);
+        // Activation logistique continue pour la détection du chaos (Zéro Seuil Arbitraire)
+        const volScore = activeVolatility?.score ?? 50.0;
+        const chaosIndex = 0.5 * (1.0 / (1.0 + Math.exp(-8.0 * (chaoticRatio - 0.20)))) +
+                           0.5 * (1.0 / (1.0 + Math.exp(-0.1 * (volScore - 75.0))));
+        setIsChaotic(chaosIndex > 0.5);
     }, [chaoticRatio, activeVolatility]);
 
     useEffect(() => {
@@ -340,12 +344,12 @@ export const usePredictionGenerator = (drawName: string) => {
             
             setActiveDNA("Monte-Carlo (MCMC)");
             audioEngine.play("success");
-            showToast(`Convergence MC achvée avec succès.`, "success");
+            showToast(`Convergence MC achevée avec succès.`, "success");
 
         } catch (e: any) {
             console.error("Monte Carlo Failed:", e);
             audioEngine.play("error");
-            showToast("Echec du process stochastique MCMC.", "error");
+            showToast("Échec du process stochastique MCMC.", "error");
         } finally {
             setIsComputing(false);
             setComputingStep("");

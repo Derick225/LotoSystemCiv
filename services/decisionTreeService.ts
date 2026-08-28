@@ -624,11 +624,11 @@ export const runDecisionForest = async (
 
       // Calcul du Tamis de l'ADN Algorithmique Actuel (Tamis ADN Actif - ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
       const dnaReport = calculateDnaSieveWeights(history, weights, activeDrawName);
-      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna } = dnaReport;
+      const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna, meanDna } = dnaReport;
 
       // Intensité du tamisage différentiable continu basée sur le SNR de l'ADN
-      const snrDna = (stdDevDna || 0.1) / 0.1;
-      const dynamicSieveIntensity = 1.0 / (1.0 + Math.exp(-1.5 * (snrDna - 1.0)));
+      const snrDna = (stdDevDna || 0.1) / (meanDna || 1.0);
+      const dynamicSieveIntensity = 2.0 * (1.0 / (1.0 + Math.exp(-snrDna * Math.PI)) - 0.5);
 
       // Calcul des distances de Mahalanobis pour le Mode Ombre
       const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);
@@ -650,7 +650,9 @@ export const runDecisionForest = async (
             Math.round(rawScore * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult))
           )
         );
-        const isDnaBoosted = dnaMult > 1.05;
+        // Activation douce probabiliste pour l'affichage visuel
+        const dominanceProbability = 1.0 / (1.0 + Math.exp(-Math.PI * (dnaMult - 1.0)));
+        const isDnaBoosted = dominanceProbability > 0.55;
 
         // Génération du chemin de décision sur l'arbre primaire
         const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], activeFeatures);

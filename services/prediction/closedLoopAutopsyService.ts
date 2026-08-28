@@ -263,7 +263,9 @@ export const executeClosedLoopAutopsy = async (
 
   // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
   // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
-  const baseLR = 0.25 / (1.0 + Math.exp(5.0 * (brierScore - 0.05)));
+  const expectedUniformBrier = (5.0 / 90.0) * Math.pow(1.0 - 1.0 / 5.0, 2);
+  const maxLR = 1.0 / Math.sqrt(numAlgos);
+  const baseLR = maxLR / (1.0 + Math.exp((brierScore - expectedUniformBrier) / (expectedUniformBrier || 1e-6)));
   const temporalDriftMetrics = calculateTemporalDriftLearningRate(priorHistory, baseLR, 10);
   const learningRate = Math.max(0.02, Math.min(0.5, temporalDriftMetrics.learningRate));
 
@@ -293,14 +295,15 @@ export const executeClosedLoopAutopsy = async (
       const neighborMinus = w > 1 ? w - 1 : 90;
       const neighborPlus = w < 90 ? w + 1 : 1;
       const neighborGaussWeight = Math.exp(-0.5); // Noyau gaussien continu exp(-d^2/(2*sigma^2))
-      attributionWinners += (scores[neighborMinus] || 0) * neighborGaussWeight * 0.25;
-      attributionWinners += (scores[neighborPlus] || 0) * neighborGaussWeight * 0.25;
-      totalTargetMass += neighborGaussWeight * 0.5;
+      const halfNeighborWeight = neighborGaussWeight / 2.0;
+      attributionWinners += (scores[neighborMinus] || 0) * halfNeighborWeight;
+      attributionWinners += (scores[neighborPlus] || 0) * halfNeighborWeight;
+      totalTargetMass += neighborGaussWeight;
 
       // 3. Résonance miroir décadaire
       const mirror = getMirrorNumber(w);
       if (mirror !== w) {
-        const mirrorWeight = Math.exp(-1.0) * 0.2;
+        const mirrorWeight = Math.exp(-1.0) / 2.0;
         attributionWinners += (scores[mirror] || 0) * mirrorWeight;
         totalTargetMass += mirrorWeight;
       }

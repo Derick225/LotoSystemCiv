@@ -601,12 +601,17 @@ export const calculateDnaSieveWeights = (
     }
     const stdDevDna = Math.sqrt(varDna / 90.0) || 1e-6;
 
+    const baseSteepness = 1.0 + Math.sqrt(shannon.normalized || 0.5);
+
     let sumAffinity = 0;
     for (let n = 1; n <= N; n++) {
         const z = (compositeDna[n] - meanDna) / stdDevDna;
-        const mult = 2.0 / (1.0 + Math.exp(-0.95 * z));
-        multipliers[n] = Math.max(0.1, Math.min(1.9, mult));
-        const aff = Math.round(Math.max(0, Math.min(100, (1.0 / (1.0 + Math.exp(-1.15 * z))) * 100)));
+        // Pente continue dérivée de l'entropie, avec des bornes [0.1, 1.9] naturelles (Zéro clamp binaire)
+        const mult = 0.1 + 1.8 / (1.0 + Math.exp(-baseSteepness * z));
+        multipliers[n] = mult;
+        
+        // Mapping probabiliste de l'affinité sur [0, 100]
+        const aff = Math.round(100.0 / (1.0 + Math.exp(-baseSteepness * 1.2 * z)));
         affinityPercent[n] = aff;
         sumAffinity += aff;
     }
