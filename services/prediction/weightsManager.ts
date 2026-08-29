@@ -164,6 +164,8 @@ export interface AlgoProofMetric {
   confidence: number;
 }
 
+const algoEmpiricalProofCache = new Map<string, Record<AlgoKey, AlgoProofMetric>>();
+
 /**
  * ÉVALUATION EMPIRIQUE DE LA VALEUR PRÉDICTIVE D'UN ALGORITHME
  * 
@@ -191,6 +193,10 @@ export const evaluateAlgoEmpiricalProof = (
     });
     return result;
   }
+
+  const cacheKey = `${(drawName || 'default').trim().toLowerCase()}_${history.length}_${history[0]?.date || 'nodate'}_${history[0]?.gagnants?.join('-') || 'none'}`;
+  const cached = algoEmpiricalProofCache.get(cacheKey);
+  if (cached) return cached;
 
   const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
   const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
@@ -548,6 +554,12 @@ export const evaluateAlgoEmpiricalProof = (
       confidence: parseFloat(confidence.toFixed(4))
     };
   });
+
+  if (algoEmpiricalProofCache.size > 100) {
+    const firstKey = algoEmpiricalProofCache.keys().next().value;
+    if (firstKey) algoEmpiricalProofCache.delete(firstKey);
+  }
+  algoEmpiricalProofCache.set(cacheKey, result);
 
   return result;
 };

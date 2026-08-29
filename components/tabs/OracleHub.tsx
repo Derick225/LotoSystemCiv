@@ -25,9 +25,6 @@ const IntelligenceTab = lazy(() =>
 const OrchestrationTab = lazy(() =>
   import("./OrchestrationTab").then((m) => ({ default: m.OrchestrationTab })),
 );
-const ConvergenceTab = lazy(() =>
-  import("./ConvergenceTab").then((m) => ({ default: m.ConvergenceTab })),
-);
 const StrategicSynthesisTab = lazy(() =>
   import("./StrategicSynthesisTab").then((m) => ({
     default: m.StrategicSynthesisTab,
@@ -47,7 +44,6 @@ const subTabPreloaders: Record<string, () => Promise<unknown>> = {
   ai_prediction: () => import("./IAPredictionTab"),
   inertia_optimizer: () => import("./InertiaOptimizerTab"),
   platinum: () => import("./MetaAnalystTab"),
-  convergence: () => import("./ConvergenceTab"),
   oracle: () => import("./PredictionTab"),
   orch: () => import("./OrchestrationTab"),
 };
@@ -65,7 +61,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     | "oracle"
     | "platinum"
     | "orch"
-    | "convergence"
     | "strategic"
     | "ai_prediction"
     | "inertia_optimizer"
@@ -118,13 +113,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
       bg: "hover:bg-amber-50",
     },
     {
-      id: "convergence",
-      label: "Fusion",
-      icon: <Layers size={16} />,
-      color: "text-pink-500",
-      bg: "hover:bg-pink-50",
-    },
-    {
       id: "oracle",
       label: "Oracle Base",
       tag: "Local",
@@ -164,7 +152,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                         | "oracle"
                         | "platinum"
                         | "orch"
-                        | "convergence"
                         | "strategic"
                         | "ai_prediction"
                         | "inertia_optimizer",
@@ -318,7 +305,6 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
           {subTab === "inertia_optimizer" && (
             <InertiaOptimizerTab drawName={drawName} />
           )}
-          {subTab === "convergence" && <ConvergenceTab drawName={drawName} />}
           {subTab === "oracle" && <PredictionTab drawName={drawName} />}
           {subTab === "platinum" && <MetaAnalystTab drawName={drawName} />}
           {subTab === "orch" && <OrchestrationTab drawName={drawName} />}

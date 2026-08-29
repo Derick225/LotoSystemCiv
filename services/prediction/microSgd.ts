@@ -5,14 +5,7 @@ import { logger } from "../../utils/logger";
 import { normalizeWeights } from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores } from "./scoringEngine";
-import {
-  calculatePoissonScores, calculateBayesianScore, calculateTemporalScores,
-  calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores,
-  calculateLeaderSuccession, calculateAiIntuition, calculateFractalResonance,
-  calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores,
-  calculateHawkesExcitation, calculateTopologicalLyapunov
-} from "../advancedMathService";
-import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
+import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
 
 // ============================================================================
 // CONFIGURATION EXPLICITE (Zéro Nombre Magique)
@@ -58,31 +51,12 @@ export const hashHistoryContent = (history: DrawResult[]): string => {
 
 type AlgoBundle = EnhancedMetrics;
 
-export const buildAlgoBundle = (
+export const buildAlgoBundle = async (
   subHistory: DrawResult[],
   drawName: string,
   useSpatioTemporalHawkes: boolean,
-): AlgoBundle => {
-  const subHawkes = useSpatioTemporalHawkes
-    ? calculateSpatioTemporalHawkes(subHistory, drawName)
-    : calculateHawkesExcitation(subHistory);
-
-  return {
-    poisson: calculatePoissonScores(subHistory),
-    bayes: calculateBayesianScore(subHistory),
-    temporal: calculateTemporalScores(subHistory),
-    digitalRoot: calculateDigitalRootAnalysis(subHistory),
-    resistance: calculateResistanceScores(subHistory),
-    gapVelocity: calculateGapVelocityScores(subHistory),
-    leaderSuccession: calculateLeaderSuccession(subHistory),
-    aiIntuition: calculateAiIntuition(subHistory, {}),
-    fractalResonance: calculateFractalResonance(subHistory),
-    spatial: calculateSpatialHotSpots(subHistory),
-    coOccurrence: calculateCoOccurrenceScores(subHistory),
-    anomaly: calculateAnomalyScores(subHistory),
-    hawkes: subHawkes,
-    lyapunov: calculateTopologicalLyapunov(subHistory),
-  } as EnhancedMetrics;
+): Promise<AlgoBundle> => {
+  return await computeAdvancedMetrics(subHistory, drawName, {}, useSpatioTemporalHawkes);
 };
 
 /**
@@ -129,7 +103,7 @@ export const applyDeterministicMicroSgd = async (
       const subHash = `${subHistory.length}_${hashHistoryContent(subHistory)}`;
       let subMetrics = bundleCache.get(subHash);
       if (!subMetrics) {
-        subMetrics = buildAlgoBundle(subHistory, drawName, useSpatioTemporalHawkes);
+        subMetrics = await buildAlgoBundle(subHistory, drawName, useSpatioTemporalHawkes);
         bundleCache.set(subHash, subMetrics);
       }
 

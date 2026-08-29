@@ -161,7 +161,7 @@ export const usePredictionGenerator = (drawName: string) => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));
     }, [globalWeights]);
 
-    const resolveWeights = async (forcedWeights?: AlgoWeights | null) => {
+    const resolveWeights = useCallback(async (forcedWeights?: AlgoWeights | null): Promise<AlgoWeights> => {
         let specificWeights = forcedWeights || (Object.keys(globalWeights || {}).length > 0 ? { ...globalWeights } as AlgoWeights : null);
         if (!specificWeights) {
             try {
@@ -172,7 +172,7 @@ export const usePredictionGenerator = (drawName: string) => {
             }
         }
         return specificWeights;
-    };
+    }, [drawName, globalWeights]);
 
     const runInference = useCallback(async (forcedWeights?: AlgoWeights) => {
         if (!isIsolated) {

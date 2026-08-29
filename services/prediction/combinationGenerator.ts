@@ -422,12 +422,12 @@ export const generateCombination = async (
   };
 
   // --- ÉTAPE 1 : CONSTRUIRE UN SÉLECTEUR GLOUTON BASÉ SUR LE GAIN MARGINAL D'ÉNERGIE ---
-  const runGreedyConstruction = (
+  const runGreedyConstruction = async (
     initialSelections: number[],
     poolCandidates: number[],
     targetOutsidersQuota: number,
     forceOutsiders: boolean = false
-  ): number[] => {
+  ): Promise<number[]> => {
     const combo = [...initialSelections];
     
     while (combo.length < DRAW_SIZE) {
@@ -452,9 +452,12 @@ export const generateCombination = async (
         candidates = allCandidatesPool.filter(c => !combo.includes(c));
       }
 
-      for (const candidate of candidates) {
+      // Optimisation: Restreindre aux meilleurs candidats pertinents pour éviter O(N^2) complet
+      const searchPool = candidates.slice(0, Math.min(30, candidates.length));
+
+      for (const candidate of searchPool) {
         const proposed = [...combo, candidate];
-        const energyBreakdown = calculateCombinationEnergyDetailed(
+        const energyVal = calculateCombinationEnergy(
           proposed,
           scoresMap,
           affinityMap,
@@ -464,7 +467,6 @@ export const generateCombination = async (
           topPool,
           targetOutsidersQuota
         );
-        const energyVal = energyBreakdown.totalEnergy;
         
         if (energyVal < bestEnergyValue) {
           bestEnergyValue = energyVal;
@@ -491,13 +493,13 @@ export const generateCombination = async (
 
   // --- ÉTAPE 2 : MULTIPLES SEEDS GLOUTONNES DE DÉPART DÉTERMINISTES ---
   // Seed 1 : Orientée score pur (recherche gloutonne standard)
-  const seed1 = runGreedyConstruction([topPool[0]], allCandidatesPool, targetOutsiders);
+  const seed1 = await runGreedyConstruction([topPool[0]], allCandidatesPool, targetOutsiders);
 
   // Seed 2 : Orientée orthogonalité / diversité de profil
   const firstNum = topPool[0];
   const secondNumCandidates = topPool.slice(1, 15).filter(n => getProfileSimilarity(firstNum, n, breakdownsMap) < 0.4);
   const secondNum = secondNumCandidates.length > 0 ? secondNumCandidates[0] : topPool[1];
-  const seed2 = runGreedyConstruction([firstNum, secondNum], allCandidatesPool, targetOutsiders);
+  const seed2 = await runGreedyConstruction([firstNum, secondNum], allCandidatesPool, targetOutsiders);
 
   // Seed 3 : Orientée affinité maximale de départ
   let bestPair = [topPool[0], topPool[1]];
@@ -511,11 +513,14 @@ export const generateCombination = async (
       }
     }
   }
-  const seed3 = runGreedyConstruction(bestPair, allCandidatesPool, targetOutsiders);
+  const seed3 = await runGreedyConstruction(bestPair, allCandidatesPool, targetOutsiders);
 
   // Seed 4 : Orientée outsiders forcés d'entrée
   const firstOutsider = outsiderPool.length > 0 ? outsiderPool[0] : topPool[topPool.length - 1];
-  const seed4 = runGreedyConstruction([firstOutsider], allCandidatesPool, targetOutsiders, true);
+  const seed4 = await runGreedyConstruction([firstOutsider], allCandidatesPool, targetOutsiders, true);
+
+  // Yield au navigateur avant le recuit simulé
+  await new Promise(resolve => setTimeout(resolve, 0));
 
   // Élection de la meilleure seed gloutonne selon l'énergie globale
   const seedsList = [seed1, seed2, seed3, seed4].filter(s => s.length === DRAW_SIZE);

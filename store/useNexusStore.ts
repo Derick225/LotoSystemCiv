@@ -298,7 +298,29 @@ export const useNexusStore = create<NexusState>()(
         set({ loading: true, drawName: name, currentDrawName: name });
         try {
           const { data } = await fetchResults(name, force);
-          set({ history: data });
+          const historyData = data || [];
+          
+          const counts: Record<number, number> = {};
+          historyData.forEach((d) =>
+            (d.gagnants || []).forEach((n) => {
+              if (n >= 1 && n <= 90) counts[n] = (counts[n] || 0) + 1;
+            })
+          );
+          const stats = Object.entries(counts)
+            .map(([n, c]) => ({ number: Number(n), count: c }))
+            .sort((a, b) => b.count - a.count);
+
+          const gaps: { number: number; gap: number }[] = [];
+          for (let i = 1; i <= 90; i++) {
+            let gap = 0;
+            for (const draw of historyData) {
+              if ((draw.gagnants || []).includes(i)) break;
+              gap++;
+            }
+            gaps.push({ number: i, gap });
+          }
+
+          set({ history: historyData, stats, gaps });
         } catch (error) {
           console.error("Failed to refresh data:", error);
         } finally {

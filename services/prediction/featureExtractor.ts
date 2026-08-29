@@ -61,7 +61,11 @@ export const extractFeatures = async (
 ): Promise<ExtractedFeatures> => {
   // Filtrage robuste selon la règle d'isolation (TIRAGE ISOLATION RULE)
   const filteredHistory = purifyHistoryForDraw(drawName, history);
-  const cacheKey = globalCache.generateKey('features', drawName, `${filteredHistory.length}_${filteredHistory[0]?.date || 'nodate'}`);
+  const cacheKey = globalCache.generateKey(
+    'features',
+    drawName,
+    `${filteredHistory.length}_${sampleSize}_${filteredHistory[0]?.date || 'nodate'}`
+  );
 
   return globalCache.getOrCompute(
     cacheKey,

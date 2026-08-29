@@ -6,7 +6,6 @@
  * Conception mathématique continue v3.0 - Conforme AGENTS.md (Zéro Nombre Magique & 100% Déterministe)
  */
 
-import { useNexusStore } from "../../store/useNexusStore";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 export class ConceptDriftDetector {
@@ -158,14 +157,14 @@ export class ConceptDriftDetector {
      * Analyse structurelle de dérive de concept basée sur la KL-Divergence normalisée.
      * Combine un audit global binarisé (milieu d'historique) avec un test de Page-Hinkley séquentiel glissant.
      */
-    public evaluateStructuralDrift(history: { gagnants: number[]; drawName?: string }[]): { 
+    public evaluateStructuralDrift(history: { gagnants: number[]; drawName?: string }[], targetDrawName?: string): { 
         driftDetected: boolean; 
         divergence: number; 
         severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
         confidence: number;
         driftIndex?: number;
     } {
-        const activeDraw = useNexusStore.getState().drawName || "Reveil";
+        const activeDraw = targetDrawName || history[0]?.drawName || "Reveil";
         const purifiedHistory = purifyHistoryForDraw(activeDraw, history);
 
         // Minimum requis pour une représentativité statistique minimale sur 2 blocs

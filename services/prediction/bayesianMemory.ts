@@ -31,25 +31,36 @@ export const getBayesianMemoryAsync = async (drawName: string): Promise<Bayesian
 };
 
 /**
+ * Calcule la limite de mémoire basée sur sqrt(N_algos * N_domain)
+ */
+export const computeMemoryLimit = (observations: BayesianObservation[]): number => {
+    const numAlgos = observations.length > 0 && observations[0].weights
+        ? Object.keys(observations[0].weights).length
+        : 22;
+    return Math.pow(2, Math.ceil(Math.log2(Math.sqrt(numAlgos * 90))));
+};
+
+/**
+ * Filtre et tronque les observations selon la limite calculée
+ */
+export const pruneObservations = (observations: BayesianObservation[]): BayesianObservation[] => {
+    const limit = computeMemoryLimit(observations);
+    return [...observations]
+        .filter(o => o && o.weights && typeof o.score === 'number')
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+};
+
+/**
  * Enregistre l'historique des observations de calibration bayésienne de manière asynchrone dans IndexedDB (idb-keyval).
- * Conserve uniquement les 100 meilleures observations de l'historique pour prévenir la saturation mémoire.
+ * Conserve uniquement les meilleures observations de l'historique pour prévenir la saturation mémoire.
  * 
  * @param drawName Nom unique du tirage actif.
  * @param observations Liste complète des observations candidats-scores.
  */
 export const saveBayesianMemoryAsync = async (drawName: string, observations: BayesianObservation[]): Promise<void> => {
     try {
-        // Memory limit derived from sqrt(N_algos * N_domain) to balance coverage vs storage
-        // For 22 algos and 90 numbers: sqrt(22*90) ~= 45, rounded up to nearest power of 2 = 64
-        const numAlgos = observations.length > 0 && observations[0].weights
-            ? Object.keys(observations[0].weights).length
-            : 22;
-        const memoryLimit = Math.pow(2, Math.ceil(Math.log2(Math.sqrt(numAlgos * 90))));
-        const sorted = [...observations]
-            .filter(o => o && o.weights && typeof o.score === 'number')
-            .sort((a, b) => b.score - a.score)
-            .slice(0, memoryLimit);
-
+        const sorted = pruneObservations(observations);
         memoryStore.set(drawName, sorted);
         await set(`bayesian_mem_${drawName}`, sorted);
     } catch (e) {
@@ -87,14 +98,7 @@ export const getBayesianMemory = (drawName: string): BayesianObservation[] => {
  * @param observations Liste des observations.
  */
 export const saveBayesianMemory = (drawName: string, observations: BayesianObservation[]) => {
-    const numAlgos = observations.length > 0 && observations[0].weights
-        ? Object.keys(observations[0].weights).length
-        : 22;
-    const memoryLimit = Math.pow(2, Math.ceil(Math.log2(Math.sqrt(numAlgos * 90))));
-    const sorted = [...observations]
-        .filter(o => o && o.weights && typeof o.score === 'number')
-        .sort((a, b) => b.score - a.score)
-        .slice(0, memoryLimit);
+    const sorted = pruneObservations(observations);
     memoryStore.set(drawName, sorted);
     saveBayesianMemoryAsync(drawName, sorted).catch(() => {});
 };
