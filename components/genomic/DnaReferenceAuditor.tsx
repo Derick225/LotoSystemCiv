@@ -13,6 +13,7 @@ import {
   Search,
   Fingerprint,
   Zap,
+  Flame,
 } from "lucide-react";
 import {
   runSystematicDnaAudit,
@@ -32,6 +33,7 @@ export const DnaReferenceAuditor: React.FC<{
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
   const addAgentLog = useNexusStore((state) => state.addAgentLog);
+  const navigateToModule = useNexusStore((state) => state.navigateToModule);
 
   const [report, setReport] = useState<DnaAuditReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -172,6 +174,16 @@ export const DnaReferenceAuditor: React.FC<{
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
             <button
+              id="view-drift-heatmap-from-auditor-btn"
+              onClick={() => navigateToModule("Genomique", "DRIFT_HEATMAP")}
+              className="px-4 py-3.5 bg-rose-950/70 hover:bg-rose-900/80 text-rose-200 border border-rose-500/40 rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm"
+              title="Ouvrir la Heatmap des Corrélations Écarts & Sous-Algorithmes"
+            >
+              <Flame size={14} className="text-rose-400" />
+              Heatmap Écarts
+            </button>
+
+            <button
               id="refresh-dna-audit-btn"
               onClick={executeAudit}
               disabled={loading || syncing}
@@ -209,7 +221,7 @@ export const DnaReferenceAuditor: React.FC<{
 
         {/* Métriques d'empreinte & Signature statistique */}
         {report && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mt-6 pt-6 border-t border-white/5">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 md:gap-4 mt-6 pt-6 border-t border-white/5">
             <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-white/5">
               <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 flex items-center gap-1.5">
                 <Fingerprint size={12} className="text-indigo-400" />
@@ -229,6 +241,19 @@ export const DnaReferenceAuditor: React.FC<{
                 {report.coherenceScore}%
                 <span className="text-[10px] text-slate-400 font-normal ml-1">
                   ({report.alignedAlgorithmsCount}/{report.totalAlgorithmsCount})
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-white/5">
+              <div className="text-[10px] uppercase font-black tracking-widest text-slate-500 flex items-center gap-1.5">
+                <AlertTriangle size={12} className="text-rose-400" />
+                Seuil Critique (τ)
+              </div>
+              <div className="text-xs md:text-sm font-mono font-bold text-rose-300 mt-1">
+                {(report.criticalDriftThreshold * 100).toFixed(1)}%{" "}
+                <span className="text-[10px] text-slate-400 font-normal">
+                  (Δmax: {(report.maxWeightDriftDelta * 100).toFixed(1)}%)
                 </span>
               </div>
             </div>

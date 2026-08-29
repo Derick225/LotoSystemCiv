@@ -28,6 +28,7 @@ const AuthScreen = lazyWithRetry(() => import('./components/auth/AuthScreen'), '
 const ResetPasswordScreen = lazyWithRetry(() => import('./components/auth/ResetPasswordScreen'), 'ResetPasswordScreen');
 const SubscriptionWall = lazyWithRetry(() => import('./components/auth/SubscriptionWall'), 'SubscriptionWall');
 const GlobalNumberHUD = lazyWithRetry(() => import('./components/ui/GlobalNumberHUD'), 'GlobalNumberHUD');
+const CriticalDnaDriftNotification = lazyWithRetry(() => import('./components/ui/CriticalDnaDriftNotification').then(m => ({ default: m.CriticalDnaDriftNotification })), 'CriticalDnaDriftNotification');
 
 const GlobalDashboard = lazyWithRetry(() => import('./components/GlobalDashboard'), 'GlobalDashboard');
 const DrawDetails = lazyWithRetry(() => import('./components/DrawDetails'), 'DrawDetails');
@@ -277,6 +278,7 @@ const AppContent: React.FC = () => {
         {renderContent()}
       </AppShell>
       <Suspense fallback={null}>
+        <CriticalDnaDriftNotification />
         <GlobalNumberHUD />
         <TutorialOverlay />
         <InstallPrompt />

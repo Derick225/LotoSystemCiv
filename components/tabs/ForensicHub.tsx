@@ -8,6 +8,7 @@ import { UnifiedForensicTimeline } from "../UnifiedForensicTimeline";
 import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { ClosedLoopAutopsyPanel } from "../ClosedLoopAutopsyPanel";
 import { StorageOptimizationModal } from "../StorageOptimizationModal";
+import { StochasticEntropyPanel } from "../forensic/StochasticEntropyPanel";
 import {
   Target,
   Trash2,
@@ -46,7 +47,7 @@ import { generateLearningSession, applyForensicAdjustments } from "../../service
 import { generateMasterPrediction } from "../../services/predictionEngine";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
-type ForensicTab = "audits" | "closedloop" | "confusion" | "timeline" | "radar" | "timemachine";
+type ForensicTab = "audits" | "closedloop" | "entropy" | "confusion" | "timeline" | "radar" | "timemachine";
 type SortOption = "date_desc" | "date_asc" | "hits_desc" | "hits_asc" | "drift_desc";
 
 export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
@@ -583,6 +584,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
           {[
             { id: "audits", label: "Autopsies & Rapports", icon: BookOpen, count: reports.length },
             { id: "closedloop", label: "Boucle Fermée & Auto-Correction", icon: Zap },
+            { id: "entropy", label: "Entropie Stochastique & Prévisibilité", icon: Activity },
             { id: "confusion", label: "Matrice de Proximité & Confusion", icon: Compass },
             { id: "timeline", label: "Frise Chronologique", icon: Activity },
             { id: "radar", label: "Radar Macro/Micro & SHAP", icon: Radar },
@@ -903,6 +905,11 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
         {/* TAB 1.5: CLOSED LOOP AUTOPSY & DNA AUTO-CORRECTION */}
         {activeTab === "closedloop" && (
           <ClosedLoopAutopsyPanel drawName={drawName} />
+        )}
+
+        {/* TAB 1.8: STOCHASTIC ENTROPY & UNPREDICTABILITY FORENSICS */}
+        {activeTab === "entropy" && (
+          <StochasticEntropyPanel drawName={drawName} reports={reports} />
         )}
 
         {/* TAB 2: MATRICE DE CONFUSION & PROXIMITÉ */}

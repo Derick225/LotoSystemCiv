@@ -809,8 +809,21 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
       });
 
       // Injection des ratios Kalman stabilisés dans les poids physiques du moteur
+      const proofMap = evaluateAlgoEmpiricalProof(drawName || 'default', history);
       algosList.forEach(algo => {
-        dynamicWeights[algo] *= kalmanStates[algo].x;
+        const proof = proofMap[algo];
+        const hasProof = proof && proof.hasProof && proof.proofScore > 0;
+        let factor = kalmanStates[algo].x;
+        
+        // RÈGLE ABSOLUE : Qu'aucun algorithme ne voie son poids augmenté s'il ne fait pas ses preuves
+        if (!hasProof && factor > 1.0) {
+          factor = 1.0;
+        }
+        if (!hasProof && proof && proof.proofScore < 0) {
+          factor *= Math.max(0.2, 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore)));
+        }
+        
+        dynamicWeights[algo] *= factor;
       });
 
       return normalizeWeights(dynamicWeights);

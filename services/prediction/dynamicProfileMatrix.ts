@@ -2,6 +2,7 @@ import { DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { calculateShannonEntropy, calculateVolatility, calculateFractalIndex } from '../mathService';
 import { calculateTopologicalLyapunov } from '../advancedMathService';
+import { evaluateAlgoEmpiricalProof } from './weightsManager';
 
 export type CyclicPhaseType = 'PERIODIC_ATTRACTOR' | 'STOCHASTIC_DISPERSION' | 'TRANSITIONAL_ORBIT';
 
@@ -147,25 +148,47 @@ export const calculateCyclicPhaseProfileMatrix = (
     dominantMacroFamily = 'Diffusion Stochastique & Écarts';
   }
 
-  // 6. Modificateurs Algorithmiques Individuels Log-Scalaires
+  // 6. Modificateurs Algorithmiques Individuels Log-Scalaires (Strictement conditionnés par la preuve empirique)
+  const drawName = history[0]?.drawName || 'default';
+  const proofMap = evaluateAlgoEmpiricalProof(drawName, history);
   const algoWeightModifiers: Partial<Record<AlgoKey, number>> = {};
   
+  const applyProofConstrainedModifier = (key: AlgoKey, rawDelta: number) => {
+    const proof = proofMap[key];
+    const hasProof = proof && proof.hasProof && proof.proofScore > 0;
+    if (rawDelta > 0) {
+      // Interdiction formelle de booster un algo sans preuve empirique avérée sur ce tirage
+      if (!hasProof) {
+        algoWeightModifiers[key] = 0.0;
+      } else {
+        algoWeightModifiers[key] = rawDelta * Math.tanh(proof.proofScore);
+      }
+    } else {
+      // Les pénalisations ou amortissements s'appliquent librement, et sont accentuées si sous-performance
+      if (proof && proof.proofScore < 0) {
+        algoWeightModifiers[key] = rawDelta + Math.max(-0.5, proof.proofScore * 0.1);
+      } else {
+        algoWeightModifiers[key] = rawDelta;
+      }
+    }
+  };
+
   // Attractor family boost or dampening
   const attractorDelta = (macroFamilyWeights.attractorResonance - 0.33) * 0.5;
   MACRO_ALGO_FAMILIES.ATTRACTOR_RESONANCE.forEach(key => {
-    algoWeightModifiers[key] = attractorDelta;
+    applyProofConstrainedModifier(key, attractorDelta);
   });
 
   // Stochastic diffusion family boost or dampening
   const diffusionDelta = (macroFamilyWeights.stochasticDiffusion - 0.33) * 0.5;
   MACRO_ALGO_FAMILIES.STOCHASTIC_DIFFUSION.forEach(key => {
-    algoWeightModifiers[key] = diffusionDelta;
+    applyProofConstrainedModifier(key, diffusionDelta);
   });
 
   // Topological affinity family boost or dampening
   const affinityDelta = (macroFamilyWeights.topologicalAffinity - 0.34) * 0.5;
   MACRO_ALGO_FAMILIES.TOPOLOGICAL_AFFINITY.forEach(key => {
-    algoWeightModifiers[key] = affinityDelta;
+    applyProofConstrainedModifier(key, affinityDelta);
   });
 
   // 7. Modulateur de Confiance Continu :
