@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
   gapRangeSequenceService,
@@ -6,6 +6,7 @@ import {
   GapRangeBinInfo,
 } from "../../services/prediction/gapRangeSequenceService";
 import { NumberBall } from "../NumberBall";
+import { useToast } from "../ui/Toast";
 import {
   BarChart,
   Bar,
@@ -30,6 +31,16 @@ import {
   ShieldCheck,
   Activity,
   RotateCcw,
+  Search,
+  Copy,
+  Check,
+  Flame,
+  Zap,
+  Target,
+  BrainCircuit,
+  Sliders,
+  Cpu,
+  Atom,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 
@@ -37,9 +48,20 @@ interface GapRangeSequenceWidgetProps {
   drawName: string;
 }
 
+type SurvivorSortMode = "fused" | "dna" | "markov" | "quantum" | "proof" | "gap";
+type SurvivorCategoryFilter =
+  | "ALL"
+  | "CONVERGENCE"
+  | "DNA_DOMINANT"
+  | "MARKOV"
+  | "TAMIS_BOOSTED"
+  | "CRITICAL_GAP"
+  | "PROOF_ONLY";
+
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   drawName,
 }) => {
+  const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
@@ -47,10 +69,14 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   const [step, setStep] = useState<GapRangeStep>("combined");
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
 
-  // Specialist Controls for Survivants de l'ADN Algorithmique
-  const [sortMode, setSortMode] = useState<"fused" | "markov" | "dna" | "gap">("fused");
+  // Specialist Controls for Survivants de l'ADN Algorithmique & Filtres
+  const [sortMode, setSortMode] = useState<SurvivorSortMode>("fused");
+  const [categoryFilter, setCategoryFilter] =
+    useState<SurvivorCategoryFilter>("ALL");
   const [minScoreCutoff, setMinScoreCutoff] = useState<number>(50);
   const [filterBinIndex, setFilterBinIndex] = useState<number | "all">("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Compute Gap Range Sequence analysis dynamically with Active Algorithmic DNA weights
   const report = useMemo(() => {
@@ -106,13 +132,18 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           totalW += w;
         }
         if (totalW > 0) {
-          dnaScore = (totalVal / totalW);
+          dnaScore = totalVal / totalW;
         }
       }
 
       // c. Continuous DNA Sieve multiplier from the active algorithmic DNA (ZÉRO NOMBRE MAGIQUE)
       const dnaMultiplier = report.dnaMultipliers?.[num] ?? 1.0;
       const dnaAffinity = report.dnaAffinity?.[num] ?? Math.round(dnaScore);
+      const zScore = report.zScoresByNumber?.[num] ?? 0;
+      const lift = report.liftsByNumber?.[num] ?? 1.0;
+      const quantumCoherence = report.quantumCoherenceByNumber?.[num] ?? 50;
+      const empiricalProof = report.empiricalProofConfidence?.[num] ?? 50;
+      const burstMomentum = report.burstMomentumByNumber?.[num] ?? 50;
 
       // d. Continuous Differentiable Sieved Decision Score:
       // Combines raw transition likelihood modulated continuously by the active DNA Sieve
@@ -134,19 +165,28 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       let tag = "Survivant Standard";
       let tagColor = "text-slate-400 bg-slate-800/60 border-slate-700/50";
       let isDnaBoosted = dnaMultiplier > 1.05;
+      let categoryKey: SurvivorCategoryFilter = "ALL";
 
       if (sievedScore >= 70 && rawMarkovScore >= 60 && dnaAffinity >= 65) {
         tag = "🔥 Convergence Tamisée Élite";
         tagColor = "text-amber-300 bg-amber-500/20 border-amber-500/30 shadow-amber-500/10";
+        categoryKey = "CONVERGENCE";
       } else if (dnaAffinity >= 70) {
         tag = "⚡ Signal ADN Dominant";
         tagColor = "text-indigo-300 bg-indigo-500/20 border-indigo-500/30";
+        categoryKey = "DNA_DOMINANT";
       } else if (rawMarkovScore >= 65) {
         tag = "🎯 Transition Écart";
         tagColor = "text-emerald-300 bg-emerald-500/20 border-emerald-500/30";
+        categoryKey = "MARKOV";
       } else if (isDnaBoosted) {
         tag = "✨ Tamisé ADN +";
         tagColor = "text-cyan-300 bg-cyan-500/20 border-cyan-500/30";
+        categoryKey = "TAMIS_BOOSTED";
+      } else if (gapInfo.gap >= 20) {
+        tag = "⏳ Rupture d'Écart";
+        tagColor = "text-rose-300 bg-rose-500/20 border-rose-500/30";
+        categoryKey = "CRITICAL_GAP";
       }
 
       return {
@@ -158,11 +198,17 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         dnaAffinity,
         dnaMultiplier: parseFloat(dnaMultiplier.toFixed(2)),
         isDnaBoosted,
+        zScore,
+        lift,
+        quantumCoherence,
+        empiricalProof,
+        burstMomentum,
         gap: gapInfo.gap,
         binLabel: gapInfo.binLabel,
         binIndex: gapInfo.binIndex,
         tag,
         tagColor,
+        categoryKey,
       };
     });
 
@@ -172,6 +218,35 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       filtered = filtered.filter((item) => item.binIndex === filterBinIndex);
     }
 
+    // Apply Category Filter
+    if (categoryFilter !== "ALL") {
+      if (categoryFilter === "PROOF_ONLY") {
+        filtered = filtered.filter((item) => item.zScore > 0 && item.empiricalProof >= 60);
+      } else if (categoryFilter === "CONVERGENCE") {
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "CONVERGENCE" || item.score >= 68
+        );
+      } else if (categoryFilter === "DNA_DOMINANT") {
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "DNA_DOMINANT" || item.dnaAffinity >= 68
+        );
+      } else if (categoryFilter === "MARKOV") {
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "MARKOV" || item.rawMarkovScore >= 62
+        );
+      } else if (categoryFilter === "TAMIS_BOOSTED") {
+        filtered = filtered.filter((item) => item.isDnaBoosted);
+      } else if (categoryFilter === "CRITICAL_GAP") {
+        filtered = filtered.filter((item) => item.gap >= 18);
+      }
+    }
+
+    // Apply Search Query Filter
+    if (searchQuery.trim() !== "") {
+      const q = searchQuery.trim();
+      filtered = filtered.filter((item) => item.num.toString().includes(q));
+    }
+
     // Apply Score Retention Threshold Cutoff
     filtered = filtered.filter((item) => item.score >= minScoreCutoff);
 
@@ -179,12 +254,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     filtered.sort((a, b) => {
       if (sortMode === "fused") {
         if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
-      } else if (sortMode === "markov") {
-        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-6)
-          return b.rawMarkovScore - a.rawMarkovScore;
       } else if (sortMode === "dna") {
         if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-6) return b.dnaAffinity - a.dnaAffinity;
         if (Math.abs(b.dnaScore - a.dnaScore) > 1e-6) return b.dnaScore - a.dnaScore;
+      } else if (sortMode === "markov") {
+        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-6)
+          return b.rawMarkovScore - a.rawMarkovScore;
+      } else if (sortMode === "quantum") {
+        if (Math.abs(b.quantumCoherence - a.quantumCoherence) > 1e-6)
+          return b.quantumCoherence - a.quantumCoherence;
+      } else if (sortMode === "proof") {
+        if (Math.abs(b.empiricalProof - a.empiricalProof) > 1e-6)
+          return b.empiricalProof - a.empiricalProof;
+        if (Math.abs(b.zScore - a.zScore) > 1e-6) return b.zScore - a.zScore;
       } else if (sortMode === "gap") {
         if (b.gap !== a.gap) return b.gap - a.gap;
       }
@@ -210,7 +292,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         : "0";
 
     const topConvergenceCount = filtered.filter((item) =>
-      item.tag.includes("Convergence") || item.score >= 70,
+      item.tag.includes("Convergence") || item.score >= 70
     ).length;
 
     return {
@@ -229,8 +311,10 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     globalWeights,
     lastPrediction,
     sortMode,
+    categoryFilter,
     minScoreCutoff,
     filterBinIndex,
+    searchQuery,
   ]);
 
   const handleStepChange = (newStep: GapRangeStep) => {
@@ -239,6 +323,38 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     setSelectedBinIndex(null);
     setFilterBinIndex("all");
   };
+
+  const handleCopyNumbers = useCallback(
+    (count?: number) => {
+      const targetList = count
+        ? survivingNumbers.slice(0, count)
+        : survivingNumbers;
+      if (targetList.length === 0) return;
+
+      const numsString = targetList.map((item) => item.num).join(", ");
+      navigator.clipboard.writeText(numsString);
+      setCopiedId("all");
+      audioEngine.play("success");
+      showToast(
+        `${targetList.length} numéro(s) survivant(s) copié(s) : [${numsString}]`,
+        "success"
+      );
+
+      setTimeout(() => setCopiedId(null), 2500);
+    },
+    [survivingNumbers, showToast]
+  );
+
+  const handleCopySingle = useCallback(
+    (num: number) => {
+      navigator.clipboard.writeText(num.toString());
+      setCopiedId(`num_${num}`);
+      audioEngine.play("click");
+      showToast(`Numéro #${num} copié dans le presse-papier`, "info");
+      setTimeout(() => setCopiedId(null), 2000);
+    },
+    [showToast]
+  );
 
   const chartData = useMemo(() => {
     return report.bins.map((bin) => ({
@@ -464,139 +580,262 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
             </div>
           </div>
 
-          {/* Controls toolbar */}
-          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
-            {/* Tranche Filter */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs">
-              <Filter className="w-3.5 h-3.5 text-indigo-400 mr-1.5" />
-              <select
-                value={filterBinIndex}
-                onChange={(e) => {
-                  audioEngine.play("click");
-                  setFilterBinIndex(
-                    e.target.value === "all" ? "all" : Number(e.target.value),
-                  );
-                }}
-                className="bg-transparent text-slate-200 text-xs font-bold focus:outline-none cursor-pointer"
-              >
-                <option value="all" className="bg-slate-900 text-slate-200">
-                  Toutes tranches favorisées
+          {/* Quick Copy & Export Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleCopyNumbers(5)}
+              disabled={survivingNumbers.length === 0}
+              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-40"
+              title="Copier le Top 5 Élite"
+            >
+              <Flame size={13} className="text-amber-400" />
+              <span>Top 5 Élite</span>
+            </button>
+
+            <button
+              onClick={() => handleCopyNumbers()}
+              disabled={survivingNumbers.length === 0}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-40"
+            >
+              {copiedId === "all" ? (
+                <>
+                  <Check size={13} className="text-emerald-300" />
+                  <span>Copié !</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={13} />
+                  <span>Copier ({survivingNumbers.length})</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Category Filters Pills Bar */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 p-2 rounded-xl border border-slate-800">
+          <span className="text-[10px] font-black uppercase text-slate-400 px-2 flex items-center gap-1">
+            <Filter className="w-3 h-3 text-indigo-400" /> Filtres :
+          </span>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("ALL");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+              categoryFilter === "ALL"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            Tous les Survivants
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("CONVERGENCE");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "CONVERGENCE"
+                ? "bg-amber-600 text-white shadow-sm"
+                : "text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10"
+            }`}
+          >
+            <Flame size={12} />
+            Convergence Élite
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("DNA_DOMINANT");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "DNA_DOMINANT"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-indigo-300/80 hover:text-indigo-200 hover:bg-indigo-500/10"
+            }`}
+          >
+            <Zap size={12} />
+            Signal ADN
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("MARKOV");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "MARKOV"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : "text-emerald-300/80 hover:text-emerald-200 hover:bg-emerald-500/10"
+            }`}
+          >
+            <Target size={12} />
+            Markov Transition
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("TAMIS_BOOSTED");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "TAMIS_BOOSTED"
+                ? "bg-cyan-600 text-white shadow-sm"
+                : "text-cyan-300/80 hover:text-cyan-200 hover:bg-cyan-500/10"
+            }`}
+          >
+            <Sparkles size={12} />
+            Tamisé ADN +
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("CRITICAL_GAP");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "CRITICAL_GAP"
+                ? "bg-rose-600 text-white shadow-sm"
+                : "text-rose-300/80 hover:text-rose-200 hover:bg-rose-500/10"
+            }`}
+          >
+            ⏳ Rupture Écart
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setCategoryFilter("PROOF_ONLY");
+            }}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              categoryFilter === "PROOF_ONLY"
+                ? "bg-purple-600 text-white shadow-sm"
+                : "text-purple-300/80 hover:text-purple-200 hover:bg-purple-500/10"
+            }`}
+          >
+            <ShieldCheck size={12} />
+            Preuve Statistique
+          </button>
+        </div>
+
+        {/* Controls Grid Toolbar */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          {/* Tranche Filter */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+              <Filter className="w-3 h-3 text-indigo-400" /> Tranche d'Écart
+            </span>
+            <select
+              value={filterBinIndex}
+              onChange={(e) => {
+                audioEngine.play("click");
+                setFilterBinIndex(
+                  e.target.value === "all" ? "all" : Number(e.target.value)
+                );
+              }}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="all" className="bg-slate-900 text-slate-200">
+                Toutes tranches favorisées
+              </option>
+              {report.bins.map((bin) => (
+                <option
+                  key={bin.binIndex}
+                  value={bin.binIndex}
+                  className="bg-slate-900 text-slate-200"
+                >
+                  Tranche {bin.label} ({(bin.probability * 100).toFixed(0)}%)
                 </option>
-                {report.bins.map((bin) => (
-                  <option
-                    key={bin.binIndex}
-                    value={bin.binIndex}
-                    className="bg-slate-900 text-slate-200"
+              ))}
+            </select>
+          </div>
+
+          {/* Sort Mode Selector */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+              <ArrowUpDown className="w-3 h-3 text-emerald-400" /> Tri Prioritaire
+            </span>
+            <select
+              value={sortMode}
+              onChange={(e) => {
+                audioEngine.play("click");
+                setSortMode(e.target.value as SurvivorSortMode);
+              }}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="fused">Fusion ADN (Consensus Optimal)</option>
+              <option value="dna">Signal ADN (Affinité Génomique)</option>
+              <option value="markov">Markov (Probabilité Transition)</option>
+              <option value="quantum">Quantique (Cohérence Spectrale)</option>
+              <option value="proof">Preuve Statistique (Z-Score & Lift)</option>
+              <option value="gap">Écart (Tension d'Absence)</option>
+            </select>
+          </div>
+
+          {/* Threshold Filter Slider & Presets */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+              <span className="flex items-center gap-1">
+                <Sliders className="w-3 h-3 text-amber-400" /> Seuil Score Min
+              </span>
+              <span className="text-amber-300 font-mono font-black">{minScoreCutoff}/100</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={90}
+                step={5}
+                value={minScoreCutoff}
+                onChange={(e) => setMinScoreCutoff(Number(e.target.value))}
+                className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              />
+              <div className="flex gap-1 shrink-0">
+                {[30, 50, 65].map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setMinScoreCutoff(preset);
+                    }}
+                    className={`px-1.5 py-0.5 text-[9px] font-bold rounded ${
+                      minScoreCutoff === preset
+                        ? "bg-indigo-600 text-white"
+                        : "bg-slate-800 text-slate-400 hover:text-white"
+                    }`}
                   >
-                    Tranche {bin.label} ({(bin.probability * 100).toFixed(0)}%)
-                  </option>
+                    {preset}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
+          </div>
 
-            {/* Threshold Preset Cutoff */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
-              <span className="text-[10px] font-black uppercase text-slate-400 px-2 flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-emerald-400" /> Seuil
-              </span>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setMinScoreCutoff(30);
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  minScoreCutoff === 30
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Large (&gt;30)
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setMinScoreCutoff(50);
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  minScoreCutoff === 50
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Standard (&gt;50)
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setMinScoreCutoff(65);
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  minScoreCutoff === 65
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Élite (&gt;65)
-              </button>
-            </div>
-
-            {/* Sort Mode Switcher */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
-              <span className="text-[10px] font-black uppercase text-slate-400 px-2 flex items-center gap-1">
-                <ArrowUpDown className="w-3 h-3 text-indigo-400" /> Tri
-              </span>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setSortMode("fused");
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  sortMode === "fused"
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Fusion ADN
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setSortMode("markov");
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  sortMode === "markov"
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Markov
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setSortMode("dna");
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  sortMode === "dna"
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Signal
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setSortMode("gap");
-                }}
-                className={`px-2.5 py-1 text-[10px] font-extrabold rounded-lg transition-all ${
-                  sortMode === "gap"
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Écart
-              </button>
+          {/* Number Search Filter */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+              <Search className="w-3 h-3 text-cyan-400" /> Recherche Numéro
+            </span>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Ex: 7, 24, 88..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-2 text-[10px] text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -675,17 +914,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         {survivingNumbers.length === 0 ? (
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-8 text-center space-y-3">
             <p className="text-xs text-slate-400 italic">
-              Aucun numéro ne satisfait les critères actuels du filtre ADN (Seuil &gt; {minScoreCutoff}).
+              Aucun numéro ne satisfait les critères actuels du filtre (Seuil &gt; {minScoreCutoff}, Filtre: {categoryFilter}).
             </p>
             <button
               onClick={() => {
                 audioEngine.play("click");
                 setMinScoreCutoff(30);
+                setCategoryFilter("ALL");
                 setFilterBinIndex("all");
+                setSearchQuery("");
               }}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md"
             >
-              <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser les filtres
+              <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser tous les filtres
             </button>
           </div>
         ) : (
@@ -698,23 +939,34 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 dnaScore,
                 dnaAffinity,
                 dnaMultiplier,
+                isDnaBoosted,
+                zScore,
+                lift,
+                quantumCoherence,
+                empiricalProof,
                 gap,
                 binLabel,
                 tag,
                 tagColor,
               }) => {
+                const isItemCopied = copiedId === `num_${num}`;
                 return (
                   <div
                     key={num}
-                    className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm hover:shadow-md transition-all group relative overflow-hidden"
+                    className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-3.5 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md transition-all group relative overflow-hidden"
                   >
-                    {/* Top Row: NumberBall + Tag */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                    {/* Top Row: NumberBall + Tag + Quick Copy */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
                         <NumberBall number={num} size="md" />
                         <div>
-                          <div className="text-xs font-black text-white font-mono">
-                            Numéro #{num}
+                          <div className="text-xs font-black text-white font-mono flex items-center gap-1.5">
+                            <span>#{num}</span>
+                            {isDnaBoosted && (
+                              <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                ADN+
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">
                             Écart : <span className="text-indigo-300 font-bold">{gap}</span> ({binLabel})
@@ -722,39 +974,63 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                         </div>
                       </div>
 
-                      <span
-                        className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${tagColor}`}
-                      >
-                        {tag.split(" ")[0]}
-                      </span>
-                    </div>
-
-                    {/* Tag Label */}
-                    <div className="text-[10px] font-bold text-slate-300 flex items-center justify-between border-t border-slate-800/60 pt-1.5">
-                      <span className="text-slate-400">{tag}</span>
-                      <span className="font-mono text-emerald-400 font-black">
-                        {score.toFixed(1)} / 100
-                      </span>
-                    </div>
-
-                    {/* Score Bar & Dual Breakdown */}
-                    <div className="space-y-1">
-                      <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-800">
-                        <div
-                          className="bg-gradient-to-r from-indigo-500 via-emerald-400 to-amber-300 h-full rounded-full transition-all duration-300"
-                          style={{
-                            width: `${Math.min(100, Math.max(0, score))}%`,
-                          }}
-                        />
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleCopySingle(num)}
+                          className="p-1 text-slate-500 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                          title={`Copier #${num}`}
+                        >
+                          {isItemCopied ? (
+                            <Check size={12} className="text-emerald-400" />
+                          ) : (
+                            <Copy size={12} />
+                          )}
+                        </button>
                       </div>
+                    </div>
 
-                      <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
-                        <span>Markov: <strong className="text-emerald-400">{markovScore}</strong></span>
-                        <span className="flex items-center gap-1">
-                          ADN: <strong className="text-indigo-300">{dnaAffinity}%</strong>
-                          <span className={`text-[8px] font-black px-1 rounded ${dnaMultiplier >= 1.0 ? 'text-amber-300 bg-amber-500/10' : 'text-slate-500 bg-slate-800'}`}>
-                            {dnaMultiplier}x
-                          </span>
+                    {/* Tag Label Badge */}
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${tagColor} truncate`}
+                      >
+                        {tag}
+                      </span>
+                      <span className="font-mono text-emerald-400 font-black text-xs">
+                        {score.toFixed(1)}/100
+                      </span>
+                    </div>
+
+                    {/* Score Bar */}
+                    <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-800">
+                      <div
+                        className="bg-gradient-to-r from-indigo-500 via-emerald-400 to-amber-300 h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, score))}%`,
+                        }}
+                      />
+                    </div>
+
+                    {/* Multi-Signal Diagnostic Metrics Grid */}
+                    <div className="grid grid-cols-2 gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/70 text-[9px] font-mono">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>Markov :</span>
+                        <span className="font-bold text-emerald-400">{markovScore}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>Signal ADN :</span>
+                        <span className="font-bold text-indigo-300">{dnaAffinity}%</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>Tamis Multiplier :</span>
+                        <span className={`font-bold ${dnaMultiplier >= 1.05 ? 'text-amber-300' : 'text-slate-400'}`}>
+                          {dnaMultiplier}x
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>Z-Score / Lift :</span>
+                        <span className={`font-bold ${zScore > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                          +{zScore} / {lift}x
                         </span>
                       </div>
                     </div>

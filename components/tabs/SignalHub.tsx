@@ -12,6 +12,7 @@ import {
   Box,
   Compass,
   Cpu,
+  Workflow,
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
 import { ChaosAttractor } from "../ChaosAttractor";
@@ -22,6 +23,9 @@ import { audioEngine } from "../../utils/audioEngine";
 
 const StatsTab = lazy(() =>
   import("./StatsTab").then((m) => ({ default: m.StatsTab })),
+);
+const PatternDiscoveryTab = lazy(() =>
+  import("./PatternDiscoveryTab").then((m) => ({ default: m.PatternDiscoveryTab })),
 );
 const GapPatternTab = lazy(() =>
   import("./GapPatternTab").then((m) => ({ default: m.GapPatternTab })),
@@ -50,6 +54,7 @@ const AcademyTab = lazy(() =>
 
 const subTabPreloaders: Record<string, () => Promise<unknown>> = {
   stats: () => import("./StatsTab"),
+  patterns: () => import("./PatternDiscoveryTab"),
   gaps: () => import("./GapPatternTab"),
   spectral: () => import("./SpectralTab"),
   fractal: () => import("./FractalTab"),
@@ -94,6 +99,7 @@ export const SignalHub: React.FC = () => {
 
   const tabs = [
     { id: "stats", label: "Stats", icon: BarChart2, color: "text-indigo-500" },
+    { id: "patterns", label: "Motifs", icon: Workflow, color: "text-emerald-400" },
     { id: "gaps", label: "Écarts", icon: Compass, color: "text-rose-500" },
     {
       id: "spectral",
@@ -195,6 +201,9 @@ export const SignalHub: React.FC = () => {
                 }
               >
                 {activeSubTab === "stats" && <StatsTab drawName={activeDraw} />}
+                {activeSubTab === "patterns" && (
+                  <PatternDiscoveryTab drawName={activeDraw} />
+                )}
                 {activeSubTab === "gaps" && (
                   <GapPatternTab drawName={activeDraw} />
                 )}

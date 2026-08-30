@@ -45,6 +45,7 @@ import { NeuralDarwinismLab } from "../NeuralDarwinismLab";
 import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
 import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
 import { TrainingEvolutionDrawer } from "../TrainingEvolutionDrawer";
+import { NeuralAutoOptimizationPanel } from "../forensic/NeuralAutoOptimizationPanel";
 import type { AlgoWeights, TrainingReport } from "../../types";
 import { ExportService } from "../../services/exportService";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
@@ -66,7 +67,7 @@ const formatLabel = (key: string) => LABELS_MAP[key as AlgoKey] || key;
 
 type OptimizerType = "meta" | "pso" | "genetic" | "bayesian";
 type PresetStrategy = "BALANCED" | "HYPER_CONVERGENCE" | "EXPLORATORY" | "REGULARIZED_L2";
-type SubTabType = "training" | "darwinian" | "replay" | "feedback";
+type SubTabType = "training" | "neural-opt" | "darwinian" | "replay" | "feedback";
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
@@ -568,6 +569,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto custom-scrollbar">
         {[
           { id: "training", label: "Entraînement Continu & Gradient", icon: Zap },
+          { id: "neural-opt", label: "Auto-Optimisation Rétropropagation", icon: BrainCircuit },
           { id: "darwinian", label: "Laboratoire Darwinien Bio-Inspiré", icon: Dna },
           { id: "replay", label: "Replay Déterministe & Step-by-Step", icon: Clock },
           { id: "feedback", label: "Feedback Neuronal & Calibrage", icon: Radio },
@@ -984,17 +986,34 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
       )}
 
-      {/* VIEW 2: BIO-INSPIRED DARWINIAN LAB */}
+      {/* VIEW 2: NEURAL BACKPROPAGATION AUTO-OPTIMIZATION */}
+      {activeSubTab === "neural-opt" && (
+        <NeuralAutoOptimizationPanel
+          drawName={drawName}
+          history={cleanHistory}
+          currentWeights={liveWeights}
+          onApplyWeights={async (newWeights) => {
+            await updateGlobalWeights(newWeights, drawName);
+            await refreshData(drawName, true);
+            setLiveWeights(newWeights);
+            setOriginalWeights(newWeights);
+            setFineTuningWeights(newWeights);
+            showToast("Poids optimisés par rétropropagation appliqués avec succès !", "success");
+          }}
+        />
+      )}
+
+      {/* VIEW 3: BIO-INSPIRED DARWINIAN LAB */}
       {activeSubTab === "darwinian" && (
         <NeuralDarwinismLab drawName={drawName} />
       )}
 
-      {/* VIEW 3: DETERMINISTIC REPLAY INSPECTOR */}
+      {/* VIEW 4: DETERMINISTIC REPLAY INSPECTOR */}
       {activeSubTab === "replay" && (
         <DeterministicReplayInspector drawName={drawName} />
       )}
 
-      {/* VIEW 4: NEURAL FEEDBACK & CALIBRATION */}
+      {/* VIEW 5: NEURAL FEEDBACK & CALIBRATION */}
       {activeSubTab === "feedback" && (
         <NeuralFeedbackPanel />
       )}

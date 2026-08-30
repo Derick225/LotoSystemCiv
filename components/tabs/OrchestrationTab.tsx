@@ -430,12 +430,19 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
       };
     });
 
+    const dynamicConfidence = Math.round(
+      Math.max(15, Math.min(98,
+        currentPrediction?.confidence ??
+        ((metrics?.backtestAccuracy ?? 50) * 0.55 + ((metrics?.stabilityScore ?? 0.8) * 100) * 0.45)
+      ))
+    );
+
     const predictionObj: Prediction = {
       suggestedNumbers: generatedTicket,
       candidates: generatedTicket,
-      confidence: 85, // Arbitrary high confidence for Orchestration
-      analysis: "Orchestration Elite Synthesis",
-      breakdown: breakdown,
+      confidence: dynamicConfidence,
+      analysis: currentPrediction?.analysis || `Orchestration Elite Flux (Stabilité: ${Math.round((metrics?.stabilityScore ?? 0.8) * 100)}%, Backtest: ${metrics?.backtestAccuracy ?? 50}%)`,
+      breakdown: currentPrediction?.breakdown || breakdown,
       timestamp: Date.now(),
     };
     await savePredictionToHistory(drawName, predictionObj);

@@ -276,7 +276,9 @@ export const runMonteCarloStressTest = (
 
   for (let b = 1; b <= 90; b++) ballScoresMap[b] = [];
 
-  const prng = new LCG(`monte_carlo_whatif_${Date.now()}`);
+  // Seed déterministe canonique dérivé de l'empreinte vectorielle des poids
+  const weightFingerprint = algoKeys.map(k => `${k}:${(baseWeights[k] || 0).toFixed(4)}`).join('_');
+  const prng = new LCG(`monte_carlo_whatif_${weightFingerprint}`);
 
   for (let run = 0; run < iterations; run++) {
     const noisyWeights: Record<string, number> = {};
