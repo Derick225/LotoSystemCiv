@@ -741,6 +741,13 @@ export interface PlatinumResult {
     transition: number;
     chaotic: number;
   };
+  jaccardMetrics?: {
+    meanJaccard: number;           // Indice Jaccard temporel moyen inter-tirages
+    stdDevJaccard: number;        // Écart-type d'inertie Jaccard
+    theoreticalJaccard: number;   // Jaccard théorique stationnaire
+    jaccardInertiaRatio: number;  // Ratio d'inertie Jaccard R_J
+    ballJaccardIndices?: Record<number, number>; // Tenseur Jaccard individuel
+  };
 }
 
 export interface PlatinumScenario {
@@ -751,11 +758,13 @@ export interface PlatinumScenario {
   probability: number;
   risk: "LOW" | "MEDIUM" | "HIGH";
   color: string;
+  jaccardScore?: number;
   genomicProfile?: {
     focus: string;
     mrrBoost?: number;
     sieveAccelerationDelta?: number;
     entropyRegimeAdaptive?: boolean;
+    jaccardCouplingPct?: number;
     macroFingerprint?: {
       familyKey: string;
       familyName: string;
@@ -785,6 +794,7 @@ export interface PlatinumUserOptions {
   forensicGain: number;    // Multiplier for the forensic adjustments (default: 1.0)
   phaseFrequency: number;  // Multiplier for the phase shifts (default: 1.0)
   shannonEntropyFilter: boolean; // Filter numbers below historical entropy average
+  jaccardGain?: number;    // Multiplier for Jaccard transition persistence & coupling (default: 1.0)
 }
 
 export interface GeminiReasoning {

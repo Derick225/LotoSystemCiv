@@ -26,10 +26,14 @@ class WorkerService {
                 return;
             }
             if (this.localWorker) {
-                try { this.localWorker.terminate(); } catch (_) {}
+                try { 
+                    this.localWorker.terminate(); 
+                } catch (termErr) {
+                    console.debug("[WorkerService] Échec lors de la terminaison du worker précédent:", termErr);
+                }
             }
             // Initialisation d'un vrai Web Worker via Vite
-            this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', /* @ts-ignore */ import.meta.url), { type: 'module' });
+            this.localWorker = new Worker(new URL('./nexus.worker.ts?worker', import.meta.url), { type: 'module' });
             
             this.localWorker.onmessage = (e: MessageEvent) => {
                 const { taskId, success, result, error } = e.data;

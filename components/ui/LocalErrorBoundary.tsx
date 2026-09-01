@@ -39,8 +39,8 @@ export class LocalErrorBoundary extends React.Component<
   // Restore the module by resetting error state
   handleReload = () => {
     try {
-      // @ts-ignore
-      if (window.audioEngine) window.audioEngine.play("click");
+      const win = typeof window !== 'undefined' ? (window as typeof window & { audioEngine?: { play: (s: string) => void } }) : null;
+      if (win?.audioEngine) win.audioEngine.play("click");
     } catch (e) {
       logger.error(
         e instanceof Error ? e : new Error(String(e)),

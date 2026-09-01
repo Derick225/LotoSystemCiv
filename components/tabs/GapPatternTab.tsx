@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
+import { logger } from "../../utils/logger";
 import { NumberBall } from "../NumberBall";
 import { gapSequencePatternService } from "../../services/prediction/gapSequencePatternService";
 import { sequencePatternAnalyzer } from "../../services/prediction/sequencePatternAnalyzer";
@@ -284,7 +285,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const handleSelectNumber = (num: number) => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (e) {
+      logger.debug({ err: e }, "Audio feedback non critique");
+    }
     setSelectedNum(num);
   };
 
@@ -293,7 +296,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   ) => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (e) {
+      logger.debug({ err: e }, "Audio feedback non critique");
+    }
     if (sortBy === field) {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
@@ -302,12 +307,12 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     }
   };
 
-  const CustomGapTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
+  const CustomGapTooltip = ({ active, payload }: { active?: boolean; payload?: { value?: number; payload?: { gap?: number; drawIndex?: number; index?: number } }[] }) => {
+    if (active && payload && payload.length && payload[0]?.payload) {
       return (
         <div className="bg-slate-950/95 border border-slate-800 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-bold font-sans">
           <p className="text-white mb-1.5 uppercase tracking-wider text-[10px] text-slate-400">
-            Index de Tirage: {payload[0].payload.index}
+            Index de Tirage: {payload[0].payload.index ?? payload[0].payload.drawIndex ?? "N/A"}
           </p>
           <p className="text-amber-400">
             Écart observé:{" "}
@@ -729,7 +734,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     onChange={(e) => {
                       try {
                         audioEngine.play("click");
-                      } catch (e) {}
+                      } catch (err) {
+                        logger.debug({ err }, "Audio error");
+                      }
                       setWindowSize(parseInt(e.target.value));
                     }}
                     className="w-32 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
@@ -759,7 +766,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     onChange={(e) => {
                       try {
                         audioEngine.play("click");
-                      } catch (e) {}
+                      } catch (err) {
+                        logger.debug({ err }, "Audio error");
+                      }
                       setMinRecurrence(parseFloat(e.target.value));
                     }}
                     className="w-32 h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"

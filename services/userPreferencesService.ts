@@ -2,6 +2,16 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { audioEngine } from '../utils/audioEngine';
 import type { SavedTicket } from '../types';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
+import {
+    FusionConfig,
+    FusionConfigSchema,
+    UserSettings,
+    UserSettingsSchema,
+    UserPreferencesSettings,
+    UserPreferencesSettingsSchema,
+} from './schemas/syncSchemas';
+
+export type { FusionConfig, UserSettings, UserPreferencesSettings };
 
 // Shadowing local pour garantir la robustesse absolue dans les environnements restreints (ex: iframe sandbox)
 const localStorage = {
@@ -70,16 +80,13 @@ const FUSION_CONFIG_KEY = 'lotopro_fusion_config';
 
 // --- FUSION CONFIG (META ANALYST) ---
 
-export interface FusionConfig {
-    stability: number;
-    chaos: number;
-    harmony: number;
-}
-
 export const getFusionConfig = (): FusionConfig => {
     try {
         const raw = localStorage.getItem(FUSION_CONFIG_KEY);
-        return raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { stability: 0.5, chaos: 0.3, harmony: 0.7 };
+        if (!raw) return { stability: 0.5, chaos: 0.3, harmony: 0.7 };
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const validation = FusionConfigSchema.safeParse(parsed);
+        return validation.success ? validation.data : { stability: 0.5, chaos: 0.3, harmony: 0.7 };
     } catch (e) {
         return { stability: 0.5, chaos: 0.3, harmony: 0.7 };
     }
@@ -184,17 +191,13 @@ export const archiveTicket = async (id: string): Promise<void> => {
 
 // --- SYSTEM SETTINGS ---
 
-export interface UserSettings {
-    sound: boolean;
-    haptics: boolean;
-    highPerf: boolean;
-    theme: 'light' | 'dark' | 'system';
-}
-
 export const getSettings = (): UserSettings => {
     try {
         const raw = localStorage.getItem(SETTINGS_KEY);
-        return raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+        if (!raw) return { sound: true, haptics: true, highPerf: true, theme: 'dark' };
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const validation = UserSettingsSchema.safeParse(parsed);
+        return validation.success ? validation.data : { sound: true, haptics: true, highPerf: true, theme: 'dark' };
     } catch (e) {
         return { sound: true, haptics: true, highPerf: true, theme: 'dark' };
     }
@@ -245,9 +248,9 @@ export const performAlmostInstantSync = async () => {
         const saved_tickets = getSavedTickets();
 
         // Extraire de localStorage les paramètres d'entraînement du modèle (règles adaptatives + historique de poids + poids personnalisés)
-        const adaptive_rules: Record<string, any> = {};
-        const weights_history: Record<string, any> = {};
-        const custom_weights: Record<string, any> = {};
+        const adaptive_rules: Record<string, unknown> = {};
+        const weights_history: Record<string, unknown> = {};
+        const custom_weights: Record<string, unknown> = {};
 
         if (typeof window !== 'undefined') {
             for (let i = 0; i < localStorage.length; i++) {
@@ -277,7 +280,7 @@ export const performAlmostInstantSync = async () => {
         }
 
         // Extraire d'IndexedDB le stockage JSON de useNexusStore
-        const custom_ui_states: Record<string, any> = {};
+        const custom_ui_states: Record<string, unknown> = {};
         try {
             const nexusStorage = await idbGet('nexus-storage');
             if (nexusStorage) {
@@ -300,7 +303,7 @@ export const performAlmostInstantSync = async () => {
             });
         }
 
-        const unifiedSettings = {
+        const candidateSettings: UserPreferencesSettings = {
             ...settings,
             fusion_config,
             bankroll,
@@ -310,6 +313,9 @@ export const performAlmostInstantSync = async () => {
             custom_ui_states,
             sync_timestamp: new Date().toISOString()
         };
+
+        const validatedSettingsResult = UserPreferencesSettingsSchema.safeParse(candidateSettings);
+        const unifiedSettings = validatedSettingsResult.success ? validatedSettingsResult.data : candidateSettings;
 
         // Communication locale instantanée inter-modules
         window.dispatchEvent(new CustomEvent('PREFERENCES_CHANGED', {
@@ -329,7 +335,7 @@ export const performAlmostInstantSync = async () => {
                 settings: unifiedSettings,
                 updated_at: new Date().toISOString()
             })
-        ).catch((err: any) => {
+        ).catch((err: unknown) => {
             console.error("[AlmostInstantSync] Erreur d'écriture cloud en arrière plan", err);
         });
 
@@ -350,11 +356,10 @@ export const hydrateUserData = async (userId: string) => {
             .eq('user_id', userId)
             .single();
             
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("hydrateUserData timeout")), 25000));
-        const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as { 
-            data: { watchlist?: string[], saved_tickets?: SavedTicket[], settings?: Record<string, any> }, 
-            error?: Error 
-        };
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) =>
+            setTimeout(() => reject(new Error("hydrateUserData timeout")), 25000)
+        );
+        const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
         if (error || !data) {
             // Première synchronisation : on envoie les données locales existantes vers le Cloud
@@ -364,13 +369,14 @@ export const hydrateUserData = async (userId: string) => {
 
         // 1. WATCHLIST
         const localWatchlist = getWatchlist();
-        const remoteWatchlist = (data.watchlist || []).map(Number);
+        const rawWatchlist = Array.isArray(data.watchlist) ? data.watchlist : [];
+        const remoteWatchlist = rawWatchlist.map(Number).filter(n => !isNaN(n));
         const mergedWatchlist = Array.from(new Set([...localWatchlist, ...remoteWatchlist])).sort((a, b) => a - b);
         localStorage.setItem(WATCHLIST_KEY, JSON.stringify(mergedWatchlist));
 
         // 2. TICKETS SAUVEGARDÉS
         const localTickets = getSavedTickets();
-        const remoteTickets = (data.saved_tickets || []) as SavedTicket[];
+        const remoteTickets = (Array.isArray(data.saved_tickets) ? data.saved_tickets : []) as SavedTicket[];
         const ticketMap = new Map<string, SavedTicket>();
         
         localTickets.forEach(t => ticketMap.set(t.id, t));
@@ -384,11 +390,12 @@ export const hydrateUserData = async (userId: string) => {
         localStorage.setItem(TICKETS_KEY, JSON.stringify(mergedTickets));
 
         // 3. CORE SETTINGS & CONFIGS ÉTENDUES
-        if (data.settings) {
-            const s = data.settings;
+        if (data.settings && typeof data.settings === 'object') {
+            const parsedSettings = UserPreferencesSettingsSchema.safeParse(data.settings);
+            const s: UserPreferencesSettings = parsedSettings.success ? parsedSettings.data : (data.settings as UserPreferencesSettings);
             
             // Paramètres basiques
-            const baseSettings = {
+            const baseSettings: UserSettings = {
                 sound: s.sound !== undefined ? s.sound : true,
                 haptics: s.haptics !== undefined ? s.haptics : true,
                 highPerf: s.highPerf !== undefined ? s.highPerf : true,

@@ -76,6 +76,8 @@ const CustomTooltip = ({ active, payload }: any) => {
           <span className="text-right text-slate-200">{data.x}</span>
           <span className="text-slate-400">Attraction A(f) :</span>
           <span className="text-right text-slate-200">{data.y}</span>
+          <span className="text-slate-400">Indice Jaccard J :</span>
+          <span className="text-right text-emerald-400 font-mono font-bold">{(data.jaccard * 100).toFixed(1)}%</span>
           <span className="text-slate-400">Cohérence C(H) :</span>
           <span className="text-right text-indigo-300">{data.coherence}</span>
           <span className="text-slate-400">Amortiss. Δ(ζ) :</span>
@@ -98,6 +100,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   const [viscosityGain, setViscosityGain] = useState<number>(1.0);
   const [massGain, setMassGain] = useState<number>(1.0);
   const [couplingGain, setCouplingGain] = useState<number>(1.0);
+  const [jaccardGain, setJaccardGain] = useState<number>(1.0);
   const [dampingRatio, setDampingRatio] = useState<number>(0.5); // ζ: Physical damping coefficient
 
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -113,6 +116,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     setViscosityGain(saved.viscosityGain);
     setMassGain(saved.massGain);
     setCouplingGain(saved.couplingGain);
+    setJaccardGain(saved.jaccardGain ?? 1.0);
     setDampingRatio(saved.dampingRatio);
     setOptimizedVector(null);
     setBacktestStats(null);
@@ -129,8 +133,9 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     viscosityGain,
     massGain,
     couplingGain,
+    jaccardGain,
     dampingRatio,
-  }), [viscosityGain, massGain, couplingGain, dampingRatio]);
+  }), [viscosityGain, massGain, couplingGain, jaccardGain, dampingRatio]);
 
   // Helper to update state and persist for the active draw
   const updateAndPersistModifiers = useCallback((patch: Partial<InertiaCalibrationModifiers>) => {
@@ -138,16 +143,18 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
       viscosityGain: patch.viscosityGain !== undefined ? patch.viscosityGain : viscosityGain,
       massGain: patch.massGain !== undefined ? patch.massGain : massGain,
       couplingGain: patch.couplingGain !== undefined ? patch.couplingGain : couplingGain,
+      jaccardGain: patch.jaccardGain !== undefined ? patch.jaccardGain : jaccardGain,
       dampingRatio: patch.dampingRatio !== undefined ? patch.dampingRatio : dampingRatio,
     };
 
     if (patch.viscosityGain !== undefined) setViscosityGain(patch.viscosityGain);
     if (patch.massGain !== undefined) setMassGain(patch.massGain);
     if (patch.couplingGain !== undefined) setCouplingGain(patch.couplingGain);
+    if (patch.jaccardGain !== undefined) setJaccardGain(patch.jaccardGain);
     if (patch.dampingRatio !== undefined) setDampingRatio(patch.dampingRatio);
 
     savePersistedInertiaCalibration(drawName, nextModifiers);
-  }, [drawName, viscosityGain, massGain, couplingGain, dampingRatio]);
+  }, [drawName, viscosityGain, massGain, couplingGain, jaccardGain, dampingRatio]);
 
   // High fidelity phase space coordinate dataset for Recharts
   const oscillatorScores: InertiaOscillatorScore[] = useMemo(() => {
@@ -161,6 +168,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
       y: item.phaseAttraction,    // Phase Attraction mapped vertically
       score: item.score,
       coherence: item.fractalCoherence,
+      jaccard: item.jaccardIndex,
       damping: item.dampingCorrection,
       zScore: item.zScore,
       action: item.hamiltonianAction,
@@ -172,19 +180,19 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("click");
     switch (type) {
       case "neutral":
-        updateAndPersistModifiers({ viscosityGain: 1.0, massGain: 1.0, couplingGain: 1.0, dampingRatio: 0.5 });
+        updateAndPersistModifiers({ viscosityGain: 1.0, massGain: 1.0, couplingGain: 1.0, jaccardGain: 1.0, dampingRatio: 0.5 });
         showToast(`Profil appliqué : Équilibre Harmonique Standard (${drawName})`, "info");
         break;
       case "trend":
-        updateAndPersistModifiers({ viscosityGain: 1.75, massGain: 1.5, couplingGain: 0.7, dampingRatio: 0.35 });
-        showToast(`Profil appliqué : Persistance Forte (${drawName})`, "info");
+        updateAndPersistModifiers({ viscosityGain: 1.75, massGain: 1.5, couplingGain: 0.7, jaccardGain: 1.5, dampingRatio: 0.35 });
+        showToast(`Profil appliqué : Persistance Forte & Tendance Jaccard (${drawName})`, "info");
         break;
       case "critical":
-        updateAndPersistModifiers({ viscosityGain: 0.8, massGain: 1.0, couplingGain: 1.6, dampingRatio: 1.0 });
+        updateAndPersistModifiers({ viscosityGain: 0.8, massGain: 1.0, couplingGain: 1.6, jaccardGain: 0.8, dampingRatio: 1.0 });
         showToast(`Profil appliqué : Amortissement Critique (${drawName})`, "info");
         break;
       case "underdamped":
-        updateAndPersistModifiers({ viscosityGain: 1.2, massGain: 1.8, couplingGain: 1.2, dampingRatio: 0.2 });
+        updateAndPersistModifiers({ viscosityGain: 1.2, massGain: 1.8, couplingGain: 1.2, jaccardGain: 1.6, dampingRatio: 0.2 });
         showToast(`Profil appliqué : Sous-Amorti Résonant (${drawName})`, "info");
         break;
     }
@@ -287,6 +295,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     setViscosityGain(DEFAULT_INERTIA_CALIBRATION.viscosityGain);
     setMassGain(DEFAULT_INERTIA_CALIBRATION.massGain);
     setCouplingGain(DEFAULT_INERTIA_CALIBRATION.couplingGain);
+    setJaccardGain(DEFAULT_INERTIA_CALIBRATION.jaccardGain);
     setDampingRatio(DEFAULT_INERTIA_CALIBRATION.dampingRatio);
     setOptimizedVector(null);
     setBacktestStats(null);
@@ -509,6 +518,34 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 </div>
               </div>
 
+              {/* Couplage Jaccard d'Inertie Slider */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                    <Zap size={10} className="text-emerald-400" /> Couplage Jaccard (δ_J-gain)
+                  </span>
+                  <span className="font-mono text-emerald-400 font-black">
+                    {(computedMetrics.meanJaccardInertia * jaccardGain * 100).toFixed(2)}% ({jaccardGain.toFixed(2)}x)
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.20"
+                  max="2.50"
+                  step="0.05"
+                  value={jaccardGain}
+                  onChange={(e) => {
+                    audioEngine.play("click");
+                    updateAndPersistModifiers({ jaccardGain: Number(e.target.value) });
+                  }}
+                  className="w-full h-1.5 bg-slate-800 accent-emerald-500 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[8px] text-slate-500 uppercase font-mono">
+                  <span>Gain : {jaccardGain.toFixed(2)}x</span>
+                  <span>J̄ : {(computedMetrics.meanJaccardInertia * 100).toFixed(2)}% (Ratio {computedMetrics.jaccardInertiaRatio.toFixed(2)}x)</span>
+                </div>
+              </div>
+
               {/* Damping Ratio ζ Slider */}
               <div className="space-y-1.5 pt-2 border-t border-white/5">
                 <div className="flex justify-between items-center text-[10px]">
@@ -574,6 +611,12 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
               </div>
               <div>
                 Hurst H : <strong className="text-slate-200">{computedMetrics.baseHurst.toFixed(3)}</strong>
+              </div>
+              <div>
+                Jaccard J̄ : <strong className="text-emerald-400 font-bold">{(computedMetrics.meanJaccardInertia * 100).toFixed(2)}%</strong>
+              </div>
+              <div>
+                Ratio Jaccard R_J : <strong className="text-emerald-400 font-bold">{computedMetrics.jaccardInertiaRatio.toFixed(2)}x</strong>
               </div>
             </div>
           </div>

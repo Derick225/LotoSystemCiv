@@ -1,16 +1,15 @@
-import { get, set, del, keys } from 'idb-keyval';
+import { set, keys } from 'idb-keyval';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import {
+  OfflineQueueItem,
+  OfflineQueueItemSchema,
+  OfflineQueuePayloadType,
+  OfflineQueuePayloadTypeSchema,
+} from './schemas/syncSchemas';
+
+export type { OfflineQueueItem, OfflineQueuePayloadType };
 
 const OFFLINE_QUEUE_PREFIX = 'nexus_offline_queue_';
-
-export interface OfflineQueueItem {
-  id: string;
-  type: 'prediction_snapshot' | 'learning_log' | 'learning_session';
-  drawName: string;
-  payload: Record<string, any>;
-  timestamp: number;
-  attempts: number;
-}
 
 /**
  * Service de queue hors-ligne déterministe avec réconciliation réseau automatique.
@@ -27,7 +26,7 @@ class OfflineQueueService {
 
     window.addEventListener('online', () => {
       console.log('[OfflineQueue] Reconnexion réseau détectée. Lancement de la réconciliation...');
-      this.processQueue().catch((err) => console.warn('[OfflineQueue] Échec de réconciliation :', err));
+      this.processQueue().catch((err: unknown) => console.warn('[OfflineQueue] Échec de réconciliation :', err));
     });
 
     if (navigator.onLine) {
@@ -41,25 +40,41 @@ class OfflineQueueService {
    * Enregistre un élément dans la queue locale IndexedDB et tente une synchronisation si en ligne
    */
   public async enqueue(
-    type: 'prediction_snapshot' | 'learning_log' | 'learning_session',
+    type: OfflineQueuePayloadType,
     drawName: string,
-    payload: Record<string, any>
+    payload: Record<string, unknown> | object
   ): Promise<void> {
+    const typeValidation = OfflineQueuePayloadTypeSchema.safeParse(type);
+    if (!typeValidation.success) {
+      console.warn(`[OfflineQueue] Type de payload invalide: ${type}`);
+      return;
+    }
+
+    const payloadRecord = payload as Record<string, unknown>;
     this.queueSequence = (this.queueSequence + 1) % 1000000;
-    const id = payload.id || `queue_${type}_${Date.now()}_${this.queueSequence}`;
-    const queueItem: OfflineQueueItem = {
+    const rawId = typeof payloadRecord.id === 'string' ? payloadRecord.id : undefined;
+    const id = rawId || `queue_${type}_${Date.now()}_${this.queueSequence}`;
+    
+    const candidateItem: OfflineQueueItem = {
       id,
-      type,
+      type: typeValidation.data,
       drawName,
-      payload,
+      payload: payloadRecord,
       timestamp: Date.now(),
       attempts: 0,
     };
 
+    const parsedItem = OfflineQueueItemSchema.safeParse(candidateItem);
+    if (!parsedItem.success) {
+      console.warn(`[OfflineQueue] Échec de validation de l'élément de queue ${id}:`, parsedItem.error.format());
+      return;
+    }
+
+    const queueItem = parsedItem.data;
     const storageKey = `${OFFLINE_QUEUE_PREFIX}${type}_${id}`;
     try {
       await set(storageKey, JSON.stringify(queueItem));
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn(`[OfflineQueue] Impossible d'écrire l'élément ${id} dans IndexedDB :`, err);
     }
 
@@ -84,8 +99,8 @@ class OfflineQueueService {
     try {
       const allKeys = await keys();
       const queueKeys = allKeys.filter(
-        (k) => typeof k === 'string' && k.startsWith(OFFLINE_QUEUE_PREFIX)
-      ) as string[];
+        (k): k is string => typeof k === 'string' && k.startsWith(OFFLINE_QUEUE_PREFIX)
+      );
 
       if (queueKeys.length === 0) {
         this.isProcessing = false;
@@ -97,21 +112,28 @@ class OfflineQueueService {
       const { getMany, delMany, setMany } = await import('idb-keyval');
       const values = await getMany(queueKeys);
       const keysToDelete: string[] = [];
-      const entriesToUpdate: [string, any][] = [];
+      const entriesToUpdate: [string, string][] = [];
 
       for (let i = 0; i < values.length; i++) {
         const raw = values[i];
         const key = queueKeys[i];
         if (!raw) continue;
 
-        let item: OfflineQueueItem;
+        let parsedRaw: unknown;
         try {
-          item = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          parsedRaw = typeof raw === 'string' ? JSON.parse(raw) : raw;
         } catch {
           keysToDelete.push(key);
           continue;
         }
 
+        const validation = OfflineQueueItemSchema.safeParse(parsedRaw);
+        if (!validation.success) {
+          keysToDelete.push(key);
+          continue;
+        }
+
+        const item: OfflineQueueItem = validation.data;
         let syncSuccess = false;
 
         try {
@@ -123,11 +145,10 @@ class OfflineQueueService {
             const { error } = await supabase.from('prediction_snapshots').upsert(rowData);
             if (!error) syncSuccess = true;
           } else if (item.type === 'learning_log' || item.type === 'learning_session') {
-            // Désactivé de manière permanente pour éviter de consommer inutilement du quota Supabase gratuit.
-            // On considère le traitement local comme suffisant et réussi.
+            // Traitement local considéré comme suffisant
             syncSuccess = true;
           }
-        } catch (e) {
+        } catch (e: unknown) {
           console.warn(`[OfflineQueue] Erreur de synchro pour ${item.id} :`, e);
         }
 
@@ -153,7 +174,7 @@ class OfflineQueueService {
           await setMany(entriesToUpdate);
       }
       
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[OfflineQueue] Erreur critique durant la réconciliation :', err);
     } finally {
       this.isProcessing = false;

@@ -4,6 +4,19 @@ import { PredictionHistoryItem, ForensicReport, LearningSession, Prediction, Pre
 import { AppError, logError } from '../utils/AppError';
 import { set, del } from 'idb-keyval';
 import { getDeterministicUUID } from '../utils/mathUtils';
+import {
+    CloudPredictionMetaSchema,
+    CloudPredictionMeta,
+    CloudPredictionRowSchema,
+    CloudPredictionRow,
+    CloudForensicReportMetaSchema,
+    CloudForensicReportMeta,
+    CloudForensicReportRowSchema,
+    CloudForensicReportRow,
+    CloudPredictionSnapshotSchema,
+    CloudPredictionSnapshot,
+    PredictionFeedbackSchema,
+} from './schemas/syncSchemas';
 
 const BATCH_SIZE = 50;
 
@@ -63,10 +76,10 @@ const retryWithBackoff = async <T>(
 ): Promise<T> => {
     try {
         return await fn();
-    } catch (err: any) {
-        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+    } catch (err: unknown) {
+        const errorMsg = err instanceof Error
             ? err.message
-            : String(err);
+            : (typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message) : String(err));
 
         // Détection des erreurs réseau intermittentes (comme "Failed to fetch", "network", "timeout")
         const isNetworkError = 
@@ -97,7 +110,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
     const executeSync = async (): Promise<PredictionHistoryItem[]> => {
         // 1. PULL METADATA ONLY: Solution différentielle hautement optimisée pour minimiser la consommation réseau (Phase 3)
         // En sélectionnant uniquement les clés d'identification, nous évitons de télécharger les lourds tableaux de breakdown/candidates/analytics.
-        const { data: cloudMetaList, error } = await supabase
+        const { data: rawMetaList, error } = await supabase
             .from('predictions')
             .select('id, timestamp, draw_name, draw_result_id, feedback')
             .eq('user_id', user.id)
@@ -106,12 +119,25 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 
         if (error) throw error;
 
+        // Validation runtime des métadonnées distantes via Zod
+        const cloudMetaList: CloudPredictionMeta[] = [];
+        if (rawMetaList) {
+            for (const rawMeta of rawMetaList) {
+                const parsedMeta = CloudPredictionMetaSchema.safeParse(rawMeta);
+                if (parsedMeta.success) {
+                    cloudMetaList.push(parsedMeta.data);
+                } else {
+                    console.warn('[SYNC METADATA] Métadonnée de prédiction distante invalide ignorée:', parsedMeta.error.format());
+                }
+            }
+        }
+
         // Identifier les prédictions entièrement manquantes en local pour ne charger le plein JSON que pour elles
         const missingIds = cloudMetaList
             ? cloudMetaList.filter(c => !sanitizedLocalItems.some(l => l.id === c.id)).map(c => c.id)
             : [];
 
-        const loadedFullMap = new Map<string, any>();
+        const loadedFullMap = new Map<string, CloudPredictionRow>();
         if (missingIds.length > 0) {
             for (let i = 0; i < missingIds.length; i += BATCH_SIZE) {
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
@@ -120,8 +146,11 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
                     .select('*')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
-                fullRows?.forEach(row => {
-                    loadedFullMap.set(row.id, row);
+                fullRows?.forEach(rawRow => {
+                    const parsedRow = CloudPredictionRowSchema.safeParse(rawRow);
+                    if (parsedRow.success) {
+                        loadedFullMap.set(parsedRow.data.id, parsedRow.data);
+                    }
                 });
             }
         }
@@ -130,13 +159,25 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         const mergedMap = new Map<string, PredictionHistoryItem>();
 
         // Intégration du Cloud (en utilisant l'objet complet s'il vient d'être chargé, ou en fusionnant les caractéristiques)
-        cloudMetaList?.forEach((meta: { id: string; timestamp: number; draw_name: string; draw_result_id?: string; feedback?: unknown }) => {
+        cloudMetaList.forEach((meta: CloudPredictionMeta) => {
             const hasFull = loadedFullMap.has(meta.id);
             const localMatch = sanitizedLocalItems.find(l => l.id === meta.id);
 
-            const predictionObject = hasFull 
-                ? (loadedFullMap.get(meta.id).prediction as unknown as Prediction)
+            const fullItem = loadedFullMap.get(meta.id);
+            const rawPrediction = (hasFull && fullItem) ? fullItem.prediction : null;
+            const predictionObject: Prediction = (rawPrediction && typeof rawPrediction === 'object')
+                ? (rawPrediction as unknown as Prediction)
                 : (localMatch?.prediction || { suggestedNumbers: [], candidates: [], confidence: 50, analysis: "", breakdown: {}, timestamp: meta.timestamp });
+
+            let parsedFeedback: PredictionFeedback | undefined = undefined;
+            if (meta.feedback) {
+                const fbResult = PredictionFeedbackSchema.safeParse(meta.feedback);
+                if (fbResult.success) {
+                    parsedFeedback = fbResult.data as PredictionFeedback;
+                }
+            } else if (localMatch?.feedback) {
+                parsedFeedback = localMatch.feedback;
+            }
 
             mergedMap.set(meta.id, {
                 id: meta.id,
@@ -144,9 +185,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
                 drawName: meta.draw_name,
                 prediction: predictionObject,
                 drawResultId: meta.draw_result_id || localMatch?.drawResultId || null,
-                feedback: meta.feedback 
-                    ? (meta.feedback as unknown as PredictionFeedback) 
-                    : (localMatch?.feedback || undefined)
+                feedback: parsedFeedback
             });
         });
 
@@ -170,7 +209,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 
         // 3. DIFF-PUSH: N'envoyer vers le Cloud que les items locaux réellement absents ou modifiés
         const toPush = sanitizedLocalItems.filter(l => {
-            const cloudMatch = cloudMetaList?.find((c: { id: string }) => c.id === l.id);
+            const cloudMatch = cloudMetaList.find(c => c.id === l.id);
             if (!cloudMatch) return true; // Complètement absent du Cloud
             
             // Différence de liaison ou de retour utilisateur (RLHF)
@@ -180,7 +219,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
         });
         
         if (toPush.length > 0) {
-            // Optionnel mais extrêmement robuste : valider que les draw_result_id référencés existent réellement
+            // Valider que les draw_result_id référencés existent réellement
             const referencedResultIds = Array.from(new Set(
                 toPush.map(p => p.drawResultId).filter((id): id is string => !!id)
             ));
@@ -220,9 +259,9 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
     try {
         return await retryWithBackoff(executeSync, 3, 1000, 2);
     } catch (err: unknown) {
-        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
-            ? (err as any).message
-            : String(err);
+        const errorMsg = err instanceof Error
+            ? err.message
+            : (typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message) : String(err));
         const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
         logError(new AppError(errorMsg || "Sync Predictions Error", "SYNC_PREDICTIONS_ERROR", severity, { error: err }), { source: 'syncPredictions' });
         return sanitizedLocalItems;
@@ -239,7 +278,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 
     try {
         // 1. PULL METADATA: Évite de charger les lourds journaux de preuves (Phase 3)
-        const { data: cloudMetaList, error } = await supabase
+        const { data: rawMetaList, error } = await supabase
             .from('forensic_reports')
             .select('id, draw_date, draw_name, prediction_id')
             .eq('user_id', user.id)
@@ -248,11 +287,21 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 
         if (error) throw error;
 
+        const cloudMetaList: CloudForensicReportMeta[] = [];
+        if (rawMetaList) {
+            for (const rawMeta of rawMetaList) {
+                const parsedMeta = CloudForensicReportMetaSchema.safeParse(rawMeta);
+                if (parsedMeta.success) {
+                    cloudMetaList.push(parsedMeta.data);
+                }
+            }
+        }
+
         const missingIds = cloudMetaList
             ? cloudMetaList.filter(c => !localReports.some(l => l.id === c.id)).map(c => c.id)
             : [];
 
-        const loadedFullMap = new Map<string, any>();
+        const loadedFullMap = new Map<string, CloudForensicReportRow>();
         if (missingIds.length > 0) {
             for (let i = 0; i < missingIds.length; i += BATCH_SIZE) {
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
@@ -261,25 +310,30 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
                     .select('*')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
-                fullRows?.forEach(row => {
-                    loadedFullMap.set(row.id, row);
+                fullRows?.forEach(rawRow => {
+                    const parsedRow = CloudForensicReportRowSchema.safeParse(rawRow);
+                    if (parsedRow.success) {
+                        loadedFullMap.set(parsedRow.data.id, parsedRow.data);
+                    }
                 });
             }
         }
 
         const mergedMap = new Map<string, ForensicReport>();
 
-        cloudMetaList?.forEach((meta: { id: string; draw_date: string; draw_name: string; prediction_id?: string }) => {
+        cloudMetaList.forEach((meta: CloudForensicReportMeta) => {
             const hasFull = loadedFullMap.has(meta.id);
             const localMatch = localReports.find(l => l.id === meta.id);
 
-            const reportData = hasFull
-                ? (loadedFullMap.get(meta.id).report_data as unknown as ForensicReport)
+            const fullItem = loadedFullMap.get(meta.id);
+            const rawReport = (hasFull && fullItem) ? fullItem.report_data : null;
+            const reportData: ForensicReport = (rawReport && typeof rawReport === 'object')
+                ? (rawReport as unknown as ForensicReport)
                 : (localMatch || {
                     id: meta.id,
                     drawName: meta.draw_name,
                     date: meta.draw_date,
-                    predictionId: meta.prediction_id,
+                    predictionId: meta.prediction_id || undefined,
                     drawResultId: undefined,
                     matches: [],
                     missedOpportunities: [],
@@ -302,7 +356,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
         const mergedList = Array.from(mergedMap.values());
 
         // 2. PUSH: Seulement s'il manque complètement sur le Cloud
-        const toPush = localReports.filter(l => !cloudMetaList?.some((c: { id: string }) => c.id === l.id));
+        const toPush = localReports.filter(l => !cloudMetaList.some(c => c.id === l.id));
 
         if (toPush.length > 0) {
             const payload = toPush.map(r => ({
@@ -322,9 +376,9 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
 
         return mergedList;
     } catch (err: unknown) {
-        const errorMsg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
-            ? (err as any).message
-            : String(err);
+        const errorMsg = err instanceof Error
+            ? err.message
+            : (typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message) : String(err));
         const severity = (errorMsg.toLowerCase().includes('fetch') || errorMsg.toLowerCase().includes('network')) ? 'low' : 'medium';
         logError(new AppError(errorMsg || "Sync Forensic Error", "SYNC_FORENSIC_ERROR", severity, { error: err }), { source: 'syncForensicReports' });
         return localReports;
@@ -348,8 +402,8 @@ export const syncPredictionSnapshots = async (drawName: string) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // Fetch cloud snapshots
-        const { data: cloudSnaps, error } = await supabase
+        // Fetch cloud snapshots avec validation Zod
+        const { data: rawSnaps, error } = await supabase
             .from('prediction_snapshots')
             .select('*')
             .eq('user_id', user.id)
@@ -357,16 +411,18 @@ export const syncPredictionSnapshots = async (drawName: string) => {
             .order('created_at', { ascending: false })
             .limit(10);
             
-        if (error) return;
+        if (error || !rawSnaps) return;
         
         // Save to indexed db for offline forensic use
-        if (cloudSnaps) {
-            for (const snap of cloudSnaps) {
-                 const key = `prediction_snapshot_${snap.id}`;
-                 await set(key, JSON.stringify(snap));
+        for (const rawSnap of rawSnaps) {
+            const parsedSnap = CloudPredictionSnapshotSchema.safeParse(rawSnap);
+            if (parsedSnap.success) {
+                const snap: CloudPredictionSnapshot = parsedSnap.data;
+                const key = `prediction_snapshot_${snap.id}`;
+                await set(key, JSON.stringify(snap));
             }
         }
-    } catch (e) {
+    } catch (e: unknown) {
         console.error("Sync prediction snapshots error:", e);
     }
 };

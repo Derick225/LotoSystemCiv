@@ -19,6 +19,7 @@ import {
 import { useToast } from "./ui/Toast";
 import { LocalErrorBoundary } from "./ui/LocalErrorBoundary";
 import { audioEngine } from "../utils/audioEngine";
+import { logger } from "../utils/logger";
 import { useSyncStatus } from "../hooks/useSyncStatus";
 import { lazyWithRetry } from "../utils/lazyWithRetry";
 
@@ -207,7 +208,9 @@ export const DrawDetails: React.FC = () => {
               setForensicOptimized(!isForensicOptimized);
               try {
                 audioEngine.play("success");
-              } catch (e) {}
+              } catch (err) {
+                logger.debug({ err }, "Audio playback non-bloquant");
+              }
               showToast(
                 `Optimisation Forensic ${!isForensicOptimized ? "activée" : "désactivée"} avec succès.`,
                 !isForensicOptimized ? "success" : "info",

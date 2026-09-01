@@ -22,6 +22,7 @@ import {
   AlgorithmDnaAuditItem,
 } from "../../services/prediction/dnaAuditService";
 import { audioEngine } from "../../utils/audioEngine";
+import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
 
 export const DnaReferenceAuditor: React.FC<{
@@ -70,7 +71,9 @@ export const DnaReferenceAuditor: React.FC<{
       setSyncing(true);
       try {
         audioEngine.play("scan");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio playback non-bloquant");
+      }
 
       const syncResult = await synchronizeAlgorithmsToDnaReference(
         drawName,
@@ -91,15 +94,18 @@ export const DnaReferenceAuditor: React.FC<{
 
       try {
         audioEngine.play("success");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio playback non-bloquant");
+      }
 
       showToast(
         `ADN de référence synchronisé avec succès pour tous les algorithmes (${drawName}).`,
         "success"
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
       showToast(
-        `Échec de synchronisation : ${err.message || "Erreur"}`,
+        `Échec de synchronisation : ${msg}`,
         "error"
       );
     } finally {

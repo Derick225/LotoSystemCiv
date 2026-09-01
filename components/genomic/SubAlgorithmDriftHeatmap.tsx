@@ -9,6 +9,7 @@ import {
 import { synchronizeAlgorithmsToDnaReference } from "../../services/prediction/dnaAuditService";
 import { computeChronologicalAlgoReinforcement } from "../../services/prediction/weightsManager";
 import { audioEngine } from "../../utils/audioEngine";
+import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
 import {
   Flame,
@@ -113,7 +114,9 @@ export const SubAlgorithmDriftHeatmap: React.FC<SubAlgorithmDriftHeatmapProps> =
       setIsSyncing(true);
       try {
         audioEngine.play("scan");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio playback non-bloquant");
+      }
 
       const syncResult = await synchronizeAlgorithmsToDnaReference(
         drawName,
@@ -134,14 +137,17 @@ export const SubAlgorithmDriftHeatmap: React.FC<SubAlgorithmDriftHeatmapProps> =
 
       try {
         audioEngine.play("success");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio playback non-bloquant");
+      }
 
       showToast(
         `Tous les moteurs de calcul ont été ré-alignés sur la signature ADN de ${drawName}.`,
         "success"
       );
-    } catch (e: any) {
-      showToast(`Erreur lors de la ré-harmonisation : ${e.message}`, "error");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erreur";
+      showToast(`Erreur lors de la ré-harmonisation : ${msg}`, "error");
     } finally {
       setIsSyncing(false);
     }
@@ -161,7 +167,9 @@ export const SubAlgorithmDriftHeatmap: React.FC<SubAlgorithmDriftHeatmapProps> =
 
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio playback non-bloquant");
+    }
 
     const newWeights = { ...globalWeights };
     toxicAlgos.forEach((algo) => {
@@ -190,7 +198,9 @@ export const SubAlgorithmDriftHeatmap: React.FC<SubAlgorithmDriftHeatmapProps> =
   const handleReinforceProvenOnly = () => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio playback non-bloquant");
+    }
 
     const reinforcedWeights = computeChronologicalAlgoReinforcement(
       drawName,
@@ -219,7 +229,9 @@ export const SubAlgorithmDriftHeatmap: React.FC<SubAlgorithmDriftHeatmapProps> =
   const handleSingleAlgoRealignment = (algo: SubAlgoCorrelationMetric) => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio playback non-bloquant");
+    }
 
     updateGlobalWeights({
       ...globalWeights,

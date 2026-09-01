@@ -675,14 +675,18 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
                     newIndexObj[item.id] = { id: item.id, feedback: item.feedback };
                   }
                 }
-              } catch (_) {}
+              } catch (parseErr) {
+                console.warn("[WeightsManager] Erreur parsing item prediction:", parseErr);
+              }
             }
           }
           if (Object.keys(newIndexObj).length > 0) {
             await set('feedback_index_map', JSON.stringify(newIndexObj));
           }
         }
-      } catch (_) {}
+      } catch (indexErr) {
+        console.warn("[WeightsManager] Erreur reconstruction index feedback:", indexErr);
+      }
 
       // Simulation chronologique stricte (du plus ancien au plus récent)
       const chronologicalReports = [...recentReports].reverse();

@@ -12,6 +12,7 @@ import {
   calculateExpertBiasDecay,
 } from "../../services/prediction/expertBiasService";
 import { audioEngine } from "../../utils/audioEngine";
+import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
 import {
   Sliders,
@@ -146,7 +147,9 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
   const handleBoostUnderperformers = () => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio error non-bloquant");
+    }
 
     const newBiases: Record<AlgoKey, ExpertBiasConfig> = { ...biases };
     let boostedCount = 0;
@@ -175,7 +178,9 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
   const handleResetAll = () => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio error non-bloquant");
+    }
 
     const emptyBiases = {} as Record<AlgoKey, ExpertBiasConfig>;
     setBiases(emptyBiases);
@@ -191,7 +196,9 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
   const handleApplyBiases = () => {
     try {
       audioEngine.play("success");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio error non-bloquant");
+    }
 
     saveExpertBiases(drawName, biases);
     setGlobalWeights(simulatedWeights);

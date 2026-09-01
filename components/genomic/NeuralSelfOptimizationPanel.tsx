@@ -7,6 +7,7 @@ import {
   DEFAULT_NEURAL_HYPERPARAMS,
 } from "../../services/prediction/neuralSelfOptimizationService";
 import { audioEngine } from "../../utils/audioEngine";
+import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
 import {
   ResponsiveContainer,
@@ -62,7 +63,9 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
   const handleRunBackprop = () => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio error non-bloquant");
+    }
 
     setIsTraining(true);
 
@@ -78,7 +81,9 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
         setOptimizationResult(result);
         try {
           audioEngine.play("success");
-        } catch (e) {}
+        } catch (err) {
+          logger.debug({ err }, "Audio error non-bloquant");
+        }
         showToast(
           `Rétropropagation terminée : perte réduite de ${result.lossReductionPct}% (Gain précision : +${result.accuracyGain}%).`,
           "success"
@@ -97,7 +102,9 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     if (!optimizationResult) return;
     try {
       audioEngine.play("success");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio error non-bloquant");
+    }
 
     setGlobalWeights(optimizationResult.optimizedWeights);
 

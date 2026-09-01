@@ -85,8 +85,8 @@ export const generateTacticalReport = async (data: ReportData) => {
         }
     });
 
-    // @ts-ignore
-    y = doc.lastAutoTable.finalY + 20;
+    const docWithAutoTable = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+    y = (docWithAutoTable.lastAutoTable?.finalY ?? y) + 20;
 
     // --- Section 3: Configuration Algorithmique ---
     doc.setFontSize(14);

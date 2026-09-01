@@ -33,6 +33,7 @@ import {
   Cpu,
   Dna,
   ShieldCheck,
+  GitMerge,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -113,6 +114,11 @@ const ScenarioCard = React.memo<{
               <span className="truncate">{scenario.genomicProfile.focus}</span>
             </div>
             <div className="flex flex-wrap gap-1 pt-1">
+              {scenario.jaccardScore !== undefined && (
+                <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 font-mono font-bold">
+                  Jaccard {scenario.jaccardScore}%
+                </span>
+              )}
               {scenario.genomicProfile.mrrBoost && (
                 <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono font-bold">
                   MRR +{(scenario.genomicProfile.mrrBoost * 100 - 100).toFixed(0)}%
@@ -181,6 +187,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
   const [regimePivot, setRegimePivot] = useState<number>(0.8);
   const [forensicGain, setForensicGain] = useState<number>(1.0);
   const [phaseFrequency, setPhaseFrequency] = useState<number>(1.0);
+  const [jaccardGain, setJaccardGain] = useState<number>(1.0);
   const [shannonEntropyFilter, setShannonEntropyFilter] =
     useState<boolean>(false);
   const [showCalibration, setShowCalibration] = useState<boolean>(false);
@@ -250,7 +257,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         drawName,
         history,
         { spectral, fractal, volatility: volatility ?? undefined }, // Inject pre-computed metrics
-        { regimePivot, forensicGain, phaseFrequency, shannonEntropyFilter }, // Custom calibrated options!
+        { regimePivot, forensicGain, phaseFrequency, shannonEntropyFilter, jaccardGain }, // Custom calibrated options!
         symbioticContext,
         undefined,
         (progress, message) => {
@@ -316,7 +323,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           drawName,
           historicalWindow,
           { spectral, fractal, volatility: volatility ?? undefined },
-          { regimePivot, forensicGain, phaseFrequency, shannonEntropyFilter },
+          { regimePivot, forensicGain, phaseFrequency, shannonEntropyFilter, jaccardGain },
           symbioticContext,
           undefined,
           (progress, message) => {
@@ -522,7 +529,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
       {result && (
         <>
       {/* 1. MISSION CONTROL HEADER */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
           <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
             <span>Cohérence</span>
@@ -552,6 +559,19 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           </div>
           <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
             Intensité : {result.dnaSieveInfo?.sieveIntensityPercent ?? 50}%
+          </span>
+        </div>
+
+        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <span>Indice Jaccard</span>
+            <GitMerge size={14} className="text-cyan-400" />
+          </span>
+          <div className="mt-2 text-2xl font-black text-cyan-400 flex items-center gap-2">
+            {result.jaccardMetrics ? `${(result.jaccardMetrics.meanJaccard * 100).toFixed(1)}%` : "5.0%"}
+          </div>
+          <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
+            Inertie R_J : {result.jaccardMetrics?.jaccardInertiaRatio?.toFixed(2) ?? "1.00"}x
           </span>
         </div>
 
@@ -622,6 +642,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
               <span className="text-sm font-black text-emerald-400">
                 {spectrumData[hoveredIndex - 1]?.v}%
               </span>
+              {result?.jaccardMetrics?.ballJaccardIndices?.[hoveredIndex] !== undefined && (
+                <span className="text-[10px] font-mono text-cyan-400 border-l border-white/10 pl-2">
+                  J: {(result.jaccardMetrics.ballJaccardIndices[hoveredIndex] * 100).toFixed(0)}%
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -773,6 +798,30 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     <p className="text-[9px] text-slate-500 leading-normal">
                       Intensité de correction d'erreurs. Multiplie la
                       rétroaction des dérives et manques historiques.
+                    </p>
+                  </div>
+
+                  {/* Jaccard Gain Slider */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider">
+                      <span className="text-slate-400 flex items-center gap-1.5">
+                        <GitMerge size={12} className="text-cyan-400" /> Couplage Jaccard (Inertie)
+                      </span>
+                      <span className="text-cyan-400 font-mono">
+                        {jaccardGain.toFixed(1)}x
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="3.0"
+                      step="0.1"
+                      value={jaccardGain}
+                      onChange={(e) => setJaccardGain(Number(e.target.value))}
+                      className="w-full accent-cyan-500 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
+                    />
+                    <p className="text-[9px] text-slate-500 leading-normal">
+                      Pondération du tenseur Jaccard inter-tirages J(D_t, D_t+1) et affinité de transition des numéros récents.
                     </p>
                   </div>
                 </div>

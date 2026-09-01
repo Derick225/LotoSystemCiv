@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { ForensicReport } from "../types";
 import { audioEngine } from "../utils/audioEngine";
+import { logger } from "../utils/logger";
 
 interface MultiLevelConfusionMatrixProps {
   reports: ForensicReport[];
@@ -345,7 +346,9 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
               onClick={() => {
                 try {
                   audioEngine.play("click");
-                } catch (e) {}
+                } catch (err) {
+                  logger.debug({ err }, "Audio playback non-bloquant");
+                }
                 setSelectedFilter(isFilterActive ? "all" : cat.id);
               }}
               className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
@@ -451,7 +454,9 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
                 onClick={() => {
                   try {
                     audioEngine.play("click");
-                  } catch (e) {}
+                  } catch (err) {
+                    logger.debug({ err }, "Audio playback non-bloquant");
+                  }
                   setSelectedNumber(selectedNumber === num ? null : num);
                   if (perf.reportsWithNum.length > 0 && onSelectReport) {
                     const firstRep = reports.find(r => r.id === perf.reportsWithNum[0]);

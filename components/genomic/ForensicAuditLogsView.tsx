@@ -10,6 +10,7 @@ import {
 import { ForensicReport, ForensicEvidence, ScoreDivergence, CounterfactualResult } from "../../types";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { audioEngine } from "../../utils/audioEngine";
+import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
 import {
   FileText,
@@ -97,7 +98,9 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
       setIsSyncingWeights(true);
       try {
         audioEngine.play("scan");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio error non-bloquant");
+      }
 
       const syncResult = await synchronizeAlgorithmsToDnaReference(
         drawName,
@@ -118,15 +121,18 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
 
       try {
         audioEngine.play("success");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio error non-bloquant");
+      }
 
       showToast(
         `Tous les poids algorithmiques ont été resynchronisés sur l'ADN canonique.`,
         "success"
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur";
       showToast(
-        `Erreur lors de la synchronisation : ${err.message || "Erreur"}`,
+        `Erreur lors de la synchronisation : ${msg}`,
         "error"
       );
     } finally {

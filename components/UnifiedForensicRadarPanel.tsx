@@ -27,6 +27,7 @@ import {
 import type { ForensicReport, AlgoKey } from "../types";
 import { computeIntegratedGradients } from "../services/training/multiHeadNeuralCore";
 import { audioEngine } from "../utils/audioEngine";
+import { logger } from "../utils/logger";
 
 interface UnifiedForensicRadarPanelProps {
   report: ForensicReport | null;
@@ -213,7 +214,9 @@ export const UnifiedForensicRadarPanel: React.FC<
             onClick={() => {
               try {
                 audioEngine.play("click");
-              } catch (e) {}
+              } catch (err) {
+                logger.debug({ err }, "Audio playback non-bloquant");
+              }
               setLevel("macro");
             }}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -230,7 +233,9 @@ export const UnifiedForensicRadarPanel: React.FC<
             onClick={() => {
               try {
                 audioEngine.play("click");
-              } catch (e) {}
+              } catch (err) {
+                logger.debug({ err }, "Audio playback non-bloquant");
+              }
               setLevel("micro");
             }}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -360,7 +365,9 @@ export const UnifiedForensicRadarPanel: React.FC<
                     onClick={() => {
                       try {
                         audioEngine.play("click");
-                      } catch (e) {}
+                      } catch (err) {
+                        logger.debug({ err }, "Audio playback non-bloquant");
+                      }
                       setSelectedNumber(num);
                     }}
                     className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${

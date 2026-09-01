@@ -1,4 +1,5 @@
 import { FALLBACK_CALIBRATION } from "../shared/prediction.types";
+import { logger } from "../utils/logger";
 import React, {
   useEffect,
   useState,
@@ -153,7 +154,9 @@ const MetaLearningIndicator = React.memo(() => {
               setForensicOptimized(!isForensicOptimized);
               try {
                 audioEngine.play("success");
-              } catch (e) {}
+              } catch (err) {
+                logger.debug({ err }, "Audio playback non-bloquant");
+              }
               showToast(
                 `Optimisation Forensic ${!isForensicOptimized ? "activée" : "désactivée"} avec succès.`,
                 !isForensicOptimized ? "success" : "info",

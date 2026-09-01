@@ -19,6 +19,7 @@ import {
   Sliders,
 } from "lucide-react";
 import { audioEngine } from "../utils/audioEngine";
+import { logger } from "../utils/logger";
 import { useToast } from "./ui/Toast";
 
 export const NeuralFeedbackPanel: React.FC = () => {
@@ -36,7 +37,9 @@ export const NeuralFeedbackPanel: React.FC = () => {
   const handleClearLogs = () => {
     try {
       audioEngine.play("click");
-    } catch (e) {}
+    } catch (err) {
+      logger.debug({ err }, "Audio playback non-bloquant");
+    }
     if (neuralFeedbackLogs.length === 0) return;
     if (
       window.confirm(
@@ -46,7 +49,9 @@ export const NeuralFeedbackPanel: React.FC = () => {
       useNexusStore.setState({ neuralFeedbackLogs: [] });
       try {
         audioEngine.play("success");
-      } catch (e) {}
+      } catch (err) {
+        logger.debug({ err }, "Audio playback non-bloquant");
+      }
       showToast("Historique de feedback nettoyé.", "info");
     }
   };

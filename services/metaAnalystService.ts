@@ -168,6 +168,7 @@ export async function generatePlatinumPredictionCore(
         forensicGain: userOptions?.forensicGain ?? 1.0,
         phaseFrequency: userOptions?.phaseFrequency ?? 1.0,
         shannonEntropyFilter: userOptions?.shannonEntropyFilter ?? false,
+        jaccardGain: userOptions?.jaccardGain ?? 1.0,
     };
 
     // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS
@@ -216,6 +217,81 @@ export async function generatePlatinumPredictionCore(
     const snrDna = (stdDevDna || 0.1) / (meanDna || 1.0);
     const dynamicSieveIntensity = sigmoid(1.5 * ((snrDna * 10.0) - 1.0));
     const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
+
+    // 1.1 CALCUL DÉTERMINISTE DE L'INDICE JACCARD INTER-TIRAGES ET TENSEUR PAR BOULE
+    let sumJaccard = 0;
+    let sumJaccardSq = 0;
+    let jaccardPairsCount = 0;
+    let totalWinnersSampled = 0;
+
+    for (let t = 0; t < history.length - 1; t++) {
+        const currWinners: number[] = Array.isArray(history[t]?.gagnants) ? history[t].gagnants : [];
+        const nextWinners: number[] = Array.isArray(history[t + 1]?.gagnants) ? history[t + 1].gagnants : [];
+        if (currWinners.length === 0 || nextWinners.length === 0) continue;
+
+        totalWinnersSampled += currWinners.length;
+        const setA = new Set<number>(currWinners);
+        let intersectionSize = 0;
+        for (const w of nextWinners) {
+            if (setA.has(w)) intersectionSize++;
+        }
+        const unionSize = setA.size + nextWinners.length - intersectionSize;
+        const jVal = unionSize > 0 ? intersectionSize / unionSize : 0;
+        sumJaccard += jVal;
+        sumJaccardSq += jVal * jVal;
+        jaccardPairsCount++;
+    }
+
+    const meanJaccardInertia = jaccardPairsCount > 0 ? sumJaccard / jaccardPairsCount : 0.05;
+    const varJaccard = jaccardPairsCount > 1 
+        ? Math.max(0, (sumJaccardSq - (sumJaccard * sumJaccard) / jaccardPairsCount) / (jaccardPairsCount - 1))
+        : 1e-4;
+    const stdDevJaccardInertia = Math.sqrt(varJaccard);
+
+    const meanDrawSize = jaccardPairsCount > 0 ? totalWinnersSampled / jaccardPairsCount : DRAW_SIZE;
+    const theoreticalJaccardInertia = meanDrawSize / Math.max(1, 2 * MAX_NUM - meanDrawSize);
+    const jaccardInertiaRatio = meanJaccardInertia / Math.max(1e-6, theoreticalJaccardInertia);
+
+    // Tenseur Jaccard individuel par numéro J_n
+    const rawLastWinners: number[] = Array.isArray(history[0]?.gagnants) ? history[0].gagnants : [];
+    const lastDrawWinners = new Set<number>(rawLastWinners);
+    const meanGap = MAX_NUM / Math.max(1, meanDrawSize);
+    const recentWindowLen = Math.max(1, Math.min(history.length, Math.round(meanGap)));
+    const ballJaccardIndices: Record<number, number> = {};
+    const rawJaccardVector = new Float64Array(MAX_NUM + 1);
+
+    for (let n = 1; n <= MAX_NUM; n++) {
+        const affRow = localFeatures.affinityMap?.[n];
+        let coocInterWithLast = 0;
+        let coocTotal = 0;
+        if (affRow) {
+            for (let m = 1; m <= MAX_NUM; m++) {
+                if (m === n) continue;
+                const affVal = affRow[m];
+                if (affVal > 0) {
+                    coocTotal++;
+                    if (lastDrawWinners.has(m)) coocInterWithLast++;
+                }
+            }
+        }
+        const coocUnion = coocTotal + lastDrawWinners.size - coocInterWithLast;
+        const jaccardCooc = coocUnion > 0 ? coocInterWithLast / coocUnion : 0;
+
+        let appearancesRecent = 0;
+        for (let t = 0; t < recentWindowLen; t++) {
+            const drawG = Array.isArray(history[t]?.gagnants) ? history[t].gagnants : [];
+            if (drawG.includes(n)) appearancesRecent++;
+        }
+        const jaccardRecentDensity = appearancesRecent / recentWindowLen;
+
+        const combinedJaccard = (jaccardCooc * 0.55) + (jaccardRecentDensity * 0.45);
+        const continuousJaccard = sigmoid(4.0 * (combinedJaccard - meanJaccardInertia));
+        ballJaccardIndices[n] = parseFloat(continuousJaccard.toFixed(4));
+        rawJaccardVector[n] = continuousJaccard;
+    }
+
+    const stdJaccard = standardizeVector(rawJaccardVector);
+    const jaccardGain = Math.min(3.0, Math.max(0.0, opts.jaccardGain ?? 1.0));
 
     // 2. VECTORISATION STANDARDISÉE DES TENSEURS DE BASE
     const rawFreqVector = new Float64Array(MAX_NUM + 1);
@@ -269,7 +345,8 @@ export async function generatePlatinumPredictionCore(
             stdMarkov[i] * (weights[AlgoKey.MARKOV] ?? 1.0) +
             stdBayes[i] * (weights[AlgoKey.BAYES] ?? 1.0) +
             stdFractal[i] * (weights[AlgoKey.FRACTAL] ?? 1.0) +
-            stdSpatial[i] * (weights[AlgoKey.SPATIAL] ?? 1.0)
+            stdSpatial[i] * (weights[AlgoKey.SPATIAL] ?? 1.0) +
+            stdJaccard[i] * jaccardGain * Math.tanh(jaccardInertiaRatio)
         );
         rawSums[i] = sumVal;
         if (sumVal > maxRawSum) maxRawSum = sumVal;
@@ -423,6 +500,17 @@ export async function generatePlatinumPredictionCore(
         }));
     };
 
+    // Helper de calcul continu du score Jaccard d'un scénario
+    const computeScenarioJaccardScore = (numbers: number[]): number => {
+        if (numbers.length === 0) return 0;
+        let sumJ = 0;
+        numbers.forEach(n => {
+            sumJ += (ballJaccardIndices[n] ?? 0.5);
+        });
+        const meanScore = (sumJ / numbers.length) * 100;
+        return parseFloat(Math.min(100, Math.max(0, meanScore)).toFixed(1));
+    };
+
     // SCÉNARIO ALPHA : ALPHA CORE (Pondération stricte sur les gènes à fort MRR)
     const alphaVector = new Float64Array(MAX_NUM + 1);
     for (let i = 1; i <= MAX_NUM; i++) {
@@ -433,6 +521,7 @@ export async function generatePlatinumPredictionCore(
     const normAlpha = normalizeVector(alphaVector);
     const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0.0, entropyScore);
     const alphaProb = computeScenarioProbability(alphaNumbers, normAlpha, 72);
+    const alphaJaccard = computeScenarioJaccardScore(alphaNumbers);
     scenarios.push({
         id: 'alpha',
         name: 'Alpha Core',
@@ -441,10 +530,12 @@ export async function generatePlatinumPredictionCore(
         probability: alphaProb,
         risk: alphaProb >= 82 ? 'LOW' : 'MEDIUM',
         color: '#10b981',
+        jaccardScore: Math.round(alphaJaccard),
         genomicProfile: {
             focus: 'Pondération stricte sur les gènes à fort MRR',
             mrrBoost: 1.45,
             entropyRegimeAdaptive: false,
+            jaccardCouplingPct: alphaJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(alphaNumbers)
         }
     });
@@ -458,6 +549,7 @@ export async function generatePlatinumPredictionCore(
     const betaPhase = (Math.PI / 4.0) * freqPhase;
     const betaNumbers = greedyDeterministicSelection(normBeta, DRAW_SIZE, betaPhase, entropyScore);
     const betaProb = computeScenarioProbability(betaNumbers, normBeta, 65);
+    const betaJaccard = computeScenarioJaccardScore(betaNumbers);
     scenarios.push({
         id: 'beta',
         name: 'Beta Flow',
@@ -466,9 +558,11 @@ export async function generatePlatinumPredictionCore(
         probability: betaProb,
         risk: betaProb >= 75 ? 'LOW' : 'MEDIUM',
         color: '#6366f1',
+        jaccardScore: Math.round(betaJaccard),
         genomicProfile: {
             focus: 'Harmonique orbitale et alignement de phase spectral',
             entropyRegimeAdaptive: false,
+            jaccardCouplingPct: betaJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(betaNumbers)
         }
     });
@@ -484,6 +578,7 @@ export async function generatePlatinumPredictionCore(
     const gammaPhase = (Math.PI / 2.0) * freqPhase;
     const gammaNumbers = greedyDeterministicSelection(normGamma, DRAW_SIZE, gammaPhase, entropyScore);
     const gammaProb = computeScenarioProbability(gammaNumbers, normGamma, 58);
+    const gammaJaccard = computeScenarioJaccardScore(gammaNumbers);
     scenarios.push({
         id: 'gamma',
         name: 'Gamma Burst',
@@ -492,10 +587,12 @@ export async function generatePlatinumPredictionCore(
         probability: gammaProb,
         risk: gammaProb >= 75 ? 'MEDIUM' : 'HIGH',
         color: '#f43f5e',
+        jaccardScore: Math.round(gammaJaccard),
         genomicProfile: {
             focus: 'Amplification cinétique sur accélération de tamisage ΔM_n > 0',
             sieveAccelerationDelta: parseFloat(maxDeltaSieve.toFixed(3)),
             entropyRegimeAdaptive: false,
+            jaccardCouplingPct: gammaJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(gammaNumbers)
         }
     });
@@ -509,6 +606,7 @@ export async function generatePlatinumPredictionCore(
     const deltaPhase = (3.0 * Math.PI / 4.0) * freqPhase;
     const deltaNumbers = greedyDeterministicSelection(normDelta, DRAW_SIZE, deltaPhase, entropyScore);
     const deltaProb = computeScenarioProbability(deltaNumbers, normDelta, 60);
+    const deltaJaccard = computeScenarioJaccardScore(deltaNumbers);
     scenarios.push({
         id: 'delta',
         name: 'Delta Convergence',
@@ -517,9 +615,11 @@ export async function generatePlatinumPredictionCore(
         probability: deltaProb,
         risk: deltaProb >= 75 ? 'MEDIUM' : 'HIGH',
         color: '#f59e0b',
+        jaccardScore: Math.round(deltaJaccard),
         genomicProfile: {
             focus: 'Restitution d\'écart asymétrique et bascule de cycle',
             entropyRegimeAdaptive: false,
+            jaccardCouplingPct: deltaJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(deltaNumbers)
         }
     });
@@ -574,6 +674,7 @@ export async function generatePlatinumPredictionCore(
     const epsilonPhase = Math.PI * freqPhase;
     const epsilonNumbers = greedyDeterministicSelection(normEpsilon, DRAW_SIZE, epsilonPhase, entropyScore);
     const epsilonProb = computeScenarioProbability(epsilonNumbers, normEpsilon, 64);
+    const epsilonJaccard = computeScenarioJaccardScore(epsilonNumbers);
     scenarios.push({
         id: 'epsilon',
         name: 'Epsilon Forensic',
@@ -582,9 +683,11 @@ export async function generatePlatinumPredictionCore(
         probability: epsilonProb,
         risk: epsilonProb >= 75 ? 'LOW' : 'MEDIUM',
         color: '#8b5cf6',
+        jaccardScore: Math.round(epsilonJaccard),
         genomicProfile: {
             focus: 'Correction agentique médico-légale et compensation des dérives',
             entropyRegimeAdaptive: false,
+            jaccardCouplingPct: epsilonJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(epsilonNumbers)
         }
     });
@@ -629,6 +732,7 @@ export async function generatePlatinumPredictionCore(
     const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, zetaPhase, entropyScore);
     const dynamicBaseProb = Math.round(50 + entropyScore * 22);
     const zetaProb = computeScenarioProbability(zetaNumbers, normZeta, dynamicBaseProb);
+    const zetaJaccard = computeScenarioJaccardScore(zetaNumbers);
     scenarios.push({
         id: 'zeta',
         name: 'Zeta Adversarial',
@@ -637,9 +741,11 @@ export async function generatePlatinumPredictionCore(
         probability: zetaProb,
         risk: zetaProb >= 72 ? 'HIGH' : 'MEDIUM',
         color: '#f97316',
+        jaccardScore: Math.round(zetaJaccard),
         genomicProfile: {
             focus: 'Contre-mesure anti-consensus, amortissement harmonique ζ et résonance orthogonale',
             entropyRegimeAdaptive: true,
+            jaccardCouplingPct: zetaJaccard,
             macroFingerprint: computeScenarioMacroFingerprint(zetaNumbers)
         }
     });
@@ -702,6 +808,13 @@ export async function generatePlatinumPredictionCore(
             stable: Number((pStable * 100).toFixed(1)),
             transition: Number((pTransition * 100).toFixed(1)),
             chaotic: Number((pChaotic * 100).toFixed(1))
+        },
+        jaccardMetrics: {
+            meanJaccard: Number(meanJaccardInertia.toFixed(4)),
+            stdDevJaccard: Number(stdDevJaccardInertia.toFixed(4)),
+            theoreticalJaccard: Number(theoreticalJaccardInertia.toFixed(4)),
+            jaccardInertiaRatio: Number(jaccardInertiaRatio.toFixed(2)),
+            ballJaccardIndices
         }
     };
 }

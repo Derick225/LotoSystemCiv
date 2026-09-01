@@ -219,8 +219,8 @@ export const ExportService = {
             }
         });
 
-        // @ts-ignore
-        let currentY = doc.lastAutoTable.finalY + 12;
+        const docWithAutoTable = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+        let currentY = (docWithAutoTable.lastAutoTable?.finalY ?? 60) + 12;
 
         // Analyse Stratégique
         doc.setTextColor(15, 23, 42);
@@ -398,8 +398,8 @@ export const ExportService = {
             }
         });
 
-        // @ts-ignore
-        currentY = doc.lastAutoTable.finalY + 8;
+        const docWithAutoTable = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+        currentY = (docWithAutoTable.lastAutoTable?.finalY ?? currentY) + 8;
 
         // 4. TABLEAU D'EXPLICABILITÉ XAP (EXPLAINABLE AI)
         if (params.xapExp && params.xapExp.length > 0) {
@@ -431,8 +431,7 @@ export const ExportService = {
                 }
             });
 
-            // @ts-ignore
-            currentY = doc.lastAutoTable.finalY + 8;
+            currentY = (docWithAutoTable.lastAutoTable?.finalY ?? currentY) + 8;
         }
 
         // 5. ANALYSE STRATÉGIQUE & RECOMMANDATIONS
@@ -653,8 +652,8 @@ export const ExportService = {
             }
         });
 
-        // @ts-ignore
-        currentY = doc.lastAutoTable.finalY + 8;
+        const docWithAutoTable = doc as typeof doc & { lastAutoTable?: { finalY: number } };
+        currentY = (docWithAutoTable.lastAutoTable?.finalY ?? currentY) + 8;
 
         // 3. TABLEAU DÉTAILLÉ DES PONDÉRATIONS ET ÉCARTS TYPES OBSERVÉS
         doc.setTextColor(15, 23, 42);
@@ -759,8 +758,7 @@ export const ExportService = {
             }
         });
 
-        // @ts-ignore
-        currentY = doc.lastAutoTable.finalY + 8;
+        currentY = (docWithAutoTable.lastAutoTable?.finalY ?? currentY) + 8;
 
         // Nouvelle page si nécessaire pour les vecteurs & breakdown
         if (currentY > pageHeight - 75) {

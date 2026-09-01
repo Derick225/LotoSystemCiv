@@ -6,6 +6,7 @@ import {
   DnaAuditReport,
 } from "../services/prediction/dnaAuditService";
 import { audioEngine } from "../utils/audioEngine";
+import { logger } from "../utils/logger";
 import { useToast } from "../components/ui/Toast";
 
 export function useDnaAuditMonitor(targetDrawName?: string) {
@@ -47,7 +48,9 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
         setIsDismissed(false); // Réactiver si une nouvelle dérive critique survient
         try {
           audioEngine.play("error");
-        } catch (e) {}
+        } catch (audioErr) {
+          logger.debug({ audioErr }, "Audio playback non-bloquant");
+        }
       }
     } catch (err) {
       console.warn("[USE_DNA_AUDIT_MONITOR ERROR]", err);
@@ -73,7 +76,9 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
       setIsHarmonizing(true);
       try {
         audioEngine.play("scan");
-      } catch (e) {}
+      } catch (scanErr) {
+        logger.debug({ scanErr }, "Audio playback non-bloquant");
+      }
 
       const syncResult = await synchronizeAlgorithmsToDnaReference(
         drawName,
@@ -95,16 +100,19 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
 
       try {
         audioEngine.play("success");
-      } catch (e) {}
+      } catch (succErr) {
+        logger.debug({ succErr }, "Audio playback non-bloquant");
+      }
 
       showToast(
         `Ré-harmonisation réussie ! L'ADN canonique de ${drawName} est désormais aligné.`,
         "success"
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[HARMONIZATION ERROR]", err);
+      const msg = err instanceof Error ? err.message : "Erreur inconnue";
       showToast(
-        `Échec de la ré-harmonisation : ${err.message || "Erreur inconnue"}`,
+        `Échec de la ré-harmonisation : ${msg}`,
         "error"
       );
     } finally {

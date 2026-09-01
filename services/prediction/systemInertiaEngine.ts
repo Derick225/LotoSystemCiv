@@ -33,6 +33,12 @@ export interface SystemInertiaMetrics {
   betaThermalMass: number;
   gammaCoupling: number;
   baseHurst: number;
+  // Métriques et tenseur de l'Indice Jaccard d'Inertie Système
+  meanJaccardInertia: number;
+  stdDevJaccardInertia: number;
+  theoreticalJaccardInertia: number;
+  jaccardInertiaRatio: number;
+  ballJaccardIndices: Record<number, number>;
 }
 
 export interface InertiaOscillatorScore {
@@ -42,6 +48,7 @@ export interface InertiaOscillatorScore {
   restoringPotential: number; // U_n in [0, 1]
   fractalCoherence: number; // C_n in [0, 1]
   kineticMomentum: number; // T_n in [0, 1]
+  jaccardIndex: number; // J_n in [0, 1] (Indice Jaccard de Couplage d'Ensemble)
   dampingCorrection: number; // Δ_zeta in [-1, 1]
   hamiltonianAction: number;
   zScore: number;
@@ -51,6 +58,7 @@ export interface InertiaCalibrationModifiers {
   viscosityGain: number; // alpha gain
   massGain: number;      // beta gain
   couplingGain: number;  // gamma gain
+  jaccardGain: number;   // delta_J gain (Jaccard coupling gain)
   dampingRatio: number;  // zeta (damping coefficient)
 }
 
@@ -113,6 +121,10 @@ export const computeSystemInertiaMetrics = (
   if (sampleSize === 0) {
     const p0 = 5 / safeMaxNum;
     const muG0 = safeMaxNum / 5;
+    const jTheor0 = 5 / Math.max(1, 2 * safeMaxNum - 5);
+    const emptyBallJaccard: Record<number, number> = {};
+    for (let n = 1; n <= safeMaxNum; n++) emptyBallJaccard[n] = 0;
+
     return {
       drawName,
       safeMaxNum,
@@ -134,28 +146,45 @@ export const computeSystemInertiaMetrics = (
       betaThermalMass: Math.sin(hurstExponent * (Math.PI / 2.0)),
       gammaCoupling: Math.exp(-1.0),
       baseHurst: hurstExponent,
+      meanJaccardInertia: jTheor0,
+      stdDevJaccardInertia: 1e-4,
+      theoreticalJaccardInertia: jTheor0,
+      jaccardInertiaRatio: 1.0,
+      ballJaccardIndices: emptyBallJaccard,
     };
   }
 
   const frequencies: Record<number, number> = {};
   const gaps: Record<number, number> = {};
+  const cooccurrences: Record<number, Set<number>> = {};
+  const appearanceDraws: Record<number, number[]> = {};
   let totalBallsRecorded = 0;
 
   for (let n = 1; n <= safeMaxNum; n++) {
     frequencies[n] = 0;
     gaps[n] = sampleSize;
+    cooccurrences[n] = new Set<number>();
+    appearanceDraws[n] = [];
   }
 
   for (let s = 0; s < sampleSize; s++) {
     const draw = history[s];
     if (Array.isArray(draw?.gagnants)) {
-      totalBallsRecorded += draw.gagnants.length;
-      for (let j = 0; j < draw.gagnants.length; j++) {
-        const num = draw.gagnants[j];
+      const g = draw.gagnants;
+      totalBallsRecorded += g.length;
+      for (let j = 0; j < g.length; j++) {
+        const num = g[j];
         if (num >= 1 && num <= safeMaxNum) {
           frequencies[num]++;
+          appearanceDraws[num].push(s);
           if (gaps[num] === sampleSize) {
             gaps[num] = s;
+          }
+          for (let k = 0; k < g.length; k++) {
+            const coNum = g[k];
+            if (coNum >= 1 && coNum <= safeMaxNum && coNum !== num) {
+              cooccurrences[num].add(coNum);
+            }
           }
         }
       }
@@ -216,6 +245,67 @@ export const computeSystemInertiaMetrics = (
   // 3. Gamma (Couplage d'Entropie Système) : loi de diffusion thermique sans discontinuité
   const gammaCoupling = Math.exp(-shannonEntropyNormalized) / Math.sqrt(1.0 + Math.pow(coefficientOfVariation, 2));
 
+  // 4. Calcul continu de l'Indice Jaccard temporel (Draw-to-Draw Persistence)
+  let sumJaccard = 0;
+  const jaccardValues: number[] = [];
+  for (let s = 0; s < sampleSize - 1; s++) {
+    const drawA = history[s]?.gagnants;
+    const drawB = history[s + 1]?.gagnants;
+    if (Array.isArray(drawA) && Array.isArray(drawB) && drawA.length > 0 && drawB.length > 0) {
+      const setA = new Set(drawA);
+      let intersection = 0;
+      for (let k = 0; k < drawB.length; k++) {
+        if (setA.has(drawB[k])) intersection++;
+      }
+      const union = setA.size + drawB.length - intersection;
+      const jIndex = union > 0 ? intersection / union : 0;
+      sumJaccard += jIndex;
+      jaccardValues.push(jIndex);
+    }
+  }
+  const validPairsCount = Math.max(1, jaccardValues.length);
+  const meanJaccardInertia = jaccardValues.length > 0 ? sumJaccard / validPairsCount : 0;
+
+  let varJaccardSum = 0;
+  for (let i = 0; i < jaccardValues.length; i++) {
+    varJaccardSum += Math.pow(jaccardValues[i] - meanJaccardInertia, 2);
+  }
+  const stdDevJaccardInertia = Math.sqrt(varJaccardSum / validPairsCount) || 1e-4;
+
+  // Indice Jaccard théorique sous hypothèse nulle stationnaire indépendante
+  const theoreticalJaccardInertia = meanCountPerDraw / Math.max(1.0, 2.0 * safeMaxNum - meanCountPerDraw);
+  const jaccardInertiaRatio = meanJaccardInertia / Math.max(1e-6, theoreticalJaccardInertia);
+
+  // 5. Calcul du tenseur Jaccard individuel par boule J_n
+  const rawLastWinners: number[] = Array.isArray(history[0]?.gagnants) ? history[0].gagnants : [];
+  const lastDrawWinners = new Set<number>(rawLastWinners);
+  const recentWindowLen = Math.max(1, Math.min(sampleSize, Math.round(meanGap)));
+  const ballJaccardIndices: Record<number, number> = {};
+
+  for (let n = 1; n <= safeMaxNum; n++) {
+    const coocSet = cooccurrences[n];
+    let interCooc = 0;
+    for (const win of lastDrawWinners) {
+      if (coocSet.has(win)) interCooc++;
+    }
+    const unionCooc = coocSet.size + lastDrawWinners.size - interCooc;
+    const jaccardCooc = unionCooc > 0 ? interCooc / unionCooc : 0;
+
+    const app = appearanceDraws[n];
+    let recentHits = 0;
+    for (let i = 0; i < app.length; i++) {
+      if (app[i] < recentWindowLen) recentHits++;
+    }
+    const totalRecentUnion = app.length + recentWindowLen - recentHits;
+    const jaccardTemporal = totalRecentUnion > 0 ? recentHits / totalRecentUnion : 0;
+
+    const weightCooc = 1.0 / (1.0 + Math.exp(-3.0 * (hurstExponent - 0.5)));
+    const rawCombined = weightCooc * jaccardCooc + (1.0 - weightCooc) * jaccardTemporal;
+    const jaccardScore = Math.tanh(rawCombined * (safeMaxNum / Math.max(1.0, meanCountPerDraw)));
+
+    ballJaccardIndices[n] = Math.min(1.0, Math.max(0.0, jaccardScore));
+  }
+
   return {
     drawName,
     safeMaxNum,
@@ -237,6 +327,11 @@ export const computeSystemInertiaMetrics = (
     betaThermalMass,
     gammaCoupling,
     baseHurst: hurstExponent,
+    meanJaccardInertia,
+    stdDevJaccardInertia,
+    theoreticalJaccardInertia,
+    jaccardInertiaRatio,
+    ballJaccardIndices,
   };
 };
 
@@ -302,6 +397,7 @@ export const computeInertiaVectorScores = (
   const calAlpha = Math.min(1.0, Math.max(0.0, alphaViscosity * modifiers.viscosityGain));
   const calBeta = Math.min(1.0, Math.max(0.0, betaThermalMass * modifiers.massGain));
   const calGamma = Math.min(1.0, Math.max(0.0, gammaCoupling * modifiers.couplingGain));
+  const calJaccardGain = Math.min(3.0, Math.max(0.0, modifiers.jaccardGain ?? 1.0));
   const zeta = Math.max(0.01, modifiers.dampingRatio);
 
   const rawEntries: {
@@ -310,6 +406,7 @@ export const computeInertiaVectorScores = (
     restoringPotential: number;
     fractalCoherence: number;
     kineticMomentum: number;
+    jaccardIndex: number;
     dampingCorrection: number;
     action: number;
   }[] = [];
@@ -334,20 +431,28 @@ export const computeInertiaVectorScores = (
     // 4. Momentum Cinétique (Vitesse instantanée normalisée)
     const kineticMomentum = Math.tanh((f / Math.max(1.0, meanFrequency)) / (1.0 + g * 0.1));
 
-    // 5. Correction d'amortissement physique du second ordre
+    // 5. Indice Jaccard de couplage d'ensemble (Inertie structurelle par numéro)
+    const rawJaccard = metrics.ballJaccardIndices?.[num] ?? 0;
+    const jaccardIndex = Math.min(1.0, Math.max(0.0, rawJaccard * calJaccardGain));
+
+    // 6. Correction d'amortissement physique du second ordre
     const dampingCorrection = computeSecondOrderHarmonicDamping(g, meanGap, zeta, naturalFrequencyOmega0);
 
     // Facteur d'amortissement pondéré dérivé continûment de l'entropie et de la résonance
     const entropyDampingFactor = (1.0 - shannonEntropyNormalized) * (1.0 - Math.abs(baseHurst - 0.5));
     const dampingWeight = (1.0 / (1.0 + zeta)) * entropyDampingFactor * 0.35;
 
-    // Hamiltonien d'action de l'oscillateur
+    // Facteur de couplage Jaccard dérivé du ratio de persistance du tirage
+    const jaccardWeight = Math.tanh(metrics.jaccardInertiaRatio || 1.0) * (1.0 - 0.5 * shannonEntropyNormalized) * 0.28;
+
+    // Hamiltonien d'action de l'oscillateur avec intégration continue de Jaccard
     const action = 
       calAlpha * restoringPotential +
       (1.0 - calAlpha) * phaseAttraction +
       calBeta * fractalCoherence * calGamma +
       (1.0 - shannonEntropyNormalized) * kineticMomentum * 0.25 +
-      dampingWeight * dampingCorrection;
+      dampingWeight * dampingCorrection +
+      jaccardWeight * jaccardIndex;
 
     sumActions += action;
 
@@ -357,6 +462,7 @@ export const computeInertiaVectorScores = (
       restoringPotential,
       fractalCoherence,
       kineticMomentum,
+      jaccardIndex,
       dampingCorrection,
       action,
     });
@@ -382,6 +488,7 @@ export const computeInertiaVectorScores = (
       restoringPotential: parseFloat(entry.restoringPotential.toFixed(3)),
       fractalCoherence: parseFloat(entry.fractalCoherence.toFixed(3)),
       kineticMomentum: parseFloat(entry.kineticMomentum.toFixed(3)),
+      jaccardIndex: parseFloat(entry.jaccardIndex.toFixed(3)),
       dampingCorrection: parseFloat(entry.dampingCorrection.toFixed(3)),
       hamiltonianAction: parseFloat(entry.action.toFixed(4)),
       zScore: parseFloat(zScore.toFixed(3)),
@@ -422,7 +529,7 @@ export const resolveOptimizedInertiaVector = (
   sorted.forEach(s => varEnergy += Math.pow(s.hamiltonianAction - meanEnergy, 2));
   const energyVariance = varEnergy / Math.max(1, sorted.length);
 
-  const equationUsed = `\\mathcal{H}_n(\\alpha^c,\\beta^c,\\gamma^c,\\zeta) = \\alpha^c U_n(g) + (1-\\alpha^c) A_n(f) + \\beta^c C_n(H) \\gamma^c + \\mathcal{D}(\\zeta, \\omega_0, g_n)`;
+  const equationUsed = `\\mathcal{H}_n(\\alpha^c,\\beta^c,\\gamma^c,\\delta_J^c,\\zeta) = \\alpha^c U_n(g) + (1-\\alpha^c) A_n(f) + \\beta^c C_n(H) \\gamma^c + \\delta_J^c \\mathcal{J}_n + \\mathcal{D}(\\zeta, \\omega_0, g_n)`;
 
   return {
     primary,
@@ -504,6 +611,7 @@ export const DEFAULT_INERTIA_CALIBRATION: InertiaCalibrationModifiers = {
   viscosityGain: 1.0,
   massGain: 1.0,
   couplingGain: 1.0,
+  jaccardGain: 1.0,
   dampingRatio: 0.5,
 };
 
@@ -528,6 +636,7 @@ export const getPersistedInertiaCalibration = (drawName: string): InertiaCalibra
       viscosityGain: typeof parsed.viscosityGain === "number" && !isNaN(parsed.viscosityGain) ? parsed.viscosityGain : 1.0,
       massGain: typeof parsed.massGain === "number" && !isNaN(parsed.massGain) ? parsed.massGain : 1.0,
       couplingGain: typeof parsed.couplingGain === "number" && !isNaN(parsed.couplingGain) ? parsed.couplingGain : 1.0,
+      jaccardGain: typeof parsed.jaccardGain === "number" && !isNaN(parsed.jaccardGain) ? parsed.jaccardGain : 1.0,
       dampingRatio: typeof parsed.dampingRatio === "number" && !isNaN(parsed.dampingRatio) ? parsed.dampingRatio : 0.5,
     };
   } catch (e) {

@@ -56,8 +56,7 @@ export const runForensicWorker = async (
       matches: [],
       missedOpportunities: [],
       scoreDivergence: [],
-      // @ts-ignore - added dynamically by forensic analysis
-      catastropheControlParams: { regime: "STABLE_MONOSTABLE" }
+      catastropheControlParams: { a: 0, b: 0, discriminant: 0, regime: "STABLE_MONOSTABLE" }
     });
 
     try {
