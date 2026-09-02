@@ -56,6 +56,7 @@ export const calculateScores = (
     features,
     advancedMetrics,
     history,
+    drawName: history[0]?.drawName || '',
     weights: { ...weights },
     algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },

@@ -36,8 +36,8 @@ export interface PredictiveHyperparameters {
 }
 
 export interface HyperSearchContext {
-  featuresCache: Map<number, ExtractedFeatures>;
-  baseMetricsCache: Map<number, {
+  featuresCache: Map<string, ExtractedFeatures>;
+  baseMetricsCache: Map<string, {
     poissonScores: Record<number, number>;
     temporalScores: Record<number, number>;
     digitalRootScores: Record<number, number>;
@@ -250,7 +250,7 @@ const simulateInferenceWithHyperparameters = async (
   context?: HyperSearchContext
 ): Promise<{ num: number; score: number }[]> => {
   const localHistoryContext = history.slice(0, 30); // Limite le contexte pour des performances de calcul optimales
-  const cacheKey = history.length;
+  const cacheKey = `${drawName}_${history.length}_${history[0]?.id || history[0]?.date || 'nodate'}`;
 
   let features = context?.featuresCache.get(cacheKey);
   if (!features) {

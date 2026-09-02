@@ -232,7 +232,13 @@ export const getTrainingRecommendations = (
     }
 
     if (isSwan) {
-      const resilientAlgos = [AlgoKey.GAPS, AlgoKey.SPECTRAL, AlgoKey.FRACTAL];
+      const resilientAlgos = [
+        AlgoKey.GAPS,
+        AlgoKey.SPECTRAL,
+        AlgoKey.FRACTAL,
+        AlgoKey.SPATIAL,
+        AlgoKey.BAYES,
+      ];
       resilientAlgos.forEach((algo) => {
         if (!aggregates[algo]) {
           aggregates[algo] = { sumChange: 0, count: 0, reasons: [] };

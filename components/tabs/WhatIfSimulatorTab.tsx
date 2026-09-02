@@ -72,15 +72,19 @@ const ALGO_SEQUENCE: AlgoKey[] = [
   AlgoKey.GAP_CADENCE,
   AlgoKey.GAP_TREND,
   AlgoKey.INTER_MONTHLY_RESONANCE,
+  AlgoKey.GAP_BAND_SEQUENCE,
   AlgoKey.SPECTRAL,
   AlgoKey.FRACTAL,
   AlgoKey.TEMPORAL,
   AlgoKey.SHADOW_PROBABILITY,
+  AlgoKey.ISOLATION_ANOMALY,
   AlgoKey.SPATIAL,
   AlgoKey.AFFINITY,
+  AlgoKey.JACCARD,
   AlgoKey.NETWORK_CORRELATION,
   AlgoKey.ECHO_STATE,
   AlgoKey.DERIVED_NEIGHBOR,
+  AlgoKey.MACHINE_TRANSFER,
 ];
 
 const solveBezierY = (x: number, px1: number, py1: number, px2: number, py2: number): number => {
@@ -957,6 +961,8 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
                   AlgoKey.GAP_CADENCE,
                   AlgoKey.GAP_TREND,
                   AlgoKey.INTER_MONTHLY_RESONANCE,
+                  AlgoKey.GAP_BAND_SEQUENCE,
+                  AlgoKey.MACHINE_TRANSFER,
                 ],
               },
               {
@@ -966,6 +972,7 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
                   AlgoKey.FRACTAL,
                   AlgoKey.TEMPORAL,
                   AlgoKey.SHADOW_PROBABILITY,
+                  AlgoKey.ISOLATION_ANOMALY,
                 ],
               },
               {

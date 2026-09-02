@@ -559,16 +559,25 @@ export const calculatePositionalDNAProfiles = (
           modifier = 1.0 + Math.tanh((30.0 - stdDev) / 10.0) * (1.0 - normalizedPos);
           break;
         case AlgoKey.GAPS:
+        case AlgoKey.GAP_SEQUENCE:
+        case AlgoKey.GAP_PATTERN:
+        case AlgoKey.GAP_CADENCE:
+        case AlgoKey.GAP_TREND:
+        case AlgoKey.GAP_BAND_SEQUENCE:
           modifier = 1.0 + Math.tanh((stdDev - 30.0) / 10.0) * (1.0 - Math.max(0, autoCorr));
           break;
         case AlgoKey.SPECTRAL:
+        case AlgoKey.INTER_MONTHLY_RESONANCE:
           modifier = 1.0 + Math.abs(autoCorr) * Math.sin(normalizedPos * Math.PI);
           break;
         case AlgoKey.MARKOV:
+        case AlgoKey.SEQUENCE_PATTERN:
         case AlgoKey.AFFINITY:
+        case AlgoKey.JACCARD:
           modifier = 1.0 + (1.0 - Math.abs(normalizedPos - 0.5) * 2.0) * Math.tanh(stdDev / 20.0);
           break;
         case AlgoKey.FRACTAL:
+        case AlgoKey.ISOLATION_ANOMALY:
           modifier = 1.0 + Math.tanh(stdDev / 30.0) * (1.0 - Math.abs(autoCorr));
           break;
         case AlgoKey.TEMPORAL:
@@ -581,17 +590,20 @@ export const calculatePositionalDNAProfiles = (
           modifier = 1.0 + Math.max(0, autoCorr) * Math.tanh(stdDev / 15.0);
           break;
         case AlgoKey.SPATIAL:
+        case AlgoKey.DERIVED_NEIGHBOR: {
           const edgeDistance = Math.abs(pos - 2) / 2.0;
           modifier = 1.0 + edgeDistance * Math.tanh(stdDev / 25.0);
           break;
+        }
         case AlgoKey.SHADOW_PROBABILITY:
           modifier = 1.0 + (1.0 - Math.abs(autoCorr)) * Math.tanh(stdDev / 30.0);
           break;
         case AlgoKey.NETWORK_CORRELATION:
+        case AlgoKey.MACHINE_TRANSFER:
           modifier = 1.0 + Math.tanh(stdDev / 20.0) * Math.sin(normalizedPos * Math.PI * 2.0);
           break;
-        default:
-          modifier = 1.0;
+        case AlgoKey.ECHO_STATE:
+          modifier = 1.0 + Math.tanh(stdDev / 25.0) * (0.5 + 0.5 * Math.sin(normalizedPos * Math.PI));
           break;
       }
 

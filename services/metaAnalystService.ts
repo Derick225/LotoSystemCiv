@@ -346,7 +346,7 @@ export async function generatePlatinumPredictionCore(
             stdBayes[i] * (weights[AlgoKey.BAYES] ?? 1.0) +
             stdFractal[i] * (weights[AlgoKey.FRACTAL] ?? 1.0) +
             stdSpatial[i] * (weights[AlgoKey.SPATIAL] ?? 1.0) +
-            stdJaccard[i] * jaccardGain * Math.tanh(jaccardInertiaRatio)
+            stdJaccard[i] * jaccardGain * (weights[AlgoKey.JACCARD] ?? 1.0) * Math.tanh(jaccardInertiaRatio)
         );
         rawSums[i] = sumVal;
         if (sumVal > maxRawSum) maxRawSum = sumVal;

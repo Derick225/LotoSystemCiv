@@ -406,6 +406,8 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
           AlgoKey.GAP_CADENCE,
           AlgoKey.GAP_TREND,
           AlgoKey.INTER_MONTHLY_RESONANCE,
+          AlgoKey.GAP_BAND_SEQUENCE,
+          AlgoKey.MACHINE_TRANSFER,
         ],
       },
       {
@@ -415,6 +417,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
           AlgoKey.FRACTAL,
           AlgoKey.TEMPORAL,
           AlgoKey.SHADOW_PROBABILITY,
+          AlgoKey.ISOLATION_ANOMALY,
         ],
       },
       {

@@ -41,7 +41,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.JACCARD, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_CADENCE]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.JACCARD, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR]
   }
 ];
 

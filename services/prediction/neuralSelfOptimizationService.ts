@@ -126,23 +126,43 @@ const computeFastHistoricalFeatures = (
         case AlgoKey.GAP_PATTERN:
         case AlgoKey.GAP_CADENCE:
         case AlgoKey.GAP_TREND:
+        case AlgoKey.GAP_BAND_SEQUENCE:
           ballMap[k] = gNorm;
           break;
         case AlgoKey.MARKOV:
         case AlgoKey.BAYES:
+        case AlgoKey.SEQUENCE_PATTERN:
           ballMap[k] = mNorm;
           break;
         case AlgoKey.MOMENTUM:
           ballMap[k] = momNorm;
           break;
         case AlgoKey.SPECTRAL:
+        case AlgoKey.TEMPORAL:
+        case AlgoKey.INTER_MONTHLY_RESONANCE:
           ballMap[k] = specNorm;
           break;
         case AlgoKey.FRACTAL:
+        case AlgoKey.ISOLATION_ANOMALY:
           ballMap[k] = fractNorm;
           break;
-        default:
-          ballMap[k] = (fNorm * 0.4) + (gNorm * 0.3) + (momNorm * 0.3);
+        case AlgoKey.AFFINITY:
+        case AlgoKey.JACCARD:
+        case AlgoKey.NETWORK_CORRELATION:
+          ballMap[k] = (mNorm * 0.6) + (fNorm * 0.4);
+          break;
+        case AlgoKey.SPATIAL:
+        case AlgoKey.DERIVED_NEIGHBOR:
+          ballMap[k] = (gNorm * 0.5) + (specNorm * 0.5);
+          break;
+        case AlgoKey.SHADOW_PROBABILITY:
+          ballMap[k] = Math.max(0, 1.0 - fNorm);
+          break;
+        case AlgoKey.MACHINE_TRANSFER:
+          ballMap[k] = (fNorm * 0.5) + (gNorm * 0.5);
+          break;
+        case AlgoKey.ECHO_STATE:
+          ballMap[k] = (specNorm * 0.5) + (fractNorm * 0.5);
           break;
       }
     });

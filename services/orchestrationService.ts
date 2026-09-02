@@ -929,7 +929,8 @@ export const calculateOrchestrationScores = (
   weights?: AlgoWeights
 ): Record<number, number> => {
   if (history.length < 2) return {};
-  const cacheKey = `${history.length}_${history[0]?.date || 'nodate'}_${(history[0]?.gagnants || []).join('-')}_${weights ? JSON.stringify(weights) : 'default'}`;
+  const drawName = history[0]?.drawName || 'default';
+  const cacheKey = `${drawName}_${history.length}_${history[0]?.date || 'nodate'}_${(history[0]?.gagnants || []).join('-')}_${weights ? JSON.stringify(weights) : 'default'}`;
   const cached = orchestrationScoresCache.get(cacheKey);
   if (cached) return cached;
 

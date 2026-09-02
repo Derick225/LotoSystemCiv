@@ -284,18 +284,20 @@ export const getLocalForensicReports = async (): Promise<ForensicReport[]> => {
     const fetched = await globalCache.getByDomain<ForensicReport>('forensic_report');
     
     // We also support the old FORENSIC_KEY_PREFIX for backwards compatibility in IDB
-    const allKeys = await keys();
-    const oldKeys = allKeys.filter(
-      (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
-    );
-    for (const key of oldKeys) {
-      if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
-         const item = await get(key as string);
-         if (item) {
-           const parsed = typeof item === "string" ? JSON.parse(item) : item;
-           const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
-           fetched.push(unwrapped);
-         }
+    if (typeof indexedDB !== "undefined") {
+      const allKeys = await keys();
+      const oldKeys = allKeys.filter(
+        (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
+      );
+      for (const key of oldKeys) {
+        if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
+           const item = await get(key as string);
+           if (item) {
+             const parsed = typeof item === "string" ? JSON.parse(item) : item;
+             const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
+             fetched.push(unwrapped);
+           }
+        }
       }
     }
 
@@ -367,6 +369,9 @@ export const markAutopsyDismissed = async (predictionId: string): Promise<void> 
  * Récupère l'ensemble des IDs de prédictions dont l'autopsie a été définitivement supprimée.
  */
 export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> => {
+  if (typeof indexedDB === "undefined") {
+    return new Set<string>();
+  }
   try {
     const allK = await keys();
     const dismissed = new Set<string>();
@@ -385,10 +390,16 @@ export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> =
  * Supprime définitivement un rapport d'autopsie de la base locale (IndexedDB + Cache mémoire).
  */
 export const deleteForensicReportLocal = async (id: string, predictionId?: string) => {
-  await del(`${FORENSIC_KEY_PREFIX}${id}`);
-  await del(`nexus_forensic_report_${id}`);
-  await del(`nexus_forensic_index_${id}`);
-  await del(`nexus_forensic_detail_${id}`);
+  if (typeof indexedDB !== "undefined") {
+    try {
+      await del(`${FORENSIC_KEY_PREFIX}${id}`);
+      await del(`nexus_forensic_report_${id}`);
+      await del(`nexus_forensic_index_${id}`);
+      await del(`nexus_forensic_detail_${id}`);
+    } catch {
+      // Ignorer silencieusement si inaccessible
+    }
+  }
   await globalCache.invalidateByPrefix(`nexus_forensic_report_${id}`);
   await globalCache.invalidateByPrefix(`nexus_forensic_index_${id}`);
   if (predictionId) {
@@ -403,10 +414,16 @@ export const deleteMultipleForensicReportsLocal = async (
   items: { id: string; predictionId?: string }[]
 ) => {
   for (const item of items) {
-    await del(`${FORENSIC_KEY_PREFIX}${item.id}`);
-    await del(`nexus_forensic_report_${item.id}`);
-    await del(`nexus_forensic_index_${item.id}`);
-    await del(`nexus_forensic_detail_${item.id}`);
+    if (typeof indexedDB !== "undefined") {
+      try {
+        await del(`${FORENSIC_KEY_PREFIX}${item.id}`);
+        await del(`nexus_forensic_report_${item.id}`);
+        await del(`nexus_forensic_index_${item.id}`);
+        await del(`nexus_forensic_detail_${item.id}`);
+      } catch {
+        // Ignorer silencieusement si inaccessible
+      }
+    }
     await globalCache.invalidateByPrefix(`nexus_forensic_report_${item.id}`);
     await globalCache.invalidateByPrefix(`nexus_forensic_index_${item.id}`);
     if (item.predictionId) {

@@ -136,6 +136,8 @@ export const adjustWeightsForRegime = (
   adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_PATTERN));
   adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_SEQUENCE));
   adjusted[AlgoKey.GAP_BAND_SEQUENCE] = (adjusted[AlgoKey.GAP_BAND_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_BAND_SEQUENCE));
+  adjusted[AlgoKey.SEQUENCE_PATTERN] = (adjusted[AlgoKey.SEQUENCE_PATTERN] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.SEQUENCE_PATTERN));
+  adjusted[AlgoKey.INTER_MONTHLY_RESONANCE] = (adjusted[AlgoKey.INTER_MONTHLY_RESONANCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.INTER_MONTHLY_RESONANCE));
 
   // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien) - uniquement si prouvé
   adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.BAYES));
@@ -144,11 +146,21 @@ export const adjustWeightsForRegime = (
   adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.FRACTAL));
   adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + chaoticFactor * volFactor * getProofGain(AlgoKey.ECHO_STATE));
   adjusted[AlgoKey.DERIVED_NEIGHBOR] = (adjusted[AlgoKey.DERIVED_NEIGHBOR] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.DERIVED_NEIGHBOR));
+  adjusted[AlgoKey.ISOLATION_ANOMALY] = (adjusted[AlgoKey.ISOLATION_ANOMALY] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.ISOLATION_ANOMALY));
+  adjusted[AlgoKey.SPATIAL] = (adjusted[AlgoKey.SPATIAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.SPATIAL));
+  adjusted[AlgoKey.NETWORK_CORRELATION] = (adjusted[AlgoKey.NETWORK_CORRELATION] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.NETWORK_CORRELATION));
 
-  // Multiplicateurs de persistance Hurst & Tendance - uniquement si prouvé
+  // 3. Multiplicateurs de persistance Hurst & Tendance - uniquement si prouvé
   adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.FREQUENCY));
+  adjusted[AlgoKey.MOMENTUM] = (adjusted[AlgoKey.MOMENTUM] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.MOMENTUM));
   adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + persistenceFactor * 0.5 * getProofGain(AlgoKey.MARKOV));
+  adjusted[AlgoKey.AFFINITY] = (adjusted[AlgoKey.AFFINITY] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.AFFINITY));
+  adjusted[AlgoKey.JACCARD] = (adjusted[AlgoKey.JACCARD] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.JACCARD));
+  adjusted[AlgoKey.MACHINE_TRANSFER] = (adjusted[AlgoKey.MACHINE_TRANSFER] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.MACHINE_TRANSFER));
+
+  // 4. Réversion à la moyenne & Ombre - uniquement si prouvé
   adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor * getProofGain(AlgoKey.GAPS));
+  adjusted[AlgoKey.SHADOW_PROBABILITY] = (adjusted[AlgoKey.SHADOW_PROBABILITY] || 0) * (1.0 + meanReversionFactor * getProofGain(AlgoKey.SHADOW_PROBABILITY));
 
   const persistencePremium = Math.max(0, hurst - 0.5) * getProofGain(AlgoKey.GAP_TREND);
   adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * (1.0 + persistencePremium);
