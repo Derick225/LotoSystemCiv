@@ -1,4 +1,5 @@
 import { DrawResult, ChiSquareMetric } from "../types";
+import { wasmMatrixEngine } from "./wasm/wasmMatrixCore";
 /**
  * Core Mathematical Algorithms for Nexus
  * Shared between Web Workers and Main Thread (Backend fallback)
@@ -1278,172 +1279,38 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
     if (!data || data.length === 0) return [];
     const nSamples = data.length;
     const nFeatures = data[0].length;
-    
-    // 1. Scale data (Standardization)
-    const means = new Float64Array(nFeatures);
-    const stdDevs = new Float64Array(nFeatures);
-    
-    for(let i=0; i<nSamples; i++) {
-        for(let j=0; j<nFeatures; j++) means[j] += data[i][j];
-    }
-    for(let j=0; j<nFeatures; j++) means[j] /= nSamples;
-    
-    for(let i=0; i<nSamples; i++) {
-        for(let j=0; j<nFeatures; j++) stdDevs[j] += Math.pow(data[i][j] - means[j], 2);
-    }
-    for(let j=0; j<nFeatures; j++) {
-        stdDevs[j] = Math.sqrt(stdDevs[j] / Math.max(1, nSamples - 1)) || 1;
-    }
-    
-    const scaledData = data.map(row => row.map((val, j) => (val - means[j]) / stdDevs[j]));
+    if (nSamples === 0 || nFeatures === 0) return [];
 
-    // 2. Build RBF Kernel Matrix K of size N x N
-    // Calculate mean of pairwise squared distances to eliminate magic gamma
-    let sumDistSq = 0;
-    let pairsCount = 0;
+    // Conversion en tableau Float64Array contigu 1D pour accélération SIMD/WASM
+    const flatData = new Float64Array(nSamples * nFeatures);
     for (let i = 0; i < nSamples; i++) {
-        for (let j = i + 1; j < nSamples; j++) {
-            let distSq = 0;
-            for (let f = 0; f < nFeatures; f++) {
-                distSq += Math.pow(scaledData[i][f] - scaledData[j][f], 2);
-            }
-            sumDistSq += distSq;
-            pairsCount++;
-        }
-    }
-    const meanDistSq = pairsCount > 0 ? (sumDistSq / pairsCount) : 1.0;
-    const g = gamma ?? (1.0 / (meanDistSq || Number.EPSILON));
-    const K = Array(nSamples).fill(0).map(() => Array(nSamples).fill(0));
-    for (let i = 0; i < nSamples; i++) {
-        for (let j = i; j < nSamples; j++) {
-            let distSq = 0;
-            for (let f = 0; f < nFeatures; f++) {
-                distSq += Math.pow(scaledData[i][f] - scaledData[j][f], 2);
-            }
-            const val = Math.exp(-g * distSq);
-            K[i][j] = val;
-            K[j][i] = val;
+        const row = data[i];
+        const offset = i * nFeatures;
+        for (let j = 0; j < nFeatures; j++) {
+            flatData[offset + j] = row[j];
         }
     }
 
-    // 3. Center the Kernel Matrix
-    const K_centered = Array(nSamples).fill(0).map(() => Array(nSamples).fill(0));
-    const rowMeans = Array(nSamples).fill(0);
-    let totalMean = 0;
-    for (let i = 0; i < nSamples; i++) {
-        let rowSum = 0;
-        for (let j = 0; j < nSamples; j++) {
-            rowSum += K[i][j];
-        }
-        rowMeans[i] = rowSum / nSamples;
-        totalMean += rowSum;
-    }
-    totalMean /= (nSamples * nSamples);
-
-    for (let i = 0; i < nSamples; i++) {
-        for (let j = 0; j < nSamples; j++) {
-            K_centered[i][j] = K[i][j] - rowMeans[i] - rowMeans[j] + totalMean;
-        }
-    }
-
-    // 4. Eigen decomposition on centered Kernel Matrix
-    const { values, vectors } = computeEigenDecomposition(K_centered);
-    const totalVariance = values.reduce((sum, v) => sum + Math.abs(v), 0);
-    const dynamicThreshold = varianceThreshold ?? (1.0 - (1.0 / Math.sqrt(nFeatures)));
-
-    let k = 1;
-    let currentVar = 0;
-    for (let i = 0; i < nSamples; i++) {
-        currentVar += Math.abs(values[i]);
-        if (totalVariance > 0 && (currentVar / totalVariance) >= dynamicThreshold) {
-            k = i + 1;
-            break;
-        }
-    }
-    k = Math.max(1, Math.min(k, nSamples, nFeatures));
-
-    // 5. Projected representation in non-linear manifold (N x k)
-    const Y = Array(nSamples).fill(0).map(() => Array(k).fill(0));
-    for (let i = 0; i < nSamples; i++) {
-        for (let col = 0; col < k; col++) {
-            let sum = 0;
-            for (let j = 0; j < nSamples; j++) {
-                sum += K_centered[i][j] * vectors[j][col];
-            }
-            Y[i][col] = sum;
-        }
-    }
-
-    // 6. Pre-image Reconstruction via Ridge Regression
-    // Compute YTY (k x k)
-    const YTY = Array(k).fill(0).map(() => Array(k).fill(0));
-    for (let i = 0; i < k; i++) {
-        for (let j = 0; j < k; j++) {
-            let sum = 0;
-            for (let s = 0; s < nSamples; s++) {
-                sum += Y[s][i] * Y[s][j];
-            }
-            YTY[i][j] = sum;
-        }
-    }
-    const ridgeLambda = 1e-4;
-    for (let i = 0; i < k; i++) {
-        YTY[i][i] += ridgeLambda;
-    }
-
-    const YTY_inv = invertMatrix(YTY);
-
-    // Compute Y_T * scaledData (k x nFeatures)
-    const YT_X = Array(k).fill(0).map(() => Array(nFeatures).fill(0));
-    for (let i = 0; i < k; i++) {
-        for (let f = 0; f < nFeatures; f++) {
-            let sum = 0;
-            for (let s = 0; s < nSamples; s++) {
-                sum += Y[s][i] * scaledData[s][f];
-            }
-            YT_X[i][f] = sum;
-        }
-    }
-
-    // Regressor Weights W = YTY_inv * YT_X of size k x nFeatures
-    const W = Array(k).fill(0).map(() => Array(nFeatures).fill(0));
-    for (let i = 0; i < k; i++) {
-        for (let f = 0; f < nFeatures; f++) {
-            let sum = 0;
-            for (let j = 0; j < k; j++) {
-                sum += YTY_inv[i][j] * YT_X[j][f];
-            }
-            W[i][f] = sum;
-        }
-    }
-
-    // Reconstructed Scaled Data = Y * W of size N x D
-    const reconstructedScaled = Array(nSamples).fill(0).map(() => Array(nFeatures).fill(0));
-    for (let i = 0; i < nSamples; i++) {
-        for (let f = 0; f < nFeatures; f++) {
-            let sum = 0;
-            for (let j = 0; j < k; j++) {
-                sum += Y[i][j] * W[j][f];
-            }
-            reconstructedScaled[i][f] = sum;
-        }
-    }
-
-    // Inverse Scale Transform with continuous, bounded pre-image manifold constraint (monotonic differentiable smoothing)
-    const smoothClip = (x: number): number => {
-        if (x >= 5 && x <= 95) return x;
-        if (x < 5) {
-            return 5 * Math.exp((x - 5) / 5);
-        }
-        return 100 - 5 * Math.exp((95 - x) / 5);
-    };
-
-    const reconstructed = reconstructedScaled.map((row) =>
-        row.map((val, j) => {
-            const rawVal = (val * stdDevs[j]) + means[j];
-            return smoothClip(rawVal);
-        })
+    // Exécution vectorisée ultra-rapide par le moteur WASM / SIMD
+    const denoisedFlat = wasmMatrixEngine.denoiseKernelPcaVectorized(
+        flatData,
+        nSamples,
+        nFeatures,
+        gamma,
+        varianceThreshold
     );
 
-    return reconstructed;
+    // Reconstitution de la matrice de sortie
+    const result: number[][] = new Array(nSamples);
+    for (let i = 0; i < nSamples; i++) {
+        const offset = i * nFeatures;
+        const row = new Array(nFeatures);
+        for (let j = 0; j < nFeatures; j++) {
+            row[j] = denoisedFlat[offset + j];
+        }
+        result[i] = row;
+    }
+
+    return result;
 }
+

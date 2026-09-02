@@ -1,5 +1,5 @@
 import { DrawResult } from '../../types';
-import { globalCache, CACHE_TTL } from '../cache/CacheService';
+import { globalTensorCache } from '../cache/lruTensorCache';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
@@ -61,14 +61,11 @@ export const extractFeatures = async (
 ): Promise<ExtractedFeatures> => {
   // Filtrage robuste selon la règle d'isolation (TIRAGE ISOLATION RULE)
   const filteredHistory = purifyHistoryForDraw(drawName, history);
-  const cacheKey = globalCache.generateKey(
+
+  return globalTensorCache.getOrCompute(
     'features',
     drawName,
-    `${filteredHistory.length}_${sampleSize}_${filteredHistory[0]?.date || 'nodate'}`
-  );
-
-  return globalCache.getOrCompute(
-    cacheKey,
+    filteredHistory,
     async () => {
       // ============================================================================
       // 0. FENÊTRE GLISSANTE ADAPTATIVE (N_eval) POUR HISTORIQUES COURTS (< 200 tirages)
@@ -342,7 +339,6 @@ export const extractFeatures = async (
         networkCorrelationMap
       };
     },
-    CACHE_TTL.MEDIUM,
-    drawName
+    `sample_${sampleSize}`
   );
 };

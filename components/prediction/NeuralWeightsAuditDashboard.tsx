@@ -178,6 +178,15 @@ const ALGO_REGISTRY: LayerMeta[] = [
     formula: "Aff(i, j) = P(i cap j) / (P(i) * P(j))",
     iconName: "Network",
   },
+  {
+    key: AlgoKey.JACCARD,
+    label: "Inertie Ensembliste Jaccard",
+    category: "markov_point",
+    categoryLabel: "Couche 3 : Transitions & Processus Ponctuels",
+    description: "Indice d'inertie stochastique inter-tirages et couplage de transition conditionnelle C^infinity.",
+    formula: "J(D_t, D_{t+1}) = |D_t ∩ D_{t+1}| / |D_t ∪ D_{t+1}|",
+    iconName: "Network",
+  },
 
   // 4. Chaos, Bayes & Topologie
   {

@@ -64,6 +64,8 @@ export const lcgGlobalRandom = () => {
     return defaultLcgConfig.next();
 };
 
+export { HaltonSequence, SobolSequence1D } from "./quasiRandom";
+
 /**
  * Calcule le nombre de combinaisons possibles (n parmi k) de manière robuste.
  * nCr = n! / (k! * (n-k)!)

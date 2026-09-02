@@ -212,7 +212,8 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     [AlgoKey.AFFINITY]: 'Affinité Symbiotique',
     [AlgoKey.SPATIAL]: 'Géométrie Spatiale',
     [AlgoKey.TEMPORAL]: 'Modélisation Temporelle',
-    [AlgoKey.FRACTAL]: 'Mémoire Multi-échelle'
+    [AlgoKey.FRACTAL]: 'Mémoire Multi-échelle',
+    [AlgoKey.JACCARD]: 'Inertie Jaccard'
   };
   return strategies[topAlgo] || `Hybride (${topAlgo})`;
 };

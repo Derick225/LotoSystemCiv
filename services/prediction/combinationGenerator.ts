@@ -3,6 +3,7 @@ import { ScoredNumber } from "./scoringEngine";
 import { calculateACValue } from "../mathService";
 import { ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { calculateGeneticDiversityIndex } from "./diversityService";
+import { HaltonSequence } from "../../utils/mathUtils";
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
@@ -405,10 +406,10 @@ export const generateCombination = async (
   const targetTop = Math.max(0, DRAW_SIZE - targetOutsiders);
 
   // Seed purement déterministe via hachage FNV-1a pour ZÉRO HASARD
-  let lcgSeed = 2166136261;
+  let seedHash = 2166136261;
   const mixSeed = (val: number) => {
-    lcgSeed ^= val;
-    lcgSeed = Math.imul(lcgSeed, 16777619);
+    seedHash ^= val;
+    seedHash = Math.imul(seedHash, 16777619);
   };
   if (lastDraw) lastDraw.forEach(mixSeed);
   sortedScores.slice(0, 10).forEach(s => {
@@ -416,9 +417,17 @@ export const generateCombination = async (
     mixSeed(Math.floor(s.score * 1000));
   });
 
+  // Générateur quasi-aléatoire multidimensionnel de Halton (basse discrépance)
+  const quasiRandomOffset = Math.abs(seedHash % 10007) + 1;
+  const haltonGen = new HaltonSequence(5, quasiRandomOffset);
+
+  let lcgSeed = (seedHash >>> 0);
   const lcgRandom = () => {
+    // Hybridation LCG + Halton van der Corput pour une dispersion spatiale optimale sans clustering
     lcgSeed = (lcgSeed * 1664525 + 1013904223) >>> 0;
-    return lcgSeed / 4294967296.0;
+    const lcgVal = lcgSeed / 4294967296.0;
+    const haltonVal = haltonGen.next();
+    return (lcgVal + haltonVal) % 1.0;
   };
 
   // --- ÉTAPE 1 : CONSTRUIRE UN SÉLECTEUR GLOUTON BASÉ SUR LE GAIN MARGINAL D'ÉNERGIE ---

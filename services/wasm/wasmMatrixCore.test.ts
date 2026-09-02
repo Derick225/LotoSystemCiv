@@ -53,4 +53,41 @@ describe('WasmMatrixEngine', () => {
     expect(scores.length).toBe(90);
     expect(scores[0]).toBeCloseTo(0.1 * 0.3 + 0.2 * 0.2, 5);
   });
+
+  it('inverts non-singular matrix accurately with invertMatrixFlat', () => {
+    // 2x2 matrix: [[4, 7], [2, 6]] -> det = 24 - 14 = 10 -> inv = [[0.6, -0.7], [-0.2, 0.4]]
+    const M = new Float64Array([4, 7, 2, 6]);
+    const inv = wasmMatrixEngine.invertMatrixFlat(M, 2);
+    expect(inv[0]).toBeCloseTo(0.6, 5);
+    expect(inv[1]).toBeCloseTo(-0.7, 5);
+    expect(inv[2]).toBeCloseTo(-0.2, 5);
+    expect(inv[3]).toBeCloseTo(0.4, 5);
+  });
+
+  it('computes symmetric eigen decomposition with eigenDecompositionSym', () => {
+    // 2x2 symmetric: [[2, 1], [1, 2]] -> eigenvalues: 3 and 1
+    const M = new Float64Array([2, 1, 1, 2]);
+    const { values, vectors } = wasmMatrixEngine.eigenDecompositionSym(M, 2);
+    expect(values.length).toBe(2);
+    expect(vectors.length).toBe(4);
+    // Les valeurs propres doivent être positives et ordonnées par amplitude
+    expect(values[0] + values[1]).toBeCloseTo(4.0, 3); // Trace = 2 + 2 = 4
+  });
+
+  it('executes SIMD/WASM vectorized Kernel PCA denoising stably', () => {
+    const nSamples = 10;
+    const nFeatures = 5;
+    const flatData = new Float64Array(nSamples * nFeatures);
+    for (let i = 0; i < nSamples * nFeatures; i++) {
+      flatData[i] = 10 + (i % 20) * 3.5;
+    }
+
+    const denoised = wasmMatrixEngine.denoiseKernelPcaVectorized(flatData, nSamples, nFeatures);
+    expect(denoised.length).toBe(nSamples * nFeatures);
+    for (let i = 0; i < denoised.length; i++) {
+      expect(denoised[i]).toBeGreaterThanOrEqual(0);
+      expect(denoised[i]).toBeLessThanOrEqual(100);
+      expect(isNaN(denoised[i])).toBe(false);
+    }
+  });
 });

@@ -27,6 +27,7 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation (Inverse-Variance)',
   [AlgoKey.GAP_BAND_SEQUENCE]: 'Transition de Bandes d\'Écart',
   [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
+  [AlgoKey.JACCARD]: 'Inertie Jaccard',
 };
 
 export const ALGO_CATEGORIES = [
@@ -40,7 +41,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_CADENCE]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.JACCARD, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_CADENCE]
   }
 ];
 

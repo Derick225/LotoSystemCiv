@@ -26,7 +26,8 @@ export enum AlgoKey {
     INTER_MONTHLY_RESONANCE = 'inter_monthly_resonance',
     ISOLATION_ANOMALY = 'isolation_anomaly',
     GAP_BAND_SEQUENCE = 'gap_band_sequence',
-    MACHINE_TRANSFER = 'machine_transfer'
+    MACHINE_TRANSFER = 'machine_transfer',
+    JACCARD = 'jaccard'
 }
 
 export type AlgoWeights = Record<AlgoKey, number>;

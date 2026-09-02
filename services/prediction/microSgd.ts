@@ -124,7 +124,7 @@ export const applyDeterministicMicroSgd = async (
         probs[s.num] = 1.0 / (1.0 + Math.exp(-z));
       });
 
-      // Gradient de Brier Score vs poids
+      // Gradient de Brier Score vs poids avec régularisation Elastic-Net adaptative C^infinity
       const gradients: Record<string, number> = {};
       const algoKeys = Object.keys(adjustedWeights);
       algoKeys.forEach(algo => { gradients[algo] = 0; });
@@ -142,6 +142,11 @@ export const applyDeterministicMicroSgd = async (
         });
       });
 
+      // Elastic-Net régularisation continue : alpha * L1 + (1 - alpha) * L2
+      // alpha augmente continûment avec l'entropie pour forcer la parcimonie en régime de bruit
+      const elasticAlpha = 1.0 / (1.0 + Math.exp(-6.0 * (safeEntropy - 0.6)));
+      const lambdaReg = 0.001 * (1.0 - safeEntropy * 0.5);
+
       // Pas de gradient + projection sur le simplexe avec garde-fou de preuve empirique
       algoKeys.forEach(algo => {
         const key = algo as AlgoKey;
@@ -149,7 +154,12 @@ export const applyDeterministicMicroSgd = async (
         const proof = proofMap[key];
         const hasProof = proof && proof.hasProof && proof.proofScore > 0;
         
-        let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
+        // Termes de pénalité Elastic-Net différentiables
+        const l1Grad = Math.sign(oldWeight) * elasticAlpha;
+        const l2Grad = 2.0 * oldWeight * (1.0 - elasticAlpha);
+        const totalGrad = gradients[algo] + lambdaReg * (l1Grad + l2Grad);
+        
+        let newWeight = Math.max(0, oldWeight - eta * totalGrad);
         
         // Variation clamp derived from information theory:
         // At max entropy (safeEntropy=1), allow wider variation (more exploration).

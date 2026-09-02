@@ -525,6 +525,24 @@ export const evaluateAlgoEmpiricalProof = (
       // Aucun essai si le tirage ne contient aucune donnée machine
       trials[AlgoKey.MACHINE_TRANSFER] += 10;
     }
+
+    // 24. Canal JACCARD (Inertie ensembliste inter-tirages et persistance conditionnelle)
+    const jaccardSubScores = new Float32Array(91);
+    const lastWinnersSet = new Set(lastWinners);
+    for (let s = 0; s < Math.min(subT, 15); s++) {
+      const pastWinners = subHistory[s].gagnants;
+      const interCount = pastWinners.filter(x => lastWinnersSet.has(x)).length;
+      const unionCount = pastWinners.length + lastWinners.length - interCount;
+      const jRatio = unionCount > 0 ? interCount / unionCount : 0;
+      pastWinners.forEach(n => {
+        if (n >= 1 && n <= 90) {
+          jaccardSubScores[n] += (1.0 + jRatio * 5.0) * Math.exp(-s / 5.0);
+        }
+      });
+    }
+    const topJaccard = [...numIndices].sort((a, b) => jaccardSubScores[b] - jaccardSubScores[a]).slice(0, 10);
+    hits[AlgoKey.JACCARD] += topJaccard.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.JACCARD] += 10;
   }
 
   // Vérification de la présence effective de données machine sur l'historique du tirage

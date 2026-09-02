@@ -14,6 +14,7 @@ import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { detectGameRegime, calculateThermodynamicRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { globalCache, CACHE_TTL } from "../cache/CacheService";
+import { globalTensorCache } from "../cache/lruTensorCache";
 
 // Split module imports
 import { TUNING, applyDeterministicMicroSgd, hashHistoryContent, getMedian, getStdDev } from "./microSgd";
@@ -716,11 +717,12 @@ export const generateMasterPrediction = async (
   }
 
   const weightsHash = hashWeights(context.weightsToUse);
-  const keyParams = `${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
-  const cacheKey = globalCache.generateKey('prediction', context.drawName, keyParams);
+  const extraParams = `w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}_hawkes_${context.useSpatioTemporalHawkes}`;
 
-  return globalCache.getOrCompute(
-    cacheKey,
+  return globalTensorCache.getOrCompute<Prediction>(
+    'master_prediction',
+    context.drawName,
+    context.history,
     async () => {
       // PHASE 1 — Cloud Complet
       try {
@@ -773,8 +775,7 @@ export const generateMasterPrediction = async (
       // PHASE 4 — Réponse Prudente Dégradée
       return handleScenarioADegradedPrediction(context);
     },
-    CACHE_TTL.MEDIUM,
-    context.drawName
+    extraParams
   );
 };
 

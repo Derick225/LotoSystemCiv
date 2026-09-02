@@ -973,6 +973,7 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
                 keys: [
                   AlgoKey.SPATIAL,
                   AlgoKey.AFFINITY,
+                  AlgoKey.JACCARD,
                   AlgoKey.NETWORK_CORRELATION,
                   AlgoKey.ECHO_STATE,
                   AlgoKey.DERIVED_NEIGHBOR,
