@@ -744,20 +744,23 @@ export const generateMasterPrediction = async (
           try {
             return await runLocalPredictionViaWorker(context);
           } catch (workerErr) {
-            logger.error(
+            logger.warn(
               { drawName: context.drawName, error: workerErr instanceof Error ? workerErr.message : String(workerErr) },
-              "[predictionOrchestrator] Échec du Web Worker de prédiction locale. AUCUN basculement sur le thread principal pour éviter les freezes."
+              "[predictionOrchestrator] Échec du Web Worker de prédiction locale. Repli vers le pipeline local simplifié."
             );
             throw workerErr;
           }
+        } else if (typeof window === "undefined" || (typeof process !== "undefined" && process.env?.NODE_ENV === "test")) {
+          // En environnement sans DOM / Node / Vitest (pas de thread UI à bloquer), exécution directe du pipeline complet
+          return await runLocalPredictionPipeline(context);
         } else {
-            logger.warn("[predictionOrchestrator] Web Workers non supportés, passage direct au Local Simplifié.");
-            throw new Error("Web Workers non supportés");
+          logger.info("[predictionOrchestrator] Web Workers non supportés dans cet environnement, passage direct au Local Simplifié.");
+          return await runLocalSimplifiedPipeline(context);
         }
       } catch (e) {
-        logger.error(
+        logger.warn(
           { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
-          "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
+          "[predictionOrchestrator] Repli sur Local Simplifié."
         );
       }
 

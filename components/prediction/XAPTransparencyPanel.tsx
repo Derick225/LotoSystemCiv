@@ -215,7 +215,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   const shapleyChartData = useMemo(() => {
     if (!currentNumberXAP?.shapleyValues) {
       const breakdown = prediction.breakdown?.[selectedNum] || {};
-      const total = Object.values(breakdown).reduce((a, b) => a + (Number(b) || 0), 0) || 1;
+      const total: number = Object.values(breakdown).reduce((a: number, b) => a + (Number(b) || 0), 0) || 1;
       return Object.entries(breakdown)
         .map(([algo, val]) => ({
           algo: LABELS_FRIENDLY[algo] || algo,

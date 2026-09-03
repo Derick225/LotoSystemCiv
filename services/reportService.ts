@@ -63,12 +63,16 @@ export const generateTacticalReport = async (data: ReportData) => {
 
     const suggestedData = data.prediction.suggestedNumbers.map(n => {
         const bd = data.prediction.breakdown[n] || {};
+        const bdVals = Object.values(bd);
+        const avgScore = bdVals.length > 0 
+            ? Math.round(bdVals.reduce((acc: number, val) => acc + (Number(val) || 0), 0) / bdVals.length) 
+            : 0;
         return [
             n,
             `${Math.round((bd.frequency || 0))}%`,
             `${Math.round((bd.gap || 0))}%`,
             `${Math.round((bd.bayes || 0))}%`, // Bayes Score
-            `${Math.round((Object.values(bd).reduce((a: number, b: number) => a + (b || 0), 0) / Object.keys(bd).length))}%` // Moyenne approx
+            `${avgScore}%` // Moyenne approx
         ];
     });
 

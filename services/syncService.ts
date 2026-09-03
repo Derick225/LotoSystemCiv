@@ -1,5 +1,5 @@
 
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { PredictionHistoryItem, ForensicReport, LearningSession, Prediction, PredictionFeedback } from '../types';
 import { AppError, logError } from '../utils/AppError';
 import { set, del } from 'idb-keyval';
@@ -99,9 +99,15 @@ const retryWithBackoff = async <T>(
 };
 
 export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
-    if (!navigator.onLine) return localItems; // Mode hors ligne
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return localItems; // Mode hors ligne
 
-    const { data: { user } } = await supabase.auth.getUser();
+    let user;
+    try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user;
+    } catch {
+        return localItems;
+    }
     if (!user) return localItems; // Mode hors ligne
 
     // Assainissement préalable de toutes les prédictions locales pour garantir des UUID conformes
@@ -271,9 +277,15 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 // --- FORENSIC REPORTS ---
 
 export const syncForensicReports = async (localReports: ForensicReport[]): Promise<ForensicReport[]> => {
-    if (!navigator.onLine) return localReports;
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return localReports;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    let user;
+    try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user;
+    } catch {
+        return localReports;
+    }
     if (!user) return localReports;
 
     try {
@@ -396,7 +408,7 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
 // --- DELETE OPERATIONS ---
 
 export const syncPredictionSnapshots = async (drawName: string) => {
-    if (!navigator.onLine) return;
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
 
     try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -428,20 +440,34 @@ export const syncPredictionSnapshots = async (drawName: string) => {
 };
 
 export const deletePredictionCloud = async (id: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
+    } catch (e) {
+        console.warn("[syncService] deletePredictionCloud error:", e);
+    }
 };
 
 export const deleteForensicReportCloud = async (id: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
+    } catch (e) {
+        console.warn("[syncService] deleteForensicReportCloud error:", e);
+    }
 };
 
 export const deleteMultipleForensicReportsCloud = async (ids: string[]) => {
-    if (!ids || ids.length === 0) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('forensic_reports').delete().in('id', ids).eq('user_id', user.id);
+    if (!ids || ids.length === 0 || !isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase.from('forensic_reports').delete().in('id', ids).eq('user_id', user.id);
+    } catch (e) {
+        console.warn("[syncService] deleteMultipleForensicReportsCloud error:", e);
+    }
 };

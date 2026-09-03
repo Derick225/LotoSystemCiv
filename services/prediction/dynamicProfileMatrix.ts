@@ -39,6 +39,7 @@ export const MACRO_ALGO_FAMILIES = {
     AlgoKey.FREQUENCY,
     AlgoKey.GAPS,
     AlgoKey.GAP_CADENCE,
+    AlgoKey.GAP_PATTERN,
     AlgoKey.GAP_TREND,
     AlgoKey.GAP_BAND_SEQUENCE,
     AlgoKey.MARKOV,
@@ -47,6 +48,7 @@ export const MACRO_ALGO_FAMILIES = {
   ],
   TOPOLOGICAL_AFFINITY: [
     AlgoKey.AFFINITY,
+    AlgoKey.JACCARD,
     AlgoKey.NETWORK_CORRELATION,
     AlgoKey.DERIVED_NEIGHBOR,
     AlgoKey.GAP_SEQUENCE,

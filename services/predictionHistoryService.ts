@@ -1,7 +1,7 @@
 
 import type { Prediction, LearningSession, PredictionHistoryItem, OrchestrationPattern, PredictionFeedback, PatternType, DrawResult } from '../types';
 import { syncPredictions, syncLearningSessions, syncPredictionSnapshots } from './syncService';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getAlgoWeights } from './predictionEngine';
 import { ALL_DRAWS } from '../constants';
 import { get, set, del, keys } from "idb-keyval";
@@ -119,16 +119,18 @@ export const purgeOldPredictionLogs = async (
       await delMany(keysToDelete);
     }
 
-    // Tentative de suppression distante sur Supabase si l'utilisateur est connecté
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const ids = oldItems.map(p => p.id);
-        await supabase.from('predictions').delete().in('id', ids);
-        await supabase.from('prediction_snapshots').delete().in('id', ids);
+    // Tentative de suppression distante sur Supabase si l'utilisateur est connecté et configuré
+    if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const ids = oldItems.map(p => p.id);
+          await supabase.from('predictions').delete().in('id', ids);
+          await supabase.from('prediction_snapshots').delete().in('id', ids);
+        }
+      } catch (e) {
+        // Ignorer silencieusement en mode hors-ligne
       }
-    } catch (e) {
-      // Ignorer silencieusement en mode hors-ligne
     }
   }
 
@@ -498,15 +500,17 @@ export const deletePrediction = async (id: string): Promise<void> => {
         // ignore
     }
     
-    // Attempt to delete from cloud if syncing is enabled
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            await supabase.from('predictions').delete().eq('id', id);
-            await supabase.from('prediction_snapshots').delete().eq('id', id);
+    // Attempt to delete from cloud if syncing is enabled and configured
+    if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await supabase.from('predictions').delete().eq('id', id);
+                await supabase.from('prediction_snapshots').delete().eq('id', id);
+            }
+        } catch(e) {
+            // ignore cloud delete error silently
         }
-    } catch(e) {
-        // ignore cloud delete error silently
     }
 };
 
@@ -526,14 +530,16 @@ export const deleteMultiplePredictions = async (ids: string[]): Promise<void> =>
         // ignore
     }
 
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            await supabase.from('predictions').delete().in('id', ids);
-            await supabase.from('prediction_snapshots').delete().in('id', ids);
+    if (isSupabaseConfigured() && (typeof navigator === 'undefined' || navigator.onLine)) {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await supabase.from('predictions').delete().in('id', ids);
+                await supabase.from('prediction_snapshots').delete().in('id', ids);
+            }
+        } catch(e) {
+            // ignore cloud delete error silently
         }
-    } catch(e) {
-        // ignore cloud delete error silently
     }
 };
 

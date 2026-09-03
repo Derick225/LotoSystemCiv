@@ -1,4 +1,4 @@
-import { supabase } from '../../services/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../../services/supabaseClient';
 import { AppError, logError } from '../../utils/AppError';
 
 interface ApiOptions extends RequestInit {
@@ -8,6 +8,19 @@ interface ApiOptions extends RequestInit {
 
 export const apiClient = {
   async post<T>(endpoint: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+    if (!isSupabaseConfigured()) {
+      const offlineErr = new AppError(
+        `Service Supabase non configuré pour l'appel ${endpoint}`,
+        'CONFIG_ERR',
+        'low',
+        { endpoint }
+      );
+      if (!options.suppressErrorLogging) {
+        logError(offlineErr, { endpoint });
+      }
+      throw offlineErr;
+    }
+
     try {
       // Route toutes les requêtes vers la gateway unique 'nexus-api'
       const requestPayload =

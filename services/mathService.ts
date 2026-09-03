@@ -500,8 +500,8 @@ export const runMonteCarloSimulation = (weights: Record<number, number>, iterati
 export const calculateGapEfficiency = async (history: DrawResult[]): Promise<GapEfficiency[]> => {
     if (!history || history.length === 0) return [];
     
-    const cacheKey = `gei_${history[0].drawName}_${history[0].id}_${history.length}`;
-    const cached = getCached<GapEfficiency[]>(cacheKey);
+    const cacheKey = `gei_${history[0].drawName || history[0].draw_name || 'default'}_${history[0].id}_${history.length}`;
+    const cached = getCached<GapEfficiency[]>(cacheKey, history[0].drawName || history[0].draw_name);
     if (cached) return cached;
 
     if (typeof window !== 'undefined' && workerService.isAvailable()) {

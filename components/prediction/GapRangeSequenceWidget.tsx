@@ -128,7 +128,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         let totalW = 0;
         for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
           const w = globalWeights[algo as keyof typeof globalWeights] || 1;
-          totalVal += (val || 0) * w;
+          totalVal += (Number(val) || 0) * w;
           totalW += w;
         }
         if (totalW > 0) {

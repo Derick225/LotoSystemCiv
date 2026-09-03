@@ -1,5 +1,5 @@
 
-import { supabase, SUPABASE_URL } from './supabaseClient';
+import { supabase, SUPABASE_URL, isSupabaseConfigured } from './supabaseClient';
 import {
     PaymentConfig,
     PaymentRequest,
@@ -125,22 +125,31 @@ export const initiateRealPayment = async (config: PaymentConfig, request: Paymen
 };
 
 export const verifyTransaction = async (transactionId: string): Promise<boolean> => {
-    const { data, error } = await supabase
-        .from('transactions')
-        .select('status')
-        .eq('id', transactionId)
-        .single();
-        
-    if (error || !data) {
-        console.error("Erreur lors de la vérification de la transaction:", error);
+    if (!isSupabaseConfigured()) {
         return false;
     }
 
-    const parsed = TransactionVerificationRowSchema.safeParse(data);
-    if (!parsed.success) {
-        console.warn("Format de statut de transaction inattendu:", parsed.error);
+    try {
+        const { data, error } = await supabase
+            .from('transactions')
+            .select('status')
+            .eq('id', transactionId)
+            .single();
+            
+        if (error || !data) {
+            console.error("Erreur lors de la vérification de la transaction:", error);
+            return false;
+        }
+
+        const parsed = TransactionVerificationRowSchema.safeParse(data);
+        if (!parsed.success) {
+            console.warn("Format de statut de transaction inattendu:", parsed.error);
+            return false;
+        }
+
+        return parsed.data.status === 'COMPLETED';
+    } catch (e) {
+        console.error("Erreur inattendue lors de la vérification de transaction:", e);
         return false;
     }
-
-    return parsed.data.status === 'COMPLETED';
 };

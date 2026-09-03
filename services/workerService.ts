@@ -1,6 +1,7 @@
 
 import { AppError } from '../utils/AppError';
 import { apiClient } from '../core/api/apiClient';
+import { isSupabaseConfigured } from './supabaseClient';
 import { packHistory, packMatrix, packArray, collectTransferables } from './workers/zeroCopy';
 
 /**
@@ -213,8 +214,8 @@ class WorkerService {
     private edgeCooldownUntil: number = 0;
 
     public async runTask<T>(task: string, payload: unknown = {}, history: unknown[] = []): Promise<T> {
-        // Circuit Breaker: Si l'Edge a trop échoué, on passe directement au Local Worker pendant un temps (ex: 5 minutes)
-        if (Date.now() < this.edgeCooldownUntil) {
+        // Circuit Breaker: Si l'Edge a trop échoué ou si Supabase n'est pas configuré, on passe directement au Local Worker
+        if (!isSupabaseConfigured() || Date.now() < this.edgeCooldownUntil) {
             try {
                 return await this.runInLocalWorker(task, payload, history) as T;
             } catch (fallbackError: unknown) {

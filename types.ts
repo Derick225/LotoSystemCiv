@@ -1,4 +1,5 @@
-import { AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
+export { AlgoKey, DEFAULT_ALGO_WEIGHTS, type AlgoWeights, type ScoreBreakdown };
 
 export interface GapEfficiency {
   number: number;
