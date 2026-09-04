@@ -150,7 +150,7 @@ export const evaluatePredictionStability = (
       entropy -= p * Math.log(p);
     }
   });
-  const maxEntropy = Math.log(N);
+  const maxEntropy = Math.log(Math.max(2, N));
   const normalizedEntropy = maxEntropy > 0 ? entropy / maxEntropy : 1.0;
   const S_sharpness = Math.max(0.0, Math.min(1.0, 1.0 - normalizedEntropy));
 
@@ -309,7 +309,10 @@ export const finalizePredictionPayload = async (
   const wDiv = 0.10;
   const normSumLikelihood = sumLikelihood * 100.0;
   const normParityLikelihood = parityLikelihood * 100.0;
-  const normDiversity = diversityMetrics?.diversityScore ? diversityMetrics.diversityScore : 80.0;
+  const normDiversity =
+    diversityMetrics?.diversityScore !== undefined
+      ? Math.max(0, Math.min(100, diversityMetrics.diversityScore * 100.0))
+      : 80.0;
 
   const realityAlignment = Math.round(
     Math.max(10, Math.min(99,

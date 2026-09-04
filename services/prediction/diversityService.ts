@@ -136,8 +136,8 @@ export const calculateGeneticDiversityIndex = (
 
   // 5. Ajustement continu du Score de Diversité Génétique
   // On tempère le score géométrique standard par le coefficient d'orthogonalité inter-algorithmique KL
-  const baseDiversity = 1.0 - meanSimilarity;
-  const diversityScore = baseDiversity * klDivergenceBonus;
+  const baseDiversity = Math.max(0.0, Math.min(1.0, 1.0 - Math.max(0.0, meanSimilarity)));
+  const diversityScore = Math.max(0.0, Math.min(1.0, baseDiversity * Math.max(0.0, Math.min(1.0, klDivergenceBonus))));
 
   // 6. Pénalisation continue adaptative
   let MONOCULTURE_THRESHOLD = 0.75; // Valeur par défaut
@@ -145,7 +145,10 @@ export const calculateGeneticDiversityIndex = (
   
   if (breakdowns && Object.keys(breakdowns).length >= 45) {
     const sampleSimilarities: number[] = [];
-    const allNums = Object.keys(breakdowns).map(Number).filter(n => !isNaN(n) && n >= 1 && n <= 90);
+    const allNums = Object.keys(breakdowns)
+      .map(Number)
+      .filter(n => !isNaN(n) && n >= 1 && n <= 90)
+      .sort((a, b) => a - b);
     
     // Pour des raisons de performance et de déterminisme strict, on échantillonne avec un pas fixe
     // qui couvre tout l'univers de façon déterministe (environ 150-200 comparaisons)
