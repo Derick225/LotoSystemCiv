@@ -14,54 +14,39 @@ export const useRealtimeSync = () => {
     useEffect(() => {
         if (!navigator.onLine || !drawName) return;
 
-        let lastSyncTime = 0;
-        const MIN_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute cool-down window to avoid duplicate triggers
+        // Optimisation Egress Supabase :
+        // Le canal Supabase Realtime (drawChannel) notifie déjà le client instantanément lors de tout
+        // INSERT ou UPDATE dans draw_results. Re-télécharger agressivement tout l'historique avec force=true
+        // à chaque focus/changement d'onglet gaspillait le quota Egress.
+        // On remplace par une synchronisation douce espacée d'au moins 15 minutes, respectant le cache.
+        let lastSyncTime = Date.now();
+        const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
-        const triggerBackgroundSync = async () => {
+        const triggerGentleSync = async () => {
             const now = Date.now();
             if (now - lastSyncTime < MIN_SYNC_INTERVAL_MS) {
-                console.log("[Background Sync] Cooldown active, skipping sync to optimize battery and network.");
                 return;
             }
             lastSyncTime = now;
 
-            console.log(`[Background Sync] App focus / visibility detected. Executing progressive background sync for: ${drawName}...`);
-
             try {
-                // 1. Refresh draw results silently in the background
-                await refreshData(drawName, true);
-
-                // 2. Perform background synchronization of predictions history
-                const { syncAllHistory } = await import('../services/predictionHistoryService');
-                await syncAllHistory(drawName);
-
-                console.log("[Background Sync] Progressive background sync successfully completed.");
+                // Utiliser le cache normal (force=false)
+                await refreshData(drawName, false);
             } catch (err) {
-                console.warn("[Background Sync] Error during background progressive sync:", err);
+                console.warn("[Background Sync] Error during gentle sync:", err);
             }
         };
 
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                triggerBackgroundSync();
+                triggerGentleSync();
             }
         };
 
-        const handleFocus = () => {
-            triggerBackgroundSync();
-        };
-
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('focus', handleFocus);
-
-        // Immediate check if already visible
-        if (document.visibilityState === 'visible') {
-            triggerBackgroundSync();
-        }
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('focus', handleFocus);
         };
     }, [drawName, refreshData]);
 

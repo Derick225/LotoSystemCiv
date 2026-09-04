@@ -310,15 +310,25 @@ export const useNexusStore = create<NexusState>()(
             .map(([n, c]) => ({ number: Number(n), count: c }))
             .sort((a, b) => b.count - a.count);
 
-          const gaps: { number: number; gap: number }[] = [];
-          for (let i = 1; i <= 90; i++) {
-            let gap = 0;
-            for (const draw of historyData) {
-              if ((draw.gagnants || []).includes(i)) break;
-              gap++;
+          // Calcul des écarts en 1 seule passe linéaire O(N*5) avec terminaison anticipée
+          const gapsMap = new Map<number, number>();
+          for (let i = 1; i <= 90; i++) gapsMap.set(i, -1);
+          let foundCount = 0;
+          for (let dIdx = 0; dIdx < historyData.length && foundCount < 90; dIdx++) {
+            const winners = historyData[dIdx].gagnants || [];
+            for (let g = 0; g < winners.length; g++) {
+              const num = winners[g];
+              if (gapsMap.get(num) === -1) {
+                gapsMap.set(num, dIdx);
+                foundCount++;
+              }
             }
-            gaps.push({ number: i, gap });
           }
+          const gaps = Array.from({ length: 90 }, (_, idx) => {
+            const num = idx + 1;
+            const g = gapsMap.get(num);
+            return { number: num, gap: g === -1 ? historyData.length : g! };
+          });
 
           set({ history: historyData, stats, gaps });
         } catch (error) {

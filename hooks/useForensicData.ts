@@ -51,9 +51,10 @@ export const useForensicData = (drawName: string) => {
                     if (session) {
                         const { data: cloudReports } = await supabase
                             .from('forensic_reports')
-                            .select('*')
+                            .select('id, draw_date, draw_name, prediction_id, report_data')
                             .eq('draw_name', drawName)
-                            .order('created_at', { ascending: false });
+                            .order('created_at', { ascending: false })
+                            .limit(20);
 
                         if (cloudReports && cloudReports.length > 0) {
                             cloudReports.forEach((cr: any) => {

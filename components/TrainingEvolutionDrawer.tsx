@@ -55,12 +55,15 @@ export const TrainingEvolutionDrawer: React.FC<{
         try {
           const { data: logs, error: logsError } = await supabase
             .from("learning_logs")
-            .select("*")
+            .select("created_at, applied_weights, new_fitness, previous_fitness, improvement_delta")
             .eq("draw_name", drawName)
-            .order("created_at", { ascending: true });
+            .order("created_at", { ascending: false })
+            .limit(30);
 
           if (!logsError && logs) {
-            logs.forEach((item: any) => {
+            // Inverser pour conserver l'ordre chronologique
+            const chronLogs = [...logs].reverse();
+            chronLogs.forEach((item: any) => {
               const weights = item.applied_weights || {};
               const fit = Number(item.new_fitness) || 0;
               const prevFit = Number(item.previous_fitness) || 0;
@@ -81,12 +84,14 @@ export const TrainingEvolutionDrawer: React.FC<{
 
           const { data: sessions, error: sessionsError } = await supabase
             .from("learning_sessions")
-            .select("*")
+            .select("created_at, session_data")
             .eq("draw_name", drawName)
-            .order("created_at", { ascending: true });
+            .order("created_at", { ascending: false })
+            .limit(30);
 
           if (!sessionsError && sessions) {
-            sessions.forEach((s: any) => {
+            const chronSessions = [...sessions].reverse();
+            chronSessions.forEach((s: any) => {
               const sData = s.session_data || {};
               if (sData.bestGenome) {
                 entries.push({

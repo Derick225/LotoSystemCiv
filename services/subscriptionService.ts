@@ -23,7 +23,7 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
     try {
         const queryPromise = supabase
             .from('subscriptions')
-            .select('*')
+            .select('user_id, status, plan, expires_at, start_date, updated_at')
             .eq('user_id', userId)
             .single();
         const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) =>

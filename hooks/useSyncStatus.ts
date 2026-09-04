@@ -22,11 +22,11 @@ export function useSyncStatus() {
     };
   }, []);
 
-  const checkStatus = async () => {
+  const checkStatus = async (force?: boolean) => {
     setIsSyncing(true);
     try {
       if (isOnline) {
-        const connected = await testDatabaseConnection();
+        const connected = await testDatabaseConnection(force);
         setDbConnection(connected.success ? 'connected' : 'disconnected');
       } else {
         setDbConnection('disconnected');
@@ -63,7 +63,8 @@ export function useSyncStatus() {
 
   useEffect(() => {
     checkStatus();
-    const interval = setInterval(checkStatus, 30000);
+    // 5 minutes d'intervalle (300 000 ms) au lieu de 30 secondes pour minimiser l'Egress
+    const interval = setInterval(() => checkStatus(false), 300000);
     return () => clearInterval(interval);
   }, [isOnline]);
 
@@ -73,6 +74,6 @@ export function useSyncStatus() {
     idbStats,
     isSyncing,
     lastChecked,
-    checkStatus
+    checkStatus: (force?: boolean | unknown) => checkStatus(force === true)
   };
 }

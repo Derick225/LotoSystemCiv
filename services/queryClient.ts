@@ -7,13 +7,14 @@ import LZString from 'lz-string';
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Prioritize fresh data as requested
-      staleTime: 1000 * 30, // Data fresh for 30 seconds only
-      gcTime: 1000 * 60 * 60 * 24 * 7, // Keep in local memory for 7 days
+      // Optimisation Egress : données fraîches 30 minutes (invalidées via Supabase Realtime si nouvel insert)
+      staleTime: 1000 * 60 * 30, // 30 minutes
+      gcTime: 1000 * 60 * 60 * 24 * 7, // Conservation en mémoire locale 7 jours
       
-      refetchOnWindowFocus: true, 
-      refetchOnMount: true,
-      refetchOnReconnect: true, // Re-try sync when regaining network
+      // Bloque les requêtes répétitives à chaque focus de fenêtre ou remount
+      refetchOnWindowFocus: false, 
+      refetchOnMount: false,
+      refetchOnReconnect: false, // Évite les rafales de téléchargement sur reconnexion
       
       retry: (failureCount, error: Error | unknown) => {
         // Ne pas réessayer si 404

@@ -183,11 +183,27 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
-            'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
-            'vendor-utils': ['jspdf', 'html2canvas'],
-            'vendor-core': ['@supabase/supabase-js', '@tanstack/react-query']
+          manualChunks: (id) => {
+            if (id.includes('node_modules')) {
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('canvg')) {
+                return 'vendor-export-pdf';
+              }
+              if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('framer-motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-is')) {
+                return 'vendor-react';
+              }
+              if (id.includes('@supabase') || id.includes('@tanstack')) {
+                return 'vendor-core';
+              }
+              if (id.includes('lucide-react') || id.includes('clsx') || id.includes('tailwind-merge')) {
+                return 'vendor-ui';
+              }
+            }
           }
         }
       }

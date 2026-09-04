@@ -29,6 +29,29 @@ const getConsensusCacheKey = (drawName: string, historyLength: number, headDrawI
   return `${drawName}_${historyLength}_${headDrawId}`;
 };
 
+// Cache pour les résultats finaux de la forêt de décision (évite le ré-entraînement à chaque changement d'onglet)
+const forestResultCache = new Map<string, { timestamp: number; data: any }>();
+const MAX_FOREST_CACHE = 25;
+const FOREST_TTL = 600000; // 10 minutes
+
+const getCachedForestResult = (key: string) => {
+  const entry = forestResultCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > FOREST_TTL) {
+    forestResultCache.delete(key);
+    return null;
+  }
+  return entry.data;
+};
+
+const setCachedForestResult = (key: string, data: any) => {
+  if (forestResultCache.size >= MAX_FOREST_CACHE) {
+    const firstKey = forestResultCache.keys().next().value;
+    if (firstKey !== undefined) forestResultCache.delete(firstKey);
+  }
+  forestResultCache.set(key, { timestamp: Date.now(), data });
+};
+
 // Constante topologique dérivée du domaine (couvre 99.7% des distances spatiales dans un domaine de 90)
 const SIGMA_TOPOLOGY = 90 / 6.0; 
 
@@ -457,8 +480,14 @@ export const runDecisionForest = async (
   const activeIndices = effectiveFeatures.map(label => FEATURES_LABELS.indexOf(label)).filter(idx => idx !== -1);
   if (activeIndices.length === 0) return { votes: [], dataset: [] };
 
-  // 1. Calcul du Consensus Map (avec cache stable)
   const firstDrawId = history[0]?.id || 'empty';
+  const forestCacheKey = `${activeDrawName}_${history.length}_${firstDrawId}_${mode}_${effectiveFeatures.join(',')}`;
+  const cachedResult = getCachedForestResult(forestCacheKey);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  // 1. Calcul du Consensus Map (avec cache stable)
   const cacheKey = getConsensusCacheKey(activeDrawName, history.length, firstDrawId);
   let consensusMap = consensusCache.get(cacheKey);
   if (!consensusMap) {
@@ -739,7 +768,7 @@ export const runDecisionForest = async (
       const dnaConcordanceMean = Math.round(sumDnaAffinity / 90);
       const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
 
-      resolve({ 
+      const finalResult = { 
         votes: sortedByAffinity.slice(0, 20), 
         dataset: formattedDataset,
         effectiveFeatures,
@@ -750,7 +779,10 @@ export const runDecisionForest = async (
           sieveIntensityPercent,
           entropyBits: dnaReport.entropyBits
         }
-      });    
+      };
+
+      setCachedForestResult(forestCacheKey, finalResult);
+      resolve(finalResult);    
     };
 
     worker.onerror = (err) => { 

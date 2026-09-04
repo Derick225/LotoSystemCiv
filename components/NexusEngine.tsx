@@ -121,15 +121,25 @@ export const NexusEngine: React.FC = () => {
         .map(([n, c]) => ({ number: Number(n), count: c }))
         .sort((a, b) => b.count - a.count);
 
-      const computedGaps: { number: number; gap: number }[] = [];
-      for (let i = 1; i <= 90; i++) {
-        let gap = 0;
-        for (const draw of history) {
-          if (draw.gagnants.includes(i)) break;
-          gap++;
+      // Calcul des écarts en 1 seule passe linéaire O(N*5) avec terminaison anticipée
+      const computedGapsMap = new Map<number, number>();
+      for (let i = 1; i <= 90; i++) computedGapsMap.set(i, -1);
+      let foundCount = 0;
+      for (let dIdx = 0; dIdx < history.length && foundCount < 90; dIdx++) {
+        const gagnants = history[dIdx].gagnants || [];
+        for (let g = 0; g < gagnants.length; g++) {
+          const num = gagnants[g];
+          if (computedGapsMap.get(num) === -1) {
+            computedGapsMap.set(num, dIdx);
+            foundCount++;
+          }
         }
-        computedGaps.push({ number: i, gap });
       }
+      const computedGaps = Array.from({ length: 90 }, (_, idx) => {
+        const num = idx + 1;
+        const g = computedGapsMap.get(num);
+        return { number: num, gap: g === -1 ? history.length : g! };
+      });
 
       const empCal = generateEmpiricalCalibration(history);
       setEmpiricalCalibration(empCal);
@@ -227,6 +237,7 @@ export const NexusEngine: React.FC = () => {
           // Seules les 10 dernières prédictions (les plus récentes) ont besoin d'être vérifiées et analysées en arrière-plan.
           // Cela évite de recalculer l'analyse forensique pour des centaines de vieux tirages à chaque changement de jeu.
           const relevantPreds = preds.slice(0, 10);
+          const reportedPredIds = new Set(allLocalReports.map((r) => r.predictionId));
 
           // Chunk the processing to avoid blocking main thread
           for (let i = 0; i < relevantPreds.length; i++) {
@@ -246,10 +257,7 @@ export const NexusEngine: React.FC = () => {
 
             // Automate Forensic Analysis if linked and no report exists
             if (match) {
-              const existingReport = allLocalReports.find(
-                (r) => r.predictionId === item.id,
-              );
-              if (!existingReport) {
+              if (!reportedPredIds.has(item.id)) {
                 try {
                   const report = await performForensicAnalysis(
                     drawName,
@@ -263,6 +271,7 @@ export const NexusEngine: React.FC = () => {
                     history,
                   );
                   saveForensicReport(report);
+                  reportedPredIds.add(item.id);
                   forensicGenerated = true;
                 } catch (e) {
                   console.warn("Auto-Forensic failed for", item.id, e);

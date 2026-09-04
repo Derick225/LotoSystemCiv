@@ -149,7 +149,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
                 const { data: fullRows, error: fetchErr } = await supabase
                     .from('predictions')
-                    .select('*')
+                    .select('id, user_id, draw_name, timestamp, prediction, draw_result_id, feedback, created_at')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
                 fullRows?.forEach(rawRow => {
@@ -319,7 +319,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
                 const { data: fullRows, error: fetchErr } = await supabase
                     .from('forensic_reports')
-                    .select('*')
+                    .select('id, user_id, prediction_id, draw_result_id, draw_name, draw_date, report_data, ai_model_used, created_at')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
                 fullRows?.forEach(rawRow => {
@@ -417,7 +417,7 @@ export const syncPredictionSnapshots = async (drawName: string) => {
         // Fetch cloud snapshots avec validation Zod
         const { data: rawSnaps, error } = await supabase
             .from('prediction_snapshots')
-            .select('*')
+            .select('id, user_id, draw_name, target_date, predicted_numbers, decision_dna, metrics_snapshot, status, actual_numbers, near_misses, autopsy_report, created_at, updated_at')
             .eq('user_id', user.id)
             .eq('draw_name', drawName)
             .order('created_at', { ascending: false })

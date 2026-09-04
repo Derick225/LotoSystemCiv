@@ -84,34 +84,53 @@ export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
     const cacheKey = globalCache.generateKey('history', drawName);
 
-    // Stale-While-Revalidate : Si un cache valide existe et force=false, retour instantané
+    // Stale-While-Revalidate optimisé pour l'Egress :
+    // Si un cache valide existe et force=false, retour instantané SANS re-téléchargement massif de 2000 lignes
     if (!force) {
       const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
       if (cached && cached.length > 0) {
-        // Rafraîchissement asynchrone discret en arrière-plan
+        // Vérification de tête ultra-légère (1 seule ligne métadonnée au lieu de 2000 lignes)
+        // uniquement si en ligne et sous condition d'écart de temps
         if (isSupabaseConfigured() && navigator.onLine) {
           (async () => {
             try {
-              let query = supabase
+              let probeQuery = supabase
                 .from('draw_results')
-                .select('*')
+                .select('id, date')
                 .order('date', { ascending: false });
 
               if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
-                query = query.eq('draw_name', normalizeDrawName(drawName));
+                probeQuery = probeQuery.eq('draw_name', normalizeDrawName(drawName));
               }
-              query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
-              const { data } = await query;
-              if (data && data.length > 0) {
-                const fresh = data.map(row => ({
-                  id: row.id,
-                  drawName: row.draw_name,
-                  date: formatDate(row.date),
-                  gagnants: row.gagnants,
-                  machine: row.machine || [],
-                  version: row.version || 1
-                }));
-                await globalCache.set(cacheKey, fresh, CACHE_TTL.HISTORY, drawName);
+              const { data: probeData } = await probeQuery.limit(1);
+              
+              // Si le tirage le plus récent est déjà dans notre cache, 0 octet supplémentaire téléchargé !
+              if (probeData && probeData[0] && cached[0] && probeData[0].id === cached[0].id) {
+                return;
+              }
+
+              // Si et seulement si un nouveau tirage existe, rafraîchir avec projection stricte
+              if (probeData && probeData[0] && (!cached[0] || probeData[0].id !== cached[0].id)) {
+                let refreshQuery = supabase
+                  .from('draw_results')
+                  .select('id, draw_name, date, gagnants, machine, version')
+                  .order('date', { ascending: false });
+
+                if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
+                  refreshQuery = refreshQuery.eq('draw_name', normalizeDrawName(drawName));
+                }
+                const { data: freshRows } = await refreshQuery.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+                if (freshRows && freshRows.length > 0) {
+                  const fresh = freshRows.map(row => ({
+                    id: row.id,
+                    drawName: row.draw_name,
+                    date: formatDate(row.date),
+                    gagnants: row.gagnants,
+                    machine: row.machine || [],
+                    version: row.version || 1
+                  }));
+                  await globalCache.set(cacheKey, fresh, CACHE_TTL.HISTORY, drawName);
+                }
               }
             } catch (e) {
               // Silently ignore background revalidation failures
@@ -127,9 +146,10 @@ export const lotteryService = {
 
     if (isSupabaseConfigured() && navigator.onLine) {
         try {
+            // Projection de colonnes stricte pour minimiser l'Egress Supabase (évite SELECT *)
             let query = supabase
               .from('draw_results')
-              .select('*')
+              .select('id, draw_name, date, gagnants, machine, version')
               .order('date', { ascending: false });
 
             if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
@@ -312,10 +332,17 @@ export const getDailySummary = async (day: string) => {
       const name = draws[time];
       let lastDraw: DrawResult | null = null;
       try {
+          // Étape 1 : Vérifier si le tirage est déjà en cache local/mémoire (0 requête réseau)
+          const cacheKey = globalCache.generateKey('history', name);
+          const cached = await globalCache.get<DrawResult[]>(cacheKey, name);
+          if (cached && cached.length > 0) {
+              return { time, name, result: cached[0] };
+          }
+
           if (isSupabaseConfigured() && navigator.onLine) {
               const { data, error } = await supabase
                 .from('draw_results')
-                .select('*')
+                .select('id, draw_name, date, gagnants, machine, version')
                 .eq('draw_name', name)
                 .order('date', { ascending: false })
                 .limit(1);
