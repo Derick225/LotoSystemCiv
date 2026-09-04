@@ -5,6 +5,7 @@ import {
 } from "../../services/spatialService";
 import { predictBarycenterShift } from "../../services/mathService";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import type { SpatialMetrics, DrawResult, BarycenterPoint } from "../../types";
 import {
   Layers,
@@ -66,8 +67,13 @@ const GravityCompass: React.FC<{
 };
 
 export function SpatialTab({ drawName }: SpatialTabProps) {
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
   const nexusLoading = useNexusStore((state) => state.loading);
+
+  const history = useMemo(
+    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+    [drawName, rawHistory]
+  );
 
   // Time Travel State (0 = Présent)
   const [timeIndex, setTimeIndex] = useState(0);

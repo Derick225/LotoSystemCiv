@@ -1,12 +1,13 @@
 import { FALLBACK_CALIBRATION } from "../../shared/prediction.types";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   calculateShadowNumbers,
   calculateRunsTest,
   calculateTrendOscillator,
 } from "../../services/mathService";
 import type {
+  DrawResult,
   MathAnalysisReport,
   ShadowNumbers,
   TrendOscillatorPoint,
@@ -21,13 +22,18 @@ import {
   Wind,
 } from "lucide-react";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 interface MathTabProps {
   drawName: string;
 }
 
 export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
+  const history = useMemo(
+    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+    [drawName, rawHistory]
+  );
   const nexusLoading = useNexusStore((state) => state.loading);
   const storeCalibration = useNexusStore((state) => state.empiricalCalibration);
   const calibration = storeCalibration || FALLBACK_CALIBRATION;
@@ -51,11 +57,11 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
 
   useEffect(() => {
     if (history.length > 0) {
-      const winners = history.flatMap((d) => d.gagnants);
+      const winners = history.flatMap((d: DrawResult) => d.gagnants);
       const recentDraws = history.slice(0, 100);
 
       let drawsWithConsecutive = 0;
-      recentDraws.forEach((d) => {
+      recentDraws.forEach((d: DrawResult) => {
         const sorted = [...d.gagnants].sort((a, b) => a - b);
         let hasConsecutive = false;
         for (let i = 0; i < sorted.length - 1; i++)
@@ -68,23 +74,23 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
 
       const analysis: MathAnalysisReport = {
         parity: {
-          odd: winners.filter((n) => n % 2 !== 0).length,
-          even: winners.filter((n) => n % 2 === 0).length,
+          odd: winners.filter((n: number) => n % 2 !== 0).length,
+          even: winners.filter((n: number) => n % 2 === 0).length,
         },
         lowHigh: {
-          low: winners.filter((n) => n <= 45).length,
-          high: winners.filter((n) => n > 45).length,
+          low: winners.filter((n: number) => n <= 45).length,
+          high: winners.filter((n: number) => n > 45).length,
         },
         sumHistory: history
           .slice(0, 50)
-          .map((d) => ({
+          .map((d: DrawResult) => ({
             date: d.date,
             sum: d.gagnants.reduce((a: number, b: number) => a + b, 0),
             avg: calibration.meanSum,
           })),
         finales: Array.from({ length: 10 }, (_, i) => ({
           digit: i,
-          count: winners.filter((n) => n % 10 === i).length,
+          count: winners.filter((n: number) => n % 10 === i).length,
         })),
         consecutiveStats: {
           count: drawsWithConsecutive,

@@ -427,6 +427,7 @@ export const runDecisionForest = async (
 ): Promise<{ 
   votes: ForestVote[], 
   dataset: { features: number[]; class: number; weight: number }[],
+  effectiveFeatures?: string[],
   diagnostics?: DecisionForestDiagnostics,
   dnaSieveInfo?: {
     active: boolean;
@@ -437,14 +438,14 @@ export const runDecisionForest = async (
   }
 }> => {
   const startTime = Date.now();
-  if (!rawHistory || rawHistory.length === 0) return { votes: [], dataset: [] };
+  if (!rawHistory || rawHistory.length === 0) return { votes: [], dataset: [], effectiveFeatures: activeFeatures };
 
   const activeDrawName = drawName || useNexusStore.getState().drawName || "Reveil";
   const history = purifyHistoryForDraw(activeDrawName, rawHistory);
 
   if (history.length < 40) {
     console.warn("Historique insuffisant pour Decision Forest (Min 40).");
-    return { votes: [], dataset: [] };
+    return { votes: [], dataset: [], effectiveFeatures: activeFeatures };
   }
 
   // Vérifier si l'historique nettoyé du tirage contient au moins un tirage avec des numéros Machine
@@ -596,6 +597,7 @@ export const runDecisionForest = async (
   const votesAndDataset = await new Promise<{ 
     votes: ForestVote[], 
     dataset: { features: number[]; class: number; weight: number }[],
+    effectiveFeatures?: string[],
     dnaSieveInfo?: {
       active: boolean;
       dominantAlgos: string[];
@@ -655,7 +657,7 @@ export const runDecisionForest = async (
         const isDnaBoosted = dominanceProbability > 0.55;
 
         // Génération du chemin de décision sur l'arbre primaire
-        const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], activeFeatures);
+        const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], effectiveFeatures);
 
         return {
           candidate: num,
@@ -740,6 +742,7 @@ export const runDecisionForest = async (
       resolve({ 
         votes: sortedByAffinity.slice(0, 20), 
         dataset: formattedDataset,
+        effectiveFeatures,
         dnaSieveInfo: {
           active: true,
           dominantAlgos,
@@ -817,6 +820,7 @@ export const runDecisionForest = async (
   return {
     votes: votesAndDataset.votes,
     dataset: votesAndDataset.dataset,
+    effectiveFeatures,
     diagnostics,
     dnaSieveInfo: votesAndDataset.dnaSieveInfo
   };

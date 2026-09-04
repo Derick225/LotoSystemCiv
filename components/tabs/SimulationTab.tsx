@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   Activity,
   TrendingUp,
@@ -16,7 +17,11 @@ import { audioEngine } from "../../utils/audioEngine";
 
 export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
   ({ drawName }) => {
-    const history = useNexusStore((state) => state.history);
+    const rawHistory = useNexusStore((state) => state.history);
+    const history = useMemo(
+      () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+      [drawName, rawHistory]
+    );
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
     const [mode, setMode] = useState<
@@ -121,7 +126,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
 
           {mode === "comparative" && (
             <div className="animate-slide-up">
-              <ParallelSimulationTab />
+              <ParallelSimulationTab drawName={drawName} />
             </div>
           )}
 

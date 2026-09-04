@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { generateGlobalForensicSynthesis } from "../../services/geminiService";
 import { getLocalForensicReports } from "../../services/postPredictionAnalysisService";
 import { ForensicReport } from "../../types";
@@ -50,7 +51,11 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
+  const history = useMemo(
+    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+    [drawName, rawHistory]
+  );
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);

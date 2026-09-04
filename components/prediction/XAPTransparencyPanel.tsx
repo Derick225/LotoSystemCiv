@@ -44,6 +44,7 @@ import { useToast } from "../ui/Toast";
 import { NeuralWeightsAuditDashboard } from "./NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { audioEngine } from "../../utils/audioEngine";
 
 
@@ -100,13 +101,10 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     audioEngine.play("click");
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = history.filter(
-        (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-      );
-      const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
-      const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+      const isolatedHistory = purifyHistoryForDraw(drawName, history);
+      const hasMachineData = isolatedHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-      const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+      const proofs = evaluateAlgoEmpiricalProof(drawName, isolatedHistory);
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,

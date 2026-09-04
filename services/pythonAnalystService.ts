@@ -1,5 +1,6 @@
 import { DrawResult, PythonAnalysisResult, NotebookCell, AlgoWeights } from "../types";
 import { calculatePoissonProbability, calculateBayesianScore, runMonteCarloSimulation } from './mathService';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 // ==========================================
 // HELPERS STATISTIQUES DÉTERMINISTES & CONTINUS
@@ -481,17 +482,18 @@ const runParallelMonteCarlo = async (
 
 export const runDeepPythonAnalysis = async (
     drawName: string,
-    history: DrawResult[],
+    rawHistory: DrawResult[],
     modelType: 'XGBoost' | 'ARIMA' | 'MCMC' | 'DeepKernel' = 'DeepKernel',
     weights?: AlgoWeights,
     onProgress?: (progress: number) => void,
     onLog?: (msg: string) => void
 ): Promise<PythonAnalysisResult> => {
+    const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     
     if (onLog) {
         onLog(`[SYSTEM] Initiating Neural Python Kernel v14.0...`);
         onLog(`[CONFIG] Strategy: ${modelType} (Advanced Non-Linear Machine Learning)`);
-        onLog(`[DATA] Loading ${history.length} frames from registry...`);
+        onLog(`[DATA] Loading ${history.length} purified frames for ${drawName}...`);
         if (weights) onLog(`[DNA] Injecting AlgoWeights for symbiotic calibration...`);
     }
 

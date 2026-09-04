@@ -16,6 +16,7 @@ import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
 import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   Activity,
   Target,
@@ -32,6 +33,8 @@ import {
   Sparkles,
   FileText,
   Sliders,
+  Copy,
+  Check,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -68,6 +71,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       useState(false);
     const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
     const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
+    const [isTicketCopied, setIsTicketCopied] = useState(false);
 
     // Network and Authentication state wrappers
     const [networkState, setNetworkState] = useState<{
@@ -108,6 +112,16 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       handleOptimizeWeights,
     } = usePredictionGenerator(drawName);
 
+    const handleCopyPrimaryTicket = useCallback(() => {
+      if (!lastPrediction?.suggestedNumbers?.length) return;
+      audioEngine.play("click");
+      const text = lastPrediction.suggestedNumbers.join(" - ");
+      navigator.clipboard.writeText(text);
+      setIsTicketCopied(true);
+      showToast(`Sélection copiée : ${text}`, "success");
+      setTimeout(() => setIsTicketCopied(false), 2000);
+    }, [lastPrediction, showToast]);
+
     const handleTriggerForensicReport = useCallback(async () => {
       audioEngine.play("click");
       if (!lastPrediction) {
@@ -117,13 +131,10 @@ export const PredictionTab = React.memo<{ drawName: string }>(
 
       setIsExportingForensicPDF(true);
       try {
-        const isolatedHistory = history.filter(
-          (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-        );
-        const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
-        const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+        const isolatedHistory = purifyHistoryForDraw(drawName, history);
+        const hasMachineData = isolatedHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-        const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+        const proofs = evaluateAlgoEmpiricalProof(drawName, isolatedHistory);
 
         await exportService.generateForensicStochasticReportPDF({
           drawName,
@@ -458,13 +469,33 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                     )}
                   </div>
                 </div>
-                <div className="px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 transition-colors text-indigo-700 dark:text-indigo-400 rounded-2xl flex items-center gap-3 border border-indigo-100 dark:border-indigo-500/20 cursor-default">
-                  <span className="text-[10px] font-black uppercase tracking-widest opacity-80">
-                    Indice de Confiance
-                  </span>
-                  <span className="text-xl font-black font-mono">
-                    {lastPrediction.confidence}%
-                  </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyPrimaryTicket}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                    title="Copier la combinaison dans le presse-papier"
+                  >
+                    {isTicketCopied ? (
+                      <>
+                        <Check size={14} className="text-emerald-500" />
+                        <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Copié</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} />
+                        <span className="text-[10px] uppercase font-bold">Copier</span>
+                      </>
+                    )}
+                  </button>
+                  <div className="px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 transition-colors text-indigo-700 dark:text-indigo-400 rounded-2xl flex items-center gap-3 border border-indigo-100 dark:border-indigo-500/20 cursor-default">
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">
+                      Indice de Confiance
+                    </span>
+                    <span className="text-xl font-black font-mono">
+                      {lastPrediction.confidence}%
+                    </span>
+                  </div>
                 </div>
               </div>
 

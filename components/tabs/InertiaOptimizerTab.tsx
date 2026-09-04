@@ -35,6 +35,7 @@ import {
 import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
 import { saveTicket } from "../../services/userPreferencesService";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   computeSystemInertiaMetrics,
   computeInertiaVectorScores,
@@ -93,7 +94,11 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
+  const history = useMemo(
+    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+    [drawName, rawHistory]
+  );
   const globalRegime = useNexusStore((state) => state.regime);
 
   // Interactive cybernetic calibration state variables

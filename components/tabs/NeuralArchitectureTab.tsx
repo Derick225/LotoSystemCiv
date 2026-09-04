@@ -47,9 +47,14 @@ const COMMUNITY_BG = [
   "bg-cyan-500",
 ];
 
-export const NeuralArchitectureTab: React.FC = () => {
+interface NeuralArchitectureTabProps {
+  drawName?: string;
+}
+
+export const NeuralArchitectureTab: React.FC<NeuralArchitectureTabProps> = ({ drawName: propDrawName }) => {
   const correlationMatrix = useNexusStore((state) => state.correlationMatrix);
-  const drawName = useNexusStore((state) => state.drawName);
+  const storeDrawName = useNexusStore((state) => state.drawName);
+  const drawName = propDrawName || storeDrawName || "Reveil";
   const spectral = useNexusStore((state) => state.spectral);
   const { showToast } = useToast();
 

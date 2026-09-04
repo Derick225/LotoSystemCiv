@@ -338,9 +338,9 @@ ctx.onmessage = (e) => {
     const z = (cand.score - meanScore) / stdScore;
     const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Transition continue pour l'activation micro
 
-    const neighborFeat = cand.features[4] || 0; // Neighbor feature
-    const machineFeat = cand.features[5] || 0; // Machine leak feature
-    const microModulation = (neighborFeat + machineFeat) * 0.2;
+    // Modulation micro-spectrale continue dimension-safe sur l'ensemble des descripteurs
+    const meanFeat = cand.features.reduce((acc, f) => acc + (f || 0), 0) / Math.max(1, cand.features.length);
+    const microModulation = meanFeat * 0.2;
 
     const continuousBoost = 1.0 + level2Weight * microModulation;
     const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));

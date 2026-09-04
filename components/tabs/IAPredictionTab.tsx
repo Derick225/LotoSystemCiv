@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BrainCircuit,
@@ -84,7 +85,11 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
+  const history = useMemo(
+    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
+    [drawName, rawHistory]
+  );
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const temporalDepth = useNexusStore((state) => state.temporalDepth);

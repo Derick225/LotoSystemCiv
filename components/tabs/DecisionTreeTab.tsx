@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   runDecisionForest,
   calculateFeatureImportance,
@@ -8,6 +8,7 @@ import type { ForestVote } from "../../types";
 import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
 import { useNexusStore } from "../../store/useNexusStore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   Vote,
   Users,
@@ -22,6 +23,7 @@ import {
   GitBranch,
   Network,
   Layers,
+  Copy,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 
@@ -61,14 +63,20 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
+  const rawHistory = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const nexusLoading = useNexusStore((state) => state.loading);
+
+  const history = useMemo(
+    () => purifyHistoryForDraw(drawName, rawHistory),
+    [drawName, rawHistory]
+  );
 
   const [candidates, setCandidates] = useState<ForestVote[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<ForestVote | null>(
     null,
   );
+  const [copiedTop5, setCopiedTop5] = useState(false);
   const [dnaSieveInfo, setDnaSieveInfo] = useState<{
     active: boolean;
     dominantAlgos: string[];
@@ -90,19 +98,23 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
   >([]);
   const [selectedFeatures, setSelectedFeatures] =
     useState<string[]>(FEATURES_LABELS);
+  const [effectiveFeatures, setEffectiveFeatures] =
+    useState<string[]>(FEATURES_LABELS);
 
   const load = useCallback(async () => {
     if (history.length < 40) return;
     setLocalLoading(true);
     try {
       // Lancement du Worker Forest avec le mode sélectionné et tamisage ADN
-      const { votes, dataset, diagnostics: diag, dnaSieveInfo: sieveData } = await runDecisionForest(
+      const { votes, dataset, effectiveFeatures: effFeats, diagnostics: diag, dnaSieveInfo: sieveData } = await runDecisionForest(
         history,
         filterMode,
         selectedFeatures,
         drawName,
         globalWeights
       );
+      const activeFeats = effFeats || selectedFeatures;
+      setEffectiveFeatures(activeFeats);
       setCandidates(votes);
       setDnaSieveInfo(sieveData || null);
       setDiagnostics(diag || null);
@@ -112,7 +124,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
         setSelectedCandidate(votes[0]);
 
         // Calcul de l'importance des features (post-training)
-        const impMap = calculateFeatureImportance(dataset, selectedFeatures);
+        const impMap = calculateFeatureImportance(dataset, activeFeats);
         const impArray = Object.entries(impMap)
           .map(([name, val]) => ({ name, val }))
           .sort((a, b) => b.val - a.val);
@@ -127,6 +139,16 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
       setLocalLoading(false);
     }
   }, [history, filterMode, selectedFeatures, showToast, drawName, globalWeights]);
+
+  const handleCopyTop5 = useCallback(() => {
+    if (candidates.length === 0) return;
+    const text = candidates.slice(0, 5).map((c) => c.candidate).join(" - ");
+    navigator.clipboard.writeText(text);
+    audioEngine.play("click");
+    setCopiedTop5(true);
+    showToast(`Top 5 candidats Decision Forest copiés : ${text}`, "success");
+    setTimeout(() => setCopiedTop5(false), 2000);
+  }, [candidates, showToast]);
 
   useEffect(() => {
     if (history.length >= 40) {
@@ -329,15 +351,30 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
       <div className="grid lg:grid-cols-12 gap-8">
         {/* Liste des Élus */}
         <div className="lg:col-span-4 bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 h-fit max-h-[700px] overflow-y-auto custom-scrollbar">
-          <div className="flex justify-between items-center mb-8">
+          <div className="flex justify-between items-center mb-8 gap-2">
             <h4
               className={`font-black text-[10px] uppercase tracking-widest flex items-center gap-2 ${theme.text}`}
             >
               <Vote size={14} />
               Résultats du Vote
             </h4>
-            <div className="px-3 py-1 bg-slate-100 dark:bg-slate-900 rounded-full text-xs font-bold text-slate-500">
-              {candidates.length} Candidats
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyTop5}
+                disabled={candidates.length === 0}
+                className="px-2.5 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 rounded-full text-[10px] font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
+                title="Copier le Quintette Élu (Top 5)"
+              >
+                {copiedTop5 ? (
+                  <Check size={12} className="text-emerald-400" />
+                ) : (
+                  <Copy size={12} />
+                )}
+                <span>{copiedTop5 ? "Copié !" : "Copier Top 5"}</span>
+              </button>
+              <div className="px-3 py-1 bg-slate-100 dark:bg-slate-900 rounded-full text-xs font-bold text-slate-500">
+                {candidates.length} Candidats
+              </div>
             </div>
           </div>
 
@@ -488,7 +525,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   Empreinte de Bifurcation &amp; Signaux d'Inférence
                 </h4>
                 <div className="grid sm:grid-cols-2 gap-4">
-                  {selectedFeatures.map((featName, idx) => {
+                  {effectiveFeatures.map((featName, idx) => {
                     const val = selectedCandidate.features.values?.[idx] ?? 0;
                     const percent = Math.round(val * 100);
 
