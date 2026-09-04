@@ -98,32 +98,49 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
 
   // Refined & Optimized Differentiable Fusion for "Survivants de l'ADN Algorithmique" & Décision Tamisée
   const { survivingNumbers, populationStats, totalFavoredCandidateCount } = useMemo(() => {
+    // Check Tirage Isolation on lastPrediction (ZÉRO POLLUTION INTER-TIRAGES)
+    const normalizeName = (s?: string) =>
+      (s || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/^(loto|tirage)\s+/i, "")
+        .replace(/[\s\-_/]+/g, " ")
+        .trim();
+
+    const isPredictionForActiveDraw =
+      lastPrediction &&
+      normalizeName(lastPrediction.drawName) === normalizeName(drawName);
+
     // 1. Dynamic Favored Bin Selection (Dynamic Mean Probability Mass Cutoff)
     const totalBinsCount = report.bins.length;
     const meanProb =
-      report.bins.reduce((sum, b) => sum + b.probability, 0) /
-      (totalBinsCount || 1);
+      totalBinsCount > 0
+        ? report.bins.reduce((sum, b) => sum + b.probability, 0) / totalBinsCount
+        : 1.0 / 11;
 
     // Bins with above-average transition probability mass or top 3 predicted fallback
     const favoredBins = report.bins.filter((b) => b.probability >= meanProb);
     const topBinsToUse =
       favoredBins.length > 0 ? favoredBins : report.topPredictedBins.slice(0, 3);
+    const favoredBinIndices = new Set(topBinsToUse.map((b) => b.binIndex));
 
-    const candidateNumbers = new Set<number>();
-    topBinsToUse.forEach((bin) => {
-      bin.matchingNumbers.forEach((num) => candidateNumbers.add(num));
-    });
+    // Evaluate all domain numbers 1..90 with their continuous gap/Markov/DNA metrics
+    const allDomainNumbers: number[] = Array.from({ length: 90 }, (_, i) => i + 1);
 
-    const candidateList = Array.from(candidateNumbers);
-    const totalFavoredCount = candidateList.length;
-
-    const items = candidateList.map((num) => {
+    const items = allDomainNumbers.map((num) => {
       // a. Raw Markov Score derived from gap range transition probability distribution
-      const rawMarkovScore = report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
+      const rawMarkovScore =
+        report.rawScoresByNumber?.[num] ?? (report.scoresByNumber?.[num] ?? 50);
 
-      // b. DNA Breakdown Score derived from active global weights & last prediction matrix
-      let dnaScore = report.dnaAffinity?.[num] ?? 50;
-      if (lastPrediction?.breakdown?.[num]) {
+      // b. DNA Affinity & Multiplier from the active algorithmic DNA (ZÉRO NOMBRE MAGIQUE)
+      const dnaMultiplier = report.dnaMultipliers?.[num] ?? 1.0;
+      let dnaAffinity = report.dnaAffinity?.[num] ?? 50;
+
+      // c. If last prediction belongs strictly to active draw, refine with consensus breakdown
+      let dnaScore = dnaAffinity;
+      if (isPredictionForActiveDraw && lastPrediction?.breakdown?.[num]) {
         let totalVal = 0;
         let totalW = 0;
         for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
@@ -133,27 +150,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         }
         if (totalW > 0) {
           dnaScore = totalVal / totalW;
+          dnaAffinity = Math.round(0.5 * dnaAffinity + 0.5 * dnaScore);
         }
       }
 
-      // c. Continuous DNA Sieve multiplier from the active algorithmic DNA (ZÉRO NOMBRE MAGIQUE)
-      const dnaMultiplier = report.dnaMultipliers?.[num] ?? 1.0;
-      const dnaAffinity = report.dnaAffinity?.[num] ?? Math.round(dnaScore);
       const zScore = report.zScoresByNumber?.[num] ?? 0;
       const lift = report.liftsByNumber?.[num] ?? 1.0;
       const quantumCoherence = report.quantumCoherenceByNumber?.[num] ?? 50;
       const empiricalProof = report.empiricalProofConfidence?.[num] ?? 50;
       const burstMomentum = report.burstMomentumByNumber?.[num] ?? 50;
 
-      // d. Continuous Differentiable Sieved Decision Score:
-      // Combines raw transition likelihood modulated continuously by the active DNA Sieve
-      const zMarkov = (rawMarkovScore - 50.0) / 15.0;
-      const zDna = (dnaScore - 50.0) / 15.0;
-      const zFused = 0.40 * zMarkov + 0.60 * zDna;
-      const baseFused = 100.0 / (1.0 + Math.exp(-2.4 * zFused));
-
-      // Sift through the continuous DNA multiplier (0.35 baseline + 0.65 DNA profile)
-      const sievedScore = Math.max(0, Math.min(100, baseFused * (0.35 + 0.65 * dnaMultiplier)));
+      // d. Continuous Differentiable Sieved Score from report (calculated via dynamic SNR DNA Sieve)
+      const baseSievedScore = report.scoresByNumber?.[num] ?? (rawMarkovScore * dnaMultiplier);
+      const sievedScore = Math.max(0, Math.min(100, baseSievedScore));
 
       const gapInfo = report.currentGapsByNumber?.[num] || {
         gap: 0,
@@ -161,21 +170,27 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         binLabel: "?",
       };
 
-      // Continuous Consensus & Sieve Decision Tag
+      const isFavoredTranche = favoredBinIndices.has(gapInfo.binIndex);
+      const isDnaBoosted = dnaMultiplier >= 1.03;
+      const isCriticalGap = gapInfo.gap >= 18;
+      const isHighMarkov = rawMarkovScore >= 60;
+      const isHighDna = dnaAffinity >= 65;
+      const isConvergence = isHighMarkov && isHighDna && sievedScore >= 65;
+
+      // Unified, Deterministic Category & Tag Assignment
       let tag = "Survivant Standard";
       let tagColor = "text-slate-400 bg-slate-800/60 border-slate-700/50";
-      let isDnaBoosted = dnaMultiplier > 1.05;
       let categoryKey: SurvivorCategoryFilter = "ALL";
 
-      if (sievedScore >= 70 && rawMarkovScore >= 60 && dnaAffinity >= 65) {
+      if (isConvergence) {
         tag = "🔥 Convergence Tamisée Élite";
         tagColor = "text-amber-300 bg-amber-500/20 border-amber-500/30 shadow-amber-500/10";
         categoryKey = "CONVERGENCE";
-      } else if (dnaAffinity >= 70) {
+      } else if (isHighDna) {
         tag = "⚡ Signal ADN Dominant";
         tagColor = "text-indigo-300 bg-indigo-500/20 border-indigo-500/30";
         categoryKey = "DNA_DOMINANT";
-      } else if (rawMarkovScore >= 65) {
+      } else if (isHighMarkov) {
         tag = "🎯 Transition Écart";
         tagColor = "text-emerald-300 bg-emerald-500/20 border-emerald-500/30";
         categoryKey = "MARKOV";
@@ -183,7 +198,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         tag = "✨ Tamisé ADN +";
         tagColor = "text-cyan-300 bg-cyan-500/20 border-cyan-500/30";
         categoryKey = "TAMIS_BOOSTED";
-      } else if (gapInfo.gap >= 20) {
+      } else if (isCriticalGap) {
         tag = "⏳ Rupture d'Écart";
         tagColor = "text-rose-300 bg-rose-500/20 border-rose-500/30";
         categoryKey = "CRITICAL_GAP";
@@ -206,33 +221,39 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         gap: gapInfo.gap,
         binLabel: gapInfo.binLabel,
         binIndex: gapInfo.binIndex,
+        isFavoredTranche,
         tag,
         tagColor,
         categoryKey,
       };
     });
 
-    // Apply Tranche Filter
-    let filtered = items;
-    if (filterBinIndex !== "all") {
-      filtered = filtered.filter((item) => item.binIndex === filterBinIndex);
-    }
+    // Baseline candidate count for favored tranches
+    const favoredCandidateCount = items.filter((item) => item.isFavoredTranche).length;
 
-    // Apply Category Filter
+    // Apply Tranche Filter:
+    // If "all", default to numbers in favored transition tranches (high transition probability).
+    // If a specific tranche is selected, show all numbers belonging to that selected tranche.
+    let filtered =
+      filterBinIndex === "all"
+        ? items.filter((item) => item.isFavoredTranche)
+        : items.filter((item) => item.binIndex === filterBinIndex);
+
+    // Apply Category Filter (100% Synchronized with Category Keys)
     if (categoryFilter !== "ALL") {
       if (categoryFilter === "PROOF_ONLY") {
         filtered = filtered.filter((item) => item.zScore > 0 && item.empiricalProof >= 60);
       } else if (categoryFilter === "CONVERGENCE") {
         filtered = filtered.filter(
-          (item) => item.categoryKey === "CONVERGENCE" || item.score >= 68
+          (item) => item.categoryKey === "CONVERGENCE" || (item.score >= 65 && item.markovScore >= 58 && item.dnaAffinity >= 60)
         );
       } else if (categoryFilter === "DNA_DOMINANT") {
         filtered = filtered.filter(
-          (item) => item.categoryKey === "DNA_DOMINANT" || item.dnaAffinity >= 68
+          (item) => item.categoryKey === "DNA_DOMINANT" || item.dnaAffinity >= 65
         );
       } else if (categoryFilter === "MARKOV") {
         filtered = filtered.filter(
-          (item) => item.categoryKey === "MARKOV" || item.rawMarkovScore >= 62
+          (item) => item.categoryKey === "MARKOV" || item.rawMarkovScore >= 60
         );
       } else if (categoryFilter === "TAMIS_BOOSTED") {
         filtered = filtered.filter((item) => item.isDnaBoosted);
@@ -241,16 +262,28 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       }
     }
 
-    // Apply Search Query Filter
+    // Apply Search Query Filter (Supports single number substring or comma/space separated list)
     if (searchQuery.trim() !== "") {
-      const q = searchQuery.trim();
-      filtered = filtered.filter((item) => item.num.toString().includes(q));
+      const searchTokens = searchQuery
+        .trim()
+        .split(/[\s,]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (searchTokens.length > 0) {
+        filtered = filtered.filter((item) => {
+          const numStr = item.num.toString();
+          return searchTokens.some(
+            (token) => numStr === token || numStr.includes(token)
+          );
+        });
+      }
     }
 
     // Apply Score Retention Threshold Cutoff
     filtered = filtered.filter((item) => item.score >= minScoreCutoff);
 
-    // Apply Sorting Mode
+    // Apply Sorting Mode (Deterministic with LCG tie-breaker)
     filtered.sort((a, b) => {
       if (sortMode === "fused") {
         if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
@@ -276,6 +309,11 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     });
 
     // Compute Population Stats
+    const baselineCandidateCount =
+      filterBinIndex === "all"
+        ? favoredCandidateCount
+        : items.filter((item) => item.binIndex === filterBinIndex).length;
+
     const avgScore =
       filtered.length > 0
         ? filtered.reduce((acc, curr) => acc + curr.score, 0) / filtered.length
@@ -287,27 +325,28 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         : 50;
 
     const retentionPercent =
-      totalFavoredCount > 0
-        ? ((filtered.length / totalFavoredCount) * 100).toFixed(0)
+      baselineCandidateCount > 0
+        ? Math.min(100, Math.round((filtered.length / baselineCandidateCount) * 100)).toString()
         : "0";
 
-    const topConvergenceCount = filtered.filter((item) =>
-      item.tag.includes("Convergence") || item.score >= 70
+    const topConvergenceCount = filtered.filter(
+      (item) => item.categoryKey === "CONVERGENCE" || item.score >= 68
     ).length;
 
     return {
       survivingNumbers: filtered,
-      totalFavoredCandidateCount: totalFavoredCount,
+      totalFavoredCandidateCount: baselineCandidateCount,
       populationStats: {
         avgScore: parseFloat(avgScore.toFixed(1)),
         avgDnaAffinity: Math.round(avgDnaAffinity),
         retentionPercent,
         topConvergenceCount,
-        rejectedCount: Math.max(0, totalFavoredCount - filtered.length),
+        rejectedCount: Math.max(0, baselineCandidateCount - filtered.length),
       },
     };
   }, [
     report,
+    drawName,
     globalWeights,
     lastPrediction,
     sortMode,
@@ -326,9 +365,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
 
   const handleCopyNumbers = useCallback(
     (count?: number) => {
-      const targetList = count
-        ? survivingNumbers.slice(0, count)
-        : survivingNumbers;
+      let targetList = survivingNumbers;
+      if (count && count < survivingNumbers.length) {
+        // When requesting top count (e.g. Top 5 Élite), prioritize highest consensus score
+        targetList = [...survivingNumbers]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, count);
+      }
       if (targetList.length === 0) return;
 
       const numsString = targetList.map((item) => item.num).join(", ");
@@ -1023,14 +1066,14 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                       </div>
                       <div className="flex items-center justify-between text-slate-400">
                         <span>Tamis Multiplier :</span>
-                        <span className={`font-bold ${dnaMultiplier >= 1.05 ? 'text-amber-300' : 'text-slate-400'}`}>
+                        <span className={`font-bold ${dnaMultiplier >= 1.03 ? 'text-amber-300' : 'text-slate-400'}`}>
                           {dnaMultiplier}x
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-slate-400">
                         <span>Z-Score / Lift :</span>
-                        <span className={`font-bold ${zScore > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                          +{zScore} / {lift}x
+                        <span className={`font-bold ${zScore > 0 ? 'text-emerald-300' : zScore < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                          {zScore > 0 ? `+${zScore}` : zScore} / {lift}x
                         </span>
                       </div>
                     </div>
