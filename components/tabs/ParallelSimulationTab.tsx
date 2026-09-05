@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   runAlternativeRealitiesSimulation,
   BacktestReport,
@@ -33,18 +32,9 @@ const legendStyle = {
   paddingTop: "20px",
 };
 
-interface ParallelSimulationTabProps {
-  drawName?: string;
-}
-
-export const ParallelSimulationTab: React.FC<ParallelSimulationTabProps> = React.memo(({ drawName: propDrawName }) => {
-  const rawHistory = useNexusStore((state) => state.history);
-  const storeDrawName = useNexusStore((state) => state.drawName);
-  const drawName = propDrawName || storeDrawName || "Reveil";
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
+export const ParallelSimulationTab: React.FC = React.memo(() => {
+  const history = useNexusStore((state) => state.history);
+  const drawName = useNexusStore((state) => state.drawName);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const [reports, setReports] = useState<{
     flat: BacktestReport;

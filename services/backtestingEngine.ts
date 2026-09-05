@@ -1,5 +1,4 @@
 import { DrawResult, AlgoWeights } from "../types";
-import { isSupabaseConfigured } from "./supabaseClient";
 import {
   runSimulationCore,
   BettingStrategy,
@@ -72,7 +71,7 @@ export const runSurvivalSimulation = async (
   const useCloudEngine = useNexusStore.getState().useCloudEngine;
   const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
-  if (useCloudEngine && !isVercel && isSupabaseConfigured()) {
+  if (useCloudEngine && !isVercel) {
     try {
       console.log(`Tentative de backtesting via Supabase Edge Function (run-simulation) - Strategie: ${strategy}...`);
       

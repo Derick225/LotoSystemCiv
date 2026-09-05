@@ -24,7 +24,6 @@ import { finalizePredictionPayload } from "./predictionFinalize";
 import { calculatePoissonScores, calculateBayesianScore, calculateTemporalScores, calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores, calculateLeaderSuccession, calculateAiIntuition, calculateFractalResonance, calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores, calculateHawkesExcitation, calculateTopologicalLyapunov } from '../advancedMathService';
 import { calculateSpatioTemporalHawkes } from '../../utils/engine/hawkesEngine';
 import { calculateDnaSieveWeights } from '../temporalAnalysisService';
-import { executeAlgorithmicFilter, AlgorithmicDnaState } from './algorithmicFilterService';
 
 const TICKET_SIZE = 5;
 
@@ -529,38 +528,14 @@ export const selectPredictionNumbers = async (
     (thermoRegime.thermodynamicIndex + thermoRegime.entropy + thermoRegime.volatility / 100.0) / 3.0
   ));
 
-  // Exécution certifiée du Tamis ADN / Filtre Algorithmique d'ADN
-  const dnaState: AlgorithmicDnaState = {
-    drawName: context.drawName,
-    timestamp: Date.now(),
-    sievedScores: sortedScores,
-    dnaSieveMetrics: {
-      multipliers: context.metrics?.dnaSieve?.multipliers || {},
-      affinityPercent: context.metrics?.dnaSieve?.affinityPercent || {},
-      dominantAlgos: context.metrics?.dnaSieve?.dominantAlgos || [],
-      entropyBits: context.metrics?.dnaSieve?.entropyBits,
-      sieveIntensitySNR: context.metrics?.dnaSieve?.sieveIntensitySNR,
-      dnaConcordanceMean: context.metrics?.dnaSieve?.dnaConcordanceMean,
-    },
-    affinityMap: features.affinityMap,
+  const selection = await generateCombination(
+    sortedScores,
+    features.affinityMap,
     empiricalCalibration,
-    thermodynamicRegime: {
-      thermodynamicIndex: thermoRegime.thermodynamicIndex,
-      entropy: thermoRegime.entropy,
-      volatility: thermoRegime.volatility,
-      continuousOutsiderCount: outsiderCount,
-    },
-    targetOutsiders: outsiderCount,
-    lastDraw: context.history[0]?.gagnants,
-  };
-
-  const filterResult = await executeAlgorithmicFilter(dnaState);
-  const selection = filterResult.selectedCombination;
-
-  if (context.metrics) {
-    context.metrics.algorithmicFilterCertificate = filterResult.validationCertificate;
-    context.metrics.dnaSieveValidationCertificate = filterResult.validationCertificate;
-  }
+    outsiderCount,
+    context.history[0]?.gagnants,
+    regimeStateNormalized
+  );
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
   const candidates = sortedScores
@@ -769,23 +744,20 @@ export const generateMasterPrediction = async (
           try {
             return await runLocalPredictionViaWorker(context);
           } catch (workerErr) {
-            logger.warn(
+            logger.error(
               { drawName: context.drawName, error: workerErr instanceof Error ? workerErr.message : String(workerErr) },
-              "[predictionOrchestrator] Échec du Web Worker de prédiction locale. Repli vers le pipeline local simplifié."
+              "[predictionOrchestrator] Échec du Web Worker de prédiction locale. AUCUN basculement sur le thread principal pour éviter les freezes."
             );
             throw workerErr;
           }
-        } else if (typeof window === "undefined" || (typeof process !== "undefined" && process.env?.NODE_ENV === "test")) {
-          // En environnement sans DOM / Node / Vitest (pas de thread UI à bloquer), exécution directe du pipeline complet
-          return await runLocalPredictionPipeline(context);
         } else {
-          logger.info("[predictionOrchestrator] Web Workers non supportés dans cet environnement, passage direct au Local Simplifié.");
-          return await runLocalSimplifiedPipeline(context);
+            logger.warn("[predictionOrchestrator] Web Workers non supportés, passage direct au Local Simplifié.");
+            throw new Error("Web Workers non supportés");
         }
       } catch (e) {
-        logger.warn(
+        logger.error(
           { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
-          "[predictionOrchestrator] Repli sur Local Simplifié."
+          "[predictionOrchestrator] Échec analytique du Local Complet. Tentative de secours via Local Simplifié."
         );
       }
 

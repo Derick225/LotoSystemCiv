@@ -1,5 +1,5 @@
 
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { PredictionHistoryItem, ForensicReport, LearningSession, Prediction, PredictionFeedback } from '../types';
 import { AppError, logError } from '../utils/AppError';
 import { set, del } from 'idb-keyval';
@@ -99,15 +99,9 @@ const retryWithBackoff = async <T>(
 };
 
 export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
-    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return localItems; // Mode hors ligne
+    if (!navigator.onLine) return localItems; // Mode hors ligne
 
-    let user;
-    try {
-        const { data } = await supabase.auth.getUser();
-        user = data?.user;
-    } catch {
-        return localItems;
-    }
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localItems; // Mode hors ligne
 
     // Assainissement préalable de toutes les prédictions locales pour garantir des UUID conformes
@@ -149,7 +143,7 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
                 const { data: fullRows, error: fetchErr } = await supabase
                     .from('predictions')
-                    .select('id, user_id, draw_name, timestamp, prediction, draw_result_id, feedback, created_at')
+                    .select('*')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
                 fullRows?.forEach(rawRow => {
@@ -277,15 +271,9 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[]): Prom
 // --- FORENSIC REPORTS ---
 
 export const syncForensicReports = async (localReports: ForensicReport[]): Promise<ForensicReport[]> => {
-    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return localReports;
+    if (!navigator.onLine) return localReports;
 
-    let user;
-    try {
-        const { data } = await supabase.auth.getUser();
-        user = data?.user;
-    } catch {
-        return localReports;
-    }
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return localReports;
 
     try {
@@ -319,7 +307,7 @@ export const syncForensicReports = async (localReports: ForensicReport[]): Promi
                 const batchIds = missingIds.slice(i, i + BATCH_SIZE);
                 const { data: fullRows, error: fetchErr } = await supabase
                     .from('forensic_reports')
-                    .select('id, user_id, prediction_id, draw_result_id, draw_name, draw_date, report_data, ai_model_used, created_at')
+                    .select('*')
                     .in('id', batchIds);
                 if (fetchErr) throw fetchErr;
                 fullRows?.forEach(rawRow => {
@@ -408,7 +396,7 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
 // --- DELETE OPERATIONS ---
 
 export const syncPredictionSnapshots = async (drawName: string) => {
-    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    if (!navigator.onLine) return;
 
     try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -417,7 +405,7 @@ export const syncPredictionSnapshots = async (drawName: string) => {
         // Fetch cloud snapshots avec validation Zod
         const { data: rawSnaps, error } = await supabase
             .from('prediction_snapshots')
-            .select('id, user_id, draw_name, target_date, predicted_numbers, decision_dna, metrics_snapshot, status, actual_numbers, near_misses, autopsy_report, created_at, updated_at')
+            .select('*')
             .eq('user_id', user.id)
             .eq('draw_name', drawName)
             .order('created_at', { ascending: false })
@@ -440,34 +428,20 @@ export const syncPredictionSnapshots = async (drawName: string) => {
 };
 
 export const deletePredictionCloud = async (id: string) => {
-    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
-    } catch (e) {
-        console.warn("[syncService] deletePredictionCloud error:", e);
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('predictions').delete().eq('id', id).eq('user_id', user.id);
 };
 
 export const deleteForensicReportCloud = async (id: string) => {
-    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
-    } catch (e) {
-        console.warn("[syncService] deleteForensicReportCloud error:", e);
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('forensic_reports').delete().eq('id', id).eq('user_id', user.id);
 };
 
 export const deleteMultipleForensicReportsCloud = async (ids: string[]) => {
-    if (!ids || ids.length === 0 || !isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
-    try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        await supabase.from('forensic_reports').delete().in('id', ids).eq('user_id', user.id);
-    } catch (e) {
-        console.warn("[syncService] deleteMultipleForensicReportsCloud error:", e);
-    }
+    if (!ids || ids.length === 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('forensic_reports').delete().in('id', ids).eq('user_id', user.id);
 };

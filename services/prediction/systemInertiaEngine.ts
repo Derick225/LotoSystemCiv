@@ -12,8 +12,6 @@
  * - Isolation Absolue du Tirage : calculs et statistiques strictement délimités à l'historique actif.
  */
 
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
-
 export interface SystemInertiaMetrics {
   drawName: string;
   safeMaxNum: number;
@@ -113,11 +111,10 @@ export const discoverSafeMaxNum = (history: any[]): number => {
  * Dérive analytiquement la viscosité, la masse thermique et le couplage.
  */
 export const computeSystemInertiaMetrics = (
-  rawHistory: any[],
+  history: any[],
   drawName: string,
   hurstExponent: number = 0.5
 ): SystemInertiaMetrics => {
-  const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
   const safeMaxNum = discoverSafeMaxNum(history);
   const sampleSize = Array.isArray(history) ? history.length : 0;
 
@@ -549,12 +546,11 @@ export const resolveOptimizedInertiaVector = (
  * Évalue la précision rétroactive sans aléatoire et dérive le zeta optimal.
  */
 export const runDeterministicInertiaBacktest = async (
-  rawHistory: any[],
+  history: any[],
   drawName: string,
   modifiers: InertiaCalibrationModifiers,
   hurstExponent: number = 0.5
 ): Promise<InertiaBacktestResult> => {
-  const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
   const minRequired = 12;
   if (!Array.isArray(history) || history.length < minRequired) {
     throw new Error(`Historique insuffisant pour le rétro-audit (min. ${minRequired} tirages requis).`);

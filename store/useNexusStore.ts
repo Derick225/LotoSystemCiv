@@ -23,7 +23,7 @@ import {
   saveAlgoWeights,
   normalizeWeights,
 } from "../services/prediction/weightsManager";
-import { EmpiricalCalibration } from "../shared/prediction.types";
+import { AlgoKey, EmpiricalCalibration } from "../shared/prediction.types";
 
 interface NexusState {
   // UI State
@@ -235,11 +235,21 @@ export const useNexusStore = create<NexusState>()(
       },
 
       setDrawName: (name) => {
-        set({ drawName: name, currentDrawName: name });
+        set({ drawName: name, currentDrawName: name, lastPrediction: null });
         if (name) {
           getAlgoWeights(name).then((weights) => {
             if (get().drawName === name) {
-              set({ globalWeights: weights });
+              const currentHistory = get().history || [];
+              const hasMachine = currentHistory.some(
+                (d) => Array.isArray(d.machine) && d.machine.length > 0
+              );
+              let sanitized = { ...weights };
+              if (!hasMachine && currentHistory.length > 0) {
+                sanitized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+                sanitized = normalizeWeights(sanitized);
+                sanitized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+              }
+              set({ globalWeights: sanitized });
             }
           }).catch(() => {});
         }
@@ -251,7 +261,18 @@ export const useNexusStore = create<NexusState>()(
         set({ activeMainTab: mainTab, activeSubTab: subTab }),
       setGlobalWeights: (weights) => {
         const currentDraw = get().drawName;
-        const normalized = normalizeWeights(weights);
+        const currentHistory = get().history || [];
+        const hasMachine = currentHistory.some(
+          (d) => Array.isArray(d.machine) && d.machine.length > 0
+        );
+        let sanitizedWeights = { ...weights };
+        if (!hasMachine && currentHistory.length > 0) {
+          sanitizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+        }
+        const normalized = normalizeWeights(sanitizedWeights);
+        if (!hasMachine && currentHistory.length > 0) {
+          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+        }
         set({ globalWeights: normalized });
         if (currentDraw) {
           saveAlgoWeights(currentDraw, normalized).catch((err) => {
@@ -281,7 +302,29 @@ export const useNexusStore = create<NexusState>()(
       setCalibration: (cal) => set({ calibration: cal }),
       setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),
 
-      setHistoryData: (history, stats, gaps) => set({ history, stats, gaps }),
+      setHistoryData: (history, stats, gaps) => {
+        const hasMachine = history.some(
+          (d) => Array.isArray(d.machine) && d.machine.length > 0
+        );
+        const currentWeights = get().globalWeights;
+        if (
+          !hasMachine &&
+          history.length > 0 &&
+          currentWeights &&
+          (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
+        ) {
+          const sanitized = { ...currentWeights, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
+          const normalized = normalizeWeights(sanitized);
+          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+          set({ history, stats, gaps, globalWeights: normalized });
+          const currentDraw = get().drawName;
+          if (currentDraw) {
+            saveAlgoWeights(currentDraw, normalized).catch(() => {});
+          }
+        } else {
+          set({ history, stats, gaps });
+        }
+      },
       setAnalyticsData: (analytics) =>
         set({
           spectral: analytics?.spectral || [],
@@ -310,27 +353,39 @@ export const useNexusStore = create<NexusState>()(
             .map(([n, c]) => ({ number: Number(n), count: c }))
             .sort((a, b) => b.count - a.count);
 
-          // Calcul des écarts en 1 seule passe linéaire O(N*5) avec terminaison anticipée
-          const gapsMap = new Map<number, number>();
-          for (let i = 1; i <= 90; i++) gapsMap.set(i, -1);
-          let foundCount = 0;
-          for (let dIdx = 0; dIdx < historyData.length && foundCount < 90; dIdx++) {
-            const winners = historyData[dIdx].gagnants || [];
-            for (let g = 0; g < winners.length; g++) {
-              const num = winners[g];
-              if (gapsMap.get(num) === -1) {
-                gapsMap.set(num, dIdx);
-                foundCount++;
-              }
+          const gaps: { number: number; gap: number }[] = [];
+          for (let i = 1; i <= 90; i++) {
+            let gap = 0;
+            for (const draw of historyData) {
+              if ((draw.gagnants || []).includes(i)) break;
+              gap++;
             }
+            gaps.push({ number: i, gap });
           }
-          const gaps = Array.from({ length: 90 }, (_, idx) => {
-            const num = idx + 1;
-            const g = gapsMap.get(num);
-            return { number: num, gap: g === -1 ? historyData.length : g! };
-          });
 
-          set({ history: historyData, stats, gaps });
+          const hasMachine = historyData.some(
+            (d) => Array.isArray(d.machine) && d.machine.length > 0
+          );
+          const currentWeights = get().globalWeights;
+          let nextWeights = currentWeights;
+          if (
+            !hasMachine &&
+            historyData.length > 0 &&
+            currentWeights &&
+            (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
+          ) {
+            const sanitized = { ...currentWeights, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
+            nextWeights = normalizeWeights(sanitized);
+            nextWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+            saveAlgoWeights(name, nextWeights).catch(() => {});
+          }
+
+          set({
+            history: historyData,
+            stats,
+            gaps,
+            ...(nextWeights !== currentWeights ? { globalWeights: nextWeights } : {}),
+          });
         } catch (error) {
           console.error("Failed to refresh data:", error);
         } finally {
@@ -339,11 +394,23 @@ export const useNexusStore = create<NexusState>()(
       },
       updateGlobalWeights: async (weights, targetDrawName) => {
         const nameToSave = targetDrawName || get().drawName;
+        const currentHistory = get().history || [];
+        const hasMachine = currentHistory.some(
+          (d) => Array.isArray(d.machine) && d.machine.length > 0
+        );
+        let sanitizedWeights = { ...weights };
+        if (!hasMachine && currentHistory.length > 0) {
+          sanitizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+        }
+        const normalized = normalizeWeights(sanitizedWeights);
+        if (!hasMachine && currentHistory.length > 0) {
+          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+        }
         if (nameToSave === get().drawName) {
-          set({ globalWeights: weights });
+          set({ globalWeights: normalized });
         }
         try {
-          await saveAlgoWeights(nameToSave, weights);
+          await saveAlgoWeights(nameToSave, normalized);
         } catch (error) {
           console.error("Failed to save algo weights:", error);
         }

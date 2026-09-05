@@ -130,8 +130,26 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
   const { weights: globalWeights, labels: LABELS } = useAlgorithmSync();
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
 
+  // Check if active history contains machine draws
+  const hasMachineDataInHistory = useMemo(() => {
+    if (!history || history.length === 0) return false;
+    const isolated = history.filter((d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
+    const sample = isolated.length > 0 ? isolated : history;
+    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  }, [history, drawName]);
+
   const [customWeights, setCustomWeights] =
-    useState<AlgoWeights>(globalWeights);
+    useState<AlgoWeights>(() => {
+      const initial = { ...globalWeights };
+      return initial;
+    });
+
+  // Synchronisation et forçage automatique à 0% si aucune donnée machine n'est présente
+  useEffect(() => {
+    if (!hasMachineDataInHistory && customWeights[AlgoKey.MACHINE_TRANSFER] !== 0) {
+      setCustomWeights((prev) => ({ ...prev, [AlgoKey.MACHINE_TRANSFER]: 0 }));
+    }
+  }, [hasMachineDataInHistory, customWeights]);
   const [basePrediction, setBasePrediction] = useState<Prediction | null>(null);
   const [simPrediction, setSimPrediction] = useState<Prediction | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -523,6 +541,9 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
   };
 
   const handleWeightChange = (key: string, value: number) => {
+    if (key === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+      return;
+    }
     const newWeights = { ...customWeights, [key]: value };
     setCustomWeights(newWeights);
     debouncedRunSimulation(newWeights);
@@ -996,15 +1017,22 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
                 </h4>
                 <div className="space-y-3">
                   {cat.keys.map((key) => {
-                    const val = customWeights[key] || 0;
+                    const isMachineTransfer = key === AlgoKey.MACHINE_TRANSFER;
+                    const isMachineDisabled = isMachineTransfer && !hasMachineDataInHistory;
+                    const val = isMachineDisabled ? 0 : (customWeights[key] || 0);
                     const label = LABELS[key] || key;
                     return (
-                      <div key={key} className="space-y-1">
+                      <div key={key} className={`space-y-1 ${isMachineDisabled ? "opacity-60" : ""}`}>
                         <div className="flex justify-between text-xs font-medium">
-                          <span className="text-slate-300 font-semibold text-[11px]">
+                          <span className="text-slate-300 font-semibold text-[11px] flex items-center gap-1.5">
                             {label}
+                            {isMachineDisabled && (
+                              <span className="text-[9px] text-amber-400 font-mono font-normal">
+                                [Verrouillé 0% - Sans machine]
+                              </span>
+                            )}
                           </span>
-                          <span className="text-indigo-400 font-mono font-bold">
+                          <span className={`font-mono font-bold ${isMachineDisabled ? "text-slate-500" : "text-indigo-400"}`}>
                             {(val * 100).toFixed(1)}%
                           </span>
                         </div>
@@ -1014,10 +1042,11 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
                           max="1"
                           step="0.01"
                           value={val}
+                          disabled={isMachineDisabled}
                           onChange={(e) =>
                             handleWeightChange(key, parseFloat(e.target.value))
                           }
-                          className="w-full accent-indigo-500 h-1.5 bg-slate-950 rounded cursor-pointer"
+                          className="w-full accent-indigo-500 h-1.5 bg-slate-950 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </div>
                     );

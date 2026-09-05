@@ -83,11 +83,24 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     {} as AlgoWeights,
   );
 
+  // Vérification de la présence de données machine pour ce tirage
+  const hasMachineDataInHistory = useMemo(() => {
+    if (!history || history.length === 0) return false;
+    const isolated = history.filter(
+      (d) => !d.drawName || d.drawName.trim().toLowerCase() === selectedDrawName.trim().toLowerCase()
+    );
+    const sample = isolated.length > 0 ? isolated : history;
+    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  }, [history, selectedDrawName]);
+
   useEffect(() => {
     let isMounted = true;
     const loadSpecificDNA = async () => {
       try {
         const specificWeights = await getAlgoWeights(selectedDrawName);
+        if (!hasMachineDataInHistory) {
+          specificWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+        }
         const specificRules = getAdaptiveRules(selectedDrawName);
         const lastDate = localStorage.getItem(
           `nexus_last_learn_${selectedDrawName}`,
@@ -147,12 +160,26 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       globalWeights &&
       Object.keys(globalWeights).length > 0
     ) {
-      setLocalWeights(globalWeights);
-      setOriginalWeights(globalWeights);
-      setDnaName(getStrategyName(globalWeights));
+      const sanitized = { ...globalWeights };
+      if (!hasMachineDataInHistory) {
+        sanitized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+      }
+      setLocalWeights(sanitized);
+      setOriginalWeights(sanitized);
+      setDnaName(getStrategyName(sanitized));
       setIsDirty(false);
     }
-  }, [globalWeights, selectedDrawName, activeDrawName, isDirty]);
+  }, [globalWeights, selectedDrawName, activeDrawName, isDirty, hasMachineDataInHistory]);
+
+  // Forçage à 0% automatique si absence de données machine
+  useEffect(() => {
+    if (!hasMachineDataInHistory) {
+      setLocalWeights((prev) => {
+        if (!prev || (prev[AlgoKey.MACHINE_TRANSFER] || 0) === 0) return prev;
+        return { ...prev, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
+      });
+    }
+  }, [hasMachineDataInHistory]);
 
   const totalWeight = useMemo((): number => {
     const vals = Object.values(localWeights) as number[];
@@ -160,6 +187,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
   }, [localWeights]);
 
   const handleWeightChange = (key: AlgoKey, value: string) => {
+    if (key === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+      return;
+    }
     audioEngine.play("click");
     const numValue = parseFloat(value);
     setLocalWeights((prev) => {
@@ -173,7 +203,12 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
   const handleAutoNormalize = () => {
     audioEngine.play("click");
     if (totalWeight === 0) return;
-    const normalized = normalizeWeights(localWeights);
+    let normalized = normalizeWeights(localWeights);
+    if (!hasMachineDataInHistory) {
+      normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+      normalized = normalizeWeights(normalized);
+      normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    }
     setLocalWeights(normalized);
     setDnaName(getStrategyName(normalized));
     setIsDirty(true);
@@ -710,12 +745,14 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
                     {cat.keys.map((key) => {
-                      const val = (localWeights[key] as number) ?? 0;
+                      const isMachineTransfer = key === AlgoKey.MACHINE_TRANSFER;
+                      const isMachineDisabled = isMachineTransfer && !hasMachineDataInHistory;
+                      const val = isMachineDisabled ? 0 : ((localWeights[key] as number) ?? 0);
                       const percent = (val * 100).toFixed(1);
                       const isActive = val > 0.05;
 
                       return (
-                        <div key={String(key)} className="group">
+                        <div key={String(key)} className={`group ${isMachineDisabled ? "opacity-50" : ""}`}>
                           <div className="flex justify-between items-center mb-2">
                             <div className="flex items-center gap-2">
                               <label
@@ -723,7 +760,12 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                               >
                                 {String(key).replace(/_/g, " ")}
                               </label>
-                              {forensicInsights[key] && (
+                              {isMachineDisabled && (
+                                <span className="text-[9px] font-mono text-amber-500 font-bold">
+                                  [Verrouillé à 0%]
+                                </span>
+                              )}
+                              {forensicInsights[key] && !isMachineDisabled && (
                                 <span
                                   className={`p-1 rounded-md text-[10px] animate-pulse ${forensicInsights[key].action === "REDUCE" ? "bg-rose-500/10 text-rose-500" : "bg-emerald-500/10 text-emerald-500"}`}
                                   title={`Suggestion Forensic: ${forensicInsights[key].action} (Amélioration: +${forensicInsights[key].improvement}%)`}
@@ -757,10 +799,11 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                               max="0.5"
                               step="0.001"
                               value={val}
+                              disabled={isMachineDisabled}
                               onChange={(e) =>
                                 handleWeightChange(key, e.target.value)
                               }
-                              className="absolute w-full h-full opacity-0 cursor-pointer z-10"
+                              className="absolute w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
                             />
                             <div
                               className={`absolute h-4 w-4 rounded-full border-2 border-white shadow-md transition-all duration-100 pointer-events-none ${isActive ? "bg-indigo-600 scale-110" : "bg-slate-400"}`}

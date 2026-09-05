@@ -59,10 +59,6 @@ export interface EnhancedMetrics {
     entropyBits?: number;
     sieveIntensitySNR?: number;
   };
-
-  // Certificat de Validation du Tamis ADN / Filtre Algorithmique
-  algorithmicFilterCertificate?: import('../../types').FilterValidationCertificate;
-  dnaSieveValidationCertificate?: import('../../types').FilterValidationCertificate;
   
   [key: string]: unknown;
 }

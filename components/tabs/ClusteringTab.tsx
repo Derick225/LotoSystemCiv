@@ -32,7 +32,6 @@ import {
 } from "recharts";
 import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   Brain,
   Star,
@@ -97,13 +96,8 @@ const CLUSTER_CONFIG: Record<
 
 export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
   const { showToast } = useToast();
-  const rawHistory = useNexusStore((state) => state.history);
+  const history = useNexusStore((state) => state.history);
   const nexusLoading = useNexusStore((state) => state.loading);
-
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
 
   const [points, setPoints] = useState<ClusterPoint[]>([]);
   const [summary, setSummary] = useState<

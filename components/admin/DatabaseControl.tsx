@@ -62,16 +62,16 @@ export const DatabaseControl: React.FC = () => {
       const [draws, analytics, weights, feedback] = await Promise.all([
         supabase
           .from("draw_results")
-          .select("id", { count: "exact", head: true }),
+          .select("*", { count: "exact", head: true }),
         supabase
           .from("draw_analytics")
-          .select("id", { count: "exact", head: true }),
+          .select("*", { count: "exact", head: true }),
         supabase
           .from("algo_weights")
-          .select("id", { count: "exact", head: true }),
+          .select("*", { count: "exact", head: true }),
         supabase
           .from("prediction_feedback")
-          .select("id", { count: "exact", head: true }),
+          .select("*", { count: "exact", head: true }),
       ]);
 
       let total = 0;

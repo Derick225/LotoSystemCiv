@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   calculateSuccessionMatrixAsync,
   findFrequentTriplets,
@@ -30,11 +29,7 @@ interface SynergyTabProps {
 }
 
 export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
-  const rawHistory = useNexusStore((state) => state.history);
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
+  const history = useNexusStore((state) => state.history);
   const correlationMatrix = useNexusStore((state) => state.correlationMatrix);
   const nexusLoading = useNexusStore((state) => state.loading);
   const [selectedNum, setSelectedNum] = useState<number | null>(null);

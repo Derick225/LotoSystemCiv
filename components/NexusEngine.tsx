@@ -3,7 +3,6 @@ import { useNexusStore } from "../store/useNexusStore";
 import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
 import {
   getAlgoWeights,
-  generateMasterPrediction,
 } from "../services/predictionEngine";
 import { generateEmpiricalCalibration } from "../services/prediction/ticketAnalysisService";
 import { generateSmartInsights } from "../services/insightService";
@@ -32,7 +31,6 @@ export const NexusEngine: React.FC = () => {
   const setHistoryData = useNexusStore((s) => s.setHistoryData);
   const setAnalyticsData = useNexusStore((s) => s.setAnalyticsData);
   const setLoading = useNexusStore((s) => s.setLoading);
-  const setLastPrediction = useNexusStore((s) => s.setLastPrediction);
   const setSmartInsights = useNexusStore((s) => s.setSmartInsights);
   const setCalibration = useNexusStore((s) => s.setCalibration);
   const setEmpiricalCalibration = useNexusStore(
@@ -82,7 +80,14 @@ export const NexusEngine: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     const initConfig = async () => {
-      const weights = await getAlgoWeights(drawName);
+      let weights = await getAlgoWeights(drawName);
+      const currentHistory = useNexusStore.getState().history || [];
+      const hasMachine = currentHistory.some(
+        (d) => Array.isArray(d.machine) && d.machine.length > 0
+      );
+      if (!hasMachine && currentHistory.length > 0) {
+        weights = { ...weights, machine_transfer: 0.0 };
+      }
       if (mounted) setGlobalWeights(weights);
     };
     initConfig();
@@ -121,25 +126,15 @@ export const NexusEngine: React.FC = () => {
         .map(([n, c]) => ({ number: Number(n), count: c }))
         .sort((a, b) => b.count - a.count);
 
-      // Calcul des écarts en 1 seule passe linéaire O(N*5) avec terminaison anticipée
-      const computedGapsMap = new Map<number, number>();
-      for (let i = 1; i <= 90; i++) computedGapsMap.set(i, -1);
-      let foundCount = 0;
-      for (let dIdx = 0; dIdx < history.length && foundCount < 90; dIdx++) {
-        const gagnants = history[dIdx].gagnants || [];
-        for (let g = 0; g < gagnants.length; g++) {
-          const num = gagnants[g];
-          if (computedGapsMap.get(num) === -1) {
-            computedGapsMap.set(num, dIdx);
-            foundCount++;
-          }
+      const computedGaps: { number: number; gap: number }[] = [];
+      for (let i = 1; i <= 90; i++) {
+        let gap = 0;
+        for (const draw of history) {
+          if (draw.gagnants.includes(i)) break;
+          gap++;
         }
+        computedGaps.push({ number: i, gap });
       }
-      const computedGaps = Array.from({ length: 90 }, (_, idx) => {
-        const num = idx + 1;
-        const g = computedGapsMap.get(num);
-        return { number: num, gap: g === -1 ? history.length : g! };
-      });
 
       const empCal = generateEmpiricalCalibration(history);
       setEmpiricalCalibration(empCal);
@@ -155,28 +150,13 @@ export const NexusEngine: React.FC = () => {
     }
   }, [analytics, setAnalyticsData]);
 
-  // 3. Génération Prédiction & Insights (Dépendant des Analytics et Weights)
+  // 3. Génération des Insights (Dépendant des Analytics)
   useEffect(() => {
     if (!analytics || !history || history.length < 10) return;
 
     let mounted = true;
     const runEngine = async () => {
       try {
-        // Génération de la prédiction Master
-        const prediction = await generateMasterPrediction(
-          drawName,
-          history,
-          temporalDepth,
-          globalWeights,
-          {
-            spectral: analytics.spectral,
-            correlationMatrix: analytics.correlationMatrix,
-            regularity: analytics.regularity,
-          },
-          analytics.symbioticContext || undefined,
-        );
-        if (mounted) setLastPrediction(prediction);
-
         // Insights
         const insights = await generateSmartInsights(
           drawName,
@@ -211,9 +191,6 @@ export const NexusEngine: React.FC = () => {
     drawName,
     history,
     analytics,
-    globalWeights,
-    temporalDepth,
-    setLastPrediction,
     setSmartInsights,
   ]);
 
@@ -237,7 +214,6 @@ export const NexusEngine: React.FC = () => {
           // Seules les 10 dernières prédictions (les plus récentes) ont besoin d'être vérifiées et analysées en arrière-plan.
           // Cela évite de recalculer l'analyse forensique pour des centaines de vieux tirages à chaque changement de jeu.
           const relevantPreds = preds.slice(0, 10);
-          const reportedPredIds = new Set(allLocalReports.map((r) => r.predictionId));
 
           // Chunk the processing to avoid blocking main thread
           for (let i = 0; i < relevantPreds.length; i++) {
@@ -257,7 +233,10 @@ export const NexusEngine: React.FC = () => {
 
             // Automate Forensic Analysis if linked and no report exists
             if (match) {
-              if (!reportedPredIds.has(item.id)) {
+              const existingReport = allLocalReports.find(
+                (r) => r.predictionId === item.id,
+              );
+              if (!existingReport) {
                 try {
                   const report = await performForensicAnalysis(
                     drawName,
@@ -271,7 +250,6 @@ export const NexusEngine: React.FC = () => {
                     history,
                   );
                   saveForensicReport(report);
-                  reportedPredIds.add(item.id);
                   forensicGenerated = true;
                 } catch (e) {
                   console.warn("Auto-Forensic failed for", item.id, e);

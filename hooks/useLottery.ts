@@ -79,7 +79,7 @@ export const useDrawHistory = (drawName: string) => {
     queryKey: lotteryKeys.draw(drawName),
     queryFn: () => fetchHistory(drawName),
     enabled: !!drawName,
-    staleTime: 1000 * 60 * 30, // 30 minutes; invalidé immédiatement via Supabase Realtime si nouvel insert
+    staleTime: 1000 * 60 * 5, // Fresh for 5 minutes; invalidated automatically via Supabase real-time
   });
 };
 
@@ -87,7 +87,8 @@ export const useDailySummary = (day: string) => {
     return useQuery({
         queryKey: lotteryKeys.dailySummary(day),
         queryFn: () => getDailySummary(day),
-        staleTime: 1000 * 60 * 30, // 30 minutes au lieu de 2 min pour préserver le quota Egress
+        staleTime: 1000 * 60 * 2, 
+        refetchInterval: 1000 * 60 * 5, 
     });
 };
 
@@ -96,7 +97,7 @@ export const useGlobalStats = (drawName?: string) => {
         queryKey: lotteryKeys.globalStats(drawName),
         // On demande spécifiquement les stats des 7 derniers jours pour "High-Heat 7d"
         queryFn: () => fetchRecentStats(7, drawName),
-        staleTime: 1000 * 60 * 60, // 1 heure de validité
+        staleTime: 1000 * 60 * 30, 
     });
 };
 

@@ -25,8 +25,7 @@ export const calculateFrequency = (history: DrawResult[], number: number, limit:
 
 // --- CACHE & MEMOIZATION ---
 const mathCache = new Map<string, { timestamp: number; data: unknown }>();
-const CACHE_TTL = 600000; // 10 minutes pour résultats mathématiques déterministes
-const MAX_CACHE_ENTRIES = 200;
+const CACHE_TTL = 30000; // 30 seconds for math results
 
 const getCached = <T,>(key: string, expectedDrawName?: string): T | null => {
     const cached = mathCache.get(key);
@@ -42,16 +41,11 @@ const getCached = <T,>(key: string, expectedDrawName?: string): T | null => {
     }
 
     if (Date.now() - cached.timestamp < CACHE_TTL) return cached.data as T;
-    mathCache.delete(key);
     return null;
 };
 
 const setCached = (key: string, data: unknown) => {
-    // Éviction LRU douce pour préserver les calculs récents sans bloquer le thread principal
-    if (mathCache.size >= MAX_CACHE_ENTRIES) {
-        const firstKey = mathCache.keys().next().value;
-        if (firstKey) mathCache.delete(firstKey);
-    }
+    if (mathCache.size > 100) mathCache.clear(); // Simple eviction
     mathCache.set(key, { timestamp: Date.now(), data });
 };
 

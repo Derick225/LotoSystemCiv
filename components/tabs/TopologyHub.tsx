@@ -88,7 +88,7 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
       case "python":
         return <PythonAnalystTab drawName={drawName} />;
       case "neural":
-        return <NeuralArchitectureTab drawName={drawName} />;
+        return <NeuralArchitectureTab />;
       default:
         return null;
     }

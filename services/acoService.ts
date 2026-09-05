@@ -2,7 +2,6 @@ import { DrawResult, AntColonyPath, OracleVocalContext } from '../types';
 import { useNexusStore } from '../store/useNexusStore';
 import { LCG } from '../utils/mathUtils';
 import { apiClient } from '../core/api/apiClient';
-import { isSupabaseConfigured } from './supabaseClient';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packHistory } from './workers/zeroCopy';
@@ -76,7 +75,7 @@ export const runAntColonyOptimization = async (
     };
 
     const useCloudEngine = useNexusStore.getState().useCloudEngine;
-    if (useCloudEngine && isSupabaseConfigured()) {
+    if (useCloudEngine) {
         try {
             console.log(`Tentative ACO via Supabase Edge Function (run-ml-models)...`);
             const timeoutPromise = new Promise((_, reject) => 
@@ -106,10 +105,6 @@ export const runAntColonyOptimization = async (
         } catch (e) {
             console.warn("Exception Edge Function ACO, fallback sur Worker local.");
         }
-    }
-
-    if (typeof Worker === "undefined") {
-        return fallbackHeuristic(purifiedHistory);
     }
 
     return new Promise((resolve) => {

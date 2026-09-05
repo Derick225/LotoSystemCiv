@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BrainCircuit,
@@ -85,11 +84,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const { showToast } = useToast();
-  const rawHistory = useNexusStore((state) => state.history);
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
+  const history = useNexusStore((state) => state.history);
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
@@ -468,7 +463,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     challengedNumbers?: number[];
     stabilityScore?: number;
     diversityScore?: number;
-    diversityMetrics?: Prediction['diversityMetrics'];
     adversarialSurvivalScore?: number;
     adversarialRisks?: string[];
     hyperparameters?: any;
@@ -715,7 +709,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         challengedNumbers: predictionData.challengedNumbers,
         stabilityScore: predictionData.stabilityScore,
         diversityScore: predictionData.diversityMetrics?.diversityScore,
-        diversityMetrics: predictionData.diversityMetrics,
         adversarialSurvivalScore: predictionData.adversarialSurvivalScore,
         adversarialRisks: predictionData.adversarialRisks,
         hyperparameters: predictionData.hyperparameters,
@@ -1310,8 +1303,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             stabilityScore: prediction.stabilityScore,
                             realityAlignment: prediction.realityAlignment,
                             diversityMetrics:
-                              prediction.diversityMetrics ||
-                              (prediction.diversityScore !== undefined
+                              prediction.diversityScore !== undefined
                                 ? {
                                     meanSimilarity: 0,
                                     diversityScore: prediction.diversityScore,
@@ -1320,7 +1312,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                                     pairwiseSimilarities: [],
                                     dominantAlgo: null,
                                   }
-                                : undefined),
+                                : undefined,
                             adversarialSurvivalScore:
                               prediction.adversarialSurvivalScore,
                             adversarialRisks: prediction.adversarialRisks,
@@ -1409,28 +1401,18 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                         {/* Genetic Diversity Card */}
                         <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800/40 hover:border-slate-700/50 transition-colors">
                           <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wider block mb-1.5">
-                            Diversité Génétique (Orthogonalité)
+                            Diversité Génétique
                           </span>
                           <div className="flex items-baseline gap-1">
-                            <span className={`text-sm font-black font-mono ${
-                              (prediction.diversityMetrics?.diversityScore ?? prediction.diversityScore ?? 0.85) >= 0.5
-                                ? "text-emerald-400"
-                                : (prediction.diversityMetrics?.diversityScore ?? prediction.diversityScore ?? 0.85) >= 0.3
-                                  ? "text-indigo-400"
-                                  : "text-rose-400"
-                            }`}>
-                              {(
-                                (prediction.diversityMetrics?.diversityScore ??
-                                  (prediction.diversityScore !== undefined
-                                    ? (prediction.diversityScore <= 1.0 ? prediction.diversityScore * 100 : prediction.diversityScore)
-                                    : 85.0))
-                              ).toFixed(1)}%
+                            <span className="text-sm font-black text-fuchsia-400 font-mono">
+                              {(prediction.diversityScore !== undefined
+                                ? prediction.diversityScore
+                                : 1.25
+                              ).toFixed(2)}
                             </span>
                           </div>
                           <span className="text-[8px] text-slate-500 block leading-tight mt-1">
-                            {prediction.diversityMetrics?.dominantAlgo
-                              ? `Orthogonalité ADN • Dominé par ${prediction.diversityMetrics.dominantAlgo}`
-                              : "Dispersion spectrale d'énergie des candidats."}
+                            Dispersion spectrale d'énergie des candidats.
                           </span>
                         </div>
 

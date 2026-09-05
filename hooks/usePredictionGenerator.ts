@@ -135,16 +135,19 @@ export const usePredictionGenerator = (drawName: string) => {
         setIsChaotic(chaosIndex > 0.5);
     }, [chaoticRatio, activeVolatility]);
 
+    const [cachedPrediction, setCachedPrediction] = useState<Prediction | null>(null);
+
     useEffect(() => {
         let isMounted = true;
         setLastPrediction(null);
+        setCachedPrediction(null);
         lastInferenceStateRef.current = null;
 
-        // Chargement instantané de la dernière prédiction en cache local (Offline Fallback & Restauration Instantanée)
+        // Pré-charger la dernière prédiction en cache (accessible sur demande sans lancement automatique)
         if (drawName) {
             getLatestPredictionForDraw(drawName).then((cached) => {
                 if (isMounted && cached) {
-                    setLastPrediction(cached);
+                    setCachedPrediction(cached);
                 }
             }).catch(e => {
                 console.warn("[Oracle Base] Erreur lecture cache prédiction:", e);
@@ -155,6 +158,14 @@ export const usePredictionGenerator = (drawName: string) => {
             isMounted = false;
         };
     }, [drawName, setLastPrediction]);
+
+    const restoreCachedPrediction = useCallback(() => {
+        if (cachedPrediction) {
+            setLastPrediction(cachedPrediction);
+            audioEngine.play('click');
+            showToast("Dernière prédiction archivée restaurée.", "info");
+        }
+    }, [cachedPrediction, setLastPrediction, showToast]);
 
     useEffect(() => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));
@@ -174,9 +185,15 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [drawName, globalWeights]);
 
     const runInference = useCallback(async (forcedWeights?: AlgoWeights) => {
+        if (!isIsolated) {
+            audioEngine.play('error');
+            console.error(`[StrictDrawIsolationGuard] Rejected runInference: active draw "${drawName}" is not synchronized with store draw "${storeDrawName}".`);
+            showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
+            return;
+        }
         if (activeHistory.length < 5) {
             audioEngine.play('error');
-            showToast(`Historique insuffisant pour l'Oracle Base (${activeHistory.length} tirage(s) pour "${drawName}"). Minimum 5 requis.`, "error");
+            showToast("Historique insuffisant pour l'Oracle Base.", "error");
             return;
         }
         audioEngine.play('loading');
@@ -257,9 +274,14 @@ export const usePredictionGenerator = (drawName: string) => {
 
 
     const runMonteCarlo = useCallback(async () => {
-        if (activeHistory.length < 10) {
+        if (!isIsolated) {
             audioEngine.play('error');
-            showToast(`Historique insuffisant pour Monte-Carlo (${activeHistory.length} tirage(s) pour "${drawName}"). Minimum 10 requis.`, "error");
+            console.error(`[StrictDrawIsolationGuard] Rejected runMonteCarlo: active draw "${drawName}" is not synchronized with store draw "${storeDrawName}".`);
+            showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
+            return;
+        }
+        if (activeHistory.length < 10) {
+            showToast("Historique insuffisant.", "error");
             return;
         }
         audioEngine.play('scan');
@@ -367,6 +389,8 @@ export const usePredictionGenerator = (drawName: string) => {
         gameRegimeInfo,
         runInference,
         runMonteCarlo,
-        handleOptimizeWeights
+        handleOptimizeWeights,
+        cachedPrediction,
+        restoreCachedPrediction,
     };
 };

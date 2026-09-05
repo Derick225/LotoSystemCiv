@@ -303,13 +303,19 @@ ctx.onmessage = (e) => {
   // --- NIVEAU 1 : MACRO-FILTRAGE (90 -> 20 Candidats) ---
   const level1Votes = (candidates as Candidate[]).map((cand: Candidate) => {
     let sumProb = 0;
+    let positiveVotes = 0;
     forest.forEach(tree => {
-      sumProb += predict(tree, cand.features);
+      const prob = predict(tree, cand.features);
+      sumProb += prob;
+      if (prob > 0.5) positiveVotes++;
     });
+
+    const concordance = Math.round((positiveVotes / Math.max(1, forest.length)) * 100);
 
     return {
       number: cand.number,
       score: (sumProb / Math.max(1, forest.length)) * 100,
+      concordance,
       features: cand.features
     };
   });
@@ -338,9 +344,9 @@ ctx.onmessage = (e) => {
     const z = (cand.score - meanScore) / stdScore;
     const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Transition continue pour l'activation micro
 
-    // Modulation micro-spectrale continue dimension-safe sur l'ensemble des descripteurs
-    const meanFeat = cand.features.reduce((acc, f) => acc + (f || 0), 0) / Math.max(1, cand.features.length);
-    const microModulation = meanFeat * 0.2;
+    const neighborFeat = cand.features[4] || 0; // Neighbor feature
+    const machineFeat = cand.features[5] || 0; // Machine leak feature
+    const microModulation = (neighborFeat + machineFeat) * 0.2;
 
     const continuousBoost = 1.0 + level2Weight * microModulation;
     const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));
@@ -348,6 +354,7 @@ ctx.onmessage = (e) => {
     return {
       number: cand.number,
       score: refinedScore,
+      concordance: cand.concordance,
       features: cand.features
     };
   });

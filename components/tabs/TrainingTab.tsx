@@ -73,11 +73,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
   const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
   const refreshData = useNexusStore((state) => state.refreshData);
-  const rawHistory = useNexusStore((state) => state.history);
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
+  const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
 
   // Active Sub-Tab Navigation

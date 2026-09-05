@@ -9,17 +9,12 @@ import {
   Activity,
 } from "lucide-react";
 import { computeSVD } from "../../services/mathCore";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const spectral = useNexusStore((state) => state.spectral);
   const wavelet = useNexusStore((state) => state.wavelet);
   const loading = useNexusStore((state) => state.loading);
-  const rawHistory = useNexusStore((state) => state.history);
-  const history = useMemo(
-    () => (drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory),
-    [drawName, rawHistory]
-  );
+  const history = useNexusStore((state) => state.history);
 
   const highEnergy = useMemo(() => {
     return [...spectral].sort((a, b) => b.energy - a.energy).slice(0, 15);

@@ -188,6 +188,9 @@ export const runNeuralSelfOptimization = (
   const startTime = Date.now();
   const hyperparams: NeuralHyperparameters = { ...DEFAULT_NEURAL_HYPERPARAMS, ...params };
   const pureHistory = purifyHistoryForDraw<DrawResult>(drawName, history);
+  const hasMachineData = pureHistory.some(
+    (d) => Array.isArray(d.machine) && d.machine.length > 0
+  );
   
   const validKeys = Object.values(AlgoKey);
   const numAlgos = validKeys.length;
@@ -218,6 +221,10 @@ export const runNeuralSelfOptimization = (
 
   const effectiveBatchSize = featureTensors.length;
   if (effectiveBatchSize === 0) {
+    const safeWeights = { ...initialWeights };
+    if (!hasMachineData) {
+      safeWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    }
     return {
       drawName,
       epochsCompleted: 0,
@@ -228,8 +235,8 @@ export const runNeuralSelfOptimization = (
       finalAccuracy: 0,
       accuracyGain: 0,
       batchSize: 0,
-      initialWeights: { ...initialWeights },
-      optimizedWeights: { ...initialWeights },
+      initialWeights: safeWeights,
+      optimizedWeights: safeWeights,
       algoGradients: [],
       epochHistory: [],
       trainingDurationMs: 0,
@@ -242,7 +249,11 @@ export const runNeuralSelfOptimization = (
   const momentumV: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
   
   validKeys.forEach((k) => {
-    currentW[k] = initialWeights[k] || (1.0 / numAlgos);
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineData) {
+      currentW[k] = 0.0;
+    } else {
+      currentW[k] = initialWeights[k] || (1.0 / numAlgos);
+    }
     momentumV[k] = 0;
   });
 
@@ -369,12 +380,22 @@ export const runNeuralSelfOptimization = (
       if (!hasProof && step < 0) {
         step = 0; // Aucun boost pour les non-prouvés
       }
-      
-      currentW[k] = Math.max(0.0001, currentW[k] - step);
+
+      if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineData) {
+        currentW[k] = 0.0;
+      } else {
+        currentW[k] = Math.max(0.0001, currentW[k] - step);
+      }
     });
 
     // Normalisation L1 intermédiaire
+    if (!hasMachineData) {
+      currentW[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    }
     const normalizedW = normalizeWeights(currentW);
+    if (!hasMachineData) {
+      normalizedW[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    }
     validKeys.forEach((k) => {
       currentW[k] = normalizedW[k];
     });
@@ -396,15 +417,20 @@ export const runNeuralSelfOptimization = (
   }
 
   const finalAccuracy = computeAccuracy(currentW);
-  const optimizedWeights = normalizeWeights(currentW);
+  let optimizedWeights = normalizeWeights(currentW);
+  if (!hasMachineData) {
+    optimizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    optimizedWeights = normalizeWeights(optimizedWeights);
+    optimizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+  }
   const duration = Date.now() - startTime;
 
   // 4. Analyse des Gradients et Attribution par Algorithme
   const algoGradients: AlgoNeuralGradientInfo[] = validKeys.map((algoKey) => {
     const label = LABELS_MAP[algoKey] || algoKey;
     const category = getCategoryName(algoKey);
-    const initW = initialWeights[algoKey] || (1.0 / numAlgos);
-    const optW = optimizedWeights[algoKey] || 0;
+    const initW = (!hasMachineData && algoKey === AlgoKey.MACHINE_TRANSFER) ? 0 : (initialWeights[algoKey] || (1.0 / numAlgos));
+    const optW = (!hasMachineData && algoKey === AlgoKey.MACHINE_TRANSFER) ? 0 : (optimizedWeights[algoKey] || 0);
     const delta = optW - initW;
     const deltaPct = initW > 0 ? (delta / initW) * 100 : 0;
     
@@ -415,7 +441,9 @@ export const runNeuralSelfOptimization = (
     const mom = momentumV[algoKey] || 0;
 
     let gatingAction: AlgoNeuralGradientInfo['gatingAction'] = 'MAINTAINED';
-    if (!hasEmpiricalProof && grad < 0) {
+    if (!hasMachineData && algoKey === AlgoKey.MACHINE_TRANSFER) {
+      gatingAction = 'PROOF_LOCKED';
+    } else if (!hasEmpiricalProof && grad < 0) {
       gatingAction = 'PROOF_LOCKED';
     } else if (delta > 0.005) {
       gatingAction = 'BOOSTED';

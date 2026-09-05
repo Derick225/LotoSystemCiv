@@ -16,7 +16,6 @@ import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
 import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
   Activity,
   Target,
@@ -33,8 +32,6 @@ import {
   Sparkles,
   FileText,
   Sliders,
-  Copy,
-  Check,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -71,7 +68,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       useState(false);
     const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
     const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
-    const [isTicketCopied, setIsTicketCopied] = useState(false);
 
     // Network and Authentication state wrappers
     const [networkState, setNetworkState] = useState<{
@@ -110,17 +106,9 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       runInference,
       runMonteCarlo,
       handleOptimizeWeights,
+      cachedPrediction,
+      restoreCachedPrediction,
     } = usePredictionGenerator(drawName);
-
-    const handleCopyPrimaryTicket = useCallback(() => {
-      if (!lastPrediction?.suggestedNumbers?.length) return;
-      audioEngine.play("click");
-      const text = lastPrediction.suggestedNumbers.join(" - ");
-      navigator.clipboard.writeText(text);
-      setIsTicketCopied(true);
-      showToast(`Sélection copiée : ${text}`, "success");
-      setTimeout(() => setIsTicketCopied(false), 2000);
-    }, [lastPrediction, showToast]);
 
     const handleTriggerForensicReport = useCallback(async () => {
       audioEngine.play("click");
@@ -131,10 +119,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(
 
       setIsExportingForensicPDF(true);
       try {
-        const isolatedHistory = purifyHistoryForDraw(drawName, history);
-        const hasMachineData = isolatedHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+        const isolatedHistory = history.filter(
+          (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
+        );
+        const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
+        const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-        const proofs = evaluateAlgoEmpiricalProof(drawName, isolatedHistory);
+        const proofs = evaluateAlgoEmpiricalProof(drawName, history);
 
         await exportService.generateForensicStochasticReportPDF({
           drawName,
@@ -291,15 +282,17 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-4">
               <button
+                id="btn-launch-oracle-prediction"
                 onClick={() => runInference()}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
                 <Activity size={18} className="group-hover:animate-pulse" />{" "}
-                Lancer la génération
+                Lancer la prédiction
               </button>
               <button
+                id="btn-launch-oracle-monte-carlo"
                 onClick={runMonteCarlo}
                 className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
@@ -310,6 +303,19 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 Monte Carlo
               </button>
             </div>
+
+            {cachedPrediction && (
+              <div className="w-full max-w-md mx-auto mb-8">
+                <button
+                  id="btn-restore-oracle-cache"
+                  onClick={restoreCachedPrediction}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-semibold uppercase tracking-wider transition-colors"
+                >
+                  <FileText size={14} />
+                  <span>Charger la dernière prédiction archivée</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -397,6 +403,20 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </button>
 
             <button
+              id="btn-reset-oracle-view"
+              onClick={() => {
+                audioEngine.play("click");
+                setLastPrediction(null);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-slate-200 dark:border-slate-700"
+              title="Retourner à l'écran de lancement"
+            >
+              <RefreshCw size={15} />
+              <span>Nouveau Tirage</span>
+            </button>
+
+            <button
+              id="btn-rerun-oracle-prediction"
               onClick={() => runInference()}
               disabled={isComputing}
               className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider disabled:opacity-50 shadow-md shadow-indigo-600/20 group"
@@ -409,7 +429,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   className="group-hover:rotate-180 transition-transform duration-500"
                 />
               )}
-              Relancer
+              Relancer la prédiction
             </button>
           </div>
         </div>
@@ -469,33 +489,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyPrimaryTicket}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors border border-slate-200 dark:border-slate-700 text-xs font-semibold"
-                    title="Copier la combinaison dans le presse-papier"
-                  >
-                    {isTicketCopied ? (
-                      <>
-                        <Check size={14} className="text-emerald-500" />
-                        <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Copié</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={14} />
-                        <span className="text-[10px] uppercase font-bold">Copier</span>
-                      </>
-                    )}
-                  </button>
-                  <div className="px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 transition-colors text-indigo-700 dark:text-indigo-400 rounded-2xl flex items-center gap-3 border border-indigo-100 dark:border-indigo-500/20 cursor-default">
-                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">
-                      Indice de Confiance
-                    </span>
-                    <span className="text-xl font-black font-mono">
-                      {lastPrediction.confidence}%
-                    </span>
-                  </div>
+                <div className="px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 transition-colors text-indigo-700 dark:text-indigo-400 rounded-2xl flex items-center gap-3 border border-indigo-100 dark:border-indigo-500/20 cursor-default">
+                  <span className="text-[10px] font-black uppercase tracking-widest opacity-80">
+                    Indice de Confiance
+                  </span>
+                  <span className="text-xl font-black font-mono">
+                    {lastPrediction.confidence}%
+                  </span>
                 </div>
               </div>
 
@@ -828,7 +828,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   onClose={() => setIsAuditDashboardOpen(false)}
                   onApplySuccess={() => {
                     setIsAuditDashboardOpen(false);
-                    runInference();
+                    showToast("Pondérations appliquées avec succès.", "success");
                   }}
                 />
               </motion.div>

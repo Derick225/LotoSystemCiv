@@ -102,30 +102,11 @@ const createSafeClient = (): SupabaseClient => {
 
 export const supabase = createSafeClient();
 
-export interface DatabaseConnectionResult {
-  success: boolean;
-  count?: number;
-  latency?: number;
-  error?: string;
-  code?: string;
-}
-
-// Cache mémoire pour le test de connexion afin d'éviter le martèlement de Supabase
-let cachedConnResult: { result: DatabaseConnectionResult; timestamp: number } | null = null;
-const CONN_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
-
-export const testDatabaseConnection = async (force?: boolean): Promise<DatabaseConnectionResult> => {
+export const testDatabaseConnection = async () => {
   if (!isSupabaseConfigured()) return { success: false, error: "Configuration manquante (.env)" };
-
-  const now = Date.now();
-  if (!force && cachedConnResult && (now - cachedConnResult.timestamp < CONN_CACHE_TTL)) {
-    return cachedConnResult.result;
-  }
-
   try {
     const start = performance.now();
-    // Projection 'id' avec 'head: true' pour minimiser la consommation Egress
-    const { error, count } = await supabase.from('draw_results').select('id', { count: 'exact', head: true });
+    const { error, count } = await supabase.from('draw_results').select('*', { count: 'exact', head: true });
     const latency = Math.round(performance.now() - start);
     if (error) {
       const errorMsg = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : String(error));
@@ -135,21 +116,15 @@ export const testDatabaseConnection = async (force?: boolean): Promise<DatabaseC
       if (lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('connection') || lowerMsg.includes('contact')) {
         return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
       }
-      const failureRes = { success: false, error: errorMsg, code: error.code || 'UNKNOWN', latency };
-      cachedConnResult = { result: failureRes, timestamp: now };
-      return failureRes;
+      return { success: false, error: errorMsg, code: error.code || 'UNKNOWN', latency };
     }
-    const successRes = { success: true, count: count ?? 0, latency };
-    cachedConnResult = { result: successRes, timestamp: now };
-    return successRes;
+    return { success: true, count: count ?? 0, latency };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const lowerMsg = errorMsg.toLowerCase();
     if (lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('connection') || lowerMsg.includes('contact')) {
       return { success: false, error: "Erreur réseau. Vérifiez votre connexion.", code: 'NETWORK' };
     }
-    const errRes = { success: false, error: errorMsg || "Erreur critique de connexion." };
-    cachedConnResult = { result: errRes, timestamp: now };
-    return errRes;
+    return { success: false, error: errorMsg || "Erreur critique de connexion." };
   }
 };
