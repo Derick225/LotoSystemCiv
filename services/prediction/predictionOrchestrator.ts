@@ -24,6 +24,7 @@ import { finalizePredictionPayload } from "./predictionFinalize";
 import { calculatePoissonScores, calculateBayesianScore, calculateTemporalScores, calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores, calculateLeaderSuccession, calculateAiIntuition, calculateFractalResonance, calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores, calculateHawkesExcitation, calculateTopologicalLyapunov } from '../advancedMathService';
 import { calculateSpatioTemporalHawkes } from '../../utils/engine/hawkesEngine';
 import { calculateDnaSieveWeights } from '../temporalAnalysisService';
+import { executeAlgorithmicFilter, AlgorithmicDnaState } from './algorithmicFilterService';
 
 const TICKET_SIZE = 5;
 
@@ -528,14 +529,37 @@ export const selectPredictionNumbers = async (
     (thermoRegime.thermodynamicIndex + thermoRegime.entropy + thermoRegime.volatility / 100.0) / 3.0
   ));
 
-  const selection = await generateCombination(
-    sortedScores,
-    features.affinityMap,
+  // Exécution certifiée du Filtre Algorithmique d'ADN
+  const dnaState: AlgorithmicDnaState = {
+    drawName: context.drawName,
+    timestamp: Date.now(),
+    sievedScores: sortedScores,
+    dnaSieveMetrics: {
+      multipliers: context.metrics?.dnaSieve?.multipliers || {},
+      affinityPercent: context.metrics?.dnaSieve?.affinityPercent || {},
+      dominantAlgos: context.metrics?.dnaSieve?.dominantAlgos || [],
+      entropyBits: context.metrics?.dnaSieve?.entropyBits,
+      sieveIntensitySNR: context.metrics?.dnaSieve?.sieveIntensitySNR,
+      dnaConcordanceMean: context.metrics?.dnaSieve?.dnaConcordanceMean,
+    },
+    affinityMap: features.affinityMap,
     empiricalCalibration,
-    outsiderCount,
-    context.history[0]?.gagnants,
-    regimeStateNormalized
-  );
+    thermodynamicRegime: {
+      thermodynamicIndex: thermoRegime.thermodynamicIndex,
+      entropy: thermoRegime.entropy,
+      volatility: thermoRegime.volatility,
+      continuousOutsiderCount: outsiderCount,
+    },
+    targetOutsiders: outsiderCount,
+    lastDraw: context.history[0]?.gagnants,
+  };
+
+  const filterResult = await executeAlgorithmicFilter(dnaState);
+  const selection = filterResult.selectedCombination;
+
+  if (context.metrics) {
+    context.metrics.algorithmicFilterCertificate = filterResult.validationCertificate;
+  }
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
   const candidates = sortedScores

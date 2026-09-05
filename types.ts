@@ -375,6 +375,81 @@ export interface ForensicReport {
   recommendedAdjustments?: ForensicActionableAdjustment[];
   warnings?: string[];
   postMortemStabilityScore?: number;
+  dnaPostMortem?: DnaPostMortemMetrics;
+}
+
+export type DnaAnomalyCategory =
+  | 'BIAIS_TOPOLOGIQUE_SPATIAL'
+  | 'SURCONCENTRATION_ADN'
+  | 'ANOMALIE_PHASE_TEMPORELLE'
+  | 'DECONNEXION_MARKOV_AFFINITE'
+  | 'FUITE_MACHINE_STOCHASTIQUE'
+  | 'EFFONDREMENT_ENTROPIQUE';
+
+export interface DnaAnomalyReport {
+  id: string;
+  category: DnaAnomalyCategory;
+  severity: SeverityLevel;
+  description: string;
+  impactScore: number; // Impact en % sur la fiabilité de l'ADN
+  degradationFactors: string[];
+  correctiveAction: {
+    targetParameter: string;
+    adjustmentFormula: string;
+    dampingFactor: number;
+    recommendedValueChange: number;
+    explanation: string;
+  };
+}
+
+export interface DnaReliabilityDegradationFactor {
+  factor: string;
+  degradationLevel: number; // 0 à 1
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  continuousRemediation: string;
+}
+
+export interface DnaPostMortemMetrics {
+  dnaErrorRate: number; // 0 - 100%
+  dnaWassersteinDistance: number;
+  dnaCosineSimilarity: number;
+  genomicProfileDivergence: number; // Divergence KL entre profil prédit et composition gagnante
+  recurrentBiases: {
+    paritySkewZScore: number;
+    decadeConcentrationGini: number;
+    dominantGeneBiases: { gene: string; biasPercent: number; direction: 'SUR' | 'SOUS' }[];
+    hawkesExcitationExcess: number;
+    temporalPhaseDrift: number;
+  };
+  reliabilityDegradationMap: DnaReliabilityDegradationFactor[];
+  classifiedAnomalies: DnaAnomalyReport[];
+  feedbackAdjustments: {
+    targetGene: string;
+    sieveDamping: number;
+    phaseCorrection: number;
+    entropyRegularization: number;
+  }[];
+}
+
+export interface FilterRuleEvaluation {
+  ruleId: string;
+  ruleName: string;
+  description: string;
+  appliedThreshold: string;
+  measuredValue: number;
+  isPassed: boolean;
+  penaltyWeight: number;
+}
+
+export interface FilterValidationCertificate {
+  isCompliant: boolean;
+  complianceScore: number; // 0 - 100%
+  totalEnergy: number;
+  ruleEvaluations: FilterRuleEvaluation[];
+  dnaIntegrityPreserved: boolean;
+  eliminatedCombinationsCount: number;
+  retainedCombinationRank: number;
+  timestamp: string;
 }
 
 export interface CondensedForensicReport {

@@ -59,6 +59,9 @@ export interface EnhancedMetrics {
     entropyBits?: number;
     sieveIntensitySNR?: number;
   };
+
+  // Certificat de Validation du Filtre Algorithmique d'ADN
+  algorithmicFilterCertificate?: import('../../types').FilterValidationCertificate;
   
   [key: string]: unknown;
 }

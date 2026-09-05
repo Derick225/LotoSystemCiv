@@ -3,6 +3,7 @@ import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } f
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 import { useNexusStore } from '../store/useNexusStore';
+import { getDnaFeedbackCalibrationSync, applyDnaFeedbackToSieve } from './prediction/dnaFeedbackService';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -619,7 +620,7 @@ export const calculateDnaSieveWeights = (
     const dnaConcordanceMean = Math.round(sumAffinity / 90.0);
     const entropyBits = parseFloat((shannon.raw || 0).toFixed(2));
 
-    return { 
+    const baseResult: DnaSieveResult = { 
         multipliers, 
         affinityPercent, 
         dominantAlgos,
@@ -630,6 +631,16 @@ export const calculateDnaSieveWeights = (
         entropyBits,
         activeGenesBreakdown
     };
+
+    // Intégration de la rétroaction continue d'ADN (Feedback Loop isolée par tirage)
+    if (drawName) {
+        const feedbackCalibration = getDnaFeedbackCalibrationSync(drawName);
+        if (feedbackCalibration) {
+            return applyDnaFeedbackToSieve(baseResult, feedbackCalibration);
+        }
+    }
+
+    return baseResult;
 };
 
 /**
