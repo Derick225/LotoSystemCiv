@@ -43,11 +43,15 @@ const computeCosineSimilarity = (
 
 /**
  * ============================================================================
- * FORMALISATION DU FILTRE ALGORITHMIQUE D'ADN (Algorithmic DNA Filter)
+ * FORMALISATION DU FILTRE ALGORITHMIQUE D'ADN / TAMIS ADN (Algorithmic DNA Sieve)
  * ============================================================================
  *
+ * NOMENCLATURE UNIFIÉE :
+ * Le "Filtre Algorithmique" et le "Tamis ADN" (ou "Tamis ADN Algorithmique")
+ * désignent le même composant d'évaluation et de filtrage déterministe central.
+ *
  * DÉFINITION FORMELLE :
- * Le Filtre Algorithmique est un opérateur mathématique déterministe spécialisé, noté
+ * Le Filtre Algorithmique / Tamis ADN est un opérateur mathématique déterministe spécialisé, noté :
  * F_DNA : S_T x M_T x A_T x R_T -> C* subset {1, ..., 90}, |C*| = K
  *
  * Il opère une sélection continue et certifiée d'une combinaison optimale C*
@@ -94,6 +98,11 @@ export interface AlgorithmicDnaState {
   targetOutsiders?: number;
   lastDraw?: number[];
 }
+
+// Alias de type pour l'équivalence Tamis ADN <=> Filtre Algorithmique
+export type DnaSieveState = AlgorithmicDnaState;
+export type DnaSieveFilterConfig = AlgorithmicFilterConfig;
+export type DnaSieveFilterResult = AlgorithmicFilterResult;
 
 export interface AlgorithmicFilterConfig {
   ticketSize?: number; // Par défaut K=5
@@ -503,3 +512,10 @@ export const executeAlgorithmicFilter = async (
     dnaStateChecksum: postChecksum,
   };
 };
+
+/**
+ * Alias fonctionnels explicites : Tamis ADN <=> Filtre Algorithmique
+ */
+export const executeDnaSieveFilter = executeAlgorithmicFilter;
+export const validateCombinationAgainstDnaSieve = validateCombinationAgainstDna;
+

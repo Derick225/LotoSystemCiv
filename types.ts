@@ -441,6 +441,9 @@ export interface FilterRuleEvaluation {
   penaltyWeight: number;
 }
 
+/**
+ * Certificat de Validation du Filtre Algorithmique d'ADN (également appelé Tamis ADN)
+ */
 export interface FilterValidationCertificate {
   isCompliant: boolean;
   complianceScore: number; // 0 - 100%
@@ -451,6 +454,10 @@ export interface FilterValidationCertificate {
   retainedCombinationRank: number;
   timestamp: string;
 }
+
+// Alias de nomenclature : Filtre Algorithmique <=> Tamis ADN
+export type DnaSieveValidationCertificate = FilterValidationCertificate;
+export type DnaSieveRuleEvaluation = FilterRuleEvaluation;
 
 export interface CondensedForensicReport {
   id: string;

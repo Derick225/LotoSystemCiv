@@ -364,20 +364,20 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
             )}
           </div>
 
-          {/* SECTION DÉDIÉE : ANALYSE POST-MORTEM SYSTÉMATIQUE DE L'ADN ALGORITHMIQUE */}
+          {/* SECTION DÉDIÉE : ANALYSE POST-MORTEM SYSTÉMATIQUE DU TAMIS ADN / FILTRE ALGORITHMIQUE */}
           {report.dnaPostMortem && (
             <div className="bg-slate-50 dark:bg-slate-800/60 p-5 rounded-2xl border border-indigo-500/20 space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-indigo-500/10">
                 <div className="flex items-center gap-2">
                   <Dna size={18} className="text-indigo-500 animate-pulse" />
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white">
-                    Analyse Post-Mortem de l'ADN Algorithmique & Rétroaction Continue
+                    Analyse Post-Mortem du Tamis ADN (Filtre Algorithmique) & Rétroaction Continue
                   </h4>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold rounded-lg border border-emerald-500/20 flex items-center gap-1">
                     <ShieldCheck size={12} />
-                    Rétroaction Continue Injectée
+                    Rétroaction Injectée au Tamis ADN
                   </span>
                 </div>
               </div>

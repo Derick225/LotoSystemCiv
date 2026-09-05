@@ -529,7 +529,7 @@ export const selectPredictionNumbers = async (
     (thermoRegime.thermodynamicIndex + thermoRegime.entropy + thermoRegime.volatility / 100.0) / 3.0
   ));
 
-  // Exécution certifiée du Filtre Algorithmique d'ADN
+  // Exécution certifiée du Tamis ADN / Filtre Algorithmique d'ADN
   const dnaState: AlgorithmicDnaState = {
     drawName: context.drawName,
     timestamp: Date.now(),
@@ -559,6 +559,7 @@ export const selectPredictionNumbers = async (
 
   if (context.metrics) {
     context.metrics.algorithmicFilterCertificate = filterResult.validationCertificate;
+    context.metrics.dnaSieveValidationCertificate = filterResult.validationCertificate;
   }
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
