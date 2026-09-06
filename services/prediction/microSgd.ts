@@ -1,11 +1,16 @@
 import { DrawResult, AlgoWeights } from "../../types";
-import { AlgoKey } from "../../shared/prediction.types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { EnhancedMetrics } from "./metrics.types";
 import { logger } from "../../utils/logger";
 import { normalizeWeights, evaluateAlgoEmpiricalProof } from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores } from "./scoringEngine";
 import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
+import {
+  computeRobbinsMonroLearningRate,
+  applyJamesSteinShrinkage,
+  computeMetaMomentumBeta
+} from "./onlineMetaCalibrationService";
 
 // ============================================================================
 // CONFIGURATION EXPLICITE (Zéro Nombre Magique)
@@ -61,6 +66,7 @@ export const buildAlgoBundle = async (
 
 /**
  * Micro-ajustement continu des poids par descente de gradient (SGD)
+ * avec méta-apprentissage de Robbins-Monro, momentum de Hurst et rétrécissement de James-Stein.
  */
 export const applyDeterministicMicroSgd = async (
   drawName: string,
@@ -69,6 +75,7 @@ export const applyDeterministicMicroSgd = async (
   entropyValue: number,
   learningRateOverride: number | undefined,
   useSpatioTemporalHawkes: boolean,
+  hurstExponent?: number
 ): Promise<AlgoWeights> => {
   let adjustedWeights = { ...weights };
 
@@ -83,9 +90,20 @@ export const applyDeterministicMicroSgd = async (
   // Évaluation des preuves empiriques propres au tirage actif
   const proofMap = evaluateAlgoEmpiricalProof(drawName, history);
 
-  const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
+  const numAlgos = Object.keys(adjustedWeights).length || 1;
   const safeEntropy = (typeof entropyValue === 'number' && !isNaN(entropyValue)) ? entropyValue : 0.5;
-  const eta = baseEta * (1.0 - Math.pow(safeEntropy, 2.0));
+
+  // Taux d'apprentissage continu dérivé du théorème de Robbins-Monro et Shannon/Hurst
+  const eta = learningRateOverride !== undefined
+    ? learningRateOverride * (1.0 - Math.pow(safeEntropy, 2.0))
+    : computeRobbinsMonroLearningRate(history.length, numAlgos, safeEntropy, hurstExponent);
+
+  // Momentum adaptatif dérivé de l'exposant de mémoire de Hurst
+  const momentumBeta = computeMetaMomentumBeta(hurstExponent);
+  const momentum: Record<string, number> = {};
+  const algoKeysList = Object.keys(adjustedWeights);
+  algoKeysList.forEach(k => { momentum[k] = 0.0; });
+  const allGrads: number[][] = [];
 
   // Cache des bundles d'algos par hash de sous-historique
   const bundleCache = new Map<string, AlgoBundle>();
@@ -142,15 +160,21 @@ export const applyDeterministicMicroSgd = async (
         });
       });
 
+      allGrads.push(algoKeys.map(k => gradients[k] || 0));
+
       // Elastic-Net régularisation continue : alpha * L1 + (1 - alpha) * L2
       // alpha augmente continûment avec l'entropie pour forcer la parcimonie en régime de bruit
       const elasticAlpha = 1.0 / (1.0 + Math.exp(-6.0 * (safeEntropy - 0.6)));
       const lambdaReg = 0.001 * (1.0 - safeEntropy * 0.5);
 
-      // Pas de gradient + projection sur le simplexe avec garde-fou de preuve empirique
+      // Pas de gradient avec momentum Polyak + projection sur le simplexe avec garde-fou de preuve empirique
       algoKeys.forEach(algo => {
         const key = algo as AlgoKey;
         const oldWeight = adjustedWeights[key] || 0;
+        if (oldWeight <= 0.0001) {
+          adjustedWeights[key] = 0.0;
+          return;
+        }
         const proof = proofMap[key];
         const hasProof = proof && proof.hasProof && proof.proofScore > 0;
         
@@ -159,12 +183,12 @@ export const applyDeterministicMicroSgd = async (
         const l2Grad = 2.0 * oldWeight * (1.0 - elasticAlpha);
         const totalGrad = gradients[algo] + lambdaReg * (l1Grad + l2Grad);
         
-        let newWeight = Math.max(0, oldWeight - eta * totalGrad);
+        // Accumulation du momentum Nesterov/Polyak
+        momentum[algo] = momentumBeta * (momentum[algo] || 0) + (1.0 - momentumBeta) * totalGrad;
+
+        let newWeight = Math.max(0, oldWeight - eta * momentum[algo]);
         
-        // Variation clamp derived from information theory:
-        // At max entropy (safeEntropy=1), allow wider variation (more exploration).
-        // At min entropy (safeEntropy=0), restrict variation (exploit stable signal).
-        const numAlgos = Object.keys(adjustedWeights).length || 1;
+        // Variation clamp dérivé de la théorie de l'information
         const variationBase = 1.0 / (2.0 * numAlgos);
         const variationMax = 1.0 / Math.sqrt(numAlgos);
         const variationClamp = variationBase + (variationMax - variationBase) * safeEntropy;
@@ -174,15 +198,12 @@ export const applyDeterministicMicroSgd = async (
 
         // RÈGLE ABSOLUE : Qu'aucun algorithme ne voie son poids augmenté s'il ne fait pas ses preuves
         if (!hasProof) {
-          // Si l'algo n'est pas prouvé ou sous-performe le hasard (proofScore <= 0),
-          // son poids ne peut JAMAIS augmenter : il est plafonné à oldWeight et amorti
           newWeight = Math.min(oldWeight, newWeight);
           if (proof && proof.proofScore < 0) {
             const dampener = 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore));
             newWeight = newWeight * Math.max(0.1, dampener);
           }
         } else {
-          // S'il a fait ses preuves, la hausse est modulée par la confiance dans sa preuve
           if (newWeight > oldWeight) {
             const boostFactor = Math.tanh(proof.proofScore);
             newWeight = oldWeight + (newWeight - oldWeight) * boostFactor;
@@ -207,6 +228,42 @@ export const applyDeterministicMicroSgd = async (
     );
     return weights;
   }
+
+  // Rétrécissement de James-Stein empirique bayésien
+  // Unifie l'estimateur walk-forward propre au tirage avec les priors robustes selon la taille d'échantillon N
+  let gradVariance = 0.001;
+  if (allGrads.length > 0) {
+    let totalVar = 0;
+    let varCount = 0;
+    for (let a = 0; a < algoKeysList.length; a++) {
+      const gSeries = allGrads.map(g => g[a] || 0);
+      const gMean = gSeries.reduce((s, v) => s + v, 0) / gSeries.length;
+      const gVar = gSeries.reduce((s, v) => s + Math.pow(v - gMean, 2), 0) / Math.max(1, gSeries.length - 1);
+      totalVar += gVar;
+      varCount++;
+    }
+    gradVariance = varCount > 0 ? (totalVar / varCount) : 0.001;
+  }
+
+  const jsResult = applyJamesSteinShrinkage(
+    adjustedWeights,
+    DEFAULT_ALGO_WEIGHTS,
+    history.length,
+    gradVariance
+  );
+  adjustedWeights = jsResult.shrunkWeights;
+
+  logger.info(
+    {
+      drawName,
+      historyLength: history.length,
+      robbinsMonroEta: parseFloat(eta.toFixed(5)),
+      momentumBeta: parseFloat(momentumBeta.toFixed(3)),
+      jamesSteinShrinkage: parseFloat(jsResult.shrinkageFactor.toFixed(4)),
+      distanceToPrior: parseFloat(jsResult.distanceToPrior.toFixed(4))
+    },
+    "[microSgd] Walk-forward micro-calibration achevée avec rétrécissement de James-Stein."
+  );
 
   return adjustedWeights;
 };

@@ -238,17 +238,19 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
     initialWeights
   );
   
-  // 3. Entraînement continu Micro-SGD propre au tirage actif
+  // 3. Entraînement continu Micro-SGD propre au tirage actif avec méta-apprentissage & James-Stein
   if (!context.skipTraining && context.history.length >= 10) {
     const currentEntropyResult = calculateShannonEntropy(context.history);
     const currentEntropy = currentEntropyResult.normalized;
+    const hurstExponent = context.metrics?.statisticalBounds?.hurstExponent;
     weights = await applyDeterministicMicroSgd(
       context.drawName,
       weights,
       context.history,
       currentEntropy,
       undefined,
-      context.useSpatioTemporalHawkes
+      context.useSpatioTemporalHawkes,
+      hurstExponent
     );
   }
 
@@ -534,7 +536,12 @@ export const selectPredictionNumbers = async (
     empiricalCalibration,
     outsiderCount,
     context.history[0]?.gagnants,
-    regimeStateNormalized
+    regimeStateNormalized,
+    context.drawName,
+    {
+      entropy: thermoRegime.entropy,
+      hurstExponent: context.metrics?.statisticalBounds?.hurstExponent
+    }
   );
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;

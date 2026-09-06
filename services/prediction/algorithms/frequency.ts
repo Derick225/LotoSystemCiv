@@ -1,67 +1,34 @@
-
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
+import { StateDynamicsEngine } from '../stateDynamicsEngine';
 
 export const frequencyPlugin: AlgorithmPlugin = {
   key: AlgoKey.FREQUENCY,
   category: 'core',
   stability: 'stable',
-  mathematicalBasis: 'Loi des Grands Nombres et Distribution Empirique Robuste',
-  description: 'Évalue la fréquence historique normalisée de manière robuste aux valeurs aberrantes (outliers).',
+  mathematicalBasis: 'Loi des Grands Nombres et Distribution Empirique Robuste (État Statique d\'Ordre 0 unifié)',
+  description: 'Évalue la fréquence historique normalisée de manière robuste aux valeurs aberrantes au sein du moteur d\'état unifié.',
   isStrictlyDeterministic: true,
-  /**
-   * Precomputes median and IQR of frequencies.
-   * Uses Number.EPSILON to guarantee division safety.
-   */
+
   precompute(ctx) {
-    const values = Array.from(ctx.features.freqMap).slice(1).filter(v => v > 0);
-    let cacheVal;
-    if (values.length === 0) {
-      cacheVal = { median: 0, iqr: 1.0, sampleSize: 0 };
-    } else {
-      const sorted = [...values].sort((a, b) => a - b);
-      const n = sorted.length;
-      // Interpolated median for even-length arrays (more precise than floor-only)
-      const mid = Math.floor(n / 2);
-      const median = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-      const q1 = sorted[Math.floor(n * 0.25)];
-      const q3 = sorted[Math.floor(n * 0.75)];
-      // IQR floored at 1/sqrt(N) to prevent over-sharpening on small samples
-      const iqr = Math.max(1.0 / Math.sqrt(Math.max(1, ctx.history?.length || 1)), q3 - q1);
-      cacheVal = { median, iqr, sampleSize: n };
-    }
-    ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.FREQUENCY] = cacheVal;
+    StateDynamicsEngine.analyze(ctx);
   },
-  /**
-   * Evaluates the frequency score of a number.
-   * 
-   * CRITICAL DESIGN DECISION:
-   * Any non-statistical heuristics (such as Digital Root / Numerology) have been completely removed
-   * to strictly adhere to the project's statistical philosophy of "Zero Non-Statistical Heuristics".
-   * Under the Law of Large Numbers, the expectation of draws is independent of digit sums, and 
-   * injecting numerological boosts would distort the gradient landscape and compromise prediction rigor.
-   */
+
   evaluate(num, ctx) {
-    const rawFreq = Number(ctx.features.freqMap[num]) || 0;
-    
     if (!ctx.pluginCache?.[AlgoKey.FREQUENCY]) {
-      frequencyPlugin.precompute(ctx);
+      this.precompute(ctx);
     }
-    const cache = ctx.pluginCache![AlgoKey.FREQUENCY];
-    const median = cache.median;
-    const iqr = cache.iqr;
+    const profile = StateDynamicsEngine.getProfile(num, ctx);
     
-    // Slope scaled by sqrt(sampleSize) to sharpen discrimination as history grows
-    const sampleSize = cache.sampleSize || 1;
-    const slope = Math.sqrt(sampleSize) / (iqr * Math.sqrt(90));
-    const normalizedScore = 100.0 / (1.0 + Math.exp(-slope * (rawFreq - median)));
-    
-    const score = Math.max(0.0, Math.min(100.0, normalizedScore));
     return {
-      score,
-      confidence: 0.95,
-      metadata: { rawFreq }
+      score: profile.frequencyScore,
+      confidence: profile.confidence,
+      metadata: {
+        rawFreq: profile.frequencyRaw,
+        frequencyScore: Number(profile.frequencyScore.toFixed(2)),
+        stateScore: Number(profile.stateScore.toFixed(2)),
+        model: 'StateDynamicsEngine (Order 0 Frequency)'
+      }
     };
   }
 };

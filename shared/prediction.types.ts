@@ -42,10 +42,32 @@ export type AlgoWeights = Record<AlgoKey, number>;
  * sur l'intuition d'un seul métamodèle, son poids maximal théorique a été réduit à 18%, 
  * redistribuant l'influence sur l'analyse de signaux (Spectral/Markov/Bayes).
  */
-export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = Object.values(AlgoKey).reduce((acc, key) => {
-    acc[key] = 1.0;
-    return acc;
-}, {} as AlgoWeights);
+export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = {
+    [AlgoKey.SHADOW_PROBABILITY]: 1.50,       // Lift@5 +10.5% (Preuve empirique #1 Hit@5)
+    [AlgoKey.NETWORK_CORRELATION]: 1.40,     // Lift@5 +7.6% (Topologie de réseau)
+    [AlgoKey.SEQUENCE_PATTERN]: 1.35,        // Lift@5 +6.2% (Transitions différentielles)
+    [AlgoKey.GAP_PATTERN]: 1.35,             // FLAGSHIP UNIFIÉ GAP DYNAMICS (Lift@10 +2.5%, Lift@5 +2.5%)
+    [AlgoKey.MARKOV]: 1.30,                  // Lift@10 +5.1% (Chaînes de Markov)
+    [AlgoKey.TEMPORAL]: 1.25,                // Lift@10 +3.3% (Déclin temporel continu)
+    [AlgoKey.INTER_MONTHLY_RESONANCE]: 1.25, // Lift@10 +3.3% (Résonance mensuelle)
+    [AlgoKey.SPATIAL]: 1.15,                 // Lift@5 +4.7% (Proximité spatiale)
+    [AlgoKey.DERIVED_NEIGHBOR]: 1.10,        // Lift@5 +1.1% (Voisins modulaires)
+    [AlgoKey.ECHO_STATE]: 1.10,              // Lift@10 +0.7% (Réservoir stochastique)
+    [AlgoKey.MOMENTUM]: 1.05,                // Harmonisé StateDynamicsEngine (Ordre 1 Vélocité)
+    [AlgoKey.FREQUENCY]: 1.00,               // Harmonisé StateDynamicsEngine (Ordre 0 Position)
+    [AlgoKey.MACHINE_TRANSFER]: 1.00,        // Actif uniquement si flux machine présent (isolé)
+    [AlgoKey.BAYES]: 0.95,                   // Harmonisé StateDynamicsEngine (Ordre 2 Prior Conjugué)
+    [AlgoKey.JACCARD]: 0.85,
+    [AlgoKey.SPECTRAL]: 0.85,
+    [AlgoKey.FRACTAL]: 0.85,
+    [AlgoKey.ISOLATION_ANOMALY]: 0.80,
+    [AlgoKey.GAP_TREND]: 0.40,               // Consolidé satellite sous GapDynamicsEngine
+    [AlgoKey.GAP_BAND_SEQUENCE]: 0.40,        // Consolidé satellite sous GapDynamicsEngine
+    [AlgoKey.GAP_CADENCE]: 0.40,             // Consolidé satellite sous GapDynamicsEngine
+    [AlgoKey.GAPS]: 0.40,                    // Consolidé satellite sous GapDynamicsEngine
+    [AlgoKey.AFFINITY]: 0.00,                // DÉSACTIVÉ : -10.9% Lift@10 (Destructeur de valeur)
+    [AlgoKey.GAP_SEQUENCE]: 0.00             // DÉSACTIVÉ : -13.8% Lift@10 (Destructeur de valeur)
+};
 
 export type ScoreBreakdown = Partial<Record<AlgoKey, number>>;
 

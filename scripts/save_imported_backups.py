@@ -1,0 +1,1993 @@
+import json
+
+baraka_data = [
+  {
+    "id": "44c3548f-d835-400e-b61d-a2aa5f68bb73",
+    "drawName": "Baraka",
+    "date": "02/09/2026",
+    "gagnants": [57, 83, 86, 29, 79],
+    "machine": [43, 63, 27, 4, 59],
+    "version": 1
+  },
+  {
+    "id": "f0872ac8-31cb-4739-ac4a-5fba98a6d59a",
+    "drawName": "Baraka",
+    "date": "26/08/2026",
+    "gagnants": [48, 40, 82, 44, 77],
+    "machine": [51, 69, 3, 1, 35],
+    "version": 1
+  },
+  {
+    "id": "7afdfacb-5ebe-476b-9b96-49e9b6a15e4a",
+    "drawName": "Baraka",
+    "date": "19/08/2026",
+    "gagnants": [69, 56, 54, 30, 79],
+    "machine": [88, 84, 86, 75, 89],
+    "version": 1
+  },
+  {
+    "id": "35bb9ef7-a6f4-4d7d-8183-8480099f0182",
+    "drawName": "Baraka",
+    "date": "12/08/2026",
+    "gagnants": [37, 26, 17, 58, 61],
+    "machine": [40, 59, 33, 21, 75],
+    "version": 1
+  },
+  {
+    "id": "41df42c1-05b6-4b5a-882a-1b8db34bd409",
+    "drawName": "Baraka",
+    "date": "05/08/2026",
+    "gagnants": [29, 86, 31, 52, 18],
+    "machine": [69, 32, 75, 16, 62],
+    "version": 1
+  },
+  {
+    "id": "2e4229d4-426c-49cd-b374-17a06e2e6130",
+    "drawName": "Baraka",
+    "date": "29/07/2026",
+    "gagnants": [23, 88, 64, 29, 6],
+    "machine": [73, 34, 42, 86, 74],
+    "version": 1
+  },
+  {
+    "id": "a2d6ddf9-27d8-4389-9134-5a04b0cf34a1",
+    "drawName": "Baraka",
+    "date": "22/07/2026",
+    "gagnants": [52, 25, 67, 76, 41],
+    "machine": [85, 1, 90, 47, 49],
+    "version": 1
+  },
+  {
+    "id": "3e058b4a-b017-462f-9155-79fc03e7ca41",
+    "drawName": "Baraka",
+    "date": "15/07/2026",
+    "gagnants": [22, 89, 24, 16, 69],
+    "machine": [60, 19, 87, 6, 30],
+    "version": 1
+  },
+  {
+    "id": "74db0b97-4269-4e3f-b03b-8f65da52fc80",
+    "drawName": "Baraka",
+    "date": "08/07/2026",
+    "gagnants": [46, 78, 8, 13, 30],
+    "machine": [37, 60, 24, 51, 69],
+    "version": 1
+  },
+  {
+    "id": "c3e31d63-4051-44c7-b529-4ddbddd51c1d",
+    "drawName": "Baraka",
+    "date": "01/07/2026",
+    "gagnants": [14, 89, 40, 33, 34],
+    "machine": [80, 16, 74, 45, 20],
+    "version": 1
+  },
+  {
+    "id": "bb64a0c0-36e6-4324-adbd-0fd8fc70bee2",
+    "drawName": "Baraka",
+    "date": "24/06/2026",
+    "gagnants": [11, 63, 41, 32, 19],
+    "machine": [90, 46, 53, 88, 9],
+    "version": 1
+  },
+  {
+    "id": "e1ab0a56-cefb-4888-a68e-340a7c529319",
+    "drawName": "Baraka",
+    "date": "17/06/2026",
+    "gagnants": [44, 57, 3, 30, 63],
+    "machine": [74, 31, 41, 28, 59],
+    "version": 1
+  },
+  {
+    "id": "43e31f2d-5c96-43d8-b6fa-c4b926d79908",
+    "drawName": "Baraka",
+    "date": "10/06/2026",
+    "gagnants": [74, 82, 90, 26, 64],
+    "machine": [43, 81, 58, 33, 80],
+    "version": 1
+  },
+  {
+    "id": "4543be1e-b483-4065-81bd-92618d5716a6",
+    "drawName": "Baraka",
+    "date": "03/06/2026",
+    "gagnants": [74, 71, 3, 38, 7],
+    "machine": [14, 72, 67, 62, 30],
+    "version": 1
+  },
+  {
+    "id": "101a16fa-d99b-4468-833d-c9fee891b5e1",
+    "drawName": "Baraka",
+    "date": "27/05/2026",
+    "gagnants": [37, 41, 26, 74, 23],
+    "machine": [54, 30, 7, 43, 79],
+    "version": 1
+  },
+  {
+    "id": "06924dc7-f1f0-4e5c-a129-92cd40d9f554",
+    "drawName": "Baraka",
+    "date": "20/05/2026",
+    "gagnants": [61, 72, 49, 30, 41],
+    "machine": [76, 78, 51, 60, 74],
+    "version": 1
+  },
+  {
+    "id": "70d835e2-5e10-46d3-97c6-ca672276d460",
+    "drawName": "Baraka",
+    "date": "13/05/2026",
+    "gagnants": [57, 79, 38, 29, 34],
+    "machine": [69, 62, 49, 14, 45],
+    "version": 1
+  },
+  {
+    "id": "2cf4a455-2d8c-49e7-bcd2-39f4d02ab1be",
+    "drawName": "Baraka",
+    "date": "06/05/2026",
+    "gagnants": [39, 34, 46, 9, 86],
+    "machine": [6, 33, 60, 73, 71],
+    "version": 1
+  },
+  {
+    "id": "060c845f-a616-4d83-970d-c0999dadcedc",
+    "drawName": "Baraka",
+    "date": "29/04/2026",
+    "gagnants": [14, 79, 3, 36, 68],
+    "machine": [30, 15, 5, 73, 81],
+    "version": 1
+  },
+  {
+    "id": "770fdc63-fe80-4d1f-8a96-baf7494b1cfc",
+    "drawName": "Baraka",
+    "date": "22/04/2026",
+    "gagnants": [15, 69, 11, 38, 60],
+    "machine": [78, 32, 71, 31, 16],
+    "version": 1
+  },
+  {
+    "id": "6bccc7f7-2cc8-426b-96b2-cd0cca266af2",
+    "drawName": "Baraka",
+    "date": "15/04/2026",
+    "gagnants": [67, 77, 38, 33, 26],
+    "machine": [22, 83, 23, 57, 31],
+    "version": 1
+  },
+  {
+    "id": "1d0ef18b-0368-454a-a49c-a838db9efc25",
+    "drawName": "Baraka",
+    "date": "08/04/2026",
+    "gagnants": [24, 28, 21, 22, 11],
+    "machine": [56, 61, 7, 77, 13],
+    "version": 1
+  },
+  {
+    "id": "80eb7524-ef6c-48ba-b82e-e1fe290e492f",
+    "drawName": "Baraka",
+    "date": "01/04/2026",
+    "gagnants": [61, 82, 1, 43, 50],
+    "machine": [30, 7, 85, 71, 16],
+    "version": 1
+  },
+  {
+    "id": "43faa57a-c0e5-4b04-98ac-f909a5a8c641",
+    "drawName": "Baraka",
+    "date": "25/03/2026",
+    "gagnants": [89, 67, 78, 46, 62],
+    "machine": [80, 53, 55, 50, 7],
+    "version": 1
+  },
+  {
+    "id": "1c2b679a-44de-42b1-b382-d2d6c1977944",
+    "drawName": "Baraka",
+    "date": "18/03/2026",
+    "gagnants": [49, 51, 56, 25, 80],
+    "machine": [50, 85, 4, 29, 70],
+    "version": 1
+  },
+  {
+    "id": "f0557834-6c45-44a9-a59d-e021abcdb812",
+    "drawName": "Baraka",
+    "date": "11/03/2026",
+    "gagnants": [4, 78, 62, 74, 52],
+    "machine": [82, 80, 42, 66, 34],
+    "version": 1
+  },
+  {
+    "id": "431b3548-a4ad-44ba-857f-127529a62c7c",
+    "drawName": "Baraka",
+    "date": "04/03/2026",
+    "gagnants": [88, 43, 62, 16, 7],
+    "machine": [90, 37, 25, 64, 73],
+    "version": 1
+  },
+  {
+    "id": "ca0a8372-d9c8-4e47-9b69-3219dc735cc0",
+    "drawName": "Baraka",
+    "date": "25/02/2026",
+    "gagnants": [30, 2, 20, 84, 4],
+    "machine": [79, 82, 85, 29, 80],
+    "version": 1
+  },
+  {
+    "id": "c2c4a671-9d78-4e55-a098-8dd3f2eaba60",
+    "drawName": "Baraka",
+    "date": "18/02/2026",
+    "gagnants": [30, 16, 47, 22, 25],
+    "machine": [89, 71, 11, 84, 56],
+    "version": 1
+  },
+  {
+    "id": "efd2683d-e2a6-4c3e-8e66-030badc03470",
+    "drawName": "Baraka",
+    "date": "11/02/2026",
+    "gagnants": [68, 73, 46, 88, 49],
+    "machine": [61, 53, 16, 29, 9],
+    "version": 1
+  },
+  {
+    "id": "74183606-6487-419b-855e-b4592ba1a068",
+    "drawName": "Baraka",
+    "date": "04/02/2026",
+    "gagnants": [37, 16, 50, 36, 85],
+    "machine": [39, 68, 82, 44, 15],
+    "version": 1
+  },
+  {
+    "id": "4bb31d31-9d9e-43c5-80bd-b82086c055a6",
+    "drawName": "Baraka",
+    "date": "28/01/2026",
+    "gagnants": [26, 78, 88, 54, 57],
+    "machine": [5, 20, 40, 15, 68],
+    "version": 1
+  },
+  {
+    "id": "d6c934dc-f6fd-4db9-83bc-adf31dcaf65d",
+    "drawName": "Baraka",
+    "date": "21/01/2026",
+    "gagnants": [25, 42, 26, 55, 83],
+    "machine": [1, 14, 78, 85, 84],
+    "version": 1
+  },
+  {
+    "id": "163f9670-3c27-4ae8-b763-1d6f5ba358c8",
+    "drawName": "Baraka",
+    "date": "14/01/2026",
+    "gagnants": [65, 84, 15, 30, 32],
+    "machine": [4, 48, 24, 39, 90],
+    "version": 1
+  },
+  {
+    "id": "7ee8be01-2557-41d4-a4b5-e98695d2e04c",
+    "drawName": "Baraka",
+    "date": "07/01/2026",
+    "gagnants": [41, 80, 38, 5, 57],
+    "machine": [3, 55, 58, 44, 90],
+    "version": 1
+  },
+  {
+    "id": "b8524f19-ed27-48c9-8610-bc0b87ccfe51",
+    "drawName": "Baraka",
+    "date": "24/12/2025",
+    "gagnants": [24, 80, 55, 83, 74],
+    "machine": [49, 22, 48, 68, 45],
+    "version": 1
+  },
+  {
+    "id": "aea4a343-e637-4194-8986-bae38f24b83f",
+    "drawName": "Baraka",
+    "date": "17/12/2025",
+    "gagnants": [35, 67, 51, 80, 81],
+    "machine": [29, 30, 33, 1, 70],
+    "version": 1
+  },
+  {
+    "id": "8e1b5dba-13ad-4c33-b064-258e63161108",
+    "drawName": "Baraka",
+    "date": "10/12/2025",
+    "gagnants": [70, 18, 25, 71, 1],
+    "machine": [61, 81, 67, 88, 31],
+    "version": 1
+  },
+  {
+    "id": "a7061c2d-30c6-4dff-b33f-7870aab3088f",
+    "drawName": "Baraka",
+    "date": "03/12/2025",
+    "gagnants": [64, 60, 4, 80, 84],
+    "machine": [14, 89, 16, 38, 70],
+    "version": 1
+  },
+  {
+    "id": "b8388472-2899-4df3-b126-e957189f710a",
+    "drawName": "Baraka",
+    "date": "26/11/2025",
+    "gagnants": [17, 35, 23, 82, 13],
+    "machine": [25, 79, 40, 32, 75],
+    "version": 1
+  },
+  {
+    "id": "15cc77cd-0bf4-41e5-86f4-49d04246a1b0",
+    "drawName": "Baraka",
+    "date": "19/11/2025",
+    "gagnants": [24, 56, 90, 19, 20],
+    "machine": [66, 4, 7, 25, 1],
+    "version": 1
+  },
+  {
+    "id": "3f9d650f-385f-422c-bc06-c99644b7ce79",
+    "drawName": "Baraka",
+    "date": "12/11/2025",
+    "gagnants": [24, 6, 31, 64, 11],
+    "machine": [47, 14, 80, 65, 45],
+    "version": 1
+  },
+  {
+    "id": "75e4d0f9-f84f-499e-8da8-a402824a4db5",
+    "drawName": "Baraka",
+    "date": "05/11/2025",
+    "gagnants": [15, 41, 62, 63, 88],
+    "machine": [18, 11, 66, 14, 34],
+    "version": 1
+  },
+  {
+    "id": "c609023f-47dc-4644-9cb7-d3166e8dc762",
+    "drawName": "Baraka",
+    "date": "29/10/2025",
+    "gagnants": [49, 36, 65, 21, 55],
+    "machine": [53, 29, 42, 3, 18],
+    "version": 1
+  },
+  {
+    "id": "85b46643-37dc-409b-9412-b1b534d05777",
+    "drawName": "Baraka",
+    "date": "22/10/2025",
+    "gagnants": [31, 40, 16, 2, 32],
+    "machine": [84, 86, 60, 26, 15],
+    "version": 1
+  },
+  {
+    "id": "f76c32a6-62fe-471e-9e7a-c8c206148952",
+    "drawName": "Baraka",
+    "date": "15/10/2025",
+    "gagnants": [60, 43, 4, 78, 62],
+    "machine": [32, 22, 42, 40, 68],
+    "version": 1
+  },
+  {
+    "id": "85eb51f3-9903-4223-b39b-f5b792cf94c6",
+    "drawName": "Baraka",
+    "date": "08/10/2025",
+    "gagnants": [38, 77, 57, 27, 58],
+    "machine": [80, 8, 61, 22, 56],
+    "version": 1
+  },
+  {
+    "id": "087523b5-663f-4e2d-85f8-1bcd6e18190c",
+    "drawName": "Baraka",
+    "date": "01/10/2025",
+    "gagnants": [57, 59, 42, 83, 48],
+    "machine": [89, 45, 49, 3, 16],
+    "version": 1
+  },
+  {
+    "id": "d948108b-eebd-4681-a83f-b15285a6c119",
+    "drawName": "Baraka",
+    "date": "24/09/2025",
+    "gagnants": [44, 82, 29, 80, 15],
+    "machine": [75, 9, 46, 60, 47],
+    "version": 1
+  },
+  {
+    "id": "afab907a-88af-48b6-869e-2a2117ee32a4",
+    "drawName": "Baraka",
+    "date": "17/09/2025",
+    "gagnants": [34, 16, 31, 17, 64],
+    "machine": [69, 27, 41, 86, 32],
+    "version": 1
+  },
+  {
+    "id": "762fcfe6-0ec7-4392-8ed0-91887e24594f",
+    "drawName": "Baraka",
+    "date": "10/09/2025",
+    "gagnants": [38, 58, 74, 57, 44],
+    "machine": [22, 50, 71, 29, 85],
+    "version": 1
+  },
+  {
+    "id": "25d86859-513d-4c49-ac16-c86c001524a5",
+    "drawName": "Baraka",
+    "date": "03/09/2025",
+    "gagnants": [11, 2, 61, 74, 41],
+    "machine": [88, 69, 29, 40, 81],
+    "version": 1
+  },
+  {
+    "id": "8c6c08b0-f116-45e3-8852-9d6d7e67d3dc",
+    "drawName": "Baraka",
+    "date": "27/08/2025",
+    "gagnants": [41, 35, 21, 75, 45],
+    "machine": [16, 46, 67, 20, 61],
+    "version": 1
+  },
+  {
+    "id": "5e23be34-193e-4e6c-89c1-5086d1bdb7de",
+    "drawName": "Baraka",
+    "date": "20/08/2025",
+    "gagnants": [90, 89, 38, 27, 53],
+    "machine": [7, 31, 49, 15, 3],
+    "version": 1
+  },
+  {
+    "id": "43383471-a53e-47e6-84eb-22bfdb9b973c",
+    "drawName": "Baraka",
+    "date": "13/08/2025",
+    "gagnants": [78, 50, 34, 54, 86],
+    "machine": [6, 52, 60, 58, 47],
+    "version": 1
+  },
+  {
+    "id": "d6d974f9-d3d1-4924-9c62-e6237976e9ae",
+    "drawName": "Baraka",
+    "date": "06/08/2025",
+    "gagnants": [31, 13, 40, 8, 36],
+    "machine": [38, 61, 57, 39, 48],
+    "version": 1
+  },
+  {
+    "id": "d64a738a-ea9a-443f-8a43-b71b96536f12",
+    "drawName": "Baraka",
+    "date": "30/07/2025",
+    "gagnants": [41, 29, 81, 5, 72],
+    "machine": [85, 71, 25, 34, 77],
+    "version": 1
+  },
+  {
+    "id": "23d7729d-50bb-4561-9880-c7c9e304da3b",
+    "drawName": "Baraka",
+    "date": "16/07/2025",
+    "gagnants": [73, 21, 67, 69, 41],
+    "machine": [63, 20, 7, 90, 46],
+    "version": 1
+  },
+  {
+    "id": "88c1eea0-d1d4-4520-81df-2f4f5f72c9ba",
+    "drawName": "Baraka",
+    "date": "09/07/2025",
+    "gagnants": [69, 78, 68, 25, 7],
+    "machine": [47, 71, 84, 37, 67],
+    "version": 1
+  },
+  {
+    "id": "8e79cd26-bcfe-4e10-b688-e24d4f75c91c",
+    "drawName": "Baraka",
+    "date": "02/07/2025",
+    "gagnants": [87, 74, 8, 19, 28],
+    "machine": [43, 72, 61, 30, 34],
+    "version": 1
+  },
+  {
+    "id": "1413b7e2-59c2-42cb-9a7c-c31caeb1a2a2",
+    "drawName": "Baraka",
+    "date": "25/06/2025",
+    "gagnants": [3, 75, 45, 54, 23],
+    "machine": [49, 48, 28, 30, 4],
+    "version": 1
+  },
+  {
+    "id": "e96807bd-60f7-40ae-94b4-08b1a40ab515",
+    "drawName": "Baraka",
+    "date": "18/06/2025",
+    "gagnants": [82, 76, 29, 6, 62],
+    "machine": [59, 78, 52, 73, 54],
+    "version": 1
+  },
+  {
+    "id": "fe714e4d-6881-4baf-af68-12d3179a651c",
+    "drawName": "Baraka",
+    "date": "11/06/2025",
+    "gagnants": [70, 45, 18, 83, 86],
+    "machine": [73, 87, 29, 28, 85],
+    "version": 1
+  },
+  {
+    "id": "9b766588-c5ec-4c9b-864c-fd0af427ef6b",
+    "drawName": "Baraka",
+    "date": "04/06/2025",
+    "gagnants": [43, 9, 80, 58, 5],
+    "machine": [33, 11, 37, 68, 76],
+    "version": 1
+  },
+  {
+    "id": "570e11ed-312a-4728-a8dd-1bd3a77b31c9",
+    "drawName": "Baraka",
+    "date": "28/05/2025",
+    "gagnants": [39, 69, 25, 9, 28],
+    "machine": [27, 64, 89, 83, 24],
+    "version": 1
+  },
+  {
+    "id": "f43250eb-54ab-4b8f-be2d-fd7659800dca",
+    "drawName": "Baraka",
+    "date": "21/05/2025",
+    "gagnants": [19, 41, 3, 51, 27],
+    "machine": [48, 49, 15, 69, 56],
+    "version": 1
+  },
+  {
+    "id": "2f0e8fd8-689a-494d-bd28-e0e504b4b6e0",
+    "drawName": "Baraka",
+    "date": "14/05/2025",
+    "gagnants": [65, 58, 6, 10, 17],
+    "machine": [76, 79, 52, 89, 70],
+    "version": 1
+  },
+  {
+    "id": "58ae7f76-6613-43d8-8ae0-be5a30b55de2",
+    "drawName": "Baraka",
+    "date": "07/05/2025",
+    "gagnants": [88, 4, 5, 71, 41],
+    "machine": [16, 35, 67, 70, 59],
+    "version": 1
+  },
+  {
+    "id": "a705e227-1249-4a00-a35c-d9e361366754",
+    "drawName": "Baraka",
+    "date": "30/04/2025",
+    "gagnants": [60, 83, 25, 27, 5],
+    "machine": [63, 78, 10, 8, 29],
+    "version": 1
+  },
+  {
+    "id": "844cb612-4662-4c13-87b4-f74f0afa733f",
+    "drawName": "Baraka",
+    "date": "23/04/2025",
+    "gagnants": [87, 40, 70, 10, 16],
+    "machine": [9, 82, 71, 22, 25],
+    "version": 1
+  },
+  {
+    "id": "13583053-0a77-4d93-a559-aa08c6764440",
+    "drawName": "Baraka",
+    "date": "16/04/2025",
+    "gagnants": [29, 41, 18, 24, 14],
+    "machine": [71, 10, 33, 32, 15],
+    "version": 1
+  },
+  {
+    "id": "2cac6cd0-8a5c-4e9f-bed0-ad7b413f239d",
+    "drawName": "Baraka",
+    "date": "09/04/2025",
+    "gagnants": [44, 89, 85, 27, 18],
+    "machine": [1, 16, 61, 21, 56],
+    "version": 1
+  },
+  {
+    "id": "7bde6c45-3320-412d-bb23-114312d98902",
+    "drawName": "Baraka",
+    "date": "02/04/2025",
+    "gagnants": [1, 27, 79, 82, 41],
+    "machine": [35, 20, 32, 22, 11],
+    "version": 1
+  },
+  {
+    "id": "c085ee3c-5612-40fe-96f8-e196172d31d8",
+    "drawName": "Baraka",
+    "date": "26/03/2025",
+    "gagnants": [5, 87, 88, 60, 63],
+    "machine": [62, 6, 83, 55, 44],
+    "version": 1
+  },
+  {
+    "id": "c7afcd4f-39c7-484a-8eec-a1b4ea963443",
+    "drawName": "Baraka",
+    "date": "19/03/2025",
+    "gagnants": [33, 85, 75, 86, 67],
+    "machine": [78, 13, 21, 27, 10],
+    "version": 1
+  },
+  {
+    "id": "f044c5cc-c659-4e28-acac-1a47f13a4c12",
+    "drawName": "Baraka",
+    "date": "12/03/2025",
+    "gagnants": [25, 14, 90, 68, 22],
+    "machine": [5, 24, 74, 76, 18],
+    "version": 1
+  },
+  {
+    "id": "6a70eaf8-c861-4647-908f-e0b715e817ae",
+    "drawName": "Baraka",
+    "date": "05/03/2025",
+    "gagnants": [66, 48, 47, 57, 24],
+    "machine": [54, 36, 5, 56, 10],
+    "version": 1
+  },
+  {
+    "id": "27d28a75-0e47-4f1e-a5e9-497b92b408d7",
+    "drawName": "Baraka",
+    "date": "26/02/2025",
+    "gagnants": [5, 75, 4, 9, 83],
+    "machine": [65, 73, 90, 40, 57],
+    "version": 1
+  },
+  {
+    "id": "b24f7038-34c7-4ee4-9547-0d76a17790bc",
+    "drawName": "Baraka",
+    "date": "19/02/2025",
+    "gagnants": [16, 8, 85, 28, 20],
+    "machine": [22, 17, 56, 87, 7],
+    "version": 1
+  },
+  {
+    "id": "f2d05b9d-e7da-4eb4-81cc-bf7dd9f9d3a5",
+    "drawName": "Baraka",
+    "date": "12/02/2025",
+    "gagnants": [53, 41, 80, 73, 27],
+    "machine": [51, 43, 61, 17, 84],
+    "version": 1
+  },
+  {
+    "id": "d33b6900-41a2-400c-bc97-0952f2435b55",
+    "drawName": "Baraka",
+    "date": "05/02/2025",
+    "gagnants": [7, 44, 21, 13, 14],
+    "machine": [5, 47, 49, 38, 82],
+    "version": 1
+  },
+  {
+    "id": "ad0d2f6b-cdc4-40c3-92b0-4c988e6b0b59",
+    "drawName": "Baraka",
+    "date": "22/01/2025",
+    "gagnants": [71, 10, 61, 82, 87],
+    "machine": [79, 86, 72, 14, 17],
+    "version": 1
+  },
+  {
+    "id": "6be07c11-d80e-4acc-ac78-67f9ec8147b1",
+    "drawName": "Baraka",
+    "date": "15/01/2025",
+    "gagnants": [17, 52, 48, 34, 47],
+    "machine": [82, 55, 61, 33, 27],
+    "version": 1
+  },
+  {
+    "id": "50e6c035-1965-4d77-9ed1-57d6db78615e",
+    "drawName": "Baraka",
+    "date": "08/01/2025",
+    "gagnants": [68, 22, 42, 52, 85],
+    "machine": [24, 80, 73, 21, 51],
+    "version": 1
+  },
+  {
+    "id": "5989e806-1a76-4710-b455-822ba4002d4a",
+    "drawName": "Baraka",
+    "date": "01/01/2025",
+    "gagnants": [72, 40, 83, 36, 49],
+    "machine": [17, 20, 55, 78, 89],
+    "version": 1
+  },
+  {
+    "id": "2ccd5bb6-c378-4a14-ba5e-27dd31e18d6e",
+    "drawName": "Baraka",
+    "date": "25/12/2024",
+    "gagnants": [44, 28, 87, 2, 41],
+    "machine": [5, 43, 39, 3, 48],
+    "version": 1
+  },
+  {
+    "id": "a190d230-6faf-439e-978e-c24797029c40",
+    "drawName": "Baraka",
+    "date": "18/12/2024",
+    "gagnants": [65, 30, 56, 83, 48],
+    "machine": [67, 60, 90, 33, 42],
+    "version": 1
+  },
+  {
+    "id": "408f67de-5dd0-49ea-a20e-bafae0c8d08d",
+    "drawName": "Baraka",
+    "date": "11/12/2024",
+    "gagnants": [15, 32, 57, 82, 61],
+    "machine": [47, 72, 75, 29, 14],
+    "version": 1
+  },
+  {
+    "id": "3a7df417-9939-414d-961a-c690430097e7",
+    "drawName": "Baraka",
+    "date": "04/12/2024",
+    "gagnants": [44, 65, 49, 67, 88],
+    "machine": [43, 6, 33, 30, 63],
+    "version": 1
+  },
+  {
+    "id": "77f167b9-41a9-4ef7-8ab5-a3030571fd3e",
+    "drawName": "Baraka",
+    "date": "27/11/2024",
+    "gagnants": [33, 59, 3, 74, 23],
+    "machine": [18, 69, 61, 79, 34],
+    "version": 1
+  },
+  {
+    "id": "7bf232bf-b509-4f51-a5ef-641dd1b33fc5",
+    "drawName": "Baraka",
+    "date": "20/11/2024",
+    "gagnants": [14, 38, 11, 13, 62],
+    "machine": [29, 64, 71, 6, 40],
+    "version": 1
+  },
+  {
+    "id": "64b7346e-175d-45d7-a3b2-a8f205c42b64",
+    "drawName": "Baraka",
+    "date": "13/11/2024",
+    "gagnants": [49, 71, 20, 77, 69],
+    "machine": [30, 46, 10, 54, 78],
+    "version": 1
+  },
+  {
+    "id": "354c8e16-ce76-4f67-afd0-f7cb0c668eb0",
+    "drawName": "Baraka",
+    "date": "06/11/2024",
+    "gagnants": [76, 54, 30, 70, 12],
+    "machine": [37, 29, 19, 83, 25],
+    "version": 1
+  },
+  {
+    "id": "7da095de-cb34-4fc2-acc9-bb6844ed7a3f",
+    "drawName": "Baraka",
+    "date": "30/10/2024",
+    "gagnants": [68, 65, 71, 67, 24],
+    "machine": [63, 50, 75, 77, 51],
+    "version": 1
+  },
+  {
+    "id": "d81688ab-209b-46a1-bdcd-0c2b2210db91",
+    "drawName": "Baraka",
+    "date": "23/10/2024",
+    "gagnants": [78, 38, 29, 26, 90],
+    "machine": [79, 63, 45, 62, 65],
+    "version": 1
+  },
+  {
+    "id": "7e0e11db-407d-4e13-9016-75e300d3599c",
+    "drawName": "Baraka",
+    "date": "16/10/2024",
+    "gagnants": [33, 74, 65, 15, 80],
+    "machine": [32, 51, 75, 67, 46],
+    "version": 1
+  },
+  {
+    "id": "dc67dfc9-0fc2-4ecd-8ee8-9121edb316f3",
+    "drawName": "Baraka",
+    "date": "09/10/2024",
+    "gagnants": [82, 70, 40, 59, 62],
+    "machine": [20, 36, 29, 50, 25],
+    "version": 1
+  },
+  {
+    "id": "5113c24f-acc9-4e59-8881-6edcb82e5ee3",
+    "drawName": "Baraka",
+    "date": "02/10/2024",
+    "gagnants": [3, 2, 70, 64, 84],
+    "machine": [9, 18, 16, 49, 31],
+    "version": 1
+  },
+  {
+    "id": "5b922cb3-9734-46bc-bca6-069cf87c283a",
+    "drawName": "Baraka",
+    "date": "25/09/2024",
+    "gagnants": [64, 48, 47, 75, 31],
+    "machine": [24, 50, 32, 41, 61],
+    "version": 1
+  },
+  {
+    "id": "0ed4c778-12bd-4c77-961d-383f7116544d",
+    "drawName": "Baraka",
+    "date": "18/09/2024",
+    "gagnants": [28, 24, 5, 16, 9],
+    "machine": [69, 7, 67, 85, 53],
+    "version": 1
+  },
+  {
+    "id": "b736ece3-f267-4218-bf7f-13f682ec8db7",
+    "drawName": "Baraka",
+    "date": "11/09/2024",
+    "gagnants": [87, 61, 44, 47, 75],
+    "machine": [58, 69, 54, 51, 83],
+    "version": 1
+  },
+  {
+    "id": "a1148b14-16e1-47fc-8f98-7e453b64e841",
+    "drawName": "Baraka",
+    "date": "04/09/2024",
+    "gagnants": [21, 2, 13, 24, 40],
+    "machine": [22, 90, 72, 15, 35],
+    "version": 1
+  },
+  {
+    "id": "00f1fc55-25f7-4908-9033-2e1c518a2e4e",
+    "drawName": "Baraka",
+    "date": "28/08/2024",
+    "gagnants": [12, 30, 10, 72, 34],
+    "machine": [6, 78, 52, 76, 56],
+    "version": 1
+  },
+  {
+    "id": "033e7693-bb60-4f86-8566-e0d22420cf86",
+    "drawName": "Baraka",
+    "date": "21/08/2024",
+    "gagnants": [49, 72, 2, 33, 8],
+    "machine": [69, 22, 17, 24, 36],
+    "version": 1
+  },
+  {
+    "id": "3ad1d4f0-08c6-4415-a23d-ebeebc8a7451",
+    "drawName": "Baraka",
+    "date": "14/08/2024",
+    "gagnants": [88, 36, 8, 56, 49],
+    "machine": [25, 45, 13, 74, 90],
+    "version": 1
+  },
+  {
+    "id": "915582c9-37c1-49fa-88c7-b9b093b65881",
+    "drawName": "Baraka",
+    "date": "31/07/2024",
+    "gagnants": [50, 37, 61, 75, 83],
+    "machine": [35, 15, 59, 10, 44],
+    "version": 1
+  },
+  {
+    "id": "de2a6f94-53b9-415a-adad-1ed7cc80fbf4",
+    "drawName": "Baraka",
+    "date": "24/07/2024",
+    "gagnants": [17, 10, 49, 29, 71],
+    "machine": [88, 58, 11, 83, 35],
+    "version": 1
+  },
+  {
+    "id": "e38656d7-3251-4fe1-87bf-4fd7ebbeabb6",
+    "drawName": "Baraka",
+    "date": "17/07/2024",
+    "gagnants": [52, 82, 87, 74, 40],
+    "machine": [56, 19, 85, 46, 79],
+    "version": 1
+  },
+  {
+    "id": "c66c67e2-373a-44c4-91e0-4ac583e4343e",
+    "drawName": "Baraka",
+    "date": "10/07/2024",
+    "gagnants": [6, 33, 4, 57, 90],
+    "machine": [75, 89, 47, 60, 36],
+    "version": 1
+  },
+  {
+    "id": "da0af680-9199-4b9b-81d7-817b7da6ad24",
+    "drawName": "Baraka",
+    "date": "03/07/2024",
+    "gagnants": [61, 31, 8, 3, 83],
+    "machine": [9, 19, 52, 47, 86],
+    "version": 1
+  },
+  {
+    "id": "bdda3340-4788-415a-88b3-4075c9d66426",
+    "drawName": "Baraka",
+    "date": "26/06/2024",
+    "gagnants": [56, 21, 26, 54, 64],
+    "machine": [13, 66, 46, 29, 88],
+    "version": 1
+  },
+  {
+    "id": "0d59f98a-6b67-4373-8e3d-1ff1d83d52ad",
+    "drawName": "Baraka",
+    "date": "19/06/2024",
+    "gagnants": [27, 44, 4, 70, 78],
+    "machine": [32, 11, 19, 35, 9],
+    "version": 1
+  },
+  {
+    "id": "dcffbe1a-22b9-4159-a60b-f3fd00cb314d",
+    "drawName": "Baraka",
+    "date": "12/06/2024",
+    "gagnants": [65, 87, 63, 69, 46],
+    "machine": [51, 19, 66, 27, 76],
+    "version": 1
+  },
+  {
+    "id": "f5b03d11-9f7b-464d-be29-284b26deca43",
+    "drawName": "Baraka",
+    "date": "05/06/2024",
+    "gagnants": [62, 5, 50, 25, 81],
+    "machine": [67, 16, 31, 52, 1],
+    "version": 1
+  },
+  {
+    "id": "4871fc5d-3a74-4add-81d6-4b584a006e9b",
+    "drawName": "Baraka",
+    "date": "29/05/2024",
+    "gagnants": [51, 27, 50, 62, 6],
+    "machine": [18, 25, 66, 9, 35],
+    "version": 1
+  },
+  {
+    "id": "28a4183b-af30-4984-b7f2-e4ff53dfcb6a",
+    "drawName": "Baraka",
+    "date": "22/05/2024",
+    "gagnants": [67, 52, 84, 51, 48],
+    "machine": [55, 58, 63, 57, 68],
+    "version": 1
+  },
+  {
+    "id": "69dd3b6c-63e6-4092-a86c-6e69b62e6b22",
+    "drawName": "Baraka",
+    "date": "15/05/2024",
+    "gagnants": [55, 90, 28, 27, 19],
+    "machine": [50, 44, 30, 84, 8],
+    "version": 1
+  },
+  {
+    "id": "22dd7f96-2cab-4462-a4cc-89736da2b89a",
+    "drawName": "Baraka",
+    "date": "08/05/2024",
+    "gagnants": [81, 6, 75, 46, 28],
+    "machine": [71, 39, 25, 63, 85],
+    "version": 1
+  },
+  {
+    "id": "7ff58041-7ab7-4e81-8e02-cee8b8d9d44d",
+    "drawName": "Baraka",
+    "date": "01/05/2024",
+    "gagnants": [77, 76, 19, 22, 14],
+    "machine": [35, 64, 26, 52, 39],
+    "version": 1
+  },
+  {
+    "id": "7707bf39-326a-4fe7-a449-71b85f060d28",
+    "drawName": "Baraka",
+    "date": "24/04/2024",
+    "gagnants": [4, 81, 66, 57, 17],
+    "machine": [76, 43, 15, 14, 44],
+    "version": 1
+  },
+  {
+    "id": "f2cc1072-7654-45ef-9983-3064a0fd7518",
+    "drawName": "Baraka",
+    "date": "17/04/2024",
+    "gagnants": [9, 65, 69, 19, 41],
+    "machine": [80, 17, 57, 87, 89],
+    "version": 1
+  },
+  {
+    "id": "1847e0f9-ed7e-4f31-81b2-bc91775a69b9",
+    "drawName": "Baraka",
+    "date": "10/04/2024",
+    "gagnants": [20, 26, 7, 56, 63],
+    "machine": [5, 85, 50, 32, 3],
+    "version": 1
+  },
+  {
+    "id": "fefb4a12-0b4e-4214-bf7a-ccabe5af6e81",
+    "drawName": "Baraka",
+    "date": "03/04/2024",
+    "gagnants": [53, 71, 12, 70, 90],
+    "machine": [45, 22, 1, 75, 30],
+    "version": 1
+  },
+  {
+    "id": "d72e950d-49cd-4f5a-97e0-699bb708c057",
+    "drawName": "Baraka",
+    "date": "27/03/2024",
+    "gagnants": [81, 21, 16, 52, 87],
+    "machine": [17, 86, 28, 60, 61],
+    "version": 1
+  },
+  {
+    "id": "ebe6e3a3-6209-4afe-9251-54498831d1b3",
+    "drawName": "Baraka",
+    "date": "20/03/2024",
+    "gagnants": [34, 62, 18, 55, 43],
+    "machine": [74, 32, 41, 14, 40],
+    "version": 1
+  },
+  {
+    "id": "59465264-6336-4bb5-a7b2-2fef07d8abb3",
+    "drawName": "Baraka",
+    "date": "13/03/2024",
+    "gagnants": [49, 32, 25, 33, 71],
+    "machine": [62, 18, 48, 72, 6],
+    "version": 1
+  },
+  {
+    "id": "43ddf968-467c-4f08-9d55-44a306e2b752",
+    "drawName": "Baraka",
+    "date": "06/03/2024",
+    "gagnants": [35, 76, 50, 60, 30],
+    "machine": [79, 28, 82, 7, 88],
+    "version": 1
+  },
+  {
+    "id": "308ce3b5-fa35-45fd-bb28-e98c174b1ef7",
+    "drawName": "Baraka",
+    "date": "28/02/2024",
+    "gagnants": [2, 67, 12, 1, 25],
+    "machine": [82, 5, 15, 7, 17],
+    "version": 1
+  },
+  {
+    "id": "f51cc47a-cfd5-4835-a090-fb8ea04d4351",
+    "drawName": "Baraka",
+    "date": "21/02/2024",
+    "gagnants": [87, 51, 37, 61, 6],
+    "machine": [5, 66, 67, 63, 35],
+    "version": 1
+  },
+  {
+    "id": "920f1bee-840b-46e2-8da2-de1bc1191d71",
+    "drawName": "Baraka",
+    "date": "14/02/2024",
+    "gagnants": [82, 40, 46, 84, 24],
+    "machine": [79, 52, 58, 80, 2],
+    "version": 1
+  },
+  {
+    "id": "1f77d6a0-73ee-4803-b573-2b7292d0cefb",
+    "drawName": "Baraka",
+    "date": "07/02/2024",
+    "gagnants": [61, 59, 70, 48, 1],
+    "machine": [20, 58, 18, 25, 60],
+    "version": 1
+  },
+  {
+    "id": "ca5489ca-fc65-4fbe-b797-598e96fcd100",
+    "drawName": "Baraka",
+    "date": "31/01/2024",
+    "gagnants": [32, 62, 55, 77, 73],
+    "machine": [41, 18, 20, 38, 21],
+    "version": 1
+  },
+  {
+    "id": "c58db685-29b5-4e33-bf2e-f377d9dfdf80",
+    "drawName": "Baraka",
+    "date": "24/01/2024",
+    "gagnants": [59, 84, 9, 67, 89],
+    "machine": [38, 13, 80, 32, 42],
+    "version": 1
+  },
+  {
+    "id": "400a4116-225f-4164-ae9e-b406927ed570",
+    "drawName": "Baraka",
+    "date": "17/01/2024",
+    "gagnants": [61, 82, 37, 54, 29],
+    "machine": [80, 68, 64, 62, 45],
+    "version": 1
+  },
+  {
+    "id": "e0ad3cc1-646c-40fd-b563-d15a6ae989fd",
+    "drawName": "Baraka",
+    "date": "10/01/2024",
+    "gagnants": [7, 72, 78, 13, 77],
+    "machine": [36, 79, 80, 89, 85],
+    "version": 1
+  },
+  {
+    "id": "806a867a-c023-4602-b93f-d98a4d23ef61",
+    "drawName": "Baraka",
+    "date": "03/01/2024",
+    "gagnants": [9, 48, 76, 53, 61],
+    "machine": [38, 18, 17, 62, 81],
+    "version": 1
+  },
+  {
+    "id": "cf812c3c-67cd-4764-abb7-48044bc26b33",
+    "drawName": "Baraka",
+    "date": "27/12/2023",
+    "gagnants": [81, 56, 13, 44, 64],
+    "machine": [63, 4, 23, 21, 45],
+    "version": 1
+  },
+  {
+    "id": "e7ff3492-b5df-4317-9008-139902134a24",
+    "drawName": "Baraka",
+    "date": "20/12/2023",
+    "gagnants": [74, 54, 63, 7, 80],
+    "machine": [32, 37, 4, 3, 28],
+    "version": 1
+  },
+  {
+    "id": "ca144768-f5d4-47df-9d87-a60d4a6fe77a",
+    "drawName": "Baraka",
+    "date": "13/12/2023",
+    "gagnants": [16, 19, 11, 3, 29],
+    "machine": [6, 41, 5, 27, 26],
+    "version": 1
+  },
+  {
+    "id": "59191427-9c2a-4870-8d93-2c0de5def781",
+    "drawName": "Baraka",
+    "date": "06/12/2023",
+    "gagnants": [49, 23, 80, 78, 48],
+    "machine": [33, 88, 25, 83, 68],
+    "version": 1
+  },
+  {
+    "id": "02eedae7-9f5f-4fac-9336-2ae3d1f1c938",
+    "drawName": "Baraka",
+    "date": "29/11/2023",
+    "gagnants": [33, 70, 26, 8, 61],
+    "machine": [88, 46, 20, 66, 85],
+    "version": 1
+  },
+  {
+    "id": "7c4d303b-e09c-4d7d-826f-a358fe099bfa",
+    "drawName": "Baraka",
+    "date": "22/11/2023",
+    "gagnants": [79, 12, 69, 86, 44],
+    "machine": [35, 9, 21, 1, 73],
+    "version": 1
+  },
+  {
+    "id": "b26e044b-e0ab-4c4c-b7ed-511f964aae1d",
+    "drawName": "Baraka",
+    "date": "15/11/2023",
+    "gagnants": [71, 65, 47, 50, 63],
+    "machine": [77, 15, 9, 40, 52],
+    "version": 1
+  },
+  {
+    "id": "25f82952-7bae-430b-a305-862d592bd793",
+    "drawName": "Baraka",
+    "date": "08/11/2023",
+    "gagnants": [50, 73, 27, 74, 34],
+    "machine": [82, 23, 58, 86, 43],
+    "version": 1
+  },
+  {
+    "id": "3a73f75e-8dd7-4111-a873-19f2d922b0ec",
+    "drawName": "Baraka",
+    "date": "01/11/2023",
+    "gagnants": [11, 47, 70, 44, 71],
+    "machine": [89, 15, 45, 3, 67],
+    "version": 1
+  },
+  {
+    "id": "505095e3-a324-4e14-8566-aae11cafa469",
+    "drawName": "Baraka",
+    "date": "25/10/2023",
+    "gagnants": [11, 40, 31, 50, 43],
+    "machine": [2, 20, 88, 35, 53],
+    "version": 1
+  },
+  {
+    "id": "9aae3398-74fd-43bd-a730-8a5942188078",
+    "drawName": "Baraka",
+    "date": "18/10/2023",
+    "gagnants": [41, 40, 22, 83, 81],
+    "machine": [10, 67, 64, 89, 12],
+    "version": 1
+  },
+  {
+    "id": "d96a8a69-bcca-4939-b328-75628cabfb53",
+    "drawName": "Baraka",
+    "date": "11/10/2023",
+    "gagnants": [19, 21, 11, 88, 40],
+    "machine": [18, 67, 10, 83, 32],
+    "version": 1
+  },
+  {
+    "id": "6f6d3c7b-0d1e-4faf-bf8e-f9dd29f12322",
+    "drawName": "Baraka",
+    "date": "04/10/2023",
+    "gagnants": [33, 80, 38, 49, 69],
+    "machine": [58, 84, 60, 28, 9],
+    "version": 1
+  },
+  {
+    "id": "619d80ef-729f-482b-9a1d-0b852c719daf",
+    "drawName": "Baraka",
+    "date": "27/09/2023",
+    "gagnants": [63, 73, 53, 87, 58],
+    "machine": [6, 45, 24, 33, 86],
+    "version": 1
+  },
+  {
+    "id": "3e4e6547-3099-4112-b7ed-9664a652da7a",
+    "drawName": "Baraka",
+    "date": "06/09/2023",
+    "gagnants": [41, 34, 16, 73, 67],
+    "machine": [82, 52, 89, 30, 70],
+    "version": 1
+  },
+  {
+    "id": "4c22e339-fb2e-4429-98df-36cb282bc2b3",
+    "drawName": "Baraka",
+    "date": "30/08/2023",
+    "gagnants": [72, 19, 80, 42, 63],
+    "machine": [54, 7, 30, 66, 33],
+    "version": 1
+  },
+  {
+    "id": "fbde09c1-4de7-4285-9a6b-ac71dc1c83f7",
+    "drawName": "Baraka",
+    "date": "23/08/2023",
+    "gagnants": [72, 64, 12, 45, 5],
+    "machine": [23, 84, 55, 31, 10],
+    "version": 1
+  },
+  {
+    "id": "93f8e556-2ac5-4f58-a014-f8449338e37d",
+    "drawName": "Baraka",
+    "date": "16/08/2023",
+    "gagnants": [24, 87, 41, 51, 19],
+    "machine": [81, 62, 11, 63, 50],
+    "version": 1
+  },
+  {
+    "id": "8e381652-7686-454c-96ef-dec9ca44fd6a",
+    "drawName": "Baraka",
+    "date": "09/08/2023",
+    "gagnants": [77, 42, 63, 48, 76],
+    "machine": [83, 53, 44, 31, 32],
+    "version": 1
+  },
+  {
+    "id": "c0fcacfe-04e4-48b8-8814-9a949893c7a9",
+    "drawName": "Baraka",
+    "date": "02/08/2023",
+    "gagnants": [73, 32, 42, 89, 53],
+    "machine": [71, 52, 36, 16, 39],
+    "version": 1
+  },
+  {
+    "id": "eaf15d01-dca1-4244-8b7b-9ab6e4d157b1",
+    "drawName": "Baraka",
+    "date": "26/07/2023",
+    "gagnants": [12, 90, 14, 87, 21],
+    "machine": [46, 17, 40, 35, 4],
+    "version": 1
+  },
+  {
+    "id": "de93aa5d-2c95-47f9-af8f-e3fcf2dd0a19",
+    "drawName": "Baraka",
+    "date": "19/07/2023",
+    "gagnants": [10, 53, 85, 66, 39],
+    "machine": [4, 33, 7, 26, 13],
+    "version": 1
+  },
+  {
+    "id": "93dbbd98-f5ff-48f4-8557-45a12f928dbf",
+    "drawName": "Baraka",
+    "date": "12/07/2023",
+    "gagnants": [40, 45, 42, 16, 29],
+    "machine": [37, 7, 88, 41, 19],
+    "version": 1
+  },
+  {
+    "id": "a035045d-006e-4098-9801-9e70383f6058",
+    "drawName": "Baraka",
+    "date": "05/07/2023",
+    "gagnants": [35, 56, 13, 58, 64],
+    "machine": [70, 1, 6, 76, 29],
+    "version": 1
+  },
+  {
+    "id": "6dd1a049-29d5-498d-a1e9-e92a71a437f1",
+    "drawName": "Baraka",
+    "date": "28/06/2023",
+    "gagnants": [41, 75, 17, 16, 24],
+    "machine": [45, 20, 54, 48, 72],
+    "version": 1
+  },
+  {
+    "id": "d75d6f14-3b38-4e00-b13c-b3d3d8806eec",
+    "drawName": "Baraka",
+    "date": "21/06/2023",
+    "gagnants": [19, 85, 8, 69, 61],
+    "machine": [35, 71, 50, 37, 90],
+    "version": 1
+  },
+  {
+    "id": "3e0af839-81ed-4554-903b-3927ed52016c",
+    "drawName": "Baraka",
+    "date": "14/06/2023",
+    "gagnants": [80, 6, 37, 63, 86],
+    "machine": [30, 9, 69, 26, 7],
+    "version": 1
+  },
+  {
+    "id": "360b1a77-940f-4d6e-a39e-673fb4ba4a00",
+    "drawName": "Baraka",
+    "date": "07/06/2023",
+    "gagnants": [32, 8, 78, 71, 64],
+    "machine": [33, 31, 63, 16, 29],
+    "version": 1
+  },
+  {
+    "id": "e0363928-eccf-45c4-a570-5d2d28351301",
+    "drawName": "Baraka",
+    "date": "31/05/2023",
+    "gagnants": [12, 51, 10, 55, 45],
+    "machine": [80, 21, 66, 38, 47],
+    "version": 1
+  },
+  {
+    "id": "28c82230-a13b-45c1-8291-caeb6010f9a1",
+    "drawName": "Baraka",
+    "date": "24/05/2023",
+    "gagnants": [48, 8, 29, 31, 59],
+    "machine": [85, 25, 64, 38, 15],
+    "version": 1
+  },
+  {
+    "id": "c9fbb84f-d448-4a63-8527-102d3a0beb56",
+    "drawName": "Baraka",
+    "date": "17/05/2023",
+    "gagnants": [16, 62, 89, 36, 45],
+    "machine": [69, 17, 75, 30, 24],
+    "version": 1
+  },
+  {
+    "id": "0c3482cd-9abf-4903-b19a-c96b6395a64a",
+    "drawName": "Baraka",
+    "date": "10/05/2023",
+    "gagnants": [52, 4, 76, 83, 80],
+    "machine": [32, 16, 12, 89, 42],
+    "version": 1
+  },
+  {
+    "id": "53253da4-b9db-46b2-8028-4e4ec62ead44",
+    "drawName": "Baraka",
+    "date": "03/05/2023",
+    "gagnants": [13, 22, 39, 3, 70],
+    "machine": [12, 1, 14, 46, 35],
+    "version": 1
+  },
+  {
+    "id": "38255f61-48f6-4a63-8883-b07b13109906",
+    "drawName": "Baraka",
+    "date": "26/04/2023",
+    "gagnants": [21, 18, 49, 10, 79],
+    "machine": [9, 51, 87, 80, 2],
+    "version": 1
+  },
+  {
+    "id": "ea02d93c-e0aa-4d3d-8d93-4c9b11955f0a",
+    "drawName": "Baraka",
+    "date": "19/04/2023",
+    "gagnants": [45, 68, 58, 28, 65],
+    "machine": [14, 41, 36, 79, 8],
+    "version": 1
+  },
+  {
+    "id": "21aeabcf-4c70-454a-87ff-a7b1c6b65e6a",
+    "drawName": "Baraka",
+    "date": "12/04/2023",
+    "gagnants": [2, 39, 12, 69, 44],
+    "machine": [42, 15, 84, 5, 27],
+    "version": 1
+  },
+  {
+    "id": "f53c8207-eb24-4e57-8fae-a04012f7541b",
+    "drawName": "Baraka",
+    "date": "05/04/2023",
+    "gagnants": [9, 52, 6, 11, 82],
+    "machine": [46, 19, 20, 86, 16],
+    "version": 1
+  },
+  {
+    "id": "6d896d9e-e17c-484c-a0ae-8b67fdcf7055",
+    "drawName": "Baraka",
+    "date": "22/03/2023",
+    "gagnants": [19, 48, 79, 25, 22],
+    "machine": [11, 27, 41, 86, 59],
+    "version": 1
+  },
+  {
+    "id": "72627091-d0dc-423e-88d0-f30389ff262e",
+    "drawName": "Baraka",
+    "date": "15/03/2023",
+    "gagnants": [54, 78, 22, 14, 46],
+    "machine": [29, 18, 17, 34, 11],
+    "version": 1
+  },
+  {
+    "id": "291c371d-77c1-42d8-8808-b83733c2a286",
+    "drawName": "Baraka",
+    "date": "08/03/2023",
+    "gagnants": [11, 46, 64, 12, 52],
+    "machine": [55, 76, 69, 30, 14],
+    "version": 1
+  },
+  {
+    "id": "a228e219-aff3-4d94-af0f-6632b5c2d79b",
+    "drawName": "Baraka",
+    "date": "01/03/2023",
+    "gagnants": [44, 89, 1, 60, 73],
+    "machine": [6, 56, 71, 75, 69],
+    "version": 1
+  },
+  {
+    "id": "587767c9-146a-40e9-82d6-c79f88010669",
+    "drawName": "Baraka",
+    "date": "22/02/2023",
+    "gagnants": [58, 43, 10, 1, 42],
+    "machine": [13, 48, 4, 35, 41],
+    "version": 1
+  },
+  {
+    "id": "2b7ff7d5-e038-4465-a9b9-0e50d4e777e6",
+    "drawName": "Baraka",
+    "date": "15/02/2023",
+    "gagnants": [3, 18, 38, 53, 2],
+    "machine": [31, 62, 36, 88, 32],
+    "version": 1
+  },
+  {
+    "id": "99cc7844-1324-4264-a498-39e71e4b2600",
+    "drawName": "Baraka",
+    "date": "08/02/2023",
+    "gagnants": [55, 22, 65, 11, 84],
+    "machine": [39, 85, 51, 63, 48],
+    "version": 1
+  },
+  {
+    "id": "0b9e1406-3623-4909-a9b9-62fc4110cd00",
+    "drawName": "Baraka",
+    "date": "01/02/2023",
+    "gagnants": [24, 13, 71, 84, 73],
+    "machine": [12, 16, 87, 27, 88],
+    "version": 1
+  },
+  {
+    "id": "f957743d-66cd-461b-a0c1-e5b5648d537e",
+    "drawName": "Baraka",
+    "date": "25/01/2023",
+    "gagnants": [28, 11, 29, 22, 37],
+    "machine": [12, 34, 38, 27, 48],
+    "version": 1
+  },
+  {
+    "id": "383016ae-3428-4b7d-92fd-0b31132c5903",
+    "drawName": "Baraka",
+    "date": "18/01/2023",
+    "gagnants": [10, 16, 79, 74, 36],
+    "machine": [68, 63, 90, 7, 41],
+    "version": 1
+  },
+  {
+    "id": "3ccfe582-7ad8-4d47-86ed-ecbb12ac3ea1",
+    "drawName": "Baraka",
+    "date": "11/01/2023",
+    "gagnants": [20, 9, 90, 80, 15],
+    "machine": [23, 88, 13, 29, 83],
+    "version": 1
+  },
+  {
+    "id": "7dbb2929-37e3-4313-a706-52ef62ecc78e",
+    "drawName": "Baraka",
+    "date": "04/01/2023",
+    "gagnants": [73, 57, 49, 56, 13],
+    "machine": [59, 58, 86, 2, 25],
+    "version": 1
+  },
+  {
+    "id": "b8f3612b-8e61-44b3-94f3-09c4efdbdbaf",
+    "drawName": "Baraka",
+    "date": "28/12/2022",
+    "gagnants": [2, 74, 71, 55, 25],
+    "machine": [84, 46, 14, 1, 61],
+    "version": 1
+  },
+  {
+    "id": "53e7024e-fb03-468c-9af7-187be1c796c6",
+    "drawName": "Baraka",
+    "date": "21/12/2022",
+    "gagnants": [77, 53, 90, 76, 46],
+    "machine": [81, 88, 83, 87, 51],
+    "version": 1
+  },
+  {
+    "id": "02b85fc9-86cc-47ff-9cd9-83d874d35f06",
+    "drawName": "Baraka",
+    "date": "14/12/2022",
+    "gagnants": [51, 39, 44, 50, 56],
+    "machine": [7, 75, 6, 84, 47],
+    "version": 1
+  },
+  {
+    "id": "65cacdbc-c79a-4953-8af0-916ce6472243",
+    "drawName": "Baraka",
+    "date": "07/12/2022",
+    "gagnants": [24, 85, 38, 54, 42],
+    "machine": [56, 73, 7, 89, 29],
+    "version": 1
+  },
+  {
+    "id": "a30dc418-69a7-412f-a0b1-8cf7eda1254b",
+    "drawName": "Baraka",
+    "date": "30/11/2022",
+    "gagnants": [69, 42, 71, 66, 52],
+    "machine": [82, 23, 4, 31, 74],
+    "version": 1
+  },
+  {
+    "id": "b17e53dd-0177-4f30-83a8-0cad3c1750f2",
+    "drawName": "Baraka",
+    "date": "23/11/2022",
+    "gagnants": [80, 37, 76, 87, 79],
+    "machine": [33, 28, 15, 65, 42],
+    "version": 1
+  },
+  {
+    "id": "8d95816e-6781-4e72-a115-787a8c1d3f61",
+    "drawName": "Baraka",
+    "date": "16/11/2022",
+    "gagnants": [41, 14, 24, 25, 28],
+    "machine": [84, 69, 61, 76, 87],
+    "version": 1
+  },
+  {
+    "id": "b05eccac-2082-4e43-b8c6-82b17a893342",
+    "drawName": "Baraka",
+    "date": "09/11/2022",
+    "gagnants": [67, 87, 90, 54, 20],
+    "machine": [43, 62, 31, 69, 2],
+    "version": 1
+  },
+  {
+    "id": "2a6406af-6f9b-4791-8df4-7f570f231ad1",
+    "drawName": "Baraka",
+    "date": "02/11/2022",
+    "gagnants": [35, 53, 47, 60, 4],
+    "machine": [81, 9, 79, 45, 38],
+    "version": 1
+  },
+  {
+    "id": "e6c145df-6c14-455d-9e4e-281c7302cee7",
+    "drawName": "Baraka",
+    "date": "26/10/2022",
+    "gagnants": [73, 13, 26, 39, 29],
+    "machine": [83, 80, 78, 62, 18],
+    "version": 1
+  },
+  {
+    "id": "b7be9f4d-ba5a-43da-87cb-2481a6f588ad",
+    "drawName": "Baraka",
+    "date": "19/10/2022",
+    "gagnants": [31, 63, 38, 77, 62],
+    "machine": [82, 48, 13, 45, 79],
+    "version": 1
+  },
+  {
+    "id": "2373ec40-cc7d-4396-947c-4307538a74e1",
+    "drawName": "Baraka",
+    "date": "12/10/2022",
+    "gagnants": [6, 89, 58, 63, 5],
+    "machine": [86, 33, 17, 31, 42],
+    "version": 1
+  },
+  {
+    "id": "4a63fe11-aeee-4a4d-b909-8bf00c294c2e",
+    "drawName": "Baraka",
+    "date": "28/09/2022",
+    "gagnants": [3, 7, 16, 90, 17],
+    "machine": [36, 40, 30, 38, 83],
+    "version": 1
+  },
+  {
+    "id": "da067ebd-3175-44f2-91ac-ce1348f938ac",
+    "drawName": "Baraka",
+    "date": "21/09/2022",
+    "gagnants": [89, 28, 8, 72, 14],
+    "machine": [27, 38, 11, 33, 15],
+    "version": 1
+  },
+  {
+    "id": "385bd384-952d-4429-a25e-dbdd7f9a44e9",
+    "drawName": "Baraka",
+    "date": "14/09/2022",
+    "gagnants": [9, 86, 78, 31, 74],
+    "machine": [42, 15, 30, 88, 28],
+    "version": 1
+  },
+  {
+    "id": "f5c5d584-fe48-4dd0-a0a6-3a54121ffecd",
+    "drawName": "Baraka",
+    "date": "07/09/2022",
+    "gagnants": [28, 50, 16, 54, 71],
+    "machine": [13, 43, 41, 20, 29],
+    "version": 1
+  },
+  {
+    "id": "71aa2a58-42a6-4acc-8ebb-ef239133be7c",
+    "drawName": "Baraka",
+    "date": "31/08/2022",
+    "gagnants": [39, 56, 71, 3, 1],
+    "machine": [35, 51, 76, 46, 4],
+    "version": 1
+  },
+  {
+    "id": "189fc49b-fc9f-4210-bfbb-0882ab8e45a7",
+    "drawName": "Baraka",
+    "date": "24/08/2022",
+    "gagnants": [6, 54, 87, 10, 43],
+    "machine": [18, 80, 64, 72, 32],
+    "version": 1
+  },
+  {
+    "id": "53a7e1a1-d7b9-4b12-a8a2-83ac1f08d28a",
+    "drawName": "Baraka",
+    "date": "17/08/2022",
+    "gagnants": [55, 23, 32, 85, 2],
+    "machine": [90, 45, 70, 11, 1],
+    "version": 1
+  },
+  {
+    "id": "06c22db6-4950-466c-8b8e-41e081c91ab3",
+    "drawName": "Baraka",
+    "date": "10/08/2022",
+    "gagnants": [33, 78, 51, 48, 22],
+    "machine": [8, 67, 64, 35, 13],
+    "version": 1
+  },
+  {
+    "id": "80a615e5-7daf-4f2f-bba2-da097a31e2c2",
+    "drawName": "Baraka",
+    "date": "03/08/2022",
+    "gagnants": [60, 88, 16, 62, 2],
+    "machine": [21, 31, 83, 30, 90],
+    "version": 1
+  },
+  {
+    "id": "f9e35173-1822-44c2-8bcf-05e4a287a58d",
+    "drawName": "Baraka",
+    "date": "27/07/2022",
+    "gagnants": [32, 30, 77, 20, 25],
+    "machine": [76, 12, 23, 57, 19],
+    "version": 1
+  },
+  {
+    "id": "57bfc08a-a078-4318-bdeb-26dd1ae6d82c",
+    "drawName": "Baraka",
+    "date": "20/07/2022",
+    "gagnants": [79, 29, 52, 66, 65],
+    "machine": [31, 43, 63, 57, 14],
+    "version": 1
+  },
+  {
+    "id": "aa6cf2f4-42c4-4b6f-8894-5851a7f4b28c",
+    "drawName": "Baraka",
+    "date": "13/07/2022",
+    "gagnants": [81, 51, 87, 15, 44],
+    "machine": [88, 23, 58, 9, 61],
+    "version": 1
+  },
+  {
+    "id": "9910499b-a8b4-40eb-a1ae-4d37c0681a3b",
+    "drawName": "Baraka",
+    "date": "06/07/2022",
+    "gagnants": [38, 43, 17, 10, 74],
+    "machine": [60, 15, 6, 59, 82],
+    "version": 1
+  },
+  {
+    "id": "33c98764-0fc7-4ba6-9f2b-9abe480fa96d",
+    "drawName": "Baraka",
+    "date": "29/06/2022",
+    "gagnants": [5, 34, 69, 84, 77],
+    "machine": [44, 20, 47, 17, 61],
+    "version": 1
+  },
+  {
+    "id": "05703326-6b57-4e5f-9522-6e8a2afb0cdd",
+    "drawName": "Baraka",
+    "date": "22/06/2022",
+    "gagnants": [14, 36, 22, 13, 27],
+    "machine": [89, 16, 39, 85, 57],
+    "version": 1
+  },
+  {
+    "id": "7b7b0c62-5755-4281-ad56-a9ae6c9ffdc3",
+    "drawName": "Baraka",
+    "date": "15/06/2022",
+    "gagnants": [12, 54, 68, 21, 20],
+    "machine": [50, 24, 34, 70, 22],
+    "version": 1
+  },
+  {
+    "id": "acc8b9b5-a7b4-4b02-a15a-bdf00b05a968",
+    "drawName": "Baraka",
+    "date": "08/06/2022",
+    "gagnants": [87, 18, 72, 8, 46],
+    "machine": [10, 77, 84, 43, 5],
+    "version": 1
+  },
+  {
+    "id": "104c3701-500a-4da3-aa94-b17ec223037d",
+    "drawName": "Baraka",
+    "date": "01/06/2022",
+    "gagnants": [18, 63, 50, 69, 40],
+    "machine": [70, 21, 11, 59, 2],
+    "version": 1
+  },
+  {
+    "id": "d0e6b501-83a7-475a-ac1e-f83537e0528e",
+    "drawName": "Baraka",
+    "date": "25/05/2022",
+    "gagnants": [44, 77, 43, 50, 73],
+    "machine": [59, 21, 72, 69, 54],
+    "version": 1
+  },
+  {
+    "id": "5d6ff8f0-e006-4c0f-8460-0f4e1c22e1f8",
+    "drawName": "Baraka",
+    "date": "18/05/2022",
+    "gagnants": [4, 29, 72, 68, 30],
+    "machine": [84, 49, 89, 48, 88],
+    "version": 1
+  },
+  {
+    "id": "1ac052be-2228-4a14-9ab1-ff2d1bd8378d",
+    "drawName": "Baraka",
+    "date": "11/05/2022",
+    "gagnants": [32, 5, 53, 30, 13],
+    "machine": [22, 20, 25, 57, 38],
+    "version": 1
+  },
+  {
+    "id": "fc28cf84-0b66-44be-8f61-0b62e53a891e",
+    "drawName": "Baraka",
+    "date": "04/05/2022",
+    "gagnants": [31, 33, 74, 64, 48],
+    "machine": [10, 82, 45, 52, 21],
+    "version": 1
+  },
+  {
+    "id": "637d9847-677a-40a5-8734-cb3dd138c016",
+    "drawName": "Baraka",
+    "date": "27/04/2022",
+    "gagnants": [78, 49, 55, 57, 47],
+    "machine": [51, 28, 3, 17, 2],
+    "version": 1
+  },
+  {
+    "id": "cbe4418f-bda8-4807-a951-8be548c9734b",
+    "drawName": "Baraka",
+    "date": "20/04/2022",
+    "gagnants": [46, 3, 61, 57, 73],
+    "machine": [60, 63, 2, 40, 58],
+    "version": 1
+  },
+  {
+    "id": "5a1d4f06-d270-47dc-b6a6-83242347ac6a",
+    "drawName": "Baraka",
+    "date": "06/04/2022",
+    "gagnants": [74, 60, 59, 34, 84],
+    "machine": [23, 17, 29, 38, 32],
+    "version": 1
+  },
+  {
+    "id": "6719c9c2-be00-4e1f-9013-316196158623",
+    "drawName": "Baraka",
+    "date": "30/03/2022",
+    "gagnants": [32, 69, 40, 45, 78],
+    "machine": [50, 73, 56, 62, 28],
+    "version": 1
+  },
+  {
+    "id": "35a4a8ba-fab8-495a-ab42-88f2863a767f",
+    "drawName": "Baraka",
+    "date": "23/03/2022",
+    "gagnants": [60, 57, 31, 52, 12],
+    "machine": [58, 37, 75, 22, 19],
+    "version": 1
+  },
+  {
+    "id": "80a687d3-d9f2-4403-b966-9cca798d11c4",
+    "drawName": "Baraka",
+    "date": "16/03/2022",
+    "gagnants": [88, 85, 83, 72, 3],
+    "machine": [17, 66, 59, 84, 86],
+    "version": 1
+  },
+  {
+    "id": "530b32a9-0f69-488f-bc35-2f938a743e33",
+    "drawName": "Baraka",
+    "date": "09/03/2022",
+    "gagnants": [2, 37, 14, 24, 30],
+    "machine": [26, 7, 4, 9, 33],
+    "version": 1
+  },
+  {
+    "id": "2736e6e1-1ebf-4513-9a5d-c4cb2aed55a7",
+    "drawName": "Baraka",
+    "date": "02/03/2022",
+    "gagnants": [54, 59, 79, 75, 85],
+    "machine": [83, 14, 24, 38, 87],
+    "version": 1
+  },
+  {
+    "id": "4d9369bc-d867-46da-a3af-a9d18a36e150",
+    "drawName": "Baraka",
+    "date": "23/02/2022",
+    "gagnants": [78, 8, 62, 86, 5],
+    "machine": [26, 30, 46, 39, 12],
+    "version": 1
+  },
+  {
+    "id": "62694269-30ac-4aae-a625-ce6aed7ac808",
+    "drawName": "Baraka",
+    "date": "16/02/2022",
+    "gagnants": [18, 70, 33, 74, 80],
+    "machine": [21, 10, 28, 65, 19],
+    "version": 1
+  },
+  {
+    "id": "1521b883-7f48-4d7f-9046-1f24c39594a8",
+    "drawName": "Baraka",
+    "date": "09/02/2022",
+    "gagnants": [70, 59, 11, 15, 16],
+    "machine": [10, 41, 45, 27, 26],
+    "version": 1
+  },
+  {
+    "id": "942f4648-7939-4e64-a5fe-bc670a694238",
+    "drawName": "Baraka",
+    "date": "02/02/2022",
+    "gagnants": [7, 24, 81, 34, 46],
+    "machine": [54, 59, 22, 72, 21],
+    "version": 1
+  },
+  {
+    "id": "7cf8ebe5-0621-4dcd-90ad-9827db2c2d40",
+    "drawName": "Baraka",
+    "date": "26/01/2022",
+    "gagnants": [47, 56, 66, 26, 31],
+    "machine": [24, 33, 84, 81, 89],
+    "version": 1
+  },
+  {
+    "id": "e15e454d-eafe-4635-83dc-873f03d95cdb",
+    "drawName": "Baraka",
+    "date": "19/01/2022",
+    "gagnants": [21, 75, 83, 67, 81],
+    "machine": [32, 9, 45, 19, 16],
+    "version": 1
+  },
+  {
+    "id": "240b169a-9623-401f-9660-82150f30ac7b",
+    "drawName": "Baraka",
+    "date": "12/01/2022",
+    "gagnants": [89, 81, 66, 67, 65],
+    "machine": [1, 3, 38, 69, 8],
+    "version": 1
+  },
+  {
+    "id": "baa896b6-a428-48ef-ba9d-bc3b3afaa99e",
+    "drawName": "Baraka",
+    "date": "05/01/2022",
+    "gagnants": [1, 7, 27, 17, 8],
+    "machine": [69, 34, 75, 66, 80],
+    "version": 1
+  },
+  {
+    "id": "bac84498-d28d-4ece-b499-c9d27550d946",
+    "drawName": "Baraka",
+    "date": "29/12/2021",
+    "gagnants": [18, 67, 82, 9, 65],
+    "machine": [87, 80, 25, 76, 28],
+    "version": 1
+  },
+  {
+    "id": "548202f6-75f0-4e61-a2fb-ddacc6221bb8",
+    "drawName": "Baraka",
+    "date": "22/12/2021",
+    "gagnants": [53, 7, 88, 63, 78],
+    "machine": [71, 39, 27, 84, 32],
+    "version": 1
+  },
+  {
+    "id": "9a07ae1e-0a22-4bc5-855f-73d8dfe465a3",
+    "drawName": "Baraka",
+    "date": "15/12/2021",
+    "gagnants": [42, 89, 28, 41, 35],
+    "machine": [26, 85, 79, 44, 6],
+    "version": 1
+  },
+  {
+    "id": "5b6cfd22-e769-49bf-a1e8-50cfa43e6e15",
+    "drawName": "Baraka",
+    "date": "08/12/2021",
+    "gagnants": [5, 18, 43, 35, 3],
+    "machine": [66, 72, 41, 81, 80],
+    "version": 1
+  },
+  {
+    "id": "05d7a2e9-16f2-4d5d-b82f-719fabbb5cde",
+    "drawName": "Baraka",
+    "date": "01/12/2021",
+    "gagnants": [42, 51, 57, 41, 81],
+    "machine": [26, 47, 88, 16, 9],
+    "version": 1
+  },
+  {
+    "id": "85298870-d7bd-4d3a-9a20-6a4fb20b52a8",
+    "drawName": "Baraka",
+    "date": "24/11/2021",
+    "gagnants": [46, 36, 11, 62, 68],
+    "machine": [46, 74, 54, 7, 30],
+    "version": 1
+  },
+  {
+    "id": "945447b3-3887-486a-84b5-b62f31e99990",
+    "drawName": "Baraka",
+    "date": "17/11/2021",
+    "gagnants": [30, 65, 53, 75, 38],
+    "machine": [77, 11, 78, 63, 88],
+    "version": 1
+  },
+  {
+    "id": "ecbc68b5-3363-4892-8005-23454d1ca8a2",
+    "drawName": "Baraka",
+    "date": "10/11/2021",
+    "gagnants": [90, 66, 12, 28, 65],
+    "machine": [49, 15, 2, 44, 72],
+    "version": 1
+  },
+  {
+    "id": "6f8465a2-6b89-43cb-a358-2a7b15d90f70",
+    "drawName": "Baraka",
+    "date": "03/11/2021",
+    "gagnants": [24, 6, 36, 4, 48],
+    "machine": [60, 35, 84, 67, 18],
+    "version": 1
+  },
+  {
+    "id": "88396ec6-a88b-4900-b6b2-472b58fcd9ec",
+    "drawName": "Baraka",
+    "date": "27/10/2021",
+    "gagnants": [78, 71, 34, 49, 67],
+    "machine": [11, 45, 69, 25, 32],
+    "version": 1
+  },
+  {
+    "id": "95dfa084-3f23-4624-bdbb-15e07700e53f",
+    "drawName": "Baraka",
+    "date": "20/10/2021",
+    "gagnants": [6, 30, 55, 46, 14],
+    "machine": [19, 80, 2, 85, 42],
+    "version": 1
+  },
+  {
+    "id": "09f677cd-fc31-4cf3-923e-150d7169c337",
+    "drawName": "Baraka",
+    "date": "13/10/2021",
+    "gagnants": [51, 48, 26, 30, 68],
+    "machine": [54, 24, 47, 71, 19],
+    "version": 1
+  },
+  {
+    "id": "acf89d71-6a87-4c2f-9787-9dce1099c9c3",
+    "drawName": "Baraka",
+    "date": "06/10/2021",
+    "gagnants": [68, 54, 1, 44, 81],
+    "machine": [37, 75, 72, 82, 39],
+    "version": 1
+  }
+]
+
+print(f"Baraka count: {len(baraka_data)}")
+with open('data/backups/baraka.json', 'w') as f:
+    json.dump(baraka_data, f, indent=2)
+

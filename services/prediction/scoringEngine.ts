@@ -80,6 +80,10 @@ export const calculateScores = (
 
   const failedAlgos = new Set<string>();
   let effectiveWeights = { ...weights };
+  const hasMachineDataInHistory = history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  if (!hasMachineDataInHistory) {
+    effectiveWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
   const rawBreakdowns: Record<number, ScoreBreakdown> = {};
   const algoValues: Record<string, number[]> = {};
   Object.values(AlgoKey).forEach(k => { algoValues[k] = []; });

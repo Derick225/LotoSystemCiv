@@ -4,6 +4,7 @@ import { calculateACValue } from "../mathService";
 import { ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { HaltonSequence } from "../../utils/mathUtils";
+import { MarkowitzPortfolioSolver } from "./markowitzPortfolio";
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
@@ -12,6 +13,7 @@ export interface CombinationEnergyBreakdown {
   totalEnergy: number;
   baseScoreTerm: number;
   affinityTerm: number;
+  sumPenalty: number;
   repetitionPenalty: number;
   parityPenalty: number;
   decadePenalty: number;
@@ -25,6 +27,7 @@ export interface CombinationEnergyBreakdown {
   dominantFamilyPenalty: number;
   decadeConcentrationPenalty: number;
   outsiderQuotaPenalty: number;
+  markowitzVarianceTerm?: number;
 }
 
 /**
@@ -102,6 +105,17 @@ export const calculateCombinationEnergyDetailed = (
 
   const baseScoreTerm = -(baseScoreSum * baseScoreScale);
   const affinityTerm = -(affinitySum * affinityScale);
+
+  // 0. Somme : Z-score Gaussien Empirique basé sur l'historique du tirage actif
+  let sumPenalty = 0.0;
+  if (combo.length > 0 && calibration.stdSum > 0) {
+    const currentSum = combo.reduce((a, b) => a + b, 0);
+    const sumScale = combo.length / DRAW_SIZE;
+    const expectedSum = calibration.meanSum * sumScale;
+    const expectedStdSum = calibration.stdSum * Math.sqrt(sumScale);
+    const zSum = (currentSum - expectedSum) / Math.max(Number.EPSILON, expectedStdSum);
+    sumPenalty = Math.min(15.0, Math.pow(zSum, 2.0) * Math.exp(-Math.abs(zSum) / 10.0));
+  }
 
   // 1. Anti-Répétition : Loi Hypergéométrique exacte
   let repetitionPenalty = 0.0;
@@ -316,6 +330,7 @@ export const calculateCombinationEnergyDetailed = (
   const totalEnergy = 
     baseScoreTerm + 
     affinityTerm + 
+    sumPenalty +
     repetitionPenalty + 
     parityPenalty + 
     decadePenalty + 
@@ -334,6 +349,7 @@ export const calculateCombinationEnergyDetailed = (
     totalEnergy,
     baseScoreTerm,
     affinityTerm,
+    sumPenalty,
     repetitionPenalty,
     parityPenalty,
     decadePenalty,
@@ -387,6 +403,8 @@ export const generateCombination = async (
   outsiderCount: number,
   lastDraw: number[] | undefined,
   regimeStateNormalized: number,
+  drawName?: string,
+  statisticalBounds?: { entropy?: number; hurstExponent?: number },
 ): Promise<number[]> => {
   const outsiderRatio = outsiderCount / DRAW_SIZE;
   const scoresMap = new Map<number, number>();
@@ -404,6 +422,17 @@ export const generateCombination = async (
 
   const targetOutsiders = Math.round(DRAW_SIZE * outsiderRatio);
   const targetTop = Math.max(0, DRAW_SIZE - targetOutsiders);
+
+  // Markowitz Covariance Matrix & Continuous Risk Aversion
+  const entropy = statisticalBounds?.entropy ?? (regimeStateNormalized * 3.5 + 2.0);
+  const hurst = statisticalBounds?.hurstExponent ?? 0.5;
+  const covarMatrix = MarkowitzPortfolioSolver.buildCovarianceMatrix(
+    scoresMap,
+    breakdownsMap,
+    affinityMap,
+    { domainSize: DOMAIN_SIZE, drawSize: DRAW_SIZE, entropy, hurst, drawName }
+  );
+  const lambdaRisk = MarkowitzPortfolioSolver.calculateRiskAversion(entropy, hurst);
 
   // Seed purement déterministe via hachage FNV-1a pour ZÉRO HASARD
   let seedHash = 2166136261;
@@ -500,7 +529,20 @@ export const generateCombination = async (
     return combo;
   };
 
-  // --- ÉTAPE 2 : MULTIPLES SEEDS GLOUTONNES DE DÉPART DÉTERMINISTES ---
+  // --- ÉTAPE 2 : MULTIPLES SEEDS GLOUTONNES DE DÉPART DÉTERMINISTES & FRONTIÈRE DE MARKOWITZ ---
+  // Résolution de la frontière efficiente de Markowitz (Sharpe optimal, Variance minimale, Momentum, Outsider)
+  const frontierSeeds = MarkowitzPortfolioSolver.solveFrontierSeeds(
+    sortedScores,
+    scoresMap,
+    covarMatrix,
+    affinityMap,
+    calibration,
+    lastDraw,
+    targetOutsiders,
+    { domainSize: DOMAIN_SIZE, drawSize: DRAW_SIZE, entropy, hurst, drawName },
+    (c) => calculateCombinationEnergy(c, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders)
+  );
+
   // Seed 1 : Orientée score pur (recherche gloutonne standard)
   const seed1 = await runGreedyConstruction([topPool[0]], allCandidatesPool, targetOutsiders);
 
@@ -531,9 +573,15 @@ export const generateCombination = async (
   // Yield au navigateur avant le recuit simulé
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  // Élection de la meilleure seed gloutonne selon l'énergie globale
-  const seedsList = [seed1, seed2, seed3, seed4].filter(s => s.length === DRAW_SIZE);
-  let bestInitialCombo = seed1;
+  // Élection de la meilleure seed gloutonne / Markowitz selon l'énergie globale
+  const seedsList = [
+    ...frontierSeeds.map(s => s.numbers),
+    seed1,
+    seed2,
+    seed3,
+    seed4
+  ].filter(s => s && s.length === DRAW_SIZE);
+  let bestInitialCombo = frontierSeeds[0]?.numbers || seed1;
   let bestInitialEnergy = Infinity;
 
   for (const s of seedsList) {
@@ -658,44 +706,46 @@ export const generateCombination = async (
         proposedCombo[idx2] = newNum2;
       } 
       else {
-        // C. Mutation ciblée par affinité (10%)
-        // Éjecter le numéro qui a le moins d'affinité avec le reste
-        let minAvgAff = Infinity;
-        let minAffIdx = 0;
+        // C. Mutation de rééquilibrage de Markowitz (10%)
+        // Éjecter le numéro ayant la covariance marginale la plus forte (redondance maximale)
+        let maxMarginalCov = -Infinity;
+        let worstIdx = 0;
         for (let idx = 0; idx < DRAW_SIZE; idx++) {
-          let sumAff = 0;
+          let sumCov = 0;
           for (let k = 0; k < DRAW_SIZE; k++) {
             if (idx !== k) {
-              sumAff += affinityMap[currentCombo[idx]]?.[currentCombo[k]] || 0;
+              sumCov += covarMatrix[currentCombo[idx]]?.[currentCombo[k]] || 0;
             }
           }
-          if (sumAff < minAvgAff) {
-            minAvgAff = sumAff;
-            minAffIdx = idx;
+          if (sumCov > maxMarginalCov) {
+            maxMarginalCov = sumCov;
+            worstIdx = idx;
           }
         }
 
-        const isOutsiderSlot = minAffIdx >= targetTop;
+        const isOutsiderSlot = worstIdx >= targetTop;
         const candidateList = isOutsiderSlot && outsiderPool.length > 0 ? outsiderPool : topPool;
-        const otherNumbers = currentCombo.filter((_, idx) => idx !== minAffIdx);
+        const otherNumbers = currentCombo.filter((_, idx) => idx !== worstIdx);
 
         let bestCand = -1;
-        let maxCandAff = -Infinity;
+        let bestSharpeUtility = -Infinity;
         for (let a = 0; a < 8; a++) {
           const cand = candidateList[Math.floor(lcgRandom() * candidateList.length)];
           if (currentCombo.includes(cand)) continue;
-          let sumAff = 0;
+          let marginalCov = 0;
           for (const o of otherNumbers) {
-            sumAff += affinityMap[cand]?.[o] || 0;
+            marginalCov += covarMatrix[cand]?.[o] || 0;
           }
-          if (sumAff > maxCandAff) {
-            maxCandAff = sumAff;
+          const candScore = scoresMap.get(cand) || 50;
+          const utility = candScore - lambdaRisk * 100.0 * (marginalCov / otherNumbers.length);
+          if (utility > bestSharpeUtility) {
+            bestSharpeUtility = utility;
             bestCand = cand;
           }
         }
 
         if (bestCand !== -1) {
-          proposedCombo[minAffIdx] = bestCand;
+          proposedCombo[worstIdx] = bestCand;
         } else {
           // Fallback single swap
           const list = isOutsiderSlot && outsiderPool.length > 0 ? outsiderPool : topPool;
@@ -705,7 +755,7 @@ export const generateCombination = async (
             newNum = list[Math.floor(lcgRandom() * list.length)];
             attempts++;
           }
-          proposedCombo[minAffIdx] = newNum;
+          proposedCombo[worstIdx] = newNum;
         }
       }
 

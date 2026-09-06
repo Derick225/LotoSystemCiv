@@ -631,6 +631,11 @@ export const computeChronologicalAlgoReinforcement = (
     }
 
     const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
+    if (baseW <= 0.0001) {
+      reinforced[k] = 0.0; // Respect strict de la désactivation (Zéro résurgence arbitraire)
+      return;
+    }
+
     const proof = proofResults[k];
 
     if (!proof || !proof.hasProof || proof.proofScore <= 0) {
@@ -638,12 +643,12 @@ export const computeChronologicalAlgoReinforcement = (
       // Amortissement différentiable continu selon l'écart au hasard : Sigmoïde logistique raide
       const z = proof ? proof.proofScore : -1.0;
       const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-2.5 * z)); // Multiplicateur <= 0.5 quand z <= 0, tombant vers 0.05 quand z < -1
-      reinforced[k] = Math.max(0.001, baseW * unprovenMultiplier);
+      reinforced[k] = baseW * unprovenMultiplier;
     } else {
       // PREUVE EMPIRIQUE VALORISÉE : L'algorithme a démontré sa supériorité sur le tirage actif
       const earnedBoost = Math.tanh(proof.proofScore) * sampleConfidence;
       const provenMultiplier = 1.0 + earnedBoost;
-      reinforced[k] = Math.max(0.001, baseW * provenMultiplier);
+      reinforced[k] = baseW * provenMultiplier;
     }
   });
 
