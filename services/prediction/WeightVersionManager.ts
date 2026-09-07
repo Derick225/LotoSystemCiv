@@ -1,4 +1,5 @@
 import { AlgoWeights } from '../../types';
+import { recordModelDnaGeneration } from './modelDnaKnowledgeBase';
 
 export const WeightVersionManager = {
   saveVersion: async (
@@ -8,6 +9,23 @@ export const WeightVersionManager = {
     relativeGain: number, 
     metadata: { source: string; forensicReportsCount: number; backtestSampleSize?: number }
   ) => {
+    // 1. Enregistrement enrichi dans la Base de Connaissances ADN structurée
+    try {
+      const sourceKey = metadata.source === 'forensic_autopsy' 
+        ? 'forensic_autopsy' 
+        : (metadata.source === 'sgd' ? 'sgd' : 'hyperparameter_tuning');
+      await recordModelDnaGeneration(drawName, weights, score, sourceKey, {
+        relativeGain,
+        metadata: {
+          forensicReportsCount: metadata.forensicReportsCount,
+          backtestSampleSize: metadata.backtestSampleSize,
+        }
+      });
+    } catch (e) {
+      console.warn("[WeightVersionManager] Erreur synchronisation base ADN:", e);
+    }
+
+    // 2. Maintien de la compatibilité ascendante localStorage
     if (typeof window === 'undefined' || !window.localStorage) {
       return;
     }

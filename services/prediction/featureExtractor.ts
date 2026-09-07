@@ -12,6 +12,8 @@ export interface ExtractedFeatures {
   machineTransferMap: Float32Array;
   shadowProbabilityMap: Float32Array;
   networkCorrelationMap: Float32Array;
+  volatilityMap?: Float32Array;
+  residualEntropyMap?: Float32Array;
 }
 
 // ============================================================================
@@ -33,25 +35,50 @@ const calculateMedian = (values: number[]): number => {
 };
 
 /**
+ * Parse universellement des flux hétérogènes de numéros (tableaux, chaînes, entiers, objets).
+ * Gère les séparateurs multiples (virgules, tirets, espaces, points-virgules), zéros de tête ("05")
+ * et structures d'objets imbriquées.
+ */
+export const parseRawNumberArray = (raw: unknown): number[] => {
+  if (raw === null || raw === undefined) return [];
+  let result: number[] = [];
+  if (Array.isArray(raw)) {
+    result = raw
+      .map(item => {
+        if (typeof item === 'number') return item;
+        if (typeof item === 'string') return parseInt(item.trim(), 10);
+        if (item && typeof item === 'object') {
+          const val = (item as any).num ?? (item as any).number ?? (item as any).val;
+          return typeof val === 'number' ? val : parseInt(String(val), 10);
+        }
+        return NaN;
+      })
+      .filter(n => !isNaN(n) && Number.isFinite(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
+  } else if (typeof raw === 'number') {
+    result = raw >= DOMAIN_MIN && raw <= DOMAIN_MAX ? [raw] : [];
+  } else if (typeof raw === 'string') {
+    result = raw
+      .split(/[\s,;\/\-]+/)
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n) && Number.isFinite(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
+  } else if (typeof raw === 'object') {
+    const candidate = (raw as any).numbers || (raw as any).gagnants || (raw as any).winningNumbers || (raw as any).machine || (raw as any).values;
+    if (candidate) return parseRawNumberArray(candidate);
+  }
+  return Array.from(new Set(result));
+};
+
+/**
  * Extrait les numéros gagnants et de machine de façon extrêmement robuste.
- * Gère les types hétérogènes (number, array, string).
+ * Gère les types hétérogènes (number, array, string, objets imbriqués) et les clés alternatives (gagnants, numbers, winningNumbers, machine, machineNumbers).
  */
 export const extractDrawNumbers = (draw: DrawResult): { winners: number[], machine: number[] } => {
-  const winners = Array.isArray(draw.gagnants) ? draw.gagnants : [];
-  let machine: number[] = [];
-  if (draw.machine) {
-    if (Array.isArray(draw.machine)) {
-      machine = draw.machine;
-    } else if (typeof draw.machine === 'number') {
-      machine = [draw.machine];
-    } else if (typeof draw.machine === 'string') {
-      machine = String(draw.machine).split(',').map(Number).filter(n => !isNaN(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
-    }
-  }
-  return { 
-    winners: winners.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX), 
-    machine: machine.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX) 
-  };
+  if (!draw) return { winners: [], machine: [] };
+  const rawWinners = (draw as any).gagnants ?? (draw as any).numbers ?? (draw as any).winningNumbers;
+  const rawMachine = (draw as any).machine ?? (draw as any).machineNumbers;
+  const winners = parseRawNumberArray(rawWinners);
+  const machine = parseRawNumberArray(rawMachine);
+  return { winners, machine };
 };
 
 export const extractFeatures = async (
@@ -328,6 +355,25 @@ export const extractFeatures = async (
         networkCorrelationMap[n] = affSum / DOMAIN_SIZE;
       }
 
+      // ============================================================================
+      // 5. INDICATEURS CLÉS ENRICHIS (Volatilité Locale & Entropie Résiduelle)
+      // ============================================================================
+      const volatilityMap = new Float32Array(DOMAIN_MAX + 1);
+      const residualEntropyMap = new Float32Array(DOMAIN_MAX + 1);
+      const windowLen = Math.max(1, recentHistory.length);
+
+      for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
+        const pOccur = freqMap[n] / (totalFreqSum || 1.0);
+        const expectedGap = 1.0 / Math.max(1e-4, pOccur * DOMAIN_SIZE);
+        const actualGap = gapsMap[n] >= 0 ? gapsMap[n] : windowLen;
+        const gapDeviation = Math.abs(actualGap - expectedGap);
+        volatilityMap[n] = parseFloat((gapDeviation / (expectedGap + gapDeviation)).toFixed(4));
+
+        const pMarkov = markovMap[n] || (1.0 / DOMAIN_SIZE);
+        const klLocal = pOccur > 0 ? pOccur * Math.log(Math.max(1e-6, pOccur / pMarkov)) : 0;
+        residualEntropyMap[n] = parseFloat((1.0 / (1.0 + Math.exp(-klLocal))).toFixed(4));
+      }
+
       return {
         freqMap,
         gapsMap,
@@ -336,9 +382,64 @@ export const extractFeatures = async (
         momentumMap,
         machineTransferMap,
         shadowProbabilityMap,
-        networkCorrelationMap
+        networkCorrelationMap,
+        volatilityMap,
+        residualEntropyMap
       };
     },
     `sample_${sampleSize}`
   );
+};
+
+/**
+ * Calcule la volatilité statistique locale pour chaque numéro [1-90] à partir d'un historique de tirages.
+ */
+export const calculateVolatilityMap = (history: DrawResult[]): Record<number, number> => {
+  const result: Record<number, number> = {};
+  const total = Math.max(1, history.length);
+  const counts = new Int32Array(DOMAIN_MAX + 1);
+  const gaps = new Int32Array(DOMAIN_MAX + 1).fill(-1);
+
+  for (let i = 0; i < history.length; i++) {
+    const { winners } = extractDrawNumbers(history[i]);
+    for (const w of winners) {
+      if (w >= DOMAIN_MIN && w <= DOMAIN_MAX) {
+        counts[w]++;
+        if (gaps[w] === -1) gaps[w] = i;
+      }
+    }
+  }
+
+  for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
+    const p = counts[n] / (total * 5);
+    const expGap = 1.0 / Math.max(1e-4, p * DOMAIN_SIZE);
+    const actGap = gaps[n] >= 0 ? gaps[n] : total;
+    const dev = Math.abs(actGap - expGap);
+    result[n] = parseFloat((dev / (expGap + dev)).toFixed(4));
+  }
+  return result;
+};
+
+/**
+ * Calcule l'entropie résiduelle locale pour chaque numéro [1-90] à partir d'un historique de tirages.
+ */
+export const calculateResidualEntropyMap = (history: DrawResult[]): Record<number, number> => {
+  const result: Record<number, number> = {};
+  const total = Math.max(1, history.length);
+  const counts = new Int32Array(DOMAIN_MAX + 1);
+
+  for (const draw of history) {
+    const { winners } = extractDrawNumbers(draw);
+    for (const w of winners) {
+      if (w >= DOMAIN_MIN && w <= DOMAIN_MAX) counts[w]++;
+    }
+  }
+
+  for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
+    const p = counts[n] / (total * 5);
+    const pUniform = 1.0 / DOMAIN_SIZE;
+    const kl = p > 0 ? p * Math.log(p / pUniform) : 0;
+    result[n] = parseFloat((1.0 / (1.0 + Math.exp(-kl))).toFixed(4));
+  }
+  return result;
 };

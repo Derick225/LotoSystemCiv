@@ -604,3 +604,55 @@ export const tunePredictiveHyperparameters = async (
     log
   };
 };
+
+/**
+ * Optimisation déterministe ultra-rapide des hyperparamètres à partir des rapports actionnables
+ * ou du feedback causal post-mortem. Évite la réévaluation complète si des directives causales existent.
+ */
+export const tuneHyperparametersFromCausalFeedback = (
+  baseParams: PredictiveHyperparameters,
+  actionableDeltas?: {
+    hawkesDecayDelta?: number;
+    spatialSigmaDelta?: number;
+    gapVelocityDelta?: number;
+    pcaVarianceDelta?: number;
+  },
+  dispersionIndex?: number
+): {
+  tunedParams: PredictiveHyperparameters;
+  adjustmentsApplied: string[];
+} => {
+  const tuned = { ...baseParams };
+  const adjustmentsApplied: string[] = [];
+
+  if (actionableDeltas) {
+    if (actionableDeltas.hawkesDecayDelta !== undefined) {
+      const oldVal = tuned.hawkesDecay;
+      tuned.hawkesDecay = Math.max(0.05, Math.min(0.50, oldVal + actionableDeltas.hawkesDecayDelta));
+      adjustmentsApplied.push(`Hawkes Decay: ${oldVal.toFixed(3)} -> ${tuned.hawkesDecay.toFixed(3)}`);
+    }
+    if (actionableDeltas.spatialSigmaDelta !== undefined) {
+      const oldVal = tuned.spatialSigma;
+      tuned.spatialSigma = Math.max(0.5, Math.min(3.0, oldVal + actionableDeltas.spatialSigmaDelta));
+      adjustmentsApplied.push(`Spatial Sigma: ${oldVal.toFixed(3)} -> ${tuned.spatialSigma.toFixed(3)}`);
+    }
+    if (actionableDeltas.gapVelocityDelta !== undefined) {
+      const oldVal = tuned.gapVelocityWeight;
+      tuned.gapVelocityWeight = Math.max(0.2, Math.min(2.0, oldVal + actionableDeltas.gapVelocityDelta));
+      adjustmentsApplied.push(`Gap Velocity Weight: ${oldVal.toFixed(3)} -> ${tuned.gapVelocityWeight.toFixed(3)}`);
+    }
+    if (actionableDeltas.pcaVarianceDelta !== undefined && tuned.pcaVarianceThreshold !== undefined) {
+      const oldVal = tuned.pcaVarianceThreshold;
+      tuned.pcaVarianceThreshold = Math.max(0.80, Math.min(0.99, oldVal + actionableDeltas.pcaVarianceDelta));
+      adjustmentsApplied.push(`PCA Variance Threshold: ${oldVal.toFixed(3)} -> ${tuned.pcaVarianceThreshold.toFixed(3)}`);
+    }
+  }
+
+  if (dispersionIndex !== undefined && dispersionIndex > 60) {
+    const dispersionDamping = 1.0 - ((dispersionIndex - 60) / 100.0) * 0.2;
+    tuned.sgdLearningRate = Math.max(0.005, tuned.sgdLearningRate * dispersionDamping);
+    adjustmentsApplied.push(`SGD LR amorti selon l'indice de dispersion: ${tuned.sgdLearningRate.toFixed(5)}`);
+  }
+
+  return { tunedParams: tuned, adjustmentsApplied };
+};

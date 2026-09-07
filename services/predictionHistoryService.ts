@@ -164,7 +164,28 @@ export const autoPurgePredictionLogsIfEnabled = async (
   return { purgedCount: result.purgedCount };
 };
 
+// ============================================================================
+// INDEXATION MÉMOIRE HAUTE PERFORMANCE (L1) - ISOLATION STRICTE PAR TIRAGE
+// ============================================================================
+interface HistoryMemoryIndex {
+  all: PredictionHistoryItem[];
+  byDraw: Map<string, PredictionHistoryItem[]>;
+  byId: Map<string, PredictionHistoryItem>;
+  lastLoaded: number;
+}
+
+let historyIndex: HistoryMemoryIndex | null = null;
+
+export const invalidateHistoryIndex = (): void => {
+  historyIndex = null;
+};
+
 const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
+  // Vérification de l'index mémoire L1 (validité 15 secondes ou jusqu'à invalidation)
+  if (historyIndex && (Date.now() - historyIndex.lastLoaded < 15000)) {
+    return historyIndex.all;
+  }
+
   const items: PredictionHistoryItem[] = [];
   try {
     const allKeys = await keys();
@@ -187,11 +208,33 @@ const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
   } catch (e) {
     console.warn("Error getting local history", e);
   }
+  
   // Tri déterministe : timestamp décroissant, puis ID croissant en cas d'égalité
-  return items.sort((a, b) => {
+  const sorted = items.sort((a, b) => {
     if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
     return a.id.localeCompare(b.id);
   });
+
+  // Construction des index secondaires isolés
+  const byDraw = new Map<string, PredictionHistoryItem[]>();
+  const byId = new Map<string, PredictionHistoryItem>();
+  for (const item of sorted) {
+    byId.set(item.id, item);
+    const drawKey = (item.drawName || '').trim().toLowerCase();
+    if (!byDraw.has(drawKey)) {
+      byDraw.set(drawKey, []);
+    }
+    byDraw.get(drawKey)!.push(item);
+  }
+
+  historyIndex = {
+    all: sorted,
+    byDraw,
+    byId,
+    lastLoaded: Date.now(),
+  };
+
+  return sorted;
 };
 
 export const findMatchingResultForPrediction = (prediction: PredictionHistoryItem, historyUpdates: DrawResult[]): DrawResult | null => {
@@ -254,10 +297,57 @@ export const syncAllHistory = async (drawName: string): Promise<PredictionHistor
 };
 
 export const getPredictionHistoryAsync = async (drawName: string): Promise<PredictionHistoryItem[]> => {
-    // On tente une synchro rapide en arrière-plan si on est en ligne ?
-    // Pour l'instant, on retourne le local, et l'UI déclenchera la synchro explicite.
+    if (!drawName) return [];
+    await getLocalHistory();
+    const cleanDraw = drawName.trim().toLowerCase();
+    if (historyIndex && historyIndex.byDraw.has(cleanDraw)) {
+        return historyIndex.byDraw.get(cleanDraw)!;
+    }
     const all = await getLocalHistory();
-    return all.filter(p => p.drawName?.toLowerCase() === drawName?.toLowerCase());
+    return all.filter(p => p.drawName?.toLowerCase() === cleanDraw);
+};
+
+export interface PredictionQueryOptions {
+  drawName?: string;
+  startDate?: string;
+  endDate?: string;
+  minHits?: number;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Moteur de requête indexé haute performance avec pagination et filtres temporels
+ */
+export const queryPredictionsFast = async (
+  options: PredictionQueryOptions = {}
+): Promise<{ items: PredictionHistoryItem[]; total: number }> => {
+  const all = options.drawName 
+    ? await getPredictionHistoryAsync(options.drawName)
+    : await getLocalHistory();
+
+  let filtered = all;
+
+  if (options.startDate) {
+    const startMs = new Date(options.startDate).getTime();
+    if (!isNaN(startMs)) {
+      filtered = filtered.filter(p => p.timestamp >= startMs);
+    }
+  }
+
+  if (options.endDate) {
+    const endMs = new Date(options.endDate).getTime();
+    if (!isNaN(endMs)) {
+      filtered = filtered.filter(p => p.timestamp <= endMs);
+    }
+  }
+
+  const total = filtered.length;
+  const offset = options.offset || 0;
+  const limit = options.limit || 50;
+  const paginated = filtered.slice(offset, offset + limit);
+
+  return { items: paginated, total };
 };
 
 const LATEST_PRED_KEY_PREFIX = 'nexus_latest_prediction_';
@@ -703,4 +793,126 @@ export const calculateHistoricalPerformance = (predictions: PredictionHistoryIte
         analyzedDrawsCount: trendData.length,
         trend: trendData
     };
+};
+
+export interface AdvancedPredictionPerformanceTimeline {
+  drawName: string;
+  totalPredictions: number;
+  evaluatedPredictions: number;
+  hitDistribution: {
+    hits0: number;
+    hits1: number;
+    hits2: number;
+    hits3: number;
+    hits4: number;
+    hits5: number;
+  };
+  hitRateTop5Pct: number; // % avec >= 1 hit
+  exact3PlusPct: number;  // % avec >= 3 hits
+  averageConfidence: number;
+  rollingAccuracyTrend: 'improving' | 'stable' | 'degrading';
+  timeline: {
+    date: string;
+    timestamp: number;
+    hits: number;
+    confidence: number;
+    hitRateCumulPct: number;
+  }[];
+}
+
+/**
+ * Calcule une série temporelle complète et quantifiée des métriques de précision des prédictions passées.
+ * 100% Déterministe et strictement isolé par tirage (Tirage Isolation Rule).
+ */
+export const calculateAdvancedPerformanceTimeline = (
+  drawName: string,
+  predictions: PredictionHistoryItem[],
+  results: DrawResult[]
+): AdvancedPredictionPerformanceTimeline => {
+  const cleanDraw = (drawName || '').trim().toLowerCase();
+  const isolatedPreds = predictions.filter(p => (p.drawName || '').trim().toLowerCase() === cleanDraw);
+  const isolatedResults = results.filter(r => (r.drawName || '').trim().toLowerCase() === cleanDraw);
+
+  const hitDistribution = { hits0: 0, hits1: 0, hits2: 0, hits3: 0, hits4: 0, hits5: 0 };
+  let totalEvaluated = 0;
+  let totalHitsCount = 0;
+  let confSum = 0;
+  let exact3PlusCount = 0;
+
+  const timelineItems: AdvancedPredictionPerformanceTimeline['timeline'] = [];
+
+  // Tri chronologique croissant pour suivre l'évolution cumulative dans le temps
+  const chronologicalPreds = [...isolatedPreds].sort((a, b) => a.timestamp - b.timestamp);
+
+  for (const pred of chronologicalPreds) {
+    const d = new Date(pred.timestamp);
+    const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    const result = isolatedResults.find(r => r.id === pred.drawResultId || r.date === dateStr);
+
+    if (result) {
+      totalEvaluated++;
+      const suggested = Array.isArray(pred.prediction?.suggestedNumbers) ? pred.prediction.suggestedNumbers : [];
+      const winners = Array.isArray(result.gagnants) ? result.gagnants : [];
+      const hits = suggested.filter(n => winners.includes(n)).length;
+
+      if (hits === 0) hitDistribution.hits0++;
+      else if (hits === 1) hitDistribution.hits1++;
+      else if (hits === 2) hitDistribution.hits2++;
+      else if (hits === 3) hitDistribution.hits3++;
+      else if (hits === 4) hitDistribution.hits4++;
+      else if (hits >= 5) hitDistribution.hits5++;
+
+      if (hits >= 3) exact3PlusCount++;
+      totalHitsCount += hits;
+      const conf = pred.prediction?.confidence || 50;
+      confSum += conf;
+
+      const hitRateCumul = (totalHitsCount / (totalEvaluated * 5)) * 100;
+
+      timelineItems.push({
+        date: dateStr,
+        timestamp: pred.timestamp,
+        hits,
+        confidence: conf,
+        hitRateCumulPct: parseFloat(hitRateCumul.toFixed(2)),
+      });
+    }
+  }
+
+  // Évaluation de la tendance temporelle sur les 10 dernières évaluations
+  let rollingAccuracyTrend: AdvancedPredictionPerformanceTimeline['rollingAccuracyTrend'] = 'stable';
+  if (timelineItems.length >= 6) {
+    const mid = Math.floor(timelineItems.length / 2);
+    const firstHalfAvg = timelineItems.slice(0, mid).reduce((s, t) => s + t.hits, 0) / mid;
+    const secondHalfAvg = timelineItems.slice(mid).reduce((s, t) => s + t.hits, 0) / (timelineItems.length - mid);
+    if (secondHalfAvg > firstHalfAvg + 0.3) {
+      rollingAccuracyTrend = 'improving';
+    } else if (secondHalfAvg < firstHalfAvg - 0.3) {
+      rollingAccuracyTrend = 'degrading';
+    }
+  }
+
+  const hitRateTop5Pct = totalEvaluated > 0 
+    ? parseFloat((((totalEvaluated - hitDistribution.hits0) / totalEvaluated) * 100).toFixed(2)) 
+    : 0;
+
+  const exact3PlusPct = totalEvaluated > 0 
+    ? parseFloat(((exact3PlusCount / totalEvaluated) * 100).toFixed(2)) 
+    : 0;
+
+  const averageConfidence = totalEvaluated > 0 
+    ? parseFloat((confSum / totalEvaluated).toFixed(1)) 
+    : 0;
+
+  return {
+    drawName,
+    totalPredictions: isolatedPreds.length,
+    evaluatedPredictions: totalEvaluated,
+    hitDistribution,
+    hitRateTop5Pct,
+    exact3PlusPct,
+    averageConfidence,
+    rollingAccuracyTrend,
+    timeline: timelineItems,
+  };
 };

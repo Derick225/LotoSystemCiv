@@ -155,6 +155,29 @@ export interface Prediction {
       sieveEnergyPct: number;
     }[];
   };
+  quantifiedUncertainty?: QuantifiedUncertainty;
+  simulationScenarios?: PredictionScenarioItem[];
+  readabilityReport?: {
+    summary: string;
+    keyDrivers: string[];
+    riskAssessment: string;
+  };
+}
+
+export interface QuantifiedUncertainty {
+  epistemicUncertainty: number;    // Incertitude épistémique (échantillon, divergence modèle) [0 - 100]
+  aleatoricUncertainty: number;    // Incertitude aléatoire intrinsèque [0 - 100]
+  totalEntropyBits: number;        // Entropie prédictive en bits de Shannon
+  confidenceIntervals: Record<number, { lower: number; upper: number; mean: number }>;
+  reliabilityScore: number;        // Indice de fiabilité globale synthétique [0 - 100]
+}
+
+export interface PredictionScenarioItem {
+  scenarioId: 'CONSERVATIVE' | 'BALANCED_PARETO' | 'VOLATILE_ANTIESTABLISHMENT';
+  label: string;
+  suggestedNumbers: number[];
+  confidence: number;
+  rationale: string;
 }
 
 export interface PredictionFeedback {
@@ -211,6 +234,42 @@ export type ForensicFailureMode =
   | "structuralmisalignment"
   | "regimebreak"
   | "anomalousdraw";
+
+export interface CausalAttributionItem {
+  number: number;
+  category: 'FALSE_POSITIVE' | 'FALSE_NEGATIVE' | 'BALLISTIC_NEAR_MISS' | 'CONFIRMED_HIT';
+  primaryCause: string;
+  contributingAlgos: { algo: string; contribution: number; direction: 'overpromoted' | 'suppressed' }[];
+  attributionScore: number; // 0 - 100
+  counterfactualFix: string;
+}
+
+export interface SystematicComparisonReport {
+  directHits: number[];
+  neighbors1: { actual: number; predicted: number; diff: number }[];
+  neighbors2: { actual: number; predicted: number; diff: number }[];
+  mirrors: { actual: number; predicted: number; type: string }[];
+  shadows: { actual: number; predicted: number }[];
+  machineLeakages: number[];
+  unmatchedPredicted: number[];
+  unmatchedWinners: number[];
+  hitRateTop5: number;
+  captureRateExtended: number; // Top 5 + Voisins + Miroirs
+  dispersionIndex: number;
+}
+
+export interface ActionableImprovementReport {
+  summary: string;
+  recommendedWeightDeltas: Record<string, number>;
+  recommendedHyperparameterDeltas?: {
+    hawkesDecayDelta?: number;
+    spatialSigmaDelta?: number;
+    gapVelocityDelta?: number;
+    pcaVarianceDelta?: number;
+  };
+  priorityFixes: string[];
+  expectedAccuracyGain: number;
+}
 
 export interface ForensicActionableAdjustment {
   target: string;
@@ -374,6 +433,9 @@ export interface ForensicReport {
   recommendedAdjustments?: ForensicActionableAdjustment[];
   warnings?: string[];
   postMortemStabilityScore?: number;
+  causalAttributions?: CausalAttributionItem[];
+  systematicComparison?: SystematicComparisonReport;
+  actionableImprovementReport?: ActionableImprovementReport;
 }
 
 export interface CondensedForensicReport {

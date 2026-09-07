@@ -1,5 +1,6 @@
 import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } from '../types';
 import { calculateShannonEntropy, calculateMedian, gaussianPDF, sigmoid } from './prediction/deterministicCore';
+import { extractDrawNumbers } from './prediction/featureExtractor';
 
 // ============================================================================
 // STATISTIQUES ROBUSTES (Zéro sensibilité aux Outliers)
@@ -57,8 +58,9 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   
   const variance = new Float32Array(91);
   for (const draw of chronoHistory) {
+    const winners = extractDrawNumbers(draw).winners;
     for (let num = 1; num <= 90; num++) {
-      const isPresent = draw.gagnants.includes(num) ? 1.0 : 0.0;
+      const isPresent = winners.includes(num) ? 1.0 : 0.0;
       const diff = isPresent - scores[num];
       scores[num] = scores[num] + ALPHA * diff;
       variance[num] = (1 - ALPHA) * (variance[num] + ALPHA * diff * diff);
@@ -68,7 +70,8 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   for (let num = 1; num <= 90; num++) {
     let gap = 0;
     for (const draw of history) {
-      if (draw.gagnants.includes(num)) break;
+      const winners = extractDrawNumbers(draw).winners;
+      if (winners.includes(num)) break;
       gap++;
     }
     gaps[num] = gap;
@@ -78,7 +81,8 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   const allGaps = Array.from(gaps).slice(1);
   const { mean: medianGap, std: stdDevGap } = getMeanAndStdDev(allGaps.filter(g => g > 0));
   // Moyenne de l'EMA théorique = probabilité de base
-  const probBase = chronoHistory.reduce((s, h) => s + h.gagnants.length, 0) / (chronoHistory.length * 90) || (5 / 90);
+  const totalExtractedWinners = chronoHistory.reduce((s, h) => s + extractDrawNumbers(h).winners.length, 0);
+  const probBase = totalExtractedWinners / (chronoHistory.length * 90) || (5 / 90);
 
   for (let num = 1; num <= 90; num++) {
     const emaScore = scores[num];
@@ -148,20 +152,27 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
   if (history.length < 3) return [];
   
   const associationScores = new Float32Array(91);
-  const lastDrawNumbers = history[0].gagnants;
-  const prevDrawNumbers = history[1].gagnants;
+  const lastDrawNumbers = extractDrawNumbers(history[0]).winners;
+  const prevDrawNumbers = extractDrawNumbers(history[1]).winners;
   
-  // Normalisation des poids ADN
-  const totalDnaWeight = (dna as any)['markov'] + (dna as any)['temporal'] + (dna as any)['fractal'] || 1.0;
-  const dnaMarkov = ((dna as any)['markov'] || 0) / totalDnaWeight;
-  const dnaTemporal = ((dna as any)['temporal'] || 0) / totalDnaWeight;
-  const dnaFractal = ((dna as any)['fractal'] || 0) / totalDnaWeight;
+  // Normalisation des poids ADN sécurisée (insensible à la casse)
+  const getDnaWeight = (key: string): number => {
+    const val = (dna as any)[key] ?? (dna as any)[key.toLowerCase()] ?? (dna as any)[key.toUpperCase()] ?? 0;
+    return typeof val === 'number' && Number.isFinite(val) ? val : 0;
+  };
+  const wMarkov = getDnaWeight('markov');
+  const wTemporal = getDnaWeight('temporal');
+  const wFractal = getDnaWeight('fractal');
+  const totalDnaWeight = Math.max(1e-4, wMarkov + wTemporal + wFractal);
+  const dnaMarkov = wMarkov / totalDnaWeight;
+  const dnaTemporal = wTemporal / totalDnaWeight;
+  const dnaFractal = wFractal / totalDnaWeight;
   
   const maxDepth = history.length - 1; // Pas de constante arbitraire "50", parcourt tout l'historique
   
   for (let i = 2; i < maxDepth; i++) {
-    const historicalRecent = history[i - 1].gagnants;
-    const historicalOlder = history[i].gagnants;
+    const historicalRecent = extractDrawNumbers(history[i - 1]).winners;
+    const historicalOlder = extractDrawNumbers(history[i]).winners;
     
     const commonWithLast = historicalRecent.filter(n => lastDrawNumbers.includes(n)).length;
     const commonWithPrev = historicalOlder.filter(n => prevDrawNumbers.includes(n)).length;
@@ -184,7 +195,8 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
     const decayFactor = (maxDepth / Math.E) * (1.0 + dnaFractal * Math.E);
     const weight = contextStrength * Math.exp(-i / decayFactor) * activation;
 
-    futureDraw.gagnants.forEach(n => { associationScores[n] += weight; });
+    const futureWinners = extractDrawNumbers(futureDraw).winners;
+    futureWinners.forEach(n => { if (n >= 1 && n <= 90) associationScores[n] += weight; });
   }
 
   const preds = new Set(lastPrediction?.suggestedNumbers || []);
@@ -271,6 +283,17 @@ export const calculateFusion = (
   covLI /= 90.0;
   covPI /= 90.0;
 
+  // Coefficients de corrélation de Pearson entre paires de capteurs
+  const corrLP = Math.max(-1.0, Math.min(1.0, covLP / (stdP * stdQ + Number.EPSILON)));
+  const corrLI = Math.max(-1.0, Math.min(1.0, covLI / (stdP * stdO + Number.EPSILON)));
+  const corrPI = Math.max(-1.0, Math.min(1.0, covPI / (stdQ * stdO + Number.EPSILON)));
+
+  // Dé-corrélation continue : amortissement de la précision des capteurs mutuellement redondants
+  // Si deux capteurs sont fortement corrélés (r -> 1), la redondance est amortie pour valoriser la diversité orthogonale
+  const redundancyDiscountP = 1.0 - 0.4 * Math.max(0, corrLP * corrLP, corrLI * corrLI);
+  const redundancyDiscountQ = 1.0 - 0.4 * Math.max(0, corrLP * corrLP, corrPI * corrPI);
+  const redundancyDiscountO = 1.0 - 0.4 * Math.max(0, corrLI * corrLI, corrPI * corrPI);
+
   // Information de Fisher du système multi-capteurs fusionné : I(theta) = Tr(Sigma^-1)
   const fisherGain = Math.log(1.0 + (1.0 / varP + 1.0 / varQ + 1.0 / varO));
 
@@ -286,10 +309,10 @@ export const calculateFusion = (
   // Lambda de régularisation continue : s'élève proportionnellement au désordre (entropie) et à l'écart type moyen
   const lambda = avgStd * entropyMultiplier * 0.15;
 
-  // Matrices de Précision Régularisées (évite l'overfitting d'un capteur très bruité)
-  const precP = W_PYTHON / (varP + lambda);
-  const precQ = W_QUANTUM / (varQ + lambda);
-  const precO = W_ORACLE / (varO + lambda);
+  // Matrices de Précision Régularisées et Dé-corrélées (élimine les redondances colinéaires)
+  const precP = (W_PYTHON * redundancyDiscountP) / (varP + lambda);
+  const precQ = (W_QUANTUM * redundancyDiscountQ) / (varQ + lambda);
+  const precO = (W_ORACLE * redundancyDiscountO) / (varO + lambda);
   
   const totalPrecision = precP + precQ + precO;
   const kalmanGainP = precP / totalPrecision;

@@ -14,6 +14,7 @@ import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import { PredictionVectorPortfolio } from "../prediction/PredictionVectorPortfolio";
 import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
 import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
+import { PredictionUncertaintyScenariosPanel } from "../prediction/PredictionUncertaintyScenariosPanel";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import {
@@ -763,6 +764,21 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   Pondérations optimisées déterministes.
                 </p>
               </div>
+            </div>
+
+            {/* Quantified Uncertainty & Deterministic Simulation Scenarios */}
+            <div className="lg:col-span-12 mt-4">
+              <PredictionUncertaintyScenariosPanel
+                prediction={lastPrediction}
+                onApplyScenario={(numbers) => {
+                  if (lastPrediction) {
+                    setLastPrediction({
+                      ...lastPrediction,
+                      suggestedNumbers: numbers,
+                    });
+                  }
+                }}
+              />
             </div>
 
             {/* Comprehensive XAP Transparency Panel */}

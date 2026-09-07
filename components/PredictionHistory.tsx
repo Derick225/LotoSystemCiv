@@ -11,6 +11,8 @@ import {
   setAutoPurgeEnabled,
   purgeOldPredictionLogs,
   STORAGE_RETENTION_CONSTANTS,
+  calculateAdvancedPerformanceTimeline,
+  queryPredictionsFast,
 } from "../services/predictionHistoryService";
 import {
   performForensicAnalysis,
@@ -72,8 +74,23 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
   const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
   const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
   const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
+  const [filterMode, setFilterMode] = useState<'ALL' | 'EVALUATED' | 'SIMULATIONS'>('ALL');
   const attemptedLinksRef = useRef<Set<string>>(new Set());
   const isLinkingRef = useRef(false);
+
+  const performanceTimeline = React.useMemo(() => {
+    return calculateAdvancedPerformanceTimeline(drawName, history, results);
+  }, [drawName, history, results]);
+
+  const filteredHistory = React.useMemo(() => {
+    if (filterMode === 'EVALUATED') {
+      return history.filter(item => Boolean(item.drawResultId));
+    }
+    if (filterMode === 'SIMULATIONS') {
+      return history.filter(item => Boolean(item.isSimulation || item.isExploratory));
+    }
+    return history;
+  }, [history, filterMode]);
 
   const oldLogsStats = React.useMemo(() => {
     const cutoff = Date.now() - STORAGE_RETENTION_CONSTANTS.RETENTION_PERIOD_MS;
@@ -365,7 +382,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
-    count: history.length,
+    count: filteredHistory.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 180,
   });
@@ -379,7 +396,38 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     );
 
   return (
-    <div className="space-y-6 animate-fade-in flex flex-col h-[700px]">
+    <div className="space-y-6 animate-fade-in flex flex-col h-[750px]">
+      {/* PERFORMANCE TIMELINE SUMMARY BANNER */}
+      {performanceTimeline.evaluatedPredictions > 0 && (
+        <div className="p-4 bg-slate-900/80 rounded-2xl border border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+          <div className="space-y-0.5">
+            <span className="text-[9px] font-black uppercase text-slate-400">Évaluations Réelles</span>
+            <span className="text-lg font-black font-mono text-white block">
+              {performanceTimeline.evaluatedPredictions}
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            <span className="text-[9px] font-black uppercase text-slate-400">Exacts 3+ Gagnants</span>
+            <span className="text-lg font-black font-mono text-emerald-400 block">
+              {performanceTimeline.exact3PlusPct}% ({performanceTimeline.hitDistribution.hits5 + performanceTimeline.hitDistribution.hits4 + performanceTimeline.hitDistribution.hits3})
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            <span className="text-[9px] font-black uppercase text-slate-400">Capture Top 5</span>
+            <span className="text-lg font-black font-mono text-cyan-400 block">
+              {performanceTimeline.hitRateTop5Pct}%
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            <span className="text-[9px] font-black uppercase text-slate-400">Confiance Moyenne</span>
+            <span className="text-lg font-black font-mono text-amber-400 block">
+              {performanceTimeline.averageConfidence}%
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* HEADER CONTROLS */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-2 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-indigo-100 dark:bg-indigo-950/50 rounded-xl text-indigo-600 dark:text-indigo-400">
@@ -390,10 +438,45 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
               Historique Inférence
             </h3>
             <span className="text-[10px] text-slate-500 font-mono">
-              {history.length} prédiction(s) enregistrée(s)
+              {filteredHistory.length} prédiction(s) affichée(s)
             </span>
           </div>
         </div>
+
+        {/* FAST FILTER PILLS */}
+        <div className="flex items-center gap-1.5 bg-slate-900/60 p-1 rounded-xl border border-white/5 text-[10px] font-mono">
+          <button
+            onClick={() => setFilterMode('ALL')}
+            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+              filterMode === 'ALL'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Toutes ({history.length})
+          </button>
+          <button
+            onClick={() => setFilterMode('EVALUATED')}
+            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+              filterMode === 'EVALUATED'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Évaluées ({history.filter(h => Boolean(h.drawResultId)).length})
+          </button>
+          <button
+            onClick={() => setFilterMode('SIMULATIONS')}
+            className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+              filterMode === 'SIMULATIONS'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Simulations ({history.filter(h => Boolean(h.isSimulation || h.isExploratory)).length})
+          </button>
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <div className="hidden lg:flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase mr-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Hit
@@ -537,7 +620,7 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
               }}
             >
               {virtualizer.getVirtualItems().map((virtualItem) => {
-                const item = history[virtualItem.index];
+                const item = filteredHistory[virtualItem.index];
                 const res = item.drawResultId
                   ? getResultById(item.drawResultId)
                   : findMatchingResultForPrediction(item, results);

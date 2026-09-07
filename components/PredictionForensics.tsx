@@ -288,6 +288,120 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
             </div>
           )}
 
+          {/* Causal Attribution Panel */}
+          {report.causalAttributions && report.causalAttributions.length > 0 && (
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
+              <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+                <Target size={12} className="text-cyan-500" />
+                Attribution Causale Automatisée des Numéros (Hits & Échecs)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {report.causalAttributions.map((attr, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black text-xs flex items-center justify-center border border-slate-300 dark:border-slate-600">
+                          {attr.number}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                            attr.category === 'CONFIRMED_HIT'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : attr.category === 'BALLISTIC_NEAR_MISS'
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : attr.category === 'FALSE_POSITIVE'
+                              ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                              : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                          }`}
+                        >
+                          {attr.category.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400 font-bold">
+                        {attr.attributionScore}%
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-600 dark:text-slate-300">
+                      {attr.primaryCause}
+                    </p>
+                    {attr.counterfactualFix && (
+                      <p className="text-[9px] text-indigo-500 dark:text-indigo-300 font-mono">
+                        ↳ Correctif : {attr.counterfactualFix}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Systematic Comparison Metrics */}
+          {report.systematicComparison && (
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
+              <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+                <Sliders size={12} className="text-indigo-500" />
+                Comparaison Systématique avec le Tirage Réel
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Hits Directs</span>
+                  <span className="text-xs font-black font-mono text-emerald-500 mt-1 block">
+                    {report.systematicComparison.directHits.length > 0
+                      ? report.systematicComparison.directHits.join(', ')
+                      : '0'}
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Voisins (±1)</span>
+                  <span className="text-xs font-black font-mono text-amber-500 mt-1 block">
+                    {report.systematicComparison.neighbors1.length} capturé(s)
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Taux Capture Étendu</span>
+                  <span className="text-xs font-black font-mono text-cyan-500 mt-1 block">
+                    {(report.systematicComparison.captureRateExtended * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Indice Dispersion</span>
+                  <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
+                    {report.systematicComparison.dispersionIndex} / 100
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Actionable Improvement Report */}
+          {report.actionableImprovementReport && (
+            <div className="p-5 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider flex items-center gap-2">
+                  <Sparkles size={12} />
+                  Rapport d'Amélioration Actionnable
+                </h4>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                  Gain attendu : +{report.actionableImprovementReport.expectedAccuracyGain}%
+                </span>
+              </div>
+              <p className="text-xs text-indigo-100 font-medium">
+                {report.actionableImprovementReport.summary}
+              </p>
+              <div className="space-y-1.5">
+                {report.actionableImprovementReport.priorityFixes.map((fix, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-[11px] text-slate-300">
+                    <span className="text-indigo-400">✓</span>
+                    <span>{fix}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Actionable Adjustments / Recommendations */}
           <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
