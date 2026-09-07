@@ -1,6 +1,7 @@
 import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
+import { isDrawWithoutMachine } from "../../constants";
 import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
@@ -255,8 +256,9 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
   }
 
   // 4. Règle d'or : Aucun boost ou surestimation de MACHINE_TRANSFER sans présence de données machine réelles
+  const isWithoutMachine = isDrawWithoutMachine(context.drawName);
   const hasMachineData = context.history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
-  if (!hasMachineData) {
+  if (isWithoutMachine || !hasMachineData) {
     (weights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
   }
 
@@ -425,12 +427,12 @@ export const applyPredictionDnaSieve = (
 
   // Dérivation vectorielle des 6 macro-familles pour le Radar Algorithmique
   const macroFamilyDefinitions = [
-    { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', algos: ['frequency', 'markov', 'affinity', 'cohort'] },
-    { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', algos: ['gaps', 'gap_sequence', 'gap_cadence', 'gap_trend', 'gap_band_sequence'] },
-    { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', algos: ['temporal', 'inter_monthly_resonance', 'isolation_anomaly', 'cross_entropy'] },
-    { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', algos: ['spectral'] },
-    { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', algos: ['spatial', 'fractal'] },
-    { key: 'MACHINE_BAYES', name: 'Machine & Bayes', algos: ['machine_transfer', 'bayes', 'shadow_probability', 'consecutive'] }
+    { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', algos: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.AFFINITY, AlgoKey.JACCARD, AlgoKey.NETWORK_CORRELATION] },
+    { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', algos: [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.GAP_BAND_SEQUENCE, AlgoKey.GAP_PATTERN] },
+    { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', algos: [AlgoKey.TEMPORAL, AlgoKey.MOMENTUM, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.ISOLATION_ANOMALY] },
+    { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', algos: [AlgoKey.SPECTRAL, AlgoKey.ECHO_STATE] },
+    { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', algos: [AlgoKey.SPATIAL, AlgoKey.FRACTAL, AlgoKey.DERIVED_NEIGHBOR] },
+    { key: 'MACHINE_BAYES', name: 'Machine & Bayes', algos: [AlgoKey.MACHINE_TRANSFER, AlgoKey.BAYES, AlgoKey.SHADOW_PROBABILITY, AlgoKey.SEQUENCE_PATTERN] }
   ];
 
   const totalWeightsSum = Object.values(weights).reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0) || 1.0;

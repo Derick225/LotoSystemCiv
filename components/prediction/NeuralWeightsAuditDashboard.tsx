@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { evaluateAlgoEmpiricalProof, computeChronologicalAlgoReinforcement, normalizeWeights } from "../../services/prediction/weightsManager";
+import { isDrawWithoutMachine } from "../../constants";
 import { exportService } from "../../services/exportService";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
@@ -297,6 +298,11 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     return initial;
   });
 
+  // Check if active draw type is defined without machine numbers
+  const isMachineDisabled = useMemo(() => {
+    return isDrawWithoutMachine(drawName);
+  }, [drawName]);
+
   // Check if active history contains machine draws
   const hasMachineDataInHistory = useMemo(() => {
     if (!history || history.length === 0) return false;
@@ -314,28 +320,35 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
           ? (globalWeights as any)[meta.key]
           : 1.0;
       });
-      if (!hasMachineDataInHistory) {
+      if (isMachineDisabled) {
         next[AlgoKey.MACHINE_TRANSFER] = 0.0;
       }
       setLocalWeights(next);
     }
-  }, [globalWeights, hasMachineDataInHistory]);
+  }, [globalWeights, isMachineDisabled]);
 
   // Locked weights state (pinned while normalizing others)
   const [lockedKeys, setLockedKeys] = useState<Record<string, boolean>>({});
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [isExportingPDF, setIsExportingPDF] = useState(false);
 
-  // Verrouillage et forçage automatique à 0% de MACHINE_TRANSFER dès qu'un tirage sans machine est actif
+  // Verrouillage et forçage automatique à 0% de MACHINE_TRANSFER uniquement pour les tirages sans machine
   useEffect(() => {
-    if (!hasMachineDataInHistory) {
+    if (isMachineDisabled) {
       setLocalWeights((prev) => {
         if (prev[AlgoKey.MACHINE_TRANSFER] === 0) return prev;
         return { ...prev, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
       });
       setLockedKeys((prev) => ({ ...prev, [AlgoKey.MACHINE_TRANSFER]: true }));
+    } else {
+      setLockedKeys((prev) => {
+        if (!prev[AlgoKey.MACHINE_TRANSFER]) return prev;
+        const copy = { ...prev };
+        delete copy[AlgoKey.MACHINE_TRANSFER];
+        return copy;
+      });
     }
-  }, [hasMachineDataInHistory]);
+  }, [isMachineDisabled]);
 
   // Empirical Proofs & Standard Deviations evaluation on active draw history
   const empiricalProofs = useMemo(() => {

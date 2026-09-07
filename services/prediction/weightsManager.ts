@@ -1,5 +1,6 @@
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
+import { isDrawWithoutMachine } from '../../constants';
 import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
@@ -533,10 +534,8 @@ export const evaluateAlgoEmpiricalProof = (
       const topMachine = [...numIndices].sort((a, b) => machineScores[b] - machineScores[a]).slice(0, 10);
       hits[AlgoKey.MACHINE_TRANSFER] += topMachine.filter(n => actualDraw.includes(n)).length;
       trials[AlgoKey.MACHINE_TRANSFER] += 10;
-    } else {
-      // Aucun essai si le tirage ne contient aucune donnée machine
-      trials[AlgoKey.MACHINE_TRANSFER] += 10;
     }
+    // Note: Aucun essai ajouté si le tirage ne contient aucune donnée machine à ce pas
 
     // 24. Canal JACCARD (Inertie ensembliste inter-tirages et persistance conditionnelle)
     const jaccardSubScores = new Float32Array(91);
@@ -558,14 +557,21 @@ export const evaluateAlgoEmpiricalProof = (
   }
 
   // Vérification de la présence effective de données machine sur l'historique du tirage
+  const isWithoutMachine = isDrawWithoutMachine(drawName);
   const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
 
   // Calcul du score de preuve empirique objectif Z-score
   validKeys.forEach(k => {
-    // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
-    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
-      hits[k] = 0;
-      trials[k] = Math.max(10, sample.length * 10);
+    // Si le tirage n'a pas de machine ou aucune donnée machine présente dans l'historique
+    if (k === AlgoKey.MACHINE_TRANSFER && (isWithoutMachine || !hasMachineDataInHistory)) {
+      result[k] = {
+        hasProof: false,
+        proofScore: 0,
+        empiricalHitRate: 0,
+        baselineRate: parseFloat(baselineRate.toFixed(4)),
+        confidence: 0
+      };
+      return;
     }
 
     const t = trials[k] || 1;
@@ -622,10 +628,11 @@ export const computeChronologicalAlgoReinforcement = (
   const sampleConfidence = Math.tanh(T / 30.0);
 
   // 2. Application de la règle : AUCUNE priorité sans preuve
+  const isWithoutMachineReinforce = isDrawWithoutMachine(drawName);
   const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
   const reinforced: Record<string, number> = {};
   validKeys.forEach(k => {
-    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+    if (k === AlgoKey.MACHINE_TRANSFER && (isWithoutMachineReinforce || !hasMachineDataInHistory)) {
       reinforced[k] = 0.0; // Poids nul si aucune donnée machine enregistrée sur ce tirage
       return;
     }

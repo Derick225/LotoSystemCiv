@@ -18,6 +18,7 @@ import {
   NeuralFeedbackLog,
 } from "../types";
 import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
+import { isDrawWithoutMachine } from "../constants";
 import {
   getAlgoWeights,
   saveAlgoWeights,
@@ -303,13 +304,11 @@ export const useNexusStore = create<NexusState>()(
       setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),
 
       setHistoryData: (history, stats, gaps) => {
-        const hasMachine = history.some(
-          (d) => Array.isArray(d.machine) && d.machine.length > 0
-        );
+        const currentDraw = get().drawName;
+        const isWithoutMachine = isDrawWithoutMachine(currentDraw);
         const currentWeights = get().globalWeights;
         if (
-          !hasMachine &&
-          history.length > 0 &&
+          isWithoutMachine &&
           currentWeights &&
           (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
         ) {
@@ -317,7 +316,6 @@ export const useNexusStore = create<NexusState>()(
           const normalized = normalizeWeights(sanitized);
           normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
           set({ history, stats, gaps, globalWeights: normalized });
-          const currentDraw = get().drawName;
           if (currentDraw) {
             saveAlgoWeights(currentDraw, normalized).catch(() => {});
           }
@@ -363,14 +361,11 @@ export const useNexusStore = create<NexusState>()(
             gaps.push({ number: i, gap });
           }
 
-          const hasMachine = historyData.some(
-            (d) => Array.isArray(d.machine) && d.machine.length > 0
-          );
+          const isWithoutMachine = isDrawWithoutMachine(name);
           const currentWeights = get().globalWeights;
           let nextWeights = currentWeights;
           if (
-            !hasMachine &&
-            historyData.length > 0 &&
+            isWithoutMachine &&
             currentWeights &&
             (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
           ) {
@@ -394,16 +389,13 @@ export const useNexusStore = create<NexusState>()(
       },
       updateGlobalWeights: async (weights, targetDrawName) => {
         const nameToSave = targetDrawName || get().drawName;
-        const currentHistory = get().history || [];
-        const hasMachine = currentHistory.some(
-          (d) => Array.isArray(d.machine) && d.machine.length > 0
-        );
+        const isWithoutMachine = isDrawWithoutMachine(nameToSave);
         let sanitizedWeights = { ...weights };
-        if (!hasMachine && currentHistory.length > 0) {
+        if (isWithoutMachine) {
           sanitizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
         }
         const normalized = normalizeWeights(sanitizedWeights);
-        if (!hasMachine && currentHistory.length > 0) {
+        if (isWithoutMachine) {
           normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
         }
         if (nameToSave === get().drawName) {
