@@ -84,31 +84,12 @@ export const SignalHub: React.FC = () => {
   useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
-      const sub = (customEvent.detail?.subTab || "").toLowerCase();
-      if (sub === "stats" || sub === "statistiques") {
-        setActiveSubTab("stats");
-      } else if (sub === "patterns" || sub === "motifs" || sub === "motif") {
-        setActiveSubTab("patterns");
-      } else if (sub === "gaps" || sub === "ecarts" || sub === "ecart") {
-        setActiveSubTab("gaps");
-      } else if (sub === "spectral" || sub === "spectre" || sub === "frequences") {
-        setActiveSubTab("spectral");
-      } else if (sub === "fractal" || sub === "meteo") {
-        setActiveSubTab("fractal");
-      } else if (sub === "math" || sub === "maths" || sub === "mathematiques") {
-        setActiveSubTab("math");
-      } else if (sub === "temporal" || sub === "temps" || sub === "temporel") {
-        setActiveSubTab("temporal");
-      } else if (sub === "cluster" || sub === "clusters" || sub === "markov") {
-        setActiveSubTab("cluster");
-      } else if (sub === "machine" || sub === "transfert" || sub === "machinetransfer") {
-        setActiveSubTab("machine");
-      } else if (sub === "academy" || sub === "academie" || sub === "formation") {
-        setActiveSubTab("academy");
+      if (customEvent.detail?.subTab) {
+        setActiveSubTab(customEvent.detail.subTab);
+        const contentElement = document.getElementById("signal-content");
+        if (contentElement)
+          contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-      const contentElement = document.getElementById("signal-content");
-      if (contentElement)
-        contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
     };
     // On écoute l'événement spécifique dispatché par DrawDetails
     window.addEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);

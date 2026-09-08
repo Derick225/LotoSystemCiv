@@ -3,6 +3,7 @@ import { useNexusStore } from "../store/useNexusStore";
 import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
 import {
   getAlgoWeights,
+  generateMasterPrediction,
 } from "../services/predictionEngine";
 import { generateEmpiricalCalibration } from "../services/prediction/ticketAnalysisService";
 import { generateSmartInsights } from "../services/insightService";
@@ -31,6 +32,7 @@ export const NexusEngine: React.FC = () => {
   const setHistoryData = useNexusStore((s) => s.setHistoryData);
   const setAnalyticsData = useNexusStore((s) => s.setAnalyticsData);
   const setLoading = useNexusStore((s) => s.setLoading);
+  const setLastPrediction = useNexusStore((s) => s.setLastPrediction);
   const setSmartInsights = useNexusStore((s) => s.setSmartInsights);
   const setCalibration = useNexusStore((s) => s.setCalibration);
   const setEmpiricalCalibration = useNexusStore(
@@ -80,14 +82,7 @@ export const NexusEngine: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     const initConfig = async () => {
-      let weights = await getAlgoWeights(drawName);
-      const currentHistory = useNexusStore.getState().history || [];
-      const hasMachine = currentHistory.some(
-        (d) => Array.isArray(d.machine) && d.machine.length > 0
-      );
-      if (!hasMachine && currentHistory.length > 0) {
-        weights = { ...weights, machine_transfer: 0.0 };
-      }
+      const weights = await getAlgoWeights(drawName);
       if (mounted) setGlobalWeights(weights);
     };
     initConfig();
@@ -150,13 +145,28 @@ export const NexusEngine: React.FC = () => {
     }
   }, [analytics, setAnalyticsData]);
 
-  // 3. Génération des Insights (Dépendant des Analytics)
+  // 3. Génération Prédiction & Insights (Dépendant des Analytics et Weights)
   useEffect(() => {
     if (!analytics || !history || history.length < 10) return;
 
     let mounted = true;
     const runEngine = async () => {
       try {
+        // Génération de la prédiction Master
+        const prediction = await generateMasterPrediction(
+          drawName,
+          history,
+          temporalDepth,
+          globalWeights,
+          {
+            spectral: analytics.spectral,
+            correlationMatrix: analytics.correlationMatrix,
+            regularity: analytics.regularity,
+          },
+          analytics.symbioticContext || undefined,
+        );
+        if (mounted) setLastPrediction(prediction);
+
         // Insights
         const insights = await generateSmartInsights(
           drawName,
@@ -191,6 +201,9 @@ export const NexusEngine: React.FC = () => {
     drawName,
     history,
     analytics,
+    globalWeights,
+    temporalDepth,
+    setLastPrediction,
     setSmartInsights,
   ]);
 

@@ -303,19 +303,13 @@ ctx.onmessage = (e) => {
   // --- NIVEAU 1 : MACRO-FILTRAGE (90 -> 20 Candidats) ---
   const level1Votes = (candidates as Candidate[]).map((cand: Candidate) => {
     let sumProb = 0;
-    let positiveVotes = 0;
     forest.forEach(tree => {
-      const prob = predict(tree, cand.features);
-      sumProb += prob;
-      if (prob > 0.5) positiveVotes++;
+      sumProb += predict(tree, cand.features);
     });
-
-    const concordance = Math.round((positiveVotes / Math.max(1, forest.length)) * 100);
 
     return {
       number: cand.number,
       score: (sumProb / Math.max(1, forest.length)) * 100,
-      concordance,
       features: cand.features
     };
   });
@@ -354,7 +348,6 @@ ctx.onmessage = (e) => {
     return {
       number: cand.number,
       score: refinedScore,
-      concordance: cand.concordance,
       features: cand.features
     };
   });

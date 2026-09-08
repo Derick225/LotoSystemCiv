@@ -96,15 +96,6 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
 
-  // Vérification de la présence de données machine pour ce tirage
-  const hasMachineData = useMemo(() => {
-    const isolatedHistory = history.filter(
-      (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-    );
-    const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
-    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
-  }, [history, drawName]);
-
   const handleExportForensicReport = async () => {
     audioEngine.play("click");
     setIsExportingForensicPDF(true);
@@ -224,7 +215,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   const shapleyChartData = useMemo(() => {
     if (!currentNumberXAP?.shapleyValues) {
       const breakdown = prediction.breakdown?.[selectedNum] || {};
-      const total: number = Object.values(breakdown).reduce((a: number, b) => a + (Number(b) || 0), 0) || 1;
+      const total = Object.values(breakdown).reduce((a, b) => a + (Number(b) || 0), 0) || 1;
       return Object.entries(breakdown)
         .map(([algo, val]) => ({
           algo: LABELS_FRIENDLY[algo] || algo,
@@ -247,13 +238,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
 
   // Neural Weights Ranking & Distribution
   const neuralWeightsData = useMemo(() => {
-    const rawSource = prediction.aiWeights || globalWeights || {};
-    const sourceWeights: Record<string, number> = { ...rawSource };
-    if (!hasMachineData) {
-      sourceWeights["machine_transfer"] = 0;
-      sourceWeights["machineTransfer"] = 0;
-      sourceWeights["machine"] = 0;
-    }
+    const sourceWeights = prediction.aiWeights || globalWeights || {};
     const entries = Object.entries(sourceWeights).map(([k, v]) => ({
       key: k,
       label: LABELS_FRIENDLY[k] || k,
@@ -280,7 +265,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       normalizedEntropy,
       activeModelsCount: entries.filter((e) => e.weight > 0.005).length,
     };
-  }, [prediction.aiWeights, globalWeights, hasMachineData]);
+  }, [prediction.aiWeights, globalWeights]);
 
   // Stochastic Factors Decomposition
   const stochasticFactors = useMemo(() => {
@@ -298,9 +283,9 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     // 3. Hawkes Self-Excitation Impact:
     const hawkesWeight = ((gWeights["hawkes"] || gWeights["temporal"] || 0.05) / Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0))) * 100;
     // 4. Machine Transfer Symbiosis (Exact normalized weight percentage):
-    const rawMachineVal = !hasMachineData ? 0 : (gWeights["machine_transfer"] ?? gWeights["machineTransfer"] ?? gWeights["machine"] ?? 0);
+    const rawMachineVal = gWeights["machine_transfer"] ?? gWeights["machineTransfer"] ?? gWeights["machine"] ?? 0;
     const totalWeightsSum = Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0));
-    const machineWeight = !hasMachineData ? 0 : (rawMachineVal / totalWeightsSum) * 100;
+    const machineWeight = (rawMachineVal / totalWeightsSum) * 100;
     // 5. Weyl Topological Regularity:
     const weylUniformity = Math.max(10, Math.min(99, (1.0 - weylDiscrepancy) * 100));
     // 6. Shannon Entropy Dispersion:
@@ -342,16 +327,8 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         name: "Transfert Machine ➔ Gagnants",
         value: `${machineWeight.toFixed(1)}%`,
         forcePct: Math.min(100, Math.round(machineWeight)),
-        status: !hasMachineData
-          ? "Verrouillé à 0.00% (Aucune Donnée Machine)"
-          : machineWeight > 5
-          ? "Flux Cinématique Actif"
-          : machineWeight > 0.1
-          ? "Flux Découplé Stationnaire"
-          : "Inactif (Désactivé / Non Prouvé sur ce Tirage)",
-        description: !hasMachineData
-          ? "Module automatiquement forcé à 0% : tirage sans numéros machine dans son historique."
-          : "Amplification cinématique continue par transformation tanh du vecteur machine.",
+        status: machineWeight > 5 ? "Flux Cinématique Actif" : machineWeight > 0.1 ? "Flux Découplé Stationnaire" : "Inactif (Désactivé / Non Prouvé sur ce Tirage)",
+        description: "Amplification cinématique continue par transformation tanh du vecteur machine.",
         color: "text-emerald-400",
         barColor: "bg-emerald-500",
       },

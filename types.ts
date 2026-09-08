@@ -1,5 +1,4 @@
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS, AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
-export { AlgoKey, DEFAULT_ALGO_WEIGHTS, type AlgoWeights, type ScoreBreakdown };
+import { AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
 
 export interface GapEfficiency {
   number: number;
@@ -155,29 +154,6 @@ export interface Prediction {
       sieveEnergyPct: number;
     }[];
   };
-  quantifiedUncertainty?: QuantifiedUncertainty;
-  simulationScenarios?: PredictionScenarioItem[];
-  readabilityReport?: {
-    summary: string;
-    keyDrivers: string[];
-    riskAssessment: string;
-  };
-}
-
-export interface QuantifiedUncertainty {
-  epistemicUncertainty: number;    // Incertitude épistémique (échantillon, divergence modèle) [0 - 100]
-  aleatoricUncertainty: number;    // Incertitude aléatoire intrinsèque [0 - 100]
-  totalEntropyBits: number;        // Entropie prédictive en bits de Shannon
-  confidenceIntervals: Record<number, { lower: number; upper: number; mean: number }>;
-  reliabilityScore: number;        // Indice de fiabilité globale synthétique [0 - 100]
-}
-
-export interface PredictionScenarioItem {
-  scenarioId: 'CONSERVATIVE' | 'BALANCED_PARETO' | 'VOLATILE_ANTIESTABLISHMENT';
-  label: string;
-  suggestedNumbers: number[];
-  confidence: number;
-  rationale: string;
 }
 
 export interface PredictionFeedback {
@@ -234,42 +210,6 @@ export type ForensicFailureMode =
   | "structuralmisalignment"
   | "regimebreak"
   | "anomalousdraw";
-
-export interface CausalAttributionItem {
-  number: number;
-  category: 'FALSE_POSITIVE' | 'FALSE_NEGATIVE' | 'BALLISTIC_NEAR_MISS' | 'CONFIRMED_HIT';
-  primaryCause: string;
-  contributingAlgos: { algo: string; contribution: number; direction: 'overpromoted' | 'suppressed' }[];
-  attributionScore: number; // 0 - 100
-  counterfactualFix: string;
-}
-
-export interface SystematicComparisonReport {
-  directHits: number[];
-  neighbors1: { actual: number; predicted: number; diff: number }[];
-  neighbors2: { actual: number; predicted: number; diff: number }[];
-  mirrors: { actual: number; predicted: number; type: string }[];
-  shadows: { actual: number; predicted: number }[];
-  machineLeakages: number[];
-  unmatchedPredicted: number[];
-  unmatchedWinners: number[];
-  hitRateTop5: number;
-  captureRateExtended: number; // Top 5 + Voisins + Miroirs
-  dispersionIndex: number;
-}
-
-export interface ActionableImprovementReport {
-  summary: string;
-  recommendedWeightDeltas: Record<string, number>;
-  recommendedHyperparameterDeltas?: {
-    hawkesDecayDelta?: number;
-    spatialSigmaDelta?: number;
-    gapVelocityDelta?: number;
-    pcaVarianceDelta?: number;
-  };
-  priorityFixes: string[];
-  expectedAccuracyGain: number;
-}
 
 export interface ForensicActionableAdjustment {
   target: string;
@@ -433,9 +373,6 @@ export interface ForensicReport {
   recommendedAdjustments?: ForensicActionableAdjustment[];
   warnings?: string[];
   postMortemStabilityScore?: number;
-  causalAttributions?: CausalAttributionItem[];
-  systematicComparison?: SystematicComparisonReport;
-  actionableImprovementReport?: ActionableImprovementReport;
 }
 
 export interface CondensedForensicReport {
@@ -763,7 +700,6 @@ export interface ForestVote {
   dnaAffinity?: number;
   dnaMultiplier?: number;
   isDnaBoosted?: boolean;
-  concordance?: number;
   votes: { temporal: number; spatial: number; structural: number };
   decisionPath: DecisionNode;
   features: { isConsensusTrap: boolean; values?: number[] };
@@ -805,13 +741,6 @@ export interface PlatinumResult {
     transition: number;
     chaotic: number;
   };
-  jaccardMetrics?: {
-    meanJaccard: number;           // Indice Jaccard temporel moyen inter-tirages
-    stdDevJaccard: number;        // Écart-type d'inertie Jaccard
-    theoreticalJaccard: number;   // Jaccard théorique stationnaire
-    jaccardInertiaRatio: number;  // Ratio d'inertie Jaccard R_J
-    ballJaccardIndices?: Record<number, number>; // Tenseur Jaccard individuel
-  };
 }
 
 export interface PlatinumScenario {
@@ -822,13 +751,11 @@ export interface PlatinumScenario {
   probability: number;
   risk: "LOW" | "MEDIUM" | "HIGH";
   color: string;
-  jaccardScore?: number;
   genomicProfile?: {
     focus: string;
     mrrBoost?: number;
     sieveAccelerationDelta?: number;
     entropyRegimeAdaptive?: boolean;
-    jaccardCouplingPct?: number;
     macroFingerprint?: {
       familyKey: string;
       familyName: string;
@@ -858,7 +785,6 @@ export interface PlatinumUserOptions {
   forensicGain: number;    // Multiplier for the forensic adjustments (default: 1.0)
   phaseFrequency: number;  // Multiplier for the phase shifts (default: 1.0)
   shannonEntropyFilter: boolean; // Filter numbers below historical entropy average
-  jaccardGain?: number;    // Multiplier for Jaccard transition persistence & coupling (default: 1.0)
 }
 
 export interface GeminiReasoning {

@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { evaluateAlgoEmpiricalProof, computeChronologicalAlgoReinforcement, normalizeWeights } from "../../services/prediction/weightsManager";
-import { isDrawWithoutMachine } from "../../constants";
 import { exportService } from "../../services/exportService";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
@@ -179,15 +178,6 @@ const ALGO_REGISTRY: LayerMeta[] = [
     formula: "Aff(i, j) = P(i cap j) / (P(i) * P(j))",
     iconName: "Network",
   },
-  {
-    key: AlgoKey.JACCARD,
-    label: "Inertie Ensembliste Jaccard",
-    category: "markov_point",
-    categoryLabel: "Couche 3 : Transitions & Processus Ponctuels",
-    description: "Indice d'inertie stochastique inter-tirages et couplage de transition conditionnelle C^infinity.",
-    formula: "J(D_t, D_{t+1}) = |D_t ∩ D_{t+1}| / |D_t ∪ D_{t+1}|",
-    iconName: "Network",
-  },
 
   // 4. Chaos, Bayes & Topologie
   {
@@ -298,19 +288,6 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     return initial;
   });
 
-  // Check if active draw type is defined without machine numbers
-  const isMachineDisabled = useMemo(() => {
-    return isDrawWithoutMachine(drawName);
-  }, [drawName]);
-
-  // Check if active history contains machine draws
-  const hasMachineDataInHistory = useMemo(() => {
-    if (!history || history.length === 0) return false;
-    const isolated = history.filter((d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
-    const sample = isolated.length > 0 ? isolated : history;
-    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
-  }, [history, drawName]);
-
   // Synchronisation continue dès que les poids globaux du tirage changent dans l'application
   useEffect(() => {
     if (globalWeights && Object.keys(globalWeights).length > 0) {
@@ -320,35 +297,22 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
           ? (globalWeights as any)[meta.key]
           : 1.0;
       });
-      if (isMachineDisabled) {
-        next[AlgoKey.MACHINE_TRANSFER] = 0.0;
-      }
       setLocalWeights(next);
     }
-  }, [globalWeights, isMachineDisabled]);
+  }, [globalWeights]);
 
   // Locked weights state (pinned while normalizing others)
   const [lockedKeys, setLockedKeys] = useState<Record<string, boolean>>({});
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [isExportingPDF, setIsExportingPDF] = useState(false);
 
-  // Verrouillage et forçage automatique à 0% de MACHINE_TRANSFER uniquement pour les tirages sans machine
-  useEffect(() => {
-    if (isMachineDisabled) {
-      setLocalWeights((prev) => {
-        if (prev[AlgoKey.MACHINE_TRANSFER] === 0) return prev;
-        return { ...prev, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
-      });
-      setLockedKeys((prev) => ({ ...prev, [AlgoKey.MACHINE_TRANSFER]: true }));
-    } else {
-      setLockedKeys((prev) => {
-        if (!prev[AlgoKey.MACHINE_TRANSFER]) return prev;
-        const copy = { ...prev };
-        delete copy[AlgoKey.MACHINE_TRANSFER];
-        return copy;
-      });
-    }
-  }, [isMachineDisabled]);
+  // Check if active history contains machine draws
+  const hasMachineDataInHistory = useMemo(() => {
+    if (!history || history.length === 0) return false;
+    const isolated = history.filter((d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
+    const sample = isolated.length > 0 ? isolated : history;
+    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  }, [history, drawName]);
 
   // Empirical Proofs & Standard Deviations evaluation on active draw history
   const empiricalProofs = useMemo(() => {
@@ -362,22 +326,14 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
 
   // Normalized percentages of local weights
   const normalizedPercentages = useMemo(() => {
-    const effectiveWeights: Record<string, number> = { ...localWeights };
-    if (!hasMachineDataInHistory) {
-      effectiveWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
-    }
-    const rawSum = Object.values(effectiveWeights).reduce((a, b) => a + (Math.max(0, Number(b)) || 0), 0);
+    const rawSum = Object.values(localWeights).reduce((a, b) => a + (Math.max(0, Number(b)) || 0), 0);
     const result: Record<string, number> = {};
     ALGO_REGISTRY.forEach((meta) => {
-      if (meta.key === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
-        result[meta.key] = 0.0;
-      } else {
-        const val = Math.max(0, Number(effectiveWeights[meta.key]) || 0);
-        result[meta.key] = rawSum > 0 ? (val / rawSum) * 100 : (100 / ALGO_REGISTRY.length);
-      }
+      const val = Math.max(0, Number(localWeights[meta.key]) || 0);
+      result[meta.key] = rawSum > 0 ? (val / rawSum) * 100 : (100 / ALGO_REGISTRY.length);
     });
     return result;
-  }, [localWeights, hasMachineDataInHistory]);
+  }, [localWeights]);
 
   // Shannon Entropy of the weight distribution
   const weightEntropy = useMemo(() => {
@@ -764,7 +720,7 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
                   min="0"
                   max="10"
                   step="0.05"
-                  value={isMachineDisabled ? 0 : rawVal}
+                  value={rawVal}
                   disabled={isLocked || isMachineDisabled}
                   onChange={(e) => handleWeightChange(meta.key, parseFloat(e.target.value))}
                   className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -776,7 +732,7 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
                     min="0"
                     max="100"
                     step="0.1"
-                    value={isMachineDisabled ? "0.00" : rawVal.toFixed(2)}
+                    value={rawVal.toFixed(2)}
                     disabled={isLocked || isMachineDisabled}
                     onChange={(e) => handleWeightChange(meta.key, parseFloat(e.target.value) || 0)}
                     className="w-16 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono font-bold text-center text-white focus:border-indigo-500 focus:outline-none disabled:opacity-30"
@@ -787,9 +743,9 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
 
               {/* Formula & Status Footer */}
               {isMachineDisabled && (
-                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-400/90 font-medium bg-amber-950/20 px-2.5 py-1 rounded-lg border border-amber-500/20">
-                  <AlertTriangle size={12} className="shrink-0" />
-                  <span>Module verrouillé et forcé à 0.00% : aucune donnée machine pour ce tirage ({drawName}).</span>
+                <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-400/90 font-medium">
+                  <AlertTriangle size={12} />
+                  <span>Module désactivé (poids = 0) car aucune colonne 'machine' n'existe dans l'historique de ce tirage.</span>
                 </div>
               )}
             </div>

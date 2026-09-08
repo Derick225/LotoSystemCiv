@@ -18,13 +18,12 @@ import {
   NeuralFeedbackLog,
 } from "../types";
 import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
-import { isDrawWithoutMachine } from "../constants";
 import {
   getAlgoWeights,
   saveAlgoWeights,
   normalizeWeights,
 } from "../services/prediction/weightsManager";
-import { AlgoKey, EmpiricalCalibration } from "../shared/prediction.types";
+import { EmpiricalCalibration } from "../shared/prediction.types";
 
 interface NexusState {
   // UI State
@@ -236,21 +235,11 @@ export const useNexusStore = create<NexusState>()(
       },
 
       setDrawName: (name) => {
-        set({ drawName: name, currentDrawName: name, lastPrediction: null });
+        set({ drawName: name, currentDrawName: name });
         if (name) {
           getAlgoWeights(name).then((weights) => {
             if (get().drawName === name) {
-              const currentHistory = get().history || [];
-              const hasMachine = currentHistory.some(
-                (d) => Array.isArray(d.machine) && d.machine.length > 0
-              );
-              let sanitized = { ...weights };
-              if (!hasMachine && currentHistory.length > 0) {
-                sanitized[AlgoKey.MACHINE_TRANSFER] = 0.0;
-                sanitized = normalizeWeights(sanitized);
-                sanitized[AlgoKey.MACHINE_TRANSFER] = 0.0;
-              }
-              set({ globalWeights: sanitized });
+              set({ globalWeights: weights });
             }
           }).catch(() => {});
         }
@@ -262,18 +251,7 @@ export const useNexusStore = create<NexusState>()(
         set({ activeMainTab: mainTab, activeSubTab: subTab }),
       setGlobalWeights: (weights) => {
         const currentDraw = get().drawName;
-        const currentHistory = get().history || [];
-        const hasMachine = currentHistory.some(
-          (d) => Array.isArray(d.machine) && d.machine.length > 0
-        );
-        let sanitizedWeights = { ...weights };
-        if (!hasMachine && currentHistory.length > 0) {
-          sanitizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
-        }
-        const normalized = normalizeWeights(sanitizedWeights);
-        if (!hasMachine && currentHistory.length > 0) {
-          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
-        }
+        const normalized = normalizeWeights(weights);
         set({ globalWeights: normalized });
         if (currentDraw) {
           saveAlgoWeights(currentDraw, normalized).catch((err) => {
@@ -303,26 +281,7 @@ export const useNexusStore = create<NexusState>()(
       setCalibration: (cal) => set({ calibration: cal }),
       setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),
 
-      setHistoryData: (history, stats, gaps) => {
-        const currentDraw = get().drawName;
-        const isWithoutMachine = isDrawWithoutMachine(currentDraw);
-        const currentWeights = get().globalWeights;
-        if (
-          isWithoutMachine &&
-          currentWeights &&
-          (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
-        ) {
-          const sanitized = { ...currentWeights, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
-          const normalized = normalizeWeights(sanitized);
-          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
-          set({ history, stats, gaps, globalWeights: normalized });
-          if (currentDraw) {
-            saveAlgoWeights(currentDraw, normalized).catch(() => {});
-          }
-        } else {
-          set({ history, stats, gaps });
-        }
-      },
+      setHistoryData: (history, stats, gaps) => set({ history, stats, gaps }),
       setAnalyticsData: (analytics) =>
         set({
           spectral: analytics?.spectral || [],
@@ -361,26 +320,7 @@ export const useNexusStore = create<NexusState>()(
             gaps.push({ number: i, gap });
           }
 
-          const isWithoutMachine = isDrawWithoutMachine(name);
-          const currentWeights = get().globalWeights;
-          let nextWeights = currentWeights;
-          if (
-            isWithoutMachine &&
-            currentWeights &&
-            (currentWeights[AlgoKey.MACHINE_TRANSFER] || 0) > 0
-          ) {
-            const sanitized = { ...currentWeights, [AlgoKey.MACHINE_TRANSFER]: 0.0 };
-            nextWeights = normalizeWeights(sanitized);
-            nextWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
-            saveAlgoWeights(name, nextWeights).catch(() => {});
-          }
-
-          set({
-            history: historyData,
-            stats,
-            gaps,
-            ...(nextWeights !== currentWeights ? { globalWeights: nextWeights } : {}),
-          });
+          set({ history: historyData, stats, gaps });
         } catch (error) {
           console.error("Failed to refresh data:", error);
         } finally {
@@ -389,20 +329,11 @@ export const useNexusStore = create<NexusState>()(
       },
       updateGlobalWeights: async (weights, targetDrawName) => {
         const nameToSave = targetDrawName || get().drawName;
-        const isWithoutMachine = isDrawWithoutMachine(nameToSave);
-        let sanitizedWeights = { ...weights };
-        if (isWithoutMachine) {
-          sanitizedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
-        }
-        const normalized = normalizeWeights(sanitizedWeights);
-        if (isWithoutMachine) {
-          normalized[AlgoKey.MACHINE_TRANSFER] = 0.0;
-        }
         if (nameToSave === get().drawName) {
-          set({ globalWeights: normalized });
+          set({ globalWeights: weights });
         }
         try {
-          await saveAlgoWeights(nameToSave, normalized);
+          await saveAlgoWeights(nameToSave, weights);
         } catch (error) {
           console.error("Failed to save algo weights:", error);
         }

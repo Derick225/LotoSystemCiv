@@ -13,7 +13,6 @@ import { HONEST_NOTE } from "./predictionScenarios";
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
-import { computeQuantifiedUncertainty, generateSimulationScenarios, generateReadabilityReport } from "./quantifiedUncertaintyEngine";
 
 const TICKET_SIZE = 5;
 
@@ -324,11 +323,6 @@ export const finalizePredictionPayload = async (
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
 
-  // Moteur d'Incertitude Quantifiée & Scénarios de Simulation
-  const quantifiedUncertainty = computeQuantifiedUncertainty(denoisedScores, context.history, features);
-  const simulationScenarios = generateSimulationScenarios(denoisedScores, features);
-  const readabilityReport = generateReadabilityReport(selection, denoisedScores, quantifiedUncertainty);
-
   return {
     suggestedNumbers: selection,
     candidates,
@@ -360,9 +354,6 @@ export const finalizePredictionPayload = async (
       driftResistanceFactor: driftLearning.driftResistanceFactor
     },
     dnaSieve: dnaSieveMetrics,
-    quantifiedUncertainty,
-    simulationScenarios,
-    readabilityReport,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
       spatialSigma: DOMAIN_SIZE / 60.0,

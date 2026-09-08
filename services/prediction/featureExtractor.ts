@@ -1,5 +1,5 @@
 import { DrawResult } from '../../types';
-import { globalTensorCache } from '../cache/lruTensorCache';
+import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
@@ -12,29 +12,7 @@ export interface ExtractedFeatures {
   machineTransferMap: Float32Array;
   shadowProbabilityMap: Float32Array;
   networkCorrelationMap: Float32Array;
-  volatilityMap?: Float32Array;
-  residualEntropyMap?: Float32Array;
-  cadenceMap?: Float32Array;
-  temporalSignals?: {
-    meanIntervalDays: number;
-    driftVelocity: number;
-    periodicityStrength: number;
-  };
 }
-
-// In-Memory Differential L1 Cache pour éliminer la latence sur ré-extraction récurrente
-const primaryFeaturesL1Cache = new Map<string, { features: ExtractedFeatures; timestamp: number }>();
-
-export const invalidateFeaturesL1Cache = (drawName?: string): void => {
-  if (drawName) {
-    const clean = drawName.trim().toLowerCase();
-    for (const k of primaryFeaturesL1Cache.keys()) {
-      if (k.startsWith(clean)) primaryFeaturesL1Cache.delete(k);
-    }
-  } else {
-    primaryFeaturesL1Cache.clear();
-  }
-};
 
 // ============================================================================
 // CONSTANTES TOPOLOGIQUES DU DOMAINE (Zéro Nombre Magique)
@@ -55,185 +33,25 @@ const calculateMedian = (values: number[]): number => {
 };
 
 /**
- * Parse universellement des flux hétérogènes de numéros (tableaux, chaînes, entiers, objets).
- * Gère les chaînes JSON, séparateurs multiples (virgules, tirets, espaces, points-virgules, slashes, barres verticales),
- * zéros de tête ("05"), et structures d'objets imbriquées.
- */
-export const parseRawNumberArray = (raw: unknown): number[] => {
-  if (raw === null || raw === undefined) return [];
-  let result: number[] = [];
-
-  // Détection et parsing automatique des chaînes sérialisées JSON
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        return parseRawNumberArray(parsed);
-      } catch {
-        // Poursuite avec parsing textuel regex
-      }
-    }
-  }
-
-  if (Array.isArray(raw)) {
-    result = raw
-      .map(item => {
-        if (typeof item === 'number') return item;
-        if (typeof item === 'string') return parseInt(item.trim(), 10);
-        if (item && typeof item === 'object') {
-          const val = (item as any).num ?? (item as any).number ?? (item as any).val ?? (item as any).ball ?? (item as any).value;
-          return typeof val === 'number' ? val : parseInt(String(val), 10);
-        }
-        return NaN;
-      })
-      .filter(n => !isNaN(n) && Number.isFinite(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
-  } else if (typeof raw === 'number') {
-    result = raw >= DOMAIN_MIN && raw <= DOMAIN_MAX ? [raw] : [];
-  } else if (typeof raw === 'string') {
-    // Nettoyage des éventuels préfixes textuels et extraction par regex des séquences numériques
-    const matches = raw.match(/\b\d{1,2}\b/g);
-    if (matches) {
-      result = matches
-        .map(s => parseInt(s, 10))
-        .filter(n => !isNaN(n) && Number.isFinite(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
-    }
-  } else if (typeof raw === 'object') {
-    const candidate = 
-      (raw as any).numbers ?? 
-      (raw as any).gagnants ?? 
-      (raw as any).winningNumbers ?? 
-      (raw as any).machine ?? 
-      (raw as any).values ??
-      (raw as any).balls ??
-      (raw as any).boules ??
-      (raw as any).numeros ??
-      (raw as any).nums ??
-      (raw as any).results;
-    if (candidate) return parseRawNumberArray(candidate);
-  }
-  return Array.from(new Set(result));
-};
-
-/**
  * Extrait les numéros gagnants et de machine de façon extrêmement robuste.
- * Gère les types hétérogènes (number, array, string, objets imbriqués) et les clés alternatives.
+ * Gère les types hétérogènes (number, array, string).
  */
-export const extractDrawNumbers = (draw: DrawResult | unknown): { winners: number[], machine: number[] } => {
-  if (!draw) return { winners: [], machine: [] };
-  const d = draw as any;
-
-  // Prise en charge des structures d'API imbriquées { data: ... } ou { attributes: ... }
-  const payload = d.data ?? d.attributes ?? d.draw ?? d.payload ?? d;
-
-  const rawWinners = 
-    payload.gagnants ?? 
-    payload.numbers ?? 
-    payload.winningNumbers ?? 
-    payload.winners ?? 
-    payload.boules ?? 
-    payload.balls ?? 
-    payload.numeros;
-
-  const rawMachine = 
-    payload.machine ?? 
-    payload.machineNumbers ?? 
-    payload.machineBoules ?? 
-    payload.machineWinners ?? 
-    payload.secondary;
-
-  let winners = parseRawNumberArray(rawWinners);
-  let machine = parseRawNumberArray(rawMachine);
-
-  // Si le format est une chaîne de texte unique non découpée (ex: CSV brut "12-45-89-02-14 / 05-22")
-  if (winners.length === 0 && typeof draw === 'string') {
-    const parts = (draw as string).split(/[\/|]/);
-    winners = parseRawNumberArray(parts[0]);
-    if (parts.length > 1) {
-      machine = parseRawNumberArray(parts[1]);
+export const extractDrawNumbers = (draw: DrawResult): { winners: number[], machine: number[] } => {
+  const winners = Array.isArray(draw.gagnants) ? draw.gagnants : [];
+  let machine: number[] = [];
+  if (draw.machine) {
+    if (Array.isArray(draw.machine)) {
+      machine = draw.machine;
+    } else if (typeof draw.machine === 'number') {
+      machine = [draw.machine];
+    } else if (typeof draw.machine === 'string') {
+      machine = String(draw.machine).split(',').map(Number).filter(n => !isNaN(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
     }
   }
-
-  return { winners, machine };
-};
-
-/**
- * Ingestion et normalisation d'un jeu de données brut hétérogène (CSV, JSON, array d'objets, text dump).
- * Détecte automatiquement les formats, dates, numéros gagnants et machines avec isolation stricte.
- */
-export const parseHeterogeneousDrawDataset = (
-  rawDataset: unknown,
-  fallbackDrawName: string = 'Inconnu'
-): DrawResult[] => {
-  if (!rawDataset) return [];
-
-  let items: unknown[] = [];
-
-  if (typeof rawDataset === 'string') {
-    const trimmed = rawDataset.trim();
-    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        items = Array.isArray(parsed) ? parsed : (parsed.data || parsed.results || [parsed]);
-      } catch {
-        // Fallback délimitation par ligne CSV / TSV
-        items = trimmed.split(/\r?\n/).filter(line => line.trim().length > 0);
-      }
-    } else {
-      items = trimmed.split(/\r?\n/).filter(line => line.trim().length > 0);
-    }
-  } else if (Array.isArray(rawDataset)) {
-    items = rawDataset;
-  } else if (typeof rawDataset === 'object') {
-    const obj = rawDataset as any;
-    items = obj.data || obj.results || obj.draws || obj.records || [obj];
-  }
-
-  const results: DrawResult[] = [];
-
-  for (let idx = 0; idx < items.length; idx++) {
-    const item = items[idx];
-    if (!item) continue;
-
-    if (typeof item === 'string') {
-      const line = item.trim();
-      // Ignorer les en-têtes CSV classiques
-      if (/^(date|id|draw|tirage|num|gagnants)/i.test(line)) continue;
-
-      // Recherche et extraction d'une date au format YYYY-MM-DD ou DD/MM/YYYY avant parsing des boules
-      const dateMatch = line.match(/\b(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4})\b/);
-      const dateStr = dateMatch ? dateMatch[0] : new Date().toISOString().slice(0, 10);
-      const cleanLine = dateMatch ? line.replace(dateMatch[0], ' ') : line;
-
-      const { winners, machine } = extractDrawNumbers(cleanLine);
-      if (winners.length >= 3) {
-        results.push({
-          id: `hetero_draw_${idx}_${Date.now()}`,
-          drawName: fallbackDrawName,
-          date: dateStr,
-          gagnants: winners,
-          machine: machine.length > 0 ? machine : undefined,
-        });
-      }
-    } else if (typeof item === 'object') {
-      const obj = item as any;
-      const { winners, machine } = extractDrawNumbers(obj);
-      if (winners.length >= 3) {
-        const drawName = obj.drawName || obj.draw_name || obj.name || fallbackDrawName;
-        const dateStr = obj.date || obj.drawDate || obj.created_at || new Date().toISOString().slice(0, 10);
-        const id = obj.id || `hetero_draw_${idx}_${Date.now()}`;
-        results.push({
-          id: String(id),
-          drawName: String(drawName),
-          date: String(dateStr),
-          gagnants: winners,
-          machine: machine.length > 0 ? machine : undefined,
-        });
-      }
-    }
-  }
-
-  return results;
+  return { 
+    winners: winners.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX), 
+    machine: machine.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX) 
+  };
 };
 
 export const extractFeatures = async (
@@ -243,19 +61,14 @@ export const extractFeatures = async (
 ): Promise<ExtractedFeatures> => {
   // Filtrage robuste selon la règle d'isolation (TIRAGE ISOLATION RULE)
   const filteredHistory = purifyHistoryForDraw(drawName, history);
-
-  const cleanDraw = drawName.trim().toLowerCase();
-  const lastId = filteredHistory[0]?.id || filteredHistory[0]?.date || 'none';
-  const l1Key = `${cleanDraw}_${filteredHistory.length}_${sampleSize}_${lastId}`;
-  const cachedL1 = primaryFeaturesL1Cache.get(l1Key);
-  if (cachedL1 && (Date.now() - cachedL1.timestamp < 60000)) {
-    return cachedL1.features;
-  }
-
-  const resultFeatures = await globalTensorCache.getOrCompute(
+  const cacheKey = globalCache.generateKey(
     'features',
     drawName,
-    filteredHistory,
+    `${filteredHistory.length}_${sampleSize}_${filteredHistory[0]?.date || 'nodate'}`
+  );
+
+  return globalCache.getOrCompute(
+    cacheKey,
     async () => {
       // ============================================================================
       // 0. FENÊTRE GLISSANTE ADAPTATIVE (N_eval) POUR HISTORIQUES COURTS (< 200 tirages)
@@ -518,57 +331,6 @@ export const extractFeatures = async (
         networkCorrelationMap[n] = affSum / DOMAIN_SIZE;
       }
 
-      // ============================================================================
-      // 5. INDICATEURS CLÉS ENRICHIS (Volatilité Locale & Entropie Résiduelle)
-      // ============================================================================
-      const volatilityMap = new Float32Array(DOMAIN_MAX + 1);
-      const residualEntropyMap = new Float32Array(DOMAIN_MAX + 1);
-      const windowLen = Math.max(1, recentHistory.length);
-
-      for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
-        const pOccur = freqMap[n] / (totalFreqSum || 1.0);
-        const expectedGap = 1.0 / Math.max(1e-4, pOccur * DOMAIN_SIZE);
-        const actualGap = gapsMap[n] >= 0 ? gapsMap[n] : windowLen;
-        const gapDeviation = Math.abs(actualGap - expectedGap);
-        volatilityMap[n] = parseFloat((gapDeviation / (expectedGap + gapDeviation)).toFixed(4));
-
-        const pMarkov = markovMap[n] || (1.0 / DOMAIN_SIZE);
-        const klLocal = pOccur > 0 ? pOccur * Math.log(Math.max(1e-6, pOccur / pMarkov)) : 0;
-        residualEntropyMap[n] = parseFloat((1.0 / (1.0 + Math.exp(-klLocal))).toFixed(4));
-      }
-
-      // Dérivation des signaux temporels et de cadence continue
-      const cadenceMap = new Float32Array(DOMAIN_MAX + 1);
-      for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
-        const gap = gapsMap[n] >= 0 ? gapsMap[n] : windowLen;
-        cadenceMap[n] = parseFloat((1.0 / (1.0 + Math.exp(-((gap - 18) / 9.0)))).toFixed(4));
-      }
-
-      let totalIntervalMs = 0;
-      let intervalCount = 0;
-      for (let i = 0; i < Math.min(recentHistory.length - 1, 20); i++) {
-        const d1 = recentHistory[i]?.date;
-        const d2 = recentHistory[i + 1]?.date;
-        if (d1 && d2) {
-          const [day1, month1, year1] = d1.split('/').map(Number);
-          const [day2, month2, year2] = d2.split('/').map(Number);
-          const t1 = new Date(year1, month1 - 1, day1).getTime();
-          const t2 = new Date(year2, month2 - 1, day2).getTime();
-          const diff = Math.abs(t1 - t2);
-          if (diff > 0 && !isNaN(diff)) {
-            totalIntervalMs += diff;
-            intervalCount++;
-          }
-        }
-      }
-      const meanIntervalDays = intervalCount > 0 ? (totalIntervalMs / intervalCount) / (1000 * 60 * 60 * 24) : 7.0;
-
-      const temporalSignals = {
-        meanIntervalDays: parseFloat(meanIntervalDays.toFixed(2)),
-        driftVelocity: parseFloat((Math.sin(windowLen) * 0.1).toFixed(4)),
-        periodicityStrength: parseFloat((1.0 / (1.0 + Math.abs(meanIntervalDays - 7.0))).toFixed(4)),
-      };
-
       return {
         freqMap,
         gapsMap,
@@ -577,74 +339,10 @@ export const extractFeatures = async (
         momentumMap,
         machineTransferMap,
         shadowProbabilityMap,
-        networkCorrelationMap,
-        volatilityMap,
-        residualEntropyMap,
-        cadenceMap,
-        temporalSignals
+        networkCorrelationMap
       };
     },
-    `sample_${sampleSize}`
+    CACHE_TTL.MEDIUM,
+    drawName
   );
-
-  // Mise à jour de l'index différentiel L1 ultra-rapide
-  primaryFeaturesL1Cache.set(l1Key, {
-    features: resultFeatures,
-    timestamp: Date.now()
-  });
-
-  return resultFeatures;
-};
-
-/**
- * Calcule la volatilité statistique locale pour chaque numéro [1-90] à partir d'un historique de tirages.
- */
-export const calculateVolatilityMap = (history: DrawResult[]): Record<number, number> => {
-  const result: Record<number, number> = {};
-  const total = Math.max(1, history.length);
-  const counts = new Int32Array(DOMAIN_MAX + 1);
-  const gaps = new Int32Array(DOMAIN_MAX + 1).fill(-1);
-
-  for (let i = 0; i < history.length; i++) {
-    const { winners } = extractDrawNumbers(history[i]);
-    for (const w of winners) {
-      if (w >= DOMAIN_MIN && w <= DOMAIN_MAX) {
-        counts[w]++;
-        if (gaps[w] === -1) gaps[w] = i;
-      }
-    }
-  }
-
-  for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
-    const p = counts[n] / (total * 5);
-    const expGap = 1.0 / Math.max(1e-4, p * DOMAIN_SIZE);
-    const actGap = gaps[n] >= 0 ? gaps[n] : total;
-    const dev = Math.abs(actGap - expGap);
-    result[n] = parseFloat((dev / (expGap + dev)).toFixed(4));
-  }
-  return result;
-};
-
-/**
- * Calcule l'entropie résiduelle locale pour chaque numéro [1-90] à partir d'un historique de tirages.
- */
-export const calculateResidualEntropyMap = (history: DrawResult[]): Record<number, number> => {
-  const result: Record<number, number> = {};
-  const total = Math.max(1, history.length);
-  const counts = new Int32Array(DOMAIN_MAX + 1);
-
-  for (const draw of history) {
-    const { winners } = extractDrawNumbers(draw);
-    for (const w of winners) {
-      if (w >= DOMAIN_MIN && w <= DOMAIN_MAX) counts[w]++;
-    }
-  }
-
-  for (let n = DOMAIN_MIN; n <= DOMAIN_MAX; n++) {
-    const p = counts[n] / (total * 5);
-    const pUniform = 1.0 / DOMAIN_SIZE;
-    const kl = p > 0 ? p * Math.log(p / pUniform) : 0;
-    result[n] = parseFloat((1.0 / (1.0 + Math.exp(-kl))).toFixed(4));
-  }
-  return result;
 };

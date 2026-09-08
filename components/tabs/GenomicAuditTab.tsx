@@ -5,47 +5,35 @@ import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
 import { SubAlgorithmDriftHeatmap } from "../genomic/SubAlgorithmDriftHeatmap";
 import { ExpertBiasAdjuster } from "../genomic/ExpertBiasAdjuster";
 import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPanel";
-import { ModelDnaEvolutionPanel } from "../genomic/ModelDnaEvolutionPanel";
 import { useNexusStore } from "../../store/useNexusStore";
-import { Dna, Radar, ShieldCheck, FileText, Flame, Sliders, BrainCircuit, GitBranch } from "lucide-react";
+import { Dna, Radar, ShieldCheck, FileText, Flame, Sliders, BrainCircuit } from "lucide-react";
 
 export const GenomicAuditTab: React.FC<{ drawName: string }> = ({
   drawName,
 }) => {
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const [activeView, setActiveView] = useState<
-    "DNA_AUDITOR" | "DNA_EVOLUTION" | "DRIFT_HEATMAP" | "EXPERT_BIAS" | "NEURAL_OPT" | "FORENSIC_LOGS" | "SIEVE_RADAR"
+    "DNA_AUDITOR" | "DRIFT_HEATMAP" | "EXPERT_BIAS" | "NEURAL_OPT" | "FORENSIC_LOGS" | "SIEVE_RADAR"
   >("DNA_AUDITOR");
 
   useEffect(() => {
-    const handleNavigation = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      const sub = (customEvent.detail?.subTab || "").toUpperCase();
-      if (sub === "DNA_EVOLUTION" || sub === "EVOLUTION") {
-        setActiveView("DNA_EVOLUTION");
-      } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP") {
-        setActiveView("DRIFT_HEATMAP");
-      } else if (sub === "EXPERT_BIAS" || sub === "BIAS") {
-        setActiveView("EXPERT_BIAS");
-      } else if (sub === "NEURAL_OPT" || sub === "NEURAL") {
-        setActiveView("NEURAL_OPT");
-      } else if (sub === "FORENSIC_LOGS" || sub === "FORENSIC") {
-        setActiveView("FORENSIC_LOGS");
-      } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
-        setActiveView("SIEVE_RADAR");
-      } else if (sub === "DNA_AUDITOR" || sub === "AUDITOR") {
-        setActiveView("DNA_AUDITOR");
-      }
-      const el = document.getElementById("genomic-content");
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-    window.addEventListener("NAVIGATE_SUB_GENOMIQUE", handleNavigation);
-    return () =>
-      window.removeEventListener("NAVIGATE_SUB_GENOMIQUE", handleNavigation);
-  }, []);
+    if (activeSubTab === "DRIFT_HEATMAP" || activeSubTab === "HEATMAP") {
+      setActiveView("DRIFT_HEATMAP");
+    } else if (activeSubTab === "EXPERT_BIAS" || activeSubTab === "BIAS") {
+      setActiveView("EXPERT_BIAS");
+    } else if (activeSubTab === "NEURAL_OPT" || activeSubTab === "NEURAL") {
+      setActiveView("NEURAL_OPT");
+    } else if (activeSubTab === "FORENSIC_LOGS" || activeSubTab === "FORENSIC") {
+      setActiveView("FORENSIC_LOGS");
+    } else if (activeSubTab === "SIEVE_RADAR" || activeSubTab === "RADAR") {
+      setActiveView("SIEVE_RADAR");
+    } else if (activeSubTab === "DNA_AUDITOR") {
+      setActiveView("DNA_AUDITOR");
+    }
+  }, [activeSubTab]);
 
   return (
-    <div id="genomic-content" className="space-y-6">
+    <div className="space-y-6">
       {/* Sélecteur de Mode d'Audit Génomique */}
       <div className="flex justify-center">
         <div className="inline-flex p-1.5 bg-slate-900/80 border border-white/10 rounded-2xl backdrop-blur-md shadow-xl gap-1 overflow-x-auto max-w-full">
@@ -59,20 +47,7 @@ export const GenomicAuditTab: React.FC<{ drawName: string }> = ({
             }`}
           >
             <ShieldCheck size={14} />
-            Audit ADN & Synchro
-          </button>
-
-          <button
-            id="tab-dna-evolution"
-            onClick={() => setActiveView("DNA_EVOLUTION")}
-            className={`flex items-center gap-2 px-4 md:px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-              activeView === "DNA_EVOLUTION"
-                ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            <GitBranch size={14} />
-            Arbre ADN & Traçabilité
+            Audit ADN & Synchronisation
           </button>
 
           <button
@@ -137,7 +112,7 @@ export const GenomicAuditTab: React.FC<{ drawName: string }> = ({
             }`}
           >
             <Radar size={14} />
-            Radar & Tamisage
+            Radar & Tamisage Génomique
           </button>
         </div>
       </div>
@@ -145,9 +120,6 @@ export const GenomicAuditTab: React.FC<{ drawName: string }> = ({
       {/* Contenu Actif */}
       {activeView === "DNA_AUDITOR" && (
         <DnaReferenceAuditor drawName={drawName} />
-      )}
-      {activeView === "DNA_EVOLUTION" && (
-        <ModelDnaEvolutionPanel drawName={drawName} />
       )}
       {activeView === "DRIFT_HEATMAP" && (
         <SubAlgorithmDriftHeatmap drawName={drawName} />

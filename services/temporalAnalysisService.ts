@@ -1,7 +1,6 @@
 import type { DrawResult, MonthStats, NumberRegularity } from '../types';
 import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { isDrawWithoutMachine } from '../constants';
 import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 import { useNexusStore } from '../store/useNexusStore';
 
@@ -335,7 +334,6 @@ export const ALGO_LABELS: Record<string, string> = {
     [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation',
     [AlgoKey.GAP_BAND_SEQUENCE]: 'Bandes d\'Écart',
     [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
-    [AlgoKey.JACCARD]: 'Similarité Jaccard',
 };
 
 /**
@@ -410,18 +408,19 @@ export const calculateDnaSieveWeights = (
     });
     const maxFreq = Math.max(...Array.from(freq), 1e-6);
 
-    // 2. Markov transitions du dernier tirage (sens chronologique strict T-1 -> T)
+    // 2. Markov transitions du dernier tirage
     const markov = new Float32Array(91);
     const lastWinners = history[0]?.gagnants || [];
-    for (let idx = 0; idx < history.length - 1; idx++) {
-        const prevDraw = history[idx + 1]; // Tirage antérieur (T-1)
-        const nextDraw = history[idx];     // Tirage postérieur (T)
-        const hasCommon = prevDraw.gagnants.some(n => lastWinners.includes(n));
-        if (hasCommon) {
-            const w = Math.exp(-decayFactor * idx);
-            nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= N) markov[n] += w; });
+    history.forEach((d, idx) => {
+        if (idx < history.length - 1) {
+            const nextDraw = history[idx + 1];
+            const hasCommon = d.gagnants.some(n => lastWinners.includes(n));
+            if (hasCommon) {
+                const w = Math.exp(-decayFactor * idx);
+                nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= N) markov[n] += w; });
+            }
         }
-    }
+    });
     const maxMarkov = Math.max(...Array.from(markov), 1e-6);
 
     // 3. Écarts actuels et écarts moyens par numéro
@@ -463,21 +462,19 @@ export const calculateDnaSieveWeights = (
         momentum[n] = shortCount - longCount;
     }
 
-    // 5. Transfert Machine -> Gagnants (sens chronologique strict Machine T-1 -> Gagnants T)
+    // 5. Transfert Machine -> Gagnants (Stochastique)
     const machineTransfer = new Float32Array(91);
     const lastMachines = Array.isArray(history[0]?.machine) ? history[0].machine : [];
     if (lastMachines.length > 0) {
-        for (let idx = 0; idx < history.length - 1; idx++) {
-            const prevDraw = history[idx + 1]; // Tirage antérieur (T-1)
-            const nextDraw = history[idx];     // Tirage postérieur (T)
-            if (Array.isArray(prevDraw.machine)) {
-                const hadMachine = prevDraw.machine.some(m => lastMachines.includes(m));
+        history.forEach((d, idx) => {
+            if (idx < history.length - 1 && Array.isArray(d.machine)) {
+                const hadMachine = d.machine.some(m => lastMachines.includes(m));
                 if (hadMachine) {
                     const w = Math.exp(-decayFactor * idx);
-                    nextDraw.gagnants.forEach(n => { if (n >= 1 && n <= N) machineTransfer[n] += w; });
+                    history[idx + 1].gagnants.forEach(n => { if (n >= 1 && n <= N) machineTransfer[n] += w; });
                 }
             }
-        }
+        });
     }
     const maxMachine = Math.max(...Array.from(machineTransfer), 1e-6);
 
@@ -532,14 +529,13 @@ export const calculateDnaSieveWeights = (
     // 9. Extraction et Normalisation continue des poids d'ADN
     const geneKeys = Object.values(AlgoKey);
     const hasMachineDataInHistory = history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
-    const isWithoutMachine = isDrawWithoutMachine(drawName);
     let totalWeight = 0;
     const activeWeightsMap: Record<string, number> = {};
 
     geneKeys.forEach(k => {
         const rawW = Number(effectiveWeights[k]);
         let safeW = typeof rawW === 'number' && !isNaN(rawW) && rawW >= 0 ? rawW : 0.05;
-        if (k === AlgoKey.MACHINE_TRANSFER && (isWithoutMachine || !hasMachineDataInHistory)) {
+        if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
             safeW = 0.0;
         }
         activeWeightsMap[k] = safeW;
@@ -577,30 +573,21 @@ export const calculateDnaSieveWeights = (
         const sFractal = 0.5 + 0.5 * Math.tanh((sFreq - 0.5) * 2.0);
 
         let geneSum = 0;
-        geneSum += (activeWeightsMap[AlgoKey.FREQUENCY] ?? 0) * sFreq;
-        geneSum += (activeWeightsMap[AlgoKey.MARKOV] ?? 0) * sMarkov;
-        geneSum += (activeWeightsMap[AlgoKey.GAPS] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.MOMENTUM] ?? 0) * sMom;
-        geneSum += (activeWeightsMap[AlgoKey.MACHINE_TRANSFER] ?? 0) * sMachine;
-        geneSum += (activeWeightsMap[AlgoKey.AFFINITY] ?? 0) * sAff;
-        geneSum += (activeWeightsMap[AlgoKey.TEMPORAL] ?? 0) * sHawkes;
-        geneSum += (activeWeightsMap[AlgoKey.SPECTRAL] ?? 0) * sSpectral;
-        geneSum += (activeWeightsMap[AlgoKey.BAYES] ?? 0) * sBayes;
-        geneSum += (activeWeightsMap[AlgoKey.SPATIAL] ?? 0) * sSpatial;
-        geneSum += (activeWeightsMap[AlgoKey.FRACTAL] ?? 0) * sFractal;
-        geneSum += (activeWeightsMap[AlgoKey.GAP_SEQUENCE] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.GAP_CADENCE] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.GAP_TREND] ?? 0) * sMom;
-        geneSum += (activeWeightsMap[AlgoKey.SHADOW_PROBABILITY] ?? 0) * (1.0 - sFreq);
-        geneSum += (activeWeightsMap[AlgoKey.JACCARD] ?? 0) * sAff;
-        geneSum += (activeWeightsMap[AlgoKey.ECHO_STATE] ?? 0) * sSpectral;
-        geneSum += (activeWeightsMap[AlgoKey.DERIVED_NEIGHBOR] ?? 0) * sSpatial;
-        geneSum += (activeWeightsMap[AlgoKey.GAP_PATTERN] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.SEQUENCE_PATTERN] ?? 0) * sMarkov;
-        geneSum += (activeWeightsMap[AlgoKey.INTER_MONTHLY_RESONANCE] ?? 0) * sHawkes;
-        geneSum += (activeWeightsMap[AlgoKey.ISOLATION_ANOMALY] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.GAP_BAND_SEQUENCE] ?? 0) * sGap;
-        geneSum += (activeWeightsMap[AlgoKey.NETWORK_CORRELATION] ?? 0) * sAff;
+        geneSum += (activeWeightsMap[AlgoKey.FREQUENCY] || 1.0) * sFreq;
+        geneSum += (activeWeightsMap[AlgoKey.MARKOV] || 1.0) * sMarkov;
+        geneSum += (activeWeightsMap[AlgoKey.GAPS] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.MOMENTUM] || 1.0) * sMom;
+        geneSum += (activeWeightsMap[AlgoKey.MACHINE_TRANSFER] || 1.0) * sMachine;
+        geneSum += (activeWeightsMap[AlgoKey.AFFINITY] || 1.0) * sAff;
+        geneSum += (activeWeightsMap[AlgoKey.TEMPORAL] || 1.0) * sHawkes;
+        geneSum += (activeWeightsMap[AlgoKey.SPECTRAL] || 1.0) * sSpectral;
+        geneSum += (activeWeightsMap[AlgoKey.BAYES] || 1.0) * sBayes;
+        geneSum += (activeWeightsMap[AlgoKey.SPATIAL] || 1.0) * sSpatial;
+        geneSum += (activeWeightsMap[AlgoKey.FRACTAL] || 1.0) * sFractal;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_SEQUENCE] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_CADENCE] || 1.0) * sGap;
+        geneSum += (activeWeightsMap[AlgoKey.GAP_TREND] || 1.0) * sMom;
+        geneSum += (activeWeightsMap[AlgoKey.SHADOW_PROBABILITY] || 1.0) * (1.0 - sFreq);
 
         const val = geneSum / totalWeight;
         compositeDna[n] = val;

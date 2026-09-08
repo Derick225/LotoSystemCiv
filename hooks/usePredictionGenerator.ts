@@ -135,19 +135,16 @@ export const usePredictionGenerator = (drawName: string) => {
         setIsChaotic(chaosIndex > 0.5);
     }, [chaoticRatio, activeVolatility]);
 
-    const [cachedPrediction, setCachedPrediction] = useState<Prediction | null>(null);
-
     useEffect(() => {
         let isMounted = true;
         setLastPrediction(null);
-        setCachedPrediction(null);
         lastInferenceStateRef.current = null;
 
-        // Pré-charger la dernière prédiction en cache (accessible sur demande sans lancement automatique)
+        // Chargement instantané de la dernière prédiction en cache local (Offline Fallback & Restauration Instantanée)
         if (drawName) {
             getLatestPredictionForDraw(drawName).then((cached) => {
                 if (isMounted && cached) {
-                    setCachedPrediction(cached);
+                    setLastPrediction(cached);
                 }
             }).catch(e => {
                 console.warn("[Oracle Base] Erreur lecture cache prédiction:", e);
@@ -158,14 +155,6 @@ export const usePredictionGenerator = (drawName: string) => {
             isMounted = false;
         };
     }, [drawName, setLastPrediction]);
-
-    const restoreCachedPrediction = useCallback(() => {
-        if (cachedPrediction) {
-            setLastPrediction(cachedPrediction);
-            audioEngine.play('click');
-            showToast("Dernière prédiction archivée restaurée.", "info");
-        }
-    }, [cachedPrediction, setLastPrediction, showToast]);
 
     useEffect(() => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));
@@ -389,8 +378,6 @@ export const usePredictionGenerator = (drawName: string) => {
         gameRegimeInfo,
         runInference,
         runMonteCarlo,
-        handleOptimizeWeights,
-        cachedPrediction,
-        restoreCachedPrediction,
+        handleOptimizeWeights
     };
 };

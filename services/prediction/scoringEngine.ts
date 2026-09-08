@@ -11,7 +11,6 @@ import { normalizeWeights } from "./weightsManager";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { parseDateSafely } from "../../utils/dateUtils";
-import { isDrawWithoutMachine } from "../../constants";
 
 export interface ScoredNumber {
   num: number;
@@ -57,7 +56,6 @@ export const calculateScores = (
     features,
     advancedMetrics,
     history,
-    drawName: history[0]?.drawName || '',
     weights: { ...weights },
     algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },
@@ -81,11 +79,6 @@ export const calculateScores = (
 
   const failedAlgos = new Set<string>();
   let effectiveWeights = { ...weights };
-  const isWithoutMachine = isDrawWithoutMachine(context.drawName);
-  const hasMachineDataInHistory = !isWithoutMachine && history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
-  if (isWithoutMachine || !hasMachineDataInHistory) {
-    effectiveWeights[AlgoKey.MACHINE_TRANSFER] = 0;
-  }
   const rawBreakdowns: Record<number, ScoreBreakdown> = {};
   const algoValues: Record<string, number[]> = {};
   Object.values(AlgoKey).forEach(k => { algoValues[k] = []; });

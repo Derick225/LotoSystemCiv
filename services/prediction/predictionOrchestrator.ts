@@ -1,7 +1,6 @@
 import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
-import { isDrawWithoutMachine } from "../../constants";
 import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
@@ -15,7 +14,6 @@ import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { detectGameRegime, calculateThermodynamicRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { globalCache, CACHE_TTL } from "../cache/CacheService";
-import { globalTensorCache } from "../cache/lruTensorCache";
 
 // Split module imports
 import { TUNING, applyDeterministicMicroSgd, hashHistoryContent, getMedian, getStdDev } from "./microSgd";
@@ -239,26 +237,23 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
     initialWeights
   );
   
-  // 3. Entraînement continu Micro-SGD propre au tirage actif avec méta-apprentissage & James-Stein
+  // 3. Entraînement continu Micro-SGD propre au tirage actif
   if (!context.skipTraining && context.history.length >= 10) {
     const currentEntropyResult = calculateShannonEntropy(context.history);
     const currentEntropy = currentEntropyResult.normalized;
-    const hurstExponent = context.metrics?.statisticalBounds?.hurstExponent;
     weights = await applyDeterministicMicroSgd(
       context.drawName,
       weights,
       context.history,
       currentEntropy,
       undefined,
-      context.useSpatioTemporalHawkes,
-      hurstExponent
+      context.useSpatioTemporalHawkes
     );
   }
 
   // 4. Règle d'or : Aucun boost ou surestimation de MACHINE_TRANSFER sans présence de données machine réelles
-  const isWithoutMachine = isDrawWithoutMachine(context.drawName);
   const hasMachineData = context.history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
-  if (isWithoutMachine || !hasMachineData) {
+  if (!hasMachineData) {
     (weights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
   }
 
@@ -427,12 +422,12 @@ export const applyPredictionDnaSieve = (
 
   // Dérivation vectorielle des 6 macro-familles pour le Radar Algorithmique
   const macroFamilyDefinitions = [
-    { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', algos: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.AFFINITY, AlgoKey.JACCARD, AlgoKey.NETWORK_CORRELATION] },
-    { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', algos: [AlgoKey.GAPS, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.GAP_BAND_SEQUENCE, AlgoKey.GAP_PATTERN] },
-    { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', algos: [AlgoKey.TEMPORAL, AlgoKey.MOMENTUM, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.ISOLATION_ANOMALY] },
-    { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', algos: [AlgoKey.SPECTRAL, AlgoKey.ECHO_STATE] },
-    { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', algos: [AlgoKey.SPATIAL, AlgoKey.FRACTAL, AlgoKey.DERIVED_NEIGHBOR] },
-    { key: 'MACHINE_BAYES', name: 'Machine & Bayes', algos: [AlgoKey.MACHINE_TRANSFER, AlgoKey.BAYES, AlgoKey.SHADOW_PROBABILITY, AlgoKey.SEQUENCE_PATTERN] }
+    { key: 'FREQ_MARKOV', name: 'Fréquence & Markov', algos: ['frequency', 'markov', 'affinity', 'cohort'] },
+    { key: 'GAPS_CADENCE', name: 'Écarts & Cadences', algos: ['gaps', 'gap_sequence', 'gap_cadence', 'gap_trend', 'gap_band_sequence'] },
+    { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', algos: ['temporal', 'inter_monthly_resonance', 'isolation_anomaly', 'cross_entropy'] },
+    { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', algos: ['spectral'] },
+    { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', algos: ['spatial', 'fractal'] },
+    { key: 'MACHINE_BAYES', name: 'Machine & Bayes', algos: ['machine_transfer', 'bayes', 'shadow_probability', 'consecutive'] }
   ];
 
   const totalWeightsSum = Object.values(weights).reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0) || 1.0;
@@ -538,12 +533,7 @@ export const selectPredictionNumbers = async (
     empiricalCalibration,
     outsiderCount,
     context.history[0]?.gagnants,
-    regimeStateNormalized,
-    context.drawName,
-    {
-      entropy: thermoRegime.entropy,
-      hurstExponent: context.metrics?.statisticalBounds?.hurstExponent
-    }
+    regimeStateNormalized
   );
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
@@ -726,12 +716,11 @@ export const generateMasterPrediction = async (
   }
 
   const weightsHash = hashWeights(context.weightsToUse);
-  const extraParams = `w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}_hawkes_${context.useSpatioTemporalHawkes}`;
+  const keyParams = `${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
+  const cacheKey = globalCache.generateKey('prediction', context.drawName, keyParams);
 
-  return globalTensorCache.getOrCompute<Prediction>(
-    'master_prediction',
-    context.drawName,
-    context.history,
+  return globalCache.getOrCompute(
+    cacheKey,
     async () => {
       // PHASE 1 — Cloud Complet
       try {
@@ -784,7 +773,8 @@ export const generateMasterPrediction = async (
       // PHASE 4 — Réponse Prudente Dégradée
       return handleScenarioADegradedPrediction(context);
     },
-    extraParams
+    CACHE_TTL.MEDIUM,
+    context.drawName
   );
 };
 

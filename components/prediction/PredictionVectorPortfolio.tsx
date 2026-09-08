@@ -418,7 +418,7 @@ export const PredictionVectorPortfolio: React.FC<
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 {Object.entries(prediction.breakdown[inspectedNum])
-                  .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+                  .sort((a, b) => b[1] - a[1])
                   .slice(0, 8)
                   .map(([algo, score]) => (
                     <div

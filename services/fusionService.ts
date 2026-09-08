@@ -1,6 +1,5 @@
 import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } from '../types';
 import { calculateShannonEntropy, calculateMedian, gaussianPDF, sigmoid } from './prediction/deterministicCore';
-import { extractDrawNumbers } from './prediction/featureExtractor';
 
 // ============================================================================
 // STATISTIQUES ROBUSTES (Zéro sensibilité aux Outliers)
@@ -58,9 +57,8 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   
   const variance = new Float32Array(91);
   for (const draw of chronoHistory) {
-    const winners = extractDrawNumbers(draw).winners;
     for (let num = 1; num <= 90; num++) {
-      const isPresent = winners.includes(num) ? 1.0 : 0.0;
+      const isPresent = draw.gagnants.includes(num) ? 1.0 : 0.0;
       const diff = isPresent - scores[num];
       scores[num] = scores[num] + ALPHA * diff;
       variance[num] = (1 - ALPHA) * (variance[num] + ALPHA * diff * diff);
@@ -70,8 +68,7 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   for (let num = 1; num <= 90; num++) {
     let gap = 0;
     for (const draw of history) {
-      const winners = extractDrawNumbers(draw).winners;
-      if (winners.includes(num)) break;
+      if (draw.gagnants.includes(num)) break;
       gap++;
     }
     gaps[num] = gap;
@@ -81,8 +78,7 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   const allGaps = Array.from(gaps).slice(1);
   const { mean: medianGap, std: stdDevGap } = getMeanAndStdDev(allGaps.filter(g => g > 0));
   // Moyenne de l'EMA théorique = probabilité de base
-  const totalExtractedWinners = chronoHistory.reduce((s, h) => s + extractDrawNumbers(h).winners.length, 0);
-  const probBase = totalExtractedWinners / (chronoHistory.length * 90) || (5 / 90);
+  const probBase = chronoHistory.reduce((s, h) => s + h.gagnants.length, 0) / (chronoHistory.length * 90) || (5 / 90);
 
   for (let num = 1; num <= 90; num++) {
     const emaScore = scores[num];
@@ -152,27 +148,20 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
   if (history.length < 3) return [];
   
   const associationScores = new Float32Array(91);
-  const lastDrawNumbers = extractDrawNumbers(history[0]).winners;
-  const prevDrawNumbers = extractDrawNumbers(history[1]).winners;
+  const lastDrawNumbers = history[0].gagnants;
+  const prevDrawNumbers = history[1].gagnants;
   
-  // Normalisation des poids ADN sécurisée (insensible à la casse)
-  const getDnaWeight = (key: string): number => {
-    const val = (dna as any)[key] ?? (dna as any)[key.toLowerCase()] ?? (dna as any)[key.toUpperCase()] ?? 0;
-    return typeof val === 'number' && Number.isFinite(val) ? val : 0;
-  };
-  const wMarkov = getDnaWeight('markov');
-  const wTemporal = getDnaWeight('temporal');
-  const wFractal = getDnaWeight('fractal');
-  const totalDnaWeight = Math.max(1e-4, wMarkov + wTemporal + wFractal);
-  const dnaMarkov = wMarkov / totalDnaWeight;
-  const dnaTemporal = wTemporal / totalDnaWeight;
-  const dnaFractal = wFractal / totalDnaWeight;
+  // Normalisation des poids ADN
+  const totalDnaWeight = (dna as any)['markov'] + (dna as any)['temporal'] + (dna as any)['fractal'] || 1.0;
+  const dnaMarkov = ((dna as any)['markov'] || 0) / totalDnaWeight;
+  const dnaTemporal = ((dna as any)['temporal'] || 0) / totalDnaWeight;
+  const dnaFractal = ((dna as any)['fractal'] || 0) / totalDnaWeight;
   
   const maxDepth = history.length - 1; // Pas de constante arbitraire "50", parcourt tout l'historique
   
   for (let i = 2; i < maxDepth; i++) {
-    const historicalRecent = extractDrawNumbers(history[i - 1]).winners;
-    const historicalOlder = extractDrawNumbers(history[i]).winners;
+    const historicalRecent = history[i - 1].gagnants;
+    const historicalOlder = history[i].gagnants;
     
     const commonWithLast = historicalRecent.filter(n => lastDrawNumbers.includes(n)).length;
     const commonWithPrev = historicalOlder.filter(n => prevDrawNumbers.includes(n)).length;
@@ -195,8 +184,7 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
     const decayFactor = (maxDepth / Math.E) * (1.0 + dnaFractal * Math.E);
     const weight = contextStrength * Math.exp(-i / decayFactor) * activation;
 
-    const futureWinners = extractDrawNumbers(futureDraw).winners;
-    futureWinners.forEach(n => { if (n >= 1 && n <= 90) associationScores[n] += weight; });
+    futureDraw.gagnants.forEach(n => { associationScores[n] += weight; });
   }
 
   const preds = new Set(lastPrediction?.suggestedNumbers || []);
@@ -283,6 +271,10 @@ export const calculateFusion = (
   covLI /= 90.0;
   covPI /= 90.0;
 
+  // Information de Fisher du système multi-capteurs fusionné : I(theta) = Tr(Sigma^-1)
+  const fisherGain = Math.log(1.0 + (1.0 / varP + 1.0 / varQ + 1.0 / varO));
+
+  // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Kalman pour situations de forte variance
   // Calcule l'entropie cumulée des trois signaux pour adapter la régularisation (zéro nombre magique)
   const combinedScores = new Float64Array(91);
   for (let i = 1; i <= 90; i++) {
@@ -290,51 +282,19 @@ export const calculateFusion = (
   }
   const entropyMultiplier = computeVectorEntropy(normalizeVector(combinedScores));
   const avgStd = (stdP + stdQ + stdO) / 3.0;
+  
+  // Lambda de régularisation continue : s'élève proportionnellement au désordre (entropie) et à l'écart type moyen
+  const lambda = avgStd * entropyMultiplier * 0.15;
 
-  // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Tikhonov continue basée sur la trace et l'entropie
-  const trace = varP + varQ + varO;
-  const lambda = (trace / 3.0) * (entropyMultiplier / (1.0 + entropyMultiplier));
-
-  // ============================================================================
-  // INVERSION ANALYTIQUE DE LA MATRICE DE COVARIANCE 3x3 (FILTRE DE KALMAN / BLUE)
-  // ============================================================================
-  // Matrice de covariance régularisée C = Sigma + lambda * I
-  const c00 = varP + lambda, c01 = covLP,        c02 = covLI;
-  const c10 = covLP,        c11 = varQ + lambda, c12 = covPI;
-  const c20 = covLI,        c21 = covPI,        c22 = varO + lambda;
-
-  // Déterminant 3x3
-  const det = c00 * (c11 * c22 - c12 * c12) -
-              c01 * (c10 * c22 - c12 * c20) +
-              c02 * (c10 * c21 - c11 * c20);
-
-  const safeDet = Math.abs(det) > 1e-9 ? det : 1.0;
-
-  // Matrice des cofacteurs (Comatrice / Inverse non normalisée)
-  const inv00 = (c11 * c22 - c12 * c21) / safeDet;
-  const inv01 = (c02 * c21 - c01 * c22) / safeDet;
-  const inv02 = (c01 * c12 - c02 * c11) / safeDet;
-
-  const inv10 = (c12 * c20 - c10 * c22) / safeDet;
-  const inv11 = (c00 * c22 - c02 * c20) / safeDet;
-  const inv12 = (c02 * c10 - c00 * c12) / safeDet;
-
-  const inv20 = (c10 * c21 - c11 * c20) / safeDet;
-  const inv21 = (c01 * c20 - c00 * c21) / safeDet;
-  const inv22 = (c00 * c11 - c01 * c10) / safeDet;
-
-  // Somme des colonnes de la matrice de précision (BLUE Weights: w = Sigma^-1 * 1)
-  const blueP = Math.max(1e-4, (inv00 + inv01 + inv02)) * W_PYTHON;
-  const blueQ = Math.max(1e-4, (inv10 + inv11 + inv12)) * W_QUANTUM;
-  const blueO = Math.max(1e-4, (inv20 + inv21 + inv22)) * W_ORACLE;
-
-  const totalPrecision = blueP + blueQ + blueO;
-  const kalmanGainP = blueP / totalPrecision;
-  const kalmanGainQ = blueQ / totalPrecision;
-  const kalmanGainO = blueO / totalPrecision;
-
-  // Gain d'information de Fisher dérivé de la trace de la matrice de précision Sigma^-1
-  const fisherGain = Math.log(1.0 + Math.max(0, inv00 + inv11 + inv22));
+  // Matrices de Précision Régularisées (évite l'overfitting d'un capteur très bruité)
+  const precP = W_PYTHON / (varP + lambda);
+  const precQ = W_QUANTUM / (varQ + lambda);
+  const precO = W_ORACLE / (varO + lambda);
+  
+  const totalPrecision = precP + precQ + precO;
+  const kalmanGainP = precP / totalPrecision;
+  const kalmanGainQ = precQ / totalPrecision;
+  const kalmanGainO = precO / totalPrecision;
 
   for (let i = 1; i <= 90; i++) {
     const sP = mPython.get(i) || 0;

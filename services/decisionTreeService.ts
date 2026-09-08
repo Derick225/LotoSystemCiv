@@ -414,13 +414,6 @@ export const computeDatasetStats = (
   };
 };
 
-export interface DecisionForestConfig {
-  numTrees?: number;
-  maxDepth?: number;
-  enableDnaSieve?: boolean;
-  minSize?: number;
-}
-
 /**
  * Exécute une forêt d'arbres décisionnels (Random Forest) via un Worker.
  * Isolation complète du tirage, sans couplage au store global, avec diagnostic de qualité.
@@ -430,11 +423,9 @@ export const runDecisionForest = async (
   mode: 'consensus' | 'average' | 'shadow' | 'quantum_pruning' = 'consensus',
   activeFeatures: string[] = FEATURES_LABELS,
   drawName?: string,
-  weights?: AlgoWeights,
-  forestConfig?: DecisionForestConfig
+  weights?: AlgoWeights
 ): Promise<{ 
-  votes: ForestVote[],
-  allVotes?: ForestVote[],
+  votes: ForestVote[], 
   dataset: { features: number[]; class: number; weight: number }[],
   diagnostics?: DecisionForestDiagnostics,
   dnaSieveInfo?: {
@@ -601,12 +592,9 @@ export const runDecisionForest = async (
     };
   });
 
-  const isDnaSieveEnabled = forestConfig?.enableDnaSieve !== false;
-
   // 5. Délégation au Web Worker
   const votesAndDataset = await new Promise<{ 
-    votes: ForestVote[],
-    allVotes: ForestVote[],
+    votes: ForestVote[], 
     dataset: { features: number[]; class: number; weight: number }[],
     dnaSieveInfo?: {
       active: boolean;
@@ -621,7 +609,7 @@ export const runDecisionForest = async (
     const timeout = setTimeout(() => {
       console.warn("Decision Forest Worker timed out");
       worker.terminate();
-      resolve({ votes: [], allVotes: [], dataset: [] });
+      resolve({ votes: [], dataset: [] });
     }, 120000);
 
     worker.onmessage = (e) => {
@@ -630,7 +618,7 @@ export const runDecisionForest = async (
       worker.terminate();
 
       if (!workerVotes) {
-        resolve({ votes: [], allVotes: [], dataset: [] });
+        resolve({ votes: [], dataset: [] });
         return;
       }
 
@@ -640,9 +628,7 @@ export const runDecisionForest = async (
 
       // Intensité du tamisage différentiable continu basée sur le SNR de l'ADN
       const snrDna = (stdDevDna || 0.1) / (meanDna || 1.0);
-      const dynamicSieveIntensity = isDnaSieveEnabled
-        ? 2.0 * (1.0 / (1.0 + Math.exp(-snrDna * Math.PI)) - 0.5)
-        : 0;
+      const dynamicSieveIntensity = 2.0 * (1.0 / (1.0 + Math.exp(-snrDna * Math.PI)) - 0.5);
 
       // Calcul des distances de Mahalanobis pour le Mode Ombre
       const mahalanobisMap = computeMahalanobisDistances(candidates, dataset);
@@ -654,22 +640,19 @@ export const runDecisionForest = async (
         const rawScore = Math.round(v.score);
         const dnaMult = dnaMultipliers[num] ?? 1.0;
         const dnaAff = dnaAffinity[num] ?? 50.0;
-        const concordance = v.concordance ?? 50;
 
         // Tamisage différentiable continu par l'ADN algorithmique du moment
-        const sievedScore = isDnaSieveEnabled
-          ? Math.max(
-              0,
-              Math.min(
-                100,
-                Math.round(rawScore * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult))
-              )
-            )
-          : rawScore;
-
+        // Modulation continue dérivée du SNR de l'ADN sans seuil arbitraire :
+        const sievedScore = Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(rawScore * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult))
+          )
+        );
         // Activation douce probabiliste pour l'affichage visuel
         const dominanceProbability = 1.0 / (1.0 + Math.exp(-Math.PI * (dnaMult - 1.0)));
-        const isDnaBoosted = isDnaSieveEnabled && dominanceProbability > 0.55;
+        const isDnaBoosted = dominanceProbability > 0.55;
 
         // Génération du chemin de décision sur l'arbre primaire
         const pathTrace = buildTreeDecisionPath(primaryTree, cand ? cand.features : [], activeFeatures);
@@ -681,7 +664,6 @@ export const runDecisionForest = async (
           dnaAffinity: Math.round(dnaAff),
           dnaMultiplier: parseFloat(dnaMult.toFixed(2)),
           isDnaBoosted,
-          concordance,
           votes: { temporal: Math.round(mDist * 10), spatial: 0, structural: 0 },
           decisionPath: pathTrace,
           features: { 
@@ -718,14 +700,13 @@ export const runDecisionForest = async (
 
         const dnaMult = v.dnaMultiplier ?? 1.0;
         // Tamisage de l'affinité de classement par l'ADN algorithmique
-        const sievedAffinity = isDnaSieveEnabled
-          ? baseAffinity * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult)
-          : baseAffinity;
+        const sievedAffinity = baseAffinity * ((1.0 - dynamicSieveIntensity * 0.6) + dynamicSieveIntensity * 0.6 * dnaMult);
 
         return { vote: v, affinity: sievedAffinity };
       });
 
       const sortedByAffinity = affinityArray
+        .filter(item => item.affinity > (1.0 / 90.0))
         .sort((a, b) => {
           if (Math.abs(b.affinity - a.affinity) > 1e-6) return b.affinity - a.affinity;
           if (Math.abs(b.vote.score - a.vote.score) > 1e-6) return b.vote.score - a.vote.score;
@@ -742,7 +723,7 @@ export const runDecisionForest = async (
         })
         .map(item => item.vote);
 
-      // Formatage correct du dataset complet pour calculateFeatureImportance
+      // Correction : Formatage correct du dataset complet pour calculateFeatureImportance
       const formattedDataset = dataset.map(d => ({
         features: d.features,
         class: d.label,
@@ -758,10 +739,9 @@ export const runDecisionForest = async (
 
       resolve({ 
         votes: sortedByAffinity.slice(0, 20), 
-        allVotes: sortedByAffinity,
         dataset: formattedDataset,
         dnaSieveInfo: {
-          active: isDnaSieveEnabled,
+          active: true,
           dominantAlgos,
           dnaConcordanceMean,
           sieveIntensityPercent,
@@ -778,11 +758,8 @@ export const runDecisionForest = async (
     };
 
     // Configuration de la forêt dérivée continûment
-    const calculatedTrees = Math.min(100, Math.max(40, Math.floor(dataset.length / Math.log2(dataset.length + 1))));
-    const numTrees = forestConfig?.numTrees || calculatedTrees;
-    const calculatedDepth = Math.max(3, Math.floor(Math.log2(dataset.length / Math.max(1, activeIndices.length))));
-    const maxDepth = forestConfig?.maxDepth || calculatedDepth;
-    const minSize = forestConfig?.minSize || 2;
+    const numTrees = Math.min(100, Math.max(50, Math.floor(dataset.length / Math.log2(dataset.length + 1))));
+    const maxDepth = Math.max(3, Math.floor(Math.log2(dataset.length / activeIndices.length)));
     
     // Simplification pour le worker avec transfert zero-copy des matrices de caractéristiques
     const featureMatrix = dataset.map(d => d.features);
@@ -796,7 +773,7 @@ export const runDecisionForest = async (
       cols: packedFeatures.cols,
       labelsBuffer: packedLabels.arrayBuffer,
       candidates, 
-      config: { numTrees, maxDepth, minSize },
+      config: { numTrees, maxDepth },
       timeSignature: history.length 
     }, [packedFeatures.matrixBuffer, packedLabels.arrayBuffer]);
   });

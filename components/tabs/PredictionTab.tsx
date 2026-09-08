@@ -14,7 +14,6 @@ import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import { PredictionVectorPortfolio } from "../prediction/PredictionVectorPortfolio";
 import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
 import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
-import { PredictionUncertaintyScenariosPanel } from "../prediction/PredictionUncertaintyScenariosPanel";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import {
@@ -107,8 +106,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
       runInference,
       runMonteCarlo,
       handleOptimizeWeights,
-      cachedPrediction,
-      restoreCachedPrediction,
     } = usePredictionGenerator(drawName);
 
     const handleTriggerForensicReport = useCallback(async () => {
@@ -283,17 +280,15 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-8">
               <button
-                id="btn-launch-oracle-prediction"
                 onClick={() => runInference()}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
                 <Activity size={18} className="group-hover:animate-pulse" />{" "}
-                Lancer la prédiction
+                Lancer la génération
               </button>
               <button
-                id="btn-launch-oracle-monte-carlo"
                 onClick={runMonteCarlo}
                 className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group"
               >
@@ -304,19 +299,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                 Monte Carlo
               </button>
             </div>
-
-            {cachedPrediction && (
-              <div className="w-full max-w-md mx-auto mb-8">
-                <button
-                  id="btn-restore-oracle-cache"
-                  onClick={restoreCachedPrediction}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs font-semibold uppercase tracking-wider transition-colors"
-                >
-                  <FileText size={14} />
-                  <span>Charger la dernière prédiction archivée</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       );
@@ -404,20 +386,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
             </button>
 
             <button
-              id="btn-reset-oracle-view"
-              onClick={() => {
-                audioEngine.play("click");
-                setLastPrediction(null);
-              }}
-              className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-slate-200 dark:border-slate-700"
-              title="Retourner à l'écran de lancement"
-            >
-              <RefreshCw size={15} />
-              <span>Nouveau Tirage</span>
-            </button>
-
-            <button
-              id="btn-rerun-oracle-prediction"
               onClick={() => runInference()}
               disabled={isComputing}
               className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider disabled:opacity-50 shadow-md shadow-indigo-600/20 group"
@@ -430,7 +398,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   className="group-hover:rotate-180 transition-transform duration-500"
                 />
               )}
-              Relancer la prédiction
+              Relancer
             </button>
           </div>
         </div>
@@ -766,21 +734,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(
               </div>
             </div>
 
-            {/* Quantified Uncertainty & Deterministic Simulation Scenarios */}
-            <div className="lg:col-span-12 mt-4">
-              <PredictionUncertaintyScenariosPanel
-                prediction={lastPrediction}
-                onApplyScenario={(numbers) => {
-                  if (lastPrediction) {
-                    setLastPrediction({
-                      ...lastPrediction,
-                      suggestedNumbers: numbers,
-                    });
-                  }
-                }}
-              />
-            </div>
-
             {/* Comprehensive XAP Transparency Panel */}
             <div className="lg:col-span-12 mt-4 mb-4">
               <XAPTransparencyPanel
@@ -844,7 +797,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(
                   onClose={() => setIsAuditDashboardOpen(false)}
                   onApplySuccess={() => {
                     setIsAuditDashboardOpen(false);
-                    showToast("Pondérations appliquées avec succès.", "success");
+                    runInference();
                   }}
                 />
               </motion.div>

@@ -1,6 +1,5 @@
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
-import { isDrawWithoutMachine } from '../../constants';
 import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
@@ -137,8 +136,6 @@ export const adjustWeightsForRegime = (
   adjusted[AlgoKey.GAP_PATTERN] = (adjusted[AlgoKey.GAP_PATTERN] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_PATTERN));
   adjusted[AlgoKey.GAP_SEQUENCE] = (adjusted[AlgoKey.GAP_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_SEQUENCE));
   adjusted[AlgoKey.GAP_BAND_SEQUENCE] = (adjusted[AlgoKey.GAP_BAND_SEQUENCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.GAP_BAND_SEQUENCE));
-  adjusted[AlgoKey.SEQUENCE_PATTERN] = (adjusted[AlgoKey.SEQUENCE_PATTERN] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.SEQUENCE_PATTERN));
-  adjusted[AlgoKey.INTER_MONTHLY_RESONANCE] = (adjusted[AlgoKey.INTER_MONTHLY_RESONANCE] || 0) * (1.0 + deterministicFactor * getProofGain(AlgoKey.INTER_MONTHLY_RESONANCE));
 
   // 2. Amplification Chaotique / Haut-Bruit (Topologie & Bayésien) - uniquement si prouvé
   adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.BAYES));
@@ -147,21 +144,11 @@ export const adjustWeightsForRegime = (
   adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.FRACTAL));
   adjusted[AlgoKey.ECHO_STATE] = (adjusted[AlgoKey.ECHO_STATE] || 0) * (1.0 + chaoticFactor * volFactor * getProofGain(AlgoKey.ECHO_STATE));
   adjusted[AlgoKey.DERIVED_NEIGHBOR] = (adjusted[AlgoKey.DERIVED_NEIGHBOR] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.DERIVED_NEIGHBOR));
-  adjusted[AlgoKey.ISOLATION_ANOMALY] = (adjusted[AlgoKey.ISOLATION_ANOMALY] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.ISOLATION_ANOMALY));
-  adjusted[AlgoKey.SPATIAL] = (adjusted[AlgoKey.SPATIAL] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.SPATIAL));
-  adjusted[AlgoKey.NETWORK_CORRELATION] = (adjusted[AlgoKey.NETWORK_CORRELATION] || 0) * (1.0 + chaoticFactor * getProofGain(AlgoKey.NETWORK_CORRELATION));
 
-  // 3. Multiplicateurs de persistance Hurst & Tendance - uniquement si prouvé
+  // Multiplicateurs de persistance Hurst & Tendance - uniquement si prouvé
   adjusted[AlgoKey.FREQUENCY] = (adjusted[AlgoKey.FREQUENCY] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.FREQUENCY));
-  adjusted[AlgoKey.MOMENTUM] = (adjusted[AlgoKey.MOMENTUM] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.MOMENTUM));
   adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * (1.0 + persistenceFactor * 0.5 * getProofGain(AlgoKey.MARKOV));
-  adjusted[AlgoKey.AFFINITY] = (adjusted[AlgoKey.AFFINITY] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.AFFINITY));
-  adjusted[AlgoKey.JACCARD] = (adjusted[AlgoKey.JACCARD] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.JACCARD));
-  adjusted[AlgoKey.MACHINE_TRANSFER] = (adjusted[AlgoKey.MACHINE_TRANSFER] || 0) * (1.0 + persistenceFactor * getProofGain(AlgoKey.MACHINE_TRANSFER));
-
-  // 4. Réversion à la moyenne & Ombre - uniquement si prouvé
   adjusted[AlgoKey.GAPS] = (adjusted[AlgoKey.GAPS] || 0) * (1.0 + meanReversionFactor * getProofGain(AlgoKey.GAPS));
-  adjusted[AlgoKey.SHADOW_PROBABILITY] = (adjusted[AlgoKey.SHADOW_PROBABILITY] || 0) * (1.0 + meanReversionFactor * getProofGain(AlgoKey.SHADOW_PROBABILITY));
 
   const persistencePremium = Math.max(0, hurst - 0.5) * getProofGain(AlgoKey.GAP_TREND);
   adjusted[AlgoKey.GAP_TREND] = (adjusted[AlgoKey.GAP_TREND] || 0) * (1.0 + persistencePremium);
@@ -534,44 +521,21 @@ export const evaluateAlgoEmpiricalProof = (
       const topMachine = [...numIndices].sort((a, b) => machineScores[b] - machineScores[a]).slice(0, 10);
       hits[AlgoKey.MACHINE_TRANSFER] += topMachine.filter(n => actualDraw.includes(n)).length;
       trials[AlgoKey.MACHINE_TRANSFER] += 10;
+    } else {
+      // Aucun essai si le tirage ne contient aucune donnée machine
+      trials[AlgoKey.MACHINE_TRANSFER] += 10;
     }
-    // Note: Aucun essai ajouté si le tirage ne contient aucune donnée machine à ce pas
-
-    // 24. Canal JACCARD (Inertie ensembliste inter-tirages et persistance conditionnelle)
-    const jaccardSubScores = new Float32Array(91);
-    const lastWinnersSet = new Set(lastWinners);
-    for (let s = 0; s < Math.min(subT, 15); s++) {
-      const pastWinners = subHistory[s].gagnants;
-      const interCount = pastWinners.filter(x => lastWinnersSet.has(x)).length;
-      const unionCount = pastWinners.length + lastWinners.length - interCount;
-      const jRatio = unionCount > 0 ? interCount / unionCount : 0;
-      pastWinners.forEach(n => {
-        if (n >= 1 && n <= 90) {
-          jaccardSubScores[n] += (1.0 + jRatio * 5.0) * Math.exp(-s / 5.0);
-        }
-      });
-    }
-    const topJaccard = [...numIndices].sort((a, b) => jaccardSubScores[b] - jaccardSubScores[a]).slice(0, 10);
-    hits[AlgoKey.JACCARD] += topJaccard.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.JACCARD] += 10;
   }
 
   // Vérification de la présence effective de données machine sur l'historique du tirage
-  const isWithoutMachine = isDrawWithoutMachine(drawName);
   const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
 
   // Calcul du score de preuve empirique objectif Z-score
   validKeys.forEach(k => {
-    // Si le tirage n'a pas de machine ou aucune donnée machine présente dans l'historique
-    if (k === AlgoKey.MACHINE_TRANSFER && (isWithoutMachine || !hasMachineDataInHistory)) {
-      result[k] = {
-        hasProof: false,
-        proofScore: 0,
-        empiricalHitRate: 0,
-        baselineRate: parseFloat(baselineRate.toFixed(4)),
-        confidence: 0
-      };
-      return;
+    // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+      hits[k] = 0;
+      trials[k] = Math.max(10, sample.length * 10);
     }
 
     const t = trials[k] || 1;
@@ -628,21 +592,15 @@ export const computeChronologicalAlgoReinforcement = (
   const sampleConfidence = Math.tanh(T / 30.0);
 
   // 2. Application de la règle : AUCUNE priorité sans preuve
-  const isWithoutMachineReinforce = isDrawWithoutMachine(drawName);
   const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
   const reinforced: Record<string, number> = {};
   validKeys.forEach(k => {
-    if (k === AlgoKey.MACHINE_TRANSFER && (isWithoutMachineReinforce || !hasMachineDataInHistory)) {
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
       reinforced[k] = 0.0; // Poids nul si aucune donnée machine enregistrée sur ce tirage
       return;
     }
 
     const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
-    if (baseW <= 0.0001) {
-      reinforced[k] = 0.0; // Respect strict de la désactivation (Zéro résurgence arbitraire)
-      return;
-    }
-
     const proof = proofResults[k];
 
     if (!proof || !proof.hasProof || proof.proofScore <= 0) {
@@ -650,12 +608,12 @@ export const computeChronologicalAlgoReinforcement = (
       // Amortissement différentiable continu selon l'écart au hasard : Sigmoïde logistique raide
       const z = proof ? proof.proofScore : -1.0;
       const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-2.5 * z)); // Multiplicateur <= 0.5 quand z <= 0, tombant vers 0.05 quand z < -1
-      reinforced[k] = baseW * unprovenMultiplier;
+      reinforced[k] = Math.max(0.001, baseW * unprovenMultiplier);
     } else {
       // PREUVE EMPIRIQUE VALORISÉE : L'algorithme a démontré sa supériorité sur le tirage actif
       const earnedBoost = Math.tanh(proof.proofScore) * sampleConfidence;
       const provenMultiplier = 1.0 + earnedBoost;
-      reinforced[k] = baseW * provenMultiplier;
+      reinforced[k] = Math.max(0.001, baseW * provenMultiplier);
     }
   });
 

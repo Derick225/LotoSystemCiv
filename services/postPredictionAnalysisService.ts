@@ -6,9 +6,6 @@ import type {
   SpectralDeviation,
   AlgoWeights,
   DrawResult,
-  CausalAttributionItem,
-  SystematicComparisonReport,
-  ActionableImprovementReport,
 } from "../types";
 import { normalizeWeights, getAlgoWeights } from "./predictionEngine";
 import { syncForensicReports } from "./syncService";
@@ -22,7 +19,6 @@ import { z } from "zod";
 import { parseDateSafely } from "../utils/dateUtils";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { getDeterministicUUID } from "../utils/mathUtils";
-import { applyForensicCalibration } from "./prediction/weightsManager";
 
 /**
  * Calcule la probabilité binomiale cumulée P(X >= k) pour X ~ B(n, p)
@@ -288,20 +284,18 @@ export const getLocalForensicReports = async (): Promise<ForensicReport[]> => {
     const fetched = await globalCache.getByDomain<ForensicReport>('forensic_report');
     
     // We also support the old FORENSIC_KEY_PREFIX for backwards compatibility in IDB
-    if (typeof indexedDB !== "undefined") {
-      const allKeys = await keys();
-      const oldKeys = allKeys.filter(
-        (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
-      );
-      for (const key of oldKeys) {
-        if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
-           const item = await get(key as string);
-           if (item) {
-             const parsed = typeof item === "string" ? JSON.parse(item) : item;
-             const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
-             fetched.push(unwrapped);
-           }
-        }
+    const allKeys = await keys();
+    const oldKeys = allKeys.filter(
+      (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
+    );
+    for (const key of oldKeys) {
+      if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
+         const item = await get(key as string);
+         if (item) {
+           const parsed = typeof item === "string" ? JSON.parse(item) : item;
+           const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
+           fetched.push(unwrapped);
+         }
       }
     }
 
@@ -373,9 +367,6 @@ export const markAutopsyDismissed = async (predictionId: string): Promise<void> 
  * Récupère l'ensemble des IDs de prédictions dont l'autopsie a été définitivement supprimée.
  */
 export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> => {
-  if (typeof indexedDB === "undefined") {
-    return new Set<string>();
-  }
   try {
     const allK = await keys();
     const dismissed = new Set<string>();
@@ -394,16 +385,10 @@ export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> =
  * Supprime définitivement un rapport d'autopsie de la base locale (IndexedDB + Cache mémoire).
  */
 export const deleteForensicReportLocal = async (id: string, predictionId?: string) => {
-  if (typeof indexedDB !== "undefined") {
-    try {
-      await del(`${FORENSIC_KEY_PREFIX}${id}`);
-      await del(`nexus_forensic_report_${id}`);
-      await del(`nexus_forensic_index_${id}`);
-      await del(`nexus_forensic_detail_${id}`);
-    } catch {
-      // Ignorer silencieusement si inaccessible
-    }
-  }
+  await del(`${FORENSIC_KEY_PREFIX}${id}`);
+  await del(`nexus_forensic_report_${id}`);
+  await del(`nexus_forensic_index_${id}`);
+  await del(`nexus_forensic_detail_${id}`);
   await globalCache.invalidateByPrefix(`nexus_forensic_report_${id}`);
   await globalCache.invalidateByPrefix(`nexus_forensic_index_${id}`);
   if (predictionId) {
@@ -418,16 +403,10 @@ export const deleteMultipleForensicReportsLocal = async (
   items: { id: string; predictionId?: string }[]
 ) => {
   for (const item of items) {
-    if (typeof indexedDB !== "undefined") {
-      try {
-        await del(`${FORENSIC_KEY_PREFIX}${item.id}`);
-        await del(`nexus_forensic_report_${item.id}`);
-        await del(`nexus_forensic_index_${item.id}`);
-        await del(`nexus_forensic_detail_${item.id}`);
-      } catch {
-        // Ignorer silencieusement si inaccessible
-      }
-    }
+    await del(`${FORENSIC_KEY_PREFIX}${item.id}`);
+    await del(`nexus_forensic_report_${item.id}`);
+    await del(`nexus_forensic_index_${item.id}`);
+    await del(`nexus_forensic_detail_${item.id}`);
     await globalCache.invalidateByPrefix(`nexus_forensic_report_${item.id}`);
     await globalCache.invalidateByPrefix(`nexus_forensic_index_${item.id}`);
     if (item.predictionId) {
@@ -461,275 +440,6 @@ export const runForensicAutopsy = (
   skipLLM,
   fullHistory
 );
-
-// ============================================================================
-// MOTEUR D'ATTRIBUTION CAUSALE AUTOMATISÉE
-// ============================================================================
-export const computeAutomatedCausalAttribution = (
-  predictedNumbers: number[],
-  actualWinningNumbers: number[],
-  machineNumbers: number[],
-  predictionBreakdown: Record<number, Record<string, number>> | undefined,
-  baseWeights: AlgoWeights,
-  spectralDeviations: SpectralDeviation[] = []
-): CausalAttributionItem[] => {
-  const attributions: CausalAttributionItem[] = [];
-  const winningSet = new Set(actualWinningNumbers);
-  const machineSet = new Set(machineNumbers);
-  const algos = Object.keys(baseWeights || {});
-
-  // 1. Analyse des prédictions (Hits, Faux Positifs, Near Misses)
-  for (const num of predictedNumbers) {
-    if (winningSet.has(num)) {
-      attributions.push({
-        number: num,
-        category: 'CONFIRMED_HIT',
-        primaryCause: "Convergence harmonieuse des tenseurs de prédiction avec l'état réel",
-        contributingAlgos: algos.map(a => ({ algo: a, contribution: (baseWeights as any)[a] || 0, direction: 'overpromoted' as const })),
-        attributionScore: 100,
-        counterfactualFix: "Maintenir l'équilibre pondéral des vecteurs de confirmation",
-      });
-      continue;
-    }
-
-    const isNearMiss = actualWinningNumbers.some(w => Math.abs(w - num) <= 2);
-    const isMirror = actualWinningNumbers.some(w => {
-      const s = String(w).padStart(2, '0');
-      const rev = parseInt(s.split('').reverse().join(''), 10);
-      return rev === num || (91 - w) === num;
-    });
-    const isMachine = machineSet.has(num);
-
-    const bd = predictionBreakdown?.[num] || {};
-    const contributingAlgos = algos
-      .map(algo => ({
-        algo,
-        contribution: bd[algo] || bd[algo.toUpperCase()] || 0,
-        direction: (bd[algo] || bd[algo.toUpperCase()] || 0) > 50 ? 'overpromoted' as const : 'suppressed' as const,
-      }))
-      .sort((a, b) => b.contribution - a.contribution);
-
-    const dominantAlgo = contributingAlgos[0]?.algo || 'Inconnu';
-
-    let category: CausalAttributionItem['category'] = 'FALSE_POSITIVE';
-    let primaryCause = `Sur-activation de l'algorithme ${dominantAlgo} sans résonance dans le tirage`;
-    let fix = `Diminuer le poids relatif de ${dominantAlgo} ou augmenter l'amortissement du bruit`;
-
-    if (isMachine) {
-      category = 'BALLISTIC_NEAR_MISS';
-      primaryCause = "Attraction résiduelle vers le panier machine (fuite machine)";
-      fix = "Renforcer le coefficient d'isolation machine ou purger la mémoire de transfert";
-    } else if (isNearMiss) {
-      category = 'BALLISTIC_NEAR_MISS';
-      primaryCause = "Dispersion spatiale orbitale (écart de +/- 1 ou 2 positions)";
-      fix = "Resserrer le paramètre de lissage spatial sigma ou activer le noyau gaussien d'étalement";
-    } else if (isMirror) {
-      category = 'BALLISTIC_NEAR_MISS';
-      primaryCause = "Inversion topologique ou symétrie miroir (91 - n ou inversion décimale)";
-      fix = "Intégrer une projection symétrique de Cartan dans la phase de reranking";
-    }
-
-    const maxContrib = contributingAlgos[0]?.contribution || 50;
-    const attributionScore = Math.min(100, Math.max(10, Math.round(maxContrib)));
-
-    attributions.push({
-      number: num,
-      category,
-      primaryCause,
-      contributingAlgos,
-      attributionScore,
-      counterfactualFix: fix,
-    });
-  }
-
-  // 2. Analyse des faux négatifs (gagnants manqués non prédits)
-  for (const winNum of actualWinningNumbers) {
-    if (predictedNumbers.includes(winNum)) continue;
-
-    const bd = predictionBreakdown?.[winNum] || {};
-    const contributingAlgos = algos
-      .map(algo => ({
-        algo,
-        contribution: bd[algo] || bd[algo.toUpperCase()] || 0,
-        direction: (bd[algo] || bd[algo.toUpperCase()] || 0) < 30 ? 'suppressed' as const : 'overpromoted' as const,
-      }))
-      .sort((a, b) => a.contribution - b.contribution);
-
-    const suppressedBy = contributingAlgos[0]?.algo || 'Inconnu';
-    const specDev = Array.isArray(spectralDeviations) ? spectralDeviations.find(s => s.number === winNum) : undefined;
-
-    attributions.push({
-      number: winNum,
-      category: 'FALSE_NEGATIVE',
-      primaryCause: specDev && Math.abs(specDev.delta) > 20
-        ? `Rupture spectrale non capturée (Delta spectral: ${specDev.delta.toFixed(1)}) masqué par ${suppressedBy}`
-        : `Sous-évaluation par ${suppressedBy} et pénalisation par le filtre d'entropie`,
-      contributingAlgos,
-      attributionScore: Math.min(100, Math.max(20, Math.round(100 - (contributingAlgos[0]?.contribution || 0)))),
-      counterfactualFix: `Élever le gain de détection des signaux faibles pour ${suppressedBy} et calibrer la sensibilité spectrale`,
-    });
-  }
-
-  return attributions;
-};
-
-// ============================================================================
-// COMPARAISON SYSTÉMATIQUE ENTRE RÉSULTATS PRÉDITS ET OBSERVATIONS RÉELLES
-// ============================================================================
-export const computeSystematicPredictionComparison = (
-  predictedNumbers: number[],
-  actualWinningNumbers: number[],
-  machineNumbers: number[]
-): SystematicComparisonReport => {
-  const directHits: number[] = [];
-  const neighbors1: { actual: number; predicted: number; diff: number }[] = [];
-  const neighbors2: { actual: number; predicted: number; diff: number }[] = [];
-  const mirrors: { actual: number; predicted: number; type: string }[] = [];
-  const shadows: { actual: number; predicted: number }[] = [];
-  const machineLeakages: number[] = [];
-
-  const matchedPredicted = new Set<number>();
-  const matchedWinners = new Set<number>();
-
-  for (const p of predictedNumbers) {
-    if (actualWinningNumbers.includes(p)) {
-      directHits.push(p);
-      matchedPredicted.add(p);
-      matchedWinners.add(p);
-    }
-    if (machineNumbers.includes(p)) {
-      machineLeakages.push(p);
-    }
-  }
-
-  for (const a of actualWinningNumbers) {
-    if (matchedWinners.has(a)) continue;
-    for (const p of predictedNumbers) {
-      if (matchedPredicted.has(p)) continue;
-      const diff = Math.abs(a - p);
-      if (diff === 1) {
-        neighbors1.push({ actual: a, predicted: p, diff: a - p });
-      } else if (diff === 2) {
-        neighbors2.push({ actual: a, predicted: p, diff: a - p });
-      }
-
-      const aStr = String(a).padStart(2, '0');
-      const pStr = String(p).padStart(2, '0');
-      if (aStr.split('').reverse().join('') === pStr) {
-        mirrors.push({ actual: a, predicted: p, type: 'decimal_inversion' });
-      } else if (a + p === 91) {
-        mirrors.push({ actual: a, predicted: p, type: 'complement_91' });
-      }
-    }
-  }
-
-  const unmatchedPredicted = predictedNumbers.filter(p => !matchedPredicted.has(p));
-  const unmatchedWinners = actualWinningNumbers.filter(a => !matchedWinners.has(a));
-
-  const hitRateTop5 = predictedNumbers.length > 0 ? directHits.length / predictedNumbers.length : 0;
-  const extendedMatches = directHits.length + neighbors1.length * 0.5 + neighbors2.length * 0.25 + mirrors.length * 0.4;
-  const captureRateExtended = actualWinningNumbers.length > 0 ? Math.min(1.0, extendedMatches / actualWinningNumbers.length) : 0;
-
-  let sumDist = 0;
-  let distCount = 0;
-  for (const p of predictedNumbers) {
-    let minDist = 90;
-    for (const a of actualWinningNumbers) {
-      minDist = Math.min(minDist, Math.abs(p - a));
-    }
-    sumDist += minDist;
-    distCount++;
-  }
-  const avgMinDist = distCount > 0 ? sumDist / distCount : 15;
-  const dispersionIndex = Math.min(100, Math.max(0, Math.round((avgMinDist / 45.0) * 100)));
-
-  return {
-    directHits,
-    neighbors1,
-    neighbors2,
-    mirrors,
-    shadows,
-    machineLeakages,
-    unmatchedPredicted,
-    unmatchedWinners,
-    hitRateTop5,
-    captureRateExtended,
-    dispersionIndex,
-  };
-};
-
-// ============================================================================
-// GÉNÉRATEUR DE RAPPORTS D'AMÉLIORATION ACTIONNABLES
-// ============================================================================
-export const generateActionableImprovementReport = (
-  systematicComparison: SystematicComparisonReport,
-  causalAttributions: CausalAttributionItem[],
-  baseWeights: AlgoWeights
-): ActionableImprovementReport => {
-  const recommendedWeightDeltas: Record<string, number> = {};
-  const priorityFixes: string[] = [];
-  const algos = Object.keys(baseWeights || {});
-
-  for (const a of algos) {
-    recommendedWeightDeltas[a] = 0;
-  }
-
-  for (const attr of causalAttributions) {
-    if (attr.category === 'CONFIRMED_HIT') {
-      for (const ca of attr.contributingAlgos) {
-        recommendedWeightDeltas[ca.algo] = (recommendedWeightDeltas[ca.algo] || 0) + 0.015;
-      }
-    } else if (attr.category === 'FALSE_POSITIVE') {
-      const topAlgo = attr.contributingAlgos[0];
-      if (topAlgo) {
-        recommendedWeightDeltas[topAlgo.algo] = (recommendedWeightDeltas[topAlgo.algo] || 0) - 0.02;
-        if (!priorityFixes.includes(attr.counterfactualFix)) {
-          priorityFixes.push(attr.counterfactualFix);
-        }
-      }
-    } else if (attr.category === 'FALSE_NEGATIVE') {
-      const suppressedAlgo = attr.contributingAlgos[0];
-      if (suppressedAlgo) {
-        recommendedWeightDeltas[suppressedAlgo.algo] = (recommendedWeightDeltas[suppressedAlgo.algo] || 0) + 0.01;
-      }
-    }
-  }
-
-  const recommendedHyperparameterDeltas: ActionableImprovementReport['recommendedHyperparameterDeltas'] = {};
-
-  if (systematicComparison.neighbors1.length >= 1) {
-    recommendedHyperparameterDeltas.spatialSigmaDelta = 0.25;
-    priorityFixes.push("Activer le noyau gaussien d'étalement spatial (+0.25 sigma) pour convertir les voisins directs en hits");
-  }
-  if (systematicComparison.machineLeakages.length >= 1) {
-    priorityFixes.push("Renforcer le verrouillage anti-fuite machine dans le transfert de probabilités");
-  }
-  if (systematicComparison.dispersionIndex > 50) {
-    recommendedHyperparameterDeltas.hawkesDecayDelta = -0.05;
-    priorityFixes.push("Réduire la décroissance de Hawkes pour augmenter la mémoire temporelle de récurrence");
-  }
-
-  if (priorityFixes.length === 0) {
-    priorityFixes.push("Stabilisation nominale : maintenir la calibration actuelle et optimiser le taux d'apprentissage différentiel.");
-  }
-
-  const expectedGain = parseFloat((
-    (systematicComparison.captureRateExtended - systematicComparison.hitRateTop5) * 20.0 + 
-    Math.max(0, 10 - systematicComparison.dispersionIndex * 0.1)
-  ).toFixed(2));
-
-  const summary = `Post-Mortem Actionnable : ${systematicComparison.directHits.length} hit(s) direct(s), ` +
-    `${systematicComparison.neighbors1.length} voisin(s) d'ordre 1, ${systematicComparison.mirrors.length} miroir(s). ` +
-    `Gain de précision estimé : +${expectedGain}%.`;
-
-  return {
-    summary,
-    recommendedWeightDeltas,
-    recommendedHyperparameterDeltas,
-    priorityFixes: priorityFixes.slice(0, 5),
-    expectedAccuracyGain: expectedGain,
-  };
-};
 
 export const performForensicAnalysis = async (
   drawName: string,
@@ -1471,28 +1181,6 @@ export const performForensicAnalysis = async (
 
   const divergenceMetric = Math.max(0, Math.min(100, Math.round((1.0 - (exactHitsCount + 0.5 * nearMisses.length) / 5) * 100)));
 
-  // Calcul automatisé de l'attribution causale, de la comparaison systématique et du rapport actionnable
-  const causalAttributions = computeAutomatedCausalAttribution(
-    predictedNumbers,
-    actualWinningNumbers,
-    machineNumbers,
-    predictionBreakdown as Record<number, Record<string, number>> | undefined,
-    baseWeights,
-    spectralDeviations
-  );
-
-  const systematicComparison = computeSystematicPredictionComparison(
-    predictedNumbers,
-    actualWinningNumbers,
-    machineNumbers
-  );
-
-  const actionableImprovementReport = generateActionableImprovementReport(
-    systematicComparison,
-    causalAttributions,
-    baseWeights
-  );
-
   return {
     id: deterministicId,
     drawName,
@@ -1539,9 +1227,6 @@ export const performForensicAnalysis = async (
     topologicalTensionIndex: UFI_Data.topologicalTensionIndex,
     catastropheControlParams: UFI_Data.catastropheControlParams,
     winningXAP,
-    causalAttributions,
-    systematicComparison,
-    actionableImprovementReport,
   };
 };
 
@@ -2077,20 +1762,4 @@ export const runCounterfactualSimulation = (
     baselineLoss: baseline.continuousTopologicalLoss,
     baselineWassersteinLoss: baseline.wassersteinLoss,
   };
-};
-
-/**
- * Applique le retour bayésien médico-légal sur la distribution des poids avec régularisation continue.
- */
-export const applyBayesianForensicFeedback = (
-  currentWeights: AlgoWeights,
-  priorityFixes: Array<{ algo: string; action: string; impactScore: number }>,
-  historyLength: number = 20
-): AlgoWeights => {
-  const suggestions = priorityFixes.map(f => ({
-    algo: f.algo,
-    action: f.action,
-    improvement: f.impactScore,
-  }));
-  return applyForensicCalibration(currentWeights, suggestions, historyLength);
 };
