@@ -262,6 +262,26 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
     "all" | "entropy_high" | "entropy_low" | "harmonic_even" | "harmonic_odd" | "consecutive"
   >("all");
 
+  // SYMBIOSE : Écouteur d'événements pour navigation croisée
+  useEffect(() => {
+    const handleNavigation = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const sub = (customEvent.detail?.subTab || "").toLowerCase();
+      if (sub === "calendar" || sub === "calendrier") {
+        setViewMode("calendar");
+      } else if (sub === "list" || sub === "liste") {
+        setViewMode("list");
+      } else if (sub === "analytics" || sub === "stats") {
+        setShowAnalytics(true);
+      }
+      const el = document.getElementById("flux-content");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener("NAVIGATE_SUB_FLUX", handleNavigation);
+    return () =>
+      window.removeEventListener("NAVIGATE_SUB_FLUX", handleNavigation);
+  }, []);
+
   const handleManualRefresh = async () => {
     if (!currentDrawName) return;
     showToast("Synchronisation API...", "info");
@@ -391,7 +411,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   if (loading && history.length === 0) return <ListSkeleton />;
 
   return (
-    <div className="space-y-4 md:space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-1 md:px-0">
+    <div id="flux-content" className="space-y-4 md:space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-1 md:px-0">
       {/* Top Header KPI & Stats Bar */}
       <div className="bg-slate-900/90 text-white p-4 sm:p-5 rounded-[2rem] border border-slate-800/80 shadow-2xl relative overflow-hidden shrink-0">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>

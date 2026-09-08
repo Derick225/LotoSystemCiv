@@ -18,25 +18,34 @@ export const GenomicAuditTab: React.FC<{ drawName: string }> = ({
   >("DNA_AUDITOR");
 
   useEffect(() => {
-    if (activeSubTab === "DNA_EVOLUTION" || activeSubTab === "EVOLUTION") {
-      setActiveView("DNA_EVOLUTION");
-    } else if (activeSubTab === "DRIFT_HEATMAP" || activeSubTab === "HEATMAP") {
-      setActiveView("DRIFT_HEATMAP");
-    } else if (activeSubTab === "EXPERT_BIAS" || activeSubTab === "BIAS") {
-      setActiveView("EXPERT_BIAS");
-    } else if (activeSubTab === "NEURAL_OPT" || activeSubTab === "NEURAL") {
-      setActiveView("NEURAL_OPT");
-    } else if (activeSubTab === "FORENSIC_LOGS" || activeSubTab === "FORENSIC") {
-      setActiveView("FORENSIC_LOGS");
-    } else if (activeSubTab === "SIEVE_RADAR" || activeSubTab === "RADAR") {
-      setActiveView("SIEVE_RADAR");
-    } else if (activeSubTab === "DNA_AUDITOR") {
-      setActiveView("DNA_AUDITOR");
-    }
-  }, [activeSubTab]);
+    const handleNavigation = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const sub = (customEvent.detail?.subTab || "").toUpperCase();
+      if (sub === "DNA_EVOLUTION" || sub === "EVOLUTION") {
+        setActiveView("DNA_EVOLUTION");
+      } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP") {
+        setActiveView("DRIFT_HEATMAP");
+      } else if (sub === "EXPERT_BIAS" || sub === "BIAS") {
+        setActiveView("EXPERT_BIAS");
+      } else if (sub === "NEURAL_OPT" || sub === "NEURAL") {
+        setActiveView("NEURAL_OPT");
+      } else if (sub === "FORENSIC_LOGS" || sub === "FORENSIC") {
+        setActiveView("FORENSIC_LOGS");
+      } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
+        setActiveView("SIEVE_RADAR");
+      } else if (sub === "DNA_AUDITOR" || sub === "AUDITOR") {
+        setActiveView("DNA_AUDITOR");
+      }
+      const el = document.getElementById("genomic-content");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener("NAVIGATE_SUB_GENOMIQUE", handleNavigation);
+    return () =>
+      window.removeEventListener("NAVIGATE_SUB_GENOMIQUE", handleNavigation);
+  }, []);
 
   return (
-    <div className="space-y-6">
+    <div id="genomic-content" className="space-y-6">
       {/* Sélecteur de Mode d'Audit Génomique */}
       <div className="flex justify-center">
         <div className="inline-flex p-1.5 bg-slate-900/80 border border-white/10 rounded-2xl backdrop-blur-md shadow-xl gap-1 overflow-x-auto max-w-full">

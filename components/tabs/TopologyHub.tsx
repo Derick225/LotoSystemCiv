@@ -63,12 +63,23 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
   useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
-      if (customEvent.detail?.subTab) {
-        setSubTab(customEvent.detail.subTab);
-        const contentElement = document.getElementById("topology-content");
-        if (contentElement)
-          contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      const sub = (customEvent.detail?.subTab || "").toLowerCase();
+      if (sub === "spatial" || sub === "geometrie" || sub === "geometry") {
+        setSubTab("spatial");
+      } else if (sub === "neural" || sub === "architecture" || sub === "reseau") {
+        setSubTab("neural");
+      } else if (sub === "synergy" || sub === "synergie") {
+        setSubTab("synergy");
+      } else if (sub === "decision" || sub === "decisiontree" || sub === "tree") {
+        setSubTab("decision");
+      } else if (sub === "combinations" || sub === "architecte" || sub === "combinaisons") {
+        setSubTab("combinations");
+      } else if (sub === "python" || sub === "kernel" || sub === "deepkernel") {
+        setSubTab("python");
       }
+      const contentElement = document.getElementById("topology-content");
+      if (contentElement)
+        contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
     };
     window.addEventListener("NAVIGATE_SUB_TOPOLOGIE", handleNavigation);
     return () =>

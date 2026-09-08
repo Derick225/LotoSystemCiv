@@ -26,11 +26,14 @@ export const TicketXRay: React.FC<TicketXRayProps> = React.memo(
 
     if (numbers.length === 0) return null;
 
+    const meanAC = calibration?.meanAC && calibration.meanAC > 0 ? calibration.meanAC : FALLBACK_CALIBRATION.meanAC;
+    const stdAC = typeof calibration?.stdAC === "number" ? calibration.stdAC : FALLBACK_CALIBRATION.stdAC;
+
     // Retrait de l'obligation de Poids Total Équilibré à la demande de l'utilisateur
     const isSumGood = true;
 
     const isMixGood = oddCount >= 2 && oddCount <= 3;
-    const isAcGood = ac >= calibration.meanAC - calibration.stdAC;
+    const isAcGood = ac >= meanAC - stdAC;
 
     const checks = [
       {
@@ -46,9 +49,8 @@ export const TicketXRay: React.FC<TicketXRayProps> = React.memo(
       },
     ];
 
-    const integrityScore = Math.round(
-      (Math.min(100, (ac / calibration.meanAC) * 100) + (score || 50)) / 2,
-    );
+    const rawIntegrity = (Math.min(100, (ac / meanAC) * 100) + (score || 50)) / 2;
+    const integrityScore = isNaN(rawIntegrity) ? 50 : Math.round(rawIntegrity);
     const isOptimal = integrityScore > 60;
 
     return (

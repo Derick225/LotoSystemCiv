@@ -174,10 +174,38 @@ export const generateSimulationScenarios = (
  * Générateur de rapport de lisibilité compréhensible et actionnable pour l'utilisateur.
  */
 export const generateReadabilityReport = (
-  suggestedNumbers: number[],
-  masterScores: ScoredNumber[],
-  uncertainty: QuantifiedUncertainty
+  suggestedNumbersOrScores: number[] | ScoredNumber[],
+  masterScoresOrUncertainty?: ScoredNumber[] | QuantifiedUncertainty,
+  uncertaintyOrScenarios?: QuantifiedUncertainty | any
 ): ReadabilityReport => {
+  let suggestedNumbers: number[] = [];
+  let masterScores: ScoredNumber[] = [];
+  let uncertainty: QuantifiedUncertainty = {
+    epistemicUncertainty: 20,
+    aleatoricUncertainty: 30,
+    totalEntropyBits: 4.5,
+    confidenceIntervals: {},
+    reliabilityScore: 75,
+  };
+
+  if (Array.isArray(suggestedNumbersOrScores) && suggestedNumbersOrScores.length > 0) {
+    if (typeof suggestedNumbersOrScores[0] === 'number') {
+      suggestedNumbers = suggestedNumbersOrScores as number[];
+      if (Array.isArray(masterScoresOrUncertainty)) {
+        masterScores = masterScoresOrUncertainty as ScoredNumber[];
+      }
+      if (uncertaintyOrScenarios && 'reliabilityScore' in uncertaintyOrScenarios) {
+        uncertainty = uncertaintyOrScenarios;
+      }
+    } else {
+      masterScores = suggestedNumbersOrScores as ScoredNumber[];
+      suggestedNumbers = masterScores.slice(0, 5).map(s => s.num);
+      if (masterScoresOrUncertainty && 'reliabilityScore' in masterScoresOrUncertainty) {
+        uncertainty = masterScoresOrUncertainty as QuantifiedUncertainty;
+      }
+    }
+  }
+
   const topNumbersFormatted = suggestedNumbers.join(' - ');
   
   // Analyse des facteurs clés

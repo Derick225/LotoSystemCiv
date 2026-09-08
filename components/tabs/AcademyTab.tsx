@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Compass,
   Microscope,
+  X,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 
@@ -236,11 +237,88 @@ export const AcademyTab: React.FC = () => {
         </div>
         <button
           onClick={() => navigateTo("Oracle")}
-          className="w-full md:w-auto px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs md:text-sm uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 active:scale-95 transition-all relative z-10 flex items-center justify-center gap-3"
+          className="w-full md:w-auto px-12 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-xs md:text-sm uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 active:scale-95 transition-all relative z-10 flex items-center justify-center gap-3 cursor-pointer"
         >
           <Zap size={18} fill="currentColor" /> Ouvrir l'Oracle
         </button>
       </div>
+
+      {/* Lesson Details Modal */}
+      {selectedLesson && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-3xl p-6 md:p-8 shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setSelectedLesson(null);
+              }}
+              className="absolute top-6 right-6 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex items-center gap-4 mb-6">
+              <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
+                {selectedLesson.icon}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">
+                    Masterclass • {selectedLesson.difficulty}
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-[10px] font-bold text-emerald-400">
+                    Impact {selectedLesson.impact}
+                  </span>
+                </div>
+                <h3 className="text-2xl font-black text-white uppercase tracking-tight">
+                  {selectedLesson.title}
+                </h3>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-300 leading-relaxed font-normal">
+              <p className="p-4 bg-slate-950/60 rounded-2xl border border-slate-800/80">
+                {selectedLesson.content}
+              </p>
+
+              <div className="p-4 bg-indigo-950/40 rounded-2xl border border-indigo-800/40 flex items-start gap-3">
+                <Lightbulb size={20} className="text-indigo-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-black uppercase text-indigo-300 tracking-wider mb-1">
+                    Recommandation Stratégique
+                  </div>
+                  <p className="text-xs text-indigo-200 font-medium italic">
+                    {selectedLesson.tip}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setSelectedLesson(null);
+                }}
+                className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Fermer
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setSelectedLesson(null);
+                  navigateTo("Oracle");
+                }}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Zap size={14} /> Appliquer dans l'Oracle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

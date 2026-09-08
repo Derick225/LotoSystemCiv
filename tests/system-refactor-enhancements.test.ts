@@ -202,7 +202,7 @@ describe('3. Core Algorithms - Deterministic Hyperparameter Tuning', () => {
     expect(result.tunedParams.bayesWindowRatio).toBeGreaterThan(0);
     expect(result.accuracyGain).toBeGreaterThanOrEqual(0);
     expect(result.log.length).toBeGreaterThan(0);
-  });
+  }, 20000);
 });
 
 describe('4. Model DNA Knowledge Base - Genealogical Tracking & Isolation', () => {

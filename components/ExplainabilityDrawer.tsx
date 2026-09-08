@@ -121,7 +121,7 @@ export const ExplainabilityDrawer: React.FC = () => {
                 </h3>
                 <div className="flex items-end gap-3">
                   <span className="text-3xl font-black font-mono text-indigo-500">
-                    {expData.topologicalTension.toFixed(2)}
+                    {(expData.topologicalTension ?? 0).toFixed(2)}
                   </span>
                   <span className="text-xs text-slate-500 mb-1">
                     Indice de résistance aux perturbations locales.
@@ -137,7 +137,7 @@ export const ExplainabilityDrawer: React.FC = () => {
                 </h3>
                 <div className="flex items-end gap-3">
                   <span className="text-3xl font-black font-mono text-emerald-500">
-                    {expData.dnaOrbitingIndex.toFixed(4)}
+                    {(expData.dnaOrbitingIndex ?? 0).toFixed(4)}
                   </span>
                   <span className="text-xs text-slate-500 mb-1">
                     Alignement spectral continu avec la signature globale.

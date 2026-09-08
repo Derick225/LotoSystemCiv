@@ -70,12 +70,23 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
   React.useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
-      if (customEvent.detail?.subTab) {
-        setSubTab(customEvent.detail.subTab as never);
-        const contentElement = document.getElementById("oracle-content");
-        if (contentElement)
-          contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      const sub = (customEvent.detail?.subTab || "").toLowerCase();
+      if (sub === "strategic" || sub === "strategie" || sub === "synth" || sub === "synthesis") {
+        setSubTab("strategic");
+      } else if (sub === "ai_prediction" || sub === "ai" || sub === "cloud" || sub === "iaprediction") {
+        setSubTab("ai_prediction");
+      } else if (sub === "inertia_optimizer" || sub === "inertia" || sub === "inertie") {
+        setSubTab("inertia_optimizer");
+      } else if (sub === "platinum" || sub === "meta" || sub === "metaanalyst") {
+        setSubTab("platinum");
+      } else if (sub === "oracle" || sub === "prediction" || sub === "base") {
+        setSubTab("oracle");
+      } else if (sub === "orch" || sub === "orchestra" || sub === "orchestration") {
+        setSubTab("orch");
       }
+      const contentElement = document.getElementById("oracle-content");
+      if (contentElement)
+        contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
     };
     window.addEventListener("NAVIGATE_SUB_ORACLE", handleNavigation);
     return () =>

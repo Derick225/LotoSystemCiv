@@ -66,6 +66,37 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
     } = useForensicData(drawName);
 
     const [activeTab, setActiveTab] = useState<ForensicTab>("audits");
+
+    // SYMBIOSE : Écouteur d'événements pour navigation croisée
+    React.useEffect(() => {
+      const handleNavigation = (e: Event) => {
+        const customEvent = e as CustomEvent;
+        const sub = (customEvent.detail?.subTab || "").toLowerCase();
+        if (sub) {
+          if (sub === "audits" || sub === "prediction" || sub === "reports") {
+            setActiveTab("audits");
+          } else if (sub === "closedloop" || sub === "autopsy") {
+            setActiveTab("closedloop");
+          } else if (sub === "entropy") {
+            setActiveTab("entropy");
+          } else if (sub === "confusion" || sub === "matrix") {
+            setActiveTab("confusion");
+          } else if (sub === "timeline") {
+            setActiveTab("timeline");
+          } else if (sub === "radar" || sub === "shap") {
+            setActiveTab("radar");
+          } else if (sub === "timemachine" || sub === "oos") {
+            setActiveTab("timemachine");
+          }
+          const contentElement = document.getElementById("forensic-content");
+          if (contentElement)
+            contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      };
+      window.addEventListener("NAVIGATE_SUB_FORENSIC", handleNavigation);
+      return () =>
+        window.removeEventListener("NAVIGATE_SUB_FORENSIC", handleNavigation);
+    }, []);
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [searchQuery, setSearchQuery] = useState<string>("");
     const [sortBy, setSortBy] = useState<SortOption>("date_desc");
@@ -453,7 +484,7 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
     }, [reports]);
 
     return (
-      <div className="w-full space-y-8 animate-fade-in pb-16 font-sans">
+      <div id="forensic-content" className="w-full space-y-8 animate-fade-in pb-16 font-sans">
         {/* HEADER */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-slate-900/80 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-2xl">
           <div>

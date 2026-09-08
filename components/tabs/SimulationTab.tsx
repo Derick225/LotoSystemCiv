@@ -23,6 +23,30 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
       "single" | "comparative" | "walkforward" | "replay" | "whatif"
     >("single");
 
+    // SYMBIOSE : Écouteur d'événements pour navigation croisée
+    React.useEffect(() => {
+      const handleNavigation = (e: Event) => {
+        const customEvent = e as CustomEvent;
+        const sub = (customEvent.detail?.subTab || "").toLowerCase();
+        if (sub === "single" || sub === "backtest" || sub === "standard") {
+          setMode("single");
+        } else if (sub === "comparative" || sub === "parallel" || sub === "comparator") {
+          setMode("comparative");
+        } else if (sub === "walkforward" || sub === "montecarlo" || sub === "mc") {
+          setMode("walkforward");
+        } else if (sub === "replay" || sub === "deterministic") {
+          setMode("replay");
+        } else if (sub === "whatif" || sub === "simulator") {
+          setMode("whatif");
+        }
+        const el = document.getElementById("simulation-content");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+      window.addEventListener("NAVIGATE_SUB_SIMULATION", handleNavigation);
+      return () =>
+        window.removeEventListener("NAVIGATE_SUB_SIMULATION", handleNavigation);
+    }, []);
+
     if (nexusLoading) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 animate-pulse">
@@ -35,7 +59,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     }
 
     return (
-      <div className="space-y-8 animate-fade-in pb-16 w-full">
+      <div id="simulation-content" className="space-y-8 animate-fade-in pb-16 w-full">
         {/* Mode Switcher */}
         <div className="flex justify-center mb-4">
           <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 shadow-inner overflow-x-auto max-w-full">
