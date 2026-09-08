@@ -22,6 +22,7 @@ import { z } from "zod";
 import { parseDateSafely } from "../utils/dateUtils";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { getDeterministicUUID } from "../utils/mathUtils";
+import { applyForensicCalibration } from "./prediction/weightsManager";
 
 /**
  * Calcule la probabilité binomiale cumulée P(X >= k) pour X ~ B(n, p)
@@ -470,7 +471,7 @@ export const computeAutomatedCausalAttribution = (
   machineNumbers: number[],
   predictionBreakdown: Record<number, Record<string, number>> | undefined,
   baseWeights: AlgoWeights,
-  spectralDeviations: SpectralDeviation[]
+  spectralDeviations: SpectralDeviation[] = []
 ): CausalAttributionItem[] => {
   const attributions: CausalAttributionItem[] = [];
   const winningSet = new Set(actualWinningNumbers);
@@ -2076,4 +2077,20 @@ export const runCounterfactualSimulation = (
     baselineLoss: baseline.continuousTopologicalLoss,
     baselineWassersteinLoss: baseline.wassersteinLoss,
   };
+};
+
+/**
+ * Applique le retour bayésien médico-légal sur la distribution des poids avec régularisation continue.
+ */
+export const applyBayesianForensicFeedback = (
+  currentWeights: AlgoWeights,
+  priorityFixes: Array<{ algo: string; action: string; impactScore: number }>,
+  historyLength: number = 20
+): AlgoWeights => {
+  const suggestions = priorityFixes.map(f => ({
+    algo: f.algo,
+    action: f.action,
+    improvement: f.impactScore,
+  }));
+  return applyForensicCalibration(currentWeights, suggestions, historyLength);
 };

@@ -132,6 +132,65 @@ export const PredictionUncertaintyScenariosPanel: React.FC<PredictionUncertainty
         </div>
       )}
 
+      {/* CONFIDENCE INTERVALS (IC 95%) FOR TOP CANDIDATES */}
+      {uncertainty && uncertainty.confidenceIntervals && Object.keys(uncertainty.confidenceIntervals).length > 0 && (
+        <div className="p-5 bg-slate-950/60 rounded-2xl border border-white/5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <TrendingUp size={14} className="text-emerald-400" />
+              Intervalles de Confiance Quantifiés à 95% (Bandes de Crédibilité)
+            </h4>
+            <span className="text-[9px] font-mono font-bold text-slate-400">
+              Marge d'erreur empirique z=1.96
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+            {Object.entries(uncertainty.confidenceIntervals).slice(0, 10).map(([numStr, ci]) => {
+              const num = parseInt(numStr, 10);
+              const span = Math.max(1, ci.upper - ci.lower);
+              const posPercent = Math.max(0, Math.min(100, ((ci.mean - ci.lower) / span) * 100));
+
+              return (
+                <div
+                  key={num}
+                  className="p-2.5 bg-slate-900/80 rounded-xl border border-white/5 flex flex-col justify-between space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <NumberBall number={num} size="sm" />
+                    <span className="text-xs font-mono font-black text-emerald-400">
+                      {ci.mean.toFixed(1)}
+                    </span>
+                  </div>
+
+                  {/* Horizontal CI Bar */}
+                  <div className="space-y-1">
+                    <div className="relative w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="absolute top-0 bottom-0 bg-emerald-500/40 rounded-full"
+                        style={{
+                          left: `${Math.max(0, ci.lower)}%`,
+                          width: `${Math.min(100, span)}%`,
+                        }}
+                      />
+                      <div
+                        className="absolute top-0 bottom-0 w-1.5 bg-emerald-400 rounded-full shadow-sm shadow-emerald-400"
+                        style={{ left: `${posPercent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[8px] font-mono text-slate-400">
+                      <span>{ci.lower.toFixed(1)}</span>
+                      <span className="text-slate-500">IC 95%</span>
+                      <span>{ci.upper.toFixed(1)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 3 DETERMINISTIC SCENARIOS */}
       {scenarios.length > 0 && (
         <div className="space-y-3">

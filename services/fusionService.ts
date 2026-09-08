@@ -283,21 +283,6 @@ export const calculateFusion = (
   covLI /= 90.0;
   covPI /= 90.0;
 
-  // Coefficients de corrélation de Pearson entre paires de capteurs
-  const corrLP = Math.max(-1.0, Math.min(1.0, covLP / (stdP * stdQ + Number.EPSILON)));
-  const corrLI = Math.max(-1.0, Math.min(1.0, covLI / (stdP * stdO + Number.EPSILON)));
-  const corrPI = Math.max(-1.0, Math.min(1.0, covPI / (stdQ * stdO + Number.EPSILON)));
-
-  // Dé-corrélation continue : amortissement de la précision des capteurs mutuellement redondants
-  // Si deux capteurs sont fortement corrélés (r -> 1), la redondance est amortie pour valoriser la diversité orthogonale
-  const redundancyDiscountP = 1.0 - 0.4 * Math.max(0, corrLP * corrLP, corrLI * corrLI);
-  const redundancyDiscountQ = 1.0 - 0.4 * Math.max(0, corrLP * corrLP, corrPI * corrPI);
-  const redundancyDiscountO = 1.0 - 0.4 * Math.max(0, corrLI * corrLI, corrPI * corrPI);
-
-  // Information de Fisher du système multi-capteurs fusionné : I(theta) = Tr(Sigma^-1)
-  const fisherGain = Math.log(1.0 + (1.0 / varP + 1.0 / varQ + 1.0 / varO));
-
-  // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Kalman pour situations de forte variance
   // Calcule l'entropie cumulée des trois signaux pour adapter la régularisation (zéro nombre magique)
   const combinedScores = new Float64Array(91);
   for (let i = 1; i <= 90; i++) {
@@ -305,19 +290,51 @@ export const calculateFusion = (
   }
   const entropyMultiplier = computeVectorEntropy(normalizeVector(combinedScores));
   const avgStd = (stdP + stdQ + stdO) / 3.0;
-  
-  // Lambda de régularisation continue : s'élève proportionnellement au désordre (entropie) et à l'écart type moyen
-  const lambda = avgStd * entropyMultiplier * 0.15;
 
-  // Matrices de Précision Régularisées et Dé-corrélées (élimine les redondances colinéaires)
-  const precP = (W_PYTHON * redundancyDiscountP) / (varP + lambda);
-  const precQ = (W_QUANTUM * redundancyDiscountQ) / (varQ + lambda);
-  const precO = (W_ORACLE * redundancyDiscountO) / (varO + lambda);
-  
-  const totalPrecision = precP + precQ + precO;
-  const kalmanGainP = precP / totalPrecision;
-  const kalmanGainQ = precQ / totalPrecision;
-  const kalmanGainO = precO / totalPrecision;
+  // RENTRÉE STATISTIQUE DYNAMIQUE : Régularisation de Tikhonov continue basée sur la trace et l'entropie
+  const trace = varP + varQ + varO;
+  const lambda = (trace / 3.0) * (entropyMultiplier / (1.0 + entropyMultiplier));
+
+  // ============================================================================
+  // INVERSION ANALYTIQUE DE LA MATRICE DE COVARIANCE 3x3 (FILTRE DE KALMAN / BLUE)
+  // ============================================================================
+  // Matrice de covariance régularisée C = Sigma + lambda * I
+  const c00 = varP + lambda, c01 = covLP,        c02 = covLI;
+  const c10 = covLP,        c11 = varQ + lambda, c12 = covPI;
+  const c20 = covLI,        c21 = covPI,        c22 = varO + lambda;
+
+  // Déterminant 3x3
+  const det = c00 * (c11 * c22 - c12 * c12) -
+              c01 * (c10 * c22 - c12 * c20) +
+              c02 * (c10 * c21 - c11 * c20);
+
+  const safeDet = Math.abs(det) > 1e-9 ? det : 1.0;
+
+  // Matrice des cofacteurs (Comatrice / Inverse non normalisée)
+  const inv00 = (c11 * c22 - c12 * c21) / safeDet;
+  const inv01 = (c02 * c21 - c01 * c22) / safeDet;
+  const inv02 = (c01 * c12 - c02 * c11) / safeDet;
+
+  const inv10 = (c12 * c20 - c10 * c22) / safeDet;
+  const inv11 = (c00 * c22 - c02 * c20) / safeDet;
+  const inv12 = (c02 * c10 - c00 * c12) / safeDet;
+
+  const inv20 = (c10 * c21 - c11 * c20) / safeDet;
+  const inv21 = (c01 * c20 - c00 * c21) / safeDet;
+  const inv22 = (c00 * c11 - c01 * c10) / safeDet;
+
+  // Somme des colonnes de la matrice de précision (BLUE Weights: w = Sigma^-1 * 1)
+  const blueP = Math.max(1e-4, (inv00 + inv01 + inv02)) * W_PYTHON;
+  const blueQ = Math.max(1e-4, (inv10 + inv11 + inv12)) * W_QUANTUM;
+  const blueO = Math.max(1e-4, (inv20 + inv21 + inv22)) * W_ORACLE;
+
+  const totalPrecision = blueP + blueQ + blueO;
+  const kalmanGainP = blueP / totalPrecision;
+  const kalmanGainQ = blueQ / totalPrecision;
+  const kalmanGainO = blueO / totalPrecision;
+
+  // Gain d'information de Fisher dérivé de la trace de la matrice de précision Sigma^-1
+  const fisherGain = Math.log(1.0 + Math.max(0, inv00 + inv11 + inv22));
 
   for (let i = 1; i <= 90; i++) {
     const sP = mPython.get(i) || 0;

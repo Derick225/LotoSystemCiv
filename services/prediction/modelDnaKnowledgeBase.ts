@@ -2,6 +2,7 @@ import { AlgoWeights } from '../../types';
 import { get, set } from 'idb-keyval';
 import { PredictiveHyperparameters, DEFAULT_HYPERPARAMETERS } from './hyperParameterTuner';
 import { getDeterministicUUID } from '../../utils/mathUtils';
+import { saveAlgoWeights } from './weightsManager';
 
 export interface ModelDnaRecord {
   id: string;
@@ -16,7 +17,7 @@ export interface ModelDnaRecord {
   relativeGain: number;         // % d'amélioration par rapport au modèle parent
   paretoEfficiency: number;     // 0 - 100 (compromis précision / stabilité / parcimonie)
   mutationDelta: Record<string, number>;
-  source: 'sgd' | 'forensic_autopsy' | 'hyperparameter_tuning' | 'kalman_consensus' | 'baseline';
+  source: 'sgd' | 'forensic_autopsy' | 'hyperparameter_tuning' | 'kalman_consensus' | 'baseline' | 'rollback';
   metadata?: {
     forensicReportsCount?: number;
     backtestSampleSize?: number;
@@ -38,6 +39,7 @@ export interface DnaEvolutionReport {
   netFitnessGain: number;
   bestVersionId: string;
   stabilityTrend: 'converging' | 'oscillating' | 'diverging';
+  activeGeneration?: ModelDnaRecord;
   generations: ModelDnaRecord[];
 }
 
@@ -45,6 +47,10 @@ const DNA_KB_KEY_PREFIX = 'lotopro_dna_kb_';
 
 // Cache mémoire L1 isolé par tirage
 const l1DnaCache: Map<string, ModelDnaRecord[]> = new Map();
+
+const isIdbAvailable = (): boolean => {
+  return typeof globalThis !== 'undefined' && 'indexedDB' in globalThis && globalThis.indexedDB !== undefined;
+};
 
 /**
  * Enregistre un nouveau jalon évolutif dans la base de connaissances ADN du tirage.
@@ -122,10 +128,13 @@ export const recordModelDnaGeneration = async (
   const updatedHistory = [record, ...currentHistory].slice(0, 100);
   l1DnaCache.set(cleanDraw, updatedHistory);
 
-  try {
-    await set(`${DNA_KB_KEY_PREFIX}${cleanDraw}`, updatedHistory);
-  } catch (err) {
-    // Fallback localStorage si environnement sans IndexedDB
+  if (isIdbAvailable()) {
+    try {
+      await set(`${DNA_KB_KEY_PREFIX}${cleanDraw}`, updatedHistory);
+    } catch {
+      // Fallback localStorage si erreur
+    }
+  } else {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(`nexus_weights_history_${drawName}`, JSON.stringify(updatedHistory));
@@ -148,14 +157,16 @@ export const getModelDnaHistory = async (drawName: string): Promise<ModelDnaReco
     return l1DnaCache.get(cleanDraw)!;
   }
 
-  try {
-    const idbData = await get<ModelDnaRecord[]>(`${DNA_KB_KEY_PREFIX}${cleanDraw}`);
-    if (idbData && Array.isArray(idbData)) {
-      l1DnaCache.set(cleanDraw, idbData);
-      return idbData;
+  if (isIdbAvailable()) {
+    try {
+      const idbData = await get<ModelDnaRecord[]>(`${DNA_KB_KEY_PREFIX}${cleanDraw}`);
+      if (idbData && Array.isArray(idbData)) {
+        l1DnaCache.set(cleanDraw, idbData);
+        return idbData;
+      }
+    } catch {
+      // Silenced error
     }
-  } catch (err) {
-    console.warn(`[ModelDnaKB] Erreur lecture IndexedDB pour ${drawName}:`, err);
   }
 
   // Fallback localStorage
@@ -247,6 +258,86 @@ export const generateDnaEvolutionReport = async (drawName: string): Promise<DnaE
     netFitnessGain: parseFloat((latest.fitnessScore - oldest.fitnessScore).toFixed(2)),
     bestVersionId: best?.id || latest.id,
     stabilityTrend,
+    activeGeneration: latest,
     generations: history,
   };
 };
+
+/**
+ * Alias pour la récupération et analyse de l'évolution de l'ADN d'un modèle.
+ */
+export const getModelDnaEvolutionReport = generateDnaEvolutionReport;
+
+/**
+ * Reconstitue fidèlement les poids algorithmiques d'une génération historique spécifique.
+ */
+export const reconstituteHistoricalWeights = async (
+  drawName: string,
+  recordId: string
+): Promise<AlgoWeights | null> => {
+  const history = await getModelDnaHistory(drawName);
+  const found = history.find(h => h.id === recordId);
+  return found ? { ...found.weights } : null;
+};
+
+/**
+ * Restaure de manière déterministe le modèle à une génération phylogénétique passée (Rollback).
+ * Enregistre un nouvel événement de traçabilité tagged 'rollback' pour maintenir l'auditabilité continue.
+ */
+export const rollbackToDnaGeneration = async (
+  drawName: string,
+  recordId: string
+): Promise<{ success: boolean; restoredRecord: ModelDnaRecord | null }> => {
+  const history = await getModelDnaHistory(drawName);
+  const targetRecord = history.find(h => h.id === recordId);
+
+  if (!targetRecord) {
+    return { success: false, restoredRecord: null };
+  }
+
+  // Application des poids reconstitués
+  saveAlgoWeights(drawName, targetRecord.weights);
+
+  // Enregistrement de la nouvelle génération de rollback
+  const rollbackRecord = await recordModelDnaGeneration(
+    drawName,
+    targetRecord.weights,
+    targetRecord.fitnessScore,
+    'rollback',
+    {
+      hyperparameters: targetRecord.hyperparameters,
+      parentVersionId: recordId,
+      metadata: { notes: `Restauration phylogénétique depuis la génération ${targetRecord.generation}` }
+    }
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('MODEL_DNA_ROLLBACK_COMPLETED', {
+        detail: { drawName, targetId: recordId, newRecordId: rollbackRecord.id }
+      })
+    );
+  }
+
+  return { success: true, restoredRecord: rollbackRecord };
+};
+
+/**
+ * Supprime l'historique ADN d'un tirage spécifique en garantissant une isolation stricte (TIRAGE ISOLATION RULE).
+ */
+export const deleteModelDnaHistoryForDraw = async (drawName: string): Promise<void> => {
+  const cleanDraw = drawName.trim().toLowerCase();
+  l1DnaCache.delete(cleanDraw);
+
+  try {
+    if (typeof globalThis !== 'undefined' && 'indexedDB' in globalThis) {
+      const { del } = await import('idb-keyval');
+      await del(`${DNA_KB_KEY_PREFIX}${cleanDraw}`);
+    }
+  } catch {
+    // Ignore in non-browser environments
+  }
+};
+
+
+

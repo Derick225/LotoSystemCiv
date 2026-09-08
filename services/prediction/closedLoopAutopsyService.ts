@@ -1,4 +1,4 @@
-import { DrawResult, AlgoWeights } from '../../types';
+import { DrawResult, AlgoWeights, CausalAttributionItem, SystematicComparisonReport, ActionableImprovementReport } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { extractFeatures, extractDrawNumbers } from './featureExtractor';
@@ -9,6 +9,11 @@ import { normalizeWeights } from './weightsManager';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
 import { parseDateSafely } from '../../utils/dateUtils';
+import { 
+  computeAutomatedCausalAttribution, 
+  computeSystematicPredictionComparison, 
+  generateActionableImprovementReport 
+} from '../postPredictionAnalysisService';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -52,6 +57,9 @@ export interface ClosedLoopAutopsyReport {
   summaryRemark: string;
   cyclicPhaseProfile?: CyclicPhaseProfileResult;
   temporalDriftMetrics?: TemporalDriftLearningRateResult;
+  causalAttributions?: CausalAttributionItem[];
+  systematicComparison?: SystematicComparisonReport;
+  actionableImprovementReport?: ActionableImprovementReport;
 }
 
 /**
@@ -351,7 +359,36 @@ export const executeClosedLoopAutopsy = async (
   // Tri par attribution décroissante
   algoGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
 
-  // 8. Synthèse Narrative Enrichie
+  // 8. Comparaison Systématique, Attribution Causale Automatisée & Rapport d'Amélioration Actionnable
+  const predictionBreakdown: Record<number, Record<string, number>> = {};
+  for (let num = 1; num <= 90; num++) {
+    predictionBreakdown[num] = {};
+    validKeys.forEach((k) => {
+      predictionBreakdown[num][k] = (algoScores[k]?.[num] || 0) * 100.0;
+    });
+  }
+
+  const systematicComparison = computeSystematicPredictionComparison(
+    top5Predicted,
+    actualWinners,
+    actualMachine
+  );
+
+  const causalAttributions = computeAutomatedCausalAttribution(
+    top5Predicted,
+    actualWinners,
+    actualMachine,
+    predictionBreakdown,
+    normalizedCurrent
+  );
+
+  const actionableImprovementReport = generateActionableImprovementReport(
+    systematicComparison,
+    causalAttributions,
+    normalizedCurrent
+  );
+
+  // 9. Synthèse Narrative Enrichie
   let summaryRemark = `Autopsie rétrospective du ${targetDraw.date} (${cyclicPhaseProfile.phaseLabel}) : `;
   if (directHitsTop5.length >= 2) {
     summaryRemark += `Excellente résonance prédictive avec ${directHitsTop5.length} gagnants capturés directement dans le Top 5 (${directHitsTop5.join(', ')}). `;
@@ -386,5 +423,8 @@ export const executeClosedLoopAutopsy = async (
     summaryRemark,
     cyclicPhaseProfile,
     temporalDriftMetrics,
+    causalAttributions,
+    systematicComparison,
+    actionableImprovementReport,
   };
 };

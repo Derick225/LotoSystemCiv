@@ -307,6 +307,10 @@ export const getPredictionHistoryAsync = async (drawName: string): Promise<Predi
     return all.filter(p => p.drawName?.toLowerCase() === cleanDraw);
 };
 
+export const getLocalHistoryByDraw = async (drawName: string): Promise<PredictionHistoryItem[]> => {
+    return getPredictionHistoryAsync(drawName);
+};
+
 export interface PredictionQueryOptions {
   drawName?: string;
   startDate?: string;
@@ -314,6 +318,7 @@ export interface PredictionQueryOptions {
   minHits?: number;
   limit?: number;
   offset?: number;
+  items?: PredictionHistoryItem[];
 }
 
 /**
@@ -322,9 +327,13 @@ export interface PredictionQueryOptions {
 export const queryPredictionsFast = async (
   options: PredictionQueryOptions = {}
 ): Promise<{ items: PredictionHistoryItem[]; total: number }> => {
-  const all = options.drawName 
-    ? await getPredictionHistoryAsync(options.drawName)
-    : await getLocalHistory();
+  const all = options.items
+    ? (options.drawName 
+        ? options.items.filter(p => p.drawName?.toLowerCase() === options.drawName?.toLowerCase())
+        : options.items)
+    : (options.drawName 
+        ? await getPredictionHistoryAsync(options.drawName)
+        : await getLocalHistory());
 
   let filtered = all;
 
@@ -831,7 +840,7 @@ export const calculateAdvancedPerformanceTimeline = (
 ): AdvancedPredictionPerformanceTimeline => {
   const cleanDraw = (drawName || '').trim().toLowerCase();
   const isolatedPreds = predictions.filter(p => (p.drawName || '').trim().toLowerCase() === cleanDraw);
-  const isolatedResults = results.filter(r => (r.drawName || '').trim().toLowerCase() === cleanDraw);
+  const isolatedResults = results.filter(r => !r.drawName || (r.drawName || '').trim().toLowerCase() === cleanDraw);
 
   const hitDistribution = { hits0: 0, hits1: 0, hits2: 0, hits3: 0, hits4: 0, hits5: 0 };
   let totalEvaluated = 0;

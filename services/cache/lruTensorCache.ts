@@ -46,6 +46,14 @@ export const encryptPayload = (dataStr: string, keySeed: string): string => {
   return btoa(unescape(encodeURIComponent(masked)));
 };
 
+const isIdbAvailable = (): boolean => {
+  try {
+    return typeof globalThis !== "undefined" && "indexedDB" in globalThis && Boolean((globalThis as unknown as { indexedDB?: unknown }).indexedDB);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Déchiffre un payload chiffré stocké en IndexedDB
  */
@@ -125,7 +133,7 @@ export class LruTensorCache {
     }
 
     // 2. Recherche dans L2 (IndexedDB Chiffrée)
-    if (typeof indexedDB !== "undefined") {
+    if (isIdbAvailable()) {
       try {
         const idbKey = `${this.IDB_PREFIX}${key}`;
         const rawCipher = await get<string>(idbKey);
@@ -175,7 +183,7 @@ export class LruTensorCache {
     this.putInMemory(key, payload);
 
     // 2. Stockage L2 IndexedDB Chiffrée
-    if (typeof indexedDB !== "undefined") {
+    if (isIdbAvailable()) {
       try {
         const idbKey = `${this.IDB_PREFIX}${key}`;
         const cipher = encryptPayload(JSON.stringify(payload), key);
@@ -243,7 +251,7 @@ export class LruTensorCache {
     }
 
     // Invalidation IDB
-    if (typeof indexedDB !== "undefined") {
+    if (isIdbAvailable()) {
       try {
         const allKeys = await idbKeys();
         const prefix = `${this.IDB_PREFIX}${cleanDraw}`;
@@ -263,7 +271,7 @@ export class LruTensorCache {
    */
   public async clear(): Promise<void> {
     this.memoryLru.clear();
-    if (typeof indexedDB !== "undefined") {
+    if (isIdbAvailable()) {
       try {
         const allKeys = await idbKeys();
         const toDelete = allKeys.filter(k => typeof k === "string" && k.startsWith(this.IDB_PREFIX));

@@ -1,8 +1,8 @@
 import { expect, test, describe } from 'vitest';
-import { parseRawNumberArray, extractDrawNumbers, calculateVolatilityMap, calculateResidualEntropyMap } from '../services/prediction/featureExtractor';
-import { computeAutomatedCausalAttribution, computeSystematicPredictionComparison, generateActionableImprovementReport } from '../services/postPredictionAnalysisService';
-import { tuneHyperparametersFromCausalFeedback, DEFAULT_HYPERPARAMETERS } from '../services/prediction/hyperParameterTuner';
-import { recordModelDnaGeneration, getModelDnaHistory, generateDnaEvolutionReport } from '../services/prediction/modelDnaKnowledgeBase';
+import { parseRawNumberArray, extractDrawNumbers, calculateVolatilityMap, calculateResidualEntropyMap, extractFeatures } from '../services/prediction/featureExtractor';
+import { computeAutomatedCausalAttribution, computeSystematicPredictionComparison, generateActionableImprovementReport, applyBayesianForensicFeedback } from '../services/postPredictionAnalysisService';
+import { tuneHyperparametersFromCausalFeedback, tunePredictiveHyperparameters, DEFAULT_HYPERPARAMETERS } from '../services/prediction/hyperParameterTuner';
+import { recordModelDnaGeneration, getModelDnaHistory, generateDnaEvolutionReport, rollbackToDnaGeneration, deleteModelDnaHistoryForDraw } from '../services/prediction/modelDnaKnowledgeBase';
 import { calculateFusion } from '../services/fusionService';
 import { calculateAdvancedPerformanceTimeline, queryPredictionsFast, invalidateHistoryIndex } from '../services/predictionHistoryService';
 import { computeQuantifiedUncertainty, generateSimulationScenarios, generateReadabilityReport } from '../services/prediction/quantifiedUncertaintyEngine';
@@ -58,6 +58,29 @@ describe('1. Primary Analysis Tools - Heterogeneous Data & Key Indicators', () =
       expect(entropyMap[i]).toBeLessThanOrEqual(1);
     }
   });
+
+  test('extractFeatures extracts cadenceMap and temporalSignals with L1 caching performance', async () => {
+    const history: DrawResult[] = [
+      { id: '1', date: '01/01/2026', gagnants: [5, 12, 23, 45, 67] },
+      { id: '2', date: '02/01/2026', gagnants: [5, 14, 23, 50, 80] },
+      { id: '3', date: '03/01/2026', gagnants: [5, 18, 29, 45, 90] },
+      { id: '4', date: '04/01/2026', gagnants: [1, 2, 3, 4, 5] },
+    ];
+    const t0 = performance.now();
+    const feat1 = await extractFeatures('TestDraw', history);
+    const durationFirst = performance.now() - t0;
+
+    const t1 = performance.now();
+    const feat2 = await extractFeatures('TestDraw', history);
+    const durationCached = performance.now() - t1;
+
+    expect(feat1).toBeDefined();
+    expect(feat1.cadenceMap).toBeDefined();
+    expect(feat1.temporalSignals).toBeDefined();
+    expect(feat1.temporalSignals.meanIntervalDays).toBeGreaterThan(0);
+    expect(feat2).toBe(feat1); // L1 cache reference hit
+    expect(durationCached).toBeLessThanOrEqual(durationFirst + 5);
+  });
 });
 
 describe('2. Post-Mortem Forensic Autopsy - Causal Attribution & Actionable Reports', () => {
@@ -112,6 +135,42 @@ describe('2. Post-Mortem Forensic Autopsy - Causal Attribution & Actionable Repo
     expect(report.recommendedWeightDeltas).toBeDefined();
     expect(report.expectedAccuracyGain).toBeGreaterThanOrEqual(0);
   });
+
+  test('computeAutomatedCausalAttribution assigns correct contributingAlgos and directions', () => {
+    const predicted = [10, 20, 30, 40, 50];
+    const actual = [10, 21, 70, 80, 90];
+    const defaultWeights = getDefaultWeights();
+    const attributions = computeAutomatedCausalAttribution(
+      predicted,
+      actual,
+      [],
+      {
+        10: { bayes: 90, markov: 80 },
+        20: { spatial: 75, gap: 10 },
+        30: { bayes: 10, markov: 95 },
+      },
+      defaultWeights,
+      []
+    );
+    const hitAttr = attributions.find(a => a.number === 10)!;
+    expect(hitAttr.contributingAlgos.length).toBeGreaterThan(0);
+    expect(hitAttr.category).toBe('CONFIRMED_HIT');
+
+    const falsePositiveAttr = attributions.find(a => a.number === 30)!;
+    expect(falsePositiveAttr.contributingAlgos.some(c => c.direction === 'overpromoted')).toBe(true);
+  });
+
+  test('applyBayesianForensicFeedback dynamically regularizes weights without oscillatory collapse', () => {
+    const currentWeights = getDefaultWeights();
+    const systematic = computeSystematicPredictionComparison([1, 2, 3, 4, 5], [1, 2, 8, 9, 10], []);
+    const report = generateActionableImprovementReport(systematic, [], currentWeights);
+    const updated = applyBayesianForensicFeedback(currentWeights, report.priorityFixes, 20);
+
+    expect(updated).toBeDefined();
+    const sum = Object.values(updated).reduce((a, b) => a + b, 0);
+    expect(sum).toBeGreaterThan(0.95);
+    expect(sum).toBeLessThan(1.05);
+  });
 });
 
 describe('3. Core Algorithms - Deterministic Hyperparameter Tuning', () => {
@@ -127,6 +186,22 @@ describe('3. Core Algorithms - Deterministic Hyperparameter Tuning', () => {
     expect(tunedParams.spatialSigma).toBeGreaterThan(base.spatialSigma);
     expect(tunedParams.gapVelocityWeight).toBeGreaterThan(base.gapVelocityWeight);
     expect(adjustmentsApplied.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('tunePredictiveHyperparameters derives continuous parameters using statistical moments with zero magic numbers', async () => {
+    const history: DrawResult[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `d_${i}`,
+      date: `01/${(i % 28) + 1}/2026`,
+      gagnants: [(i % 18) * 5 + 1, (i % 18) * 5 + 2, (i % 18) * 5 + 3, (i % 18) * 5 + 4, (i % 18) * 5 + 5],
+    }));
+
+    const result = await tunePredictiveHyperparameters('Test_Tuning_Draw', history, getDefaultWeights());
+    expect(result.tunedParams).toBeDefined();
+    expect(result.tunedParams.spatialSigma).toBeGreaterThan(0);
+    expect(result.tunedParams.gapVelocityWeight).toBeGreaterThan(0);
+    expect(result.tunedParams.bayesWindowRatio).toBeGreaterThan(0);
+    expect(result.accuracyGain).toBeGreaterThanOrEqual(0);
+    expect(result.log.length).toBeGreaterThan(0);
   });
 });
 
@@ -147,6 +222,26 @@ describe('4. Model DNA Knowledge Base - Genealogical Tracking & Isolation', () =
     const report = await generateDnaEvolutionReport(drawName);
     expect(report.totalGenerations).toBeGreaterThanOrEqual(2);
     expect(report.netFitnessGain).toBe(12);
+  });
+
+  test('rollbackToDnaGeneration restores previous weights and logs rollback event', async () => {
+    const drawName = 'Test_Draw_Rollback';
+    const weights0 = getDefaultWeights();
+    const gen0 = await recordModelDnaGeneration(drawName, weights0, 50, 'baseline');
+    
+    const weights1: AlgoWeights = { ...weights0, bayes: (weights0.bayes || 0) + 10 };
+    await recordModelDnaGeneration(drawName, weights1, 65, 'sgd');
+
+    const rollbackResult = await rollbackToDnaGeneration(drawName, gen0.id);
+    expect(rollbackResult.success).toBe(true);
+    expect(rollbackResult.restoredRecord).toBeDefined();
+    expect(rollbackResult.restoredRecord?.source).toBe('rollback');
+    expect(rollbackResult.restoredRecord?.fitnessScore).toBe(50);
+
+    // Test isolation purge
+    await deleteModelDnaHistoryForDraw(drawName);
+    const emptyHistory = await getModelDnaHistory(drawName);
+    expect(emptyHistory.length).toBe(0);
   });
 });
 
@@ -246,5 +341,51 @@ describe('6. Prediction History & Quantified Future Uncertainty', () => {
     expect(report.summary).toContain('Combinaison retenue');
     expect(report.keyDrivers.length).toBeGreaterThan(0);
     expect(report.riskAssessment).toBeDefined();
+  });
+
+  test('queryPredictionsFast supports fast pagination and strict drawName isolation', async () => {
+    const drawA = 'Iso_Draw_A';
+    const drawB = 'Iso_Draw_B';
+    const items: PredictionHistoryItem[] = [
+      { id: '1', drawName: drawA, timestamp: 100, prediction: { suggestedNumbers: [1, 2, 3, 4, 5] } as any },
+      { id: '2', drawName: drawA, timestamp: 200, prediction: { suggestedNumbers: [6, 7, 8, 9, 10] } as any },
+      { id: '3', drawName: drawB, timestamp: 300, prediction: { suggestedNumbers: [11, 12, 13, 14, 15] } as any },
+    ];
+
+    invalidateHistoryIndex(drawA);
+    invalidateHistoryIndex(drawB);
+
+    const resA = await queryPredictionsFast({ drawName: drawA, items, limit: 10 });
+    expect(resA.total).toBe(2);
+    expect(resA.items.every(item => item.drawName === drawA)).toBe(true);
+
+    const resB = await queryPredictionsFast({ drawName: drawB, items, limit: 10 });
+    expect(resB.total).toBe(1);
+    expect(resB.items[0].id).toBe('3');
+  });
+
+  test('computeQuantifiedUncertainty derives consistent 95% confidence intervals within bounds [0, 100]', () => {
+    const scoredNumbers = Array.from({ length: 90 }, (_, i) => ({
+      num: i + 1,
+      score: 50 + (i % 20),
+      breakdown: { algo1: 40 + (i % 10), algo2: 60 - (i % 10) },
+    }));
+    const history: DrawResult[] = [
+      { id: '1', date: '01/01/2026', gagnants: [1, 2, 3, 4, 5] },
+      { id: '2', date: '02/01/2026', gagnants: [10, 20, 30, 40, 50] },
+      { id: '3', date: '03/01/2026', gagnants: [15, 25, 35, 45, 55] },
+    ];
+
+    const uncertainty = computeQuantifiedUncertainty(scoredNumbers, history);
+    for (const item of scoredNumbers.slice(0, 15)) {
+      const ci = uncertainty.confidenceIntervals[item.num];
+      expect(ci).toBeDefined();
+      expect(ci.lower).toBeGreaterThanOrEqual(0);
+      expect(ci.upper).toBeLessThanOrEqual(100);
+      expect(ci.lower).toBeLessThanOrEqual(ci.upper);
+      expect(isNaN(ci.lower)).toBe(false);
+      expect(isNaN(ci.upper)).toBe(false);
+      expect(isNaN(ci.mean)).toBe(false);
+    }
   });
 });

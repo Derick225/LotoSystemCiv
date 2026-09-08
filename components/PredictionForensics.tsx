@@ -327,8 +327,26 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                     <p className="text-[10px] text-slate-600 dark:text-slate-300">
                       {attr.primaryCause}
                     </p>
+                    {attr.contributingAlgos && attr.contributingAlgos.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {attr.contributingAlgos.map((ca, cIdx) => (
+                          <span
+                            key={cIdx}
+                            className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase ${
+                              ca.direction === 'overpromoted'
+                                ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                                : ca.direction === 'suppressed'
+                                ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                                : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                            }`}
+                          >
+                            {ca.direction === 'overpromoted' ? '↑' : ca.direction === 'suppressed' ? '↓' : '≈'} {ca.algo}: {ca.contribution.toFixed(1)}%
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {attr.counterfactualFix && (
-                      <p className="text-[9px] text-indigo-500 dark:text-indigo-300 font-mono">
+                      <p className="text-[9px] text-indigo-500 dark:text-indigo-300 font-mono pt-0.5">
                         ↳ Correctif : {attr.counterfactualFix}
                       </p>
                     )}
