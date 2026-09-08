@@ -8,6 +8,7 @@ import { get, set, del, keys } from "idb-keyval";
 import { EnhancedMetrics } from './prediction/metrics.types';
 import { getDeterministicUUID } from '../utils/mathUtils';
 import { offlineQueueService } from './offlineQueueService';
+import { parseDateSafely, formatDateSafely } from '../utils/dateUtils';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
@@ -210,13 +211,12 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
     if (resultDrawName && prediction.drawName && resultDrawName.trim().toLowerCase() !== prediction.drawName.trim().toLowerCase()) {
       continue;
     }
-    const [day, month, year] = d.date.split('/').map(Number);
-    const drawOccurrence = new Date(year, month - 1, day, drawHour, drawMinute, 0).getTime();
+    const parsedDate = parseDateSafely(d.date);
+    const drawOccurrence = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), drawHour || 21, drawMinute || 0, 0).getTime();
     const diff = drawOccurrence - predTime;
     
     if (diff >= -TIME_CONSTANTS.GRACE_PERIOD_MS && diff < TIME_CONSTANTS.MAX_LOOKAHEAD_MS) {
         // We want the draw that is closest in the future (smallest positive diff, or smallest absolute diff if negative)
-        // Wait, if it's the exact draw, diff should be small.
         const absDiff = Math.abs(diff);
         if (absDiff < bestDiff) {
             bestDiff = absDiff;
@@ -342,7 +342,7 @@ export const saveLatestPredictionForDraw = async (drawName: string, prediction: 
 export const findPredictionsByDate = async (drawName: string, date: string): Promise<PredictionHistoryItem[]> => {
     const all = await getPredictionHistoryAsync(drawName);
     return all.filter(p => {
-        const d = new Date(p.timestamp);
+        const d = parseDateSafely(p.timestamp);
         const predDate = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
         return predDate === date;
     });
@@ -661,6 +661,7 @@ export const linkPredictionToResult = async (predictionId: string, drawResultId:
 
 /**
  * Calcule des statistiques de performance de l'IA sur l'historique
+ * Utilise le résultat directement lié (drawResultId) ou l'algorithme robuste findMatchingResultForPrediction
  */
 export const calculateHistoricalPerformance = (predictions: PredictionHistoryItem[], results: DrawResult[]) => {
     let totalPredictedNumbers = 0;
@@ -670,11 +671,8 @@ export const calculateHistoricalPerformance = (predictions: PredictionHistoryIte
 
     // On parcourt les prédictions
     for (const pred of predictions) {
-        const d = new Date(pred.timestamp);
-        const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        
-        // On cherche le résultat correspondant (par ID lié ou par date)
-        const result = results.find(r => r.id === pred.drawResultId || r.date === dateStr);
+        // On cherche le résultat correspondant (par ID lié ou par matching temporel robuste)
+        const result = (pred.drawResultId ? results.find(r => r.id === pred.drawResultId) : null) || findMatchingResultForPrediction(pred, results);
         
         if (result) {
             // Calcul des hits
@@ -685,8 +683,9 @@ export const calculateHistoricalPerformance = (predictions: PredictionHistoryIte
             
             if (hits >= 3) perfectDraws++;
             
+            const displayDate = result.date ? (result.date.includes('/') ? result.date.slice(0, 5) : result.date) : formatDateSafely(pred.timestamp).slice(0, 5);
             trendData.push({
-                date: dateStr.slice(0, 5), // JJ/MM
+                date: displayDate,
                 hits: hits,
                 confidence: pred.prediction.confidence
             });

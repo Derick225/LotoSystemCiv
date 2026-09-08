@@ -93,30 +93,10 @@ export const useForensicData = (drawName: string) => {
 
                 let actual = null;
                 if (pred.drawResultId) {
-                    actual = historyById.get(pred.drawResultId);
+                    actual = historyById.get(pred.drawResultId) || null;
                 }
                 if (!actual) {
-                    const d = parseDateSafely(pred.timestamp);
-                    const predDateLocale = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-                    actual = historyByDate.get(predDateLocale);
-
-                    // Centralized robust matching helper
-                    if (!actual) {
-                        actual = findMatchingResultForPrediction(pred, cleanHistory);
-                    }
-
-                    // Fallback date approximative
-                    if (!actual) {
-                        const predTime = pred.timestamp;
-                        const sortedHistory = [...cleanHistory].sort(
-                            (a, b) => parseDateSafely(a.date).getTime() - parseDateSafely(b.date).getTime()
-                        );
-                        actual = sortedHistory.find((d) => {
-                            const dTime = parseDateSafely(d.date).getTime();
-                            const actualDrawTime = dTime + 21 * 3600 * 1000;
-                            return actualDrawTime >= predTime && actualDrawTime - predTime < 7 * 24 * 3600 * 1000;
-                        }) || null;
-                    }
+                    actual = findMatchingResultForPrediction(pred, cleanHistory);
                 }
 
                 if (actual) {

@@ -528,36 +528,52 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
 
   // LOGIQUE DE RETRAITE LOCALE (Full Feedback Loop sans dépendance API Edge)
   try {
-    const { getPredictionHistoryAsync, linkPredictionToResult } = await import('./predictionHistoryService');
-    const { performForensicAnalysis, saveForensicReport } = await import('./postPredictionAnalysisService');
+    const { getPredictionHistoryAsync, linkPredictionToResult, findMatchingResultForPrediction } = await import('./predictionHistoryService');
+    const { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, getDismissedAutopsyPredictionIds } = await import('./postPredictionAnalysisService');
+    const { purifyHistoryForDraw } = await import('../utils/arrayUtils');
 
     const history = await lotteryService.fetchHistory(drawName);
     const resultToMatch = history.find((r) => r.date === normalizeDate(date) || r.id === resultId);
     
     if (!resultToMatch) return;
 
-    const unlinkedPredictions = (await getPredictionHistoryAsync(drawName)).filter(
+    const unlinkedOrTargetPredictions = (await getPredictionHistoryAsync(drawName)).filter(
       p => !p.drawResultId || p.drawResultId === resultToMatch.id
     );
 
+    const dismissedPredictionIds = await getDismissedAutopsyPredictionIds();
+    const cleanHistory = purifyHistoryForDraw(drawName, history);
     let autopsiesRun = 0;
     
-    // Pour simplifier et trouver la prédiction pertinente :
-    for (const pred of unlinkedPredictions) {
-      const pDate = new Date(pred.timestamp).toLocaleDateString("fr-FR", { year: 'numeric', month: '2-digit', day: '2-digit' });
-      // Si la prédiction a été faite le même jour ou précède immédiatement
-      if (pDate === date || pred.drawResultId === resultToMatch.id) {
-          console.log(`[Autopsy Locale] Execution forensics pour prédiction ${pred.id}`);
-          const report = await performForensicAnalysis(
-            drawName,
-            date,
-            pred.prediction.suggestedNumbers,
-            resultToMatch.gagnants,
-            pred.prediction.breakdown
-          );
-          await saveForensicReport(report);
-          await linkPredictionToResult(pred.id, resultToMatch.id);
-          autopsiesRun++;
+    for (const pred of unlinkedOrTargetPredictions) {
+      if (dismissedPredictionIds.has(pred.id)) continue;
+
+      // Matching temporel déterministe unifié
+      const match = pred.drawResultId === resultToMatch.id
+        ? resultToMatch
+        : findMatchingResultForPrediction(pred, history);
+
+      if (match && match.id === resultToMatch.id) {
+          const existingReport = await getForensicReportByPredictionId(pred.id);
+          if (!existingReport) {
+            console.log(`[Autopsy Locale] Execution forensics pour prédiction ${pred.id}`);
+            const report = await performForensicAnalysis(
+              drawName,
+              resultToMatch.date,
+              pred.prediction.suggestedNumbers,
+              resultToMatch.gagnants,
+              pred.prediction.breakdown,
+              pred.id,
+              resultToMatch.id,
+              true, // skipLLM for automated background analysis
+              cleanHistory
+            );
+            await saveForensicReport(report);
+            autopsiesRun++;
+          }
+          if (pred.drawResultId !== resultToMatch.id) {
+            await linkPredictionToResult(pred.id, resultToMatch.id);
+          }
       }
     }
 
