@@ -104,22 +104,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       report.bins.reduce((sum, b) => sum + b.probability, 0) /
       (totalBinsCount || 1);
 
-    // Bins with above-average transition probability mass or top 3 predicted fallback
+    // Bins with above-average transition probability mass
     const favoredBins = report.bins.filter((b) => b.probability >= meanProb);
     const topBinsToUse =
       favoredBins.length > 0 ? favoredBins : report.topPredictedBins.slice(0, 3);
+    const favoredBinIndices = new Set(topBinsToUse.map((b) => b.binIndex));
 
-    const candidateNumbers = new Set<number>();
-    topBinsToUse.forEach((bin) => {
-      bin.matchingNumbers.forEach((num) => candidateNumbers.add(num));
-    });
+    // Evaluate all active lottery numbers (1-90)
+    const allNumbers = Array.from({ length: 90 }, (_, i) => i + 1);
 
-    const candidateList = Array.from(candidateNumbers);
-    const totalFavoredCount = candidateList.length;
-
-    const items = candidateList.map((num) => {
+    const allItems = allNumbers.map((num) => {
       // a. Raw Markov Score derived from gap range transition probability distribution
-      const rawMarkovScore = report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
+      const rawMarkovScore =
+        report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
 
       // b. DNA Breakdown Score derived from active global weights & last prediction matrix
       let dnaScore = report.dnaAffinity?.[num] ?? 50;
@@ -132,13 +129,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           totalW += w;
         }
         if (totalW > 0) {
-          dnaScore = totalVal / totalW;
+          dnaScore = Math.max(0, Math.min(100, totalVal / totalW));
         }
       }
 
       // c. Continuous DNA Sieve multiplier from the active algorithmic DNA (ZÉRO NOMBRE MAGIQUE)
       const dnaMultiplier = report.dnaMultipliers?.[num] ?? 1.0;
-      const dnaAffinity = report.dnaAffinity?.[num] ?? Math.round(dnaScore);
+      const dnaAffinity = Math.round(dnaScore);
       const zScore = report.zScoresByNumber?.[num] ?? 0;
       const lift = report.liftsByNumber?.[num] ?? 1.0;
       const quantumCoherence = report.quantumCoherenceByNumber?.[num] ?? 50;
@@ -153,7 +150,10 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       const baseFused = 100.0 / (1.0 + Math.exp(-2.4 * zFused));
 
       // Sift through the continuous DNA multiplier (0.35 baseline + 0.65 DNA profile)
-      const sievedScore = Math.max(0, Math.min(100, baseFused * (0.35 + 0.65 * dnaMultiplier)));
+      const sievedScore = Math.max(
+        0,
+        Math.min(100, baseFused * (0.35 + 0.65 * dnaMultiplier))
+      );
 
       const gapInfo = report.currentGapsByNumber?.[num] || {
         gap: 0,
@@ -161,21 +161,23 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         binLabel: "?",
       };
 
+      const isInFavoredBin = favoredBinIndices.has(gapInfo.binIndex);
+
       // Continuous Consensus & Sieve Decision Tag
       let tag = "Survivant Standard";
       let tagColor = "text-slate-400 bg-slate-800/60 border-slate-700/50";
-      let isDnaBoosted = dnaMultiplier > 1.05;
+      const isDnaBoosted = dnaMultiplier >= 1.05;
       let categoryKey: SurvivorCategoryFilter = "ALL";
 
-      if (sievedScore >= 70 && rawMarkovScore >= 60 && dnaAffinity >= 65) {
+      if (sievedScore >= 68 && rawMarkovScore >= 58 && dnaAffinity >= 62) {
         tag = "🔥 Convergence Tamisée Élite";
         tagColor = "text-amber-300 bg-amber-500/20 border-amber-500/30 shadow-amber-500/10";
         categoryKey = "CONVERGENCE";
-      } else if (dnaAffinity >= 70) {
+      } else if (dnaAffinity >= 68) {
         tag = "⚡ Signal ADN Dominant";
         tagColor = "text-indigo-300 bg-indigo-500/20 border-indigo-500/30";
         categoryKey = "DNA_DOMINANT";
-      } else if (rawMarkovScore >= 65) {
+      } else if (rawMarkovScore >= 62) {
         tag = "🎯 Transition Écart";
         tagColor = "text-emerald-300 bg-emerald-500/20 border-emerald-500/30";
         categoryKey = "MARKOV";
@@ -183,10 +185,14 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         tag = "✨ Tamisé ADN +";
         tagColor = "text-cyan-300 bg-cyan-500/20 border-cyan-500/30";
         categoryKey = "TAMIS_BOOSTED";
-      } else if (gapInfo.gap >= 20) {
+      } else if (gapInfo.gap >= 18) {
         tag = "⏳ Rupture d'Écart";
         tagColor = "text-rose-300 bg-rose-500/20 border-rose-500/30";
         categoryKey = "CRITICAL_GAP";
+      } else if (zScore > 0 && empiricalProof >= 60) {
+        tag = "🛡️ Preuve Statistique";
+        tagColor = "text-purple-300 bg-purple-500/20 border-purple-500/30";
+        categoryKey = "PROOF_ONLY";
       }
 
       return {
@@ -198,6 +204,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         dnaAffinity,
         dnaMultiplier: parseFloat(dnaMultiplier.toFixed(2)),
         isDnaBoosted,
+        isInFavoredBin,
         zScore,
         lift,
         quantumCoherence,
@@ -212,16 +219,26 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       };
     });
 
-    // Apply Tranche Filter
-    let filtered = items;
+    // If specific tranche is selected, filter by that tranche; otherwise consider favored bins or all candidate items
+    let candidatesPool = allItems;
     if (filterBinIndex !== "all") {
-      filtered = filtered.filter((item) => item.binIndex === filterBinIndex);
+      candidatesPool = allItems.filter((item) => item.binIndex === filterBinIndex);
+    } else {
+      // Default: prioritize numbers in favored transition bins or with strong sieved score
+      candidatesPool = allItems.filter(
+        (item) => item.isInFavoredBin || item.score >= 50
+      );
     }
 
+    const totalFavoredCount = candidatesPool.length;
+
     // Apply Category Filter
+    let filtered = candidatesPool;
     if (categoryFilter !== "ALL") {
       if (categoryFilter === "PROOF_ONLY") {
-        filtered = filtered.filter((item) => item.zScore > 0 && item.empiricalProof >= 60);
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "PROOF_ONLY" || (item.zScore > 0 && item.empiricalProof >= 60)
+        );
       } else if (categoryFilter === "CONVERGENCE") {
         filtered = filtered.filter(
           (item) => item.categoryKey === "CONVERGENCE" || item.score >= 68
@@ -235,9 +252,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           (item) => item.categoryKey === "MARKOV" || item.rawMarkovScore >= 62
         );
       } else if (categoryFilter === "TAMIS_BOOSTED") {
-        filtered = filtered.filter((item) => item.isDnaBoosted);
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "TAMIS_BOOSTED" || item.isDnaBoosted
+        );
       } else if (categoryFilter === "CRITICAL_GAP") {
-        filtered = filtered.filter((item) => item.gap >= 18);
+        filtered = filtered.filter(
+          (item) => item.categoryKey === "CRITICAL_GAP" || item.gap >= 18
+        );
       }
     }
 
@@ -255,7 +276,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       if (sortMode === "fused") {
         if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
       } else if (sortMode === "dna") {
-        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-6) return b.dnaAffinity - a.dnaAffinity;
+        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-6)
+          return b.dnaAffinity - a.dnaAffinity;
         if (Math.abs(b.dnaScore - a.dnaScore) > 1e-6) return b.dnaScore - a.dnaScore;
       } else if (sortMode === "markov") {
         if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-6)
@@ -292,7 +314,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         : "0";
 
     const topConvergenceCount = filtered.filter((item) =>
-      item.tag.includes("Convergence") || item.score >= 70
+      item.tag.includes("Convergence") || item.score >= 68
     ).length;
 
     return {
@@ -581,7 +603,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           </div>
 
           {/* Quick Copy & Export Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => handleCopyNumbers(5)}
               disabled={survivingNumbers.length === 0}
@@ -590,6 +612,16 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
             >
               <Flame size={13} className="text-amber-400" />
               <span>Top 5 Élite</span>
+            </button>
+
+            <button
+              onClick={() => handleCopyNumbers(10)}
+              disabled={survivingNumbers.length === 0}
+              className="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-40"
+              title="Copier le Top 10 Élite"
+            >
+              <Zap size={13} className="text-indigo-400" />
+              <span>Top 10</span>
             </button>
 
             <button
@@ -605,7 +637,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
               ) : (
                 <>
                   <Copy size={13} />
-                  <span>Copier ({survivingNumbers.length})</span>
+                  <span>Copier Tout ({survivingNumbers.length})</span>
                 </>
               )}
             </button>
@@ -932,36 +964,45 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {survivingNumbers.map(
-              ({
-                num,
-                score,
-                markovScore,
-                dnaScore,
-                dnaAffinity,
-                dnaMultiplier,
-                isDnaBoosted,
-                zScore,
-                lift,
-                quantumCoherence,
-                empiricalProof,
-                gap,
-                binLabel,
-                tag,
-                tagColor,
-              }) => {
+              (
+                {
+                  num,
+                  score,
+                  markovScore,
+                  dnaScore,
+                  dnaAffinity,
+                  dnaMultiplier,
+                  isDnaBoosted,
+                  zScore,
+                  lift,
+                  quantumCoherence,
+                  empiricalProof,
+                  gap,
+                  binLabel,
+                  tag,
+                  tagColor,
+                },
+                idx
+              ) => {
                 const isItemCopied = copiedId === `num_${num}`;
+                const rank = idx + 1;
                 return (
                   <div
                     key={num}
                     className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-3.5 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md transition-all group relative overflow-hidden"
                   >
-                    {/* Top Row: NumberBall + Tag + Quick Copy */}
+                    {/* Top Row: Rank + NumberBall + Tag + Quick Copy */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <NumberBall number={num} size="md" />
+                        <div className="relative">
+                          <NumberBall number={num} size="md" />
+                          <span className="absolute -top-1 -left-1 px-1.5 py-0.2 bg-slate-950/90 border border-slate-700 text-[9px] font-black text-indigo-300 rounded-full font-mono shadow-sm">
+                            #{rank}
+                          </span>
+                        </div>
                         <div>
                           <div className="text-xs font-black text-white font-mono flex items-center gap-1.5">
-                            <span>#{num}</span>
+                            <span>N° {num}</span>
                             {isDnaBoosted && (
                               <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 ADN+
@@ -1022,7 +1063,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                         <span className="font-bold text-indigo-300">{dnaAffinity}%</span>
                       </div>
                       <div className="flex items-center justify-between text-slate-400">
-                        <span>Tamis Multiplier :</span>
+                        <span>Tamis ADN :</span>
                         <span className={`font-bold ${dnaMultiplier >= 1.05 ? 'text-amber-300' : 'text-slate-400'}`}>
                           {dnaMultiplier}x
                         </span>
@@ -1030,13 +1071,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                       <div className="flex items-center justify-between text-slate-400">
                         <span>Z-Score / Lift :</span>
                         <span className={`font-bold ${zScore > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                          +{zScore} / {lift}x
+                          {zScore > 0 ? `+${zScore}` : zScore} / {lift}x
                         </span>
                       </div>
                     </div>
                   </div>
                 );
-              },
+              }
             )}
           </div>
         )}
