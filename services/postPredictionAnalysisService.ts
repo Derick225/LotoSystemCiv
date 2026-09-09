@@ -6,6 +6,10 @@ import type {
   SpectralDeviation,
   AlgoWeights,
   DrawResult,
+  ForensicActionableAdjustment,
+  ForensicFailureMode,
+  SeverityLevel,
+  ForensicConfidence,
 } from "../types";
 import { normalizeWeights, getAlgoWeights } from "./predictionEngine";
 import { syncForensicReports } from "./syncService";
@@ -1181,6 +1185,117 @@ export const performForensicAnalysis = async (
 
   const divergenceMetric = Math.max(0, Math.min(100, Math.round((1.0 - (exactHitsCount + 0.5 * nearMisses.length) / 5) * 100)));
 
+  // ============================================================================
+  // SYSTÈME D'ATTRIBUTION CAUSALE AUTOMATISÉE & RAPPORT D'AMÉLIORATION ACTIONNABLE
+  // ============================================================================
+  const drawAnomalyScore = Math.max(0, Math.min(100, Math.round(100.0 - (UFI_Data.unifiedIntegrityIndex ?? 100.0))));
+  const hitEffectiveness = (exactHitsCount * 1.0 + nearMisses.length * 0.4) / 5.0;
+  const brierPenaltyFactor = (1.0 + Math.min(1.0, (brier_score ?? 0.05) * 15.0)) / 2.0;
+  const modelMissScore = Math.min(100, Math.max(0, Math.round((1.0 - Math.min(1.0, hitEffectiveness)) * 100.0 * brierPenaltyFactor)));
+  
+  const structuralQualityScore = Math.max(0, Math.min(100, Math.round(
+    100.0 * Math.exp(-Math.max(0, continuousTopologicalLoss) - (Math.max(0, wassersteinLoss) / 45.0))
+  )));
+  
+  const postMortemStabilityScore = Math.max(0, Math.min(100, Math.round(
+    (structuralQualityScore * 0.5) + ((100.0 - modelMissScore) * 0.5)
+  )));
+
+  // Attribution Causale Déterministe
+  const dominantCauses: string[] = [];
+  const warnings: string[] = [];
+
+  if (drawAnomalyScore >= 65 || (UFI_Data.riggedProbability && UFI_Data.riggedProbability > 0.6)) {
+    dominantCauses.push("Anomalie structurelle du tirage : rupture des distributions standard (UFI bas, biais stochastique)");
+  }
+  if (UFI_Data.catastropheControlParams?.regime === "RUPTURE" || (shannonEntropy && shannonEntropy < 2.0)) {
+    dominantCauses.push("Effondrement entropique ou saut de catastrophe topologique (changement de régime dynamique)");
+  }
+  if (nearMisses.length >= 3 && exactHitsCount <= 1) {
+    dominantCauses.push(`Dispersion par frôlements (${nearMisses.length} near-misses) : résonance spatiale/miroir présente mais décalée`);
+  }
+  if ((brier_score ?? 0) > 0.08) {
+    dominantCauses.push("Surconfiance de l'ensemble d'inférence : probabilités disproportionnées par rapport aux réalisations");
+  }
+  if (continuousTopologicalLoss > 0.6) {
+    dominantCauses.push("Divergence topologique : barycentre des prédictions éloigné des zones d'attraction réelles");
+  }
+  
+  const severeDrifts = algorithmicDrift.filter(d => Math.abs(d.driftScore) >= 1.5);
+  if (severeDrifts.length > 0) {
+    dominantCauses.push(`Dérive algorithmique prononcée sur les estimateurs : ${severeDrifts.slice(0, 3).map(d => `${d.algo} (${d.direction})`).join(", ")}`);
+  }
+  if (dominantCauses.length === 0) {
+    if (exactHitsCount >= 2) {
+      dominantCauses.push("Convergence prédictive réussie : alignement cohérent des sous-modèles");
+    } else {
+      dominantCauses.push("Fluctuation stochastique normale : dispersion dans les limites prévues par le bruit poissonnien");
+    }
+  }
+
+  // Classification du Mode de Défaillance
+  let failureMode: ForensicFailureMode = "normalnoise";
+  if (drawAnomalyScore >= 70) {
+    failureMode = "anomalousdraw";
+  } else if (UFI_Data.catastropheControlParams?.regime === "RUPTURE" || (shannonEntropy && shannonEntropy < 2.0)) {
+    failureMode = "regimebreak";
+  } else if (severeDrifts.some(d => d.algo.toLowerCase().includes("momentum") || d.algo.toLowerCase().includes("freq"))) {
+    failureMode = "recentoverfit";
+  } else if (continuousTopologicalLoss > 0.65 || (nearMisses.length >= 3 && exactHitsCount === 0)) {
+    failureMode = "structuralmisalignment";
+  } else if ((brier_score ?? 0) > 0.08) {
+    failureMode = "overconfidence";
+  } else {
+    failureMode = "normalnoise";
+  }
+
+  // Gravité (Severity)
+  let severity: SeverityLevel = "low";
+  if (modelMissScore > 80 && drawAnomalyScore < 40) {
+    severity = "critical";
+    warnings.push("Alerte critique : échec du modèle sur un tirage statistiquement normal.");
+  } else if (modelMissScore > 65) {
+    severity = "high";
+  } else if (modelMissScore > 35) {
+    severity = "medium";
+  } else {
+    severity = "low";
+  }
+
+  // Confiance Forensique
+  const confidenceReasons: string[] = [];
+  if (exactHitsCount > 0 || nearMisses.length > 0) confidenceReasons.push(`${exactHitsCount} hits et ${nearMisses.length} near-misses analysés.`);
+  if (counterfactuals.length > 0) confidenceReasons.push(`${counterfactuals.length} simulations contrefactuelles résolues.`);
+  confidenceReasons.push(`UFI du tirage: ${(UFI_Data.unifiedIntegrityIndex ?? 100).toFixed(1)}/100.`);
+
+  const forensicConfidence: ForensicConfidence = {
+    level: counterfactuals.length >= 3 ? "high" : "medium",
+    reasons: confidenceReasons,
+  };
+
+  // Ajustements Actionnables Déterministes (Actionable Improvements)
+  const recommendedAdjustments: ForensicActionableAdjustment[] = [];
+  proposedAdjustments.forEach(adj => {
+    const magnitude = Math.abs(adj.proposedWeightChange || 0);
+    if (magnitude > 0.001) {
+      recommendedAdjustments.push({
+        target: adj.algo,
+        action: (adj.proposedWeightChange || 0) > 0 ? "increase" : "decrease",
+        magnitude: parseFloat(magnitude.toFixed(4)),
+        reason: adj.reason,
+      });
+    }
+  });
+
+  if (recommendedAdjustments.length === 0 && failureMode === "overconfidence") {
+    recommendedAdjustments.push({
+      target: "ENSEMBLE_CONFIDENCE",
+      action: "stabilize",
+      magnitude: 0.05,
+      reason: "Amortissement de la calibration softmax post-mortem",
+    });
+  }
+
   return {
     id: deterministicId,
     drawName,
@@ -1202,6 +1317,17 @@ export const performForensicAnalysis = async (
     shannon_entropy: shannonEntropy,
     continuousTopologicalLoss,
     divergenceMetric,
+    drawAnomalyScore,
+    modelMissScore,
+    structuralQualityScore,
+    postMortemStabilityScore,
+    failureMode,
+    verdict: failureMode,
+    severity,
+    forensicConfidence,
+    dominantCauses,
+    recommendedAdjustments,
+    warnings,
     entropyCollapse: UFI_Data.entropyCollapse,
     benfordCompliance: UFI_Data.benfordCompliance,
     suspicionScore: UFI_Data.suspicionScore,

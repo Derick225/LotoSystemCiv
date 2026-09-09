@@ -130,6 +130,11 @@ export interface Prediction {
     algoWeightModifiers: Partial<Record<string, number>>;
     narrativeInterpretation: string;
   };
+  regimeContext?: {
+    regime: string;
+    hurst?: number;
+    entropy?: number;
+  };
   temporalDriftLearning?: {
     learningRate: number;
     klDivergence: number;
@@ -154,6 +159,21 @@ export interface Prediction {
       sieveEnergyPct: number;
     }[];
   };
+  uncertaintyQuantification?: {
+    epistemicUncertainty: number;
+    aleatoricUncertainty: number;
+    confidenceInterval: { lower: number; upper: number };
+    entropyBits: number;
+    credibleIntervalRange: number;
+  };
+  simulationScenarios?: {
+    scenarioId: string;
+    scenarioName: string;
+    ticket: number[];
+    probabilityScore: number;
+    riskProfile: 'DEFENSIVE' | 'BALANCED' | 'AGGRESSIVE';
+    description: string;
+  }[];
 }
 
 export interface PredictionFeedback {
@@ -988,6 +1008,9 @@ export interface FusionResult {
     covPI: number;
     fisherGain: number;
   };
+  coherenceIndex?: number;
+  redundancyPenalty?: { logicPhysics: number; logicIntuition: number; physicsIntuition: number };
+  orthogonalizationApplied?: boolean;
   method?: string;
 }
 

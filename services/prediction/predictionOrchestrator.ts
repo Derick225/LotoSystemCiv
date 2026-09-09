@@ -6,7 +6,7 @@ import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
 import { generateCombination } from "./combinationGenerator";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
-import { PredictiveHyperparameters } from "./hyperParameterTuner";
+import { PredictiveHyperparameters, getTunedHyperparameters } from "./hyperParameterTuner";
 import { logger } from "../../utils/logger";
 import PredictionWorker from "../workers/prediction.worker?worker";
 import { EnhancedMetrics } from "./metrics.types";
@@ -261,10 +261,11 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
 };
 
 export const computeAdvancedMetricsBundle = async (context: PredictionRuntimeContext): Promise<EnhancedMetrics> => {
+  const hyperparams = await getTunedHyperparameters(context.drawName);
   return await computeAdvancedMetrics(
     context.history.slice(0, context.validTemporalDepth),
     context.drawName,
-    { hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY, gapVelocityWeight: 1.0 },
+    { hawkesDecay: hyperparams.hawkesDecay, gapVelocityWeight: hyperparams.gapVelocityWeight },
     context.useSpatioTemporalHawkes,
     context.metrics
   );

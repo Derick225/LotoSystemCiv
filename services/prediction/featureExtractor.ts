@@ -33,24 +33,54 @@ const calculateMedian = (values: number[]): number => {
 };
 
 /**
- * Extrait les numéros gagnants et de machine de façon extrêmement robuste.
- * Gère les types hétérogènes (number, array, string).
+ * Extrait les numéros d'un champ brut hétérogène (tableau de nombres, tableau de chaînes,
+ * chaîne séparée par virgules, tirets, points-virgules, espaces ou slashs, nombre isolé).
+ * Déduplique en préservant l'ordre canonique et filtre rigoureusement sur le domaine [1, 90].
  */
-export const extractDrawNumbers = (draw: DrawResult): { winners: number[], machine: number[] } => {
-  const winners = Array.isArray(draw.gagnants) ? draw.gagnants : [];
-  let machine: number[] = [];
-  if (draw.machine) {
-    if (Array.isArray(draw.machine)) {
-      machine = draw.machine;
-    } else if (typeof draw.machine === 'number') {
-      machine = [draw.machine];
-    } else if (typeof draw.machine === 'string') {
-      machine = String(draw.machine).split(',').map(Number).filter(n => !isNaN(n) && n >= DOMAIN_MIN && n <= DOMAIN_MAX);
+const parseHeterogeneousNumberList = (input: unknown): number[] => {
+  if (!input && input !== 0) return [];
+  const numbers: number[] = [];
+  const seen = new Set<number>();
+
+  const appendIfValid = (val: unknown) => {
+    const num = typeof val === 'number' ? Math.floor(val) : parseInt(String(val).trim(), 10);
+    if (!isNaN(num) && num >= DOMAIN_MIN && num <= DOMAIN_MAX && !seen.has(num)) {
+      seen.add(num);
+      numbers.push(num);
     }
+  };
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (typeof item === 'string' && (item.includes(',') || item.includes('-') || item.includes(' ') || item.includes(';'))) {
+        const parts = item.split(/[\s,;\/\-]+/).filter(Boolean);
+        for (const p of parts) appendIfValid(p);
+      } else {
+        appendIfValid(item);
+      }
+    }
+  } else if (typeof input === 'number') {
+    appendIfValid(input);
+  } else if (typeof input === 'string') {
+    const parts = input.split(/[\s,;\/\-]+/).filter(Boolean);
+    for (const p of parts) appendIfValid(p);
   }
-  return { 
-    winners: winners.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX), 
-    machine: machine.filter(n => n >= DOMAIN_MIN && n <= DOMAIN_MAX) 
+
+  return numbers;
+};
+
+/**
+ * Extrait les numéros gagnants et de machine de façon extrêmement robuste.
+ * Gère tous les formats de données brutes hétérogènes.
+ */
+export const extractDrawNumbers = (draw: DrawResult): { winners: number[]; machine: number[] } => {
+  if (!draw) return { winners: [], machine: [] };
+  const rawWinners = draw.gagnants ?? (draw as unknown as Record<string, unknown>).winners ?? (draw as unknown as Record<string, unknown>).numbers;
+  const rawMachine = draw.machine ?? (draw as unknown as Record<string, unknown>).machine_numbers;
+
+  return {
+    winners: parseHeterogeneousNumberList(rawWinners),
+    machine: parseHeterogeneousNumberList(rawMachine)
   };
 };
 

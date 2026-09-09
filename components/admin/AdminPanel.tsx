@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { ModelFusionPanel } from "./ModelFusionPanel";
 import { ExpertTuningPanel } from "./ExpertTuningPanel";
 import { DrawManagement } from "./DrawManagement";
 import { TrainingTab } from "../tabs/TrainingTab";
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   Users,
   RadioTower,
+  GitMerge,
 } from "lucide-react";
 import { ALL_DRAWS } from "../../constants";
 import { RefreshCw } from "lucide-react";
@@ -40,8 +42,9 @@ export const AdminPanel: React.FC = () => {
     }
   }, [selectedDraw, setDrawName, refreshData]);
 
-  // Ensure active tab starts at tuning if empty
-  const currentTab = (activeSubTab || "tuning") as
+  // Ensure active tab starts at fusion or tuning
+  const currentTab = (activeSubTab || "fusion") as
+    | "fusion"
     | "tuning"
     | "training"
     | "management"
@@ -75,6 +78,7 @@ export const AdminPanel: React.FC = () => {
 
         <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide w-full md:max-w-full">
           {[
+            { id: "fusion", label: "Fusion Modèles", icon: <GitMerge size={14} /> },
             { id: "tuning", label: "Tuning", icon: <Sliders size={14} /> },
             {
               id: "training",
@@ -144,6 +148,9 @@ export const AdminPanel: React.FC = () => {
           )}
 
         <div className="animate-slide-up">
+          {currentTab === "fusion" && (
+            <ModelFusionPanel selectedDrawName={selectedDraw} />
+          )}
           {currentTab === "tuning" && (
             <ExpertTuningPanel selectedDrawName={selectedDraw} />
           )}

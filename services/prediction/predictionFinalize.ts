@@ -323,6 +323,81 @@ export const finalizePredictionPayload = async (
   const forensicOracleDrift = enhancedMetrics.proximityDiagnostic || {};
   const adversarialResult = evaluateAdversarialSurvival(selection, breakdownRecord, context.history, forensicOracleDrift);
 
+  // ============================================================================
+  // QUANTIFICATION CONTINUE DE L'INCERTITUDE (ÉPISTÉMIQUE & ALÉATOIRE)
+  // ============================================================================
+  const maxShannonEntropy = Math.log2(DOMAIN_SIZE);
+  const normalizedEntropy = Math.min(1.0, Math.max(0.0, currentEntropy / maxShannonEntropy));
+  const aleatoricUncertainty = parseFloat((normalizedEntropy * 100.0).toFixed(2));
+  const epistemicUncertainty = parseFloat(
+    (Math.max(0, 100.0 - stabilityScore) * (1.0 - (diversityMetrics?.meanSimilarity ?? 0.5))).toFixed(2)
+  );
+
+  const effectiveSampleSize = Math.max(10, context.validTemporalDepth);
+  const pConf = finalConfidence / 100.0;
+  const standardError = Math.sqrt((pConf * (1.0 - pConf)) / effectiveSampleSize) * 100.0;
+  const marginOfError = 1.96 * standardError;
+  const ciLower = Math.max(1, Math.round(finalConfidence - marginOfError));
+  const ciUpper = Math.min(99, Math.round(finalConfidence + marginOfError));
+
+  const uncertaintyQuantification = {
+    epistemicUncertainty,
+    aleatoricUncertainty,
+    confidenceInterval: { lower: ciLower, upper: ciUpper },
+    entropyBits: parseFloat(currentEntropy.toFixed(3)),
+    credibleIntervalRange: ciUpper - ciLower,
+  };
+
+  // ============================================================================
+  // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES
+  // ============================================================================
+  const defensiveTicket = [...denoisedScores]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, TICKET_SIZE)
+    .map(s => s.num)
+    .sort((a, b) => a - b);
+
+  const top3 = denoisedScores.slice(0, 3).map(s => s.num);
+  const outsiderPool = [...denoisedScores]
+    .slice(5, 20)
+    .sort((a, b) => {
+      const tensionA = explainabilityRecord[a.num]?.topologicalTension || 0;
+      const tensionB = explainabilityRecord[b.num]?.topologicalTension || 0;
+      return tensionB - tensionA;
+    })
+    .map(s => s.num);
+  
+  const aggressiveTicket = Array.from(new Set([...top3, ...outsiderPool.slice(0, 2)]))
+    .slice(0, TICKET_SIZE)
+    .sort((a, b) => a - b);
+
+  const simulationScenarios = [
+    {
+      scenarioId: `sim_balanced_${Date.now()}`,
+      scenarioName: "Consensus Symbiotique (Tamis ADN)",
+      ticket: [...selection].sort((a, b) => a - b),
+      probabilityScore: finalConfidence,
+      riskProfile: "BALANCED" as const,
+      description: "Profil d'équilibre optimisé par le Tamis ADN et l'alignement de réalité.",
+    },
+    {
+      scenarioId: `sim_defensive_${Date.now()}`,
+      scenarioName: "Attracteur Fréquentiel (Défensif)",
+      ticket: defensiveTicket,
+      probabilityScore: Math.min(99, Math.round(finalConfidence * 1.05)),
+      riskProfile: "DEFENSIVE" as const,
+      description: "Concentration sur les centres de masse à densité maximale et variance minimale.",
+    },
+    {
+      scenarioId: `sim_aggressive_${Date.now()}`,
+      scenarioName: "Rupture de Phase (Exploration Lyapunov)",
+      ticket: aggressiveTicket.length === TICKET_SIZE ? aggressiveTicket : selection,
+      probabilityScore: Math.max(1, Math.round(finalConfidence * 0.85)),
+      riskProfile: "AGGRESSIVE" as const,
+      description: "Injection d'outsiders à tension topologique élevée pour anticiper les ruptures stochastiques.",
+    },
+  ];
+
   return {
     suggestedNumbers: selection,
     candidates,
@@ -354,6 +429,8 @@ export const finalizePredictionPayload = async (
       driftResistanceFactor: driftLearning.driftResistanceFactor
     },
     dnaSieve: dnaSieveMetrics,
+    uncertaintyQuantification,
+    simulationScenarios,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,
       spatialSigma: DOMAIN_SIZE / 60.0,

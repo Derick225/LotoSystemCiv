@@ -48,8 +48,11 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
   const gaps = new Int16Array(91);
   const factorNum = history.length;
   
-  // Demi-vie adaptative dérivée de la taille de l'échantillon (loi de désintégration continue)
-  const adaptiveHalfLife = Math.log(2) / Math.max(1, factorNum * 0.05); 
+  // Demi-vie adaptative dérivée de la taille de l'échantillon et de la densité du jeu (loi de désintégration continue)
+  const baseDecayScale = (history[0]?.gagnants?.length && history[0].gagnants.length > 0)
+    ? 90.0 / history[0].gagnants.length
+    : 18.0;
+  const adaptiveHalfLife = Math.log(2) / Math.max(1, factorNum / baseDecayScale); 
   const ALPHA = 1.0 - Math.pow(0.5, 1.0 / adaptiveHalfLife);
   
   const chronoHistory = [];
@@ -123,18 +126,26 @@ const calculatePythonVector = (history: DrawResult[]): { number: number; score: 
  */
 const calculateQuantumVector = (spectral: SpectralMetric[]): { number: number; score: number }[] => {
   if (spectral.length === 0) return [];
-  const energies = spectral.map(s => s.energy);
+  const energies = spectral.map(s => {
+    const val = typeof s.energy === 'number' && !isNaN(s.energy)
+      ? s.energy
+      : (typeof (s as any).spectralPower === 'number' && !isNaN((s as any).spectralPower)
+          ? (s as any).spectralPower
+          : 1.0);
+    return val;
+  });
   const { mean: medianEnergy, std: stdDevEnergy } = getMeanAndStdDev(energies);
   
-  return spectral.map(s => {
-    const zEnergy = (s.energy - medianEnergy) / (stdDevEnergy + Number.EPSILON);
+  return spectral.map((s, idx) => {
+    const energyVal = energies[idx];
+    const zEnergy = (energyVal - medianEnergy) / (stdDevEnergy + Number.EPSILON);
     // Pente sigmoïdale adaptée dynamiquement à la dispersion énergétique
     const adaptiveGain = 1.0 / (1.0 + stdDevEnergy / (medianEnergy + Number.EPSILON));
     const activation = sigmoid(zEnergy, 0, adaptiveGain);
     
     // Le "boost" est maintenant proportionnel à la variance dynamique de la série
     const dynamicBoost = stdDevEnergy * Math.E * activation; 
-    const transformedEnergy = s.energy * (1.0 - activation) + (medianEnergy + dynamicBoost) * activation;
+    const transformedEnergy = energyVal * (1.0 - activation) + (medianEnergy + dynamicBoost) * activation;
     
     return { number: s.number, score: transformedEnergy };
   });
@@ -283,13 +294,29 @@ export const calculateFusion = (
   const entropyMultiplier = computeVectorEntropy(normalizeVector(combinedScores));
   const avgStd = (stdP + stdQ + stdO) / 3.0;
   
-  // Lambda de régularisation continue : s'élève proportionnellement au désordre (entropie) et à l'écart type moyen
-  const lambda = avgStd * entropyMultiplier * 0.15;
+  // Lambda de régularisation continue (Zéro nombre magique) : découle de l'entropie et de l'écart-type d'échantillonnage
+  const lambda = (avgStd * entropyMultiplier) / Math.sqrt(90.0);
 
-  // Matrices de Précision Régularisées (évite l'overfitting d'un capteur très bruité)
-  const precP = W_PYTHON / (varP + lambda);
-  const precQ = W_QUANTUM / (varQ + lambda);
-  const precO = W_ORACLE / (varO + lambda);
+  // ALIGNEMENT INTER-MODÈLES & ÉLIMINATION DES REDONDANCES
+  // Calcul des corrélations de Pearson croisées entre les modèles sources
+  const corrLP = covLP / (stdP * stdQ + Number.EPSILON);
+  const corrLI = covLI / (stdP * stdO + Number.EPSILON);
+  const corrPI = covPI / (stdQ * stdO + Number.EPSILON);
+
+  // Déflation continue des redondances (évite la surpondération lorsque 2 capteurs sont colinéaires)
+  const redLP = Math.max(0, Math.abs(corrLP) - 0.70);
+  const redLI = Math.max(0, Math.abs(corrLI) - 0.70);
+  const redPI = Math.max(0, Math.abs(corrPI) - 0.70);
+  const dampP = Math.exp(-redLP - redLI);
+  const dampQ = Math.exp(-redLP - redPI);
+  const dampO = Math.exp(-redLI - redPI);
+  const orthogonalizationApplied = (redLP + redLI + redPI) > 0.05;
+  const coherenceIndex = Math.max(0, Math.min(100, Math.round(100.0 * (1.0 - (redLP + redLI + redPI) / 3.0))));
+
+  // Matrices de Précision Régularisées et dé-redondées
+  const precP = (W_PYTHON * dampP) / (varP + lambda);
+  const precQ = (W_QUANTUM * dampQ) / (varQ + lambda);
+  const precO = (W_ORACLE * dampO) / (varO + lambda);
   
   const totalPrecision = precP + precQ + precO;
   const kalmanGainP = precP / totalPrecision;
@@ -326,9 +353,10 @@ export const calculateFusion = (
       kalmanState = (sP * kalmanGainP) + (sQ * kalmanGainQ) + (sO * kalmanGainO);
     }
 
-    // 2. Filtrage spatial (Porte de bruit analytique et continue)
+    // 2. Filtrage spatial (Porte de bruit analytique et continue sans constante magique)
     const combinedMedian = (medianP * kalmanGainP) + (medianQ * kalmanGainQ) + (medianO * kalmanGainO);
-    const noiseGate = sigmoid(kalmanState, combinedMedian, 0.5);
+    const noiseGateGain = 1.0 / (avgStd + Number.EPSILON);
+    const noiseGate = sigmoid(kalmanState, combinedMedian, noiseGateGain);
 
     // 3. Matrice de Symbiose d'état (Cross-Covariance Activation)
     const pLogic = sigmoid(sP, medianP, 1.0 / stdP);
@@ -431,6 +459,13 @@ export const calculateFusion = (
       covPI: parseFloat(covPI.toFixed(3)),
       fisherGain: parseFloat(fisherGain.toFixed(3))
     },
+    coherenceIndex,
+    redundancyPenalty: {
+      logicPhysics: parseFloat(redLP.toFixed(3)),
+      logicIntuition: parseFloat(redLI.toFixed(3)),
+      physicsIntuition: parseFloat(redPI.toFixed(3))
+    },
+    orthogonalizationApplied,
     method: selectionMethod
   };
 };

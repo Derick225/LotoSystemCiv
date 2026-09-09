@@ -39,9 +39,9 @@ const ForensicHub = lazyWithRetry(
   () => import("./tabs/ForensicHub"),
   "ForensicHub",
 );
-const GenomicAuditTab = lazyWithRetry(
-  () => import("./tabs/GenomicAuditTab").then((m) => ({ default: m.GenomicAuditTab })),
-  "GenomicAuditTab",
+const DrawDnaHistoryViewer = lazyWithRetry(
+  () => import("./prediction/DrawDnaHistoryViewer"),
+  "DrawDnaHistoryViewer",
 );
 
 // Preloaders pour chargement prédictif au survol
@@ -52,7 +52,8 @@ const tabPreloaders: Record<MainTab, () => Promise<unknown>> = {
   Oracle: () => import("./tabs/OracleHub"),
   Simulation: () => import("./tabs/SimulationTab"),
   Forensic: () => import("./tabs/ForensicHub"),
-  Genomique: () => import("./tabs/GenomicAuditTab"),
+  Genomique: () => import("./tabs/ForensicHub"),
+  DnaHistory: () => import("./prediction/DrawDnaHistoryViewer"),
 };
 
 type MainTab =
@@ -62,7 +63,8 @@ type MainTab =
   | "Oracle"
   | "Simulation"
   | "Forensic"
-  | "Genomique";
+  | "Genomique"
+  | "DnaHistory";
 
 export const DrawDetails: React.FC = () => {
   const drawName = useNexusStore((state) => state.drawName);
@@ -155,14 +157,14 @@ export const DrawDetails: React.FC = () => {
     {
       id: "Forensic",
       icon: Microscope,
-      label: "Forensic",
-      desc: "Audit Post-Tirage",
+      label: "Forensic & ADN",
+      desc: "Audit Post-Mortem & ADN",
     },
     {
-      id: "Genomique",
+      id: "DnaHistory",
       icon: Dna,
-      label: "Audit Génomique",
-      desc: "Audit ADN & Efficience",
+      label: "Historique ADN",
+      desc: "ADN Numéros Gagnants",
     },
   ];
 
@@ -388,11 +390,11 @@ export const DrawDetails: React.FC = () => {
             {activeMainTab === "Simulation" && (
               <SimulationTab drawName={drawName} />
             )}
-            {activeMainTab === "Forensic" && (
-              <ForensicHub drawName={drawName} />
+            {(activeMainTab === "Forensic" || activeMainTab === "Genomique") && (
+              <ForensicHub drawName={drawName} initialTab={activeMainTab === "Genomique" ? "dna_drift" : undefined} />
             )}
-            {activeMainTab === "Genomique" && (
-              <GenomicAuditTab drawName={drawName} />
+            {activeMainTab === "DnaHistory" && (
+              <DrawDnaHistoryViewer drawName={drawName} history={history} />
             )}
           </Suspense>
         </LocalErrorBoundary>

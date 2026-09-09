@@ -4,6 +4,7 @@ import { RefreshCw, AlertTriangle } from "lucide-react";
 
 interface LocalErrorBoundaryProps {
   children?: ReactNode;
+  name?: string;
   // Explicitly allow key to prevent TS errors in consumers
   key?: React.Key;
 }

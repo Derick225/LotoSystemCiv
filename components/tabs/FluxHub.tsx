@@ -24,6 +24,7 @@ import {
   Zap,
   Sliders,
   Sparkles,
+  Dna,
 } from "lucide-react";
 import { ExportService } from "../../services/exportService";
 import { useToast } from "../ui/Toast";
@@ -47,6 +48,7 @@ interface DrawRowCardProps {
 const DrawRowCard: React.FC<DrawRowCardProps> = React.memo(
   ({ draw, index, totalCount, meanSum, onSimilarity }) => {
     const { showToast } = useToast();
+    const navigateToModule = useNexusStore((state) => state.navigateToModule);
     const [copied, setCopied] = useState(false);
 
     if (!draw) return null;
@@ -146,6 +148,17 @@ const DrawRowCard: React.FC<DrawRowCardProps> = React.memo(
                 >
                   <GitCompare size={14} />
                 </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    audioEngine.play("click");
+                    navigateToModule("DnaHistory");
+                  }}
+                  className="p-2 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl active:scale-95"
+                  title="ADN Prédictif"
+                >
+                  <Dna size={14} />
+                </button>
               </div>
             </div>
 
@@ -234,6 +247,18 @@ const DrawRowCard: React.FC<DrawRowCardProps> = React.memo(
                   title="Trouver Similitudes"
                 >
                   <GitCompare size={15} />
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    audioEngine.play("click");
+                    navigateToModule("DnaHistory");
+                  }}
+                  className="p-2.5 bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-xl hover:scale-110 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-all shadow-sm"
+                  title="Inspecter l'ADN Prédictif"
+                >
+                  <Dna size={15} />
                 </button>
               </div>
             </div>

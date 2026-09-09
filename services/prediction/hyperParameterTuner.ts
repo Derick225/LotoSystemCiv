@@ -598,9 +598,52 @@ export const tunePredictiveHyperparameters = async (
   }
   onProgress?.(45, "Calibrage cybernétique achevé.");
 
+  // Sauvegarde persistante délimitée au tirage (TIRAGE ISOLATION RULE)
+  await saveTunedHyperparameters(drawName, currentParams);
+
   return {
     tunedParams: currentParams,
     accuracyGain: Math.max(0, accuracyGain),
     log
   };
+};
+
+const HYPERPARAMS_CACHE = new Map<string, PredictiveHyperparameters>();
+
+/**
+ * Récupère les hyperparamètres calibrés pour un tirage isolé (avec fallback aux valeurs par défaut statistiques).
+ */
+export const getTunedHyperparameters = async (drawName: string): Promise<PredictiveHyperparameters> => {
+  if (HYPERPARAMS_CACHE.has(drawName)) {
+    return HYPERPARAMS_CACHE.get(drawName)!;
+  }
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const stored = window.localStorage.getItem(`lotopro_hyperparams_${drawName}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed.hawkesDecay === 'number') {
+          HYPERPARAMS_CACHE.set(drawName, parsed);
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignorer
+    }
+  }
+  return { ...DEFAULT_HYPERPARAMETERS };
+};
+
+/**
+ * Enregistre les hyperparamètres calibrés de façon isolée et persistante par tirage.
+ */
+export const saveTunedHyperparameters = async (drawName: string, params: PredictiveHyperparameters): Promise<void> => {
+  HYPERPARAMS_CACHE.set(drawName, params);
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem(`lotopro_hyperparams_${drawName}`, JSON.stringify(params));
+    } catch {
+      // Ignorer
+    }
+  }
 };

@@ -1,11 +1,22 @@
 
-import { DrawResult, ProjectionItem, TopFollowerAnalysis } from '../types';
+import { DrawResult, ProjectionItem, TopFollowerAnalysis, AlgoWeights } from '../types';
 import { DRAW_SCHEDULE, isDrawWithoutMachine } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
 import { AppError, logError, getErrorMessage } from '../utils/AppError';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
+import {
+  logActivePredictionDna,
+  getPredictionDnaLogs,
+  qualifyNumberDna,
+  reconcileDnaLogsWithDrawResult,
+  getOrReconstructWinningNumbersDna,
+  calculateDnaPerformanceDrift,
+  type PredictionDnaAuditLog,
+  type NumberDnaAttribution,
+  type DnaPerformanceDriftReport,
+} from './prediction/dnaAuditLogService';
 
 /**
  * Constantes fondamentales du système de loterie 5/90.
@@ -179,6 +190,50 @@ export const lotteryService = {
     const fallbackData = generateDeterministicFallbackHistory(drawName);
     await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
     return fallbackData;
+  },
+
+  /**
+   * Enregistre systématiquement l'ADN actif utilisé lors de la génération d'une prédiction.
+   */
+  async logPredictionDna(
+    drawName: string,
+    predictionId: string,
+    suggestedNumbers: number[],
+    activeWeights: AlgoWeights,
+    history?: DrawResult[],
+    metrics?: { entropy?: number; hurst?: number; confidence?: number; regime?: string }
+  ): Promise<PredictionDnaAuditLog> {
+    return logActivePredictionDna(drawName, predictionId, suggestedNumbers, activeWeights, history, metrics);
+  },
+
+  /**
+   * Récupère la liste des logs d'audit ADN pour un tirage isolé.
+   */
+  async getPredictionDnaLogs(drawName: string, limit?: number): Promise<PredictionDnaAuditLog[]> {
+    return getPredictionDnaLogs(drawName, limit);
+  },
+
+  /**
+   * Récupère ou reconstruit l'ADN prédictif qui a généré chaque numéro gagnant d'un tirage passé.
+   */
+  async getWinningNumbersDna(
+    drawName: string,
+    drawResult: DrawResult,
+    fullHistory: DrawResult[],
+    activeWeights?: AlgoWeights
+  ): Promise<Record<number, NumberDnaAttribution>> {
+    return getOrReconstructWinningNumbersDna(drawName, drawResult, fullHistory, activeWeights);
+  },
+
+  /**
+   * Calcule le drift de performance entre l'ADN injecté par le moteur neural et la réalité statistique observée.
+   */
+  async computeDnaDrift(
+    drawName: string,
+    history: DrawResult[],
+    injectedWeights: AlgoWeights
+  ): Promise<DnaPerformanceDriftReport> {
+    return calculateDnaPerformanceDrift(drawName, history, injectedWeights);
   }
 };
 
@@ -577,6 +632,16 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
       }
     }
 
+    // Réconciliation systématique des logs ADN actifs avec les numéros du tirage réel
+    try {
+      const reconciledDnaCount = await reconcileDnaLogsWithDrawResult(drawName, resultToMatch, cleanHistory);
+      if (reconciledDnaCount > 0) {
+        console.log(`[ADN Audit] ${reconciledDnaCount} log(s) ADN réconcilié(s) avec le tirage ${resultToMatch.date}`);
+      }
+    } catch (dnaErr) {
+      console.warn("[ADN Audit] Erreur lors de la réconciliation ADN:", dnaErr);
+    }
+
     if (autopsiesRun > 0) {
        console.log(`[Autopsie] ${autopsiesRun} autopsie(s) effectuée(s).`);
     } else {
@@ -730,6 +795,18 @@ export const fetchAssociatedNumbers = async (number: number, drawName: string, h
     }
     const sorted = Object.entries(followers).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count).slice(0, 10);
     return { following: sorted };
+};
+
+export {
+  logActivePredictionDna,
+  getPredictionDnaLogs,
+  qualifyNumberDna,
+  reconcileDnaLogsWithDrawResult,
+  getOrReconstructWinningNumbersDna,
+  calculateDnaPerformanceDrift,
+  type PredictionDnaAuditLog,
+  type NumberDnaAttribution,
+  type DnaPerformanceDriftReport,
 };
 
 

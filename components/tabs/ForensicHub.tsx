@@ -9,6 +9,12 @@ import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { ClosedLoopAutopsyPanel } from "../ClosedLoopAutopsyPanel";
 import { StorageOptimizationModal } from "../StorageOptimizationModal";
 import { StochasticEntropyPanel } from "../forensic/StochasticEntropyPanel";
+import { DnaReferenceAuditor } from "../genomic/DnaReferenceAuditor";
+import { SubAlgorithmDriftHeatmap } from "../genomic/SubAlgorithmDriftHeatmap";
+import { ExpertBiasAdjuster } from "../genomic/ExpertBiasAdjuster";
+import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPanel";
+import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
+import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
 import {
   Target,
   Trash2,
@@ -37,6 +43,9 @@ import {
   ArrowUpDown,
   Database,
   Layers,
+  Dna,
+  Flame,
+  BrainCircuit,
 } from "lucide-react";
 import { ForensicReport, ForensicEvidence } from "../../types";
 import { useForensicData } from "../../hooks/useForensicData";
@@ -47,14 +56,15 @@ import { generateLearningSession, applyForensicAdjustments } from "../../service
 import { generateMasterPrediction } from "../../services/predictionEngine";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
-type ForensicTab = "audits" | "closedloop" | "entropy" | "confusion" | "timeline" | "radar" | "timemachine";
+type ForensicTab = "audits" | "closedloop" | "dna_drift" | "matrices_entropy" | "timemachine";
 type SortOption = "date_desc" | "date_asc" | "hits_desc" | "hits_asc" | "drift_desc";
 
-export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
-  ({ drawName }) => {
+export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = React.memo(
+  ({ drawName, initialTab }) => {
     const { showToast } = useToast();
     const history = useNexusStore((state) => state.history);
     const globalWeights = useNexusStore((state) => state.globalWeights);
+    const activeSubTab = useNexusStore((state) => state.activeSubTab);
 
     const { 
       reports, 
@@ -65,7 +75,54 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
       deleteReports
     } = useForensicData(drawName);
 
-    const [activeTab, setActiveTab] = useState<ForensicTab>("audits");
+    const [activeTab, setActiveTab] = useState<ForensicTab>(() => {
+      if (initialTab === "dna_drift" || initialTab === "DNA_AUDITOR" || initialTab === "DRIFT_HEATMAP") {
+        return "dna_drift";
+      }
+      return "audits";
+    });
+
+    // Sous-vues internes pour une ergonomie optimale
+    const [auditSubView, setAuditSubView] = useState<"table" | "logs">("table");
+    const [closedLoopSubView, setClosedLoopSubView] = useState<"autopsy" | "neural_opt" | "expert_bias">("autopsy");
+    const [dnaSubView, setDnaSubView] = useState<"reference" | "drift_heatmap" | "sieve_radar">("reference");
+    const [matrixSubView, setMatrixSubView] = useState<"confusion" | "entropy" | "radar" | "timeline">("confusion");
+
+    // Écoute des sous-onglets globaux ou navigation externe
+    React.useEffect(() => {
+      if (!activeSubTab) return;
+      const sub = activeSubTab.toUpperCase();
+      if (sub === "DNA_AUDITOR" || sub === "DNA") {
+        setActiveTab("dna_drift");
+        setDnaSubView("reference");
+      } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP") {
+        setActiveTab("dna_drift");
+        setDnaSubView("drift_heatmap");
+      } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
+        setActiveTab("dna_drift");
+        setDnaSubView("sieve_radar");
+      } else if (sub === "NEURAL_OPT" || sub === "NEURAL") {
+        setActiveTab("closedloop");
+        setClosedLoopSubView("neural_opt");
+      } else if (sub === "EXPERT_BIAS" || sub === "BIAS") {
+        setActiveTab("closedloop");
+        setClosedLoopSubView("expert_bias");
+      } else if (sub === "FORENSIC_LOGS" || sub === "LOGS") {
+        setActiveTab("audits");
+        setAuditSubView("logs");
+      } else if (sub === "CONFUSION") {
+        setActiveTab("matrices_entropy");
+        setMatrixSubView("confusion");
+      } else if (sub === "ENTROPY") {
+        setActiveTab("matrices_entropy");
+        setMatrixSubView("entropy");
+      } else if (sub === "TIMELINE") {
+        setActiveTab("matrices_entropy");
+        setMatrixSubView("timeline");
+      } else if (sub === "TIMEMACHINE") {
+        setActiveTab("timemachine");
+      }
+    }, [activeSubTab]);
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [searchQuery, setSearchQuery] = useState<string>("");
     const [sortBy, setSortBy] = useState<SortOption>("date_desc");
@@ -579,15 +636,13 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
           </div>
         </div>
 
-        {/* SUB-NAVIGATION TABS */}
+        {/* SUB-NAVIGATION TABS CONSOLIDÉS */}
         <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto custom-scrollbar">
           {[
             { id: "audits", label: "Autopsies & Rapports", icon: BookOpen, count: reports.length },
-            { id: "closedloop", label: "Boucle Fermée & Auto-Correction", icon: Zap },
-            { id: "entropy", label: "Entropie Stochastique & Prévisibilité", icon: Activity },
-            { id: "confusion", label: "Matrice de Proximité & Confusion", icon: Compass },
-            { id: "timeline", label: "Frise Chronologique", icon: Activity },
-            { id: "radar", label: "Radar Macro/Micro & SHAP", icon: Radar },
+            { id: "closedloop", label: "Boucle Fermée & Optimisation", icon: Zap },
+            { id: "dna_drift", label: "Audit ADN & Dérive des Modèles", icon: Dna },
+            { id: "matrices_entropy", label: "Matrices, Entropie & SHAP", icon: Compass },
             { id: "timemachine", label: "Time Machine & OOS", icon: Clock },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -622,6 +677,44 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
         {/* TAB 1: AUDITS & RAPPORTS */}
         {activeTab === "audits" && (
           <div className="space-y-6">
+            {/* Switcher vue Table vs Journal d'Audit */}
+            <div className="flex items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+              <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setAuditSubView("table");
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    auditSubView === "table"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <BookOpen size={13} />
+                  Tableau des Autopsies
+                </button>
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setAuditSubView("logs");
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    auditSubView === "logs"
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <FileText size={13} />
+                  Journal d'Audit Forensic
+                </button>
+              </div>
+            </div>
+
+            {auditSubView === "logs" ? (
+              <ForensicAuditLogsView drawName={drawName} />
+            ) : (
+              <>
             {/* Search, Status Filter Badges & Management Tools */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/40 p-4 rounded-2xl border border-slate-800/80">
               {/* Filter pills & Search input */}
@@ -899,47 +992,209 @@ export const ForensicHub: React.FC<{ drawName: string }> = React.memo(
                 })}
               </div>
             )}
+            </>
+            )}
           </div>
         )}
 
-        {/* TAB 1.5: CLOSED LOOP AUTOPSY & DNA AUTO-CORRECTION */}
+        {/* TAB 2: CLOSED LOOP AUTOPSY & OPTIMISATION NEURALE */}
         {activeTab === "closedloop" && (
-          <ClosedLoopAutopsyPanel drawName={drawName} />
+          <div className="space-y-6">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setClosedLoopSubView("autopsy");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  closedLoopSubView === "autopsy"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Zap size={13} />
+                Boucle Fermée d'Autopsie
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setClosedLoopSubView("neural_opt");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  closedLoopSubView === "neural_opt"
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <BrainCircuit size={13} />
+                Auto-Optimisation Neurale
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setClosedLoopSubView("expert_bias");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  closedLoopSubView === "expert_bias"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Sliders size={13} />
+                Biais Expert Manuel
+              </button>
+            </div>
+
+            {closedLoopSubView === "autopsy" && <ClosedLoopAutopsyPanel drawName={drawName} />}
+            {closedLoopSubView === "neural_opt" && <NeuralSelfOptimizationPanel drawName={drawName} />}
+            {closedLoopSubView === "expert_bias" && <ExpertBiasAdjuster drawName={drawName} />}
+          </div>
         )}
 
-        {/* TAB 1.8: STOCHASTIC ENTROPY & UNPREDICTABILITY FORENSICS */}
-        {activeTab === "entropy" && (
-          <StochasticEntropyPanel drawName={drawName} reports={reports} />
+        {/* TAB 3: AUDIT ADN & DÉRIVE DES MODÈLES */}
+        {activeTab === "dna_drift" && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("reference");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "reference"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <ShieldCheck size={13} />
+                Audit ADN & Synchronisation
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("drift_heatmap");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "drift_heatmap"
+                    ? "bg-rose-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Flame size={13} />
+                Heatmap Dérive Sous-Algos
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("sieve_radar");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "sieve_radar"
+                    ? "bg-teal-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Radar size={13} />
+                Radar Crible ADN
+              </button>
+            </div>
+
+            {dnaSubView === "reference" && <DnaReferenceAuditor drawName={drawName} />}
+            {dnaSubView === "drift_heatmap" && <SubAlgorithmDriftHeatmap drawName={drawName} />}
+            {dnaSubView === "sieve_radar" && <UnifiedDnaSieveRadar drawName={drawName} />}
+          </div>
         )}
 
-        {/* TAB 2: MATRICE DE CONFUSION & PROXIMITÉ */}
-        {activeTab === "confusion" && (
-          <MultiLevelConfusionMatrix
-            reports={reports}
-            drawName={drawName}
-            onSelectReport={(rep) => setSelectedReport(rep)}
-          />
-        )}
+        {/* TAB 4: MATRICES, ENTROPIE & SHAP */}
+        {activeTab === "matrices_entropy" && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setMatrixSubView("confusion");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  matrixSubView === "confusion"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Compass size={13} />
+                Matrice de Confusion
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setMatrixSubView("entropy");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  matrixSubView === "entropy"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Activity size={13} />
+                Entropie Stochastique
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setMatrixSubView("radar");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  matrixSubView === "radar"
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Radar size={13} />
+                Radar Macro/Micro & SHAP
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setMatrixSubView("timeline");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  matrixSubView === "timeline"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Clock size={13} />
+                Frise Chronologique
+              </button>
+            </div>
 
-        {/* TAB 3: FRISE CHRONOLOGIQUE */}
-        {activeTab === "timeline" && (
-          <UnifiedForensicTimeline
-            reports={reports}
-            selectedReport={selectedReport}
-            onSelectReport={(rep) => setSelectedReport(rep)}
-            onDeleteReport={(id, e) => {
-              const rep = reports.find((r) => r.id === id);
-              handleDeleteReport(id, rep?.predictionId, e);
-            }}
-          />
-        )}
-
-        {/* TAB 4: RADAR MACRO/MICRO & ATTRIBUTION SHAP */}
-        {activeTab === "radar" && (
-          <UnifiedForensicRadarPanel
-            report={selectedReport || reports[0] || null}
-            drawName={drawName}
-          />
+            {matrixSubView === "confusion" && (
+              <MultiLevelConfusionMatrix
+                reports={reports}
+                drawName={drawName}
+                onSelectReport={(rep) => setSelectedReport(rep)}
+              />
+            )}
+            {matrixSubView === "entropy" && (
+              <StochasticEntropyPanel drawName={drawName} reports={reports} />
+            )}
+            {matrixSubView === "radar" && (
+              <UnifiedForensicRadarPanel
+                report={selectedReport || reports[0] || null}
+                drawName={drawName}
+              />
+            )}
+            {matrixSubView === "timeline" && (
+              <UnifiedForensicTimeline
+                reports={reports}
+                selectedReport={selectedReport}
+                onSelectReport={(rep) => setSelectedReport(rep)}
+                onDeleteReport={(id, e) => {
+                  const rep = reports.find((r) => r.id === id);
+                  handleDeleteReport(id, rep?.predictionId, e);
+                }}
+              />
+            )}
+          </div>
         )}
 
         {/* TAB 5: TIME MACHINE & SIMULATION HISTORIQUE */}

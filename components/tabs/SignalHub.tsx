@@ -7,7 +7,6 @@ import {
   Activity,
   Layers,
   Clock,
-  RefreshCw,
   BookOpen,
   Box,
   Compass,
@@ -52,18 +51,7 @@ const AcademyTab = lazy(() =>
   import("./AcademyTab").then((m) => ({ default: m.AcademyTab })),
 );
 
-const subTabPreloaders: Record<string, () => Promise<unknown>> = {
-  stats: () => import("./StatsTab"),
-  patterns: () => import("./PatternDiscoveryTab"),
-  gaps: () => import("./GapPatternTab"),
-  spectral: () => import("./SpectralTab"),
-  fractal: () => import("./FractalTab"),
-  math: () => import("./MathTab"),
-  temporal: () => import("./TemporalTab"),
-  cluster: () => import("./ClusteringTab"),
-  machine: () => import("./MachineTransferTab"),
-  academy: () => import("./AcademyTab"),
-};
+type SignalPillar = "stats_patterns" | "signals_spectral" | "dynamics_clustering" | "academy";
 
 export const SignalHub: React.FC = () => {
   const history = useNexusStore((state) => state.history);
@@ -71,7 +59,10 @@ export const SignalHub: React.FC = () => {
   const currentDrawName = useNexusStore((state) => state.currentDrawName);
   const activeDraw = drawName || currentDrawName;
 
-  const [activeSubTab, setActiveSubTab] = useState("stats");
+  const [pillar, setPillar] = useState<SignalPillar>("stats_patterns");
+  const [statsSubView, setStatsSubView] = useState<"stats" | "patterns" | "gaps">("stats");
+  const [spectralSubView, setSpectralSubView] = useState<"spectral" | "fractal" | "math">("spectral");
+  const [dynamicsSubView, setDynamicsSubView] = useState<"temporal" | "cluster" | "machine">("temporal");
   const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
 
   useEffect(() => {
@@ -80,53 +71,64 @@ export const SignalHub: React.FC = () => {
     }
   }, [history]);
 
-  // SYMBIOSE : Écouteur d'événements pour navigation croisée
+  // Écouteur d'événements pour navigation croisée avec rétro-compatibilité totale
   useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
-      if (customEvent.detail?.subTab) {
-        setActiveSubTab(customEvent.detail.subTab);
-        const contentElement = document.getElementById("signal-content");
-        if (contentElement)
-          contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      const sub = customEvent.detail?.subTab;
+      if (!sub) return;
+
+      if (sub === "stats" || sub === "patterns" || sub === "gaps") {
+        setPillar("stats_patterns");
+        setStatsSubView(sub as "stats" | "patterns" | "gaps");
+      } else if (sub === "spectral" || sub === "fractal" || sub === "math") {
+        setPillar("signals_spectral");
+        setSpectralSubView(sub as "spectral" | "fractal" | "math");
+      } else if (sub === "temporal" || sub === "cluster" || sub === "machine") {
+        setPillar("dynamics_clustering");
+        setDynamicsSubView(sub as "temporal" | "cluster" | "machine");
+      } else if (sub === "academy") {
+        setPillar("academy");
+      }
+
+      const contentElement = document.getElementById("signal-content");
+      if (contentElement) {
+        contentElement.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     };
-    // On écoute l'événement spécifique dispatché par DrawDetails
+
     window.addEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);
-    return () =>
-      window.removeEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);
+    return () => window.removeEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);
   }, []);
 
-  const tabs = [
-    { id: "stats", label: "Stats", icon: BarChart2, color: "text-indigo-500" },
-    { id: "patterns", label: "Motifs", icon: Workflow, color: "text-emerald-400" },
-    { id: "gaps", label: "Écarts", icon: Compass, color: "text-rose-500" },
+  const pillars = [
     {
-      id: "spectral",
-      label: "Spectral",
+      id: "stats_patterns" as SignalPillar,
+      label: "Stats & Motifs",
+      desc: "Fréquences & Écarts",
+      icon: BarChart2,
+      color: "text-indigo-400",
+    },
+    {
+      id: "signals_spectral" as SignalPillar,
+      label: "Ondes & Spectres",
+      desc: "Harmoniques & Fractales",
       icon: Waves,
-      color: "text-purple-500",
-    },
-    { id: "fractal", label: "Météo", icon: Layers, color: "text-emerald-500" },
-    { id: "math", label: "Maths", icon: Activity, color: "text-rose-500" },
-    { id: "temporal", label: "Temps", icon: Clock, color: "text-amber-500" },
-    {
-      id: "cluster",
-      label: "Markov & Clusters",
-      icon: Box,
-      color: "text-cyan-500",
+      color: "text-purple-400",
     },
     {
-      id: "machine",
-      label: "Transfert Machine",
-      icon: Cpu,
+      id: "dynamics_clustering" as SignalPillar,
+      label: "Dynamique & Markov",
+      desc: "Temps, Clusters & Transfert",
+      icon: Activity,
       color: "text-cyan-400",
     },
     {
-      id: "academy",
+      id: "academy" as SignalPillar,
       label: "Académie",
+      desc: "Documentation & Théorie",
       icon: BookOpen,
-      color: "text-fuchsia-500",
+      color: "text-fuchsia-400",
     },
   ];
 
@@ -136,94 +138,219 @@ export const SignalHub: React.FC = () => {
 
       <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-6 min-w-0">
-          {/* Navigation Onglets Mobile Optimized */}
+          {/* Barre de navigation consolidée à 4 Piliers */}
           <div className="relative z-20 bg-nexus-950 py-2 -mx-4 px-4 md:mx-0 md:px-0 md:bg-transparent">
             <div className="overflow-x-auto scrollbar-hide pb-2 mask-fade-right">
-              <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl md:rounded-2xl w-max border border-slate-200 dark:border-slate-700 shadow-inner">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setActiveSubTab(tab.id);
-                    }}
-                    onMouseEnter={() => subTabPreloaders[tab.id]?.()}
-                    onTouchStart={() => subTabPreloaders[tab.id]?.()}
-                    className={`
-                                            px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0
-                                            ${
-                                              activeSubTab === tab.id
-                                                ? "bg-white dark:bg-slate-700 shadow-lg scale-105 z-10 text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"
-                                                : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                                            }
-                                        `}
-                  >
-                    <tab.icon
-                      size={14}
-                      className={activeSubTab === tab.id ? tab.color : ""}
-                    />
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
+              <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl w-max border border-slate-200 dark:border-slate-700 shadow-inner gap-1">
+                {pillars.map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = pillar === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        audioEngine.play("click");
+                        setPillar(tab.id);
+                      }}
+                      className={`
+                        px-4 md:px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-300 flex items-center gap-2 whitespace-nowrap flex-shrink-0 cursor-pointer
+                        ${
+                          isActive
+                            ? "bg-white dark:bg-slate-700 shadow-lg text-slate-800 dark:text-white ring-1 ring-black/5 dark:ring-white/10"
+                            : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                        }
+                      `}
+                    >
+                      <Icon size={15} className={isActive ? tab.color : ""} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            <style
-              dangerouslySetInnerHTML={{
-                __html: `
-                            .mask-fade-right {
-                                -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
-                                mask-image: linear-gradient(to right, black 85%, transparent 100%);
-                            }
-                            @media (min-width: 1024px) {
-                                .mask-fade-right { -webkit-mask-image: none; mask-image: none; }
-                            }
-                        `,
-              }}
-            />
           </div>
 
           <div
             id="signal-content"
-            className="min-h-[400px] transition-all duration-500 scroll-mt-[240px] md:scroll-mt-[280px]"
+            className="transition-all duration-300 scroll-mt-[250px] md:scroll-mt-[200px]"
           >
-            <LocalErrorBoundary key={activeSubTab}>
+            <LocalErrorBoundary name="SignalSubTab">
               <Suspense
                 fallback={
-                  <div className="py-20 flex flex-col items-center justify-center gap-4">
-                    <RefreshCw
-                      className="animate-spin text-indigo-500"
-                      size={32}
-                    />
-                    <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">
-                      Calcul du module...
-                    </p>
+                  <div className="h-96 flex items-center justify-center bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <div className="flex flex-col items-center gap-4 text-slate-400">
+                      <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs font-bold uppercase tracking-wider">
+                        Extraction du signal...
+                      </span>
+                    </div>
                   </div>
                 }
               >
-                {activeSubTab === "stats" && <StatsTab drawName={activeDraw} />}
-                {activeSubTab === "patterns" && (
-                  <PatternDiscoveryTab drawName={activeDraw} />
+                {/* PILIER 1: STATS & MOTIFS */}
+                {pillar === "stats_patterns" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setStatsSubView("stats");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          statsSubView === "stats"
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <BarChart2 size={13} />
+                        Fréquences & Stats
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setStatsSubView("patterns");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          statsSubView === "patterns"
+                            ? "bg-emerald-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Workflow size={13} />
+                        Motifs Répétitifs
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setStatsSubView("gaps");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          statsSubView === "gaps"
+                            ? "bg-rose-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Compass size={13} />
+                        Écarts & Retards
+                      </button>
+                    </div>
+
+                    {statsSubView === "stats" && <StatsTab drawName={activeDraw} />}
+                    {statsSubView === "patterns" && <PatternDiscoveryTab drawName={activeDraw} />}
+                    {statsSubView === "gaps" && <GapPatternTab drawName={activeDraw} />}
+                  </div>
                 )}
-                {activeSubTab === "gaps" && (
-                  <GapPatternTab drawName={activeDraw} />
+
+                {/* PILIER 2: ONDES & SPECTRES */}
+                {pillar === "signals_spectral" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setSpectralSubView("spectral");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          spectralSubView === "spectral"
+                            ? "bg-purple-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Waves size={13} />
+                        Analyse Spectrale FFT
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setSpectralSubView("fractal");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          spectralSubView === "fractal"
+                            ? "bg-teal-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Layers size={13} />
+                        Météo Fractale & Chaos
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setSpectralSubView("math");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          spectralSubView === "math"
+                            ? "bg-rose-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Activity size={13} />
+                        Indicateurs Mathématiques
+                      </button>
+                    </div>
+
+                    {spectralSubView === "spectral" && <SpectralTab drawName={activeDraw} />}
+                    {spectralSubView === "fractal" && <FractalTab drawName={activeDraw} />}
+                    {spectralSubView === "math" && <MathTab drawName={activeDraw} />}
+                  </div>
                 )}
-                {activeSubTab === "spectral" && (
-                  <SpectralTab drawName={activeDraw} />
+
+                {/* PILIER 3: DYNAMIQUE & MARKOV */}
+                {pillar === "dynamics_clustering" && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setDynamicsSubView("temporal");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          dynamicsSubView === "temporal"
+                            ? "bg-amber-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Clock size={13} />
+                        Dynamique Temporelle
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setDynamicsSubView("cluster");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          dynamicsSubView === "cluster"
+                            ? "bg-cyan-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Box size={13} />
+                        Markov & Réseaux de Clusters
+                      </button>
+                      <button
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setDynamicsSubView("machine");
+                        }}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          dynamicsSubView === "machine"
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Cpu size={13} />
+                        Transfert Machine & Entropie
+                      </button>
+                    </div>
+
+                    {dynamicsSubView === "temporal" && <TemporalTab drawName={activeDraw} />}
+                    {dynamicsSubView === "cluster" && <ClusteringTab drawName={activeDraw} />}
+                    {dynamicsSubView === "machine" && <MachineTransferTab drawName={activeDraw} />}
+                  </div>
                 )}
-                {activeSubTab === "fractal" && (
-                  <FractalTab drawName={activeDraw} />
-                )}
-                {activeSubTab === "math" && <MathTab drawName={activeDraw} />}
-                {activeSubTab === "temporal" && (
-                  <TemporalTab drawName={activeDraw} />
-                )}
-                {activeSubTab === "cluster" && (
-                  <ClusteringTab drawName={activeDraw} />
-                )}
-                {activeSubTab === "machine" && (
-                  <MachineTransferTab drawName={activeDraw} />
-                )}
-                {activeSubTab === "academy" && <AcademyTab />}
+
+                {/* PILIER 4: ACADÉMIE */}
+                {pillar === "academy" && <AcademyTab />}
               </Suspense>
             </LocalErrorBoundary>
           </div>
@@ -234,7 +361,7 @@ export const SignalHub: React.FC = () => {
           <ChaosAttractor history={history} />
           <GapEfficiencyMeter data={geiData} />
 
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] md:rounded-2xl border border-slate-100 dark:border-slate-700 shadow-xl">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-xl">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Box size={12} className="text-indigo-500" /> Analyse Contextuelle
             </h4>
