@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
 import { audioEngine } from "../../utils/audioEngine";
+import { useNexusStore } from "../../store/useNexusStore";
 
 const SpatialTab = lazy(() =>
   import("./SpatialTab").then((m) => ({ default: m.SpatialTab })),
@@ -49,10 +50,25 @@ const TabLoader = () => (
 );
 
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
+  const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const [pillar, setPillar] = useState<TopologyPillar>("geometry_networks");
   const [geomSubView, setGeomSubView] = useState<"spatial" | "neural">("spatial");
   const [synergySubView, setSynergySubView] = useState<"synergy" | "decision">("synergy");
   const [combSubView, setCombSubView] = useState<"combinations" | "python">("combinations");
+
+  const mapSubTabToState = (subRaw: string) => {
+    const sub = (subRaw || "").toLowerCase();
+    if (sub === "spatial" || sub === "neural" || sub === "geometry" || sub === "network") {
+      setPillar("geometry_networks");
+      setGeomSubView(sub === "neural" ? "neural" : "spatial");
+    } else if (sub === "synergy" || sub === "decision" || sub === "tree" || sub === "affinities") {
+      setPillar("synergy_decisions");
+      setSynergySubView(sub === "decision" || sub === "tree" ? "decision" : "synergy");
+    } else if (sub === "combinations" || sub === "python" || sub === "kernel") {
+      setPillar("combinations_kernel");
+      setCombSubView(sub === "python" ? "python" : "combinations");
+    }
+  };
 
   // Rétro-compatibilité et écouteur d'événements
   useEffect(() => {
@@ -60,17 +76,7 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
       const customEvent = e as CustomEvent;
       const sub = customEvent.detail?.subTab;
       if (!sub) return;
-
-      if (sub === "spatial" || sub === "neural") {
-        setPillar("geometry_networks");
-        setGeomSubView(sub as "spatial" | "neural");
-      } else if (sub === "synergy" || sub === "decision") {
-        setPillar("synergy_decisions");
-        setSynergySubView(sub as "synergy" | "decision");
-      } else if (sub === "combinations" || sub === "python") {
-        setPillar("combinations_kernel");
-        setCombSubView(sub as "combinations" | "python");
-      }
+      mapSubTabToState(sub);
 
       const contentElement = document.getElementById("topology-content");
       if (contentElement) {
@@ -81,6 +87,12 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
     window.addEventListener("NAVIGATE_SUB_TOPOLOGIE", handleNavigation);
     return () => window.removeEventListener("NAVIGATE_SUB_TOPOLOGIE", handleNavigation);
   }, []);
+
+  useEffect(() => {
+    if (activeSubTab) {
+      mapSubTabToState(activeSubTab);
+    }
+  }, [activeSubTab]);
 
   const pillars = [
     {

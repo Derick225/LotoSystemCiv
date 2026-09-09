@@ -95,7 +95,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
       if (sub === "DNA_AUDITOR" || sub === "DNA") {
         setActiveTab("dna_drift");
         setDnaSubView("reference");
-      } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP") {
+      } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP" || sub === "DRIFT" || sub === "DNA_DRIFT") {
         setActiveTab("dna_drift");
         setDnaSubView("drift_heatmap");
       } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
@@ -107,9 +107,15 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
       } else if (sub === "EXPERT_BIAS" || sub === "BIAS") {
         setActiveTab("closedloop");
         setClosedLoopSubView("expert_bias");
+      } else if (sub === "AUTOPSY" || sub === "CLOSEDLOOP") {
+        setActiveTab("closedloop");
+        setClosedLoopSubView("autopsy");
       } else if (sub === "FORENSIC_LOGS" || sub === "LOGS") {
         setActiveTab("audits");
         setAuditSubView("logs");
+      } else if (sub === "PREDICTION" || sub === "AUDITS" || sub === "TABLE") {
+        setActiveTab("audits");
+        setAuditSubView("table");
       } else if (sub === "CONFUSION") {
         setActiveTab("matrices_entropy");
         setMatrixSubView("confusion");

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
   Activity,
@@ -19,9 +19,34 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const history = useNexusStore((state) => state.history);
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
+    const activeSubTab = useNexusStore((state) => state.activeSubTab);
     const [mode, setMode] = useState<
       "single" | "comparative" | "walkforward" | "replay" | "whatif"
     >("single");
+
+    useEffect(() => {
+      const handleSubNav = (e: CustomEvent<{ subTab: string }>) => {
+        const sub = (e.detail?.subTab || "").toLowerCase();
+        if (sub === "comparative" || sub === "compare") setMode("comparative");
+        else if (sub === "walkforward" || sub === "walk_forward" || sub === "mc") setMode("walkforward");
+        else if (sub === "replay" || sub === "deterministic") setMode("replay");
+        else if (sub === "whatif" || sub === "what_if") setMode("whatif");
+        else if (sub === "single" || sub === "standard") setMode("single");
+      };
+
+      window.addEventListener("NAVIGATE_SUB_SIMULATION" as any, handleSubNav);
+      return () => window.removeEventListener("NAVIGATE_SUB_SIMULATION" as any, handleSubNav);
+    }, []);
+
+    useEffect(() => {
+      if (!activeSubTab) return;
+      const sub = activeSubTab.toLowerCase();
+      if (sub === "comparative" || sub === "compare") setMode("comparative");
+      else if (sub === "walkforward" || sub === "walk_forward" || sub === "mc") setMode("walkforward");
+      else if (sub === "replay" || sub === "deterministic") setMode("replay");
+      else if (sub === "whatif" || sub === "what_if") setMode("whatif");
+      else if (sub === "single" || sub === "standard") setMode("single");
+    }, [activeSubTab]);
 
     if (nexusLoading) {
       return (

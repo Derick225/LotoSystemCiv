@@ -247,8 +247,36 @@ export const useNexusStore = create<NexusState>()(
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
       setFocusMode: (focus) => set({ isFocusMode: focus }),
-      navigateToModule: (mainTab, subTab = null) =>
-        set({ activeMainTab: mainTab, activeSubTab: subTab }),
+      navigateToModule: (mainTab, subTab = null) => {
+        const raw = (mainTab || "").trim();
+        const lower = raw.toLowerCase();
+        let targetMain = raw;
+        let targetSub = subTab;
+
+        if (lower === "flux" || lower === "history" || lower === "data") {
+          targetMain = "Flux";
+        } else if (lower === "signaux" || lower === "signals" || lower === "ensemble" || lower === "stats") {
+          targetMain = "Signaux";
+          if (lower === "stats" && !targetSub) targetSub = "stats";
+        } else if (lower === "topologie" || lower === "topology" || lower === "geometry") {
+          targetMain = "Topologie";
+        } else if (lower === "oracle" || lower === "predictive" || lower === "prediction" || lower === "inference") {
+          targetMain = "Oracle";
+        } else if (lower === "simulation" || lower === "backtest" || lower === "replay") {
+          targetMain = "Simulation";
+          if (lower === "replay" && !targetSub) targetSub = "replay";
+        } else if (lower === "forensic" || lower === "audit" || lower === "autopsy") {
+          targetMain = "Forensic";
+        } else if (lower === "genomique" || lower === "genomic") {
+          targetMain = "Genomique";
+        } else if (lower === "dnahistory" || lower === "dna" || lower === "dna_history") {
+          targetMain = "DnaHistory";
+        } else if (lower === "admin") {
+          targetMain = "admin";
+        }
+
+        set({ activeMainTab: targetMain, activeSubTab: targetSub });
+      },
       setGlobalWeights: (weights) => {
         const currentDraw = get().drawName;
         const normalized = normalizeWeights(weights);

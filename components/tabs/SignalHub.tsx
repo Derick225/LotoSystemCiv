@@ -57,6 +57,7 @@ export const SignalHub: React.FC = () => {
   const history = useNexusStore((state) => state.history);
   const drawName = useNexusStore((state) => state.drawName);
   const currentDrawName = useNexusStore((state) => state.currentDrawName);
+  const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const activeDraw = drawName || currentDrawName;
 
   const [pillar, setPillar] = useState<SignalPillar>("stats_patterns");
@@ -71,25 +72,33 @@ export const SignalHub: React.FC = () => {
     }
   }, [history]);
 
+  const mapSubTabToState = (subRaw: string) => {
+    const sub = (subRaw || "").toLowerCase();
+    if (sub === "stats" || sub === "patterns" || sub === "gaps") {
+      setPillar("stats_patterns");
+      setStatsSubView(sub as "stats" | "patterns" | "gaps");
+    } else if (sub === "spectral" || sub === "fractal" || sub === "math" || sub === "hurst" || sub === "volatility") {
+      setPillar("signals_spectral");
+      if (sub === "hurst" || sub === "volatility") {
+        setSpectralSubView("math");
+      } else {
+        setSpectralSubView(sub as "spectral" | "fractal" | "math");
+      }
+    } else if (sub === "temporal" || sub === "cluster" || sub === "machine" || sub === "cycles") {
+      setPillar("dynamics_clustering");
+      setDynamicsSubView(sub === "cycles" ? "temporal" : (sub as "temporal" | "cluster" | "machine"));
+    } else if (sub === "academy" || sub === "formation") {
+      setPillar("academy");
+    }
+  };
+
   // Écouteur d'événements pour navigation croisée avec rétro-compatibilité totale
   useEffect(() => {
     const handleNavigation = (e: Event) => {
       const customEvent = e as CustomEvent;
       const sub = customEvent.detail?.subTab;
       if (!sub) return;
-
-      if (sub === "stats" || sub === "patterns" || sub === "gaps") {
-        setPillar("stats_patterns");
-        setStatsSubView(sub as "stats" | "patterns" | "gaps");
-      } else if (sub === "spectral" || sub === "fractal" || sub === "math") {
-        setPillar("signals_spectral");
-        setSpectralSubView(sub as "spectral" | "fractal" | "math");
-      } else if (sub === "temporal" || sub === "cluster" || sub === "machine") {
-        setPillar("dynamics_clustering");
-        setDynamicsSubView(sub as "temporal" | "cluster" | "machine");
-      } else if (sub === "academy") {
-        setPillar("academy");
-      }
+      mapSubTabToState(sub);
 
       const contentElement = document.getElementById("signal-content");
       if (contentElement) {
@@ -100,6 +109,12 @@ export const SignalHub: React.FC = () => {
     window.addEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);
     return () => window.removeEventListener("NAVIGATE_SUB_SIGNAUX", handleNavigation);
   }, []);
+
+  useEffect(() => {
+    if (activeSubTab) {
+      mapSubTabToState(activeSubTab);
+    }
+  }, [activeSubTab]);
 
   const pillars = [
     {

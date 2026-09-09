@@ -69,19 +69,20 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     return () => window.removeEventListener("NAVIGATE_SUB_ORACLE", handleNavigation);
   }, []);
 
-  const mapSubTabToState = (sub: string) => {
-    if (sub === "strategic") {
+  const mapSubTabToState = (subRaw: string) => {
+    const sub = (subRaw || "").toLowerCase();
+    if (sub === "strategic" || sub === "synthesis" || sub === "portfolio") {
       setPillar("strategic");
-    } else if (sub === "platinum") {
+    } else if (sub === "platinum" || sub === "prediction" || sub === "predictions" || sub === "inference") {
       setPillar("inference");
       setInferenceMode("platinum");
-    } else if (sub === "oracle") {
+    } else if (sub === "oracle" || sub === "meta" || sub === "meta_analyst") {
       setPillar("inference");
       setInferenceMode("oracle");
-    } else if (sub === "ai_prediction" || sub === "ai_cloud") {
+    } else if (sub === "ai_prediction" || sub === "ai_cloud" || sub === "ai" || sub === "cloud") {
       setPillar("inference");
       setInferenceMode("ai_cloud");
-    } else if (sub === "orch" || sub === "models") {
+    } else if (sub === "orch" || sub === "models" || sub === "ensemble" || sub === "orchestration") {
       setPillar("orchestration");
       setOrchestrationMode("models");
     } else if (sub === "inertia_optimizer" || sub === "inertia") {
