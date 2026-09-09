@@ -53,6 +53,108 @@ export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: s
 };
 
 /**
+ * ============================================================================
+ * TOPOLOGIE MATÉRIELLE DES BOULONNIERS (MACHINES PHYSIQUES)
+ * ============================================================================
+ * Règle d'or matérielle :
+ * - Groupe A : Tirages de 10H, 16H et Dimanche 19H55 partagent le même appareil mécanique.
+ * - Groupe B : Tirages de 13H partagent leur propre boulonnier dédié.
+ * - Groupe C : Tirages de 19H55 (Lundi au Samedi) partagent leur boulonnier dédié.
+ */
+export type BoulonnierId = 'BOULONNIER_A' | 'BOULONNIER_B' | 'BOULONNIER_C';
+
+export interface BoulonnierInfo {
+  id: BoulonnierId;
+  code: 'A' | 'B' | 'C';
+  name: string;
+  shortLabel: string;
+  badgeColor: string;
+  description: string;
+  draws: string[];
+}
+
+export const BOULONNIER_CONFIG: Record<BoulonnierId, BoulonnierInfo> = {
+  BOULONNIER_A: {
+    id: 'BOULONNIER_A',
+    code: 'A',
+    name: 'Boulonnier Groupe A (10H / 16H / Dimanche 19H55)',
+    shortLabel: 'Boulonnier A (10H/16H/Dim 19H55)',
+    badgeColor: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+    description: 'Appareil mécanique partagé pour tous les tirages du matin (10H), d\'après-midi (16H) et le tirage dominical de 19H55 (Espoir).',
+    draws: [
+      // 10H
+      'Reveil', 'La Matinale', 'Premiere Heure', 'Kado', 'Cash', 'Soutra', 'Benediction',
+      // 16H
+      'Akwaba', 'Sika', 'Baraka', 'Monni', 'Wari', 'Moaye', 'Awale',
+      // Dimanche 19H55
+      'Espoir'
+    ]
+  },
+  BOULONNIER_B: {
+    id: 'BOULONNIER_B',
+    code: 'B',
+    name: 'Boulonnier Groupe B (13H Zénith)',
+    shortLabel: 'Boulonnier B (13H)',
+    badgeColor: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
+    description: 'Boulonnier mécanique dédié exclusivement aux 7 tirages quotidiens du midi (13H00).',
+    draws: [
+      'Etoile', 'Emergence', 'Fortune', 'Privilege', 'Solution', 'Diamant', 'Prestige'
+    ]
+  },
+  BOULONNIER_C: {
+    id: 'BOULONNIER_C',
+    code: 'C',
+    name: 'Boulonnier Groupe C (19H55 Semaine)',
+    shortLabel: 'Boulonnier C (19H55 Semaine)',
+    badgeColor: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30',
+    description: 'Boulonnier mécanique dédié aux grands tirages nocturnes de 19H55 du lundi au samedi.',
+    draws: [
+      'Monday Special', 'Lucky Tuesday', 'Midweek', 'Fortune Thursday', 'Friday Bonanza', 'National'
+    ]
+  }
+};
+
+const normalizeName = (name: string): string =>
+  name
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^(loto|tirage)\s+/i, '')
+    .replace(/[\s\-_/]+/g, ' ')
+    .trim();
+
+export const getBoulonnierForDraw = (drawName?: string | null): BoulonnierInfo => {
+  if (!drawName) return BOULONNIER_CONFIG.BOULONNIER_A;
+  const norm = normalizeName(drawName);
+
+  for (const config of Object.values(BOULONNIER_CONFIG)) {
+    if (config.draws.some(d => normalizeName(d) === norm)) {
+      return config;
+    }
+  }
+
+  // Fallback heuristique basé sur l'horaire si le nom contient 13H ou 19H55
+  if (norm.includes('13:00') || norm.includes('13h')) return BOULONNIER_CONFIG.BOULONNIER_B;
+  if (norm.includes('19:55') || norm.includes('19h55') || norm.includes('20h')) {
+    if (norm.includes('dimanche') || norm.includes('espoir')) return BOULONNIER_CONFIG.BOULONNIER_A;
+    return BOULONNIER_CONFIG.BOULONNIER_C;
+  }
+
+  return BOULONNIER_CONFIG.BOULONNIER_A;
+};
+
+export const isSameBoulonnier = (draw1: string, draw2: string): boolean => {
+  const b1 = getBoulonnierForDraw(draw1);
+  const b2 = getBoulonnierForDraw(draw2);
+  return b1.id === b2.id;
+};
+
+export const getBoulonnierDraws = (drawName: string): string[] => {
+  return getBoulonnierForDraw(drawName).draws;
+};
+
+/**
  * Liste des tirages officiels ne disposant pas de numéros machine (notamment Fortune Thursday).
  * Règle d'or : Fortune (Mercredi 13:00) dispose de numéros machine,
  * tandis que Fortune Thursday (Jeudi 19:55) n'a AUCUN numéro machine.

@@ -1,18 +1,18 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { extractDrawNumbers } from './featureExtractor';
-import { isDrawWithoutMachine } from '../../constants';
+import { isDrawWithoutMachine, getBoulonnierForDraw, BoulonnierInfo } from '../../constants';
 
 export interface MachineCandidate {
   number: number;
   sourceMachineNumber: number;
-  transferType: 'direct' | 'neighbor' | 'mirror' | 'cross_markov';
+  transferType: 'direct' | 'neighbor' | 'mirror' | 'cross_markov' | 'boulonnier_shared';
   historicalTransferCount: number;
   transferProbability: number; // 0 - 100%
   historicalLags: number[];
   averageLag: number;
   confidenceScore: number; // 0 - 100
-  recommendationTag: 'CANDIDAT MAJEUR' | 'RÉSONANCE FORTE' | 'SURVEILLANCE' | 'MIROIR MACHINE';
+  recommendationTag: 'CANDIDAT MAJEUR' | 'RÉSONANCE FORTE' | 'SURVEILLANCE' | 'MIROIR MACHINE' | 'BOULONNIER PHYSIQUE';
 }
 
 export interface MachineTransferPair {
@@ -20,6 +20,22 @@ export interface MachineTransferPair {
   winnerNum: number;
   coOccurrenceCount: number;
   affinityRatio: number;
+}
+
+export interface BoulonnierMechanicalReport {
+  boulonnierInfo: BoulonnierInfo;
+  siblingDraws: string[];
+  totalBoulonnierEvents: number;
+  interSessionTransferRate: number; // % of consecutive sessions on this machine where machine/winner carry-over occurred
+  latestPhysicalSession: {
+    drawName: string;
+    date?: string;
+    winners: number[];
+    machine: number[];
+  } | null;
+  mechanicalFrequencies: { number: number; count: number; zScore: number; sector: number }[];
+  boulonnierCandidates: MachineCandidate[];
+  mechanicalRemark: string;
 }
 
 export interface MachineTransferReport {
@@ -34,6 +50,7 @@ export interface MachineTransferReport {
   crossAffinityMatrix: MachineTransferPair[];
   lagDistribution: { lag1: number; lag2: number; lag3: number; lag4Plus: number };
   diagnosticRemark: string;
+  boulonnierReport: BoulonnierMechanicalReport;
 }
 
 const getMirrorNumber = (n: number): number => {
@@ -44,12 +61,142 @@ const getMirrorNumber = (n: number): number => {
 };
 
 /**
+ * Calcule l'analyse mécanique consolidée pour l'ensemble des tirages partageant le même Boulonnier physique.
+ */
+export const calculateBoulonnierMechanicalReport = (
+  drawName: string,
+  rawHistory: DrawResult[]
+): BoulonnierMechanicalReport => {
+  const boulonnierInfo = getBoulonnierForDraw(drawName);
+  const siblingSet = new Set(boulonnierInfo.draws.map(d => d.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()));
+
+  // Filtrer l'historique chronologique pour tous les tirages exécutés sur ce boulonnier
+  const boulonnierHistory = rawHistory.filter(draw => {
+    const dName = (draw.drawName || draw.draw_name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    return siblingSet.has(dName);
+  });
+
+  const totalEvents = boulonnierHistory.length;
+  const siblingDraws = boulonnierInfo.draws;
+
+  if (totalEvents === 0) {
+    return {
+      boulonnierInfo,
+      siblingDraws,
+      totalBoulonnierEvents: 0,
+      interSessionTransferRate: 0,
+      latestPhysicalSession: null,
+      mechanicalFrequencies: [],
+      boulonnierCandidates: [],
+      mechanicalRemark: `Aucune session historique trouvée pour le ${boulonnierInfo.name}.`,
+    };
+  }
+
+  // Dernière session physique passée sur cette machine mécanique
+  const latestDraw = boulonnierHistory[0];
+  const latestNums = extractDrawNumbers(latestDraw);
+  const latestPhysicalSession = {
+    drawName: latestDraw.drawName || latestDraw.draw_name || drawName,
+    date: latestDraw.date,
+    winners: latestNums.winners,
+    machine: latestNums.machine,
+  };
+
+  // 1. Comptage des fréquences globales sur cette machine physique (Détection des biais de plateau/rotor)
+  const hitCounts = new Array(91).fill(0);
+  const machineHits = new Array(91).fill(0);
+  let evaluatedTransfers = 0;
+  let successfulTransfers = 0;
+
+  for (let i = 0; i < totalEvents; i++) {
+    const { winners, machine } = extractDrawNumbers(boulonnierHistory[i]);
+    winners.forEach(w => { if (w >= 1 && w <= 90) hitCounts[w]++; });
+    machine.forEach(m => { if (m >= 1 && m <= 90) machineHits[m]++; });
+
+    // Transfert inter-sessions consécutives sur le même appareil mécanique
+    if (i < totalEvents - 1) {
+      const prevSession = extractDrawNumbers(boulonnierHistory[i + 1]);
+      if (prevSession.machine.length > 0 && winners.length > 0) {
+        evaluatedTransfers++;
+        const hasCarry = prevSession.machine.some(m => winners.includes(m));
+        if (hasCarry) successfulTransfers++;
+      }
+    }
+  }
+
+  const interSessionTransferRate = evaluatedTransfers > 0 ? (successfulTransfers / evaluatedTransfers) * 100 : 0;
+
+  // Calcul du Z-Score mécanique par numéro (zéro nombre magique)
+  const pSingle = 5 / 90;
+  const expectedHits = totalEvents * pSingle;
+  const stdDev = Math.max(Number.EPSILON, Math.sqrt(totalEvents * pSingle * (1 - pSingle)));
+
+  const mechanicalFrequencies: { number: number; count: number; zScore: number; sector: number }[] = [];
+  for (let n = 1; n <= 90; n++) {
+    const count = hitCounts[n];
+    const zScore = (count - expectedHits) / stdDev;
+    const sector = Math.ceil(n / 18); // 5 secteurs de 18 numéros
+    mechanicalFrequencies.push({ number: n, count, zScore, sector });
+  }
+
+  // Candidats issus de la dernière session du même boulonnier
+  const boulonnierCandidates: MachineCandidate[] = [];
+  const processed = new Set<number>();
+
+  // Numéros machine et gagnants de la toute dernière session physique du boulonnier
+  const activePhysicalSource = [...latestNums.machine, ...latestNums.winners];
+  
+  activePhysicalSource.forEach(num => {
+    if (num >= 1 && num <= 90 && !processed.has(num)) {
+      processed.add(num);
+      const isMachineSource = latestNums.machine.includes(num);
+      const z = mechanicalFrequencies[num - 1]?.zScore || 0;
+      const prob = Math.min(95, Math.max(10, Math.round(50 + z * 15 + (isMachineSource ? 15 : 0))));
+      
+      boulonnierCandidates.push({
+        number: num,
+        sourceMachineNumber: num,
+        transferType: 'boulonnier_shared',
+        historicalTransferCount: machineHits[num] || 0,
+        transferProbability: prob,
+        historicalLags: [1],
+        averageLag: 1.0,
+        confidenceScore: Math.min(98, Math.max(20, Math.round(prob * 1.05))),
+        recommendationTag: 'BOULONNIER PHYSIQUE',
+      });
+    }
+  });
+
+  boulonnierCandidates.sort((a, b) => b.confidenceScore - a.confidenceScore);
+
+  let mechanicalRemark = `Topologie Matérielle : ${boulonnierInfo.name}. `;
+  if (interSessionTransferRate >= 25) {
+    mechanicalRemark += `Forte résonance mécanique inter-séances (${interSessionTransferRate.toFixed(1)}%). Le rotor conserve une inertie cinématique active entre tirages affiliés.`;
+  } else {
+    mechanicalRemark += `Comportement mécanique stable (${interSessionTransferRate.toFixed(1)}% de transfert inter-séances sur ${totalEvents} tirages de l'appareil).`;
+  }
+
+  return {
+    boulonnierInfo,
+    siblingDraws,
+    totalBoulonnierEvents: totalEvents,
+    interSessionTransferRate,
+    latestPhysicalSession,
+    mechanicalFrequencies: mechanicalFrequencies.sort((a, b) => b.zScore - a.zScore).slice(0, 10),
+    boulonnierCandidates: boulonnierCandidates.slice(0, 6),
+    mechanicalRemark,
+  };
+};
+
+/**
  * Moteur d'Analyse du Transfert Machine -> Gagnants (Zero Magic Numbers)
  */
 export const calculateMachineTransferReport = (
   drawName: string,
   rawHistory: DrawResult[]
 ): MachineTransferReport => {
+  const boulonnierReport = calculateBoulonnierMechanicalReport(drawName, rawHistory);
+
   if (isDrawWithoutMachine(drawName)) {
     return {
       drawName,
@@ -59,10 +206,11 @@ export const calculateMachineTransferReport = (
       hasMachineData: false,
       latestMachineNumbers: [],
       topHistoricalTransfers: [],
-      activeSieveCandidates: [],
+      activeSieveCandidates: boulonnierReport.boulonnierCandidates,
       crossAffinityMatrix: [],
       lagDistribution: { lag1: 0, lag2: 0, lag3: 0, lag4Plus: 0 },
-      diagnosticRemark: `Le tirage officiel ${drawName} ne dispose d'aucun numéro machine (contrairement à Fortune du mercredi).`,
+      diagnosticRemark: `Le tirage officiel ${drawName} ne dispose d'aucun numéro machine (contrairement à Fortune du mercredi). Analyse matérielle basée sur le ${boulonnierReport.boulonnierInfo.shortLabel}.`,
+      boulonnierReport,
     };
   }
 
@@ -78,10 +226,11 @@ export const calculateMachineTransferReport = (
       hasMachineData: false,
       latestMachineNumbers: [],
       topHistoricalTransfers: [],
-      activeSieveCandidates: [],
+      activeSieveCandidates: boulonnierReport.boulonnierCandidates,
       crossAffinityMatrix: [],
       lagDistribution: { lag1: 0, lag2: 0, lag3: 0, lag4Plus: 0 },
-      diagnosticRemark: 'Aucun historique disponible pour ce tirage.',
+      diagnosticRemark: `Aucun historique disponible pour ${drawName}.`,
+      boulonnierReport,
     };
   }
 
@@ -104,10 +253,11 @@ export const calculateMachineTransferReport = (
       hasMachineData: false,
       latestMachineNumbers: latestMachine,
       topHistoricalTransfers: [],
-      activeSieveCandidates: [],
+      activeSieveCandidates: boulonnierReport.boulonnierCandidates,
       crossAffinityMatrix: [],
       lagDistribution: { lag1: 0, lag2: 0, lag3: 0, lag4Plus: 0 },
       diagnosticRemark: `Le tirage ${drawName} ne comporte pas de plateau Machine régulier dans son historique.`,
+      boulonnierReport,
     };
   }
 
@@ -214,7 +364,7 @@ export const calculateMachineTransferReport = (
     const convRate = (directTrans / totalApps) * 100;
     const conf = Math.min(99, Math.round(convRate * 1.5 + (directTrans >= 2 ? 25 : 10)));
 
-    let tag: 'CANDIDAT MAJEUR' | 'RÉSONANCE FORTE' | 'SURVEILLANCE' | 'MIROIR MACHINE' = 'SURVEILLANCE';
+    let tag: 'CANDIDAT MAJEUR' | 'RÉSONANCE FORTE' | 'SURVEILLANCE' | 'MIROIR MACHINE' | 'BOULONNIER PHYSIQUE' = 'SURVEILLANCE';
     if (directTrans >= 3 || convRate >= 40) tag = 'CANDIDAT MAJEUR';
     else if (directTrans >= 1 || convRate >= 20) tag = 'RÉSONANCE FORTE';
 
@@ -273,16 +423,24 @@ export const calculateMachineTransferReport = (
     });
   });
 
+  // Ajouter les candidats majeurs du Boulonnier partagé s'ils ne sont pas déjà présents
+  boulonnierReport.boulonnierCandidates.forEach(cand => {
+    if (!processedNumbers.has(cand.number)) {
+      processedNumbers.add(cand.number);
+      activeSieveCandidates.push(cand);
+    }
+  });
+
   activeSieveCandidates.sort((a, b) => b.confidenceScore - a.confidenceScore);
 
   // Diagnostic narratif
-  let diagnosticRemark = `Analyse du plateau Machine pour ${drawName} : `;
+  let diagnosticRemark = `Analyse du plateau Machine pour ${drawName} (${boulonnierReport.boulonnierInfo.shortLabel}) : `;
   if (directTransferRate >= 20) {
     diagnosticRemark += `Haute résonance de transfert direct (${directTransferRate.toFixed(1)}% des tirages capturent au moins 1 numéro machine au tirage suivant). Le vecteur Machine est un puissant attracteur stochastique.`;
   } else if (directTransferRate >= 10) {
     diagnosticRemark += `Résonance modérée de transfert (${directTransferRate.toFixed(1)}%). Prise en compte prioritaire des leaders de conversion (${topHistoricalTransfers.slice(0, 3).map((t) => t.number).join(', ')}).`;
   } else {
-    diagnosticRemark += `Transfert direct diffus (${directTransferRate.toFixed(1)}%). Favoriser les transitions croisées et les résonances harmoniques.`;
+    diagnosticRemark += `Transfert direct diffus (${directTransferRate.toFixed(1)}%). Couplage avec la signature mécanique du ${boulonnierReport.boulonnierInfo.code}.`;
   }
 
   return {
@@ -293,9 +451,10 @@ export const calculateMachineTransferReport = (
     hasMachineData: true,
     latestMachineNumbers: latestMachine,
     topHistoricalTransfers: topHistoricalTransfers.slice(0, 10),
-    activeSieveCandidates: activeSieveCandidates.slice(0, 8),
+    activeSieveCandidates: activeSieveCandidates.slice(0, 10),
     crossAffinityMatrix,
     lagDistribution: lagCounts,
     diagnosticRemark,
+    boulonnierReport,
   };
 };

@@ -33,6 +33,11 @@ const NeuralArchitectureTab = lazy(() =>
     default: m.NeuralArchitectureTab,
   })),
 );
+const BoulonnierCrossCorrelationTab = lazy(() =>
+  import("./BoulonnierCrossCorrelationTab").then((m) => ({
+    default: m.BoulonnierCrossCorrelationTab,
+  })),
+);
 
 interface TopologyHubProps {
   drawName: string;
@@ -52,15 +57,17 @@ const TabLoader = () => (
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const [pillar, setPillar] = useState<TopologyPillar>("geometry_networks");
-  const [geomSubView, setGeomSubView] = useState<"spatial" | "neural">("spatial");
+  const [geomSubView, setGeomSubView] = useState<"spatial" | "neural" | "boulonnier">("spatial");
   const [synergySubView, setSynergySubView] = useState<"synergy" | "decision">("synergy");
   const [combSubView, setCombSubView] = useState<"combinations" | "python">("combinations");
 
   const mapSubTabToState = (subRaw: string) => {
     const sub = (subRaw || "").toLowerCase();
-    if (sub === "spatial" || sub === "neural" || sub === "geometry" || sub === "network") {
+    if (sub === "spatial" || sub === "neural" || sub === "geometry" || sub === "network" || sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") {
       setPillar("geometry_networks");
-      setGeomSubView(sub === "neural" ? "neural" : "spatial");
+      if (sub === "neural") setGeomSubView("neural");
+      else if (sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") setGeomSubView("boulonnier");
+      else setGeomSubView("spatial");
     } else if (sub === "synergy" || sub === "decision" || sub === "tree" || sub === "affinities") {
       setPillar("synergy_decisions");
       setSynergySubView(sub === "decision" || sub === "tree" ? "decision" : "synergy");
@@ -190,10 +197,25 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                     <Network size={13} />
                     Architecture Neurale Graph
                   </button>
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setGeomSubView("boulonnier");
+                    }}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      geomSubView === "boulonnier"
+                        ? "bg-amber-600 text-white shadow-sm font-black"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <Share2 size={13} />
+                    Corrélation Boulonniers (10H/16H/19H55)
+                  </button>
                 </div>
 
                 {geomSubView === "spatial" && <SpatialTab drawName={drawName} />}
                 {geomSubView === "neural" && <NeuralArchitectureTab />}
+                {geomSubView === "boulonnier" && <BoulonnierCrossCorrelationTab drawName={drawName} />}
               </div>
             )}
 
