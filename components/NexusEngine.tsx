@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useNexusStore } from "../store/useNexusStore";
 import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
 import {
@@ -59,6 +59,7 @@ export const NexusEngine: React.FC = () => {
   );
 
   const loading = historyLoading || analyticsLoading;
+  const lastComputedDrawKeyRef = useRef<string>("");
 
   // Sync loading state
   useEffect(() => {
@@ -152,21 +153,6 @@ export const NexusEngine: React.FC = () => {
     let mounted = true;
     const runEngine = async () => {
       try {
-        // Génération de la prédiction Master
-        const prediction = await generateMasterPrediction(
-          drawName,
-          history,
-          temporalDepth,
-          globalWeights,
-          {
-            spectral: analytics.spectral,
-            correlationMatrix: analytics.correlationMatrix,
-            regularity: analytics.regularity,
-          },
-          analytics.symbioticContext || undefined,
-        );
-        if (mounted) setLastPrediction(prediction);
-
         // Insights
         const insights = await generateSmartInsights(
           drawName,
@@ -179,6 +165,28 @@ export const NexusEngine: React.FC = () => {
           analytics.regularity,
         );
         if (mounted) setSmartInsights(insights);
+
+        // Clé de version du jeu de données actif (drawName + nombre de tirages + date du dernier tirage)
+        const currentDataKey = `${drawName}_${history.length}_${history[0]?.date || ""}`;
+        const currentPred = useNexusStore.getState().lastPrediction;
+
+        // Génération automatique uniquement si aucune prédiction n'existe pour ce tirage ou si le jeu de données a changé
+        if (!currentPred || currentPred.drawName !== drawName || lastComputedDrawKeyRef.current !== currentDataKey) {
+          lastComputedDrawKeyRef.current = currentDataKey;
+          const prediction = await generateMasterPrediction(
+            drawName,
+            history,
+            temporalDepth,
+            globalWeights,
+            {
+              spectral: analytics.spectral,
+              correlationMatrix: analytics.correlationMatrix,
+              regularity: analytics.regularity,
+            },
+            analytics.symbioticContext || undefined,
+          );
+          if (mounted) setLastPrediction(prediction);
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         logError(
@@ -192,7 +200,7 @@ export const NexusEngine: React.FC = () => {
 
     const t = setTimeout(() => {
       runEngine();
-    }, 100);
+    }, 250);
     return () => {
       mounted = false;
       clearTimeout(t);

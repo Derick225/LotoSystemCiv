@@ -73,6 +73,7 @@ export interface PredictionHistoryItem {
 }
 
 export interface Prediction {
+  drawName?: string;
   suggestedNumbers: number[];
   candidates: number[];
   confidence: number;

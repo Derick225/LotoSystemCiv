@@ -137,18 +137,24 @@ export const usePredictionGenerator = (drawName: string) => {
 
     useEffect(() => {
         let isMounted = true;
-        setLastPrediction(null);
-        lastInferenceStateRef.current = null;
+        const currentPred = useNexusStore.getState().lastPrediction;
+        
+        // Ne réinitialiser que si la prédiction active ne correspond pas au tirage courant
+        if (!currentPred || currentPred.drawName !== drawName) {
+            lastInferenceStateRef.current = null;
 
-        // Chargement instantané de la dernière prédiction en cache local (Offline Fallback & Restauration Instantanée)
-        if (drawName) {
-            getLatestPredictionForDraw(drawName).then((cached) => {
-                if (isMounted && cached) {
-                    setLastPrediction(cached);
-                }
-            }).catch(e => {
-                console.warn("[Oracle Base] Erreur lecture cache prédiction:", e);
-            });
+            // Chargement instantané de la dernière prédiction en cache local (Offline Fallback & Restauration Instantanée)
+            if (drawName) {
+                getLatestPredictionForDraw(drawName).then((cached) => {
+                    if (isMounted && cached) {
+                        setLastPrediction(cached);
+                    } else if (isMounted && (!currentPred || currentPred.drawName !== drawName)) {
+                        setLastPrediction(null);
+                    }
+                }).catch(e => {
+                    console.warn("[Oracle Base] Erreur lecture cache prédiction:", e);
+                });
+            }
         }
 
         return () => {
