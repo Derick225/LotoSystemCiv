@@ -1889,3 +1889,34 @@ export const runCounterfactualSimulation = (
     baselineWassersteinLoss: baseline.wassersteinLoss,
   };
 };
+
+/**
+ * Déclenche l'auto-ajustement en boucle fermée à partir d'un rapport Forensic
+ * Post-Mortem ➔ Micro-SGD ➔ Création automatique de Version ADN
+ */
+export const autoTuneModelDnaFromAutopsyReport = async (
+  report: ForensicReport,
+  history: DrawResult[],
+  options?: { dryRun?: boolean; learningRateOverride?: number }
+) => {
+  const { executeClosedLoopAutoAdjustment } = await import('./prediction/closedLoopAutopsyService');
+  const { getAlgoWeights } = await import('./prediction/weightsManager');
+  const currentWeights = await getAlgoWeights(report.drawName);
+
+  // Identifier l'index du tirage dans l'historique
+  const drawIndex = history.findIndex((d) => d.date === report.date || d.id === report.drawResultId);
+  const targetIndex = drawIndex >= 0 ? drawIndex : 0;
+
+  return executeClosedLoopAutoAdjustment(
+    report.drawName,
+    targetIndex,
+    history,
+    currentWeights,
+    {
+      dryRun: options?.dryRun,
+      learningRateOverride: options?.learningRateOverride,
+      auditContext: `Déclenché depuis le rapport Forensic ${report.id} (Verdict: ${report.verdict || report.failureMode})`,
+    }
+  );
+};
+

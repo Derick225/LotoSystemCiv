@@ -49,13 +49,15 @@ export const calculateScores = (
   weights: AlgoWeights,
   advancedMetrics: EnhancedMetrics,
   history: DrawResult[],
-  confidenceLevel: number = 0.90 // Paramètre mathématique au lieu de 0.05/0.95 en dur
+  confidenceLevel: number = 0.90, // Paramètre mathématique au lieu de 0.05/0.95 en dur
+  drawName?: string
 ): ScoredNumber[] => {
   const N = 90;
   const context: AlgorithmContext = {
     features,
     advancedMetrics,
     history,
+    drawName: drawName || (history.length > 0 ? history[0].drawName : undefined),
     weights: { ...weights },
     algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },

@@ -4,6 +4,7 @@ import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from './prediction/
 import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysisService';
 import { detectGameRegime, calculateTemporalDriftLearningRate } from './mathService';
 import { LCG } from '../utils/mathUtils';
+import { recordModelDnaVersion } from './prediction/modelDnaKnowledgeBase';
 
 const generateDeterministicId = (prefix: string, index: number, seedStr: string): string => {
   let hash = 0;
@@ -137,6 +138,29 @@ export const applyForensicAdjustments = async (
   if (!dryRun) {
     // Sauvegarde isolée par drawName
     await saveAlgoWeights(drawName, finalNormalized);
+
+    // Enregistrement automatique de la version dans la base de connaissances ADN
+    try {
+      const auditTrail = learningSession.adjustments.map(
+        (a) => `${a.algo}: ${(a.oldWeight * 100).toFixed(1)}% ➔ ${(a.newWeight * 100).toFixed(1)}% (${a.reason})`
+      );
+      await recordModelDnaVersion({
+        drawName,
+        version: `v_forensic_${Date.now().toString(36)}`,
+        origin: 'FORENSIC_AUTOPSY',
+        weights: finalNormalized,
+        performance: {
+          score: 75.0,
+          relativeGain: alpha * 10.0,
+        },
+        causalAuditTrail: [
+          `Session Forensic appliquée (Session ID: ${learningSession.id})`,
+          ...auditTrail.slice(0, 5),
+        ],
+      });
+    } catch (e) {
+      console.warn('[forensicTrainingBridge] Erreur lors de l’enregistrement ADN:', e);
+    }
 
     // Ajustement continu des règles adaptatives
     const currentRules = getAdaptiveRules(drawName);

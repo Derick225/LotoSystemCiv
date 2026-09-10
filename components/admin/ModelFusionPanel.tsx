@@ -104,6 +104,7 @@ const CATEGORY_MAP: Record<string, { label: string; keys: AlgoKey[]; color: stri
       AlgoKey.MACHINE_TRANSFER,
       AlgoKey.ISOLATION_ANOMALY,
       AlgoKey.INTER_MONTHLY_RESONANCE,
+      AlgoKey.INTER_DRAW_RESONANCE,
     ],
     color: "amber",
   },
@@ -410,13 +411,14 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         lastPrediction,
         weights,
         fusionBiases,
-        fusionMethod
+        fusionMethod,
+        selectedDrawName
       );
     } catch (e) {
       console.warn("[ModelFusionPanel] Erreur simulation fusion:", e);
       return null;
     }
-  }, [history, spectral, lastPrediction, weights, fusionBiases, fusionMethod]);
+  }, [history, spectral, lastPrediction, weights, fusionBiases, fusionMethod, selectedDrawName]);
 
   // Filtered algorithms list for weights matrix
   const filteredAlgos = useMemo(() => {

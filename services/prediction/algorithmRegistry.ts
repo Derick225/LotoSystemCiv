@@ -111,6 +111,7 @@ const createValidationContext = (): AlgorithmContext => {
   const machineTransferMap = new Float32Array(91);
   const shadowProbabilityMap = new Float32Array(91);
   const networkCorrelationMap = new Float32Array(91);
+  const interDrawMap = new Float32Array(91);
   const affinityMap: Float32Array[] = Array.from({ length: 91 }, () => new Float32Array(91));
 
   for (let i = 1; i <= 90; i++) {
@@ -118,6 +119,7 @@ const createValidationContext = (): AlgorithmContext => {
     gapsMap[i] = 5;
     shadowProbabilityMap[i] = 0.5;
     networkCorrelationMap[i] = 0.3;
+    interDrawMap[i] = 0.0555;
     momentumMap[i] = 1.0;
     machineTransferMap[i] = 0.5;
   }
@@ -131,7 +133,8 @@ const createValidationContext = (): AlgorithmContext => {
       momentumMap,
       machineTransferMap,
       shadowProbabilityMap,
-      networkCorrelationMap
+      networkCorrelationMap,
+      interDrawMap
     },
     advancedMetrics: {
       digitalRoot: {},

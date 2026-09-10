@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNexusStore } from "../store/useNexusStore";
 import {
   executeClosedLoopAutopsy,
+  executeClosedLoopAutoAdjustment,
   ClosedLoopAutopsyReport,
+  ClosedLoopAutoAdjustmentResult,
 } from "../services/prediction/closedLoopAutopsyService";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useToast } from "./ui/Toast";
@@ -23,6 +25,9 @@ import {
   Compass,
   Layers,
   Award,
+  Dna,
+  History as HistoryIcon,
+  FileText,
 } from "lucide-react";
 
 export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
@@ -38,6 +43,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [isApplying, setIsApplying] = useState<boolean>(false);
   const [applied, setApplied] = useState<boolean>(false);
+  const [lastAdjustmentResult, setLastAdjustmentResult] = useState<ClosedLoopAutoAdjustmentResult | null>(null);
 
   // Filtrage strict par tirage (Tirage Isolation)
   const drawHistory = useMemo(() => {
@@ -48,6 +54,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     try {
       setLoading(true);
       setApplied(false);
+      setLastAdjustmentResult(null);
       const res = await executeClosedLoopAutopsy(
         drawName,
         index,
@@ -66,17 +73,27 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     runAutopsy(selectedDrawIndex);
   }, [drawName, selectedDrawIndex, drawHistory.length]);
 
-  const handleApplyCorrection = () => {
+  const handleApplyCorrection = async () => {
     if (!report) return;
     try {
       setIsApplying(true);
       audioEngine.play("click");
-      setGlobalWeights(report.correctedWeights);
+      const result = await executeClosedLoopAutoAdjustment(
+        drawName,
+        selectedDrawIndex,
+        drawHistory,
+        globalWeights
+      );
+      setLastAdjustmentResult(result);
+      setGlobalWeights(result.optimizedWeights);
       setApplied(true);
-      showToast("ADN Algorithmique recalibré par Boucle Fermée !", "success");
+      showToast(
+        `ADN Recalibré ! Nouvelle version ${result.dnaRecord.version} enregistrée`,
+        "success"
+      );
       audioEngine.play("success");
-    } catch (e) {
-      showToast("Erreur lors de l'application de la correction", "error");
+    } catch (e: any) {
+      showToast(e?.message || "Erreur lors de l'application de la correction", "error");
     } finally {
       setIsApplying(false);
     }
@@ -189,6 +206,52 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
               {report.summaryRemark}
             </p>
           </div>
+
+          {/* NOUVELLE VERSION ADN ENREGISTRÉE */}
+          {lastAdjustmentResult && (
+            <div className="p-6 bg-emerald-950/30 border border-emerald-500/30 rounded-3xl space-y-4 animate-fade-in shadow-xl">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                    <Dna size={18} />
+                  </span>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                      Boucle Fermée Réussie &bull; ADN Recalibré
+                    </span>
+                    <h5 className="text-sm font-black text-white font-mono">
+                      Version : {lastAdjustmentResult.dnaRecord.version}
+                    </h5>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-slate-900 text-slate-300 rounded-lg text-[10px] font-mono border border-white/5">
+                    Empreinte : {lastAdjustmentResult.dnaRecord.dnaFingerprint.slice(0, 10)}...
+                  </span>
+                  <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-lg text-[10px] font-black uppercase border border-emerald-500/30">
+                    {lastAdjustmentResult.dnaRecord.origin}
+                  </span>
+                </div>
+              </div>
+
+              {/* AUDIT TRAIL CAUSAL */}
+              <div className="space-y-1.5 pt-2 border-t border-emerald-500/20">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                  <FileText size={12} />
+                  <span>Trace d'Audit Causale (Zéro Nombre Magique)</span>
+                </div>
+                <ul className="space-y-1 text-xs text-slate-300 font-mono">
+                  {lastAdjustmentResult.causalAuditTrail.map((log, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">&bull;</span>
+                      <span className="text-[11px] leading-relaxed">{log}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
           {/* KPI CARDS (DIVERGENCE KL, BRIER SCORE, HITS) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

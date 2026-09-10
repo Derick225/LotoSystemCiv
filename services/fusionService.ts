@@ -1,5 +1,7 @@
 import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } from '../types';
+import { AlgoKey } from '../shared/prediction.types';
 import { calculateShannonEntropy, calculateMedian, gaussianPDF, sigmoid } from './prediction/deterministicCore';
+import { calculateInterDrawVector } from './interDrawService';
 
 // ============================================================================
 // STATISTIQUES ROBUSTES (Zéro sensibilité aux Outliers)
@@ -152,10 +154,16 @@ const calculateQuantumVector = (spectral: SpectralMetric[]): { number: number; s
 };
 
 /**
- * CALCUL DU VECTEUR ORACLE (Markov/Temporel)
+ * CALCUL DU VECTEUR ORACLE (Markov/Temporel/Inter-Tirages)
  * Sans limites de boucle "magiques", en utilisant tout l'historique dispo avec décroissance exponentielle.
+ * Intègre la résonance inter-tirages étanche lorsque drawName est spécifié.
  */
-const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction | null, dna: AlgoWeights): { number: number; score: number }[] => {
+const calculateOracleVector = (
+  history: DrawResult[],
+  lastPrediction: Prediction | null,
+  dna: AlgoWeights,
+  drawName?: string
+): { number: number; score: number }[] => {
   if (history.length < 3) return [];
   
   const associationScores = new Float32Array(91);
@@ -163,10 +171,12 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
   const prevDrawNumbers = history[1].gagnants;
   
   // Normalisation des poids ADN
-  const totalDnaWeight = (dna as any)['markov'] + (dna as any)['temporal'] + (dna as any)['fractal'] || 1.0;
+  const interDrawWeightRaw = (dna as any)[AlgoKey.INTER_DRAW_RESONANCE] || 0;
+  const totalDnaWeight = (dna as any)['markov'] + (dna as any)['temporal'] + (dna as any)['fractal'] + interDrawWeightRaw || 1.0;
   const dnaMarkov = ((dna as any)['markov'] || 0) / totalDnaWeight;
   const dnaTemporal = ((dna as any)['temporal'] || 0) / totalDnaWeight;
   const dnaFractal = ((dna as any)['fractal'] || 0) / totalDnaWeight;
+  const dnaInterDraw = interDrawWeightRaw / totalDnaWeight;
   
   const maxDepth = history.length - 1; // Pas de constante arbitraire "50", parcourt tout l'historique
   
@@ -198,6 +208,15 @@ const calculateOracleVector = (history: DrawResult[], lastPrediction: Prediction
     futureDraw.gagnants.forEach(n => { associationScores[n] += weight; });
   }
 
+  // Intégration continue du vecteur d'affinité inter-tirages déterministe (Familles étanches)
+  if (drawName && dnaInterDraw > 0.001) {
+    const interVec = calculateInterDrawVector(history, drawName);
+    const maxAssocSoFar = Math.max(Number.EPSILON, ...Array.from(associationScores));
+    for (let n = 1; n <= 90; n++) {
+      associationScores[n] += (interVec[n] || 0.0555) * dnaInterDraw * maxAssocSoFar * 0.5;
+    }
+  }
+
   const preds = new Set(lastPrediction?.suggestedNumbers || []);
   const candidates = new Set(lastPrediction?.candidates || []);
   const maxScore = Math.max(Number.EPSILON, ...Array.from(associationScores));
@@ -227,11 +246,12 @@ export const calculateFusion = (
   lastPrediction: Prediction | null,
   weights: AlgoWeights,
   biases: { logic: number; physics: number; intuition: number } = { logic: 1.0, physics: 1.0, intuition: 1.0 },
-  selectionMethod: 'map' | 'balanced' | 'harmonic_consensus' | 'quantum_bayesian' = 'map'
+  selectionMethod: 'map' | 'balanced' | 'harmonic_consensus' | 'quantum_bayesian' = 'map',
+  drawName?: string
 ): FusionResult => {
   const vPython = calculatePythonVector(history);
   const vQuantum = calculateQuantumVector(spectral);
-  const vOracle = calculateOracleVector(history, lastPrediction, weights);
+  const vOracle = calculateOracleVector(history, lastPrediction, weights, drawName);
   
   const mPython = new Map(vPython.map(v => [v.number, v.score]));
   const mQuantum = new Map(vQuantum.map(v => [v.number, v.score]));
@@ -240,7 +260,7 @@ export const calculateFusion = (
   // Regroupement des poids par vecteurs normés
   const dnaLogic = (weights.frequency || 0) + (weights.gap || 0) + (weights.momentum || 0) + (weights.temporal || 0);
   const dnaPhysics = (weights.spectral || 0) + (weights.fractal || 0) + (weights.spatial || 0);
-  const dnaIntuition = (weights.markov || 0) + (weights.bayes || 0) + (weights.affinity || 0);
+  const dnaIntuition = (weights.markov || 0) + (weights.bayes || 0) + (weights.affinity || 0) + ((weights as any)[AlgoKey.INTER_DRAW_RESONANCE] || 0);
   
   // Pondération dynamique par exponentiation continue modulée par l'interactive bias
   const W_PYTHON = Math.exp(dnaLogic) * biases.logic;

@@ -289,7 +289,9 @@ export const scorePredictionNumbers = (
     features,
     weights,
     advancedMetrics,
-    context.history.slice(0, context.validTemporalDepth)
+    context.history.slice(0, context.validTemporalDepth),
+    0.90,
+    context.drawName
   );
 };
 
@@ -323,7 +325,9 @@ export const rescoreWithAdjustments = (
     features,
     weights,
     enhancedMetrics,
-    context.history.slice(0, context.validTemporalDepth)
+    context.history.slice(0, context.validTemporalDepth),
+    0.90,
+    context.drawName
   );
 
   return { rescored, enhancedMetrics };

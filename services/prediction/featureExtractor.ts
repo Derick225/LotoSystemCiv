@@ -2,6 +2,7 @@ import { DrawResult } from '../../types';
 import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { calculateInterDrawVector } from '../interDrawService';
 
 export interface ExtractedFeatures {
   freqMap: Float32Array;
@@ -12,6 +13,7 @@ export interface ExtractedFeatures {
   machineTransferMap: Float32Array;
   shadowProbabilityMap: Float32Array;
   networkCorrelationMap: Float32Array;
+  interDrawMap: Float32Array;
 }
 
 // ============================================================================
@@ -141,7 +143,8 @@ export const extractFeatures = async (
           momentumMap,
           machineTransferMap,
           shadowProbabilityMap: new Float32Array(DOMAIN_MAX + 1),
-          networkCorrelationMap: new Float32Array(DOMAIN_MAX + 1)
+          networkCorrelationMap: new Float32Array(DOMAIN_MAX + 1),
+          interDrawMap: new Float32Array(DOMAIN_MAX + 1)
         };
       }
 
@@ -342,7 +345,7 @@ export const extractFeatures = async (
       }
 
       // ============================================================================
-      // 4. CALCULS COMPLÉMENTAIRES (Shadow, Network)
+      // 4. CALCULS COMPLÉMENTAIRES (Shadow, Network, Inter-Draw)
       // ============================================================================
       const shadowProbabilityMap = new Float32Array(DOMAIN_MAX + 1);
       const networkCorrelationMap = new Float32Array(DOMAIN_MAX + 1);
@@ -361,6 +364,9 @@ export const extractFeatures = async (
         networkCorrelationMap[n] = affSum / DOMAIN_SIZE;
       }
 
+      // Vecteur de résonance inter-tirages calculé au sein de la famille étanche
+      const interDrawMap = calculateInterDrawVector(filteredHistory, drawName);
+
       return {
         freqMap,
         gapsMap,
@@ -369,7 +375,8 @@ export const extractFeatures = async (
         momentumMap,
         machineTransferMap,
         shadowProbabilityMap,
-        networkCorrelationMap
+        networkCorrelationMap,
+        interDrawMap
       };
     },
     CACHE_TTL.MEDIUM,
