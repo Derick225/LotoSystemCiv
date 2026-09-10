@@ -33,9 +33,9 @@ const NeuralArchitectureTab = lazy(() =>
     default: m.NeuralArchitectureTab,
   })),
 );
-const BoulonnierCrossCorrelationTab = lazy(() =>
-  import("./BoulonnierCrossCorrelationTab").then((m) => ({
-    default: m.BoulonnierCrossCorrelationTab,
+const InterDrawRelationsTab = lazy(() =>
+  import("./InterDrawRelationsTab").then((m) => ({
+    default: m.InterDrawRelationsTab,
   })),
 );
 
@@ -43,7 +43,7 @@ interface TopologyHubProps {
   drawName: string;
 }
 
-type TopologyPillar = "geometry_networks" | "synergy_decisions" | "combinations_kernel";
+type TopologyPillar = "geometry_networks" | "synergy_decisions" | "inter_draw_relations" | "combinations_kernel";
 
 const TabLoader = () => (
   <div className="flex flex-col items-center justify-center py-24 gap-4 animate-pulse">
@@ -57,20 +57,20 @@ const TabLoader = () => (
 export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const [pillar, setPillar] = useState<TopologyPillar>("geometry_networks");
-  const [geomSubView, setGeomSubView] = useState<"spatial" | "neural" | "boulonnier">("spatial");
+  const [geomSubView, setGeomSubView] = useState<"spatial" | "neural">("spatial");
   const [synergySubView, setSynergySubView] = useState<"synergy" | "decision">("synergy");
   const [combSubView, setCombSubView] = useState<"combinations" | "python">("combinations");
 
   const mapSubTabToState = (subRaw: string) => {
     const sub = (subRaw || "").toLowerCase();
-    if (sub === "spatial" || sub === "neural" || sub === "geometry" || sub === "network" || sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") {
+    if (sub === "spatial" || sub === "neural" || sub === "geometry" || sub === "network") {
       setPillar("geometry_networks");
-      if (sub === "neural") setGeomSubView("neural");
-      else if (sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") setGeomSubView("boulonnier");
-      else setGeomSubView("spatial");
+      setGeomSubView(sub === "neural" ? "neural" : "spatial");
     } else if (sub === "synergy" || sub === "decision" || sub === "tree" || sub === "affinities") {
       setPillar("synergy_decisions");
       setSynergySubView(sub === "decision" || sub === "tree" ? "decision" : "synergy");
+    } else if (sub === "interdraw" || sub === "inter_draw" || sub === "relations" || sub === "crossdraw" || sub === "familles") {
+      setPillar("inter_draw_relations");
     } else if (sub === "combinations" || sub === "python" || sub === "kernel") {
       setPillar("combinations_kernel");
       setCombSubView(sub === "python" ? "python" : "combinations");
@@ -115,6 +115,13 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
       desc: "Affinités & Arbres",
       icon: Share2,
       color: "text-emerald-400",
+    },
+    {
+      id: "inter_draw_relations" as TopologyPillar,
+      label: "Flux Inter-Tirages",
+      desc: "10H/16H, 13H & 19H55",
+      icon: GitBranch,
+      color: "text-amber-400",
     },
     {
       id: "combinations_kernel" as TopologyPillar,
@@ -197,25 +204,10 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
                     <Network size={13} />
                     Architecture Neurale Graph
                   </button>
-                  <button
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setGeomSubView("boulonnier");
-                    }}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      geomSubView === "boulonnier"
-                        ? "bg-amber-600 text-white shadow-sm font-black"
-                        : "text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    <Share2 size={13} />
-                    Corrélation Boulonniers (10H/16H/19H55)
-                  </button>
                 </div>
 
                 {geomSubView === "spatial" && <SpatialTab drawName={drawName} />}
                 {geomSubView === "neural" && <NeuralArchitectureTab />}
-                {geomSubView === "boulonnier" && <BoulonnierCrossCorrelationTab drawName={drawName} />}
               </div>
             )}
 
@@ -258,7 +250,19 @@ export const TopologyHub: React.FC<TopologyHubProps> = ({ drawName }) => {
               </div>
             )}
 
-            {/* PILIER 3: COMBINAISONS & DEEP KERNEL */}
+            {/* PILIER 3: RELATIONS INTER-TIRAGES (FAMILLES ÉTANCHES) */}
+            {pillar === "inter_draw_relations" && (
+              <div className="space-y-6">
+                <InterDrawRelationsTab
+                  drawName={drawName}
+                  onSelectDraw={(d) => {
+                    useNexusStore.getState().setDrawName(d);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* PILIER 4: COMBINAISONS & DEEP KERNEL */}
             {pillar === "combinations_kernel" && (
               <div className="space-y-6">
                 <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">

@@ -9,6 +9,7 @@ import { normalizeWeights } from './weightsManager';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
 import { parseDateSafely } from '../../utils/dateUtils';
+import { generateProbabilisticScenarioMatrix, SimulationScenarioItem } from './predictionScenarios';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -16,6 +17,20 @@ export interface NearMissItem {
   distance: number;
   type: 'neighbor_1' | 'neighbor_2' | 'mirror' | 'complementary_90';
   description: string;
+}
+
+export interface ScenarioPostMortemEvaluation {
+  scenarioId: string;
+  scenarioName: string;
+  riskProfile: string;
+  ticket: number[];
+  hits: number[];
+  hitCount: number;
+  nearMissCount: number;
+  alignmentScore: number; // Score continu 0-100%
+  klDivergence: number;
+  color?: string;
+  isOptimal: boolean;
 }
 
 export interface AlgoGradientBreakdown {
@@ -52,6 +67,8 @@ export interface ClosedLoopAutopsyReport {
   summaryRemark: string;
   cyclicPhaseProfile?: CyclicPhaseProfileResult;
   temporalDriftMetrics?: TemporalDriftLearningRateResult;
+  scenarioEvaluations?: ScenarioPostMortemEvaluation[];
+  bestPerformingScenario?: ScenarioPostMortemEvaluation;
 }
 
 /**
@@ -351,7 +368,84 @@ export const executeClosedLoopAutopsy = async (
   // Tri par attribution décroissante
   algoGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
 
-  // 8. Synthèse Narrative Enrichie
+  // 8. Évaluation Rétroactive Multi-Scénarios & Divergence KL par Scénario
+  const simulatedScoredNumbers = Array.from({ length: 90 }, (_, i) => {
+    const num = i + 1;
+    const breakdown: Record<string, number> = {};
+    validKeys.forEach((k) => {
+      breakdown[k] = algoScores[k][num] || 0;
+    });
+    return {
+      num,
+      score: ensembleScores[num],
+      prob: probEnsemble[num],
+      normalizedScore: ensembleScores[num],
+      rank: 0,
+      breakdown,
+    };
+  });
+
+  const scenarioDeck = generateProbabilisticScenarioMatrix({
+    selection: top5Predicted,
+    denoisedScores: simulatedScoredNumbers,
+    explainabilityRecord: (advancedMetrics?.topologicalLyapunov as any) || {},
+    finalConfidence: calibrationAccuracy,
+    drawName,
+  });
+
+  const scenarioEvaluations: ScenarioPostMortemEvaluation[] = scenarioDeck.map((sc) => {
+    const ticketSet = new Set(sc.ticket);
+    const hits = sc.ticket.filter((num) => actualWinnersSet.has(num));
+    const hitCount = hits.length;
+
+    // Calcul des near-misses spécifiques au scénario
+    let nearMissCount = 0;
+    actualWinners.forEach((w) => {
+      if (ticketSet.has(w)) return;
+      if (ticketSet.has(w - 1) || ticketSet.has(w + 1) || ticketSet.has(getMirrorNumber(w)) || ticketSet.has(91 - w)) {
+        nearMissCount++;
+      }
+    });
+
+    // Divergence KL du scénario vis-à-vis de la distribution empirique uniforme sur les gagnants
+    let scenKl = 0;
+    for (const winNum of actualWinners) {
+      const pScen = ticketSet.has(winNum) ? 1.0 / 5.0 : 1e-6;
+      scenKl += (1.0 / actualWinners.length) * Math.log((1.0 / actualWinners.length) / pScen);
+    }
+
+    // Score d'alignement continu 0-100% (Hit direct = 20 pts, Frôlement = 6 pts, Pénalité de divergence continue)
+    const rawScore = hitCount * 20.0 + nearMissCount * 6.0;
+    const alignmentScore = Math.max(0, Math.min(100, Math.round(100 * (1.0 / (1.0 + Math.exp(-0.08 * (rawScore - 20.0)))))));
+
+    return {
+      scenarioId: sc.scenarioId,
+      scenarioName: sc.scenarioName,
+      riskProfile: sc.riskProfile,
+      ticket: sc.ticket,
+      hits,
+      hitCount,
+      nearMissCount,
+      alignmentScore,
+      klDivergence: Math.max(0, scenKl),
+      color: sc.color,
+      isOptimal: false,
+    };
+  });
+
+  // Identification du scénario optimal rétroactivement
+  scenarioEvaluations.sort((a, b) => {
+    if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
+    if (b.nearMissCount !== a.nearMissCount) return b.nearMissCount - a.nearMissCount;
+    return a.klDivergence - b.klDivergence;
+  });
+
+  if (scenarioEvaluations.length > 0) {
+    scenarioEvaluations[0].isOptimal = true;
+  }
+  const bestPerformingScenario = scenarioEvaluations[0];
+
+  // 9. Synthèse Narrative Enrichie
   let summaryRemark = `Autopsie rétrospective du ${targetDraw.date} (${cyclicPhaseProfile.phaseLabel}) : `;
   if (directHitsTop5.length >= 2) {
     summaryRemark += `Excellente résonance prédictive avec ${directHitsTop5.length} gagnants capturés directement dans le Top 5 (${directHitsTop5.join(', ')}). `;
@@ -359,6 +453,9 @@ export const executeClosedLoopAutopsy = async (
     summaryRemark += `Convergence solide : ${directHitsTop10.length} numéros détectés dans le Top 10 (${directHitsTop10.join(', ')}). `;
   } else {
     summaryRemark += `Dispersion stochastique modérée. ${nearMisses.length} frôlements spatiaux/miroirs identifiés (${nearMisses.slice(0, 2).map((m) => m.actualWinner).join(', ')}). `;
+  }
+  if (bestPerformingScenario) {
+    summaryRemark += `Scénario le plus performant : "${bestPerformingScenario.scenarioName}" (${bestPerformingScenario.hitCount} exact(s), ${bestPerformingScenario.nearMissCount} frôlement(s)). `;
   }
   summaryRemark += `Taux d'apprentissage η(t) = ${(learningRate * 100).toFixed(2)}% (Résistance dérive: ${(temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%). `;
   summaryRemark += `Gènes leaders sur ce tirage : ${algoGradients.slice(0, 3).map((g) => g.label).join(', ')}.`;
@@ -386,5 +483,7 @@ export const executeClosedLoopAutopsy = async (
     summaryRemark,
     cyclicPhaseProfile,
     temporalDriftMetrics,
+    scenarioEvaluations,
+    bestPerformingScenario,
   };
 };

@@ -208,6 +208,190 @@ export function collectTransferables(
   }
 }
 
+export interface PackedFloat32Vector {
+  buffer: ArrayBuffer;
+  length: number;
+}
+
+/**
+ * Packs a Float32Array or number array into a transferable Float32Array ArrayBuffer.
+ */
+export function packFloat32Vector(arr: Float32Array | number[]): PackedFloat32Vector {
+  if (!arr || arr.length === 0) {
+    return { buffer: new Float32Array(0).buffer, length: 0 };
+  }
+  const typed = arr instanceof Float32Array ? new Float32Array(arr) : Float32Array.from(arr);
+  return { buffer: typed.buffer, length: typed.length };
+}
+
+/**
+ * Unpacks an ArrayBuffer into a Float32Array view directly without memory duplication.
+ */
+export function unpackFloat32Vector(input: ArrayBuffer | Float32Array | number[]): Float32Array {
+  if (input instanceof Float32Array) return input;
+  if (Array.isArray(input)) return Float32Array.from(input);
+  if (!input || (input instanceof ArrayBuffer && input.byteLength === 0)) return new Float32Array(0);
+  return new Float32Array(input);
+}
+
+export interface PackedMonteCarloDenseBatch {
+  iterations: number;
+  drawCount: number;
+  winningCols: number;
+  batchBuffer: ArrayBuffer;
+  transferables: Transferable[];
+}
+
+/**
+ * Packs high-density Monte-Carlo simulation state (N >= 10^5 runs) into a single contiguous
+ * linear memory ArrayBuffer for instant zero-copy Transferable Objects transfer between threads.
+ */
+export function packDenseMonteCarloBatch(
+  iterations: number,
+  weights: Record<string, number>,
+  draws: { gagnants: number[] }[]
+): PackedMonteCarloDenseBatch {
+  const drawCount = draws.length;
+  const winningCols = 5;
+  const weightValues = Object.values(weights);
+  const weightCount = weightValues.length;
+
+  // Layout: [iterations, drawCount, winningCols, weightCount] (4 floats)
+  // + weights (weightCount floats)
+  // + history (drawCount * winningCols floats)
+  const totalLength = 4 + weightCount + (drawCount * winningCols);
+  const floatArr = new Float32Array(totalLength);
+
+  floatArr[0] = iterations;
+  floatArr[1] = drawCount;
+  floatArr[2] = winningCols;
+  floatArr[3] = weightCount;
+
+  for (let w = 0; w < weightCount; w++) {
+    floatArr[4 + w] = weightValues[w] || 0;
+  }
+
+  const histOffset = 4 + weightCount;
+  for (let d = 0; d < drawCount; d++) {
+    const winners = draws[d].gagnants || [];
+    for (let c = 0; c < winningCols; c++) {
+      floatArr[histOffset + (d * winningCols) + c] = winners[c] || 0;
+    }
+  }
+
+  return {
+    iterations,
+    drawCount,
+    winningCols,
+    batchBuffer: floatArr.buffer,
+    transferables: [floatArr.buffer],
+  };
+}
+
+/**
+ * Unpacks linear Monte-Carlo buffer into typed views with 0 allocation overhead.
+ */
+export function unpackDenseMonteCarloBatch(buffer: ArrayBuffer): {
+  iterations: number;
+  drawCount: number;
+  winningCols: number;
+  weights: Float32Array;
+  history: Float32Array;
+} {
+  const floatArr = new Float32Array(buffer);
+  const iterations = Math.round(floatArr[0] || 0);
+  const drawCount = Math.round(floatArr[1] || 0);
+  const winningCols = Math.round(floatArr[2] || 5);
+  const weightCount = Math.round(floatArr[3] || 0);
+
+  const weights = floatArr.subarray(4, 4 + weightCount);
+  const histOffset = 4 + weightCount;
+  const history = floatArr.subarray(histOffset, histOffset + (drawCount * winningCols));
+
+  return {
+    iterations,
+    drawCount,
+    winningCols,
+    weights,
+    history,
+  };
+}
+
+/**
+ * Packs dense Monte Carlo execution results (hit distributions, returns curves, metrics)
+ * into a single transferable Float32Array buffer.
+ */
+export function packMonteCarloResults(
+  hitsDistribution: number[], // 6 floats [0..5]
+  returnsCurve: number[],     // K floats
+  summaryMetrics: {
+    winRate: number;
+    sharpe: number;
+    sortino: number;
+    maxDrawdown: number;
+    profitFactor: number;
+  }
+): { resultBuffer: ArrayBuffer; transferables: Transferable[] } {
+  const curveLen = returnsCurve.length;
+  // Header: 5 metrics + curveLen
+  // + 6 floats hits
+  // + curveLen floats returns
+  const totalFloats = 6 + 6 + curveLen;
+  const bufferArr = new Float32Array(totalFloats);
+
+  bufferArr[0] = summaryMetrics.winRate;
+  bufferArr[1] = summaryMetrics.sharpe;
+  bufferArr[2] = summaryMetrics.sortino;
+  bufferArr[3] = summaryMetrics.maxDrawdown;
+  bufferArr[4] = summaryMetrics.profitFactor;
+  bufferArr[5] = curveLen;
+
+  for (let i = 0; i < 6; i++) {
+    bufferArr[6 + i] = hitsDistribution[i] || 0;
+  }
+
+  for (let j = 0; j < curveLen; j++) {
+    bufferArr[12 + j] = returnsCurve[j] || 0;
+  }
+
+  return {
+    resultBuffer: bufferArr.buffer,
+    transferables: [bufferArr.buffer],
+  };
+}
+
+/**
+ * Unpacks Monte Carlo simulation results from transferable ArrayBuffer.
+ */
+export function unpackMonteCarloResults(buffer: ArrayBuffer): {
+  summaryMetrics: {
+    winRate: number;
+    sharpe: number;
+    sortino: number;
+    maxDrawdown: number;
+    profitFactor: number;
+  };
+  hitsDistribution: number[];
+  returnsCurve: number[];
+} {
+  const arr = new Float32Array(buffer);
+  const winRate = arr[0] || 0;
+  const sharpe = arr[1] || 0;
+  const sortino = arr[2] || 0;
+  const maxDrawdown = arr[3] || 0;
+  const profitFactor = arr[4] || 0;
+  const curveLen = Math.round(arr[5] || 0);
+
+  const hitsDistribution = Array.from(arr.subarray(6, 12));
+  const returnsCurve = Array.from(arr.subarray(12, 12 + curveLen));
+
+  return {
+    summaryMetrics: { winRate, sharpe, sortino, maxDrawdown, profitFactor },
+    hitsDistribution,
+    returnsCurve,
+  };
+}
+
 export interface AdaptiveCoeffs {
   cLinear: number;
   cGrid: number;

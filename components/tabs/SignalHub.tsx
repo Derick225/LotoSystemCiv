@@ -47,9 +47,6 @@ const ClusteringTab = lazy(() =>
 const MachineTransferTab = lazy(() =>
   import("./MachineTransferTab").then((m) => ({ default: m.MachineTransferTab })),
 );
-const BoulonnierCrossCorrelationTab = lazy(() =>
-  import("./BoulonnierCrossCorrelationTab").then((m) => ({ default: m.BoulonnierCrossCorrelationTab })),
-);
 const AcademyTab = lazy(() =>
   import("./AcademyTab").then((m) => ({ default: m.AcademyTab })),
 );
@@ -66,7 +63,7 @@ export const SignalHub: React.FC = () => {
   const [pillar, setPillar] = useState<SignalPillar>("stats_patterns");
   const [statsSubView, setStatsSubView] = useState<"stats" | "patterns" | "gaps">("stats");
   const [spectralSubView, setSpectralSubView] = useState<"spectral" | "fractal" | "math">("spectral");
-  const [dynamicsSubView, setDynamicsSubView] = useState<"temporal" | "cluster" | "machine" | "boulonnier">("temporal");
+  const [dynamicsSubView, setDynamicsSubView] = useState<"temporal" | "cluster" | "machine">("temporal");
   const [geiData, setGeiData] = useState<GapEfficiency[]>([]);
 
   useEffect(() => {
@@ -87,11 +84,9 @@ export const SignalHub: React.FC = () => {
       } else {
         setSpectralSubView(sub as "spectral" | "fractal" | "math");
       }
-    } else if (sub === "temporal" || sub === "cluster" || sub === "machine" || sub === "cycles" || sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") {
+    } else if (sub === "temporal" || sub === "cluster" || sub === "machine" || sub === "cycles") {
       setPillar("dynamics_clustering");
-      if (sub === "cycles") setDynamicsSubView("temporal");
-      else if (sub === "boulonnier" || sub === "boulonniers" || sub === "correlation") setDynamicsSubView("boulonnier");
-      else setDynamicsSubView(sub as "temporal" | "cluster" | "machine" | "boulonnier");
+      setDynamicsSubView(sub === "cycles" ? "temporal" : (sub as "temporal" | "cluster" | "machine"));
     } else if (sub === "academy" || sub === "formation") {
       setPillar("academy");
     }
@@ -361,26 +356,11 @@ export const SignalHub: React.FC = () => {
                         <Cpu size={13} />
                         Transfert Machine & Entropie
                       </button>
-                      <button
-                        onClick={() => {
-                          audioEngine.play("click");
-                          setDynamicsSubView("boulonnier");
-                        }}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                          dynamicsSubView === "boulonnier"
-                            ? "bg-amber-600 text-white shadow-sm font-black"
-                            : "text-slate-400 hover:text-white"
-                        }`}
-                      >
-                        <Workflow size={13} />
-                        Corrélation Boulonniers (10H/16H/19H55)
-                      </button>
                     </div>
 
                     {dynamicsSubView === "temporal" && <TemporalTab drawName={activeDraw} />}
                     {dynamicsSubView === "cluster" && <ClusteringTab drawName={activeDraw} />}
                     {dynamicsSubView === "machine" && <MachineTransferTab drawName={activeDraw} />}
-                    {dynamicsSubView === "boulonnier" && <BoulonnierCrossCorrelationTab drawName={activeDraw} />}
                   </div>
                 )}
 

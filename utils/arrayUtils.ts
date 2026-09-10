@@ -1,6 +1,6 @@
 
 import { LOTTERY_CONSTANTS } from "../services/lotteryService";
-import { isDrawWithoutMachine } from "../constants";
+import { isDrawWithoutMachine, INTER_DRAW_FAMILIES, InterDrawFamilyId, normalizeDrawName } from "../constants";
 
 /**
  * Prend un tableau de nombres (ou de chaînes de nombres) et retourne un tableau de nombres uniques triés.
@@ -67,6 +67,31 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
     }, []);
 
     return purified;
+};
+
+/**
+ * Filtre hermétiquement un historique pour n'inclure QUE les tirages d'une Famille Inter-Tirages étanche.
+ * ZÉRO POLLUTION INTER-FAMILLES (AGENTS.md) :
+ * - FAMILY_10H_16H_SUN19H55 : 10H, 16H et Dimanche 19H55 (Espoir)
+ * - FAMILY_13H : 13H exclusivement
+ * - FAMILY_19H55 : 19H55 exclusivement
+ */
+export const purifyHistoryForInterDrawFamily = <T extends { drawName?: string; draw_name?: string }>(
+    familyId: InterDrawFamilyId,
+    history: T[]
+): T[] => {
+    if (!history || !Array.isArray(history)) return [];
+    const fam = INTER_DRAW_FAMILIES[familyId];
+    if (!fam) return [];
+
+    const allowedSet = new Set(fam.drawNames.map(d => normalizeDrawName(d)));
+
+    return history.filter((d: any) => {
+        const name = d.drawName || d.draw_name;
+        if (!name) return false;
+        const norm = normalizeDrawName(String(name));
+        return allowedSet.has(norm);
+    });
 };
 
 /**

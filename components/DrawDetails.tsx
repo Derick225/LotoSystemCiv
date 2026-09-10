@@ -15,7 +15,9 @@ import {
   Navigation,
   Brain,
   Dna,
+  GitBranch,
 } from "lucide-react";
+import { getPrimaryInterDrawFamily } from "../constants";
 import { useToast } from "./ui/Toast";
 import { LocalErrorBoundary } from "./ui/LocalErrorBoundary";
 import { audioEngine } from "../utils/audioEngine";
@@ -204,6 +206,32 @@ export const DrawDetails: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-2 md:gap-3 relative z-10 w-full md:w-auto justify-end items-center">
+          {/* Badge & Raccourci vers la Famille Inter-Tirages */}
+          {(() => {
+            const fam = getPrimaryInterDrawFamily(drawName);
+            if (!fam) return null;
+            return (
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  navigateToModule("Topologie", "interdraw");
+                }}
+                className="flex items-center gap-2 px-3 md:px-4 py-2 md:py-3.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-xl md:rounded-2xl transition-all duration-300 hover:scale-[1.03] active:scale-95 shadow-md group cursor-pointer"
+                title={`Accéder aux flux de la ${fam.label} (${fam.slotsSummary})`}
+              >
+                <GitBranch size={16} className="text-amber-400 group-hover:rotate-12 transition-transform" />
+                <div className="text-left leading-none">
+                  <div className="text-[9px] font-black uppercase tracking-widest text-amber-500/80">
+                    Inter-Tirages
+                  </div>
+                  <div className="text-[11px] font-black uppercase mt-0.5 text-amber-300">
+                    {fam.shortName}
+                  </div>
+                </div>
+              </button>
+            );
+          })()}
+
           {/* Bouton de bascule de l'Optimisation Forensic avec indicateur visuel et animation */}
           <button
             onClick={() => {

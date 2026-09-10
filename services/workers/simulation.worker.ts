@@ -38,9 +38,19 @@ ctx.onmessage = async (e: MessageEvent) => {
     // 3. Exécution du cœur de simulation
     const report = await runSimulationCore(config);
 
-    // 4. Résultat final
+    // 4. Résultat final avec transfert zéro-copie pour les ArrayBuffers
+    const transferables: Transferable[] = [];
+    if (report && typeof report === 'object') {
+      const { collectTransferables } = await import('./zeroCopy');
+      collectTransferables(report, transferables);
+    }
+
     ctx.postMessage({ type: 'progress', percent: 100 });
-    ctx.postMessage({ type: 'result', report });
+    if (transferables.length > 0) {
+      ctx.postMessage({ type: 'result', report }, transferables);
+    } else {
+      ctx.postMessage({ type: 'result', report });
+    }
     
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);

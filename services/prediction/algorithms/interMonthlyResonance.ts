@@ -2,6 +2,7 @@ import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
 import { LOTTERY_CONSTANTS } from '../../lotteryService';
 import { calculateDnaSieveWeights } from '../../temporalAnalysisService';
+import { calculateInterDrawVector } from '../../interDrawService';
 
 type HistoryDraw = {
   date: string;
@@ -399,6 +400,15 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
           totalSignalMass += periodWeight * machineRatio;
           distinctProjected.add(num);
         }
+      }
+    }
+
+    // --- COUPLAGE DÉTERMINISTE AVEC LES FLUX INTER-TIRAGES DE LA FAMILLE ---
+    if (ctx.drawName) {
+      const interVec = calculateInterDrawVector(history as any, ctx.drawName);
+      for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
+        // Modulation douce continue (gain [0.85, 1.25])
+        rawScores[i] = rawScores[i] * (0.85 + 0.30 * (interVec[i] || 0.0555));
       }
     }
 

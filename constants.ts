@@ -53,108 +53,6 @@ export const SLOT_CONFIG: Record<string, { color: string, icon: string, label: s
 };
 
 /**
- * ============================================================================
- * TOPOLOGIE MATÉRIELLE DES BOULONNIERS (MACHINES PHYSIQUES)
- * ============================================================================
- * Règle d'or matérielle :
- * - Groupe A : Tirages de 10H, 16H et Dimanche 19H55 partagent le même appareil mécanique.
- * - Groupe B : Tirages de 13H partagent leur propre boulonnier dédié.
- * - Groupe C : Tirages de 19H55 (Lundi au Samedi) partagent leur boulonnier dédié.
- */
-export type BoulonnierId = 'BOULONNIER_A' | 'BOULONNIER_B' | 'BOULONNIER_C';
-
-export interface BoulonnierInfo {
-  id: BoulonnierId;
-  code: 'A' | 'B' | 'C';
-  name: string;
-  shortLabel: string;
-  badgeColor: string;
-  description: string;
-  draws: string[];
-}
-
-export const BOULONNIER_CONFIG: Record<BoulonnierId, BoulonnierInfo> = {
-  BOULONNIER_A: {
-    id: 'BOULONNIER_A',
-    code: 'A',
-    name: 'Boulonnier Groupe A (10H / 16H / Dimanche 19H55)',
-    shortLabel: 'Boulonnier A (10H/16H/Dim 19H55)',
-    badgeColor: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-    description: 'Appareil mécanique partagé pour tous les tirages du matin (10H), d\'après-midi (16H) et le tirage dominical de 19H55 (Espoir).',
-    draws: [
-      // 10H
-      'Reveil', 'La Matinale', 'Premiere Heure', 'Kado', 'Cash', 'Soutra', 'Benediction',
-      // 16H
-      'Akwaba', 'Sika', 'Baraka', 'Monni', 'Wari', 'Moaye', 'Awale',
-      // Dimanche 19H55
-      'Espoir'
-    ]
-  },
-  BOULONNIER_B: {
-    id: 'BOULONNIER_B',
-    code: 'B',
-    name: 'Boulonnier Groupe B (13H Zénith)',
-    shortLabel: 'Boulonnier B (13H)',
-    badgeColor: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-    description: 'Boulonnier mécanique dédié exclusivement aux 7 tirages quotidiens du midi (13H00).',
-    draws: [
-      'Etoile', 'Emergence', 'Fortune', 'Privilege', 'Solution', 'Diamant', 'Prestige'
-    ]
-  },
-  BOULONNIER_C: {
-    id: 'BOULONNIER_C',
-    code: 'C',
-    name: 'Boulonnier Groupe C (19H55 Semaine)',
-    shortLabel: 'Boulonnier C (19H55 Semaine)',
-    badgeColor: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30',
-    description: 'Boulonnier mécanique dédié aux grands tirages nocturnes de 19H55 du lundi au samedi.',
-    draws: [
-      'Monday Special', 'Lucky Tuesday', 'Midweek', 'Fortune Thursday', 'Friday Bonanza', 'National'
-    ]
-  }
-};
-
-const normalizeName = (name: string): string =>
-  name
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/^(loto|tirage)\s+/i, '')
-    .replace(/[\s\-_/]+/g, ' ')
-    .trim();
-
-export const getBoulonnierForDraw = (drawName?: string | null): BoulonnierInfo => {
-  if (!drawName) return BOULONNIER_CONFIG.BOULONNIER_A;
-  const norm = normalizeName(drawName);
-
-  for (const config of Object.values(BOULONNIER_CONFIG)) {
-    if (config.draws.some(d => normalizeName(d) === norm)) {
-      return config;
-    }
-  }
-
-  // Fallback heuristique basé sur l'horaire si le nom contient 13H ou 19H55
-  if (norm.includes('13:00') || norm.includes('13h')) return BOULONNIER_CONFIG.BOULONNIER_B;
-  if (norm.includes('19:55') || norm.includes('19h55') || norm.includes('20h')) {
-    if (norm.includes('dimanche') || norm.includes('espoir')) return BOULONNIER_CONFIG.BOULONNIER_A;
-    return BOULONNIER_CONFIG.BOULONNIER_C;
-  }
-
-  return BOULONNIER_CONFIG.BOULONNIER_A;
-};
-
-export const isSameBoulonnier = (draw1: string, draw2: string): boolean => {
-  const b1 = getBoulonnierForDraw(draw1);
-  const b2 = getBoulonnierForDraw(draw2);
-  return b1.id === b2.id;
-};
-
-export const getBoulonnierDraws = (drawName: string): string[] => {
-  return getBoulonnierForDraw(drawName).draws;
-};
-
-/**
  * Liste des tirages officiels ne disposant pas de numéros machine (notamment Fortune Thursday).
  * Règle d'or : Fortune (Mercredi 13:00) dispose de numéros machine,
  * tandis que Fortune Thursday (Jeudi 19:55) n'a AUCUN numéro machine.
@@ -189,6 +87,189 @@ export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) =>
         day
     }))
 );
+
+/**
+ * CADRE ARCHITECTURAL DES RELATIONS INTER-TIRAGES (3 FAMILLES STRICTEMENT ÉTANCHES)
+ * 1. Famille Nationale LONACI : Tirages de 10H, 16H et uniquement le Tirage de 19H55 du dimanche (Espoir).
+ * 2. Famille Zénith : Tirages de 13H exclusivement.
+ * 3. Famille Nocturne : Tirages de 19H55 exclusivement.
+ */
+export type InterDrawFamilyId = 'FAMILY_10H_16H_SUN19H55' | 'FAMILY_13H' | 'FAMILY_19H55';
+
+export interface InterDrawSequenceItem {
+  day: string;
+  time: string;
+  name: string;
+}
+
+export interface InterDrawFamilyConfig {
+  id: InterDrawFamilyId;
+  name: string;
+  shortName: string;
+  label: string;
+  description: string;
+  color: string;
+  badgeBg: string;
+  badgeBorder: string;
+  icon: string;
+  slotsSummary: string;
+  sequence: InterDrawSequenceItem[];
+  drawNames: string[];
+}
+
+export const INTER_DRAW_FAMILIES: Record<InterDrawFamilyId, InterDrawFamilyConfig> = {
+  FAMILY_10H_16H_SUN19H55: {
+    id: 'FAMILY_10H_16H_SUN19H55',
+    name: 'Famille Nationale LONACI (10H, 16H & Dimanche 19H55)',
+    shortName: '10H / 16H / Dim 19H55',
+    label: 'Nationale (10H - 16H - Dim 19H55)',
+    description: 'Relations inter-tirages pour les tirages de 10H, 16H et seulement le Tirage de 19H55 du dimanche (Espoir).',
+    color: 'text-amber-400',
+    badgeBg: 'bg-amber-500/10 dark:bg-amber-950/40',
+    badgeBorder: 'border-amber-500/30 dark:border-amber-500/40',
+    icon: '🌅',
+    slotsSummary: '10:00 (7) + 16:00 (7) + Dimanche 19:55 (Espoir) — 15 tirages',
+    sequence: [
+      { day: 'Lundi', time: '10:00', name: 'Reveil' },
+      { day: 'Lundi', time: '16:00', name: 'Akwaba' },
+      { day: 'Mardi', time: '10:00', name: 'La Matinale' },
+      { day: 'Mardi', time: '16:00', name: 'Sika' },
+      { day: 'Mercredi', time: '10:00', name: 'Premiere Heure' },
+      { day: 'Mercredi', time: '16:00', name: 'Baraka' },
+      { day: 'Jeudi', time: '10:00', name: 'Kado' },
+      { day: 'Jeudi', time: '16:00', name: 'Monni' },
+      { day: 'Vendredi', time: '10:00', name: 'Cash' },
+      { day: 'Vendredi', time: '16:00', name: 'Wari' },
+      { day: 'Samedi', time: '10:00', name: 'Soutra' },
+      { day: 'Samedi', time: '16:00', name: 'Moaye' },
+      { day: 'Dimanche', time: '10:00', name: 'Benediction' },
+      { day: 'Dimanche', time: '16:00', name: 'Awale' },
+      { day: 'Dimanche', time: '19:55', name: 'Espoir' },
+    ],
+    drawNames: [
+      'Reveil', 'La Matinale', 'Premiere Heure', 'Kado', 'Cash', 'Soutra', 'Benediction',
+      'Akwaba', 'Sika', 'Baraka', 'Monni', 'Wari', 'Moaye', 'Awale',
+      'Espoir'
+    ]
+  },
+  FAMILY_13H: {
+    id: 'FAMILY_13H',
+    name: 'Famille Zénith (13H Méridien)',
+    shortName: 'Tirages 13H',
+    label: 'Zénith (13H Quotidien)',
+    description: 'Relations inter-tirages exclusives pour l\'ensemble des tirages de 13H.',
+    color: 'text-sky-400',
+    badgeBg: 'bg-sky-500/10 dark:bg-sky-950/40',
+    badgeBorder: 'border-sky-500/30 dark:border-sky-500/40',
+    icon: '☀️',
+    slotsSummary: '13:00 (7 tirages quotidiens du midi)',
+    sequence: [
+      { day: 'Lundi', time: '13:00', name: 'Etoile' },
+      { day: 'Mardi', time: '13:00', name: 'Emergence' },
+      { day: 'Mercredi', time: '13:00', name: 'Fortune' },
+      { day: 'Jeudi', time: '13:00', name: 'Privilege' },
+      { day: 'Vendredi', time: '13:00', name: 'Solution' },
+      { day: 'Samedi', time: '13:00', name: 'Diamant' },
+      { day: 'Dimanche', time: '13:00', name: 'Prestige' },
+    ],
+    drawNames: [
+      'Etoile', 'Emergence', 'Fortune', 'Privilege', 'Solution', 'Diamant', 'Prestige'
+    ]
+  },
+  FAMILY_19H55: {
+    id: 'FAMILY_19H55',
+    name: 'Famille Nocturne (19H55 Soirée)',
+    shortName: 'Tirages 19H55',
+    label: 'Nocturne (19H55 Soir)',
+    description: 'Relations inter-tirages exclusives pour l\'ensemble des Tirages de 19H55.',
+    color: 'text-indigo-400',
+    badgeBg: 'bg-indigo-500/10 dark:bg-indigo-950/40',
+    badgeBorder: 'border-indigo-500/30 dark:border-indigo-500/40',
+    icon: '🌙',
+    slotsSummary: '19:55 (7 tirages du soir)',
+    sequence: [
+      { day: 'Lundi', time: '19:55', name: 'Monday Special' },
+      { day: 'Mardi', time: '19:55', name: 'Lucky Tuesday' },
+      { day: 'Mercredi', time: '19:55', name: 'Midweek' },
+      { day: 'Jeudi', time: '19:55', name: 'Fortune Thursday' },
+      { day: 'Vendredi', time: '19:55', name: 'Friday Bonanza' },
+      { day: 'Samedi', time: '19:55', name: 'National' },
+      { day: 'Dimanche', time: '19:55', name: 'Espoir' },
+    ],
+    drawNames: [
+      'Monday Special', 'Lucky Tuesday', 'Midweek', 'Fortune Thursday', 'Friday Bonanza', 'National', 'Espoir'
+    ]
+  }
+};
+
+/**
+ * Normalise un nom de tirage pour matching robuste (accents, casse, préfixes)
+ */
+export const normalizeDrawName = (drawName?: string | null): string => {
+  if (!drawName) return '';
+  return drawName
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^(loto|tirage)\s+/i, "")
+    .replace(/[\s\-_/]+/g, " ")
+    .trim();
+};
+
+/**
+ * Retourne la liste des familles inter-tirages auxquelles appartient un tirage donné.
+ * Exemple : 'Espoir' appartient à la fois à FAMILY_10H_16H_SUN19H55 et FAMILY_19H55.
+ */
+export const getInterDrawFamiliesForDraw = (drawName?: string | null): InterDrawFamilyConfig[] => {
+  if (!drawName) return [];
+  const norm = normalizeDrawName(drawName);
+  return Object.values(INTER_DRAW_FAMILIES).filter(fam =>
+    fam.drawNames.some(d => normalizeDrawName(d) === norm)
+  );
+};
+
+/**
+ * Retourne la famille prioritaire d'un tirage.
+ */
+export const getPrimaryInterDrawFamily = (drawName?: string | null): InterDrawFamilyConfig | null => {
+  const families = getInterDrawFamiliesForDraw(drawName);
+  return families.length > 0 ? families[0] : null;
+};
+
+/**
+ * Vérifie si un tirage appartient à une famille inter-tirage donnée.
+ */
+export const isDrawInInterDrawFamily = (drawName: string, familyId: InterDrawFamilyId): boolean => {
+  const fam = INTER_DRAW_FAMILIES[familyId];
+  if (!fam) return false;
+  const norm = normalizeDrawName(drawName);
+  return fam.drawNames.some(d => normalizeDrawName(d) === norm);
+};
+
+/**
+ * Calcule le prédécesseur et le successeur chronologique direct au sein d'une famille.
+ */
+export const getFamilyPredecessorAndSuccessor = (
+  drawName: string,
+  familyId: InterDrawFamilyId
+): { predecessor: InterDrawSequenceItem; successor: InterDrawSequenceItem; currentIndex: number } | null => {
+  const fam = INTER_DRAW_FAMILIES[familyId];
+  if (!fam) return null;
+  const norm = normalizeDrawName(drawName);
+  const idx = fam.sequence.findIndex(s => normalizeDrawName(s.name) === norm);
+  if (idx === -1) return null;
+
+  const len = fam.sequence.length;
+  const predIdx = (idx - 1 + len) % len;
+  const succIdx = (idx + 1) % len;
+
+  return {
+    predecessor: fam.sequence[predIdx],
+    successor: fam.sequence[succIdx],
+    currentIndex: idx
+  };
+};
 
 export const LOTO_PAYOUTS = {
     STANDARD: {

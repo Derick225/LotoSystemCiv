@@ -9,7 +9,7 @@ import { calculateGeneticDiversityIndex } from "./diversityService";
 import { evaluateAdversarialSurvival } from "./adversarialProxy";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { TUNING } from "./microSgd";
-import { HONEST_NOTE } from "./predictionScenarios";
+import { HONEST_NOTE, generateProbabilisticScenarioMatrix } from "./predictionScenarios";
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
@@ -349,54 +349,16 @@ export const finalizePredictionPayload = async (
   };
 
   // ============================================================================
-  // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES
+  // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES (SCÉNARIO D SYNTHESIZER)
   // ============================================================================
-  const defensiveTicket = [...denoisedScores]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TICKET_SIZE)
-    .map(s => s.num)
-    .sort((a, b) => a - b);
-
-  const top3 = denoisedScores.slice(0, 3).map(s => s.num);
-  const outsiderPool = [...denoisedScores]
-    .slice(5, 20)
-    .sort((a, b) => {
-      const tensionA = explainabilityRecord[a.num]?.topologicalTension || 0;
-      const tensionB = explainabilityRecord[b.num]?.topologicalTension || 0;
-      return tensionB - tensionA;
-    })
-    .map(s => s.num);
-  
-  const aggressiveTicket = Array.from(new Set([...top3, ...outsiderPool.slice(0, 2)]))
-    .slice(0, TICKET_SIZE)
-    .sort((a, b) => a - b);
-
-  const simulationScenarios = [
-    {
-      scenarioId: `sim_balanced_${Date.now()}`,
-      scenarioName: "Consensus Symbiotique (Tamis ADN)",
-      ticket: [...selection].sort((a, b) => a - b),
-      probabilityScore: finalConfidence,
-      riskProfile: "BALANCED" as const,
-      description: "Profil d'équilibre optimisé par le Tamis ADN et l'alignement de réalité.",
-    },
-    {
-      scenarioId: `sim_defensive_${Date.now()}`,
-      scenarioName: "Attracteur Fréquentiel (Défensif)",
-      ticket: defensiveTicket,
-      probabilityScore: Math.min(99, Math.round(finalConfidence * 1.05)),
-      riskProfile: "DEFENSIVE" as const,
-      description: "Concentration sur les centres de masse à densité maximale et variance minimale.",
-    },
-    {
-      scenarioId: `sim_aggressive_${Date.now()}`,
-      scenarioName: "Rupture de Phase (Exploration Lyapunov)",
-      ticket: aggressiveTicket.length === TICKET_SIZE ? aggressiveTicket : selection,
-      probabilityScore: Math.max(1, Math.round(finalConfidence * 0.85)),
-      riskProfile: "AGGRESSIVE" as const,
-      description: "Injection d'outsiders à tension topologique élevée pour anticiper les ruptures stochastiques.",
-    },
-  ];
+  const simulationScenarios = generateProbabilisticScenarioMatrix({
+    selection,
+    denoisedScores,
+    explainabilityRecord,
+    finalConfidence,
+    drawName: context.drawName,
+    dnaSieveMetrics,
+  });
 
   return {
     suggestedNumbers: selection,

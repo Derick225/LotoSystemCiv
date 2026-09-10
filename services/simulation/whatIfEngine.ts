@@ -263,18 +263,19 @@ export const detectBifurcationPoints = (
 };
 
 /**
- * Test de Stress Monte Carlo Multi-Scénarios (1 000 runs)
+ * Test de Stress Monte Carlo Multi-Scénarios avec Mémoire Linéaire Float32Array
+ * Zéro overhead d'allocation d'objets, optimisé pour haute densité d'itérations (N >= 10^5).
  */
 export const runMonteCarloStressTest = (
   baseWeights: AlgoWeights,
   evalGridScores: (w: AlgoWeights) => number[],
-  iterations: number = 100, // Light for instant UI responsiveness
+  iterations: number = 100, // Configurable pour haute densité (10^2 à 10^5)
   noiseStdDev: number = 0.05
 ): MonteCarloStressResult[] => {
   const algoKeys = Object.keys(baseWeights) as AlgoKey[];
-  const ballScoresMap: Record<number, number[]> = {};
-
-  for (let b = 1; b <= 90; b++) ballScoresMap[b] = [];
+  
+  // Mémoire linéaire contiguë Float32Array pour les 90 boules sur N itérations (zéro fragmentation)
+  const linearScores = new Float32Array(iterations * 90);
 
   // Seed déterministe canonique dérivé de l'empreinte vectorielle des poids
   const weightFingerprint = algoKeys.map(k => `${k}:${(baseWeights[k] || 0).toFixed(4)}`).join('_');
@@ -282,39 +283,54 @@ export const runMonteCarloStressTest = (
 
   for (let run = 0; run < iterations; run++) {
     const noisyWeights: Record<string, number> = {};
-    algoKeys.forEach(k => {
-      // Box-muller gaussian noise
+    const runOffset = run * 90;
+
+    for (let kIdx = 0; kIdx < algoKeys.length; kIdx++) {
+      const k = algoKeys[kIdx];
+      // Box-Muller Gaussian Noise déterministe
       const u1 = Math.max(1e-6, prng.next());
       const u2 = Math.max(1e-6, prng.next());
       const gauss = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
       noisyWeights[k] = Math.max(0.001, (baseWeights[k] || 0) + gauss * noiseStdDev);
-    });
+    }
 
     const scores = evalGridScores(normalizeWeights(noisyWeights as AlgoWeights));
-    scores.forEach((sc, idx) => {
-      ballScoresMap[idx + 1].push(sc);
-    });
+    for (let b = 0; b < 90; b++) {
+      linearScores[runOffset + b] = scores[b] || 0;
+    }
   }
 
   const results: MonteCarloStressResult[] = [];
+  const singleBallBuffer = new Float32Array(iterations);
 
-  for (let b = 1; b <= 90; b++) {
-    const vals = ballScoresMap[b].sort((a, b) => a - b);
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const variance = vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / vals.length;
-    const stdDev = Math.sqrt(variance);
+  for (let b = 0; b < 90; b++) {
+    let sum = 0;
+    for (let r = 0; r < iterations; r++) {
+      const val = linearScores[r * 90 + b];
+      singleBallBuffer[r] = val;
+      sum += val;
+    }
+    const mean = sum / iterations;
 
-    const p5Idx = Math.floor(vals.length * 0.05);
-    const p95Idx = Math.min(vals.length - 1, Math.floor(vals.length * 0.95));
+    let varianceSum = 0;
+    for (let r = 0; r < iterations; r++) {
+      varianceSum += Math.pow(singleBallBuffer[r] - mean, 2);
+    }
+    const stdDev = Math.sqrt(varianceSum / iterations);
+
+    // Tri sur le buffer local réutilisé
+    singleBallBuffer.sort();
+    const p5Idx = Math.floor(iterations * 0.05);
+    const p95Idx = Math.min(iterations - 1, Math.floor(iterations * 0.95));
 
     const stabilityIndex = Math.max(0, 1.0 - (stdDev / (mean || 1)));
 
     results.push({
-      ball: b,
+      ball: b + 1,
       meanScore: parseFloat(mean.toFixed(2)),
       stdDev: parseFloat(stdDev.toFixed(2)),
-      p5: parseFloat(vals[p5Idx].toFixed(2)),
-      p95: parseFloat(vals[p95Idx].toFixed(2)),
+      p5: parseFloat(singleBallBuffer[p5Idx].toFixed(2)),
+      p95: parseFloat(singleBallBuffer[p95Idx].toFixed(2)),
       stabilityIndex: parseFloat((stabilityIndex * 100).toFixed(1))
     });
   }

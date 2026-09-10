@@ -25,6 +25,7 @@ import {
   Target,
   Maximize2,
   Compass,
+  Share2,
 } from "lucide-react";
 import {
   runGenomicAudit,
@@ -35,6 +36,10 @@ import {
   calculateDnaSieveWeights,
   DnaSieveResult,
 } from "../../services/temporalAnalysisService";
+import {
+  getPrimaryInterDrawFamily,
+  getFamilyPredecessorAndSuccessor,
+} from "../../constants";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
@@ -107,6 +112,13 @@ export const UnifiedDnaSieveRadar: React.FC<{
 
   const [internalScenarioId, setInternalScenarioId] = useState<string | null>(null);
   const activeScenarioId = selectedScenarioId ?? internalScenarioId;
+
+  // Détection de la famille inter-tirages étanche active
+  const activeFamily = useMemo(() => getPrimaryInterDrawFamily(drawName), [drawName]);
+  const familyRelation = useMemo(
+    () => (activeFamily ? getFamilyPredecessorAndSuccessor(drawName, activeFamily.id as any) : null),
+    [activeFamily, drawName]
+  );
 
   const activeScenario = useMemo(() => {
     if (!scenarios || scenarios.length === 0) return null;
@@ -222,7 +234,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
       },
       TEMPORAL_HAWKES: {
         name: "Temporel & Hawkes",
-        genes: ["temporal", "inter_monthly_resonance", "isolation_anomaly"],
+        genes: ["temporal", "inter_monthly_resonance", "inter_draw_resonance", "isolation_anomaly"],
         currentSum: 0,
         recomSum: 0,
         sieveSum: 0,
@@ -668,6 +680,33 @@ export const UnifiedDnaSieveRadar: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* BANDEAU FLUX INTER-TIRAGES ÉTANCHE ACTIF */}
+      {activeFamily && familyRelation && (
+        <div className="p-3.5 bg-gradient-to-r from-cyan-950/40 via-slate-900/80 to-indigo-950/40 rounded-2xl border border-cyan-500/20 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              <Share2 size={14} />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-black tracking-wider text-cyan-400 block">
+                Couplage Inter-Tirages Actif • {activeFamily.name}
+              </span>
+              <span className="text-slate-300 text-[11px]">
+                Cycle séquentiel fermé : <strong className="text-slate-100">{familyRelation.predecessor?.name}</strong> → <strong className="text-emerald-400">{drawName}</strong>
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-[10px] font-mono">
+            <span className="bg-slate-800/80 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700/60">
+              Gène : <strong className="text-cyan-300">INTER_DRAW_RESONANCE</strong>
+            </span>
+            <span className="bg-cyan-500/10 text-cyan-300 px-2.5 py-1 rounded-lg border border-cyan-500/30 font-bold">
+              100% Déterministe & Continu
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 3. CORPS PRINCIPAL EN FONCTION DU VIEW MODE */}
 

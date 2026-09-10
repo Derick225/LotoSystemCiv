@@ -105,6 +105,48 @@ class CacheService {
   }
 
   /**
+   * Génère la clé d'isolation canonique stricte pour les relations inter-tirages :
+   * nexus_interdraw_${familyId}_${drawName}
+   */
+  public getInterDrawKey(
+    familyId: string,
+    drawName: string,
+    subKey?: string
+  ): string {
+    const cleanDraw = drawName.toLowerCase().trim().replace(/[\s-]+/g, "_");
+    return `nexus_interdraw_${familyId}_${cleanDraw}${subKey ? `_${subKey}` : ""}`;
+  }
+
+  /**
+   * Calcule un TTL adaptatif continu pour les matrices et rapports inter-tirages
+   * basé sur le volume d'échantillons (N) et la stabilité stochastique.
+   * TTL(N) = Base * (1 + ln(1 + N / 50)), borné de manière continue entre 30 min et 12 heures.
+   */
+  public getAdaptiveInterDrawTTL(sampleSize: number = 50, entropy: number = 0.5): number {
+    const BASE_TTL = 30 * 60 * 1000; // 30 minutes
+    const sampleFactor = Math.log(1.0 + Math.max(1, sampleSize) / 50.0);
+    const entropyFactor = Math.exp(-0.5 * Math.abs(entropy - 0.5)); // Stabilité maximale autour d'entropie équilibrée
+    const adaptiveMs = BASE_TTL * (1.0 + sampleFactor) * entropyFactor;
+    return Math.min(12 * 60 * 60 * 1000, Math.max(15 * 60 * 1000, Math.round(adaptiveMs)));
+  }
+
+  /**
+   * Récupère un élément de manière synchrone depuis le cache mémoire L1 (< 0.1 ms de latence).
+   * Utilisé pour éliminer tout overhead de microtask lors des recalculs récurrents à chaud.
+   */
+  public getSync<T>(key: string, drawName?: string): T | null {
+    if (!CACHE_FLAGS.ENABLE_MEMORY || !this.memoryCache.has(key)) {
+      return null;
+    }
+    const entry = this.memoryCache.get(key)!;
+    if (this.isValid(entry, drawName)) {
+      return entry.data as T;
+    }
+    this.memoryCache.delete(key);
+    return null;
+  }
+
+  /**
    * Enregistre un élément dans le cache à double niveau (Mémoire + IDB).
    */
   public async set<T>(

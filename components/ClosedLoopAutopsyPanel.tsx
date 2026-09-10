@@ -21,6 +21,8 @@ import {
   Sliders,
   ShieldCheck,
   Compass,
+  Layers,
+  Award,
 } from "lucide-react";
 
 export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
@@ -431,6 +433,99 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
               )}
             </div>
           </div>
+
+          {/* SECTION RETROSPECTIVE MULTI-SCÉNARIOS ORACLE */}
+          {report.scenarioEvaluations && report.scenarioEvaluations.length > 0 && (
+            <div className="p-6 bg-slate-900/60 rounded-3xl border border-white/5 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Layers size={16} className="text-indigo-400" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                    Rétro-Évaluation Multi-Scénarios & Alignement Réel
+                  </h4>
+                </div>
+                {report.bestPerformingScenario && (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                    <Award size={13} className="text-emerald-400" />
+                    Top Profil : {report.bestPerformingScenario.scenarioName}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {report.scenarioEvaluations.map((sc) => {
+                  const actualSet = new Set(report.actualWinners);
+                  return (
+                    <div
+                      key={sc.scenarioId}
+                      className={`p-4 rounded-2xl border transition-all ${
+                        sc.isOptimal
+                          ? "bg-indigo-950/40 border-indigo-500/40 shadow-lg ring-1 ring-indigo-500/30"
+                          : "bg-slate-950/60 border-white/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-xs font-black text-white truncate">
+                          {sc.scenarioName}
+                        </span>
+                        <span
+                          className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider"
+                          style={{
+                            backgroundColor: `${sc.color || "#6366f1"}20`,
+                            color: sc.color || "#6366f1",
+                            border: `1px solid ${sc.color || "#6366f1"}40`,
+                          }}
+                        >
+                          {sc.riskProfile}
+                        </span>
+                      </div>
+
+                      {/* TICKET COMBINAISON AVEC SURBRILLANCE */}
+                      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                        {sc.ticket.map((num) => {
+                          const isHit = actualSet.has(num);
+                          return (
+                            <span
+                              key={num}
+                              className={`w-7 h-7 rounded-lg text-xs font-mono font-black flex items-center justify-center border ${
+                                isHit
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 ring-2 ring-emerald-500/40"
+                                  : "bg-slate-900 text-slate-400 border-white/5"
+                              }`}
+                            >
+                              {num}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* STATISTIQUES D'ALIGNEMENT DU SCÉNARIO */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5 text-[10px] font-mono">
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Hits Directs</span>
+                          <strong className={sc.hitCount > 0 ? "text-emerald-400" : "text-slate-400"}>
+                            {sc.hitCount} / 5
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Frôlements</span>
+                          <strong className={sc.nearMissCount > 0 ? "text-cyan-400" : "text-slate-400"}>
+                            {sc.nearMissCount}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Alignement</span>
+                          <strong className="text-indigo-300">
+                            {sc.alignmentScore}%
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* GRADIENTS PAR ALGORITHME & PROPOSITION DE RECALIBRAGE */}
           <div className="p-6 bg-slate-900/60 rounded-3xl border border-white/5 space-y-4">

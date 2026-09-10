@@ -625,6 +625,18 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
             );
             await saveForensicReport(report);
             autopsiesRun++;
+
+            // Auto-Calibration Rétroactive en Boucle Fermée (Continuous Closed-Loop SGD)
+            try {
+              const { generateLearningSession, applyForensicAdjustments } = await import('./forensicTrainingBridge');
+              const learningSession = await generateLearningSession(report, cleanHistory);
+              if (learningSession && learningSession.adjustments && learningSession.adjustments.length > 0) {
+                await applyForensicAdjustments(learningSession);
+                console.log(`[Closed-Loop Auto-Feedback] Poids algorithmiques mis à jour de manière continue pour ${drawName}`);
+              }
+            } catch (closedLoopErr) {
+              console.warn("[Closed-Loop Auto-Feedback] Auto-ajustement non critique :", closedLoopErr);
+            }
           }
           if (pred.drawResultId !== resultToMatch.id) {
             await linkPredictionToResult(pred.id, resultToMatch.id);

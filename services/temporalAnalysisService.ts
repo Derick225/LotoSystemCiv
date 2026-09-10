@@ -3,6 +3,7 @@ import { calculateRegularity, calculateFractalIndex, calculateShannonEntropy } f
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 import { useNexusStore } from '../store/useNexusStore';
+import { calculateInterDrawVector, calculateInterDrawMonthlyCoupling } from './interDrawService';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -331,6 +332,7 @@ export const ALGO_LABELS: Record<string, string> = {
     [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
     [AlgoKey.GAP_TREND]: 'Tendance Écarts',
     [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Résonance Inter-Mensuelle',
+    [AlgoKey.INTER_DRAW_RESONANCE]: 'Flux Inter-Tirages',
     [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation',
     [AlgoKey.GAP_BAND_SEQUENCE]: 'Bandes d\'Écart',
     [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
@@ -555,7 +557,10 @@ export const calculateDnaSieveWeights = (
 
     const dominantAlgos = activeGenesBreakdown.slice(0, 3).map(g => g.label);
 
-    // 10. Matrice de composition génomique différentiable continue
+    // 10. Calcul du vecteur d'affinité inter-tirages déterministe (Familles étanches)
+    const interDrawVec = calculateInterDrawVector(history, drawName);
+
+    // 11. Matrice de composition génomique différentiable continue
     const compositeDna = new Float32Array(91);
     let sumDna = 0;
 
@@ -571,6 +576,7 @@ export const calculateDnaSieveWeights = (
         const sBayes = (sFreq * 0.6 + sMarkov * 0.4);
         const sSpatial = 1.0 / (1.0 + Math.exp(-Math.abs(n - 45.5) / 15.0));
         const sFractal = 0.5 + 0.5 * Math.tanh((sFreq - 0.5) * 2.0);
+        const sInterDraw = interDrawVec[n] || 0.0555;
 
         let geneSum = 0;
         geneSum += (activeWeightsMap[AlgoKey.FREQUENCY] || 1.0) * sFreq;
@@ -588,6 +594,7 @@ export const calculateDnaSieveWeights = (
         geneSum += (activeWeightsMap[AlgoKey.GAP_CADENCE] || 1.0) * sGap;
         geneSum += (activeWeightsMap[AlgoKey.GAP_TREND] || 1.0) * sMom;
         geneSum += (activeWeightsMap[AlgoKey.SHADOW_PROBABILITY] || 1.0) * (1.0 - sFreq);
+        geneSum += (activeWeightsMap[AlgoKey.INTER_DRAW_RESONANCE] || 1.0) * sInterDraw;
 
         const val = geneSum / totalWeight;
         compositeDna[n] = val;
@@ -747,6 +754,18 @@ export const calculateCrossMonthResonance = (rawHistory: DrawResult[], drawName?
         }
     });
 
+    // 5b. Couplage cyclique Inter-Tirages au sein de la famille étanche
+    if (drawName) {
+        const interCoupling = calculateInterDrawMonthlyCoupling(history, drawName);
+        if (interCoupling.familyId) {
+            const interVec = interCoupling.vector;
+            for (let n = 1; n <= 90; n++) {
+                // Modulation douce et continue sans rupture (gain [0.85, 1.25])
+                rawCompositeProjection[n] = rawCompositeProjection[n] * (0.85 + 0.30 * interVec[n]);
+            }
+        }
+    }
+
     // 6. Application du Tamis de l'ADN Algorithmique Actuel (DnaSieve)
     const { multipliers, stdDevDna } = calculateDnaSieveWeights(history, weights, drawName);
 
@@ -838,6 +857,16 @@ export interface CrossMonthResonanceAnalysis {
         entropyBits?: number;
         sieveIntensityPercent?: number;
         activeGenesBreakdown?: { gene: string; weight: number; label: string }[];
+    };
+    interDrawInfo?: {
+        hasFamily: boolean;
+        familyId?: string;
+        familyName?: string;
+        shortName?: string;
+        predecessorName?: string;
+        successorName?: string;
+        carryOverLift?: number;
+        harmonicCount?: number;
     };
 }
 
@@ -1022,6 +1051,22 @@ export const getCrossMonthResonanceAnalysis = (
 
         result.topNumbers = numbersScores.slice(0, 12);
         result.dnaSieveInfo.dnaConcordanceMean = countSieved > 0 ? Math.round(sumConcordance / countSieved) : 50;
+    }
+
+    if (drawName) {
+        const interCoupling = calculateInterDrawMonthlyCoupling(history, drawName, bestSourceMonth !== -1 ? bestSourceMonth : undefined, currentMonth);
+        if (interCoupling.familyId) {
+            result.interDrawInfo = {
+                hasFamily: true,
+                familyId: interCoupling.familyId,
+                familyName: interCoupling.familyName,
+                shortName: interCoupling.shortName,
+                predecessorName: interCoupling.predecessorName,
+                successorName: interCoupling.successorName,
+                carryOverLift: interCoupling.carryOverLift,
+                harmonicCount: interCoupling.harmonicCount
+            };
+        }
     }
 
     return result;

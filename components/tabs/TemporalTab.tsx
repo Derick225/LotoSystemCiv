@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   BarChart3,
   Waves,
+  Share2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -349,6 +350,26 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     )) || <span className="text-slate-500 text-xs">Génome Global</span>}
                   </div>
                 </div>
+
+                {/* Inter-Draw Family Coupling Telemetry */}
+                {crossMonthResonance.interDrawInfo?.hasFamily && (
+                  <div className="pt-2 border-t border-slate-800/80 mt-2 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                        <Share2 size={11} className="text-cyan-400" /> Flux Inter-Tirages Couplé :
+                      </span>
+                      <span className="text-white font-mono font-black bg-cyan-950/60 border border-cyan-500/30 px-1.5 py-0.5 rounded text-[9px]">
+                        {crossMonthResonance.interDrawInfo.shortName || crossMonthResonance.interDrawInfo.familyName}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-slate-400">
+                      <span>Cycle : <strong className="text-slate-200">{crossMonthResonance.interDrawInfo.predecessorName}</strong> → <strong className="text-emerald-400">{drawName}</strong></span>
+                      {crossMonthResonance.interDrawInfo.carryOverLift && (
+                        <span className="font-mono text-amber-400">Lift Carry-Over : ×{crossMonthResonance.interDrawInfo.carryOverLift}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

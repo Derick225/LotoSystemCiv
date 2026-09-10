@@ -1,6 +1,14 @@
 export { buildAlgoBundle, applyDeterministicMicroSgd, TUNING } from "./microSgd";
 export { applyForensicAdjustments, resolveForensicAdjustments } from "./forensicAdjustments";
-export { handleScenarioADegradedPrediction, tryCloudPrediction, HONEST_NOTE } from "./predictionScenarios";
+export {
+  handleScenarioADegradedPrediction,
+  tryCloudPrediction,
+  generateProbabilisticScenarioMatrix,
+  interpolatePredictionScenarios,
+  HONEST_NOTE,
+  getStoreStateSafely,
+} from "./predictionScenarios";
+export type { SimulationScenarioItem } from "./predictionScenarios";
 export { evaluatePredictionStability, finalizePredictionPayload } from "./predictionFinalize";
 export {
   generateMasterPrediction,

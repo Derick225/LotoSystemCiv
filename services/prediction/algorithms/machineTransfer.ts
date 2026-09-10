@@ -1,14 +1,13 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { extractDrawNumbers } from '../featureExtractor';
-import { getBoulonnierForDraw } from '../../../constants';
 
 export const machineTransferPlugin: AlgorithmPlugin = {
   key: AlgoKey.MACHINE_TRANSFER,
   category: 'core',
   stability: 'stable',
-  mathematicalBasis: 'Transfert Stochastique & Résonance Croisée Machine -> Gagnants (Cross-Markovian Density & Hardware Rotor Topology)',
-  description: 'Évalue la probabilité de transition conditionnelle et le carry-over cinématique entre le plateau Machine précédent et les numéros Gagnants, couplé à la signature mécanique du Boulonnier.',
+  mathematicalBasis: 'Transfert Stochastique & Résonance Croisée Machine -> Gagnants (Cross-Markovian Density)',
+  description: 'Évalue la probabilité de transition conditionnelle et le carry-over cinématique entre le plateau Machine précédent et les numéros Gagnants.',
   isStrictlyDeterministic: true,
 
   precompute(ctx) {
@@ -58,10 +57,6 @@ export const machineTransferPlugin: AlgorithmPlugin = {
       }
     }
 
-    // Résonance Matérielle du Boulonnier physique
-    const boulonnierInfo = getBoulonnierForDraw(ctx.drawName);
-    const hasHardwareResonance = sampleCount > 0 || latestMachine.length > 0;
-
     ctx.pluginCache = ctx.pluginCache || {};
     ctx.pluginCache[AlgoKey.MACHINE_TRANSFER] = {
       median,
@@ -69,8 +64,7 @@ export const machineTransferPlugin: AlgorithmPlugin = {
       directMachineSet,
       machineToWinnersWeights,
       sampleCount,
-      hasMachineData: hasHardwareResonance,
-      boulonnierCode: boulonnierInfo.code,
+      hasMachineData: sampleCount > 0 || latestMachine.length > 0,
     };
   },
 
@@ -79,7 +73,7 @@ export const machineTransferPlugin: AlgorithmPlugin = {
     const rawVal = ctx.features.machineTransferMap?.[num] || 0;
 
     if (!cache || !cache.hasMachineData) {
-      // Score nul et confiance nulle si aucune donnée machine disponible
+      // Score nul et confiance nulle si le tirage ne possède pas de données machine
       return { score: 0.0, confidence: 0.0 };
     }
 
