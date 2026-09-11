@@ -18,6 +18,7 @@ import { OracleScenarioMatrixDeck } from "../prediction/OracleScenarioMatrixDeck
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { getPrimaryInterDrawFamily } from "../../constants";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { Prediction } from "../../types";
 import {
   Activity,
@@ -102,9 +103,35 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
     resolvedNoiseLevel,
     resolvedMcIterations,
     gameRegimeInfo,
+    volatilityScore,
+    activeHistory,
     runInference,
     runMonteCarlo,
   } = usePredictionGenerator(drawName);
+
+  // Synchronisation dynamique de l'état réseau (en ligne / hors-ligne)
+  React.useEffect(() => {
+    const handleOnline = () => {
+      setNetworkState((prev) => ({
+        ...prev,
+        isOffline: false,
+        networkDiagnosticMessage: "Moteur connecté aux relais stochastiques distants.",
+      }));
+    };
+    const handleOffline = () => {
+      setNetworkState((prev) => ({
+        ...prev,
+        isOffline: true,
+        networkDiagnosticMessage: "Mode hors-ligne : utilisation du moteur cybernétique autonome local (100% In-Browser).",
+      }));
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   // Adoption directe d'un scénario alternatif comme vecteur principal
   const handleAdoptScenarioTicket = useCallback(
@@ -130,13 +157,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = history.filter(
-        (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-      );
+      const isolatedHistory = activeHistory.length > 0 ? activeHistory : purifyHistoryForDraw(drawName, history);
       const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
       const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-      const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+      const proofs = evaluateAlgoEmpiricalProof(drawName, sample);
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,
@@ -152,7 +177,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
           weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
           entropy: currentEntropy,
-          volatility: 35.0,
+          volatility: volatilityScore,
         },
         resolvedNoiseLevel,
         resolvedLearningRate,
@@ -175,8 +200,10 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
     lastPrediction,
     drawName,
     history,
+    activeHistory,
     currentEntropy,
     gameRegimeInfo,
+    volatilityScore,
     resolvedNoiseLevel,
     resolvedLearningRate,
     resolvedMcIterations,

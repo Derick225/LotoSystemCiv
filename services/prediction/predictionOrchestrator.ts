@@ -14,6 +14,7 @@ import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { detectGameRegime, calculateThermodynamicRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { globalCache, CACHE_TTL } from "../cache/CacheService";
+import { getPrimaryInterDrawFamily } from "../../constants";
 
 // Split module imports
 import { TUNING, applyDeterministicMicroSgd, hashHistoryContent, getMedian, getStdDev } from "./microSgd";
@@ -721,7 +722,10 @@ export const generateMasterPrediction = async (
   }
 
   const weightsHash = hashWeights(context.weightsToUse);
-  const keyParams = `${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
+  const family = getPrimaryInterDrawFamily(context.drawName);
+  const familyId = family ? family.id : "isolated";
+  const engineType = context.useCloudEngine ? "cloud" : "oracle_base";
+  const keyParams = `${engineType}_fam_${familyId}_${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
   const cacheKey = globalCache.generateKey('prediction', context.drawName, keyParams);
 
   return globalCache.getOrCompute(

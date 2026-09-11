@@ -41,6 +41,8 @@ import {
   Cpu,
   FileText,
   Brain,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { generateTacticalReport } from "../services/reportService";
 import { useToast } from "./ui/Toast";
@@ -68,7 +70,23 @@ const MetaLearningIndicator = React.memo(() => {
   const setForensicOptimized = useNexusStore(
     (state) => state.setForensicOptimized,
   );
+  const navigateToModule = useNexusStore((state) => state.navigateToModule);
   const { showToast } = useToast();
+
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   const strategyBalance = useMemo(() => {
     if (!globalWeights || Object.keys(globalWeights).length === 0) return 50;
@@ -85,42 +103,62 @@ const MetaLearningIndicator = React.memo(() => {
     const values = Object.values(globalWeights).filter(
       (v) => typeof v === "number",
     ) as number[];
-    if (values.length === 0) return baseConfidence;
+    const n = values.length;
+    if (n === 0) return baseConfidence;
     const maxWeight = Math.max(...values);
-    // Continuous boost: bounded between 0 and 15 based on the max weight deviation
-    const boost = 15.0 * Math.max(0, Math.min(1.0, (maxWeight - 0.2) / 0.5));
-    return Math.min(99, baseConfidence + boost);
+    // Calcul continu de concentration d'énergie sans nombre magique arbitraire
+    const uniformWeight = 1.0 / n;
+    const maxSpread = Math.max(0.0001, 1.0 - uniformWeight);
+    const concentration = Math.max(0, Math.min(1.0, (maxWeight - uniformWeight) / maxSpread));
+    const boost = 15.0 * concentration;
+    return Math.min(99, Math.round(baseConfidence + boost));
   }, [globalWeights, calibration]);
 
-  // Using a continuous sigmoid-based activation concept instead of strict binary,
-  // but keeping boolean for UI styling flags.
-  const shadowIntensity = Math.min(
-    1.0,
-    Math.max(0.0, (globalWeights?.fractal || 0) * 10.0),
-  );
-  const isShadowActive = shadowIntensity > 0.3;
+  const isShadowActive = useMemo(() => {
+    if (!globalWeights) return false;
+    const values = Object.values(globalWeights).filter(
+      (v) => typeof v === "number",
+    ) as number[];
+    const uniform = values.length > 0 ? 1.0 / values.length : 0.035;
+    const fractalVal = globalWeights.fractal || 0;
+    // Mode Shadow actif dès que la dimension fractale dépasse significativement l'équirépartition
+    return fractalVal > uniform * 1.5;
+  }, [globalWeights]);
 
   return (
     <div className="bg-slate-900/80 backdrop-blur-md p-4 md:p-6 rounded-3xl md:rounded-[2rem] border border-indigo-500/20 shadow-2xl relative overflow-hidden mb-8 animate-fade-in">
       <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -mr-20 -mt-20"></div>
 
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 relative z-10">
-        <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto">
-          <div className="p-2.5 md:p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30 shrink-0">
+        <button
+          type="button"
+          onClick={() => navigateToModule("Prediction")}
+          className="flex items-center gap-3 md:gap-4 w-full md:w-auto text-left hover:opacity-90 transition-opacity cursor-pointer group"
+          title="Cliquer pour basculer vers le moteur de prédiction autonome"
+        >
+          <div className="p-2.5 md:p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30 shrink-0 group-hover:scale-105 transition-transform">
             <BrainCircuit className="w-5 h-5 md:w-6 md:h-6 text-indigo-400 animate-pulse-slow" />
           </div>
           <div>
             <h3 className="text-[10px] md:text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
               Analyse Locale Hors-Ligne{" "}
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] md:text-[9px] rounded-full border border-emerald-500/20">
-                SÉCURISÉE
-              </span>
+              {isOnline ? (
+                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[8px] md:text-[9px] rounded-full border border-emerald-500/20 flex items-center gap-1">
+                  <Wifi size={10} />
+                  SÉCURISÉE (IN-BROWSER)
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 text-[8px] md:text-[9px] rounded-full border border-amber-500/30 flex items-center gap-1 animate-pulse">
+                  <WifiOff size={10} />
+                  HORS-LIGNE AUTONOME
+                </span>
+              )}
             </h3>
             <p className="text-[9px] md:text-[10px] text-slate-400 font-medium mt-0.5 md:mt-1">
-              Calcul déterministe autonome sans quota
+              Calcul déterministe 100% autonome sans quota ni fuite de données
             </p>
           </div>
-        </div>
+        </button>
 
         <div className="flex-1 w-full flex flex-col gap-2">
           <div className="flex justify-between text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-500">

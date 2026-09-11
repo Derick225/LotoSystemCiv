@@ -327,7 +327,7 @@ export const usePredictionGenerator = (drawName: string) => {
                     drawCount: packed.drawCount,
                     winningCount: packed.winningCount,
                     totalCols: packed.totalCols,
-                    temporalDepth: 10,
+                    temporalDepth: temporalDepth || 10,
                     weightsToUse: specificWeights,
                     metrics,
                     symbioticContext: activeSymbioticContext || undefined,
@@ -382,6 +382,8 @@ export const usePredictionGenerator = (drawName: string) => {
         resolvedNoiseLevel,
         resolvedMcIterations,
         gameRegimeInfo,
+        volatilityScore: activeVolatility?.score ?? 35.0,
+        activeHistory,
         runInference,
         runMonteCarlo,
         handleOptimizeWeights

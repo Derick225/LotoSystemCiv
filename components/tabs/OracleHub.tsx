@@ -73,10 +73,17 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     const sub = (subRaw || "").toLowerCase();
     if (sub === "strategic" || sub === "synthesis" || sub === "portfolio") {
       setPillar("strategic");
-    } else if (sub === "platinum" || sub === "prediction" || sub === "predictions" || sub === "inference") {
+    } else if (sub === "platinum" || sub === "meta" || sub === "meta_analyst") {
       setPillar("inference");
       setInferenceMode("platinum");
-    } else if (sub === "oracle" || sub === "meta" || sub === "meta_analyst") {
+    } else if (
+      sub === "oracle" ||
+      sub === "oracle_base" ||
+      sub === "base" ||
+      sub === "prediction" ||
+      sub === "predictions" ||
+      sub === "inference"
+    ) {
       setPillar("inference");
       setInferenceMode("oracle");
     } else if (sub === "ai_prediction" || sub === "ai_cloud" || sub === "ai" || sub === "cloud") {
@@ -296,7 +303,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                     }`}
                   >
                     <Sparkles size={13} />
-                    Oracle Déterministe & Vecteurs XAP
+                    Oracle Base (Déterministe & XAP)
                   </button>
 
                   <button

@@ -41,6 +41,8 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
+  const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
+  const refreshData = useNexusStore((state) => state.refreshData);
 
   const [optimizerType, setOptimizerType] = useState<
     "genetic" | "pso" | "bayesian" | "meta" | "gradient"
@@ -118,9 +120,34 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
     }
   };
 
-  const applyEvolvedDNA = () => {
+  const applyEvolvedDNA = async () => {
     if (!evolutionResult?.bestWeights) return;
-    setGlobalWeights(evolutionResult.bestWeights);
+    const { normalizeWeights } = await import("../services/prediction/weightsManager");
+    const normalized = normalizeWeights(evolutionResult.bestWeights);
+    await updateGlobalWeights(normalized, drawName);
+    await refreshData(drawName, true);
+
+    // Archivage dans la base de connaissances ADN
+    try {
+      const { recordModelDnaVersion } = await import("../services/prediction/modelDnaKnowledgeBase");
+      await recordModelDnaVersion({
+        drawName,
+        origin: "GENETIC_EVOLUTION",
+        weights: normalized,
+        performance: {
+          score: evolutionResult.report?.score || 0,
+          relativeGain: evolutionResult.improvement * 100,
+        },
+        causalAuditTrail: [
+          `Laboratoire Darwinien exécuté sur ${drawName}`,
+          `Générations: ${generations}, Échantillon: ${sampleSize}, Optimiseur: ${optimizerType.toUpperCase()}`,
+          `Score atteint: ${(evolutionResult.report?.score || 0).toFixed(1)}/100`,
+        ],
+      });
+    } catch (err) {
+      console.warn("[NeuralDarwinismLab] Erreur archivage ADN :", err);
+    }
+
     audioEngine.play("success");
     showToast(`ADN optimisé appliqué avec succès pour ${drawName} !`, "success");
   };
@@ -134,7 +161,10 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
   const handleImportDNA = async () => {
     try {
       const importedWeights = await ExportService.importDNA();
-      setGlobalWeights(importedWeights);
+      const { normalizeWeights } = await import("../services/prediction/weightsManager");
+      const normalized = normalizeWeights(importedWeights);
+      await updateGlobalWeights(normalized, drawName);
+      await refreshData(drawName, true);
       showToast("Profil ADN importé et injecté avec succès", "success");
       audioEngine.play("success");
     } catch (e: any) {

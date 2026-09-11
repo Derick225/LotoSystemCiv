@@ -1,7 +1,7 @@
 import { AlgoWeights, DrawResult } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { logger } from "../../utils/logger";
-import { normalizeWeights } from "../prediction/weightsManager";
+import { normalizeWeights, evaluateAlgoEmpiricalProof } from "../prediction/weightsManager";
 import { runForensicWorker } from "./trainingWorkers";
 import { calculateTemporalDriftLearningRate } from "../mathService";
 
@@ -133,10 +133,19 @@ export const applyOnlineLearningCore = async (
       falsePositiveBurden * 0.1 -
       overconfidence * 0.2;
 
-    const step = algoUpdateSignal * learningRate * Math.sign(totalSignal);
+    // Évaluation empirique continue (AGENTS.md : zéro boost arbitraire sans preuve)
+    const empiricalProofMap = evaluateAlgoEmpiricalProof(drawName, purifiedHistory);
+    const proofMetric = empiricalProofMap[algo];
+
+    const rawStep = algoUpdateSignal * learningRate * Math.sign(totalSignal);
+    // Si la direction est positive (boost), elle est modulée par la preuve empirique
+    const gatedStep = rawStep > 0 && proofMetric && !proofMetric.hasProof
+      ? rawStep * Math.max(0.1, proofMetric.proofScore)
+      : rawStep;
+
     newWeights[algo] = Math.max(
       0.01,
-      Math.min(1.0, (Number((currentWeights as any)[algo]) || 0.1) + step)
+      Math.min(1.0, (Number((currentWeights as any)[algo]) || 0.1) + gatedStep)
     );
   });
 

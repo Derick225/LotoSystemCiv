@@ -22,11 +22,14 @@ import { audioEngine } from "../utils/audioEngine";
 import { logger } from "../utils/logger";
 import { useToast } from "./ui/Toast";
 
-export const NeuralFeedbackPanel: React.FC = () => {
+export const NeuralFeedbackPanel: React.FC<{ drawName?: string }> = ({
+  drawName: propDrawName,
+}) => {
   const neuralFeedbackLogs = useNexusStore(
     (state) => state.neuralFeedbackLogs,
   );
-  const drawName = useNexusStore((state) => state.drawName);
+  const storeDrawName = useNexusStore((state) => state.drawName);
+  const drawName = propDrawName || storeDrawName;
   const history = useNexusStore((state) => state.history);
 
   const [searchTerm, setSearchTerm] = useState("");

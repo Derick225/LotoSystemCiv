@@ -65,7 +65,7 @@ import {
 // Utility for formatting labels strictly to avoid wrapping
 const formatLabel = (key: string) => LABELS_MAP[key as AlgoKey] || key;
 
-type OptimizerType = "meta" | "pso" | "genetic" | "bayesian";
+type OptimizerType = "meta" | "pso" | "genetic" | "bayesian" | "gradient";
 type PresetStrategy = "BALANCED" | "HYPER_CONVERGENCE" | "EXPLORATORY" | "REGULARIZED_L2";
 type SubTabType = "training" | "neural-opt" | "darwinian" | "replay" | "feedback";
 
@@ -212,9 +212,9 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     audioEngine.play("click");
     switch (selectedPreset) {
       case "HYPER_CONVERGENCE":
-        setOptimizerType("pso");
+        setOptimizerType("gradient");
         setGenerations(100);
-        addLog("Preset activé : HYPER-CONVERGENCE (Essaim particulaire PSO, 100 générations)");
+        addLog("Preset activé : HYPER-CONVERGENCE (Descente de gradient continue coordonnée)");
         break;
       case "EXPLORATORY":
         setOptimizerType("genetic");
@@ -275,7 +275,12 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     try {
       const result = await evolveNeuralDNA(
         drawName,
-        { generations, sampleSize: Math.min(sampleSize, effectiveHistory.length), optimizerType },
+        {
+          generations,
+          sampleSize: Math.min(sampleSize, effectiveHistory.length),
+          optimizerType,
+          history: effectiveHistory,
+        },
         (data) => {
           // Synthetic continuous loss metrics computation for real-time visualization
           const fitness = data.bestFitness;
@@ -336,9 +341,32 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const safeWeights = normalizeWeights(liveWeights);
     await updateGlobalWeights(safeWeights, drawName);
     await refreshData(drawName, true);
+
+    // Enregistrement dans la base de connaissances ADN (Model DNA Lineage)
+    try {
+      const { recordModelDnaVersion } = await import("../../services/prediction/modelDnaKnowledgeBase");
+      const relativeGain = finalReport?.score ? ((finalReport.score - 50) / 50) * 100 : 0;
+      await recordModelDnaVersion({
+        drawName,
+        origin: "GENETIC_EVOLUTION",
+        weights: safeWeights,
+        performance: {
+          score: finalReport?.score || 0,
+          relativeGain,
+          hitRate: finalReport?.averageHits ? (finalReport.averageHits / 5) * 100 : undefined,
+        },
+        causalAuditTrail: [
+          `Optimisation génomique exécutée (${optimizerType.toUpperCase()}) sur ${drawName}`,
+          `Générations: ${generations}, Échantillon: ${sampleSize} tirages`,
+          `Score atteint: ${(finalReport?.score || 0).toFixed(1)}/100`,
+        ],
+      });
+    } catch (err) {
+      console.warn("[TrainingTab] Erreur archivage ADN :", err);
+    }
     
     setOriginalWeights(safeWeights);
-    addLog("ADN mis à jour avec succès dans le moteur prédictif.");
+    addLog("ADN mis à jour avec succès dans le moteur prédictif et archivé dans la lignée.");
     showToast("ADN mis à jour avec succès !", "success");
     audioEngine.play("success");
   };
@@ -450,6 +478,24 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     await saveAlgoWeights(drawName, normalized);
     await updateGlobalWeights(normalized, drawName);
     await refreshData(drawName, true);
+
+    // Enregistrement dans la base de connaissances ADN
+    try {
+      const { recordModelDnaVersion } = await import("../../services/prediction/modelDnaKnowledgeBase");
+      await recordModelDnaVersion({
+        drawName,
+        origin: "MANUAL_CALIBRATION",
+        weights: normalized,
+        performance: {
+          score: 50,
+        },
+        causalAuditTrail: [
+          `Calibrage manuel des poids appliqué sur ${drawName}`,
+        ],
+      });
+    } catch (err) {
+      console.warn("[TrainingTab] Erreur archivage calibrage manuel ADN :", err);
+    }
     
     setOriginalWeights(normalized);
     setLiveWeights(normalized);
@@ -685,9 +731,10 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   {/* Moteur de Résolution */}
                   <div className="space-y-2">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Moteur d'Optimisation</span>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
                       {[
                         { id: "meta", label: "Omni" },
+                        { id: "gradient", label: "Gradient" },
                         { id: "pso", label: "PSO" },
                         { id: "genetic", label: "Darwin" },
                         { id: "bayesian", label: "Bayes" },
@@ -1015,7 +1062,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
       {/* VIEW 5: NEURAL FEEDBACK & CALIBRATION */}
       {activeSubTab === "feedback" && (
-        <NeuralFeedbackPanel />
+        <NeuralFeedbackPanel drawName={drawName} />
       )}
 
       {/* MODAL: MANUAL DNA FINE-TUNER */}

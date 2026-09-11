@@ -364,7 +364,12 @@ export const evolveNeuralDNACore = async (
  */
 export const evolveNeuralDNA = async (
   drawName: string,
-  options: { generations: number; sampleSize: number; optimizerType?: "genetic" | "pso" | "bayesian" | "meta" } = { generations: 20, sampleSize: 30, optimizerType: "pso" },
+  options: {
+    generations: number;
+    sampleSize: number;
+    optimizerType?: "genetic" | "pso" | "bayesian" | "meta" | "gradient";
+    history?: DrawResult[];
+  } = { generations: 20, sampleSize: 30, optimizerType: "pso" },
   onTelemetry?: (data: { gen: number; bestFitness: number; avgFitness: number; diversity: number; bestGenome: any; source?: string }) => void
 ): Promise<{
   bestWeights: any;
@@ -375,7 +380,9 @@ export const evolveNeuralDNA = async (
   firstPredictionDNASnapshot?: any;
 }> => {
   const optType = options.optimizerType || "pso";
-  const { data: rawHistory } = await fetchResults(drawName);
+  const rawHistory = options.history && options.history.length > 0
+    ? options.history
+    : (await fetchResults(drawName)).data;
   const fullHistory = purifyHistoryForDraw(drawName, rawHistory);
 
   // Clé de cache robuste intégrant le tirage, sa taille, les options et le dernier id stable

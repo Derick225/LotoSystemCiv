@@ -146,7 +146,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
     });
 
     const historicalVectors: Float32Array[] = [];
-    const sampleDepth = Math.min(30, history.length);
+    const sampleDepth = Math.min(temporalDepth || 30, history.length);
     for (let i = 0; i < sampleDepth; i++) {
         const winners = history[i]?.gagnants || [];
         winners.forEach(w => {
@@ -160,7 +160,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
     let calculatedAlignment: number | undefined; 
     if (historicalVectors.length > 0 && dnaMatrix.length > 0) {
         try {
-            const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, 30);
+            const targetProfile = optimizer.extractTargetDNAProfile(historicalVectors, sampleDepth);
             const evaluation = optimizer.evaluateCandidate(dnaMatrix, targetProfile, top5, history.map(h => h.gagnants || []));
             calculatedAlignment = Math.round(100 * Math.exp(-evaluation.distance));
         } catch(e) {
@@ -179,14 +179,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
         analysis: `Convergence MCMC Metropolis-Hastings avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique optimisé.`,
         timestamp: Date.now(),
         realityAlignment: calculatedAlignment,
-        diversityMetrics: {
-            meanSimilarity: 0.1,
-            diversityScore: 0.9,
-            penalty: 0,
-            isMonoculture: false,
-            pairwiseSimilarities: [],
-            dominantAlgo: "MCMC"
-        }
+        diversityMetrics: calculateGeneticDiversityIndex(top5, breakdownAcc as any)
     };
 
     return aggregatedPred;

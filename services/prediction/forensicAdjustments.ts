@@ -34,8 +34,20 @@ export const applyForensicAdjustments = async (
   const dynamicWeightModifiers: Record<number, Partial<Record<string, number>>> = {};
   const oracleDriftMap: Record<string, number> = {};
 
+  // Si l'optimisation Forensic est désactivée, neutralisation absolue immédiate
+  if (!isForensicOptimized) {
+    return {
+      recentReports: [],
+      proximityScores,
+      missedScores,
+      driftScores,
+      dynamicWeightModifiers,
+      oracleDriftMap,
+    };
+  }
+
   let reports = preloadedForensicReports;
-  if (!reports && isForensicOptimized) {
+  if (!reports) {
     try {
       reports = await getLocalForensicReports();
     } catch (e) {

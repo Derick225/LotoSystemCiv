@@ -111,8 +111,9 @@ const DNA_IN_MEMORY_STORAGE = new Map<string, ModelDnaRecord[]>();
  * Conforme à la règle d'isolation absolue des tirages (TIRAGE ISOLATION RULE).
  */
 export const recordModelDnaVersion = async (
-  entry: Omit<ModelDnaRecord, 'id' | 'timestamp' | 'dnaFingerprint' | 'specializations'> & {
+  entry: Omit<ModelDnaRecord, 'id' | 'timestamp' | 'dnaFingerprint' | 'specializations' | 'version'> & {
     timestamp?: string;
+    version?: string;
   }
 ): Promise<ModelDnaRecord> => {
   const drawName = entry.drawName;

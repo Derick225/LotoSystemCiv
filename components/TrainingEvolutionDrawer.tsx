@@ -50,6 +50,33 @@ export const TrainingEvolutionDrawer: React.FC<{
 
       const entries: WeightHistoryEntry[] = [];
 
+      // 0. Charger depuis la Base de Connaissances ADN Déterministe (modelDnaKnowledgeBase)
+      try {
+        const { getModelEvolutionLineage } = await import("../services/prediction/modelDnaKnowledgeBase");
+        const lineage = await getModelEvolutionLineage(drawName);
+        if (lineage && lineage.history && Array.isArray(lineage.history)) {
+          lineage.history.forEach((rec) => {
+            const fit = Number(rec.performance?.score) || 0;
+            entries.push({
+              created_at: rec.timestamp,
+              timestamp: new Date(rec.timestamp).getTime(),
+              score: fit,
+              fitness: fit,
+              relativeGain: rec.performance?.relativeGain || 0,
+              weights: rec.weights || {},
+              applied_weights: rec.weights || {},
+              source: rec.origin === "FORENSIC_AUTOPSY"
+                ? "forensic" as any
+                : rec.origin === "GENETIC_EVOLUTION"
+                ? "training" as any
+                : "local",
+            });
+          });
+        }
+      } catch (e) {
+        console.warn("[TrainingEvolutionDrawer] DNA KnowledgeBase error:", e);
+      }
+
       // 1. Charger depuis Supabase si disponible
       if (isSupabaseConfigured() && navigator.onLine) {
         try {

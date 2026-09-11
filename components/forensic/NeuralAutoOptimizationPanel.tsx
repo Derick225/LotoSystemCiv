@@ -92,6 +92,28 @@ export const NeuralAutoOptimizationPanel: React.FC<NeuralAutoOptimizationPanelPr
       await updateGlobalWeights(result.optimizedWeights, drawName);
       await refreshData(drawName, true);
     }
+
+    // Archivage dans la lignée ADN
+    try {
+      const { recordModelDnaVersion } = await import('../../services/prediction/modelDnaKnowledgeBase');
+      await recordModelDnaVersion({
+        drawName,
+        origin: 'SGD_CYBERNETIC',
+        weights: result.optimizedWeights,
+        performance: {
+          score: result.finalAccuracy,
+          relativeGain: result.accuracyGain,
+          rmse: result.finalLoss,
+        },
+        causalAuditTrail: [
+          `Rétropropagation neurale exécutée sur ${drawName} (${result.epochsCompleted} époques)`,
+          `Réduction de perte: ${result.lossReductionPct.toFixed(1)}%, Gain de précision: +${result.accuracyGain.toFixed(1)}%`,
+        ],
+      });
+    } catch (err) {
+      console.warn('[NeuralAutoOptimizationPanel] Erreur archivage ADN :', err);
+    }
+
     setApplied(true);
     audioEngine.play('success');
   };
