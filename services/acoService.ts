@@ -78,16 +78,16 @@ export const runAntColonyOptimization = async (
     if (useCloudEngine) {
         try {
             console.log(`Tentative ACO via Supabase Edge Function (run-ml-models)...`);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("Edge Function Timeout")), 5000)
+            const timeoutPromise = new Promise<{ bestPath?: { numbers: number[], confidence: number } } | null>((resolve) => 
+                setTimeout(() => resolve(null), 5000)
             );
             
             // Usage de apiClient.post pour une gestion globale des erreurs
             const invokePromise = apiClient.post<{ bestPath?: { numbers: number[], confidence: number } }>('run-ml-models', {
                 model: 'aco', history: purifiedHistory.slice(0, 50), config
-            }, { suppressErrorLogging: true });
+            }, { suppressErrorLogging: true }).catch(() => null);
 
-            const data = await Promise.race([invokePromise, timeoutPromise]) as { bestPath?: { numbers: number[], confidence: number } };
+            const data = await Promise.race([invokePromise, timeoutPromise]);
             
             if (data && data.bestPath) {
                 const bestPathObj = data.bestPath;

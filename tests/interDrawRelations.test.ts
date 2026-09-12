@@ -8,7 +8,8 @@ import {
 import {
   getMirrorNumber,
   getComplement90,
-  generateInterDrawReport
+  generateInterDrawReport,
+  calculateInterDrawVector
 } from '../services/interDrawService';
 
 describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
@@ -135,6 +136,36 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
       expect(report?.family.id).toBe('FAMILY_10H_16H_SUN19H55');
       expect(report?.targetDraw).toBe('Reveil');
       expect(report?.sourceTransitions.length).toBe(5);
+    });
+  });
+
+  describe('Vecteur de Transition Inter-Tirages (calculateInterDrawVector)', () => {
+    it('polarise les scores sur les numéros du tirage prédécesseur et non sur le tirage cible lui-même', () => {
+      const targetHistory = [
+        { date: '2026-03-01', draw_name: 'Fortune', gagnants: [81, 82, 83, 84, 85], machine: [] },
+        { date: '2026-02-22', draw_name: 'Fortune', gagnants: [81, 82, 83, 84, 85], machine: [] }
+      ];
+
+      // Prédécesseur de Fortune (13H) avec numéros distincts [7, 14, 21, 28, 35]
+      const predecessorHistory = [
+        { date: '2026-02-28', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] },
+        { date: '2026-02-21', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] }
+      ];
+
+      const vector = calculateInterDrawVector(targetHistory, 'Fortune', predecessorHistory);
+      expect(vector).toBeDefined();
+      expect(vector.length).toBe(91);
+
+      // Les numéros du prédécesseur (report direct et miroir) doivent avoir des scores plus élevés qu'un numéro neutre non lié
+      // Numéro 7 est un gagnant direct du prédécesseur (report direct attendu)
+      // Numéro 70 est le miroir décimal de 7
+      // Numéros 81-85 sont les cibles réelles de transition depuis le prédécesseur
+      // Numéros 51-55 sont totalement neutres (aucune transition, aucun miroir)
+      expect(vector[7]).toBeGreaterThan(vector[51]); // Report direct carry-over
+      expect(vector[14]).toBeGreaterThan(vector[52]); // Report direct carry-over
+      expect(vector[81]).toBeGreaterThan(vector[53]); // Transition Markov observée
+      expect(vector[70]).toBeGreaterThan(vector[54]); // Résonance Miroir décimal du prédécesseur (7 -> 70)
+      expect(vector[84]).toBeGreaterThan(vector[55]); // Transition Markov observée
     });
   });
 });

@@ -21,14 +21,16 @@ export const checkSubscriptionStatus = async (userId: string): Promise<Subscript
     }
 
     try {
-        const queryPromise = supabase
-            .from('subscriptions')
-            .select('*')
-            .eq('user_id', userId)
-            .single();
-        const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) =>
-            setTimeout(() => reject(new Error("checkSubscriptionStatus timeout")), 15000)
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error("checkSubscriptionStatus timeout") }), 15000)
         );
+        const queryPromise = Promise.resolve(
+            supabase
+                .from('subscriptions')
+                .select('*')
+                .eq('user_id', userId)
+                .single()
+        ).catch(() => ({ data: null, error: new Error("checkSubscriptionStatus query failed") }));
         const { data: rawData, error } = await Promise.race([queryPromise, timeoutPromise]);
 
         const now = new Date();

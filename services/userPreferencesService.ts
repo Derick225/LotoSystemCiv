@@ -350,15 +350,17 @@ export const hydrateUserData = async (userId: string) => {
     if (!isSupabaseConfigured()) return;
     
     try {
-        const queryPromise = supabase
-            .from('user_preferences')
-            .select('watchlist, saved_tickets, settings')
-            .eq('user_id', userId)
-            .single();
-            
-        const timeoutPromise = new Promise<{ data: null; error: Error }>((_, reject) =>
-            setTimeout(() => reject(new Error("hydrateUserData timeout")), 25000)
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error("hydrateUserData timeout") }), 25000)
         );
+        const queryPromise = Promise.resolve(
+            supabase
+                .from('user_preferences')
+                .select('watchlist, saved_tickets, settings')
+                .eq('user_id', userId)
+                .single()
+        ).catch(() => ({ data: null, error: new Error("hydrateUserData query failed") }));
+            
         const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
         if (error || !data) {
@@ -370,7 +372,7 @@ export const hydrateUserData = async (userId: string) => {
         // 1. WATCHLIST
         const localWatchlist = getWatchlist();
         const rawWatchlist = Array.isArray(data.watchlist) ? data.watchlist : [];
-        const remoteWatchlist = rawWatchlist.map(Number).filter(n => !isNaN(n));
+        const remoteWatchlist = rawWatchlist.map(Number).filter((n: number) => !isNaN(n));
         const mergedWatchlist = Array.from(new Set([...localWatchlist, ...remoteWatchlist])).sort((a, b) => a - b);
         localStorage.setItem(WATCHLIST_KEY, JSON.stringify(mergedWatchlist));
 

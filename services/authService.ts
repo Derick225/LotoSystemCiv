@@ -86,10 +86,12 @@ export const authService = {
         }
     }
     try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("getSession timeout")), 3000));
-        const { data } = await Promise.race([sessionPromise, timeoutPromise]) as { data: { session: Session | null }, error?: Error };
-        return data?.session || null;
+        const sessionPromise = supabase.auth.getSession().catch(() => ({ data: { session: null }, error: null }));
+        const timeoutPromise = new Promise<{ data: { session: null }; error: null }>((resolve) => 
+            setTimeout(() => resolve({ data: { session: null }, error: null }), 3000)
+        );
+        const res = await Promise.race([sessionPromise, timeoutPromise]);
+        return res?.data?.session || null;
     } catch (e) {
         // Silently handle timeout to avoid spamming console and blocking UI
         return null;
@@ -110,8 +112,13 @@ export const authService = {
         } catch {}
         return null;
     }
-    const { data } = await supabase.auth.getUser();
-    return data.user;
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data) return null;
+      return data.user;
+    } catch {
+      return null;
+    }
   },
 
   /**

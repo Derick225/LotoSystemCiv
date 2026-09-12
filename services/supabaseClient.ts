@@ -55,6 +55,31 @@ export const getSupabaseConfigDiagnostics = () => {
   };
 };
 
+// Safe fetch wrapper pour intercepter les erreurs réseau brutes (ex: 'Failed to fetch')
+// et retourner une réponse HTTP 503 structurée afin d'empêcher les rejections non gérées.
+const safeFetch: typeof fetch = async (input, init) => {
+  try {
+    return await fetch(input, init);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.warn('[Supabase safeFetch] Interception résiliente d\'erreur réseau :', errorMsg);
+    return new Response(
+      JSON.stringify({
+        message: errorMsg || 'Failed to fetch',
+        error: errorMsg || 'Failed to fetch',
+        code: 'NETWORK_ERROR',
+        details: null,
+        hint: null,
+      }),
+      {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+};
+
 // Initialisation sécurisée
 const createSafeClient = (): SupabaseClient => {
     if (isSupabaseConfigured()) {
@@ -69,7 +94,10 @@ const createSafeClient = (): SupabaseClient => {
                     return await fn();
                 },
             },
-            global: { headers: {} },
+            global: { 
+                fetch: safeFetch,
+                headers: {} 
+            },
         });
     } else {
         console.warn("Supabase non configuré correctement. Mode hors-ligne strict activé.");

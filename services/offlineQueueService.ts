@@ -107,7 +107,13 @@ class OfflineQueueService {
         return { processed: 0, errors: 0 };
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      let user = null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user || null;
+      } catch {
+        user = null;
+      }
 
       const { getMany, delMany, setMany } = await import('idb-keyval');
       const values = await getMany(queueKeys);

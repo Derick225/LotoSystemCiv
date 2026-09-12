@@ -15,17 +15,38 @@ export const GlobalErrorListener: React.FC = () => {
       if (event.message?.includes("Script error.")) return;
       if (event.message === "Script error.") return;
 
+      const rawMsg = event.message || (event.error instanceof Error ? event.error.message : String(event.error || ""));
+      const isNetwork = rawMsg.toLowerCase().includes("fetch") || rawMsg.toLowerCase().includes("network") || rawMsg.toLowerCase().includes("failed to fetch");
+
+      // Prévenir la propagation d'erreur non capturée au runtime global du conteneur
+      event.preventDefault();
+
       const friendlyMsg = getUserFriendlyError(event.error || event.message);
       logError(event.error || new Error(event.message), {
         source: "GlobalErrorListener",
+        severity: isNetwork ? "low" : "medium",
       });
 
-      // On affiche un toast au lieu de laisser l'app crasher silencieusement (si possible)
-      showToast(friendlyMsg, "error");
+      if (!isNetwork) {
+        showToast(friendlyMsg, "error");
+      }
     };
 
     // Gestionnaire pour les Promesses rejetées non gérées (Async)
     const handlePromiseRejection = (event: PromiseRejectionEvent) => {
+      // Indispensable : marquer la réjection comme traitée pour empêcher le conteneur
+      // ou la console du navigateur d'émettre une erreur fatale uncaught (ex: error 0: Failed to fetch)
+      event.preventDefault();
+
+      const reason = event.reason;
+      const rawMsg = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+      const isNetwork = rawMsg.toLowerCase().includes("fetch") || rawMsg.toLowerCase().includes("network") || rawMsg.toLowerCase().includes("failed to fetch") || rawMsg.toLowerCase().includes("abort");
+
+      if (isNetwork) {
+        console.warn("[GlobalErrorListener] Rejet asynchrone réseau neutralisé :", rawMsg);
+        return;
+      }
+
       const friendlyMsg = getUserFriendlyError(event.reason);
       logError(event.reason, { source: "UnhandledPromiseRejection" });
 

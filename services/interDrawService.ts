@@ -10,7 +10,7 @@ import {
   normalizeDrawName
 } from '../constants';
 import { DrawResult } from '../types';
-import { lotteryService, LOTTERY_CONSTANTS } from './lotteryService';
+import { lotteryService, LOTTERY_CONSTANTS, generateDeterministicFallbackHistory } from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 
 export interface InterDrawCandidateScore {
@@ -707,7 +707,8 @@ export const simulateInterDrawTransmission = async (
  */
 export const calculateInterDrawVector = (
   history: DrawResult[],
-  drawName?: string
+  drawName?: string,
+  predecessorHistory?: DrawResult[]
 ): Float32Array => {
   const vec = new Float32Array(91);
   if (!history || history.length === 0 || !drawName) {
@@ -727,18 +728,37 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
-  // 1. Vérification du cache L1 synchrone : s'il existe déjà un rapport complet, zéro duplication de calcul
-  const cacheKey = globalCache.getInterDrawKey(primaryFamily.id, normalizeDrawName(drawName));
-  const cachedReport = globalCache.getSync<InterDrawReport>(cacheKey, drawName);
-  if (cachedReport?.fullCandidateScores && cachedReport.fullCandidateScores.length >= 91) {
-    for (let n = 1; n <= 90; n++) {
-      vec[n] = cachedReport.fullCandidateScores[n];
+  // 1. Vérification du cache L1 synchrone : s'il existe déjà un rapport complet et aucun historique custom
+  if (!predecessorHistory) {
+    const cacheKey = globalCache.getInterDrawKey(primaryFamily.id, normalizeDrawName(drawName));
+    const cachedReport = globalCache.getSync<InterDrawReport>(cacheKey, drawName);
+    if (cachedReport?.fullCandidateScores && cachedReport.fullCandidateScores.length >= 91) {
+      for (let n = 1; n <= 90; n++) {
+        vec[n] = cachedReport.fullCandidateScores[n];
+      }
+      return vec;
     }
-    return vec;
   }
 
-  const lastDraw = history[0];
-  const lastWinners = lastDraw?.gagnants || [];
+  // 2. Récupération de l'historique du VRAI PRÉDÉCESSEUR de la famille (Zéro autocorrélation avec soi-même)
+  let predHistory: DrawResult[] = [];
+  if (predecessorHistory && predecessorHistory.length > 0) {
+    predHistory = predecessorHistory;
+  } else {
+    // Tentative de récupération synchrone depuis le cache mémoire du tirage prédécesseur
+    const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
+    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
+    if (cachedPredHistory && cachedPredHistory.length > 0) {
+      predHistory = cachedPredHistory;
+    } else {
+      // Fallback déterministe canonique pour le tirage prédécesseur (strictement isolé et reproductible)
+      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+    }
+  }
+
+  // Les numéros actifs qui polarisent le tirage cible sont les gagnants du DERNIER tirage du prédécesseur
+  const predLatest = predHistory[0];
+  const lastWinners = predLatest?.gagnants || [];
   if (lastWinners.length === 0) {
     vec.fill(0.0555);
     return vec;
@@ -747,8 +767,9 @@ export const calculateInterDrawVector = (
   const activeMirrors = new Set(lastWinners.map(getMirrorNumber));
   const activeComplements = new Set(lastWinners.map(getComplement90));
 
-  // Fréquences empiriques de transition à partir des numéros du prédécesseur avec noyau temporel Hawkes
-  const sampleLimit = Math.min(history.length, 120);
+  // Fréquences empiriques de transition à partir des numéros du prédécesseur vers le tirage cible
+  // Alignement temporel des couples consécutifs (predHistory[i] -> history[i])
+  const sampleLimit = Math.min(history.length, predHistory.length, 120);
   const hawkesDecay = 1.0 / Math.max(1.0, Math.sqrt(sampleLimit)); // Décroissance continue sans constante arbitraire
 
   const transCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
@@ -758,9 +779,11 @@ export const calculateInterDrawVector = (
   let compOcc = 0;
   let totalTested = 0;
 
-  for (let i = 0; i < sampleLimit - 1; i++) {
-    const prev = history[i + 1]?.gagnants || [];
+  for (let i = 0; i < sampleLimit; i++) {
+    const prev = predHistory[i]?.gagnants || [];
     const curr = history[i]?.gagnants || [];
+    if (prev.length === 0 || curr.length === 0) continue;
+
     const timeWeight = Math.exp(-hawkesDecay * (i / Math.sqrt(sampleLimit)));
 
     for (const pw of prev) {
@@ -792,7 +815,7 @@ export const calculateInterDrawVector = (
 
   let maxV = 1e-6;
   for (let n = 1; n <= 90; n++) {
-    // Markov multivarié : P(c | lastWinners) = 1 - prod (1 - P(c | p))
+    // Markov multivarié : P(c | lastWinners du prédécesseur) = 1 - prod (1 - P(c | p))
     let logNotProb = 0;
     for (const p of lastWinners) {
       const denom = fromTotals[p] + 90 * laplaceAlpha;
@@ -847,7 +870,8 @@ export interface HarmonicResonanceMap {
 export const calculateHarmonicResonanceMap = (
   history: DrawResult[],
   drawName: string,
-  forcedFamilyId?: InterDrawFamilyId
+  forcedFamilyId?: InterDrawFamilyId,
+  predecessorHistory?: DrawResult[]
 ): HarmonicResonanceMap | null => {
   if (!history || history.length === 0 || !drawName) return null;
 
@@ -858,9 +882,26 @@ export const calculateHarmonicResonanceMap = (
 
   if (!activeFamily) return null;
 
-  const vector = calculateInterDrawVector(history, drawName);
-  const lastDraw = history[0];
-  const lastWinners = lastDraw?.gagnants || [];
+  const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
+  if (!relation) return null;
+
+  // Récupération de l'historique du prédécesseur
+  let predHistory: DrawResult[] = [];
+  if (predecessorHistory && predecessorHistory.length > 0) {
+    predHistory = predecessorHistory;
+  } else {
+    const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
+    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
+    if (cachedPredHistory && cachedPredHistory.length > 0) {
+      predHistory = cachedPredHistory;
+    } else {
+      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+    }
+  }
+
+  const vector = calculateInterDrawVector(history, drawName, predHistory);
+  const predLatest = predHistory[0];
+  const lastWinners = predLatest?.gagnants || [];
 
   const mirrorExpectedRate = (5 / 90) * 100;
   const complementExpectedRate = (5 / 90) * 100;
@@ -871,10 +912,11 @@ export const calculateHarmonicResonanceMap = (
 
   const pairCounts: Record<string, { count: number; total: number; from: number; to: number; type: 'MIROIR' | 'COMPLEMENT' }> = {};
 
-  const sampleLimit = Math.min(history.length, 150);
-  for (let i = 0; i < sampleLimit - 1; i++) {
-    const prev = history[i + 1]?.gagnants || [];
+  const sampleLimit = Math.min(history.length, predHistory.length, 150);
+  for (let i = 0; i < sampleLimit; i++) {
+    const prev = predHistory[i]?.gagnants || [];
     const curr = history[i]?.gagnants || [];
+    if (prev.length === 0 || curr.length === 0) continue;
 
     for (const p of prev) {
       totalTested++;
@@ -983,15 +1025,21 @@ export const calculateInterDrawMonthlyCoupling = (
     return { vector: defaultVector };
   }
 
-  const baseVector = calculateInterDrawVector(history, drawName);
+  // Récupération de l'historique du prédécesseur
+  const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
+  const cachedPred = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
+  const predHistory = (cachedPred && cachedPred.length > 0) ? cachedPred : generateDeterministicFallbackHistory(relation.predecessor.name);
+
+  const baseVector = calculateInterDrawVector(history, drawName, predHistory);
 
   // Filtrage temporel des co-occurrences dans le mois source
   let monthCarryOverCount = 0;
   let totalMonthPairs = 0;
 
-  for (let i = 0; i < history.length - 1; i++) {
+  const minPairs = Math.min(history.length, predHistory.length);
+  for (let i = 0; i < minPairs; i++) {
     const d = history[i];
-    const prevD = history[i + 1];
+    const prevD = predHistory[i];
     if (d && prevD && d.date) {
       const dDate = new Date(d.date);
       const m = isNaN(dDate.getTime()) ? -1 : dDate.getMonth();
@@ -1009,7 +1057,7 @@ export const calculateInterDrawMonthlyCoupling = (
   const theoreticalRate = 25 / 90; // ~27.78%
   const carryOverLift = parseFloat((observedRate / theoreticalRate).toFixed(2));
 
-  const lastWinners = history[0]?.gagnants || [];
+  const lastWinners = predHistory[0]?.gagnants || history[0]?.gagnants || [];
   const harmonicCount = lastWinners.filter(n => getMirrorNumber(n) !== n || getComplement90(n) !== n).length;
 
   return {

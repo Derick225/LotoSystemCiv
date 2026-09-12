@@ -39,11 +39,14 @@ export const apiClient = {
             }
         }
 
-        const isNetworkError = (errorMessage || '').toLowerCase().includes('fetch') || (errorMessage || '').toLowerCase().includes('network') || (errorMessage || '').toLowerCase().includes('failed to fetch');
+        const lowerMsg = (errorMessage || '').toLowerCase();
+        const isAuthError = lowerMsg.includes('autorisé') || lowerMsg.includes('unauthorized') || lowerMsg.includes('forbidden') || lowerMsg.includes('jwt');
+        const isNetworkError = lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('failed to fetch');
+
         throw new AppError(
           errorMessage || `Erreur lors de l'appel à la fonction ${endpoint}`,
-          'NETWORK_ERR',
-          isNetworkError ? 'medium' : 'high',
+          isAuthError ? 'AUTH_ERR' : (isNetworkError ? 'NETWORK_ERR' : 'API_ERR'),
+          isAuthError || isNetworkError ? 'low' : 'medium',
           details
         );
       }

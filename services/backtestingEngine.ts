@@ -75,8 +75,8 @@ export const runSurvivalSimulation = async (
     try {
       console.log(`Tentative de backtesting via Supabase Edge Function (run-simulation) - Strategie: ${strategy}...`);
       
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("Edge Function Timeout")), 8000)
+      const timeoutPromise = new Promise<null>((resolve) => 
+        setTimeout(() => resolve(null), 8000)
       );
 
       const invokePromise = apiClient.post<BacktestReport>(
@@ -92,9 +92,9 @@ export const runSurvivalSimulation = async (
           payoutModel,
         },
         { suppressErrorLogging: true }
-      );
+      ).catch(() => null);
 
-      const data = await Promise.race([invokePromise, timeoutPromise]) as BacktestReport;
+      const data = await Promise.race([invokePromise, timeoutPromise]);
 
       if (data && data.totalDraws > 0) {
         console.log("Succès Edge Function Backtest", data);
