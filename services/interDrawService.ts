@@ -31,6 +31,18 @@ export interface InterDrawPairCombination {
   label: string;
 }
 
+export interface SourceTransitionItem {
+  targetNumber: number;
+  probability: number;
+  lift: number;
+  occurrences: number;
+}
+
+export interface SourceTransitions {
+  sourceNumber: number;
+  transitions: SourceTransitionItem[];
+}
+
 export interface InterDrawTransitionCell {
   from: number;
   to: number;
@@ -79,6 +91,8 @@ export interface InterDrawReport {
   recommendedHarmonics: InterDrawCandidateScore[];
   recommendedPairs: InterDrawPairCombination[];
   topTransitions: InterDrawTransitionCell[];
+  sourceTransitions: SourceTransitions[];
+  fullCandidateScores: number[];
   generationTimestamp: number;
 }
 
@@ -186,6 +200,7 @@ export const generateInterDrawReport = async (
   // transitionsCount[from][to]
   const transitionsCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
   const fromTotals: number[] = new Array(91).fill(0);
+  const targetMarginalCounts: number[] = new Array(91).fill(0);
   let totalConsecutivePairs = 0;
   let carryOverOccurrences = 0; // Paires ayant au moins 1 numéro en commun
   const repeatCounts: number[] = new Array(91).fill(0);
@@ -193,7 +208,10 @@ export const generateInterDrawReport = async (
   for (const pair of pairedPairs) {
     totalConsecutivePairs++;
     let hasCommon = false;
-    const predSet = new Set(pair.predWinners);
+
+    for (const tw of pair.targetWinners) {
+      targetMarginalCounts[tw]++;
+    }
 
     for (const pw of pair.predWinners) {
       fromTotals[pw]++;
@@ -266,6 +284,29 @@ export const generateInterDrawReport = async (
   const activePredNumbers = predLatestResult?.gagnants || [1, 2, 3, 4, 5];
   const activePredSet = new Set(activePredNumbers);
 
+  // Construction des flux markoviens individuels par numéro source du prédécesseur
+  const sourceTransitions: SourceTransitions[] = activePredNumbers.map(pw => {
+    const denom = fromTotals[pw] + 90 * laplaceAlpha;
+    const items: SourceTransitionItem[] = [];
+    for (let c = 1; c <= 90; c++) {
+      const occ = transitionsCount[pw][c];
+      const prob = denom > 0 ? (occ + laplaceAlpha) / denom : 1 / 90;
+      const targetMarginalProb = Math.max(1e-5, (targetMarginalCounts[c] + laplaceAlpha) / (sampleSize * 5 + 90 * laplaceAlpha));
+      const lift = prob / targetMarginalProb;
+      items.push({
+        targetNumber: c,
+        probability: Math.round(prob * 1000) / 10,
+        lift: Math.round(lift * 100) / 100,
+        occurrences: occ
+      });
+    }
+    items.sort((a, b) => b.lift - a.lift || b.probability - a.probability);
+    return {
+      sourceNumber: pw,
+      transitions: items.slice(0, 10)
+    };
+  });
+
   // Cartographie des paires harmoniques actives pour le tirage courant
   const harmonicPairs: HarmonicPairDetail[] = [];
   for (const pw of activePredNumbers) {
@@ -303,7 +344,7 @@ export const generateInterDrawReport = async (
     }
   }
 
-  // Pour chaque numéro cible c in [1..90], calculer le potentiel de transition depuis activePredNumbers
+  // Pour chaque numéro cible c in [1..90], calculer le potentiel de transition conditionnelle multivariée
   const candidateMetrics: {
     num: number;
     rawTransitionProb: number;
@@ -317,15 +358,17 @@ export const generateInterDrawReport = async (
   const activeComplements = new Set(activePredNumbers.map(getComplement90));
 
   for (let c = 1; c <= 90; c++) {
-    // Markov transition prob conditionnelle = moyenne des probabilités P(c | p) pour p in activePredNumbers
-    let sumTransitionProb = 0;
+    // Probabilité conditionnelle multivariée exacte :
+    // P(c in W_t | W_{t-1}) = 1 - prod_{p in W_{t-1}} (1 - P(c | p))
+    // Stabilité numérique via log-space : 1 - exp( sum ln(1 - P(c | p)) )
+    let logNotProb = 0;
     for (const p of activePredNumbers) {
       const count = transitionsCount[p][c];
       const denom = fromTotals[p] + 90 * laplaceAlpha;
       const prob = denom > 0 ? (count + laplaceAlpha) / denom : 1 / 90;
-      sumTransitionProb += prob;
+      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(prob, 0.9999)));
     }
-    const avgTransitionProb = sumTransitionProb / activePredNumbers.length;
+    const jointTransitionProb = -Math.expm1(logNotProb);
 
     // Répétition directe (carry-over)
     const isDirectCandidate = activePredSet.has(c);
@@ -351,7 +394,7 @@ export const generateInterDrawReport = async (
 
     candidateMetrics.push({
       num: c,
-      rawTransitionProb: avgTransitionProb,
+      rawTransitionProb: jointTransitionProb,
       rawRepeatProb: isDirectCandidate ? repeatProb : 0,
       rawHarmonicScore: harmonicBonus,
       flags
@@ -423,6 +466,12 @@ export const generateInterDrawReport = async (
   const recommendedHarmonics = scoredCandidates
     .filter(c => c.flags.includes('MIROIR_DECIMAL') || c.flags.includes('COMPLEMENT_90'))
     .slice(0, 5);
+
+  // Vecteur complet d'inférence 1..90 normalisé [0.01, 0.99]
+  const fullCandidateScores = new Array(91).fill(0.0555);
+  for (const item of scoredCandidates) {
+    fullCandidateScores[item.number] = Math.max(0.01, Math.min(0.99, item.compositeScore / 100));
+  }
 
   // 6. Top Couplages 2-sur-2 (paires) maximisant la probabilité conjointe
   const topNumbersPool = topCandidates.slice(0, 6).map(c => c.number);
@@ -497,6 +546,8 @@ export const generateInterDrawReport = async (
     recommendedHarmonics,
     recommendedPairs,
     topTransitions,
+    sourceTransitions,
+    fullCandidateScores,
     generationTimestamp: Date.now()
   };
 
@@ -564,16 +615,17 @@ export const simulateInterDrawTransmission = async (
   const rawCandidates: { num: number; prob: number; repeat: boolean; mirror: boolean; comp: boolean }[] = [];
 
   for (let c = 1; c <= 90; c++) {
-    let sumProb = 0;
+    let logNotProb = 0;
     for (const p of validNumbers) {
       const count = transitionsCount[p][c];
       const denom = fromTotals[p] + 90 * laplaceAlpha;
-      sumProb += denom > 0 ? (count + laplaceAlpha) / denom : 1 / 90;
+      const prob = denom > 0 ? (count + laplaceAlpha) / denom : 1 / 90;
+      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(prob, 0.9999)));
     }
-    const avgProb = sumProb / validNumbers.length;
+    const jointProb = -Math.expm1(logNotProb);
     rawCandidates.push({
       num: c,
-      prob: avgProb,
+      prob: jointProb,
       repeat: activeSet.has(c),
       mirror: activeMirrors.has(c) && !activeSet.has(c),
       comp: activeComplements.has(c) && !activeSet.has(c)
@@ -675,6 +727,16 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
+  // 1. Vérification du cache L1 synchrone : s'il existe déjà un rapport complet, zéro duplication de calcul
+  const cacheKey = globalCache.getInterDrawKey(primaryFamily.id, normalizeDrawName(drawName));
+  const cachedReport = globalCache.getSync<InterDrawReport>(cacheKey, drawName);
+  if (cachedReport?.fullCandidateScores && cachedReport.fullCandidateScores.length >= 91) {
+    for (let n = 1; n <= 90; n++) {
+      vec[n] = cachedReport.fullCandidateScores[n];
+    }
+    return vec;
+  }
+
   const lastDraw = history[0];
   const lastWinners = lastDraw?.gagnants || [];
   if (lastWinners.length === 0) {
@@ -685,10 +747,12 @@ export const calculateInterDrawVector = (
   const activeMirrors = new Set(lastWinners.map(getMirrorNumber));
   const activeComplements = new Set(lastWinners.map(getComplement90));
 
-  // Fréquences empiriques de transition à partir des numéros du prédécesseur
-  const transCount = new Float32Array(91);
-  let totalTrans = 0;
+  // Fréquences empiriques de transition à partir des numéros du prédécesseur avec noyau temporel Hawkes
   const sampleLimit = Math.min(history.length, 120);
+  const hawkesDecay = 1.0 / Math.max(1.0, Math.sqrt(sampleLimit)); // Décroissance continue sans constante arbitraire
+
+  const transCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
+  const fromTotals: number[] = new Array(91).fill(0);
 
   let mirrorOcc = 0;
   let compOcc = 0;
@@ -697,15 +761,17 @@ export const calculateInterDrawVector = (
   for (let i = 0; i < sampleLimit - 1; i++) {
     const prev = history[i + 1]?.gagnants || [];
     const curr = history[i]?.gagnants || [];
-    const sharedWithLast = prev.filter(n => lastWinners.includes(n));
-    if (sharedWithLast.length > 0) {
-      const weight = Math.exp(-0.03 * i) * (sharedWithLast.length / 5.0);
-      curr.forEach(n => {
-        if (n >= 1 && n <= 90) {
-          transCount[n] += weight;
-          totalTrans += weight;
+    const timeWeight = Math.exp(-hawkesDecay * (i / Math.sqrt(sampleLimit)));
+
+    for (const pw of prev) {
+      if (pw >= 1 && pw <= 90) {
+        fromTotals[pw] += timeWeight;
+        for (const cw of curr) {
+          if (cw >= 1 && cw <= 90) {
+            transCount[pw][cw] += timeWeight;
+          }
         }
-      });
+      }
     }
 
     for (const p of prev) {
@@ -718,7 +784,6 @@ export const calculateInterDrawVector = (
   }
 
   const laplaceAlpha = 1.0 / (1.0 + Math.log(1.0 + sampleLimit));
-  const denom = totalTrans + 90 * laplaceAlpha;
 
   const mirrorEmpiricalRate = totalTested > 0 ? mirrorOcc / totalTested : (5 / 90);
   const compEmpiricalRate = totalTested > 0 ? compOcc / totalTested : (5 / 90);
@@ -727,13 +792,21 @@ export const calculateInterDrawVector = (
 
   let maxV = 1e-6;
   for (let n = 1; n <= 90; n++) {
-    const pTrans = denom > 0 ? (transCount[n] + laplaceAlpha) / denom : (1 / 90);
+    // Markov multivarié : P(c | lastWinners) = 1 - prod (1 - P(c | p))
+    let logNotProb = 0;
+    for (const p of lastWinners) {
+      const denom = fromTotals[p] + 90 * laplaceAlpha;
+      const pTrans = denom > 0 ? (transCount[p][n] + laplaceAlpha) / denom : (1 / 90);
+      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(pTrans, 0.9999)));
+    }
+    const jointProb = -Math.expm1(logNotProb);
+
     const isRepeat = lastWinners.includes(n);
     const isMirror = activeMirrors.has(n) && !isRepeat;
     const isComplement = activeComplements.has(n) && !isRepeat;
 
     // Modulation continue des probabilités conditionnelles
-    let score = pTrans * 90; // Centré autour de 1.0
+    let score = jointProb * 18; // Base normalisée autour de 1.0
     if (isRepeat) score *= 1.30;
     if (isMirror) score *= (1.10 * mirrorMultiplier);
     if (isComplement) score *= (1.08 * compMultiplier);

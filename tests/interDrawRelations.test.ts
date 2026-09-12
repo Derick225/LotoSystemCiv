@@ -118,6 +118,15 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
       expect(report?.topCandidates.length).toBeGreaterThan(0);
       expect(report?.recommendedPairs.length).toBeGreaterThan(0);
       expect(report?.carryOverRate).toBeGreaterThan(0);
+      expect(report?.sourceTransitions).toBeDefined();
+      expect(report?.sourceTransitions.length).toBe(5);
+      expect(report?.sourceTransitions[0].transitions.length).toBeGreaterThan(0);
+      expect(report?.fullCandidateScores).toBeDefined();
+      expect(report?.fullCandidateScores.length).toBe(91);
+      for (let i = 1; i <= 90; i++) {
+        expect(report!.fullCandidateScores[i]).toBeGreaterThanOrEqual(0.01);
+        expect(report!.fullCandidateScores[i]).toBeLessThanOrEqual(1.0);
+      }
     });
 
     it('génère un rapport valide pour un tirage de 10H (ex: Reveil)', async () => {
@@ -125,6 +134,7 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
       expect(report).toBeDefined();
       expect(report?.family.id).toBe('FAMILY_10H_16H_SUN19H55');
       expect(report?.targetDraw).toBe('Reveil');
+      expect(report?.sourceTransitions.length).toBe(5);
     });
   });
 });

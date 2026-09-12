@@ -34,7 +34,9 @@ import {
   CheckCircle2,
   Calendar,
   Clock,
-  Info
+  Info,
+  Network,
+  Activity
 } from "lucide-react";
 
 interface InterDrawRelationsTabProps {
@@ -107,6 +109,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   };
 
   // Simulateur interactif
+  const [selectedSourceNum, setSelectedSourceNum] = useState<number | null>(null);
   const [simInput, setSimInput] = useState<string>("");
   const [simResult, setSimResult] = useState<{
     candidates: InterDrawCandidateScore[];
@@ -510,6 +513,223 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               ))}
             </div>
           </div>
+
+          {/* 4.5. FLUX STOCHASTIQUES & PROBABILITÉS CONDITIONNELLES (W_{t-1} -> W_t) */}
+          {report.sourceTransitions && report.sourceTransitions.length > 0 && (
+            <div className="bg-white/80 dark:bg-slate-900/80 p-5 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                    <Network size={16} className="text-indigo-500" />
+                    Probabilités Conditionnelles & Flux de Transition (W(t-1) → W(t))
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Décomposition unitaire des attracteurs stochastiques : chaque numéro sorti au tirage prédécesseur ({report.predecessor.name}) polarise les probabilités d'apparition du tirage cible ({report.targetDraw}).
+                  </p>
+                </div>
+
+                {/* Filtre interactif par boule source */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setSelectedSourceNum(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                      selectedSourceNum === null
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    }`}
+                  >
+                    Tous les flux
+                  </button>
+                  {report.sourceTransitions.map(st => {
+                    const isSelected = selectedSourceNum === st.sourceNumber;
+                    return (
+                      <button
+                        key={`src-btn-${st.sourceNumber}`}
+                        onClick={() => {
+                          audioEngine.play("click");
+                          setSelectedSourceNum(isSelected ? null : st.sourceNumber);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-mono font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                          isSelected
+                            ? "bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                        <span>{st.sourceNumber < 10 ? `0${st.sourceNumber}` : st.sourceNumber}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Vue Détaillée : Flux Filtré par Boule Source */}
+              {selectedSourceNum !== null ? (
+                (() => {
+                  const activeSource = report.sourceTransitions.find(st => st.sourceNumber === selectedSourceNum);
+                  if (!activeSource) return null;
+                  return (
+                    <div className="space-y-3">
+                      <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-2xl border border-indigo-200 dark:border-indigo-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <NumberBall number={activeSource.sourceNumber} size="md" />
+                          <div>
+                            <span className="text-xs font-black uppercase text-indigo-950 dark:text-indigo-200 block">
+                              Numéro Source : {activeSource.sourceNumber} ({report.predecessor.name})
+                            </span>
+                            <span className="text-[11px] text-indigo-600 dark:text-indigo-400">
+                              Top cibles historiques projetées dans {report.targetDraw} (ordonnées par Lift conditionnel)
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-left sm:text-right">
+                          <span className="text-[9px] uppercase font-bold text-slate-400 block">Transitions Enregistrées</span>
+                          <span className="text-xs font-black font-mono text-indigo-600 dark:text-indigo-400">
+                            {activeSource.transitions.length} cibles identifiées
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+                        {activeSource.transitions.map((item, idx) => {
+                          const isHighLift = item.lift >= 1.5;
+                          const isPositiveLift = item.lift >= 1.0;
+                          const isRepeat = item.targetNumber === activeSource.sourceNumber;
+                          const isMirror = item.targetNumber === getMirrorNumber(activeSource.sourceNumber) && !isRepeat;
+                          const isComp = item.targetNumber === getComplement90(activeSource.sourceNumber) && !isRepeat;
+
+                          return (
+                            <div
+                              key={`trans-${activeSource.sourceNumber}-${item.targetNumber}`}
+                              className={`p-3 rounded-2xl border transition-all duration-200 flex flex-col justify-between ${
+                                isHighLift
+                                  ? "bg-emerald-50/80 dark:bg-emerald-950/20 border-emerald-500/30 shadow-sm"
+                                  : isPositiveLift
+                                  ? "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-white/5"
+                                  : "bg-slate-50/50 dark:bg-slate-800/30 border-slate-200/50 dark:border-white/5 opacity-80"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono text-slate-400 font-bold">
+                                  #{idx + 1}
+                                </span>
+                                <div className="flex gap-1">
+                                  {isRepeat && (
+                                    <span className="px-1 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-black rounded uppercase">
+                                      Report
+                                    </span>
+                                  )}
+                                  {isMirror && (
+                                    <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[8px] font-black rounded uppercase">
+                                      Miroir
+                                    </span>
+                                  )}
+                                  {isComp && (
+                                    <span className="px-1 py-0.5 bg-sky-500/20 text-sky-600 dark:text-sky-400 text-[8px] font-black rounded uppercase">
+                                      Comp 90
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 my-2">
+                                <NumberBall number={item.targetNumber} size="sm" />
+                                <div>
+                                  <div className="flex items-baseline gap-1">
+                                    <span className="text-xs font-black font-mono text-slate-900 dark:text-white">
+                                      {item.probability}%
+                                    </span>
+                                    <span className="text-[9px] text-slate-400 font-medium">prob</span>
+                                  </div>
+                                  <span
+                                    className={`text-[10px] font-mono font-black ${
+                                      isHighLift
+                                        ? "text-emerald-600 dark:text-emerald-400"
+                                        : isPositiveLift
+                                        ? "text-indigo-600 dark:text-indigo-400"
+                                        : "text-slate-400"
+                                    }`}
+                                  >
+                                    Lift: {item.lift}x
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="pt-2 border-t border-slate-200/60 dark:border-white/5 text-[9px] text-slate-400 flex justify-between">
+                                <span>Fréquence :</span>
+                                <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
+                                  {item.occurrences} fois
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                /* Vue Synthétique de Tous les Flux */
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  {report.sourceTransitions.map(st => (
+                    <div
+                      key={`col-src-${st.sourceNumber}`}
+                      className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-white/5 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-white/5">
+                        <div className="flex items-center gap-2">
+                          <NumberBall number={st.sourceNumber} size="xs" />
+                          <span className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300">
+                            Source {st.sourceNumber}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            audioEngine.play("click");
+                            setSelectedSourceNum(st.sourceNumber);
+                          }}
+                          className="text-[10px] text-indigo-500 hover:text-indigo-600 font-bold cursor-pointer"
+                        >
+                          Détails →
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {st.transitions.slice(0, 4).map((tr, tidx) => (
+                          <div
+                            key={`tr-mini-${st.sourceNumber}-${tr.targetNumber}`}
+                            className="flex items-center justify-between p-1.5 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200/60 dark:border-white/5 text-xs"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] font-mono text-slate-400">#{tidx + 1}</span>
+                              <NumberBall number={tr.targetNumber} size="xs" />
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] font-black font-mono text-slate-800 dark:text-slate-200 block">
+                                {tr.probability}%
+                              </span>
+                              <span
+                                className={`text-[8px] font-mono font-bold ${
+                                  tr.lift >= 1.5
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-indigo-500"
+                                }`}
+                              >
+                                L: {tr.lift}x
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 5. COUPLAGES 2-SUR-2 ET RÉSONANCES HARMONIQUES */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
