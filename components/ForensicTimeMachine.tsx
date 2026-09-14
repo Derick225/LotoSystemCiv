@@ -118,9 +118,10 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
       const hits = pred.suggestedNumbers.filter((n) =>
         targetDraw.gagnants.includes(n),
       );
-      const accuracy = Math.round(
-        (hits.length / targetDraw.gagnants.length) * 100,
-      );
+      const targetWinners = Array.isArray(targetDraw?.gagnants) ? targetDraw.gagnants : [];
+      const accuracy = targetWinners.length > 0
+        ? Math.round((hits.length / targetWinners.length) * 100)
+        : 0;
 
       // Compute topological near-misses (distance 1 or 2 on domain 1-90)
       const nearMisses: {
@@ -128,9 +129,9 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         actual: number;
         distance: number;
       }[] = [];
-      pred.suggestedNumbers.forEach((predNum) => {
-        if (!targetDraw.gagnants.includes(predNum)) {
-          targetDraw.gagnants.forEach((winNum) => {
+      (pred?.suggestedNumbers || []).forEach((predNum) => {
+        if (!targetWinners.includes(predNum)) {
+          targetWinners.forEach((winNum) => {
             const dist = Math.min(
               Math.abs(predNum - winNum),
               90 - Math.abs(predNum - winNum),

@@ -41,9 +41,9 @@ export const PredictionVectorPortfolio: React.FC<
 
   // 1. Calcul déterministe des vecteurs alternatifs dérivés
   const vectors = useMemo(() => {
-    const primary = prediction.suggestedNumbers || [];
-    const candidates = prediction.candidates || [];
-    const breakdown = prediction.breakdown || {};
+    const primary = prediction?.suggestedNumbers || [];
+    const candidates = prediction?.candidates || [];
+    const breakdown = prediction?.breakdown || {};
 
     // Vecteur Anti-Fragile : Outsiders mathématiques à forte tension d'écart ou anomalie
     const scoredOutsiders = candidates
@@ -88,7 +88,7 @@ export const PredictionVectorPortfolio: React.FC<
         badge: "Consensus Optimal",
         badgeColor: "indigo",
         numbers: primary,
-        confidence: prediction.confidence,
+        confidence: prediction?.confidence || 75,
         strategy: "Consensus Bayésien & Débruitage PCA",
       },
       antifragile: {
@@ -98,7 +98,7 @@ export const PredictionVectorPortfolio: React.FC<
         badge: "Asymétrie Écart",
         badgeColor: "emerald",
         numbers: antifragile.length === 5 ? antifragile : primary,
-        confidence: Math.max(40, Math.round(prediction.confidence * 0.91)),
+        confidence: Math.max(40, Math.round((prediction?.confidence || 75) * 0.91)),
         strategy: "Convergence d'Outsiders & Résidus d'Isolation",
       },
       harmonic: {
@@ -108,17 +108,17 @@ export const PredictionVectorPortfolio: React.FC<
         badge: "Cyclicité Spectrale",
         badgeColor: "purple",
         numbers: harmonic.length === 5 ? harmonic : primary,
-        confidence: Math.max(40, Math.round(prediction.confidence * 0.88)),
+        confidence: Math.max(40, Math.round((prediction?.confidence || 75) * 0.88)),
         strategy: "Décomposition FFT & Résonance Inter-Mensuelle",
       },
     };
   }, [prediction]);
 
-  const activeVector = vectors[selectedVectorTab];
+  const activeVector = vectors[selectedVectorTab] || vectors.primary;
 
   // 2. Métriques physiques et topologiques déterministes du vecteur actif
   const vectorMetrics = useMemo(() => {
-    const nums = activeVector.numbers || [];
+    const nums = activeVector?.numbers || [];
     if (nums.length === 0) return null;
 
     const sum = nums.reduce((acc, n) => acc + n, 0);

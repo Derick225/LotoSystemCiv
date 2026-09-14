@@ -42,8 +42,8 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
     } else if (drawName.toLowerCase().includes("powerball") || drawName.toLowerCase().includes("loto")) {
       maxFound = 90;
     }
-    reports.forEach((rep) => {
-      if (rep.combo) {
+    (reports || []).forEach((rep) => {
+      if (rep && rep.combo) {
         rep.combo.forEach((n) => {
           if (n > maxFound) maxFound = n;
         });
@@ -89,7 +89,8 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       };
     }
 
-    reports.forEach((rep) => {
+    (reports || []).forEach((rep) => {
+      if (!rep) return;
       const actualList = rep.combo || [];
       const actualSet = new Set(actualList);
       

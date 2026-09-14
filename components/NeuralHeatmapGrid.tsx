@@ -72,7 +72,7 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
 
         <div className="grid grid-cols-10 gap-1 sm:gap-2 md:gap-3 relative z-10">
           {grid.map((cell) => {
-            const isSuggested = suggestedNumbers.includes(cell.num);
+            const isSuggested = (suggestedNumbers || []).includes(cell.num);
             const colorIntensity = Math.min(1, cell.intensity / 100);
 
             return (

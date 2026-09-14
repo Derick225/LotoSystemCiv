@@ -115,9 +115,11 @@ export const NexusEngine: React.FC = () => {
       storeHistory.length === 0
     ) {
       const counts: Record<number, number> = {};
-      history.forEach((d) =>
-        d.gagnants.forEach((n) => (counts[n] = (counts[n] || 0) + 1)),
-      );
+      (history || []).forEach((d) => {
+        if (d && Array.isArray(d.gagnants)) {
+          d.gagnants.forEach((n) => (counts[n] = (counts[n] || 0) + 1));
+        }
+      });
       const computedStats = Object.entries(counts)
         .map(([n, c]) => ({ number: Number(n), count: c }))
         .sort((a, b) => b.count - a.count);
@@ -125,8 +127,8 @@ export const NexusEngine: React.FC = () => {
       const computedGaps: { number: number; gap: number }[] = [];
       for (let i = 1; i <= 90; i++) {
         let gap = 0;
-        for (const draw of history) {
-          if (draw.gagnants.includes(i)) break;
+        for (const draw of history || []) {
+          if (draw && Array.isArray(draw.gagnants) && draw.gagnants.includes(i)) break;
           gap++;
         }
         computedGaps.push({ number: i, gap });

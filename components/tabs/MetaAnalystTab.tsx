@@ -334,8 +334,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         const winners = new Set(targetDraw.gagnants);
         const stepHits: Record<string, number> = {};
 
-        pred.scenarios.forEach((s) => {
-          const hits = s.numbers.filter((num) => winners.has(num)).length;
+        (pred.scenarios || []).forEach((s) => {
+          const sNums = Array.isArray(s.numbers) ? s.numbers : [];
+          const hits = sNums.filter((num) => winners.has(num)).length;
           stepHits[s.id] = hits;
 
           if (scenarioAccumulator[s.id]) {
@@ -406,7 +407,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
     if (result) {
       const breakdown: Record<number, Record<string, number>> = {};
-      scenario.numbers.forEach((num) => {
+      const scNumbers = Array.isArray(scenario.numbers) ? scenario.numbers : [];
+      scNumbers.forEach((num) => {
         breakdown[num] = {
           orchestration: scenario.probability,
           fractal: 0,
@@ -417,8 +419,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
       });
 
       const predictionObj: Prediction = {
-        suggestedNumbers: scenario.numbers,
-        candidates: scenario.numbers,
+        suggestedNumbers: scNumbers,
+        candidates: scNumbers,
         confidence: scenario.probability,
         analysis: scenario.description,
         breakdown: breakdown,

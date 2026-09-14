@@ -860,13 +860,16 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     let drawsWithAtLeastOneHit = 0;
     let drawsWithNearMiss = 0;
 
-    backtestResults.forEach((r) => {
-      totalSuggestedHits += r.suggestedHits.length;
-      totalCandidatesHits += r.candidatesHits.length;
-      if (r.suggestedHits.length > 0) {
+    (backtestResults || []).forEach((r) => {
+      const sHits = Array.isArray(r.suggestedHits) ? r.suggestedHits : [];
+      const cHits = Array.isArray(r.candidatesHits) ? r.candidatesHits : [];
+      const nMiss = Array.isArray(r.nearMisses) ? r.nearMisses : [];
+      totalSuggestedHits += sHits.length;
+      totalCandidatesHits += cHits.length;
+      if (sHits.length > 0) {
         drawsWithAtLeastOneHit++;
       }
-      if (r.nearMisses.length > 0) {
+      if (nMiss.length > 0) {
         drawsWithNearMiss++;
       }
     });
@@ -1278,25 +1281,25 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             number,
                             Record<string, number>
                           > = {};
-                          prediction.suggestedNumbers.forEach((num) => {
-                            const xapItem = prediction.xapExp?.find(
+                          (prediction?.suggestedNumbers || []).forEach((num) => {
+                            const xapItem = prediction?.xapExp?.find(
                               (x) => x.number === num,
                             );
                             breakdown[num] = {
                               xap: xapItem
                                 ? xapItem.contributionPercentage
                                 : 20,
-                              confidence: prediction.confidence,
-                              stability: prediction.stabilityScore || 80,
+                              confidence: prediction?.confidence || 75,
+                              stability: prediction?.stabilityScore || 80,
                             };
                           });
 
                           const predictionObj: Prediction = {
-                            suggestedNumbers: prediction.suggestedNumbers,
-                            candidates: prediction.candidates,
-                            confidence: prediction.confidence,
+                            suggestedNumbers: prediction?.suggestedNumbers || [],
+                            candidates: prediction?.candidates || [],
+                            confidence: prediction?.confidence || 75,
                             analysis:
-                              prediction.analysis ||
+                              prediction?.analysis ||
                               "Inférence Moteur Neural IA XAP",
                             breakdown: breakdown,
                             timestamp: Date.now(),

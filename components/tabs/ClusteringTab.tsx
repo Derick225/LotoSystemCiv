@@ -135,8 +135,8 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
 
           const counts: Record<string, number> = {};
           Object.keys(CLUSTER_CONFIG).forEach((k) => (counts[k] = 0));
-          kMeansPoints.forEach((p) => {
-            if (counts[p.cluster] !== undefined) counts[p.cluster]++;
+          (kMeansPoints || []).forEach((p) => {
+            if (p && counts[p.cluster] !== undefined) counts[p.cluster]++;
           });
 
           const summaryArray = Object.values(CLUSTER_CONFIG).map((c) => ({
@@ -234,7 +234,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
       });
 
       const breakdown: Record<number, Record<string, number>> = {};
-      bestTicket.forEach((num) => {
+      (bestTicket || []).forEach((num) => {
         breakdown[num] = {
           meta_llm_ensemble: bestAC * 10,
           spatial:

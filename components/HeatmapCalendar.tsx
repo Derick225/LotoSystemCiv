@@ -19,7 +19,8 @@ export const HeatmapCalendar: React.FC<HeatmapCalendarProps> = ({
       { count: number; sum: number; draws: number[] }
     >();
 
-    history.forEach((h) => {
+    (history || []).forEach((h) => {
+      if (!h || !h.date) return;
       // Conversion DD/MM/YYYY vers YYYY-MM-DD pour tri standard
       let isoDate = h.date;
       if (h.date.includes("/")) {
@@ -27,11 +28,12 @@ export const HeatmapCalendar: React.FC<HeatmapCalendarProps> = ({
         isoDate = `${y}-${m}-${d}`;
       }
 
+      const winners = Array.isArray(h.gagnants) ? h.gagnants : [];
       const current = map.get(isoDate) || { count: 0, sum: 0, draws: [] };
       map.set(isoDate, {
         count: current.count + 1,
-        sum: current.sum + h.gagnants.reduce((a, b) => a + b, 0),
-        draws: h.gagnants,
+        sum: current.sum + winners.reduce((a, b) => a + b, 0),
+        draws: winners,
       });
     });
 

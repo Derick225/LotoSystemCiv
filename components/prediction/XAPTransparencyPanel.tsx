@@ -159,7 +159,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
 
   // Selected number for detailed inspection (default to first suggested number)
   const [selectedNum, setSelectedNum] = useState<number>(
-    prediction.suggestedNumbers[0] || 1
+    prediction?.suggestedNumbers?.[0] || 1
   );
 
   // Sync with inspectingNumber from global store if present in candidates/suggested
@@ -170,22 +170,22 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   }, [inspectingNumber]);
 
   const allRelevantNumbers = useMemo(() => {
-    const main = prediction.suggestedNumbers || [];
-    const candidates = (prediction.candidates || []).slice(0, 5);
+    const main = prediction?.suggestedNumbers || [];
+    const candidates = (prediction?.candidates || []).slice(0, 5);
     const combined = Array.from(new Set([...main, ...candidates]));
-    return combined;
-  }, [prediction.suggestedNumbers, prediction.candidates]);
+    return combined.length > 0 ? combined : [selectedNum];
+  }, [prediction?.suggestedNumbers, prediction?.candidates, selectedNum]);
 
   // Current Number XAP Data
   const currentNumberXAP = useMemo(() => {
-    const xapList = prediction.xapExp || [];
+    const xapList = prediction?.xapExp || [];
     const found = xapList.find((x) => x.number === selectedNum);
     if (found) return found;
 
     // Fallback synthesis from breakdown and explainabilityData if xapExp not directly matched
-    const breakdown = prediction.breakdown?.[selectedNum] || {};
-    const explainExtra = prediction.explainabilityData?.[selectedNum] || {};
-    const shapValues = explainExtra.shapValues || breakdown;
+    const breakdown = prediction?.breakdown?.[selectedNum] || {};
+    const explainExtra = prediction?.explainabilityData?.[selectedNum] || {};
+    const shapValues = explainExtra.shapValues || breakdown || {};
 
     const entries = Object.entries(shapValues);
     let maxVal = -Infinity;
@@ -248,7 +248,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   // Shapley Bar Chart Data for selected number
   const shapleyChartData = useMemo(() => {
     if (!currentNumberXAP?.shapleyValues) {
-      const breakdown = prediction.breakdown?.[selectedNum] || {};
+      const breakdown = prediction?.breakdown?.[selectedNum] || {};
       const total = Object.values(breakdown).reduce((a, b) => a + (Number(b) || 0), 0) || 1;
       return Object.entries(breakdown)
         .map(([algo, val]) => ({
@@ -260,7 +260,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         .slice(0, 7);
     }
 
-    return Object.entries(currentNumberXAP.shapleyValues)
+    return Object.entries(currentNumberXAP.shapleyValues || {})
       .map(([algo, val]) => ({
         algo: LABELS_FRIENDLY[algo] || algo,
         key: algo,
@@ -268,11 +268,11 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       }))
       .sort((a, b) => b.val - a.val)
       .slice(0, 7);
-  }, [currentNumberXAP, prediction.breakdown, selectedNum]);
+  }, [currentNumberXAP, prediction?.breakdown, selectedNum]);
 
   // Neural Weights Ranking & Distribution
   const neuralWeightsData = useMemo(() => {
-    const sourceWeights = prediction.aiWeights || globalWeights || {};
+    const sourceWeights = prediction?.aiWeights || globalWeights || {};
     const entries = Object.entries(sourceWeights).map(([k, v]) => ({
       key: k,
       label: LABELS_FRIENDLY[k] || k,

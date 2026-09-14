@@ -174,7 +174,11 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
 
             // Construction Symbiotique
             const forestVotesMap: Record<number, number> = {};
-            forestRes.votes.forEach(v => forestVotesMap[v.candidate] = v.score);
+            (forestRes?.votes || []).forEach(v => {
+              if (v && typeof v.candidate === "number") {
+                forestVotesMap[v.candidate] = v.score;
+              }
+            });
 
             // Statistical calculation for gridDensity
             const densities = spatial.gridDensity.slice(1);
