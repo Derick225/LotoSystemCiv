@@ -288,18 +288,20 @@ export const getLocalForensicReports = async (): Promise<ForensicReport[]> => {
     const fetched = await globalCache.getByDomain<ForensicReport>('forensic_report');
     
     // We also support the old FORENSIC_KEY_PREFIX for backwards compatibility in IDB
-    const allKeys = await keys();
-    const oldKeys = allKeys.filter(
-      (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
-    );
-    for (const key of oldKeys) {
-      if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
-         const item = await get(key as string);
-         if (item) {
-           const parsed = typeof item === "string" ? JSON.parse(item) : item;
-           const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
-           fetched.push(unwrapped);
-         }
+    if (typeof indexedDB !== 'undefined') {
+      const allKeys = await keys();
+      const oldKeys = allKeys.filter(
+        (k) => typeof k === "string" && k.startsWith(FORENSIC_KEY_PREFIX),
+      );
+      for (const key of oldKeys) {
+        if (!fetched.find(r => `${FORENSIC_KEY_PREFIX}${r.id}` === key || `nexus_forensic_report_${r.id}` === key)) {
+           const item = await get(key as string);
+           if (item) {
+             const parsed = typeof item === "string" ? JSON.parse(item) : item;
+             const unwrapped = (parsed && typeof parsed === "object" && "data" in parsed && parsed.data) ? parsed.data : parsed;
+             fetched.push(unwrapped);
+           }
+        }
       }
     }
 
@@ -372,6 +374,9 @@ export const markAutopsyDismissed = async (predictionId: string): Promise<void> 
  */
 export const getDismissedAutopsyPredictionIds = async (): Promise<Set<string>> => {
   try {
+    if (typeof indexedDB === 'undefined') {
+      return new Set<string>();
+    }
     const allK = await keys();
     const dismissed = new Set<string>();
     for (const k of allK) {

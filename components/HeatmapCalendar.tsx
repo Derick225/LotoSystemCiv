@@ -6,7 +6,7 @@ interface HeatmapCalendarProps {
 }
 
 export const HeatmapCalendar: React.FC<HeatmapCalendarProps> = ({
-  history,
+  history = [],
 }) => {
   const data = useMemo(() => {
     const today = new Date();
@@ -19,7 +19,9 @@ export const HeatmapCalendar: React.FC<HeatmapCalendarProps> = ({
       { count: number; sum: number; draws: number[] }
     >();
 
-    history.forEach((h) => {
+    const safeHistory = Array.isArray(history) ? history : [];
+    safeHistory.forEach((h) => {
+      if (!h || !h.date) return;
       // Conversion DD/MM/YYYY vers YYYY-MM-DD pour tri standard
       let isoDate = h.date;
       if (h.date.includes("/")) {
@@ -27,11 +29,12 @@ export const HeatmapCalendar: React.FC<HeatmapCalendarProps> = ({
         isoDate = `${y}-${m}-${d}`;
       }
 
+      const gagnants = Array.isArray(h.gagnants) ? h.gagnants : [];
       const current = map.get(isoDate) || { count: 0, sum: 0, draws: [] };
       map.set(isoDate, {
         count: current.count + 1,
-        sum: current.sum + h.gagnants.reduce((a, b) => a + b, 0),
-        draws: h.gagnants,
+        sum: current.sum + gagnants.reduce((a, b) => a + b, 0),
+        draws: gagnants,
       });
     });
 

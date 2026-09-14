@@ -84,43 +84,46 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   }, [drawName, history]);
 
   // Basic memoized stats
-  const topNumbers = useMemo(() => stats.slice(0, 5), [stats]);
+  const safeStats = useMemo(() => Array.isArray(stats) ? stats : [], [stats]);
+  const safeGaps = useMemo(() => Array.isArray(gaps) ? gaps : [], [gaps]);
+
+  const topNumbers = useMemo(() => safeStats.slice(0, 5), [safeStats]);
   const topGaps = useMemo(
-    () => [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 5),
-    [gaps],
+    () => [...safeGaps].sort((a, b) => b.gap - a.gap).slice(0, 5),
+    [safeGaps],
   );
 
   const probabilityScores = useMemo(() => {
     const scores: Record<number, number> = {};
-    const maxFreq = stats[0]?.count || 1;
-    const gapsGaps = gaps.map((g) => g.gap);
+    const maxFreq = safeStats[0]?.count || 1;
+    const gapsGaps = safeGaps.map((g) => g.gap);
     const maxGap = gapsGaps.length > 0 ? Math.max(...gapsGaps) : 1;
-    stats.forEach((s) => {
-      const g = gaps.find((x) => x.number === s.number)?.gap || 0;
+    safeStats.forEach((s) => {
+      const g = safeGaps.find((x) => x.number === s.number)?.gap || 0;
       const score = (s.count / maxFreq) * 60 + (g / maxGap) * 40;
       scores[s.number] = Math.round(score);
     });
     return scores;
-  }, [stats, gaps]);
+  }, [safeStats, safeGaps]);
 
   const chartData = useMemo(() => {
-    return stats.slice(0, 15).map((s) => ({
+    return safeStats.slice(0, 15).map((s) => ({
       name: s.number.toString(),
       count: s.count,
-      gap: gaps.find((g) => g.number === s.number)?.gap || 0,
+      gap: safeGaps.find((g) => g.number === s.number)?.gap || 0,
     }));
-  }, [stats, gaps]);
+  }, [safeStats, safeGaps]);
 
   const gapChartData = useMemo(() => {
-    return [...gaps]
+    return [...safeGaps]
       .sort((a, b) => b.gap - a.gap)
       .slice(0, 15)
       .map((g) => ({
         name: g.number.toString(),
         gap: g.gap,
-        count: stats.find((s) => s.number === g.number)?.count || 0,
+        count: safeStats.find((s) => s.number === g.number)?.count || 0,
       }));
-  }, [stats, gaps]);
+  }, [safeStats, safeGaps]);
 
   const decileData = useMemo(() => {
     const deciles = Array.from({ length: 9 }, (_, i) => ({
@@ -129,7 +132,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       fullMark: 100,
     }));
 
-    stats.forEach((s) => {
+    safeStats.forEach((s) => {
       const decileIndex = Math.floor((s.number - 1) / 10);
       if (decileIndex >= 0 && decileIndex < 9) {
         deciles[decileIndex].count += s.count;
@@ -137,7 +140,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     });
 
     return deciles;
-  }, [stats]);
+  }, [safeStats]);
 
   // Filter frequencies for search in advanced tab
   const filteredFreqs = useMemo(() => {

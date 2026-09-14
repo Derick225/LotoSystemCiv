@@ -279,10 +279,10 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     scene.add(instancedMesh);
 
     // Draw Trajectory Line between historical 3D points
-    if (trajectory3DPoints.length >= 2) {
+    if (Array.isArray(trajectory3DPoints) && trajectory3DPoints.length >= 2) {
       const linePositions: number[] = [];
       trajectory3DPoints.forEach((pt) => {
-        linePositions.push(pt.x, pt.y, pt.z);
+        if (pt) linePositions.push(pt.x, pt.y, pt.z);
       });
 
       const lineGeometry = new THREE.BufferGeometry();

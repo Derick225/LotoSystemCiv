@@ -105,22 +105,24 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
           true,
         );
 
+        const actualGagnants = Array.isArray(target?.gagnants) ? target.gagnants : [];
         const hits = pred.suggestedNumbers.filter((n) =>
-          target.gagnants.includes(n),
+          actualGagnants.includes(n),
         );
         const hitCount = hits.length;
 
         // Compute Topological Loss (mean circular distance between suggested and actuals)
         let topoDistSum = 0;
-        pred.suggestedNumbers.forEach((p) => {
+        const safePredNumbers = Array.isArray(pred.suggestedNumbers) ? pred.suggestedNumbers : [];
+        safePredNumbers.forEach((p) => {
           let minDist = 90;
-          target.gagnants.forEach((a) => {
+          actualGagnants.forEach((a) => {
             const d = Math.min(Math.abs(p - a), 90 - Math.abs(p - a));
             if (d < minDist) minDist = d;
           });
           topoDistSum += minDist;
         });
-        const topologicalLoss = topoDistSum / pred.suggestedNumbers.length;
+        const topologicalLoss = safePredNumbers.length > 0 ? topoDistSum / safePredNumbers.length : 0;
 
         // Payout simulation logic
         let payoutMultiplier = 0;

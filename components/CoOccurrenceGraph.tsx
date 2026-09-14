@@ -22,6 +22,7 @@ export const CoOccurrenceGraph: React.FC<CoOccurrenceGraphProps> = ({
     const nodeFreq = new Map<number, number>();
 
     filteredHistory.forEach((draw) => {
+      if (!draw || !Array.isArray(draw.gagnants)) return;
       const nums = [...draw.gagnants].sort((a, b) => a - b);
       nums.forEach((n) => nodeFreq.set(n, (nodeFreq.get(n) || 0) + 1));
 

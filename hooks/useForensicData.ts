@@ -83,9 +83,11 @@ export const useForensicData = (drawName: string) => {
             // O(1) Lookups
             const historyById = new Map();
             const historyByDate = new Map();
-            cleanHistory.forEach((h) => {
-                historyById.set(h.id, h);
-                historyByDate.set(h.date, h);
+            (cleanHistory || []).forEach((h) => {
+                if (h) {
+                    historyById.set(h.id, h);
+                    historyByDate.set(h.date, h);
+                }
             });
 
             for (const pred of preds.slice(0, 30)) {
@@ -139,9 +141,12 @@ export const useForensicData = (drawName: string) => {
             const platHistory = await getPlatinumHistory(drawName);
             const audits: PlatinumAudit[] = [];
             
-            platHistory.forEach(pred => {
-                const actualResult = history.find(h => {
+            (platHistory || []).forEach(pred => {
+                if (!pred) return;
+                const actualResult = (history || []).find(h => {
+                    if (!h) return false;
                     if (h.id === pred.id) return true;
+                    if (!h.date) return false;
                     const dParts = h.date.split("/");
                     if (dParts.length === 3) {
                         const hTime = new Date(`${dParts[2]}-${dParts[1]}-${dParts[0]}`).getTime();
@@ -156,14 +161,14 @@ export const useForensicData = (drawName: string) => {
             });
 
             const sortedReports = [...currentReports].sort((a, b) => {
-                const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-                const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                const tA = a && a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                const tB = b && b.timestamp ? new Date(b.timestamp).getTime() : 0;
                 return tB - tA;
             });
 
             // Safeguard against duplicate forensic report IDs in React render key
             const uniqueSortedMap = new Map<string, ForensicReport>();
-            sortedReports.forEach((r) => {
+            (sortedReports || []).forEach((r) => {
                 if (r && r.id) {
                     uniqueSortedMap.set(r.id, r);
                 }

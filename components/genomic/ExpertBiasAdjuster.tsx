@@ -153,8 +153,10 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
 
     const newBiases: Record<AlgoKey, ExpertBiasConfig> = { ...biases };
     let boostedCount = 0;
+    const safeMetrics = Array.isArray(underperformanceMetrics) ? underperformanceMetrics : [];
 
-    underperformanceMetrics.forEach((metric) => {
+    safeMetrics.forEach((metric) => {
+      if (!metric) return;
       if (metric.isUnderperforming || metric.proofScore < 0) {
         newBiases[metric.algoKey] = {
           algoKey: metric.algoKey,
@@ -230,7 +232,10 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    underperformanceMetrics.forEach((m) => set.add(m.category));
+    const safeMetrics = Array.isArray(underperformanceMetrics) ? underperformanceMetrics : [];
+    safeMetrics.forEach((m) => {
+      if (m?.category) set.add(m.category);
+    });
     return Array.from(set).sort();
   }, [underperformanceMetrics]);
 

@@ -168,6 +168,9 @@ export const autoPurgePredictionLogsIfEnabled = async (
 
 const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
   const items: PredictionHistoryItem[] = [];
+  if (typeof indexedDB === 'undefined') {
+    return items;
+  }
   try {
     const allKeys = await keys();
     const histKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(HISTORY_KEY_PREFIX)) as string[];
@@ -549,6 +552,9 @@ export const deleteMultiplePredictions = async (ids: string[]): Promise<void> =>
 
 export const getAllLearningSessions = async (): Promise<LearningSession[]> => {
   const sessions: LearningSession[] = [];
+  if (typeof indexedDB === 'undefined') {
+    return sessions;
+  }
   try {
     const allKeys = await keys();
     const sessKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(LEARNING_SESSION_KEY_PREFIX)) as string[];

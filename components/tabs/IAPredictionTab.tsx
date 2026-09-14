@@ -852,21 +852,27 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
 
   // Statistical computations for Backtesting
   const stats = useMemo(() => {
-    if (!backtestResults || backtestResults.length === 0) return null;
+    const safeBacktest = Array.isArray(backtestResults) ? backtestResults : [];
+    if (safeBacktest.length === 0) return null;
 
-    const totalDraws = backtestResults.length;
+    const totalDraws = safeBacktest.length;
     let totalSuggestedHits = 0;
     let totalCandidatesHits = 0;
     let drawsWithAtLeastOneHit = 0;
     let drawsWithNearMiss = 0;
 
-    backtestResults.forEach((r) => {
-      totalSuggestedHits += r.suggestedHits.length;
-      totalCandidatesHits += r.candidatesHits.length;
-      if (r.suggestedHits.length > 0) {
+    safeBacktest.forEach((r) => {
+      if (!r) return;
+      const sugHits = Array.isArray(r.suggestedHits) ? r.suggestedHits : [];
+      const candHits = Array.isArray(r.candidatesHits) ? r.candidatesHits : [];
+      const nearM = Array.isArray(r.nearMisses) ? r.nearMisses : [];
+
+      totalSuggestedHits += sugHits.length;
+      totalCandidatesHits += candHits.length;
+      if (sugHits.length > 0) {
         drawsWithAtLeastOneHit++;
       }
-      if (r.nearMisses.length > 0) {
+      if (nearM.length > 0) {
         drawsWithNearMiss++;
       }
     });
@@ -1278,16 +1284,16 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             number,
                             Record<string, number>
                           > = {};
-                          prediction.suggestedNumbers.forEach((num) => {
-                            const xapItem = prediction.xapExp?.find(
+                          (prediction?.suggestedNumbers || []).forEach((num) => {
+                            const xapItem = prediction?.xapExp?.find(
                               (x) => x.number === num,
                             );
                             breakdown[num] = {
                               xap: xapItem
                                 ? xapItem.contributionPercentage
                                 : 20,
-                              confidence: prediction.confidence,
-                              stability: prediction.stabilityScore || 80,
+                              confidence: prediction?.confidence || 50,
+                              stability: prediction?.stabilityScore || 80,
                             };
                           });
 

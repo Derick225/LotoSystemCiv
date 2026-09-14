@@ -51,7 +51,8 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
       const duplicates: DrawResult[] = [];
       const corruptData: { id: string; reason: string }[] = [];
 
-      data.forEach((d) => {
+      (data || []).forEach((d) => {
+        if (!d) return;
         // Check Duplicates
         const existing = dateMap.get(d.date) || [];
         if (existing.length > 0) duplicates.push(d);
@@ -59,11 +60,12 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
         // Check Corruption
         const issues: string[] = [];
-        const invalidNums = d.gagnants.filter((n) => n < 1 || n > 90);
+        const gagnants = Array.isArray(d.gagnants) ? d.gagnants : [];
+        const invalidNums = gagnants.filter((n) => n < 1 || n > 90);
         if (invalidNums.length > 0)
           issues.push(`Hors limites: ${invalidNums.join(",")}`);
-        if (d.gagnants.length !== 5)
-          issues.push(`Taille invalide: ${d.gagnants.length}`);
+        if (gagnants.length !== 5)
+          issues.push(`Taille invalide: ${gagnants.length}`);
         if (d.date === "Invalid Date" || !d.date) issues.push("Date invalide");
 
         if (issues.length > 0) {

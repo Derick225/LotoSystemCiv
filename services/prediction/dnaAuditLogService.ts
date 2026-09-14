@@ -87,6 +87,7 @@ export interface DnaPerformanceDriftReport {
 
 const STORAGE_PREFIX = 'lotopro_dna_audit_logs_';
 const MAX_LOGS_PER_DRAW = 40;
+const DNA_AUDIT_IN_MEMORY_MAP = new Map<string, PredictionDnaAuditLog[]>();
 
 const getStorageKey = (drawName: string): string => {
   const normalized = (drawName || 'default').trim().toLowerCase().replace(/\s+/g, '_');
@@ -172,7 +173,10 @@ export const logActivePredictionDna = async (
       0,
       MAX_LOGS_PER_DRAW
     );
-    await set(key, updated);
+    DNA_AUDIT_IN_MEMORY_MAP.set(key, updated);
+    if (typeof indexedDB !== 'undefined') {
+      await set(key, updated);
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -195,16 +199,22 @@ export const getPredictionDnaLogs = async (
   drawName: string,
   limit: number = MAX_LOGS_PER_DRAW
 ): Promise<PredictionDnaAuditLog[]> => {
+  const key = getStorageKey(drawName);
+  if (typeof indexedDB === 'undefined') {
+    const mem = DNA_AUDIT_IN_MEMORY_MAP.get(key) || [];
+    return mem.slice(0, limit);
+  }
   try {
-    const key = getStorageKey(drawName);
     const raw = await get<PredictionDnaAuditLog[]>(key);
     if (Array.isArray(raw)) {
+      DNA_AUDIT_IN_MEMORY_MAP.set(key, raw);
       return raw.slice(0, limit);
     }
   } catch (err) {
     console.warn('[DnaAuditLog] Erreur de lecture:', err);
   }
-  return [];
+  const mem = DNA_AUDIT_IN_MEMORY_MAP.get(key) || [];
+  return mem.slice(0, limit);
 };
 
 /**

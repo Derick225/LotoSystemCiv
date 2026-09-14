@@ -50,12 +50,13 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
   });
 
   useEffect(() => {
-    if (history.length > 0) {
-      const winners = history.flatMap((d) => d.gagnants);
+    if (history && Array.isArray(history) && history.length > 0) {
+      const winners = history.flatMap((d) => (Array.isArray(d?.gagnants) ? d.gagnants : []));
       const recentDraws = history.slice(0, 100);
 
       let drawsWithConsecutive = 0;
       recentDraws.forEach((d) => {
+        if (!d || !Array.isArray(d.gagnants)) return;
         const sorted = [...d.gagnants].sort((a, b) => a - b);
         let hasConsecutive = false;
         for (let i = 0; i < sorted.length - 1; i++)

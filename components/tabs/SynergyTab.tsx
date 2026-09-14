@@ -43,8 +43,9 @@ export const SynergyTab: React.FC<SynergyTabProps> = ({ drawName }) => {
 
   // --- ANALYSE AUTOMATIQUE DU DERNIER TIRAGE ---
   const lastDrawSynergies = useMemo(() => {
-    if (history.length === 0 || !correlationMatrix[1]) return [];
-    const lastDraw = history[0].gagnants;
+    if (!history || history.length === 0 || !correlationMatrix[1]) return [];
+    const lastDraw = Array.isArray(history[0]?.gagnants) ? history[0].gagnants : [];
+    if (lastDraw.length === 0) return [];
     const scores: { number: number; score: number; sources: number[] }[] = [];
 
     // On scanne tous les numéros (1-90) pour voir lesquels réagissent le plus au tirage précédent

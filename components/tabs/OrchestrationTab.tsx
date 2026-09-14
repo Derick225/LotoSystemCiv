@@ -46,7 +46,9 @@ const VectorFlowChart: React.FC<{
     id: number;
     type: "src" | "tgt";
   } | null>(null);
-  const topCands = candidates.slice(0, 8);
+  const safeCandidates = Array.isArray(candidates) ? candidates : [];
+  const safePrevDraw = Array.isArray(prevDraw) ? prevDraw : [];
+  const topCands = safeCandidates.slice(0, 8);
 
   // Calcul des liens vectoriels RÉELS entre le tirage précédent et les candidats proposés
   const links = useMemo(() => {
@@ -57,7 +59,7 @@ const VectorFlowChart: React.FC<{
       color: string;
       strength: number;
     }[] = [];
-    prevDraw.forEach((src) => {
+    safePrevDraw.forEach((src) => {
       topCands.forEach((tgt) => {
         let type = "";
         let color = "";
@@ -420,8 +422,8 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
     });
 
     const breakdown: Record<number, Record<string, number>> = {};
-    generatedTicket.forEach((num) => {
-      const candidate = metrics?.topCandidates.find((c) => c.number === num);
+    (generatedTicket || []).forEach((num) => {
+      const candidate = metrics?.topCandidates?.find((c) => c.number === num);
       breakdown[num] = {
         orchestration: candidate ? candidate.score : 50,
         fractal: 0,

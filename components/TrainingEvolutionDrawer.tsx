@@ -213,7 +213,9 @@ export const TrainingEvolutionDrawer: React.FC<{
 
   // Extract all unique algorithm keys present across the history entries
   const allAlgoKeysSet = new Set<string>();
-  history.forEach((h) => {
+  const safeHistory = Array.isArray(history) ? history : [];
+  safeHistory.forEach((h) => {
+    if (!h) return;
     const w = h.weights || h.applied_weights || {};
     Object.keys(w).forEach((k) => allAlgoKeysSet.add(k));
   });

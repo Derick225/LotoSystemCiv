@@ -407,30 +407,38 @@ export const UnifiedDnaSieveRadar: React.FC<{
 
     switch (profile) {
       case "TOP_5_ELITE": {
-        const top5 = auditReport.dominantGenes.slice(0, 5);
+        const top5 = (auditReport?.dominantGenes || []).slice(0, 5);
         top5.forEach((g) => {
-          candidateWeights[g.key] = Math.max(0.01, g.resonanceScore);
+          if (g && g.key) {
+            candidateWeights[g.key] = Math.max(0.01, g.resonanceScore);
+          }
         });
         break;
       }
       case "ANTI_OVERFITTING": {
-        const meanWeight = 1.0 / auditReport.allGenes.length;
-        auditReport.allGenes.forEach((g) => {
-          candidateWeights[g.key] =
-            g.recommendedWeight * 0.6 + meanWeight * 0.4;
+        const allG = auditReport?.allGenes || [];
+        const meanWeight = 1.0 / Math.max(1, allG.length);
+        allG.forEach((g) => {
+          if (g && g.key) {
+            candidateWeights[g.key] =
+              g.recommendedWeight * 0.6 + meanWeight * 0.4;
+          }
         });
         break;
       }
       case "MAX_STABILITY": {
-        auditReport.allGenes.forEach((g) => {
-          candidateWeights[g.key] =
-            g.recommendedWeight * (1 + g.meanReciprocalRank);
+        const allG = auditReport?.allGenes || [];
+        allG.forEach((g) => {
+          if (g && g.key) {
+            candidateWeights[g.key] =
+              g.recommendedWeight * (1 + (g.meanReciprocalRank || 0));
+          }
         });
         break;
       }
       case "FULL_RECOMMENDED":
       default: {
-        candidateWeights = { ...auditReport.recommendedWeights };
+        candidateWeights = { ...(auditReport?.recommendedWeights || {}) };
         break;
       }
     }

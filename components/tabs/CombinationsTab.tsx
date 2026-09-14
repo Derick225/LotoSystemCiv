@@ -343,7 +343,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
     });
 
     const breakdown: Record<number, Record<string, number>> = {};
-    t.numbers.forEach((num) => {
+    (t?.numbers || []).forEach((num) => {
       breakdown[num] = {
         orchestration: t.nexusScore,
         fractal: t.ac * 10,
@@ -369,7 +369,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
     audioEngine.play("click");
     // Remplir les inputs avec les numéros ACO
     const newInputs = inputs.map((i) => ({ val: "", isBanker: false }));
-    numbers.forEach((n, idx) => {
+    (numbers || []).forEach((n, idx) => {
       if (idx < newInputs.length) newInputs[idx].val = n.toString();
     });
     setInputs(newInputs);

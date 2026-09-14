@@ -50,12 +50,13 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({
   // --- MOTEUR DE HEATMAP PRÉDICTIVE ---
   const heatMap = useMemo(() => {
     const map: Record<number, number> = {};
-    if (selection.length === 0) return map;
+    const safeSelection = Array.isArray(selection) ? selection : [];
+    if (safeSelection.length === 0) return map;
 
     for (let i = 1; i <= 90; i++) map[i] = 0;
 
     for (let target = 1; target <= 90; target++) {
-      if (selection.includes(target)) {
+      if (safeSelection.includes(target)) {
         map[target] = 100;
         continue;
       }
@@ -63,9 +64,9 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({
       let affinitySum = 0;
       let count = 0;
 
-      selection.forEach((source) => {
+      safeSelection.forEach((source) => {
         const affinity = Number(
-          correlationMatrix[source]?.affinities?.[target] || 0,
+          correlationMatrix?.[source]?.affinities?.[target] || 0,
         );
         if (affinity > 0) {
           affinitySum += affinity;
@@ -73,7 +74,7 @@ export const PatternSequencer: React.FC<{ drawName: string }> = ({
         }
       });
 
-      map[target] = count > 0 ? (affinitySum / selection.length) * 300 : 0;
+      map[target] = count > 0 ? (affinitySum / safeSelection.length) * 300 : 0;
     }
     return map;
   }, [selection, correlationMatrix]);

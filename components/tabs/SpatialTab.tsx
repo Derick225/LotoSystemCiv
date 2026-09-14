@@ -339,8 +339,8 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                   })}
 
                   {/* Bounding Box des Clusters (Visualisation) */}
-                  {metrics?.advancedClusters.map((cluster, i) => {
-                    if (cluster.numbers.length < 3) return null;
+                  {metrics?.advancedClusters?.map((cluster, i) => {
+                    if (!cluster || !Array.isArray(cluster.numbers) || cluster.numbers.length < 3) return null;
 
                     // Calculate bounds for grid positioning
                     let minX = 10,

@@ -99,10 +99,13 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
           string,
           { action: string; improvement: number }
         > = {};
+        const safeReports = Array.isArray(reports) ? reports : [];
 
-        reports.slice(0, 5).forEach((r) => {
-          r.counterfactuals?.forEach((cf) => {
-            if (cf.algo && cf.action && cf.rankImprovement !== undefined) {
+        safeReports.slice(0, 5).forEach((r) => {
+          if (!r) return;
+          const safeCfs = Array.isArray(r.counterfactuals) ? r.counterfactuals : [];
+          safeCfs.forEach((cf) => {
+            if (cf && cf.algo && cf.action && cf.rankImprovement !== undefined) {
               if (
                 !insights[cf.algo] ||
                 cf.rankImprovement > (insights[cf.algo].improvement || 0)

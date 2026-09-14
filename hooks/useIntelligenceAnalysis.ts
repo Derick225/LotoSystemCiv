@@ -48,7 +48,11 @@ export const useIntelligenceAnalysis = (drawName: string) => {
             
             // 1. Calculs Mathématiques Préalables (Le "Grounding")
             const freqMap: Record<number, number> = {};
-            stats.forEach(s => freqMap[s.number] = s.count);
+            (stats || []).forEach(s => {
+                if (s && typeof s.number === 'number') {
+                    freqMap[s.number] = s.count;
+                }
+            });
 
             // These could potentially be moved to Web Workers if needed
             const vol = calculateVolatility(history);

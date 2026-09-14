@@ -220,13 +220,19 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
   // O(1) Lookups for performance
   const resultsById = React.useMemo(() => {
     const map = new Map<string, DrawResult>();
-    results.forEach((r) => map.set(r.id, r));
+    const safeResults = Array.isArray(results) ? results : [];
+    safeResults.forEach((r) => {
+      if (r?.id) map.set(r.id, r);
+    });
     return map;
   }, [results]);
 
   const resultsByDate = React.useMemo(() => {
     const map = new Map<string, DrawResult>();
-    results.forEach((r) => map.set(r.date, r));
+    const safeResults = Array.isArray(results) ? results : [];
+    safeResults.forEach((r) => {
+      if (r?.date) map.set(r.date, r);
+    });
     return map;
   }, [results]);
 

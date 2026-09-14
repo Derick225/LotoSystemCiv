@@ -115,12 +115,13 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         isForensicOptimized,
       );
 
+      const actualGagnants = Array.isArray(targetDraw?.gagnants) ? targetDraw.gagnants : [];
       const hits = pred.suggestedNumbers.filter((n) =>
-        targetDraw.gagnants.includes(n),
+        actualGagnants.includes(n),
       );
-      const accuracy = Math.round(
-        (hits.length / targetDraw.gagnants.length) * 100,
-      );
+      const accuracy = actualGagnants.length > 0
+        ? Math.round((hits.length / actualGagnants.length) * 100)
+        : 0;
 
       // Compute topological near-misses (distance 1 or 2 on domain 1-90)
       const nearMisses: {
@@ -128,9 +129,10 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
         actual: number;
         distance: number;
       }[] = [];
-      pred.suggestedNumbers.forEach((predNum) => {
-        if (!targetDraw.gagnants.includes(predNum)) {
-          targetDraw.gagnants.forEach((winNum) => {
+      const safePredNumbers = Array.isArray(pred.suggestedNumbers) ? pred.suggestedNumbers : [];
+      safePredNumbers.forEach((predNum) => {
+        if (!actualGagnants.includes(predNum)) {
+          actualGagnants.forEach((winNum) => {
             const dist = Math.min(
               Math.abs(predNum - winNum),
               90 - Math.abs(predNum - winNum),
@@ -262,10 +264,11 @@ export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
       // Pas d'apprentissage continu adaptatif : inversement proportionnel à la variance du signal
       const adaptiveLearningRate = 0.1 / (1.0 + rmsImpact / 50.0);
 
-      divergences.forEach((div) => {
+      (divergences || []).forEach((div) => {
+        if (!div) return;
         const key = div.algo as keyof AlgoWeights;
         if (typeof newWeights[key] === "number") {
-          const delta = (div.impact / 100.0) * adaptiveLearningRate;
+          const delta = ((div.impact || 0) / 100.0) * adaptiveLearningRate;
           newWeights[key] = newWeights[key] + delta;
           adjustedCount++;
         }

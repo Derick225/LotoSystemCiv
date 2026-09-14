@@ -25,11 +25,12 @@ interface MultiLevelConfusionMatrixProps {
 }
 
 export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps> = ({
-  reports,
+  reports = [],
   drawName,
   className = "",
   onSelectReport,
 }) => {
+  const safeReports = Array.isArray(reports) ? reports : [];
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [hoveredCell, setHoveredCell] = useState<{ num: number; stats: any } | null>(null);
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
@@ -42,15 +43,15 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
     } else if (drawName.toLowerCase().includes("powerball") || drawName.toLowerCase().includes("loto")) {
       maxFound = 90;
     }
-    reports.forEach((rep) => {
-      if (rep.combo) {
+    safeReports.forEach((rep) => {
+      if (rep && Array.isArray(rep.combo)) {
         rep.combo.forEach((n) => {
           if (n > maxFound) maxFound = n;
         });
       }
     });
     return maxFound;
-  }, [drawName, reports]);
+  }, [drawName, safeReports]);
 
   // Consolidation des catégories balistiques sur l'ensemble des rapports
   const consolidatedStats = useMemo(() => {
@@ -89,8 +90,9 @@ export const MultiLevelConfusionMatrix: React.FC<MultiLevelConfusionMatrixProps>
       };
     }
 
-    reports.forEach((rep) => {
-      const actualList = rep.combo || [];
+    safeReports.forEach((rep) => {
+      if (!rep) return;
+      const actualList = Array.isArray(rep.combo) ? rep.combo : [];
       const actualSet = new Set(actualList);
       
       actualList.forEach((win) => {

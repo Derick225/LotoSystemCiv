@@ -32,10 +32,11 @@ export function useSyncStatus() {
         setDbConnection('disconnected');
       }
 
-      const allKeys = await keys();
+      const allKeys = await keys().catch(() => []);
       let history = 0, forensics = 0, learning = 0, snapshots = 0, other = 0;
 
-      allKeys.forEach((key) => {
+      const safeKeys = Array.isArray(allKeys) ? allKeys : [];
+      safeKeys.forEach((key) => {
         const k = String(key);
         if (k.startsWith('prediction_history_')) history++;
         else if (k.startsWith('forensic_report_')) forensics++;

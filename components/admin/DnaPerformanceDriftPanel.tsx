@@ -72,13 +72,15 @@ export const DnaPerformanceDriftPanel: React.FC<DnaPerformanceDriftPanelProps> =
   }, [runDriftEvaluation]);
 
   const handleApplyAdjustments = async () => {
-    if (!report || report.recommendedDnaAdjustments.length === 0) return;
+    if (!report || !Array.isArray(report.recommendedDnaAdjustments) || report.recommendedDnaAdjustments.length === 0) return;
     setApplyingFix(true);
     try {
       audioEngine.play("success");
       const updatedWeights: AlgoWeights = { ...activeWeights };
-      report.recommendedDnaAdjustments.forEach((adj) => {
-        (updatedWeights as Record<string, number>)[adj.algoKey] = adj.recommendedWeight;
+      (report.recommendedDnaAdjustments || []).forEach((adj) => {
+        if (adj && adj.algoKey) {
+          (updatedWeights as Record<string, number>)[adj.algoKey] = adj.recommendedWeight;
+        }
       });
 
       await saveAlgoWeights(drawName, updatedWeights);

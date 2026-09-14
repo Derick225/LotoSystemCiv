@@ -148,7 +148,9 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
 
   // Mapping des anomalies de poids pour chaque rapport
   const enrichedReports = useMemo(() => {
-    return reports.map((report) => {
+    const safeReports = Array.isArray(reports) ? reports : [];
+    return safeReports.map((report) => {
+      if (!report) return null;
       const matches = Array.isArray(report.matches) ? report.matches : [];
       const exactHits = matches.filter((m: ForensicEvidence) => m.errorType === "Hit");
       const nearMisses = matches.filter((m: ForensicEvidence) => m.errorType === "Voisin" || m.errorType === "Miroir" || m.errorType === "Shadow");
@@ -165,6 +167,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
       }[] = [];
 
       divergences.forEach((div: ScoreDivergence) => {
+        if (!div?.algo) return;
         const driftItem = driftedAlgorithms.find(
           (d) => d.key === div.algo || d.label.toLowerCase() === div.algo.toLowerCase()
         );
@@ -204,7 +207,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         hasWeightAnomaly,
         divergencePct,
       };
-    });
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
   }, [reports, driftedAlgorithms]);
 
   // Filtrage des rapports
