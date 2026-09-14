@@ -347,7 +347,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
                       maxX = -1,
                       minY = 10,
                       maxY = -1;
-                    (cluster.numbers || []).forEach((n) => {
+                    cluster.numbers.forEach((n) => {
                       const idx = n - 1;
                       const x = idx % 10;
                       const y = Math.floor(idx / 10);

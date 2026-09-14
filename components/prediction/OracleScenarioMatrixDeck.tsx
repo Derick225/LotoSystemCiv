@@ -32,15 +32,15 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
     const { showToast } = useToast();
 
     const rawScenarios: SimulationScenarioItem[] = useMemo(() => {
-      if (prediction?.simulationScenarios && prediction.simulationScenarios.length > 0) {
+      if (prediction.simulationScenarios && prediction.simulationScenarios.length > 0) {
         return prediction.simulationScenarios as SimulationScenarioItem[];
       }
       return [
         {
           scenarioId: "sim_default_1",
           scenarioName: "Consensus Symbiotique (Tamis ADN)",
-          ticket: prediction?.suggestedNumbers || [],
-          probabilityScore: prediction?.confidence || 75,
+          ticket: prediction.suggestedNumbers,
+          probabilityScore: prediction.confidence,
           riskProfile: "BALANCED",
           description: "Profil d'équilibre optimisé par le Tamis ADN et l'alignement de réalité.",
           color: "#6366f1",

@@ -43,13 +43,9 @@ import {
   Atom,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
-import { Prediction, DrawResult } from "../../types";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 interface GapRangeSequenceWidgetProps {
   drawName: string;
-  prediction?: Prediction | null;
-  activeHistory?: DrawResult[];
 }
 
 type SurvivorSortMode = "fused" | "dna" | "markov" | "quantum" | "proof" | "gap";
@@ -64,22 +60,11 @@ type SurvivorCategoryFilter =
 
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   drawName,
-  prediction,
-  activeHistory,
 }) => {
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const storeLastPrediction = useNexusStore((state) => state.lastPrediction);
-
-  const effectivePrediction = prediction !== undefined
-    ? prediction
-    : (storeLastPrediction && (!storeLastPrediction.drawName || storeLastPrediction.drawName === drawName) ? storeLastPrediction : null);
-
-  const effectiveHistory = useMemo(() => {
-    if (activeHistory && activeHistory.length > 0) return activeHistory;
-    return purifyHistoryForDraw(drawName, history);
-  }, [activeHistory, drawName, history]);
+  const lastPrediction = useNexusStore((state) => state.lastPrediction);
 
   const [step, setStep] = useState<GapRangeStep>("combined");
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
@@ -97,12 +82,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   const report = useMemo(() => {
     return gapRangeSequenceService.analyzeGapRangePatterns(
       drawName,
-      effectiveHistory,
+      history,
       step,
       90,
       globalWeights
     );
-  }, [drawName, effectiveHistory, step, globalWeights]);
+  }, [drawName, history, step, globalWeights]);
 
   const activeBin = useMemo(() => {
     if (selectedBinIndex !== null && report.bins[selectedBinIndex]) {
@@ -133,12 +118,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       const rawMarkovScore =
         report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
 
-      // b. DNA Breakdown Score derived from active global weights & effective prediction matrix (TIRAGE ISOLATION RULE)
+      // b. DNA Breakdown Score derived from active global weights & last prediction matrix (TIRAGE ISOLATION RULE)
       let dnaScore = report.dnaAffinity?.[num] ?? 50;
-      if (effectivePrediction && (!effectivePrediction.drawName || effectivePrediction.drawName === drawName) && effectivePrediction.breakdown?.[num]) {
+      if (lastPrediction && lastPrediction.drawName === drawName && lastPrediction.breakdown?.[num]) {
         let totalVal = 0;
         let totalW = 0;
-        for (const [algo, val] of Object.entries(effectivePrediction.breakdown[num])) {
+        for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
           const w = globalWeights[algo as keyof typeof globalWeights] || 1;
           totalVal += (val || 0) * w;
           totalW += w;
@@ -348,8 +333,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   }, [
     report,
     globalWeights,
-    effectivePrediction,
-    drawName,
+    lastPrediction,
     sortMode,
     categoryFilter,
     minScoreCutoff,

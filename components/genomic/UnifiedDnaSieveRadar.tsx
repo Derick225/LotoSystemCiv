@@ -407,23 +407,22 @@ export const UnifiedDnaSieveRadar: React.FC<{
 
     switch (profile) {
       case "TOP_5_ELITE": {
-        const top5 = (auditReport.dominantGenes || []).slice(0, 5);
+        const top5 = auditReport.dominantGenes.slice(0, 5);
         top5.forEach((g) => {
           candidateWeights[g.key] = Math.max(0.01, g.resonanceScore);
         });
         break;
       }
       case "ANTI_OVERFITTING": {
-        const genes = auditReport.allGenes || [];
-        const meanWeight = genes.length > 0 ? 1.0 / genes.length : 0.05;
-        genes.forEach((g) => {
+        const meanWeight = 1.0 / auditReport.allGenes.length;
+        auditReport.allGenes.forEach((g) => {
           candidateWeights[g.key] =
             g.recommendedWeight * 0.6 + meanWeight * 0.4;
         });
         break;
       }
       case "MAX_STABILITY": {
-        (auditReport.allGenes || []).forEach((g) => {
+        auditReport.allGenes.forEach((g) => {
           candidateWeights[g.key] =
             g.recommendedWeight * (1 + g.meanReciprocalRank);
         });

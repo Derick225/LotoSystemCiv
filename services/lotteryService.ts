@@ -459,11 +459,7 @@ export const fetchRecentStats = async (days: number = 7, drawName?: string) => {
     if (error) throw error;
     
     const counts: Record<number, number> = {};
-    (data || []).forEach(row => {
-      if (row && Array.isArray(row.gagnants)) {
-        row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1);
-      }
-    });
+    (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     
     if (Object.keys(counts).length === 0) {
          return fetchGlobalStats(drawName);
@@ -504,11 +500,7 @@ export const fetchGlobalStats = async (drawName?: string) => {
     const { data, error } = await query;
     if (error) throw error;
     const counts: Record<number, number> = {};
-    (data || []).forEach(row => {
-      if (row && Array.isArray(row.gagnants)) {
-        row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1);
-      }
-    });
+    (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     const stats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
     
     await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
@@ -532,11 +524,7 @@ const computeRecentStatsFromHistory = async (days: number, drawName?: string): P
       return hTime >= dateLimit.getTime();
     });
     const sample = filteredHistory.length > 0 ? filteredHistory : history.slice(0, 30);
-    sample.forEach(row => {
-      if (row && Array.isArray(row.gagnants)) {
-        row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1);
-      }
-    });
+    sample.forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     return Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
   } catch (_) {
     return [];
@@ -547,11 +535,7 @@ const computeGlobalStatsFromHistory = async (drawName?: string): Promise<{ numbe
   try {
     const history = await lotteryService.fetchHistory(drawName || 'ALL');
     const counts: Record<number, number> = {};
-    (history || []).forEach(row => {
-      if (row && Array.isArray(row.gagnants)) {
-        row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1);
-      }
-    });
+    history.forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
     return Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
   } catch (_) {
     return [];
@@ -814,14 +798,11 @@ export const fetchTopFollowersAnalysis = async (drawName: string, history: DrawR
 
 export const fetchAssociatedNumbers = async (number: number, drawName: string, history: DrawResult[]): Promise<{ following: { number: number; count: number }[] }> => {
     const followers: Record<number, number> = {};
-    const hist = history || [];
-    for (let i = 0; i < hist.length - 1; i++) {
-        const prev = hist[i+1]?.gagnants;
-        if (Array.isArray(prev) && prev.includes(number)) {
-            const current = hist[i]?.gagnants;
-            if (Array.isArray(current)) {
-                current.forEach(n => followers[n] = (followers[n] || 0) + 1);
-            }
+    for (let i = 0; i < history.length - 1; i++) {
+        const prev = history[i+1].gagnants;
+        if (prev.includes(number)) {
+            const current = history[i].gagnants;
+            current.forEach(n => followers[n] = (followers[n] || 0) + 1);
         }
     }
     const sorted = Object.entries(followers).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count).slice(0, 10);

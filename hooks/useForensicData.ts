@@ -56,10 +56,9 @@ export const useForensicData = (drawName: string) => {
                             .order('created_at', { ascending: false });
 
                         if (cloudReports && cloudReports.length > 0) {
-                            (cloudReports || []).forEach((cr: any) => {
-                                if (!cr) return;
+                            cloudReports.forEach((cr: any) => {
                                 const existingIdx = currentReports.findIndex((r) => r.id === cr.id || r.predictionId === cr.prediction_id);
-                                const mappedReport = { ...(cr.report_data || {}), id: cr.id, date: cr.draw_date };
+                                const mappedReport = { ...cr.report_data, id: cr.id, date: cr.draw_date };
                                 if (existingIdx >= 0) {
                                     currentReports[existingIdx] = { ...currentReports[existingIdx], ...mappedReport };
                                 } else {
@@ -73,7 +72,7 @@ export const useForensicData = (drawName: string) => {
                 }
             }
 
-            const existingReportIds = new Set((currentReports || []).map((r) => r.predictionId));
+            const existingReportIds = new Set(currentReports.map((r) => r.predictionId));
             const dismissedPredictionIds = await getDismissedAutopsyPredictionIds();
 
             // 2. Identifier les prédictions sans rapport (et non expressément supprimées par l'utilisateur)
@@ -84,11 +83,9 @@ export const useForensicData = (drawName: string) => {
             // O(1) Lookups
             const historyById = new Map();
             const historyByDate = new Map();
-            (cleanHistory || []).forEach((h) => {
-                if (h) {
-                    if (h.id) historyById.set(h.id, h);
-                    if (h.date) historyByDate.set(h.date, h);
-                }
+            cleanHistory.forEach((h) => {
+                historyById.set(h.id, h);
+                historyByDate.set(h.date, h);
             });
 
             for (const pred of preds.slice(0, 30)) {

@@ -11,85 +11,18 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Prediction } from "../types";
 
-export interface ExplainabilityDrawerProps {
-  inspectingNumber?: number | null;
-  onClose?: () => void;
-  drawName?: string;
-  prediction?: Prediction | null;
-}
-
-export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
-  inspectingNumber: propInspectingNumber,
-  onClose: propOnClose,
-  drawName,
-  prediction: propPrediction,
-}) => {
-  const storeInspectingNumber = useNexusStore((state) => state.inspectingNumber);
+export const ExplainabilityDrawer: React.FC = () => {
+  const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
   const setInspectingNumber = useNexusStore(
     (state) => state.setInspectingNumber,
   );
-  const storeLastPrediction = useNexusStore((state) => state.lastPrediction);
-
-  const activeNumber = propInspectingNumber !== undefined ? propInspectingNumber : storeInspectingNumber;
-
-  const handleClose = () => {
-    if (propOnClose) {
-      propOnClose();
-    }
-    setInspectingNumber(null);
-  };
-
-  const activePrediction = useMemo(() => {
-    if (propPrediction !== undefined) return propPrediction;
-    if (storeLastPrediction && (!drawName || !storeLastPrediction.drawName || storeLastPrediction.drawName === drawName)) {
-      return storeLastPrediction;
-    }
-    return null;
-  }, [propPrediction, storeLastPrediction, drawName]);
+  const lastPrediction = useNexusStore((state) => state.lastPrediction);
 
   const expData = useMemo(() => {
-    if (!activeNumber || !activePrediction) return null;
-
-    // 1. Direct explainabilityData if available
-    if (activePrediction.explainabilityData?.[activeNumber]) {
-      return activePrediction.explainabilityData[activeNumber];
-    }
-
-    // 2. Synthesize continuous explainability from breakdown if available (for any number 1-90)
-    const breakdown = activePrediction.breakdown?.[activeNumber];
-    if (breakdown && Object.keys(breakdown).length > 0) {
-      const entries = Object.entries(breakdown).map(([algo, val]) => [algo, Number(val) || 0] as [string, number]);
-      entries.sort((a, b) => b[1] - a[1]);
-
-      const dominantAlgo = entries[0]?.[0] || "Consensus";
-      const totalScore = entries.reduce((sum, [, v]) => sum + v, 0);
-      const meanScore = totalScore / (entries.length || 1);
-
-      // Continuous variance for topological tension
-      const variance = entries.reduce((sum, [, v]) => sum + Math.pow(v - meanScore, 2), 0) / (entries.length || 1);
-      const topologicalTension = parseFloat(Math.min(10, Math.sqrt(variance) * 10).toFixed(2));
-
-      // DNA Orbiting index based on normalized harmonic score
-      const dnaOrbitingIndex = parseFloat(Math.min(1, Math.max(0, meanScore / 100)).toFixed(4));
-
-      const shapValues: Record<string, number> = {};
-      entries.forEach(([algo, val]) => {
-        shapValues[algo] = val;
-      });
-
-      return {
-        shapValues,
-        topologicalTension,
-        dnaOrbitingIndex,
-        physicsArchetype: (activePrediction as any).physicsArchetype || "Convergence Gaussienne",
-        narrativeInterpretation: `Le numéro ${activeNumber} présente une force d'attraction portée par ${dominantAlgo.replace(/_/g, " ")} (${(entries[0]?.[1] || 0).toFixed(1)}%). Sa tension topologique de ${topologicalTension} et son alignement spectral de ${dnaOrbitingIndex} attestent de son positionnement dans le paysage d'inférence de ${drawName || "ce tirage"}.`,
-      };
-    }
-
-    return null;
-  }, [activeNumber, activePrediction, drawName]);
+    if (!inspectingNumber || !lastPrediction?.explainabilityData) return null;
+    return lastPrediction.explainabilityData[inspectingNumber];
+  }, [inspectingNumber, lastPrediction]);
 
   const shapData = useMemo(() => {
     if (!expData?.shapValues) return [];
@@ -101,7 +34,7 @@ export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
       .sort((a, b) => b.val - a.val);
   }, [expData]);
 
-  if (!activeNumber || !expData) return null;
+  if (!inspectingNumber || !expData) return null;
 
   return (
     <AnimatePresence>
@@ -117,7 +50,7 @@ export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
             <div>
               <h2 className="text-2xl font-black text-slate-900 dark:text-white flex items-center gap-3">
                 <span className="w-10 h-10 bg-indigo-500 text-white flex items-center justify-center rounded-full text-xl shadow-lg">
-                  {activeNumber}
+                  {inspectingNumber}
                 </span>
                 XAP : Diagnostic d'Attribution
               </h2>
@@ -126,7 +59,7 @@ export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
               </p>
             </div>
             <button
-              onClick={handleClose}
+              onClick={() => setInspectingNumber(null)}
               className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
             >
               <X size={20} className="text-slate-500" />
@@ -226,7 +159,7 @@ export const ExplainabilityDrawer: React.FC<ExplainabilityDrawerProps> = ({
                 </div>
                 <p className="text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed font-medium">
                   {expData.narrativeInterpretation || (
-                    `Le numéro ${activeNumber} émerge avec une contribution primaire dominée par ${shapData[0]?.algo || "N/A"} et ${shapData[1]?.algo || "N/A"}. Sa résonance spectrale de ${expData.dnaOrbitingIndex?.toFixed(4) || "0.0000"} confirme sa convergence vers l'attracteur central du tirage.`
+                    `Le numéro ${inspectingNumber} émerge avec une contribution primaire dominée par ${shapData[0]?.algo || "N/A"} et ${shapData[1]?.algo || "N/A"}. Sa résonance spectrale de ${expData.dnaOrbitingIndex?.toFixed(4) || "0.0000"} confirme sa convergence vers l'attracteur central du tirage.`
                   )}
                 </p>
               </div>

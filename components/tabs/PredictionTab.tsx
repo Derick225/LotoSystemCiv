@@ -688,10 +688,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               gameRegimeInfo={gameRegimeInfo}
               resolvedNoiseLevel={resolvedNoiseLevel}
               resolvedLearningRate={resolvedLearningRate}
-              currentEntropy={currentEntropy}
-              volatilityScore={volatilityScore}
-              resolvedMcIterations={resolvedMcIterations}
-              activeHistory={activeHistory}
             />
 
             {/* Neural Heatmap Floor */}
@@ -705,25 +701,17 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
             {/* Multi-Vector Strategic Portfolio */}
             <PredictionVectorPortfolio
               prediction={activePrediction}
-              history={activeHistory.length > 0 ? activeHistory : history}
+              history={history}
               drawName={drawName}
-              onAdoptTicket={handleAdoptScenarioTicket}
             />
 
             {/* Gap Range Sequence Pattern Module */}
-            <GapRangeSequenceWidget
-              drawName={drawName}
-              prediction={activePrediction}
-              activeHistory={activeHistory}
-            />
+            <GapRangeSequenceWidget drawName={drawName} />
           </div>
         )}
       </div>
 
-      <ExplainabilityDrawer
-        drawName={drawName}
-        prediction={activePrediction}
-      />
+      <ExplainabilityDrawer />
       <TrainingEvolutionDrawer
         isOpen={isTrainingDashboardOpen}
         onClose={() => setIsTrainingDashboardOpen(false)}
