@@ -50,6 +50,15 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const rawLastPrediction = useNexusStore((state) => state.lastPrediction);
   const lastPrediction = React.useDeferredValue(rawLastPrediction);
   const setLastPrediction = useNexusStore((state) => state.setLastPrediction);
+
+  // Isolation stricte de la prédiction au nom du tirage actif (ZÉRO POLLUTION INTER-TIRAGES)
+  const activePrediction = useMemo(() => {
+    if (lastPrediction && (!lastPrediction.drawName || lastPrediction.drawName === drawName)) {
+      return lastPrediction;
+    }
+    return null;
+  }, [lastPrediction, drawName]);
+
   const nexusLoading = useNexusStore((state) => state.loading);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
@@ -136,21 +145,21 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   // Adoption directe d'un scénario alternatif comme vecteur principal
   const handleAdoptScenarioTicket = useCallback(
     (numbers: number[], scenarioName: string) => {
-      if (!lastPrediction) return;
+      if (!activePrediction) return;
       const updatedPrediction: Prediction = {
-        ...lastPrediction,
+        ...activePrediction,
         suggestedNumbers: [...numbers].sort((a, b) => a - b),
         scenarioName,
-        analysis: `${lastPrediction.analysis} [Scénario Actif : ${scenarioName}]`,
+        analysis: `${activePrediction.analysis} [Scénario Actif : ${scenarioName}]`,
       };
       setLastPrediction(updatedPrediction);
     },
-    [lastPrediction, setLastPrediction]
+    [activePrediction, setLastPrediction]
   );
 
   const handleTriggerForensicReport = useCallback(async () => {
     audioEngine.play("click");
-    if (!lastPrediction) {
+    if (!activePrediction) {
       showToast("Veuillez d'abord générer une prédiction pour exporter le rapport forensic.", "info");
       return;
     }
@@ -165,11 +174,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,
-        suggestedNumbers: lastPrediction.suggestedNumbers,
-        candidates: lastPrediction.candidates,
-        confidence: lastPrediction.confidence,
-        stabilityScore: lastPrediction.stabilityScore,
-        realityAlignment: lastPrediction.realityAlignment,
+        suggestedNumbers: activePrediction.suggestedNumbers,
+        candidates: activePrediction.candidates,
+        confidence: activePrediction.confidence,
+        stabilityScore: activePrediction.stabilityScore,
+        realityAlignment: activePrediction.realityAlignment,
         currentEntropy: currentEntropy,
         gameRegimeInfo: {
           regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
@@ -184,8 +193,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
         resolvedMcIterations,
         appliedWeights: (optimizedWeights || globalWeights) as Record<string, number>,
         empiricalProofs: proofs as any,
-        breakdown: lastPrediction.breakdown as any,
-        analysis: lastPrediction.analysis,
+        breakdown: activePrediction.breakdown as any,
+        analysis: activePrediction.analysis,
         hasMachineData,
       });
 
@@ -197,7 +206,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
       setIsExportingForensicPDF(false);
     }
   }, [
-    lastPrediction,
+    activePrediction,
     drawName,
     history,
     activeHistory,
@@ -238,7 +247,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   }
 
   // ÉTAT INITIAL / EMPTY STATE : Command Center Oracle Base
-  if (!lastPrediction && !isComputing) {
+  if (!activePrediction && !isComputing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] w-full max-w-4xl mx-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden px-6 py-12 text-center transition-all">
         {/* Header Controls */}
@@ -388,14 +397,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               <h2 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
                 Convergence Absolue
               </h2>
-              {lastPrediction?.scenarioName && (
+              {activePrediction?.scenarioName && (
                 <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase border border-indigo-500/20">
-                  {lastPrediction.scenarioName}
+                  {activePrediction.scenarioName}
                 </span>
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              Oracle Base • Confiance: {lastPrediction?.confidence ?? 0}% • Famille : {interDrawFamily.name}
+              Oracle Base • Confiance: {activePrediction?.confidence ?? 0}% • Famille : {interDrawFamily.name}
             </p>
           </div>
         </div>
@@ -458,7 +467,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
       {/* Computation Overlay & Results Container */}
       <div className="relative min-h-[400px]">
-        {isComputing && lastPrediction && (
+        {isComputing && activePrediction && (
           <div className="absolute inset-0 z-50 bg-slate-50/60 dark:bg-slate-950/60 backdrop-blur-md rounded-3xl flex items-center justify-center p-4 transition-all duration-300">
             <div className="w-full max-w-xl">
               <PredictionComputationOverlay
@@ -471,7 +480,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           </div>
         )}
 
-        {isComputing && !lastPrediction && (
+        {isComputing && !activePrediction && (
           <div className="mb-8">
             <PredictionComputationOverlay
               isComputing={isComputing}
@@ -482,7 +491,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           </div>
         )}
 
-        {lastPrediction && (
+        {activePrediction && (
           <div className="space-y-8">
             {/* Top Grid: Primary Vector + Metrics Sidebar */}
             <div className="grid lg:grid-cols-12 gap-8">
@@ -517,14 +526,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                       Indice de Confiance
                     </span>
                     <span className="text-xl font-black font-mono">
-                      {lastPrediction.confidence}%
+                      {activePrediction.confidence}%
                     </span>
                   </div>
                 </div>
 
                 {/* Main Suggested Balls */}
                 <div className="flex flex-wrap gap-3 sm:gap-4 md:gap-6 justify-center items-center py-8 relative z-10">
-                  {lastPrediction.suggestedNumbers.map((num, i) => (
+                  {activePrediction.suggestedNumbers.map((num, i) => (
                     <motion.div
                       initial={{ scale: 0, opacity: 0, y: 20 }}
                       animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -542,13 +551,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 </div>
 
                 {/* Peripheral Candidates */}
-                {lastPrediction.candidates.length > 0 && (
+                {activePrediction.candidates.length > 0 && (
                   <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800/80 relative z-10">
                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
                       <Atom size={12} className="text-slate-400" /> Numéros Périphériques (Orbitales Secondaires)
                     </h4>
                     <div className="flex flex-wrap gap-2.5">
-                      {lastPrediction.candidates.slice(0, 10).map((num, i) => (
+                      {activePrediction.candidates.slice(0, 10).map((num, i) => (
                         <motion.div
                           initial={{ opacity: 0, scale: 0.8 }}
                           animate={{ opacity: 1, scale: 1 }}
@@ -574,7 +583,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                   <div className="grid grid-cols-2 gap-4 pb-2">
                     <div>
                       <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400 font-mono">
-                        {lastPrediction.confidence}%
+                        {activePrediction.confidence}%
                       </div>
                       <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">
                         Confiance Inférence
@@ -582,7 +591,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                     </div>
                     <div className="border-l border-slate-100 dark:border-slate-800/80 pl-4">
                       <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                        {lastPrediction.realityAlignment ?? 82}%
+                        {activePrediction.realityAlignment ?? 82}%
                       </div>
                       <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">
                         Alignement ADN Réel
@@ -592,7 +601,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
                   <div className="w-full h-px bg-slate-100 dark:bg-slate-800 my-4"></div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                    {lastPrediction.analysis}
+                    {activePrediction.analysis}
                   </p>
                 </div>
 
@@ -609,32 +618,32 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                         Robustesse Inférence
                       </span>
                       <span className="text-xs font-black font-mono text-indigo-600 dark:text-indigo-400">
-                        {lastPrediction.stabilityScore ?? 80}%
+                        {activePrediction.stabilityScore ?? 80}%
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                        style={{ width: `${lastPrediction.stabilityScore ?? 80}%` }}
+                        style={{ width: `${activePrediction.stabilityScore ?? 80}%` }}
                       ></div>
                     </div>
                   </div>
 
                   {/* Genetic Diversity */}
-                  {lastPrediction.diversityMetrics && (
+                  {activePrediction.diversityMetrics && (
                     <div>
                       <div className="flex justify-between items-center mb-1.5">
                         <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
                           Diversité Génétique
                         </span>
                         <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">
-                          {(lastPrediction.diversityMetrics.diversityScore * 100).toFixed(1)}%
+                          {(activePrediction.diversityMetrics.diversityScore * 100).toFixed(1)}%
                         </span>
                       </div>
                       <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                          style={{ width: `${lastPrediction.diversityMetrics.diversityScore * 100}%` }}
+                          style={{ width: `${activePrediction.diversityMetrics.diversityScore * 100}%` }}
                         ></div>
                       </div>
                     </div>
@@ -667,42 +676,54 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
             {/* Oracle Scenario Matrix Deck (Interactive Multi-Scenario Synthesizer & Morphing) */}
             <OracleScenarioMatrixDeck
-              prediction={lastPrediction}
+              prediction={activePrediction}
               drawName={drawName}
               onAdoptTicket={handleAdoptScenarioTicket}
             />
 
             {/* Comprehensive XAP Transparency Panel */}
             <XAPTransparencyPanel
-              prediction={lastPrediction}
+              prediction={activePrediction}
               drawName={drawName}
               gameRegimeInfo={gameRegimeInfo}
               resolvedNoiseLevel={resolvedNoiseLevel}
               resolvedLearningRate={resolvedLearningRate}
+              currentEntropy={currentEntropy}
+              volatilityScore={volatilityScore}
+              resolvedMcIterations={resolvedMcIterations}
+              activeHistory={activeHistory}
             />
 
             {/* Neural Heatmap Floor */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 border border-slate-200 dark:border-slate-800 shadow-sm">
               <NeuralHeatmapGrid
-                breakdown={lastPrediction.breakdown}
-                suggestedNumbers={lastPrediction.suggestedNumbers}
+                breakdown={activePrediction.breakdown}
+                suggestedNumbers={activePrediction.suggestedNumbers}
               />
             </div>
 
             {/* Multi-Vector Strategic Portfolio */}
             <PredictionVectorPortfolio
-              prediction={lastPrediction}
-              history={history}
+              prediction={activePrediction}
+              history={activeHistory.length > 0 ? activeHistory : history}
               drawName={drawName}
+              onAdoptTicket={handleAdoptScenarioTicket}
             />
 
             {/* Gap Range Sequence Pattern Module */}
-            <GapRangeSequenceWidget drawName={drawName} />
+            <GapRangeSequenceWidget
+              drawName={drawName}
+              prediction={activePrediction}
+              activeHistory={activeHistory}
+            />
           </div>
         )}
       </div>
 
-      <ExplainabilityDrawer />
+      <ExplainabilityDrawer
+        drawName={drawName}
+        prediction={activePrediction}
+      />
       <TrainingEvolutionDrawer
         isOpen={isTrainingDashboardOpen}
         onClose={() => setIsTrainingDashboardOpen(false)}

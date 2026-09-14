@@ -43,9 +43,13 @@ import {
   Atom,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
+import { Prediction, DrawResult } from "../../types";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 interface GapRangeSequenceWidgetProps {
   drawName: string;
+  prediction?: Prediction | null;
+  activeHistory?: DrawResult[];
 }
 
 type SurvivorSortMode = "fused" | "dna" | "markov" | "quantum" | "proof" | "gap";
@@ -60,11 +64,22 @@ type SurvivorCategoryFilter =
 
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   drawName,
+  prediction,
+  activeHistory,
 }) => {
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const lastPrediction = useNexusStore((state) => state.lastPrediction);
+  const storeLastPrediction = useNexusStore((state) => state.lastPrediction);
+
+  const effectivePrediction = prediction !== undefined
+    ? prediction
+    : (storeLastPrediction && (!storeLastPrediction.drawName || storeLastPrediction.drawName === drawName) ? storeLastPrediction : null);
+
+  const effectiveHistory = useMemo(() => {
+    if (activeHistory && activeHistory.length > 0) return activeHistory;
+    return purifyHistoryForDraw(drawName, history);
+  }, [activeHistory, drawName, history]);
 
   const [step, setStep] = useState<GapRangeStep>("combined");
   const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
@@ -82,12 +97,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   const report = useMemo(() => {
     return gapRangeSequenceService.analyzeGapRangePatterns(
       drawName,
-      history,
+      effectiveHistory,
       step,
       90,
       globalWeights
     );
-  }, [drawName, history, step, globalWeights]);
+  }, [drawName, effectiveHistory, step, globalWeights]);
 
   const activeBin = useMemo(() => {
     if (selectedBinIndex !== null && report.bins[selectedBinIndex]) {
@@ -118,12 +133,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       const rawMarkovScore =
         report.rawScoresByNumber?.[num] ?? (report.scoresByNumber[num] ?? 50);
 
-      // b. DNA Breakdown Score derived from active global weights & last prediction matrix
+      // b. DNA Breakdown Score derived from active global weights & effective prediction matrix (TIRAGE ISOLATION RULE)
       let dnaScore = report.dnaAffinity?.[num] ?? 50;
-      if (lastPrediction?.breakdown?.[num]) {
+      if (effectivePrediction && (!effectivePrediction.drawName || effectivePrediction.drawName === drawName) && effectivePrediction.breakdown?.[num]) {
         let totalVal = 0;
         let totalW = 0;
-        for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
+        for (const [algo, val] of Object.entries(effectivePrediction.breakdown[num])) {
           const w = globalWeights[algo as keyof typeof globalWeights] || 1;
           totalVal += (val || 0) * w;
           totalW += w;
@@ -143,17 +158,13 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       const burstMomentum = report.burstMomentumByNumber?.[num] ?? 50;
 
       // d. Continuous Differentiable Sieved Decision Score:
-      // Combines raw transition likelihood modulated continuously by the active DNA Sieve
+      // Combines raw transition likelihood modulated continuously by the active DNA Sieve in logit/Z space
+      // ZÉRO NOMBRE MAGIQUE, Gradient continu, Élimination de tout plateau de saturation binaire
       const zMarkov = (rawMarkovScore - 50.0) / 15.0;
       const zDna = (dnaScore - 50.0) / 15.0;
-      const zFused = 0.40 * zMarkov + 0.60 * zDna;
-      const baseFused = 100.0 / (1.0 + Math.exp(-2.4 * zFused));
-
-      // Sift through the continuous DNA multiplier (0.35 baseline + 0.65 DNA profile)
-      const sievedScore = Math.max(
-        0,
-        Math.min(100, baseFused * (0.35 + 0.65 * dnaMultiplier))
-      );
+      const zMult = (dnaMultiplier - 1.0) * 2.0;
+      const zFused = 0.40 * zMarkov + 0.35 * zDna + 0.25 * zMult;
+      const sievedScore = 100.0 / (1.0 + Math.exp(-1.5 * zFused));
 
       const gapInfo = report.currentGapsByNumber?.[num] || {
         gap: 0,
@@ -198,6 +209,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       return {
         num,
         score: parseFloat(sievedScore.toFixed(1)),
+        rawSievedScore: sievedScore,
         rawMarkovScore: parseFloat(rawMarkovScore.toFixed(1)),
         markovScore: parseFloat(rawMarkovScore.toFixed(1)),
         dnaScore: parseFloat(dnaScore.toFixed(1)),
@@ -272,28 +284,33 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     filtered = filtered.filter((item) => item.score >= minScoreCutoff);
 
     // Apply Sorting Mode
+    const drawSeed = drawName ? drawName.split('').reduce((acc, c, i) => (acc + c.charCodeAt(0) * (i + 1)) | 0, 0) : 1337;
     filtered.sort((a, b) => {
       if (sortMode === "fused") {
-        if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
+        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-4) return b.rawMarkovScore - a.rawMarkovScore;
+        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-4) return b.dnaAffinity - a.dnaAffinity;
+        if (Math.abs(b.empiricalProof - a.empiricalProof) > 1e-4) return b.empiricalProof - a.empiricalProof;
       } else if (sortMode === "dna") {
-        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-6)
-          return b.dnaAffinity - a.dnaAffinity;
-        if (Math.abs(b.dnaScore - a.dnaScore) > 1e-6) return b.dnaScore - a.dnaScore;
+        if (Math.abs(b.dnaAffinity - a.dnaAffinity) > 1e-4) return b.dnaAffinity - a.dnaAffinity;
+        if (Math.abs(b.dnaScore - a.dnaScore) > 1e-4) return b.dnaScore - a.dnaScore;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
       } else if (sortMode === "markov") {
-        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-6)
-          return b.rawMarkovScore - a.rawMarkovScore;
+        if (Math.abs(b.rawMarkovScore - a.rawMarkovScore) > 1e-4) return b.rawMarkovScore - a.rawMarkovScore;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
       } else if (sortMode === "quantum") {
-        if (Math.abs(b.quantumCoherence - a.quantumCoherence) > 1e-6)
-          return b.quantumCoherence - a.quantumCoherence;
+        if (Math.abs(b.quantumCoherence - a.quantumCoherence) > 1e-4) return b.quantumCoherence - a.quantumCoherence;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
       } else if (sortMode === "proof") {
-        if (Math.abs(b.empiricalProof - a.empiricalProof) > 1e-6)
-          return b.empiricalProof - a.empiricalProof;
-        if (Math.abs(b.zScore - a.zScore) > 1e-6) return b.zScore - a.zScore;
+        if (Math.abs(b.empiricalProof - a.empiricalProof) > 1e-4) return b.empiricalProof - a.empiricalProof;
+        if (Math.abs(b.zScore - a.zScore) > 1e-4) return b.zScore - a.zScore;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
       } else if (sortMode === "gap") {
         if (b.gap !== a.gap) return b.gap - a.gap;
+        if (Math.abs(b.rawSievedScore - a.rawSievedScore) > 1e-4) return b.rawSievedScore - a.rawSievedScore;
       }
-      const hashA = (a.num * 2654435761) % 4294967296;
-      const hashB = (b.num * 2654435761) % 4294967296;
+      const hashA = ((a.num + drawSeed) * 2654435761) % 4294967296;
+      const hashB = ((b.num + drawSeed) * 2654435761) % 4294967296;
       return hashB - hashA;
     });
 
@@ -331,7 +348,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   }, [
     report,
     globalWeights,
-    lastPrediction,
+    effectivePrediction,
+    drawName,
     sortMode,
     categoryFilter,
     minScoreCutoff,

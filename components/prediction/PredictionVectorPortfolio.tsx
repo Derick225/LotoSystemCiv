@@ -26,11 +26,12 @@ interface PredictionVectorPortfolioProps {
   prediction: Prediction;
   history: DrawResult[];
   drawName: string;
+  onAdoptTicket?: (numbers: number[], vectorName: string) => void;
 }
 
 export const PredictionVectorPortfolio: React.FC<
   PredictionVectorPortfolioProps
-> = ({ prediction, history, drawName }) => {
+> = ({ prediction, history, drawName, onAdoptTicket }) => {
   const { showToast } = useToast();
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [selectedVectorTab, setSelectedVectorTab] = useState<
@@ -361,8 +362,24 @@ export const PredictionVectorPortfolio: React.FC<
                 {activeVector.subtitle}
               </p>
             </div>
-            <div className="px-3 py-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300">
-              Stratégie : <span className="text-indigo-500 font-bold">{activeVector.strategy}</span>
+            <div className="flex items-center gap-2">
+              <div className="px-3 py-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300">
+                Stratégie : <span className="text-indigo-500 font-bold">{activeVector.strategy}</span>
+              </div>
+              {onAdoptTicket && (
+                <button
+                  onClick={() => {
+                    audioEngine.play("success");
+                    onAdoptTicket(activeVector.numbers, activeVector.title);
+                    showToast(`Vecteur "${activeVector.title}" adopté comme ticket actif.`, "success");
+                  }}
+                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  title="Adopter ce vecteur comme le ticket actif du tirage"
+                >
+                  <ArrowRight className="size-3" />
+                  <span>Adopter</span>
+                </button>
+              )}
             </div>
           </div>
 

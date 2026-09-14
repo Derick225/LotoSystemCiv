@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
-import { Prediction } from "../../types";
 import { NumberBall } from "../NumberBall";
 import {
   BrainCircuit,
@@ -45,7 +44,8 @@ import { NeuralWeightsAuditDashboard } from "./NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { audioEngine } from "../../utils/audioEngine";
-
+import { DrawResult, Prediction } from "../../types";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 interface XAPTransparencyPanelProps {
   prediction: Prediction;
@@ -53,6 +53,10 @@ interface XAPTransparencyPanelProps {
   gameRegimeInfo?: any;
   resolvedNoiseLevel?: number;
   resolvedLearningRate?: number;
+  currentEntropy?: number;
+  volatilityScore?: number;
+  resolvedMcIterations?: number;
+  activeHistory?: DrawResult[];
 }
 
 type XAPTab = "number_breakdown" | "neural_weights" | "stochastic_factors" | "synergy_matrix";
@@ -85,6 +89,10 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   gameRegimeInfo,
   resolvedNoiseLevel = 0.35,
   resolvedLearningRate = 0.05,
+  currentEntropy,
+  volatilityScore,
+  resolvedMcIterations,
+  activeHistory,
 }) => {
   const { showToast } = useToast();
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
@@ -100,13 +108,17 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     audioEngine.play("click");
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = history.filter(
-        (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-      );
+      const isolatedHistory = activeHistory && activeHistory.length > 0
+        ? activeHistory
+        : purifyHistoryForDraw(drawName, history);
       const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
       const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-      const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+      const proofs = evaluateAlgoEmpiricalProof(drawName, sample);
+
+      const entropyVal = currentEntropy ?? gameRegimeInfo?.entropy ?? 0.85;
+      const volVal = volatilityScore ?? gameRegimeInfo?.volatility ?? 35.0;
+      const mcIterVal = resolvedMcIterations ?? 500;
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,
@@ -115,18 +127,18 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         confidence: prediction.confidence,
         stabilityScore: prediction.stabilityScore,
         realityAlignment: prediction.realityAlignment,
-        currentEntropy: 0.85,
+        currentEntropy: entropyVal,
         gameRegimeInfo: {
           regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
           hurst: gameRegimeInfo?.hurst ?? 0.52,
           chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
           weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
-          entropy: 0.85,
-          volatility: 35.0,
+          entropy: entropyVal,
+          volatility: volVal,
         },
         resolvedNoiseLevel,
         resolvedLearningRate,
-        resolvedMcIterations: 500,
+        resolvedMcIterations: mcIterVal,
         appliedWeights: ((prediction as any).aiWeights || (prediction as any).weights || globalWeights) as Record<string, number>,
         empiricalProofs: proofs as any,
 
@@ -194,13 +206,35 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       shapleyPct[k] = total > 0 ? (numVal / total) * 100 : 0;
     });
 
+    // Continuous differentiable Shannon entropy derived from number breakdown (AGENTS.md: zero magic numbers)
+    let entSum = 0;
+    entries.forEach(([, v]) => {
+      const p = total > 0 ? Math.max(0, Number(v) || 0) / total : 0;
+      if (p > 1e-9) {
+        entSum -= p * Math.log2(p);
+      }
+    });
+    const maxEnt = entries.length > 1 ? Math.log2(entries.length) : 1.0;
+    const computedEntropy = maxEnt > 0 ? parseFloat((entSum / maxEnt).toFixed(3)) : 0.85;
+
+    // Continuous Gini coefficient derived from contribution distribution
+    const sortedVals = entries.map(([, v]) => Math.max(0, Number(v) || 0)).sort((a, b) => a - b);
+    const n = sortedVals.length;
+    let giniNumerator = 0;
+    sortedVals.forEach((val, idx) => {
+      giniNumerator += (2 * (idx + 1) - n - 1) * val;
+    });
+    const computedGini = (total > 0 && n > 0)
+      ? parseFloat(Math.max(0, Math.min(1, giniNumerator / (n * total))).toFixed(3))
+      : 0.35;
+
     return {
       number: selectedNum,
       dominantAlgo: dominantKey as any,
       contributionPercentage: total > 0 ? (maxVal / total) * 100 : 0,
       dnaVector: shapValues as any,
-      compositionEntropy: 0.85,
-      compositionGini: 0.35,
+      compositionEntropy: computedEntropy,
+      compositionGini: computedGini,
       synergyAlgos: entries.filter(([, v]) => Number(v) > 0.05).map(([k]) => k as any),
       shapleyValues: shapleyPct as any,
     };
@@ -272,7 +306,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     const H = gameRegimeInfo?.hurst ?? 0.52;
     const chaosDim = gameRegimeInfo?.chaosDimension ?? 1.25;
     const weylDiscrepancy = gameRegimeInfo?.weylDiscrepancy ?? 0.18;
-    const histEntropy = gameRegimeInfo?.entropy ?? 0.88;
+    const histEntropy = currentEntropy ?? gameRegimeInfo?.entropy ?? 0.88;
 
     // Continuous impacts based on mathematical derivations (AGENTS.md)
     // 1. Hurst Persistence Force: |H - 0.5| * 200%
@@ -353,7 +387,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         barColor: "bg-purple-500",
       },
     ];
-  }, [gameRegimeInfo, resolvedNoiseLevel, globalWeights]);
+  }, [gameRegimeInfo, resolvedNoiseLevel, globalWeights, currentEntropy]);
 
   // Physics Archetype Tag Details
   const archetypeInfo = useMemo(() => {

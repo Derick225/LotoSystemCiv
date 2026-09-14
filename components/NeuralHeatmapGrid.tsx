@@ -11,6 +11,7 @@ interface NeuralHeatmapGridProps {
 export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
   ({ breakdown, suggestedNumbers }) => {
     const setHoveredNumber = useNexusStore((state) => state.setHoveredNumber);
+    const setInspectingNumber = useNexusStore((state) => state.setInspectingNumber);
 
     const grid = useMemo(() => {
       return Array.from({ length: 90 }, (_, i) => {
@@ -77,7 +78,10 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
             return (
               <div
                 key={cell.num}
-                onClick={() => setHoveredNumber(cell.num)}
+                onClick={() => {
+                  setHoveredNumber(cell.num);
+                  setInspectingNumber(cell.num);
+                }}
                 className={`
                                 aspect-square rounded-md sm:rounded-xl flex items-center justify-center text-[8px] xs:text-[10px] md:text-xs font-black transition-all duration-500 relative group border cursor-pointer
                                 ${

@@ -545,10 +545,11 @@ export const gapRangeSequenceService = {
     }
 
     // Sort bins by descending conditional probability to identify top predicted gap ranges
+    const drawSeed = drawName ? drawName.split('').reduce((acc, c, i) => (acc + c.charCodeAt(0) * (i + 1)) | 0, 0) : 1337;
     const topPredictedBins = [...bins].sort((a, b) => {
       if (Math.abs(b.probability - a.probability) > 1e-6) return b.probability - a.probability;
-      const hashA = (a.binIndex * 2654435761) % 4294967296;
-      const hashB = (b.binIndex * 2654435761) % 4294967296;
+      const hashA = ((a.binIndex + drawSeed) * 2654435761) % 4294967296;
+      const hashB = ((b.binIndex + drawSeed) * 2654435761) % 4294967296;
       return hashB - hashA;
     });
 
@@ -614,9 +615,11 @@ export const gapRangeSequenceService = {
       const burst = 100.0 / (1.0 + Math.exp(-1.6 * gapSaturation));
       burstMomentumByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, burst)).toFixed(2));
 
-      // Tamisage différentiable continu par l'ADN algorithmique actif
-      const sievedScore = rawMarkovScore * ((1.0 - dynamicSieveIntensity) + dynamicSieveIntensity * mult);
-      scoresByNumber[num] = parseFloat(Math.max(0.0, Math.min(100.0, sievedScore)).toFixed(2));
+      // Tamisage différentiable continu par l'ADN algorithmique actif (Zéro clamp artificiel, préservation du gradient continu)
+      const zMult = (mult - 1.0) * 2.0;
+      const zSieved = z + dynamicSieveIntensity * zMult;
+      const sievedScore = 100.0 / (1.0 + Math.exp(-2.5 * zSieved));
+      scoresByNumber[num] = parseFloat(sievedScore.toFixed(2));
 
       sumDnaAffinity += aff;
     }
