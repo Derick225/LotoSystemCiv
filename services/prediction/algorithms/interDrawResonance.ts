@@ -19,8 +19,11 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const domainMax = 90;
 
     const drawName = ctx.drawName;
+    const forcedFamilyId = (ctx as any).forcedFamilyId;
     const families = getInterDrawFamiliesForDraw(drawName);
-    const family = families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName);
+    const family = forcedFamilyId
+      ? families.find(f => f.id === forcedFamilyId) || getPrimaryInterDrawFamily(drawName)
+      : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName));
 
     // Si le tirage n'appartient à aucune famille (ou tirage combiné "all"), distribution neutre
     if (!family || !drawName || drawName === 'all' || drawName === 'all combined') {
@@ -41,7 +44,7 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     }
 
     // 2. Calcul vectoriel continu conforme aux règles d'étanchéité et zéro nombre magique
-    const interVec = calculateInterDrawVector(ctx.history || [], drawName);
+    const interVec = calculateInterDrawVector(ctx.history || [], drawName, undefined, family?.id);
     for (let i = 1; i <= domainMax; i++) {
       scores[i] = Math.min(100.0, Math.max(0.0, (interVec[i] || 0.0555) * 100.0));
     }

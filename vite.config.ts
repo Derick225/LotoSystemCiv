@@ -187,7 +187,8 @@ export default defineConfig(({ mode }) => {
             'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
             'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
             'vendor-utils': ['jspdf', 'html2canvas'],
-            'vendor-core': ['@supabase/supabase-js', '@tanstack/react-query']
+            'vendor-core': ['@supabase/supabase-js', '@tanstack/react-query'],
+            'vendor-3d': ['three']
           }
         }
       }

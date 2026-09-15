@@ -14,11 +14,14 @@ import {
   Workflow,
 } from "lucide-react";
 import { LocalErrorBoundary } from "../ui/LocalErrorBoundary";
-import { ChaosAttractor } from "../ChaosAttractor";
 import { calculateGapEfficiency } from "../../services/mathService";
 import { GapEfficiencyMeter } from "../GapEfficiencyMeter";
 import type { GapEfficiency } from "../../types";
 import { audioEngine } from "../../utils/audioEngine";
+
+const ChaosAttractor = lazy(() =>
+  import("../ChaosAttractor").then((m) => ({ default: m.ChaosAttractor })),
+);
 
 const StatsTab = lazy(() =>
   import("./StatsTab").then((m) => ({ default: m.StatsTab })),
@@ -373,7 +376,9 @@ export const SignalHub: React.FC = () => {
 
         {/* Sidebar Widget : Attracteur & GEI */}
         <div className="lg:col-span-4 space-y-6">
-          <ChaosAttractor history={history} />
+          <Suspense fallback={<div className="h-64 rounded-2xl bg-slate-900/30 border border-slate-800/50 animate-pulse flex items-center justify-center text-[10px] uppercase font-black tracking-widest text-slate-500">Initialisation Attracteur 3D...</div>}>
+            <ChaosAttractor history={history} />
+          </Suspense>
           <GapEfficiencyMeter data={geiData} />
 
           <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-xl">

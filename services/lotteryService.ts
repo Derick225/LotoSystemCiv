@@ -237,7 +237,7 @@ export const lotteryService = {
   }
 };
 
-const getDrawTimestamp = (dateStr: string): number => {
+export const getDrawTimestamp = (dateStr: string): number => {
     if (!dateStr) return 0;
     if (dateStr.includes('/')) {
         const parts = dateStr.split('/');
@@ -362,33 +362,49 @@ export const fetchResults = async (drawName: string, force?: boolean): Promise<{
 export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort(); 
+  const drawNames = sortedTimes.map((time) => draws[time]);
   
+  if (isSupabaseConfigured() && navigator.onLine) {
+    try {
+      const { data, error } = await supabase
+        .from('draw_results')
+        .select('*')
+        .in('draw_name', drawNames)
+        .order('date', { ascending: false });
+
+      if (!error && data) {
+        // Group by draw_name, keep latest for each
+        const latestByDraw = new Map<string, DrawResult>();
+        for (const row of data) {
+          if (!latestByDraw.has(row.draw_name)) {
+            latestByDraw.set(row.draw_name, {
+              id: row.id,
+              drawName: row.draw_name,
+              date: formatDate(row.date),
+              gagnants: row.gagnants,
+              machine: row.machine || [],
+              version: row.version || 1
+            });
+          }
+        }
+        return sortedTimes.map(time => ({
+          time,
+          name: draws[time],
+          result: latestByDraw.get(draws[time]) || null
+        }));
+      }
+    } catch (err) {
+      console.warn('[getDailySummary] Batch fetch fallback:', err);
+    }
+  }
+
+  // Fallback if offline or batch query fails
   const promises = sortedTimes.map(async (time) => {
       const name = draws[time];
       let lastDraw: DrawResult | null = null;
       try {
-          if (isSupabaseConfigured() && navigator.onLine) {
-              const { data, error } = await supabase
-                .from('draw_results')
-                .select('*')
-                .eq('draw_name', name)
-                .order('date', { ascending: false })
-                .limit(1);
-              if (error) throw error;
-              if (data && data[0]) {
-                  lastDraw = {
-                      id: data[0].id,
-                      drawName: data[0].draw_name,
-                      date: formatDate(data[0].date),
-                      gagnants: data[0].gagnants,
-                      machine: data[0].machine || [],
-                      version: data[0].version || 1
-                  };
-              }
-          } else {
-              const history = await lotteryService.fetchHistory(name);
-              if (history.length > 0) lastDraw = history[0];
-          }
+          const history = await lotteryService.fetchHistory(name);
+          if (history.length > 0) lastDraw = history[0];
           return { time, name, result: lastDraw };
       } catch (e) {
           return { time, name, result: null };

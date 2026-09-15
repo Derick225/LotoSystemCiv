@@ -592,20 +592,27 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       const regimeStr = globalRegime?.regime || "STABLE (Harmonisé)";
 
       try {
-        const { data, error } = await supabase.functions.invoke(
-          "nexus-api",
-          {
-            body: {
-              action: "hybrid-prediction",
-              drawName,
-              history,
-              regime: regimeStr,
-              hurst: hurstVal,
-              entropy: entropyVal,
-              volatility: volatilityVal,
-            },
-          },
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Hybrid prediction timeout threshold reached (3500ms)")), 3500)
         );
+
+        const { data, error } = await Promise.race([
+          supabase.functions.invoke(
+            "nexus-api",
+            {
+              body: {
+                action: "hybrid-prediction",
+                drawName,
+                history,
+                regime: regimeStr,
+                hurst: hurstVal,
+                entropy: entropyVal,
+                volatility: volatilityVal,
+              },
+            },
+          ),
+          timeoutPromise
+        ]);
 
         if (error) {
           throw error;

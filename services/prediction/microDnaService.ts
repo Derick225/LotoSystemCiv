@@ -9,6 +9,36 @@ export interface NumberMicroDNA {
     spectralPower: number; // Force du numéro dictée par la résonance
 }
 
+export interface PrecomputedMicroDnaContext {
+    drawHistory: DrawResult[];
+    freqMap: Int32Array;
+    totalDraws: number;
+}
+
+/**
+ * Pré-calcule l'historique purifié et la carte de fréquences en un seul passage linéaire O(H).
+ */
+export const createMicroDnaContext = (
+    drawName: string,
+    history: DrawResult[]
+): PrecomputedMicroDnaContext => {
+    const drawHistory = purifyHistoryForDraw(drawName, history);
+    const totalDraws = drawHistory.length || 1;
+    const freqMap = new Int32Array(91);
+    for (let i = 0; i < drawHistory.length; i++) {
+        const gagnants = drawHistory[i]?.gagnants;
+        if (gagnants) {
+            for (let j = 0; j < gagnants.length; j++) {
+                const num = gagnants[j];
+                if (num >= 1 && num <= 90) {
+                    freqMap[num]++;
+                }
+            }
+        }
+    }
+    return { drawHistory, freqMap, totalDraws };
+};
+
 /**
  * Calcul de l'ADN local et comportemental (Micro-ADN) d'un numéro pour un tirage donné, 
  * strictement délimité au nom du tirage, sans mélange avec d'autres tirages.
@@ -17,20 +47,19 @@ export const calculateMicroDNAPerNumber = (
     drawName: string,
     targetNumber: number,
     history: DrawResult[], 
-    globalDnaContext: Record<string, number>
+    globalDnaContext: Record<string, number>,
+    precomputedCtx?: PrecomputedMicroDnaContext
 ): NumberMicroDNA => {
-    
-    // Règle 2: Isolation Absolue - Filtrer l'historique au tirage cible
-    const drawHistory = purifyHistoryForDraw(drawName, history);
+    // Réutilisation du contexte pré-calculé ou calcul ponctuel
+    const totalDraws = precomputedCtx ? precomputedCtx.totalDraws : (purifyHistoryForDraw(drawName, history).length || 1);
+    const frequency = precomputedCtx 
+        ? precomputedCtx.freqMap[targetNumber] || 0
+        : purifyHistoryForDraw(drawName, history).filter(h => h.gagnants?.includes(targetNumber)).length;
     
     const algoKeys = Object.keys(globalDnaContext);
     const behavioralDna: Record<string, number> = {};
     const generator = new DeterministicSeededGenerator(`${drawName}_micro_dna_${targetNumber}`);
 
-    // Extraire les statistiques continues sans if/else magiques
-    const allDrawsContainingTarget = drawHistory.filter(h => h.gagnants.includes(targetNumber));
-    const frequency = allDrawsContainingTarget.length;
-    const totalDraws = drawHistory.length || 1;
     const baseProb = frequency / totalDraws;
 
     // Calcul des poids d'affinités continus par algorithme
@@ -79,7 +108,8 @@ export const profileWinningNumbersMicroDNA = (
     history: DrawResult[], 
     globalDnaContext: Record<string, number>
 ): NumberMicroDNA[] => {
-    return winningNumbers.map(targetNumber => 
-        calculateMicroDNAPerNumber(drawName, targetNumber, history, globalDnaContext)
+    const ctx = createMicroDnaContext(drawName, history);
+    return (winningNumbers || []).map(targetNumber => 
+        calculateMicroDNAPerNumber(drawName, targetNumber, history, globalDnaContext, ctx)
     );
 };

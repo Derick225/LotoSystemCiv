@@ -1,5 +1,5 @@
 import { AlgoWeights, ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
-import { calculateMicroDNAPerNumber } from "./microDnaService";
+import { calculateMicroDNAPerNumber, createMicroDnaContext } from "./microDnaService";
 import { sigmoid } from "./deterministicCore";
 import { ExtractedFeatures } from "./featureExtractor";
 import { denoiseFeaturesKernelPCA_wrapper } from "../mathService";
@@ -142,9 +142,10 @@ export const calculateScores = (
   const targetDrawName = history[0]?.drawName || "ALL";
   const microDnaCache: Record<number, number> = {};
   if (history.length > 0) {
+    const microDnaCtx = createMicroDnaContext(targetDrawName, history);
     for (let i = 1; i <= N; i++) {
-        // Extraction du code comportemental du numéro pour l'injection via son spectralPower
-        const microDna = calculateMicroDNAPerNumber(targetDrawName, i, history, effectiveWeights as Record<string, number>);
+        // Extraction du code comportemental du numéro pour l'injection via son spectralPower avec contexte pré-calculé
+        const microDna = calculateMicroDNAPerNumber(targetDrawName, i, history, effectiveWeights as Record<string, number>, microDnaCtx);
         microDnaCache[i] = microDna.spectralPower;
     }
   }

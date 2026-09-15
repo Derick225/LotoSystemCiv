@@ -215,17 +215,25 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
     context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
     try {
       logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
-      const result = await apiClient.post<Prediction>(
-        "predict-elite",
-        {
-          drawName: context.drawName,
-          history: context.history,
-          weights: context.weightsToUse,
-          symbioticContext: context.symbioticContext,
-          metrics: context.metrics,
-        },
-        { suppressErrorLogging: true }
+      
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Cloud response latency threshold reached (3500ms)")), 3500)
       );
+
+      const result = await Promise.race([
+        apiClient.post<Prediction>(
+          "predict-elite",
+          {
+            drawName: context.drawName,
+            history: context.history,
+            weights: context.weightsToUse,
+            symbioticContext: context.symbioticContext,
+            metrics: context.metrics,
+          },
+          { suppressErrorLogging: true }
+        ),
+        timeoutPromise
+      ]);
 
       const isPayloadValid =
         result &&

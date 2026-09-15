@@ -10,15 +10,20 @@ import {
   normalizeDrawName
 } from '../constants';
 import { DrawResult } from '../types';
-import { lotteryService, LOTTERY_CONSTANTS, generateDeterministicFallbackHistory } from './lotteryService';
+import {
+  lotteryService,
+  LOTTERY_CONSTANTS,
+  generateDeterministicFallbackHistory,
+  getDrawTimestamp
+} from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 
 export interface InterDrawCandidateScore {
   number: number;
   compositeScore: number; // 0 à 100
-  transitionScore: number; // 0 à 100 (Markov conditionnel depuis prédécesseur)
+  transitionScore: number; // 0 à 100 (Markov conditionnel bayésien continu)
   repeatScore: number; // 0 à 100 (Report direct carry-over)
-  harmonicScore: number; // 0 à 100 (Miroir décimal / Complémentaire 90)
+  harmonicScore: number; // 0 à 100 (Miroir décimal / Complémentaire 91)
   confidence: number; // 0 à 1 (Indice bayésien continu)
   flags: string[];
   rawTransitionProb: number;
@@ -65,9 +70,9 @@ export interface HarmonicResonanceMetrics {
   mirrorObservedRate: number; // % réel d'attraction miroir inter-tirages
   mirrorExpectedRate: number; // % théorique (5.55%)
   mirrorLift: number; // Lift multiplicatif miroir
-  complementObservedRate: number; // % réel d'attraction complément 90
+  complementObservedRate: number; // % réel d'attraction complément 91
   complementExpectedRate: number; // % théorique (5.55%)
-  complementLift: number; // Lift multiplicatif complément 90
+  complementLift: number; // Lift multiplicatif complément 91
   overallHarmonicAttractionRate: number;
   harmonicPairs: HarmonicPairDetail[];
 }
@@ -114,7 +119,7 @@ export const getMirrorNumber = (n: number): number => {
 };
 
 /**
- * Calcul déterministe du complémentaire à 90 (somme = 91)
+ * Calcul déterministe du complémentaire à 90 (somme = 91, involution bijective sur [1, 90])
  */
 export const getComplement90 = (n: number): number => {
   if (n < 1 || n > 90) return n;
@@ -130,97 +135,120 @@ const continuousSigmoid = (z: number): number => {
 };
 
 /**
- * Calcule l'analyse complète des relations inter-tirages pour un tirage et une famille donnés.
- * Respecte rigoureusement le principe de ZÉRO POLLUTION INTER-FAMILLES (AGENTS.md).
+ * Aligne chronologiquement de manière stricte les historiques du tirage cible et de son prédécesseur direct.
+ * Élimine tout décalage temporel d'un cran d'indice (look-ahead leak ou déphasage de cycle).
  */
-export const generateInterDrawReport = async (
-  targetDrawName: string,
-  forcedFamilyId?: InterDrawFamilyId,
-  forceRefresh: boolean = false
-): Promise<InterDrawReport | null> => {
-  const families = getInterDrawFamiliesForDraw(targetDrawName);
-  const activeFamily = forcedFamilyId
-    ? INTER_DRAW_FAMILIES[forcedFamilyId]
-    : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(targetDrawName));
-
-  if (!activeFamily) {
-    return null;
+export const alignConsecutiveDrawHistories = (
+  targetHistory: DrawResult[],
+  predHistory: DrawResult[]
+): { predWinners: number[]; targetWinners: number[]; targetDate: string; predDate: string }[] => {
+  const paired: { predWinners: number[]; targetWinners: number[]; targetDate: string; predDate: string }[] = [];
+  if (!targetHistory || !predHistory || targetHistory.length === 0 || predHistory.length === 0) {
+    return paired;
   }
 
-  const relation = getFamilyPredecessorAndSuccessor(targetDrawName, activeFamily.id);
-  if (!relation) {
-    return null;
+  // Vérifier si le tirage le plus récent du prédécesseur s'est produit APRÈS le dernier tirage cible.
+  // Cas classique : le prédécesseur de ce matin (10H) vient d'être tiré, mais le tirage cible (16H) n'a pas encore eu lieu.
+  // Dans ce cas, predHistory[0] est le déclencheur actif du tirage futur à prédire,
+  // et les paires d'entraînement historiques doivent débuter à targetHistory[0] <-> predHistory[1].
+  const t0Time = getDrawTimestamp(targetHistory[0]?.date);
+  const p0Time = getDrawTimestamp(predHistory[0]?.date);
+
+  let predOffset = 0;
+  if (p0Time > t0Time && p0Time > 0 && t0Time > 0) {
+    predOffset = 1;
   }
 
-  const cacheKey = globalCache.getInterDrawKey(
-    activeFamily.id,
-    normalizeDrawName(targetDrawName)
-  );
-
-  if (!forceRefresh) {
-    // 0. Accès ultra-rapide L1 synchrone (< 0.1 ms) pour éliminer la latence sur recalculs récurrents
-    const fastSync = globalCache.getSync<InterDrawReport>(cacheKey, targetDrawName);
-    if (fastSync) return fastSync;
-
-    const cached = await globalCache.get<InterDrawReport>(cacheKey, targetDrawName);
-    if (cached) return cached;
-  }
-
-  // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans la famille
-  const [targetHistory, predHistory] = await Promise.all([
-    lotteryService.fetchHistory(targetDrawName),
-    lotteryService.fetchHistory(relation.predecessor.name)
-  ]);
-
-  const targetLatestResult = targetHistory.length > 0 ? targetHistory[0] : null;
-  const predLatestResult = predHistory.length > 0 ? predHistory[0] : null;
-
-  // 2. Alignement temporel des tirages consécutifs prédécesseur -> cible
-  // Chaque entrée est un couple (Gagnants Prédécesseur, Gagnants Cible)
-  const pairedPairs: { predWinners: number[]; targetWinners: number[] }[] = [];
-  const minDepth = Math.min(targetHistory.length, predHistory.length);
-
-  for (let i = 0; i < minDepth; i++) {
-    const tGagnants = targetHistory[i]?.gagnants || [];
-    const pGagnants = predHistory[i]?.gagnants || [];
+  const maxPairs = Math.min(targetHistory.length, predHistory.length - predOffset);
+  for (let i = 0; i < maxPairs; i++) {
+    const t = targetHistory[i];
+    const p = predHistory[i + predOffset];
+    const tGagnants = t?.gagnants || [];
+    const pGagnants = p?.gagnants || [];
     if (tGagnants.length === LOTTERY_CONSTANTS.NUMBERS_PER_DRAW && pGagnants.length === LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
-      pairedPairs.push({
+      paired.push({
         predWinners: pGagnants,
-        targetWinners: tGagnants
+        targetWinners: tGagnants,
+        targetDate: t.date || '',
+        predDate: p.date || ''
       });
     }
   }
 
+  return paired;
+};
+
+/**
+ * Moteur mathématique bayésien continu unifié pour les résonances inter-tirages.
+ * ZÉRO NOMBRE MAGIQUE, CONTINUITÉ DIFFÉRENTIABLE, SANS PORTE D'ACTIVATION BRUSQUE.
+ */
+interface BayesianEngineResult {
+  sampleSize: number;
+  laplaceAlpha: number;
+  carryOverRate: number;
+  carryOverExpected: number;
+  carryOverLift: number;
+  mirrorObservedRate: number;
+  mirrorExpectedRate: number;
+  mirrorLift: number;
+  complementObservedRate: number;
+  complementExpectedRate: number;
+  complementLift: number;
+  overallHarmonicAttractionRate: number;
+  transitionsCount: number[][];
+  fromTotals: number[];
+  targetMarginalCounts: number[];
+  repeatCounts: number[];
+  mirrorPairOccurrences: Record<string, number>;
+  compPairOccurrences: Record<string, number>;
+  scoredCandidates: InterDrawCandidateScore[];
+  fullCandidateScores: number[];
+}
+
+const runBayesianResonanceEngine = (
+  pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
+  activePredNumbers: number[]
+): BayesianEngineResult => {
+  const K = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW; // 5
+  const N = LOTTERY_CONSTANTS.TOTAL_NUMBERS; // 90
+  const p0 = K / N; // 5/90 ~ 0.055555...
+  const logitP0 = Math.log(p0 / (1.0 - p0)); // ln(1/17) ~ -2.833213
+
   const sampleSize = pairedPairs.length;
-  // Paramètre de lissage de Laplace continu dérivé de la taille d'échantillon (zéro constante magique arbitraire)
-  // alpha décroît de manière continue avec la quantité de données
+  // Paramètre de lissage de Laplace continu dérivé de la taille d'échantillon
   const laplaceAlpha = 1.0 / (1.0 + Math.log(1.0 + sampleSize));
 
-  // 3. Matrices de dénombrement des transitions et répétitions
-  // transitionsCount[from][to]
+  // Matrices de dénombrement des transitions et répétitions
   const transitionsCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
   const fromTotals: number[] = new Array(91).fill(0);
   const targetMarginalCounts: number[] = new Array(91).fill(0);
-  let totalConsecutivePairs = 0;
-  let carryOverOccurrences = 0; // Paires ayant au moins 1 numéro en commun
   const repeatCounts: number[] = new Array(91).fill(0);
+
+  let totalConsecutivePairs = 0;
+  let carryOverOccurrences = 0;
 
   for (const pair of pairedPairs) {
     totalConsecutivePairs++;
     let hasCommon = false;
 
     for (const tw of pair.targetWinners) {
-      targetMarginalCounts[tw]++;
+      if (tw >= 1 && tw <= 90) {
+        targetMarginalCounts[tw]++;
+      }
     }
 
     for (const pw of pair.predWinners) {
-      fromTotals[pw]++;
-      if (pair.targetWinners.includes(pw)) {
-        hasCommon = true;
-        repeatCounts[pw]++;
-      }
-      for (const tw of pair.targetWinners) {
-        transitionsCount[pw][tw]++;
+      if (pw >= 1 && pw <= 90) {
+        fromTotals[pw]++;
+        if (pair.targetWinners.includes(pw)) {
+          hasCommon = true;
+          repeatCounts[pw]++;
+        }
+        for (const tw of pair.targetWinners) {
+          if (tw >= 1 && tw <= 90) {
+            transitionsCount[pw][tw]++;
+          }
+        }
       }
     }
 
@@ -230,13 +258,13 @@ export const generateInterDrawReport = async (
   }
 
   // Taux de carry-over empirique et théorique
+  const carryOverExpected = (K * K / N) * 100; // 25/90 ~ 27.7778%
   const carryOverRate = totalConsecutivePairs > 0
     ? (carryOverOccurrences / totalConsecutivePairs) * 100
-    : 27.78;
-  const carryOverExpected = (25 / 90) * 100; // 27.7778%
+    : carryOverExpected;
   const carryOverLift = carryOverRate / carryOverExpected;
 
-  // Calcul du taux d'attraction empirique des Résonances Harmoniques (Miroirs & Compléments à 90)
+  // Calcul du taux d'attraction empirique des Résonances Harmoniques (Miroirs & Compléments)
   let mirrorOccurrences = 0;
   let mirrorAttempts = 0;
   let complementOccurrences = 0;
@@ -268,46 +296,278 @@ export const generateInterDrawReport = async (
     }
   }
 
-  const mirrorObservedRate = mirrorAttempts > 0 ? (mirrorOccurrences / mirrorAttempts) * 100 : 5.556;
-  const mirrorExpectedRate = (5 / 90) * 100; // 5.5556%
+  const mirrorExpectedRate = (K / N) * 100; // 5.5556%
+  const mirrorObservedRate = mirrorAttempts > 0 ? (mirrorOccurrences / mirrorAttempts) * 100 : mirrorExpectedRate;
   const mirrorLift = mirrorObservedRate / mirrorExpectedRate;
 
-  const complementObservedRate = compAttempts > 0 ? (complementOccurrences / compAttempts) * 100 : 5.556;
-  const complementExpectedRate = (5 / 90) * 100; // 5.5556%
+  const complementExpectedRate = (K / N) * 100; // 5.5556%
+  const complementObservedRate = compAttempts > 0 ? (complementOccurrences / compAttempts) * 100 : complementExpectedRate;
   const complementLift = complementObservedRate / complementExpectedRate;
 
   const totalHarmonicAttempts = mirrorAttempts + compAttempts;
   const totalHarmonicHits = mirrorOccurrences + complementOccurrences;
-  const overallHarmonicAttractionRate = totalHarmonicAttempts > 0 ? (totalHarmonicHits / totalHarmonicAttempts) * 100 : 5.556;
+  const overallHarmonicAttractionRate = totalHarmonicAttempts > 0 ? (totalHarmonicHits / totalHarmonicAttempts) * 100 : mirrorExpectedRate;
 
-  // 4. Projection sur les numéros du dernier tirage du prédécesseur
-  const activePredNumbers = predLatestResult?.gagnants || [1, 2, 3, 4, 5];
-  const activePredSet = new Set(activePredNumbers);
+  // Numéros actifs du prédécesseur
+  const validPred = activePredNumbers.filter(n => n >= 1 && n <= 90);
+  const activePredSet = new Set(validPred);
+  const activeMirrors = new Set(validPred.map(getMirrorNumber));
+  const activeComplements = new Set(validPred.map(getComplement90));
 
-  // Construction des flux markoviens individuels par numéro source du prédécesseur
-  const sourceTransitions: SourceTransitions[] = activePredNumbers.map(pw => {
-    const denom = fromTotals[pw] + 90 * laplaceAlpha;
-    const items: SourceTransitionItem[] = [];
-    for (let c = 1; c <= 90; c++) {
-      const occ = transitionsCount[pw][c];
-      const prob = denom > 0 ? (occ + laplaceAlpha) / denom : 1 / 90;
-      const targetMarginalProb = Math.max(1e-5, (targetMarginalCounts[c] + laplaceAlpha) / (sampleSize * 5 + 90 * laplaceAlpha));
-      const lift = prob / targetMarginalProb;
-      items.push({
-        targetNumber: c,
-        probability: Math.round(prob * 1000) / 10,
-        lift: Math.round(lift * 100) / 100,
-        occurrences: occ
-      });
+  // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon (sans constante arbitraire)
+  const gamma = sampleSize / (sampleSize + 10.0);
+
+  // Inférence bayésienne pour chaque numéro candidat c in [1..90]
+  const candidateMetrics: {
+    num: number;
+    probTrans: number;
+    probRepeat: number;
+    probHarmonic: number;
+    probComposite: number;
+    evidenceTrans: number;
+    evidenceRepeat: number;
+    evidenceHarmonic: number;
+    flags: string[];
+  }[] = [];
+
+  for (let c = 1; c <= 90; c++) {
+    // 1. Évidence de transition markovienne conjointe
+    let evidenceTrans = 0;
+    const targetMarginalProb = Math.max(1e-5, (targetMarginalCounts[c] + laplaceAlpha * p0) / (sampleSize * K + 90 * laplaceAlpha * p0));
+
+    for (const p of validPred) {
+      const count = transitionsCount[p][c];
+      const denom = fromTotals[p] + laplaceAlpha;
+      const condProb = denom > 0 ? (count + laplaceAlpha * p0) / denom : p0;
+      const lift = Math.max(1e-4, condProb / targetMarginalProb);
+      evidenceTrans += Math.log(lift);
     }
-    items.sort((a, b) => b.lift - a.lift || b.probability - a.probability);
+
+    const logitTrans = logitP0 + gamma * evidenceTrans;
+    const probTrans = 1.0 / (1.0 + Math.exp(-logitTrans));
+
+    // 2. Évidence de report direct (carry-over)
+    let evidenceRepeat = 0;
+    let probRepeat = p0;
+    const isDirectCandidate = activePredSet.has(c);
+
+    if (isDirectCandidate) {
+      const pDenom = fromTotals[c] + laplaceAlpha;
+      const empRepeatProb = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0) / pDenom : p0;
+      const repLift = Math.max(1e-4, empRepeatProb / p0);
+      evidenceRepeat = Math.log(repLift);
+      const logitRepeat = logitP0 + gamma * evidenceRepeat;
+      probRepeat = 1.0 / (1.0 + Math.exp(-logitRepeat));
+    }
+
+    // 3. Évidence de résonance harmonique (Miroir & Complément 91)
+    let evidenceHarmonic = 0;
+    const flags: string[] = [];
+
+    if (isDirectCandidate) {
+      flags.push('REPORT_DIRECT');
+    }
+
+    for (const p of validPred) {
+      const mir = getMirrorNumber(p);
+      if (mir === c && mir !== p) {
+        const occ = mirrorPairOccurrences[`${p}_${c}`] || 0;
+        const mirProb = (occ + laplaceAlpha * p0) / (fromTotals[p] + laplaceAlpha);
+        const mirLift = Math.max(1e-4, mirProb / p0);
+        evidenceHarmonic += Math.log(mirLift);
+        if (!flags.includes('MIROIR_DECIMAL')) flags.push('MIROIR_DECIMAL');
+      }
+
+      const comp = getComplement90(p);
+      if (comp === c && comp !== p) {
+        const occ = compPairOccurrences[`${p}_${c}`] || 0;
+        const compProb = (occ + laplaceAlpha * p0) / (fromTotals[p] + laplaceAlpha);
+        const compLift = Math.max(1e-4, compProb / p0);
+        evidenceHarmonic += Math.log(compLift);
+        if (!flags.includes('COMPLEMENT_90')) flags.push('COMPLEMENT_90');
+      }
+    }
+
+    const logitHarmonic = logitP0 + gamma * evidenceHarmonic;
+    const probHarmonic = 1.0 / (1.0 + Math.exp(-logitHarmonic));
+
+    // 4. Probabilité conjointe totale bayésienne (fusion différentiable continue)
+    const logitTotal = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic);
+    const probComposite = 1.0 / (1.0 + Math.exp(-logitTotal));
+
+    candidateMetrics.push({
+      num: c,
+      probTrans,
+      probRepeat: isDirectCandidate ? probRepeat : 0,
+      probHarmonic: evidenceHarmonic !== 0 ? probHarmonic : 0,
+      probComposite,
+      evidenceTrans,
+      evidenceRepeat,
+      evidenceHarmonic,
+      flags
+    });
+  }
+
+  // Standardisation z-score continue sur la distribution complète
+  const compProbs = candidateMetrics.map(m => m.probComposite);
+  const meanComp = compProbs.reduce((a, b) => a + b, 0) / compProbs.length;
+  const varComp = compProbs.reduce((a, b) => a + Math.pow(b - meanComp, 2), 0) / compProbs.length;
+  const stdComp = Math.max(Math.sqrt(varComp), 1e-6);
+
+  const transProbs = candidateMetrics.map(m => m.probTrans);
+  const meanTrans = transProbs.reduce((a, b) => a + b, 0) / transProbs.length;
+  const varTrans = transProbs.reduce((a, b) => a + Math.pow(b - meanTrans, 2), 0) / transProbs.length;
+  const stdTrans = Math.max(Math.sqrt(varTrans), 1e-6);
+
+  const scoredCandidates: InterDrawCandidateScore[] = candidateMetrics.map(item => {
+    const zComp = (item.probComposite - meanComp) / stdComp;
+    const compositeScore = Math.round(continuousSigmoid(zComp) * 10) / 10;
+
+    const zTrans = (item.probTrans - meanTrans) / stdTrans;
+    const transitionScore = Math.round(continuousSigmoid(zTrans) * 10) / 10;
+
+    let repeatScore = 0;
+    if (item.probRepeat > 0) {
+      const zRepeat = (item.probRepeat - p0) / stdComp;
+      repeatScore = Math.round(continuousSigmoid(zRepeat) * 10) / 10;
+    }
+
+    let harmonicScore = 0;
+    if (item.probHarmonic > 0) {
+      const zHarm = (item.probHarmonic - p0) / stdComp;
+      harmonicScore = Math.round(continuousSigmoid(zHarm) * 10) / 10;
+    }
+
+    // Confiance bayésienne continue : fonction de la certitude empirique (sampleSize) et de la séparation de signal
+    const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 20.0));
+    const signalContrast = Math.tanh(Math.abs(zComp) / 2.0);
+    const confidence = Math.round((sampleConfidence * 0.7 + signalContrast * 0.3) * 100) / 100;
+
+    if (zTrans > 1.25 && !item.flags.includes('HAUTE_TRANSITION')) {
+      item.flags.push('HAUTE_TRANSITION');
+    }
+
     return {
-      sourceNumber: pw,
-      transitions: items.slice(0, 10)
+      number: item.num,
+      compositeScore,
+      transitionScore,
+      repeatScore,
+      harmonicScore,
+      confidence,
+      flags: item.flags,
+      rawTransitionProb: item.probTrans
     };
   });
 
-  // Cartographie des paires harmoniques actives pour le tirage courant
+  scoredCandidates.sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number);
+
+  // Vecteur complet d'inférence 1..90 normalisé [0.01, 0.99]
+  const fullCandidateScores = new Array(91).fill(0.0555);
+  for (const item of scoredCandidates) {
+    fullCandidateScores[item.number] = Math.max(0.01, Math.min(0.99, item.compositeScore / 100));
+  }
+
+  return {
+    sampleSize,
+    laplaceAlpha,
+    carryOverRate,
+    carryOverExpected,
+    carryOverLift,
+    mirrorObservedRate,
+    mirrorExpectedRate,
+    mirrorLift,
+    complementObservedRate,
+    complementExpectedRate,
+    complementLift,
+    overallHarmonicAttractionRate,
+    transitionsCount,
+    fromTotals,
+    targetMarginalCounts,
+    repeatCounts,
+    mirrorPairOccurrences,
+    compPairOccurrences,
+    scoredCandidates,
+    fullCandidateScores
+  };
+};
+
+/**
+ * Calcule l'analyse complète des relations inter-tirages pour un tirage et une famille donnés.
+ * Respecte rigoureusement le principe de ZÉRO POLLUTION INTER-FAMILLES (AGENTS.md).
+ */
+export const generateInterDrawReport = async (
+  targetDrawName: string,
+  forcedFamilyId?: InterDrawFamilyId,
+  forceRefresh: boolean = false
+): Promise<InterDrawReport | null> => {
+  const families = getInterDrawFamiliesForDraw(targetDrawName);
+  const activeFamily = forcedFamilyId
+    ? INTER_DRAW_FAMILIES[forcedFamilyId]
+    : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(targetDrawName));
+
+  if (!activeFamily) {
+    return null;
+  }
+
+  const relation = getFamilyPredecessorAndSuccessor(targetDrawName, activeFamily.id);
+  if (!relation) {
+    return null;
+  }
+
+  const cacheKey = globalCache.getInterDrawKey(
+    activeFamily.id,
+    normalizeDrawName(targetDrawName)
+  );
+
+  if (!forceRefresh) {
+    // Accès ultra-rapide L1 synchrone (< 0.1 ms) pour éliminer la latence
+    const fastSync = globalCache.getSync<InterDrawReport>(cacheKey, targetDrawName);
+    if (fastSync) return fastSync;
+
+    const cached = await globalCache.get<InterDrawReport>(cacheKey, targetDrawName);
+    if (cached) return cached;
+  }
+
+  // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans la famille
+  const [targetHistory, predHistory] = await Promise.all([
+    lotteryService.fetchHistory(targetDrawName),
+    lotteryService.fetchHistory(relation.predecessor.name)
+  ]);
+
+  const targetLatestResult = targetHistory.length > 0 ? targetHistory[0] : null;
+  const predLatestResult = predHistory.length > 0 ? predHistory[0] : null;
+
+  // 2. Alignement temporel des tirages consécutifs prédécesseur -> cible
+  const pairedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);
+
+  // Numéros actifs du prédécesseur qui polarisent le tirage cible
+  const activePredNumbers = predLatestResult?.gagnants || [1, 2, 3, 4, 5];
+
+  // 3. Exécution du moteur mathématique bayésien continu
+  const engine = runBayesianResonanceEngine(pairedPairs, activePredNumbers);
+  const {
+    sampleSize,
+    laplaceAlpha,
+    carryOverRate,
+    carryOverExpected,
+    carryOverLift,
+    mirrorObservedRate,
+    mirrorExpectedRate,
+    mirrorLift,
+    complementObservedRate,
+    complementExpectedRate,
+    complementLift,
+    overallHarmonicAttractionRate,
+    transitionsCount,
+    fromTotals,
+    targetMarginalCounts,
+    mirrorPairOccurrences,
+    compPairOccurrences,
+    scoredCandidates,
+    fullCandidateScores
+  } = engine;
+
+  // 4. Cartographie des paires harmoniques actives pour le tirage courant
   const harmonicPairs: HarmonicPairDetail[] = [];
   for (const pw of activePredNumbers) {
     const mir = getMirrorNumber(pw);
@@ -344,121 +604,30 @@ export const generateInterDrawReport = async (
     }
   }
 
-  // Pour chaque numéro cible c in [1..90], calculer le potentiel de transition conditionnelle multivariée
-  const candidateMetrics: {
-    num: number;
-    rawTransitionProb: number;
-    rawRepeatProb: number;
-    rawHarmonicScore: number;
-    flags: string[];
-  }[] = [];
-
-  // Miroirs et Complémentaires des numéros prédécesseurs actifs
-  const activeMirrors = new Set(activePredNumbers.map(getMirrorNumber));
-  const activeComplements = new Set(activePredNumbers.map(getComplement90));
-
-  for (let c = 1; c <= 90; c++) {
-    // Probabilité conditionnelle multivariée exacte :
-    // P(c in W_t | W_{t-1}) = 1 - prod_{p in W_{t-1}} (1 - P(c | p))
-    // Stabilité numérique via log-space : 1 - exp( sum ln(1 - P(c | p)) )
-    let logNotProb = 0;
-    for (const p of activePredNumbers) {
-      const count = transitionsCount[p][c];
-      const denom = fromTotals[p] + 90 * laplaceAlpha;
-      const prob = denom > 0 ? (count + laplaceAlpha) / denom : 1 / 90;
-      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(prob, 0.9999)));
+  // 5. Construction des flux markoviens individuels par numéro source
+  const sourceTransitions: SourceTransitions[] = activePredNumbers.map(pw => {
+    const denom = fromTotals[pw] + 90 * laplaceAlpha;
+    const items: SourceTransitionItem[] = [];
+    for (let c = 1; c <= 90; c++) {
+      const occ = transitionsCount[pw][c];
+      const prob = denom > 0 ? (occ + laplaceAlpha) / denom : 1 / 90;
+      const targetMarginalProb = Math.max(1e-5, (targetMarginalCounts[c] + laplaceAlpha) / (sampleSize * LOTTERY_CONSTANTS.NUMBERS_PER_DRAW + 90 * laplaceAlpha));
+      const lift = prob / targetMarginalProb;
+      items.push({
+        targetNumber: c,
+        probability: Math.round(prob * 1000) / 10,
+        lift: Math.round(lift * 100) / 100,
+        occurrences: occ
+      });
     }
-    const jointTransitionProb = -Math.expm1(logNotProb);
-
-    // Répétition directe (carry-over)
-    const isDirectCandidate = activePredSet.has(c);
-    const repeatProb = fromTotals[c] > 0
-      ? (repeatCounts[c] + laplaceAlpha) / (fromTotals[c] + 2 * laplaceAlpha)
-      : (5 / 90);
-
-    // Résonance harmonique
-    let harmonicBonus = 0;
-    const flags: string[] = [];
-
-    if (isDirectCandidate) {
-      flags.push('REPORT_DIRECT');
-    }
-    if (activeMirrors.has(c) && !isDirectCandidate) {
-      harmonicBonus += 0.5;
-      flags.push('MIROIR_DECIMAL');
-    }
-    if (activeComplements.has(c) && !isDirectCandidate) {
-      harmonicBonus += 0.5;
-      flags.push('COMPLEMENT_90');
-    }
-
-    candidateMetrics.push({
-      num: c,
-      rawTransitionProb: jointTransitionProb,
-      rawRepeatProb: isDirectCandidate ? repeatProb : 0,
-      rawHarmonicScore: harmonicBonus,
-      flags
-    });
-  }
-
-  // 5. Normalisation continue sans seuils arbitraires
-  // Calcul de la moyenne et écart-type de transition pour standardisation z-score
-  const allTrans = candidateMetrics.map(m => m.rawTransitionProb);
-  const meanTrans = allTrans.reduce((a, b) => a + b, 0) / allTrans.length;
-  const varianceTrans = allTrans.reduce((a, b) => a + Math.pow(b - meanTrans, 2), 0) / allTrans.length;
-  const stdTrans = Math.max(Math.sqrt(varianceTrans), 0.00001);
-
-  const scoredCandidates: InterDrawCandidateScore[] = candidateMetrics.map(item => {
-    // z-score continu de transition
-    const zTrans = (item.rawTransitionProb - meanTrans) / stdTrans;
-    const transitionScore = continuousSigmoid(zTrans);
-
-    // Score de report
-    const zRepeat = item.rawRepeatProb > 0
-      ? (item.rawRepeatProb - (5 / 90)) / (5 / 90)
-      : -1.0;
-    const repeatScore = item.rawRepeatProb > 0 ? continuousSigmoid(zRepeat) : 0;
-
-    // Score harmonique
-    const harmonicScore = continuousSigmoid((item.rawHarmonicScore - 0.25) * 4);
-
-    // Poids dynamiques dérivés de la dynamique réelle de l'échantillon
-    // Si le carryOverLift est élevé, le poids de répétition augmente continûment
-    const carryOverWeight = Math.min(Math.max(carryOverLift * 0.25, 0.15), 0.40);
-    const harmonicWeight = 0.15;
-    const transitionWeight = 1.0 - carryOverWeight - harmonicWeight;
-
-    const rawComposite =
-      transitionWeight * transitionScore +
-      carryOverWeight * repeatScore +
-      harmonicWeight * harmonicScore;
-
-    const compositeScore = Math.round(rawComposite * 10) / 10;
-
-    // Confiance bayésienne continue basée sur la variance et la taille d'échantillon
-    const sampleConfidence = Math.min(1.0, Math.sqrt(sampleSize / (sampleSize + 20)));
-    const signalContrast = Math.abs(zTrans) / (Math.abs(zTrans) + 1.0);
-    const confidence = Math.round((sampleConfidence * 0.7 + signalContrast * 0.3) * 100) / 100;
-
-    if (zTrans > 1.2 && !item.flags.includes('HAUTE_TRANSITION')) {
-      item.flags.push('HAUTE_TRANSITION');
-    }
-
+    items.sort((a, b) => b.lift - a.lift || b.probability - a.probability);
     return {
-      number: item.num,
-      compositeScore,
-      transitionScore: Math.round(transitionScore * 10) / 10,
-      repeatScore: Math.round(repeatScore * 10) / 10,
-      harmonicScore: Math.round(harmonicScore * 10) / 10,
-      confidence,
-      flags: item.flags,
-      rawTransitionProb: item.rawTransitionProb
+      sourceNumber: pw,
+      transitions: items.slice(0, 10)
     };
   });
 
-  // Tri déterministe (score décroissant, puis numéro croissant)
-  scoredCandidates.sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number);
-
+  // Recommandations
   const topCandidates = scoredCandidates.slice(0, 10);
   const recommendedRepeats = scoredCandidates
     .filter(c => c.flags.includes('REPORT_DIRECT'))
@@ -467,13 +636,7 @@ export const generateInterDrawReport = async (
     .filter(c => c.flags.includes('MIROIR_DECIMAL') || c.flags.includes('COMPLEMENT_90'))
     .slice(0, 5);
 
-  // Vecteur complet d'inférence 1..90 normalisé [0.01, 0.99]
-  const fullCandidateScores = new Array(91).fill(0.0555);
-  for (const item of scoredCandidates) {
-    fullCandidateScores[item.number] = Math.max(0.01, Math.min(0.99, item.compositeScore / 100));
-  }
-
-  // 6. Top Couplages 2-sur-2 (paires) maximisant la probabilité conjointe
+  // 6. Top Couplages 2-sur-2 (paires)
   const topNumbersPool = topCandidates.slice(0, 6).map(c => c.number);
   const pairCandidates: InterDrawPairCombination[] = [];
 
@@ -590,81 +753,9 @@ export const simulateInterDrawTransmission = async (
     lotteryService.fetchHistory(relation.predecessor.name)
   ]);
 
-  const transitionsCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
-  const fromTotals: number[] = new Array(91).fill(0);
-  const minDepth = Math.min(targetHistory.length, predHistory.length);
-
-  for (let i = 0; i < minDepth; i++) {
-    const tGagnants = targetHistory[i]?.gagnants || [];
-    const pGagnants = predHistory[i]?.gagnants || [];
-    if (tGagnants.length === 5 && pGagnants.length === 5) {
-      for (const pw of pGagnants) {
-        fromTotals[pw]++;
-        for (const tw of tGagnants) {
-          transitionsCount[pw][tw]++;
-        }
-      }
-    }
-  }
-
-  const laplaceAlpha = 1.0 / (1.0 + Math.log(1.0 + minDepth));
-  const activeSet = new Set(validNumbers);
-  const activeMirrors = new Set(validNumbers.map(getMirrorNumber));
-  const activeComplements = new Set(validNumbers.map(getComplement90));
-
-  const rawCandidates: { num: number; prob: number; repeat: boolean; mirror: boolean; comp: boolean }[] = [];
-
-  for (let c = 1; c <= 90; c++) {
-    let logNotProb = 0;
-    for (const p of validNumbers) {
-      const count = transitionsCount[p][c];
-      const denom = fromTotals[p] + 90 * laplaceAlpha;
-      const prob = denom > 0 ? (count + laplaceAlpha) / denom : 1 / 90;
-      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(prob, 0.9999)));
-    }
-    const jointProb = -Math.expm1(logNotProb);
-    rawCandidates.push({
-      num: c,
-      prob: jointProb,
-      repeat: activeSet.has(c),
-      mirror: activeMirrors.has(c) && !activeSet.has(c),
-      comp: activeComplements.has(c) && !activeSet.has(c)
-    });
-  }
-
-  const allProbs = rawCandidates.map(c => c.prob);
-  const mean = allProbs.reduce((a, b) => a + b, 0) / allProbs.length;
-  const std = Math.max(Math.sqrt(allProbs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / allProbs.length), 0.0001);
-
-  const candidates: InterDrawCandidateScore[] = rawCandidates.map(item => {
-    const z = (item.prob - mean) / std;
-    const transScore = continuousSigmoid(z);
-    const repeatScore = item.repeat ? 85.0 : 0.0;
-    const harmonicScore = (item.mirror || item.comp) ? 75.0 : 0.0;
-
-    const compositeScore = Math.round(
-      (transScore * 0.65 + (item.repeat ? 0.25 : 0) * repeatScore + (item.mirror || item.comp ? 0.20 : 0) * harmonicScore) * 10
-    ) / 10;
-
-    const flags: string[] = [];
-    if (item.repeat) flags.push('REPORT_DIRECT');
-    if (item.mirror) flags.push('MIROIR_DECIMAL');
-    if (item.comp) flags.push('COMPLEMENT_90');
-    if (z > 1.2) flags.push('HAUTE_TRANSITION');
-
-    return {
-      number: item.num,
-      compositeScore,
-      transitionScore: Math.round(transScore * 10) / 10,
-      repeatScore,
-      harmonicScore,
-      confidence: Math.round(Math.min(1.0, 0.5 + Math.abs(z) * 0.2) * 100) / 100,
-      flags,
-      rawTransitionProb: item.prob
-    };
-  });
-
-  candidates.sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number);
+  const pairedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);
+  const engine = runBayesianResonanceEngine(pairedPairs, validNumbers);
+  const candidates = engine.scoredCandidates;
 
   const topNums = candidates.slice(0, 5).map(c => c.number);
   const recommendedPairs: InterDrawPairCombination[] = [];
@@ -672,10 +763,12 @@ export const simulateInterDrawTransmission = async (
     for (let j = i + 1; j < topNums.length; j++) {
       const s1 = candidates.find(c => c.number === topNums[i])?.compositeScore || 50;
       const s2 = candidates.find(c => c.number === topNums[j])?.compositeScore || 50;
+      const conf1 = candidates.find(c => c.number === topNums[i])?.confidence || 0.5;
+      const conf2 = candidates.find(c => c.number === topNums[j])?.confidence || 0.5;
       recommendedPairs.push({
         numbers: [topNums[i], topNums[j]],
         affinity: Math.round(Math.sqrt(s1 * s2) * 10) / 10,
-        confidence: 0.85,
+        confidence: Math.round(((conf1 + conf2) / 2) * 100) / 100,
         label: `${topNums[i] < 10 ? '0' + topNums[i] : topNums[i]} - ${topNums[j] < 10 ? '0' + topNums[j] : topNums[j]}`
       });
     }
@@ -708,7 +801,8 @@ export const simulateInterDrawTransmission = async (
 export const calculateInterDrawVector = (
   history: DrawResult[],
   drawName?: string,
-  predecessorHistory?: DrawResult[]
+  predecessorHistory?: DrawResult[],
+  forcedFamilyId?: InterDrawFamilyId
 ): Float32Array => {
   const vec = new Float32Array(91);
   if (!history || history.length === 0 || !drawName) {
@@ -716,21 +810,25 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
-  const primaryFamily = getPrimaryInterDrawFamily(drawName);
-  if (!primaryFamily) {
+  const families = getInterDrawFamiliesForDraw(drawName);
+  const activeFamily = forcedFamilyId
+    ? INTER_DRAW_FAMILIES[forcedFamilyId]
+    : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName));
+
+  if (!activeFamily) {
     vec.fill(0.0555);
     return vec;
   }
 
-  const relation = getFamilyPredecessorAndSuccessor(drawName, primaryFamily.id);
+  const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
   if (!relation) {
     vec.fill(0.0555);
     return vec;
   }
 
-  // 1. Vérification du cache L1 synchrone : s'il existe déjà un rapport complet et aucun historique custom
+  // 1. Vérification du cache L1 synchrone : s'il existe déjà un rapport complet
   if (!predecessorHistory) {
-    const cacheKey = globalCache.getInterDrawKey(primaryFamily.id, normalizeDrawName(drawName));
+    const cacheKey = globalCache.getInterDrawKey(activeFamily.id, normalizeDrawName(drawName));
     const cachedReport = globalCache.getSync<InterDrawReport>(cacheKey, drawName);
     if (cachedReport?.fullCandidateScores && cachedReport.fullCandidateScores.length >= 91) {
       for (let n = 1; n <= 90; n++) {
@@ -740,23 +838,21 @@ export const calculateInterDrawVector = (
     }
   }
 
-  // 2. Récupération de l'historique du VRAI PRÉDÉCESSEUR de la famille (Zéro autocorrélation avec soi-même)
+  // 2. Récupération de l'historique du prédécesseur (Zéro autocorrélation avec soi-même)
   let predHistory: DrawResult[] = [];
   if (predecessorHistory && predecessorHistory.length > 0) {
     predHistory = predecessorHistory;
   } else {
-    // Tentative de récupération synchrone depuis le cache mémoire du tirage prédécesseur
     const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
     const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
     if (cachedPredHistory && cachedPredHistory.length > 0) {
       predHistory = cachedPredHistory;
     } else {
-      // Fallback déterministe canonique pour le tirage prédécesseur (strictement isolé et reproductible)
       predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
     }
   }
 
-  // Les numéros actifs qui polarisent le tirage cible sont les gagnants du DERNIER tirage du prédécesseur
+  // Les numéros actifs qui polarisent le tirage cible sont les gagnants du dernier tirage du prédécesseur
   const predLatest = predHistory[0];
   const lastWinners = predLatest?.gagnants || [];
   if (lastWinners.length === 0) {
@@ -764,83 +860,17 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
-  const activeMirrors = new Set(lastWinners.map(getMirrorNumber));
-  const activeComplements = new Set(lastWinners.map(getComplement90));
-
-  // Fréquences empiriques de transition à partir des numéros du prédécesseur vers le tirage cible
-  // Alignement temporel des couples consécutifs (predHistory[i] -> history[i])
-  const sampleLimit = Math.min(history.length, predHistory.length, 120);
-  const hawkesDecay = 1.0 / Math.max(1.0, Math.sqrt(sampleLimit)); // Décroissance continue sans constante arbitraire
-
-  const transCount: number[][] = Array.from({ length: 91 }, () => new Array(91).fill(0));
-  const fromTotals: number[] = new Array(91).fill(0);
-
-  let mirrorOcc = 0;
-  let compOcc = 0;
-  let totalTested = 0;
-
-  for (let i = 0; i < sampleLimit; i++) {
-    const prev = predHistory[i]?.gagnants || [];
-    const curr = history[i]?.gagnants || [];
-    if (prev.length === 0 || curr.length === 0) continue;
-
-    const timeWeight = Math.exp(-hawkesDecay * (i / Math.sqrt(sampleLimit)));
-
-    for (const pw of prev) {
-      if (pw >= 1 && pw <= 90) {
-        fromTotals[pw] += timeWeight;
-        for (const cw of curr) {
-          if (cw >= 1 && cw <= 90) {
-            transCount[pw][cw] += timeWeight;
-          }
-        }
-      }
-    }
-
-    for (const p of prev) {
-      totalTested++;
-      const m = getMirrorNumber(p);
-      if (m !== p && curr.includes(m)) mirrorOcc++;
-      const c = getComplement90(p);
-      if (c !== p && curr.includes(c)) compOcc++;
-    }
+  // Alignement temporel des couples consécutifs
+  const pairedPairs = alignConsecutiveDrawHistories(history, predHistory);
+  if (pairedPairs.length === 0) {
+    vec.fill(0.0555);
+    return vec;
   }
 
-  const laplaceAlpha = 1.0 / (1.0 + Math.log(1.0 + sampleLimit));
-
-  const mirrorEmpiricalRate = totalTested > 0 ? mirrorOcc / totalTested : (5 / 90);
-  const compEmpiricalRate = totalTested > 0 ? compOcc / totalTested : (5 / 90);
-  const mirrorMultiplier = 1.0 + Math.min(0.5, Math.max(-0.3, (mirrorEmpiricalRate / (5 / 90) - 1.0) * 0.3));
-  const compMultiplier = 1.0 + Math.min(0.5, Math.max(-0.3, (compEmpiricalRate / (5 / 90) - 1.0) * 0.3));
-
-  let maxV = 1e-6;
+  // Exécution du modèle bayésien continu identique au rapport complet
+  const engine = runBayesianResonanceEngine(pairedPairs, lastWinners);
   for (let n = 1; n <= 90; n++) {
-    // Markov multivarié : P(c | lastWinners du prédécesseur) = 1 - prod (1 - P(c | p))
-    let logNotProb = 0;
-    for (const p of lastWinners) {
-      const denom = fromTotals[p] + 90 * laplaceAlpha;
-      const pTrans = denom > 0 ? (transCount[p][n] + laplaceAlpha) / denom : (1 / 90);
-      logNotProb += Math.log(Math.max(1e-7, 1 - Math.min(pTrans, 0.9999)));
-    }
-    const jointProb = -Math.expm1(logNotProb);
-
-    const isRepeat = lastWinners.includes(n);
-    const isMirror = activeMirrors.has(n) && !isRepeat;
-    const isComplement = activeComplements.has(n) && !isRepeat;
-
-    // Modulation continue des probabilités conditionnelles
-    let score = jointProb * 18; // Base normalisée autour de 1.0
-    if (isRepeat) score *= 1.30;
-    if (isMirror) score *= (1.10 * mirrorMultiplier);
-    if (isComplement) score *= (1.08 * compMultiplier);
-
-    vec[n] = score;
-    if (score > maxV) maxV = score;
-  }
-
-  // Normalisation douce dans [0, 1]
-  for (let n = 1; n <= 90; n++) {
-    vec[n] = vec[n] / maxV;
+    vec[n] = engine.fullCandidateScores[n] || 0.0555;
   }
 
   return vec;
@@ -864,7 +894,7 @@ export interface HarmonicResonanceMap {
 }
 
 /**
- * Génère la Cartographie Complète des Résonances Harmoniques (Miroirs & Compléments 90)
+ * Génère la Cartographie Complète des Résonances Harmoniques (Miroirs & Compléments 91)
  * avec Taux d'Attraction Empirique continu propre à chaque cycle de tirages.
  */
 export const calculateHarmonicResonanceMap = (
@@ -899,12 +929,12 @@ export const calculateHarmonicResonanceMap = (
     }
   }
 
-  const vector = calculateInterDrawVector(history, drawName, predHistory);
+  const vector = calculateInterDrawVector(history, drawName, predHistory, activeFamily.id);
   const predLatest = predHistory[0];
   const lastWinners = predLatest?.gagnants || [];
 
-  const mirrorExpectedRate = (5 / 90) * 100;
-  const complementExpectedRate = (5 / 90) * 100;
+  const mirrorExpectedRate = (LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS) * 100;
+  const complementExpectedRate = (LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS) * 100;
 
   let totalTested = 0;
   let mirrorHits = 0;
@@ -912,10 +942,12 @@ export const calculateHarmonicResonanceMap = (
 
   const pairCounts: Record<string, { count: number; total: number; from: number; to: number; type: 'MIROIR' | 'COMPLEMENT' }> = {};
 
-  const sampleLimit = Math.min(history.length, predHistory.length, 150);
+  const pairedPairs = alignConsecutiveDrawHistories(history, predHistory);
+  const sampleLimit = Math.min(pairedPairs.length, 150);
+
   for (let i = 0; i < sampleLimit; i++) {
-    const prev = predHistory[i]?.gagnants || [];
-    const curr = history[i]?.gagnants || [];
+    const prev = pairedPairs[i].predWinners;
+    const curr = pairedPairs[i].targetWinners;
     if (prev.length === 0 || curr.length === 0) continue;
 
     for (const p of prev) {
@@ -970,7 +1002,6 @@ export const calculateHarmonicResonanceMap = (
   });
 
   allPairs.sort((a, b) => b.score - a.score || b.occurrences - a.occurrences);
-
   const activeHarmonicResonances = allPairs.filter(p => p.isActiveInCurrentDraw);
 
   return {
@@ -999,7 +1030,8 @@ export const calculateInterDrawMonthlyCoupling = (
   history: DrawResult[],
   drawName?: string,
   sourceMonth?: number,
-  currentMonth?: number
+  currentMonth?: number,
+  forcedFamilyId?: InterDrawFamilyId
 ): {
   vector: Float32Array;
   familyId?: InterDrawFamilyId;
@@ -1015,7 +1047,11 @@ export const calculateInterDrawMonthlyCoupling = (
     return { vector: defaultVector };
   }
 
-  const primaryFamily = getPrimaryInterDrawFamily(drawName);
+  const families = getInterDrawFamiliesForDraw(drawName);
+  const primaryFamily = forcedFamilyId
+    ? INTER_DRAW_FAMILIES[forcedFamilyId]
+    : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName));
+
   if (!primaryFamily) {
     return { vector: defaultVector };
   }
@@ -1030,22 +1066,20 @@ export const calculateInterDrawMonthlyCoupling = (
   const cachedPred = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
   const predHistory = (cachedPred && cachedPred.length > 0) ? cachedPred : generateDeterministicFallbackHistory(relation.predecessor.name);
 
-  const baseVector = calculateInterDrawVector(history, drawName, predHistory);
+  const baseVector = calculateInterDrawVector(history, drawName, predHistory, primaryFamily.id);
 
   // Filtrage temporel des co-occurrences dans le mois source
   let monthCarryOverCount = 0;
   let totalMonthPairs = 0;
 
-  const minPairs = Math.min(history.length, predHistory.length);
-  for (let i = 0; i < minPairs; i++) {
-    const d = history[i];
-    const prevD = predHistory[i];
-    if (d && prevD && d.date) {
-      const dDate = new Date(d.date);
-      const m = isNaN(dDate.getTime()) ? -1 : dDate.getMonth();
+  const pairedPairs = alignConsecutiveDrawHistories(history, predHistory);
+  for (const pair of pairedPairs) {
+    const ts = getDrawTimestamp(pair.targetDate);
+    if (ts > 0) {
+      const m = new Date(ts).getMonth();
       if (sourceMonth === undefined || m === sourceMonth || m === currentMonth) {
         totalMonthPairs++;
-        const common = d.gagnants.filter(n => prevD.gagnants.includes(n));
+        const common = pair.targetWinners.filter(n => pair.predWinners.includes(n));
         if (common.length > 0) {
           monthCarryOverCount++;
         }
@@ -1071,4 +1105,3 @@ export const calculateInterDrawMonthlyCoupling = (
     harmonicCount
   };
 };
-

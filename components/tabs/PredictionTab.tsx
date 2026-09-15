@@ -72,9 +72,9 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const interDrawFamily = useMemo(() => {
     return (
       getPrimaryInterDrawFamily(drawName) || {
-        id: "LONACI_NATIONAL",
-        name: "Famille Nationale LONACI",
-        shortName: "10H/16H/19H55-Dim",
+        id: "FAMILY_10H_16H_SUN19H55",
+        name: "Famille Nationale LONACI (10H, 16H & Dimanche 19H55)",
+        shortName: "10H/16H/Dim-19H55",
       }
     );
   }, [drawName]);
