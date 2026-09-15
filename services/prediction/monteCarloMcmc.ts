@@ -25,7 +25,8 @@ export const runMonteCarloMcmcCore = async (
     onProgress: (progress: number, message: string) => void
 ): Promise<Prediction> => {
     const lastDraw = history[0];
-    const timestampDernierTirage = lastDraw ? new Date(lastDraw.date).getTime() : Date.now();
+    const parsedTime = lastDraw?.date ? new Date(lastDraw.date).getTime() : NaN;
+    const timestampDernierTirage = !isNaN(parsedTime) && parsedTime > 0 ? parsedTime : (history.length * 86400000 + (drawName.length * 1000));
     const seedString = `${drawName}_${timestampDernierTirage}`;
     const pmLcg = new ParkMillerLCG(seedString);
     const nextRandom = () => pmLcg.nextFloat();
@@ -172,6 +173,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
     const dynamicConfidence = Math.round(Math.min(99, Math.max(10, top5Consensus * 100)));
 
     const aggregatedPred: Prediction = {
+        drawName,
         suggestedNumbers: top5,
         candidates: candidates,
         breakdown: breakdownAcc as any,

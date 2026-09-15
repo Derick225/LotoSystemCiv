@@ -9,6 +9,9 @@ export interface PackedHistory {
   drawCount: number;
   winningCount: number;
   totalCols: number;
+  dates?: string[];
+  drawNames?: string[];
+  ids?: string[];
 }
 
 export interface PackedMatrix {
@@ -25,10 +28,12 @@ export interface PackedArray {
 /**
  * Packs DrawResult[] or { gagnants: number[], machine?: number[] }[] into an Int32Array ArrayBuffer.
  */
-export function packHistory(history: { gagnants: number[]; machine?: number[] }[]): PackedHistory {
+export function packHistory(
+  history: { id?: string; drawName?: string; date?: string; gagnants: number[]; machine?: number[] }[]
+): PackedHistory {
   if (!history || history.length === 0) {
     const empty = new Int32Array(0);
-    return { historyBuffer: empty.buffer, drawCount: 0, winningCount: 0, totalCols: 0 };
+    return { historyBuffer: empty.buffer, drawCount: 0, winningCount: 0, totalCols: 0, dates: [], drawNames: [], ids: [] };
   }
 
   const drawCount = history.length;
@@ -37,9 +42,16 @@ export function packHistory(history: { gagnants: number[]; machine?: number[] }[
   const machineCount = sample.machine ? sample.machine.length : 0;
   const totalCols = winningCount + machineCount;
 
+  const dates: string[] = new Array(drawCount);
+  const drawNames: string[] = new Array(drawCount);
+  const ids: string[] = new Array(drawCount);
+
   const typedArr = new Int32Array(drawCount * totalCols);
   for (let i = 0; i < drawCount; i++) {
     const draw = history[i];
+    dates[i] = draw.date || "";
+    drawNames[i] = draw.drawName || "";
+    ids[i] = draw.id || "";
     const offset = i * totalCols;
     const g = draw.gagnants || [];
     for (let k = 0; k < winningCount; k++) {
@@ -57,6 +69,9 @@ export function packHistory(history: { gagnants: number[]; machine?: number[] }[
     drawCount,
     winningCount,
     totalCols,
+    dates,
+    drawNames,
+    ids,
   };
 }
 
@@ -65,11 +80,14 @@ export function packHistory(history: { gagnants: number[]; machine?: number[] }[
  * Supports transparent fallback if standard array is passed.
  */
 export function unpackHistory(
-  input: ArrayBuffer | Int32Array | { gagnants: number[]; machine?: number[] }[],
+  input: ArrayBuffer | Int32Array | { id?: string; drawName?: string; date?: string; gagnants: number[]; machine?: number[] }[],
   drawCount?: number,
   winningCount: number = 5,
-  totalCols: number = 5
-): { gagnants: number[]; machine?: number[] }[] {
+  totalCols: number = 5,
+  dates?: string[],
+  drawNames?: string[],
+  ids?: string[]
+): { id?: string; drawName?: string; date?: string; gagnants: number[]; machine?: number[] }[] {
   if (Array.isArray(input)) {
     return input; // Already unpacked array fallback
   }
@@ -95,7 +113,13 @@ export function unpackHistory(
         machine[k] = arr[offset + winningCount + k];
       }
     }
-    draws[i] = { gagnants, machine };
+    draws[i] = {
+      id: ids?.[i] || `draw_${i}`,
+      drawName: drawNames?.[i] || "",
+      date: dates?.[i] || "",
+      gagnants,
+      machine
+    };
   }
 
   return draws;

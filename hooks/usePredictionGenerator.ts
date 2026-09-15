@@ -54,8 +54,12 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [drawName, history]);
 
     const isIsolated = useMemo(() => {
-        return activeHistory.length > 0 || history.length === 0;
-    }, [activeHistory.length, history.length]);
+        if (!drawName) return false;
+        if (storeDrawName && storeDrawName !== drawName) {
+            return false;
+        }
+        return true;
+    }, [drawName, storeDrawName]);
 
     const activeSpectral = useMemo(() => {
         return spectral;
@@ -188,7 +192,7 @@ export const usePredictionGenerator = (drawName: string) => {
         }
         if (activeHistory.length < 5) {
             audioEngine.play('error');
-            showToast("Historique insuffisant pour l'Oracle Base.", "error");
+            showToast(`Historique insuffisant pour ${drawName} (${activeHistory.length}/5 tirages minimum requis).`, "error");
             return;
         }
         audioEngine.play('loading');
@@ -276,7 +280,8 @@ export const usePredictionGenerator = (drawName: string) => {
             return;
         }
         if (activeHistory.length < 10) {
-            showToast("Historique insuffisant.", "error");
+            audioEngine.play('error');
+            showToast(`Historique insuffisant pour le calcul MCMC (${activeHistory.length}/10 tirages minimum requis).`, "error");
             return;
         }
         audioEngine.play('scan');
@@ -327,6 +332,9 @@ export const usePredictionGenerator = (drawName: string) => {
                     drawCount: packed.drawCount,
                     winningCount: packed.winningCount,
                     totalCols: packed.totalCols,
+                    dates: packed.dates,
+                    drawNames: packed.drawNames,
+                    ids: packed.ids,
                     temporalDepth: temporalDepth || 10,
                     weightsToUse: specificWeights,
                     metrics,

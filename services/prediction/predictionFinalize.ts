@@ -28,12 +28,13 @@ export const evaluatePredictionStability = (
   weights: AlgoWeights,
   enhancedMetrics: EnhancedMetrics,
   history: DrawResult[],
+  drawName?: string,
 ): number => {
   const weightKeys = Object.keys(weights) as AlgoKey[];
   if (weightKeys.length === 0) return 100;
 
   // 1. Calcul des scores de référence pour l'ensemble du domaine de candidats
-  const baseScores = calculateScores(features, weights, enhancedMetrics, history);
+  const baseScores = calculateScores(features, weights, enhancedMetrics, history, 0.90, drawName);
   if (baseScores.length === 0) return 100;
 
   const N = baseScores.length;
@@ -68,7 +69,7 @@ export const evaluatePredictionStability = (
     perturbedWeights[k] = wVal * perturbationFactor;
 
     const normPerturbed = normalizeWeights(perturbedWeights, { bypassCap: true });
-    const perturbedScores = calculateScores(features, normPerturbed, enhancedMetrics, history);
+    const perturbedScores = calculateScores(features, normPerturbed, enhancedMetrics, history, 0.90, drawName);
 
     const perturbedMap = new Map<number, number>();
     let sumPert = 0;
@@ -236,7 +237,7 @@ export const finalizePredictionPayload = async (
     analysisText = `Prédiction Oracle Base (${cyclicPhaseProfile.phaseLabel}) générée à partir de l'ADN Algorithmique du moment.`;
   }
 
-  const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth));
+  const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth), context.drawName);
 
   const breakdownRecord: Record<number, Record<string, number>> = {};
   const explainabilityRecord: Record<number, any> = {};
@@ -361,6 +362,7 @@ export const finalizePredictionPayload = async (
   });
 
   return {
+    drawName: context.drawName,
     suggestedNumbers: selection,
     candidates,
     confidence: finalConfidence,

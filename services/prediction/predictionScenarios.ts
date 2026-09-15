@@ -255,7 +255,7 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
       if (isPayloadValid) {
         logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Prédiction obtenue et validée avec succès depuis le Cloud.");
         context.onProgress?.(100, "[Cloud] Alignement finalisé avec succès.");
-        return result;
+        return { ...result, drawName: context.drawName };
       } else {
         logger.warn(
           { drawName: context.drawName, result },

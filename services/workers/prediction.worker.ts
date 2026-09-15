@@ -15,6 +15,9 @@ self.onmessage = async (e: MessageEvent) => {
     drawCount,
     winningCount,
     totalCols,
+    dates,
+    drawNames,
+    ids,
     temporalDepth,
     weightsToUse,
     metrics,
@@ -33,7 +36,7 @@ self.onmessage = async (e: MessageEvent) => {
   } = e.data;
 
   const history = historyBuffer
-    ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols)
+    ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols, dates, drawNames, ids)
     : (Array.isArray(rawHistory) ? rawHistory : []);
 
   try {

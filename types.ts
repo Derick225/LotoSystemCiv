@@ -1,3 +1,4 @@
+export * from "./shared/prediction.types";
 import { AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
 
 export interface GapEfficiency {
@@ -167,14 +168,19 @@ export interface Prediction {
     entropyBits: number;
     credibleIntervalRange: number;
   };
-  simulationScenarios?: {
-    scenarioId: string;
-    scenarioName: string;
-    ticket: number[];
-    probabilityScore: number;
-    riskProfile: 'DEFENSIVE' | 'BALANCED' | 'AGGRESSIVE';
-    description: string;
-  }[];
+  simulationScenarios?: SimulationScenarioItem[];
+}
+
+export interface SimulationScenarioItem {
+  scenarioId: string;
+  scenarioName: string;
+  ticket: number[];
+  probabilityScore: number;
+  riskProfile: 'DEFENSIVE' | 'BALANCED' | 'AGGRESSIVE' | 'RECURRENT' | 'ADVERSARIAL';
+  description: string;
+  color?: string;
+  genomicFocus?: string;
+  energyPct?: number;
 }
 
 export interface PredictionFeedback {

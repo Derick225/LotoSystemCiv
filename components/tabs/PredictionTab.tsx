@@ -148,13 +148,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
       if (!activePrediction) return;
       const updatedPrediction: Prediction = {
         ...activePrediction,
+        drawName: activePrediction.drawName || drawName,
         suggestedNumbers: [...numbers].sort((a, b) => a - b),
         scenarioName,
         analysis: `${activePrediction.analysis} [Scénario Actif : ${scenarioName}]`,
       };
       setLastPrediction(updatedPrediction);
     },
-    [activePrediction, setLastPrediction]
+    [activePrediction, drawName, setLastPrediction]
   );
 
   const handleTriggerForensicReport = useCallback(async () => {
@@ -291,7 +292,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           </h2>
 
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6 text-center px-4">
-            Moteur stochastique prédictif à 19 algorithmes déterministes. Génération de vecteurs absolus & synthèse multi-scénarios.
+            Moteur stochastique prédictif à 24 algorithmes déterministes. Génération de vecteurs absolus & synthèse multi-scénarios.
           </p>
 
           {/* Network & Local Diagnostic */}
@@ -312,7 +313,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 </span>
               </div>
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                19 Algorithmes • Web Workers
+                24 Algorithmes • Web Workers
               </span>
               <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
                 Markov, Poisson, Hawkes, FFT, Lyapunov, Entropie, SGD
