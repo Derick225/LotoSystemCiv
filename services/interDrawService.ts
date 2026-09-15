@@ -530,8 +530,8 @@ export const generateInterDrawReport = async (
 
   // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans la famille
   const [targetHistory, predHistory] = await Promise.all([
-    lotteryService.fetchHistory(targetDrawName),
-    lotteryService.fetchHistory(relation.predecessor.name)
+    lotteryService.fetchHistory(targetDrawName, forceRefresh),
+    lotteryService.fetchHistory(relation.predecessor.name, forceRefresh)
   ]);
 
   const targetLatestResult = targetHistory.length > 0 ? targetHistory[0] : null;
@@ -726,7 +726,8 @@ export const generateInterDrawReport = async (
 export const simulateInterDrawTransmission = async (
   targetDrawName: string,
   predecessorNumbers: number[],
-  forcedFamilyId?: InterDrawFamilyId
+  forcedFamilyId?: InterDrawFamilyId,
+  forceRefresh: boolean = false
 ): Promise<{
   candidates: InterDrawCandidateScore[];
   recommendedPairs: InterDrawPairCombination[];
@@ -749,8 +750,8 @@ export const simulateInterDrawTransmission = async (
   if (!relation) return null;
 
   const [targetHistory, predHistory] = await Promise.all([
-    lotteryService.fetchHistory(targetDrawName),
-    lotteryService.fetchHistory(relation.predecessor.name)
+    lotteryService.fetchHistory(targetDrawName, forceRefresh),
+    lotteryService.fetchHistory(relation.predecessor.name, forceRefresh)
   ]);
 
   const pairedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);

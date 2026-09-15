@@ -19,6 +19,9 @@ import {
 } from "../../services/interDrawService";
 import { NumberBall } from "../NumberBall";
 import { audioEngine } from "../../utils/audioEngine";
+import { formatDateSafely, isDrawToday } from "../../utils/dateUtils";
+import { useNexusStore } from "../../store/useNexusStore";
+import { useToast } from "../ui/Toast";
 import {
   GitBranch,
   ArrowRight,
@@ -51,6 +54,12 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   // Détection de la famille du tirage actif
   const availableFamilies = useMemo(() => getInterDrawFamiliesForDraw(drawName), [drawName]);
   const primaryFamily = useMemo(() => getPrimaryInterDrawFamily(drawName), [drawName]);
+
+  // Store Nexus pour synchronisation réactive et rafraîchissement global
+  const storeHistory = useNexusStore((state) => state.history);
+  const storeDrawName = useNexusStore((state) => state.drawName);
+  const refreshData = useNexusStore((state) => state.refreshData);
+  const { showToast } = useToast();
 
   // État de la famille sélectionnée (par défaut la famille du tirage, ou 10H/16H/Dim19H55)
   const [selectedFamilyId, setSelectedFamilyId] = useState<InterDrawFamilyId>(() => {
@@ -102,10 +111,42 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
     loadReport(targetDraw, selectedFamilyId, false);
   }, [targetDraw, selectedFamilyId, loadReport]);
 
-  const handleRefresh = () => {
+  // Empreinte réactive des données du store
+  const storeSignature = useMemo(() => {
+    if (!storeHistory || storeHistory.length === 0) return "";
+    const first = storeHistory[0];
+    return `${storeDrawName}:${storeHistory.length}:${first.id || ''}:${first.date || ''}:${(first.gagnants || []).join('-')}`;
+  }, [storeHistory, storeDrawName]);
+
+  // Synchronisation réactive : Recharger automatiquement le flux inter-tirages
+  // dès qu'un nouveau tirage de la famille est enregistré dans le store.
+  useEffect(() => {
+    if (!storeSignature) return;
+    const storeNorm = normalizeDrawName(storeDrawName);
+    const isFamilyDraw = activeFamily.sequence.some(
+      (s) => normalizeDrawName(s.name) === storeNorm
+    );
+    if (isFamilyDraw) {
+      loadReport(targetDraw, selectedFamilyId, true);
+    }
+  }, [storeSignature, activeFamily.sequence, storeDrawName, targetDraw, selectedFamilyId, loadReport]);
+
+  // Rafraîchissement réseau forcé (Bypass cache)
+  const handleRefresh = async () => {
     audioEngine.play("scan");
     setIsRefreshing(true);
-    loadReport(targetDraw, selectedFamilyId, true);
+    try {
+      await Promise.all([
+        loadReport(targetDraw, selectedFamilyId, true),
+        refreshData(targetDraw, true)
+      ]);
+      showToast("Actualisation forcée effectuée : Historique distant et flux inter-tirages synchronisés.", "success");
+    } catch (e) {
+      console.error("Erreur lors de l'actualisation forcée:", e);
+      showToast("Erreur lors du rafraîchissement réseau.", "error");
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   // Simulateur interactif
@@ -347,12 +388,38 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   {report.predecessor.day} à {report.predecessor.time}
                 </p>
 
-                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5">
-                  <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block mb-2">
-                    Derniers Numéros Gagnants Sortis
-                  </span>
+                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                    <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider">
+                      Derniers Numéros Gagnants Sortis
+                    </span>
+                    {report.predecessorResult?.date && (
+                      <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        <Calendar size={12} className="text-amber-500" />
+                        <span>{formatDateSafely(report.predecessorResult.date, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Badge de statut du résultat affiché */}
+                  {report.predecessorResult ? (
+                    <div className="flex items-center">
+                      {isDrawToday(report.predecessorResult.date) ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-xs">
+                          <CheckCircle2 size={12} className="text-emerald-500" />
+                          Résultat du jour
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shadow-xs">
+                          <Clock size={12} className="text-amber-500 animate-pulse" />
+                          Dernier résultat archivé - En attente de synchronisation
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
+
                   {report.predecessorResult?.gagnants && report.predecessorResult.gagnants.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2 pt-0.5">
                       {report.predecessorResult.gagnants.map(num => (
                         <NumberBall key={`pred-${num}`} number={num} size="sm" />
                       ))}
@@ -386,6 +453,35 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                 <p className="text-xs text-indigo-600 dark:text-indigo-400 font-bold">
                   Position {report.currentIndex + 1} / {report.totalInFamily} dans la famille
                 </p>
+
+                {report.targetLatestResult && (
+                  <div className="mt-3 pt-2.5 border-t border-indigo-200 dark:border-indigo-900/50 space-y-1.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                        <Calendar size={11} className="text-indigo-500" />
+                        {formatDateSafely(report.targetLatestResult.date, { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </span>
+                      {isDrawToday(report.targetLatestResult.date) ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                          <CheckCircle2 size={10} className="text-emerald-500" />
+                          Résultat du jour
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                          <Clock size={10} className="text-amber-500" />
+                          Dernier résultat archivé - En attente de synchronisation
+                        </span>
+                      )}
+                    </div>
+                    {report.targetLatestResult.gagnants && report.targetLatestResult.gagnants.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {report.targetLatestResult.gagnants.map(num => (
+                          <NumberBall key={`target-last-${num}`} number={num} size="xs" />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-4 p-3 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-white/5 space-y-2">
                   <div className="flex justify-between items-center text-xs">

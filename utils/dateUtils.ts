@@ -84,3 +84,19 @@ export const formatDateSafely = (
     return "Date Invalide";
   }
 };
+
+/**
+ * Vérifie si la date d'un tirage correspond à la date calendaire du jour (aujourd'hui).
+ */
+export const isDrawToday = (dateVal: any): boolean => {
+  if (!dateVal) return false;
+  const d = parseDateSafely(dateVal);
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+};
+
