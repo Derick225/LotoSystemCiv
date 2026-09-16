@@ -333,14 +333,23 @@ const runBayesianResonanceEngine = (
   for (let c = 1; c <= 90; c++) {
     // 1. Évidence de transition markovienne conjointe
     let evidenceTrans = 0;
-    const targetMarginalProb = Math.max(1e-5, (targetMarginalCounts[c] + laplaceAlpha * p0) / (sampleSize * K + 90 * laplaceAlpha * p0));
+    const isDirectCandidate = activePredSet.has(c);
 
     for (const p of validPred) {
+      if (isDirectCandidate && p === c) continue; // Pour un candidat direct, la transition vers soi-même est modélisée par le carry-over (evidenceRepeat)
       const count = transitionsCount[p][c];
       const denom = fromTotals[p] + laplaceAlpha;
       const condProb = denom > 0 ? (count + laplaceAlpha * p0) / denom : p0;
-      const lift = Math.max(1e-4, condProb / targetMarginalProb);
-      evidenceTrans += Math.log(lift);
+      if (isDirectCandidate) {
+        // Pour les gagnants actifs du prédécesseur, ne cumuler que les transitions positives effectives observées
+        const transLift = Math.max(1.0, condProb / p0);
+        if (transLift > 1.0) {
+          evidenceTrans += Math.log(transLift);
+        }
+      } else {
+        const transLift = Math.max(1e-4, condProb / p0);
+        evidenceTrans += Math.log(transLift);
+      }
     }
 
     const logitTrans = logitP0 + gamma * evidenceTrans;
@@ -349,13 +358,13 @@ const runBayesianResonanceEngine = (
     // 2. Évidence de report direct (carry-over)
     let evidenceRepeat = 0;
     let probRepeat = p0;
-    const isDirectCandidate = activePredSet.has(c);
 
     if (isDirectCandidate) {
       const pDenom = fromTotals[c] + laplaceAlpha;
-      const empRepeatProb = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0) / pDenom : p0;
-      const repLift = Math.max(1e-4, empRepeatProb / p0);
-      evidenceRepeat = Math.log(repLift);
+      const empRepeatProb = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0 * Math.max(1.0, carryOverLift)) / pDenom : p0;
+      const structuralPriorLift = Math.max(1.05, carryOverLift);
+      const empiricalBoost = 1.0 + ((repeatCounts[c] || 0) / (laplaceAlpha * p0 + (fromTotals[c] || 0) * p0));
+      evidenceRepeat = Math.log(structuralPriorLift * empiricalBoost);
       const logitRepeat = logitP0 + gamma * evidenceRepeat;
       probRepeat = 1.0 / (1.0 + Math.exp(-logitRepeat));
     }
@@ -372,18 +381,18 @@ const runBayesianResonanceEngine = (
       const mir = getMirrorNumber(p);
       if (mir === c && mir !== p) {
         const occ = mirrorPairOccurrences[`${p}_${c}`] || 0;
-        const mirProb = (occ + laplaceAlpha * p0) / (fromTotals[p] + laplaceAlpha);
-        const mirLift = Math.max(1e-4, mirProb / p0);
-        evidenceHarmonic += Math.log(mirLift);
+        const structuralMirrorLift = Math.max(1.05, mirrorLift);
+        const mirrorEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
+        evidenceHarmonic += Math.log(structuralMirrorLift * mirrorEmpiricalBoost);
         if (!flags.includes('MIROIR_DECIMAL')) flags.push('MIROIR_DECIMAL');
       }
 
       const comp = getComplement90(p);
       if (comp === c && comp !== p) {
         const occ = compPairOccurrences[`${p}_${c}`] || 0;
-        const compProb = (occ + laplaceAlpha * p0) / (fromTotals[p] + laplaceAlpha);
-        const compLift = Math.max(1e-4, compProb / p0);
-        evidenceHarmonic += Math.log(compLift);
+        const structuralCompLift = Math.max(1.05, complementLift);
+        const compEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
+        evidenceHarmonic += Math.log(structuralCompLift * compEmpiricalBoost);
         if (!flags.includes('COMPLEMENT_90')) flags.push('COMPLEMENT_90');
       }
     }

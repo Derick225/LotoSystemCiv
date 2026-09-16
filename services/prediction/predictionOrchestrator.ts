@@ -14,7 +14,8 @@ import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { detectGameRegime, calculateThermodynamicRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { globalCache, CACHE_TTL } from "../cache/CacheService";
-import { getPrimaryInterDrawFamily } from "../../constants";
+import { getPrimaryInterDrawFamily, drawHasMachineNumbers } from "../../constants";
+import { getLocalForensicReports } from "../postPredictionAnalysisService";
 
 // Split module imports
 import { TUNING, applyDeterministicMicroSgd, hashHistoryContent, getMedian, getStdDev } from "./microSgd";
@@ -252,9 +253,9 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
     );
   }
 
-  // 4. Règle d'or : Aucun boost ou surestimation de MACHINE_TRANSFER sans présence de données machine réelles
-  const hasMachineData = context.history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
-  if (!hasMachineData) {
+  // 4. Règle d'or : Les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine"
+  const hasMachine = drawHasMachineNumbers(context.drawName, context.history);
+  if (!hasMachine) {
     (weights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
   }
 
@@ -632,6 +633,12 @@ const runLocalPredictionViaWorker = async (
   context: PredictionRuntimeContext
 ): Promise<Prediction> => {
   if (typeof Worker !== "undefined") {
+    // Pré-résolution sur le thread principal pour éviter tout accès IDB/Réseau bloquant dans le Web Worker
+    const resolvedWeights = context.weightsToUse || (await getAlgoWeights(context.drawName));
+    const resolvedReports = (context.isForensicOptimized && !context.preloadedForensicReports)
+      ? await getLocalForensicReports()
+      : context.preloadedForensicReports;
+
     return new Promise<Prediction>((resolve, reject) => {
       try {
         const worker = getOrCreatePredictionWorker();
@@ -645,7 +652,7 @@ const runLocalPredictionViaWorker = async (
             activePredictionWorker = null;
           }
           reject(new Error("Timeout du Web Worker de prédiction locale"));
-        }, 60000);
+        }, 75000);
 
         pendingWorkerTasks.set(taskId, {
           resolve,
@@ -667,7 +674,7 @@ const runLocalPredictionViaWorker = async (
           drawNames: packed.drawNames,
           ids: packed.ids,
           temporalDepth: context.temporalDepth,
-          weightsToUse: context.weightsToUse,
+          weightsToUse: resolvedWeights,
           metrics: context.metrics,
           symbioticContext: context.symbioticContext,
           skipTraining: context.skipTraining,
@@ -675,7 +682,7 @@ const runLocalPredictionViaWorker = async (
           forcedOutsiderCount: context.forcedOutsiderCount,
           isForensicOptimized: context.isForensicOptimized,
           useSpatioTemporalHawkes: context.useSpatioTemporalHawkes ?? true,
-          preloadedForensicReports: context.preloadedForensicReports
+          preloadedForensicReports: resolvedReports
         }, [packed.historyBuffer]);
       } catch (workerError) {
         reject(workerError);

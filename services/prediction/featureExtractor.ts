@@ -2,7 +2,7 @@ import { DrawResult } from '../../types';
 import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
-import { calculateInterDrawVector, generateInterDrawReport } from '../interDrawService';
+import { calculateInterDrawVector } from '../interDrawService';
 
 export interface ExtractedFeatures {
   freqMap: Float32Array;
@@ -367,17 +367,10 @@ export const extractFeatures = async (
       // Vecteur de résonance inter-tirages calculé au sein de la famille étanche avec le vrai prédécesseur
       let interDrawMap: Float32Array | null = null;
       if (drawName && drawName !== 'all' && drawName !== 'all combined') {
-        try {
-          const report = await generateInterDrawReport(drawName);
-          if (report?.fullCandidateScores && report.fullCandidateScores.length >= 91) {
-            interDrawMap = new Float32Array(report.fullCandidateScores);
-          }
-        } catch {
-          // Fallback silencieux vers le calcul vectoriel direct
-        }
-      }
-      if (!interDrawMap) {
         interDrawMap = calculateInterDrawVector(filteredHistory, drawName);
+      }
+      if (!interDrawMap || interDrawMap.length < 91) {
+        interDrawMap = new Float32Array(DOMAIN_MAX + 1).fill(1.0 / DOMAIN_SIZE);
       }
 
       return {

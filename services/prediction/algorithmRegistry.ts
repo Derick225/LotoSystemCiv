@@ -2,6 +2,7 @@ import { AlgoKey } from '../../shared/prediction.types';
 import { ExtractedFeatures } from './featureExtractor';
 import { DrawResult } from '../../types';
 import { EnhancedMetrics } from './metrics.types';
+import { drawHasMachineNumbers } from '../../constants';
 
 export type PluginCacheValue = Float64Array | Int32Array | Record<number, any> | Record<string, any> | any;
 export type PluginCacheData = Record<string, PluginCacheValue>;
@@ -80,6 +81,9 @@ export interface AlgorithmPlugin {
   precompute(context: AlgorithmContext): void;
   
   evaluate(num: number, context: AlgorithmContext): { score: number; confidence: number; metadata?: any };
+
+  // Optionnel: Permet à l'algorithme d'indiquer s'il est applicable au tirage ou au contexte actif
+  isApplicable?(context: AlgorithmContext): boolean;
 
   // Optionnel: Permet d'indiquer si l'algorithme est marqué comme désactivé suite à une anomalie détectée
   disabled?: boolean;
@@ -267,4 +271,34 @@ export const getAlgorithmsByCategory = (category: AlgorithmCategory): AlgorithmP
       const stabilityOrder = { stable: 3, volatile: 2, experimental: 1 };
       return stabilityOrder[b.stability] - stabilityOrder[a.stability];
     });
+};
+
+/**
+ * Récupère les algorithmes actifs rigoureusement applicables à un tirage spécifique.
+ * RÈGLE D'OR : Les noms de tirage qui n'ont pas de numéro machines ne doivent PAS avoir l'algorithme "Transfert Machine".
+ */
+export const getAlgorithmsForDraw = (
+  drawName?: string,
+  history?: DrawResult[]
+): AlgorithmPlugin[] => {
+  const hasMachine = drawHasMachineNumbers(drawName, history);
+  return getActiveAlgorithms().filter(plugin => {
+    if (plugin.key === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
+      return false;
+    }
+    return true;
+  });
+};
+
+/**
+ * Récupère les algorithmes actifs rigoureusement applicables pour un AlgorithmContext donné.
+ */
+export const getAlgorithmsForContext = (context: AlgorithmContext): AlgorithmPlugin[] => {
+  const plugins = getAlgorithmsForDraw(context.drawName, context.history);
+  return plugins.filter(plugin => {
+    if (typeof plugin.isApplicable === 'function') {
+      return plugin.isApplicable(context);
+    }
+    return true;
+  });
 };

@@ -2,27 +2,39 @@ import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
 import { LOTTERY_CONSTANTS } from '../../lotteryService';
 import { calculateDnaSieveWeights } from '../../temporalAnalysisService';
-import { calculateInterDrawVector } from '../../interDrawService';
+import { calculateInterDrawMonthlyCoupling } from '../../interDrawService';
+import { drawHasMachineNumbers, normalizeDrawName, getPrimaryInterDrawFamily } from '../../../constants';
+import { globalCache, CACHE_TTL } from '../../cache/CacheService';
 
 type HistoryDraw = {
   date: string;
+  drawName?: string;
   gagnants?: number[];
   machine?: number[];
+  timestamp?: number;
 };
 
-type TwinCandidate = {
+type MultiScaleTwinCandidate = {
   draw: HistoryDraw;
   index: number;
+  monthsAgo: number;
   yearsAgo: number;
   dayDistance: number;
+  monthlyResonance: number;
+  seasonalResonance: number;
+  synodicResonance: number;
+  dowResonance: number;
   quality: number;
+  scaleType: 'MONTHLY' | 'ANNUAL' | 'HYBRID';
 };
 
 type InterMonthlyResonanceCache = {
-  scores: Record<number, number>; // Sieved scores passed through active algorithmic DNA
-  rawScores: Record<number, number>; // Unsieved raw temporal projections
-  dnaMultipliers: Record<number, number>; // DNA sieve continuous multipliers
-  dnaAffinity: Record<number, number>; // Normalized DNA compatibility percentage
+  scores: Record<number, number>; // Scores continus tamisés via ADN algorithmique [0, 100]
+  rawScores: Record<number, number>; // Projections spectrales temporelles brutes
+  dnaMultipliers: Record<number, number>; // Multiplicateurs différentiables du tamis ADN
+  dnaAffinity: Record<number, number>; // Affinité génomique normalisée en %
+  monthlyComponents: Record<number, number>; // Composante de résonance inter-mensuelle
+  annualComponents: Record<number, number>; // Composante de résonance multi-annuelle
   median: number;
   mad: number;
   iqr: number;
@@ -45,6 +57,8 @@ const DEFAULT_CACHE: InterMonthlyResonanceCache = {
   rawScores: {},
   dnaMultipliers: {},
   dnaAffinity: {},
+  monthlyComponents: {},
+  annualComponents: {},
   median: 0,
   mad: 1,
   iqr: 1,
@@ -81,17 +95,17 @@ const uniqueValidNumbers = (arr: unknown): number[] => {
 };
 
 /**
- * Calculates continuous DNA compatibility signal for each candidate number.
- * Sifts numbers through the active algorithmic DNA (current weights & feature matrices)
- * using the unified system-wide calculateDnaSieveWeights engine.
+ * Calcule le signal continu de compatibilité avec l'ADN algorithmique actif
+ * via le moteur unifié de tamisage génomique calculateDnaSieveWeights.
  */
-const computeDnaSieveSignal = (ctx: AlgorithmContext): { rawDna: Float64Array; multipliers: Float64Array; affinityPercent: Float64Array } => {
+const computeDnaSieveSignal = (
+  ctx: AlgorithmContext
+): { rawDna: Float64Array; multipliers: Float64Array; affinityPercent: Float64Array } => {
   const rawDna = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const multipliers = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const affinityPercent = new Float64Array(LOTTERY_CONSTANTS.TOTAL_NUMBERS + 1);
   const weights = (ctx.weights || ctx.algoWeights || {}) as Record<string, number>;
 
-  // Use the canonical 17+ gene DNA Sieve engine
   const dnaReport = calculateDnaSieveWeights(
     (ctx.history || []) as any,
     weights as any,
@@ -115,33 +129,28 @@ const computeDnaSieveSignal = (ctx: AlgorithmContext): { rawDna: Float64Array; m
 
 const parseDateStrict = (dateStr: string): Date | null => {
   if (!dateStr || typeof dateStr !== 'string') return null;
-
   const trimmed = dateStr.trim();
 
-  // DD/MM/YYYY format
+  // Format DD/MM/YYYY
   const fr = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
   if (fr) {
     const day = Number(fr[1]);
     const month = Number(fr[2]);
     const year = Number(fr[3]);
     const d = new Date(year, month - 1, day);
-    if (
-      d.getFullYear() === year &&
-      d.getMonth() === month - 1 &&
-      d.getDate() === day
-    ) {
+    if (d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day) {
       return d;
     }
     return null;
   }
 
-  // YYYY-MM-DD or full ISO
+  // ISO / YYYY-MM-DD
   const iso = new Date(trimmed);
   return Number.isNaN(iso.getTime()) ? null : iso;
 };
 
 /**
- * Computes day of year (1-366).
+ * Calcule le quantième du jour dans l'année (1-366).
  */
 const getDayOfYear = (d: Date): number => {
   const start = new Date(d.getFullYear(), 0, 0);
@@ -149,102 +158,200 @@ const getDayOfYear = (d: Date): number => {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 };
 
+// Constantes astronomiques et calendaires objectives (zéro nombre magique arbitraire)
+const TROPICAL_YEAR_DAYS = 365.242189; // Année tropique moyenne
+const SYNODIC_MONTH_DAYS = 29.530588853; // Période synodique moyenne
+const MEAN_SOLAR_MONTH_DAYS = TROPICAL_YEAR_DAYS / 12.0; // ~ 30.43685 jours
+
 /**
- * Converts date to circular seasonal phase angle theta in [0, 2*pi).
+ * Angle de phase saisonnière annuelle dans [0, 2*pi).
  */
 const getSeasonalAngle = (d: Date): number => {
   const doy = getDayOfYear(d);
-  return (2.0 * Math.PI * doy) / 365.25;
+  return (2.0 * Math.PI * doy) / TROPICAL_YEAR_DAYS;
 };
 
 /**
- * Calculates circular distance between two angles in [0, 2*pi).
+ * Angle de phase intra-mensuelle dans [0, 2*pi) sur le cycle moyen d'un mois solaire (30.43685 jours).
+ */
+const getMonthlyAngle = (d: Date): number => {
+  const day = d.getDate();
+  return (2.0 * Math.PI * (day - 1)) / MEAN_SOLAR_MONTH_DAYS;
+};
+
+/**
+ * Distance angulaire circulaire minimale entre deux phases dans [0, pi].
  */
 const getCircularAngleDistance = (a1: number, a2: number): number => {
   const diff = Math.abs(a1 - a2) % (2.0 * Math.PI);
   return Math.min(diff, 2.0 * Math.PI - diff);
 };
 
-// Continuous Gaussian circular seasonal resonance (sigma = ~14 days in radians)
-const SIGMA_SEASONAL_RAD = (2.0 * Math.PI * 14.0) / 365.25;
+// Dispersions gaussiennes continues dérivées des résolutions temporelles naturelles
+const SIGMA_SEASONAL_RAD = (2.0 * Math.PI * 14.0) / TROPICAL_YEAR_DAYS; // ~ 14 jours sur l'année tropique
+const SIGMA_MONTHLY_RAD = (2.0 * Math.PI * 3.5) / MEAN_SOLAR_MONTH_DAYS; // ~ 3.5 jours sur le mois moyen
 
 /**
- * Calculates continuous seasonal resonance combining circular phase & day-of-week harmonic alignment.
+ * Calcule l'harmonique synodique déterministe (phase de cycle calendaire lunaire).
  */
-const calculateSeasonalResonance = (targetDate: Date, drawDate: Date): number => {
-  const a1 = getSeasonalAngle(targetDate);
-  const a2 = getSeasonalAngle(drawDate);
-  const distAngle = getCircularAngleDistance(a1, a2);
-  const seasonalWeight = Math.exp(-0.5 * Math.pow(distAngle / SIGMA_SEASONAL_RAD, 2));
-
-  // Day of week harmonic alignment (0..6)
-  const dowDiff = Math.abs(targetDate.getDay() - drawDate.getDay());
-  const dowWeight = Math.pow(Math.cos((Math.PI * dowDiff) / 7.0), 2);
-
-  return seasonalWeight * (0.7 + 0.3 * dowWeight);
+const getSynodicPhase = (d: Date): number => {
+  const daysSinceEpoch = d.getTime() / 86400000.0;
+  const cycle = ((daysSinceEpoch % SYNODIC_MONTH_DAYS) + SYNODIC_MONTH_DAYS) % SYNODIC_MONTH_DAYS;
+  return (2.0 * Math.PI * cycle) / SYNODIC_MONTH_DAYS;
 };
 
-const buildDrawNumberSet = (draw: HistoryDraw): Set<number> =>
-  new Set([
-    ...uniqueValidNumbers(draw.gagnants),
-    ...uniqueValidNumbers(draw.machine),
-  ]);
+/**
+ * Calcule la résonance temporelle multi-échelles entre la date cible et une date historique.
+ * Combine la périodicité inter-mensuelle, l'angle saisonnier annuel, la phase synodique et le jour de la semaine.
+ */
+const calculateMultiScaleTemporalResonance = (
+  targetDate: Date,
+  drawDate: Date
+): {
+  monthlyResonance: number;
+  seasonalResonance: number;
+  synodicResonance: number;
+  dowResonance: number;
+  monthsAgo: number;
+  yearsAgo: number;
+  scaleType: 'MONTHLY' | 'ANNUAL' | 'HYBRID';
+} => {
+  const tYear = targetDate.getFullYear();
+  const tMonth = targetDate.getMonth();
+  const dYear = drawDate.getFullYear();
+  const dMonth = drawDate.getMonth();
+
+  const monthsAgo = (tYear - dYear) * 12 + (tMonth - dMonth);
+  const yearsAgo = tYear - dYear;
+
+  // 1. Résonance intra-mensuelle (même période du mois dans les mois passés)
+  const aMonth1 = getMonthlyAngle(targetDate);
+  const aMonth2 = getMonthlyAngle(drawDate);
+  const distMonth = getCircularAngleDistance(aMonth1, aMonth2);
+  const monthlyResonance = Math.exp(-0.5 * Math.pow(distMonth / SIGMA_MONTHLY_RAD, 2));
+
+  // 2. Résonance saisonnière multi-annuelle (même période de l'année)
+  const aSeason1 = getSeasonalAngle(targetDate);
+  const aSeason2 = getSeasonalAngle(drawDate);
+  const distSeason = getCircularAngleDistance(aSeason1, aSeason2);
+  const seasonalResonance = Math.exp(-0.5 * Math.pow(distSeason / SIGMA_SEASONAL_RAD, 2));
+
+  // 3. Harmonique synodique (cycle de 29.53 jours)
+  const phiSyn1 = getSynodicPhase(targetDate);
+  const phiSyn2 = getSynodicPhase(drawDate);
+  const distSyn = getCircularAngleDistance(phiSyn1, phiSyn2);
+  const synodicResonance = Math.pow(Math.cos(distSyn / 2.0), 2);
+
+  // 4. Harmonique jour de la semaine (DOW)
+  const dowDiff = Math.abs(targetDate.getDay() - drawDate.getDay());
+  const dowResonance = Math.pow(Math.cos((Math.PI * dowDiff) / 7.0), 2);
+
+  let scaleType: 'MONTHLY' | 'ANNUAL' | 'HYBRID' = 'HYBRID';
+  if (yearsAgo >= 1 && seasonalResonance > monthlyResonance) {
+    scaleType = 'ANNUAL';
+  } else if (monthsAgo >= 1 && monthlyResonance >= seasonalResonance) {
+    scaleType = 'MONTHLY';
+  }
+
+  return {
+    monthlyResonance,
+    seasonalResonance,
+    synodicResonance,
+    dowResonance,
+    monthsAgo,
+    yearsAgo,
+    scaleType
+  };
+};
+
+const buildDrawNumberSet = (draw: HistoryDraw, hasMachineData: boolean): Set<number> => {
+  const nums = uniqueValidNumbers(draw.gagnants);
+  if (hasMachineData && Array.isArray(draw.machine)) {
+    nums.push(...uniqueValidNumbers(draw.machine));
+  }
+  return new Set(nums);
+};
 
 /**
- * Finds all historical twin draws corresponding to the same calendar period in prior years.
- * Uses continuous Gaussian spatio-temporal resonance scoring (zero magic binary cutoffs).
+ * Recherche continue des tirages jumeaux résonants à travers les deux échelles clés :
+ * 1. Périodicité inter-mensuelle (mois M-1, M-2, ..., M-12).
+ * 2. Périodicité multi-annuelle (années Y-1, Y-2, ..., Y-K).
+ * ZÉRO COUPURE BINAIRE : Pondération continue basée sur l'exposant de Hurst et l'entropie.
  */
-const findTwinDrawCandidates = (
+const findMultiScaleTwinCandidates = (
   history: HistoryDraw[],
   currentDate: Date,
-  maxYearsToScan: number,
-  hurst: number
-): TwinCandidate[] => {
-  const currentYear = currentDate.getFullYear();
-  const candidates: TwinCandidate[] = [];
+  hurst: number,
+  hasMachineData: boolean
+): MultiScaleTwinCandidate[] => {
+  const candidates: MultiScaleTwinCandidate[] = [];
 
-  // Half-life scale derived dynamically from Hurst persistence
-  const lambdaYear = 3.0 + 4.0 * clamp(hurst, 0.1, 0.9);
+  // Échelles d'amortissement dérivées de la persistance de Hurst H in [0.1, 0.9]
+  const lambdaMonth = 6.0 + 8.0 * hurst; // Amortissement en mois
+  const lambdaYear = 3.0 + 4.0 * hurst; // Amortissement en années
 
   for (let i = 1; i < history.length; i++) {
     const draw = history[i];
     const drawDate = parseDateStrict(draw.date);
     if (!drawDate) continue;
 
-    const yearDiff = currentYear - drawDate.getFullYear();
-    if (yearDiff < 1 || yearDiff > maxYearsToScan) continue;
+    const {
+      monthlyResonance,
+      seasonalResonance,
+      synodicResonance,
+      dowResonance,
+      monthsAgo,
+      yearsAgo,
+      scaleType
+    } = calculateMultiScaleTemporalResonance(currentDate, drawDate);
 
-    // Continuous seasonal resonance (no hard binary cuts)
-    const seasonalRes = calculateSeasonalResonance(currentDate, drawDate);
-    const yearDecay = Math.exp(-yearDiff / lambdaYear);
+    if (monthsAgo < 1) continue; // Éviter l'autocorrélation avec le tirage immédiat
 
-    // Number richness (density of complete draw records)
+    // Amortissement temporel continu sans coupure brusque
+    const timeDecay = Math.max(
+      Math.exp(-monthsAgo / lambdaMonth),
+      yearsAgo >= 1 ? Math.exp(-yearsAgo / lambdaYear) : 0
+    );
+
+    // Richesse du tirage (densité de boules valides disponibles)
     const gagnantsCount = uniqueValidNumbers(draw.gagnants).length;
-    const machineCount = uniqueValidNumbers(draw.machine).length;
-    const richness = (gagnantsCount / 5.0) * 0.7 + (machineCount / 5.0) * 0.3;
+    const machineCount = hasMachineData ? uniqueValidNumbers(draw.machine).length : 0;
+    const richness = Math.min(1.0, (gagnantsCount + machineCount * 0.5) / 5.0);
 
-    const quality = clamp(seasonalRes * yearDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
+    // Résonance combinée multi-échelles
+    const blendedResonance =
+      scaleType === 'MONTHLY'
+        ? monthlyResonance * 0.65 + seasonalResonance * 0.35
+        : seasonalResonance * 0.65 + monthlyResonance * 0.35;
 
-    if (quality > 0.01) {
+    const harmonicCoupling = 0.5 + 0.25 * synodicResonance + 0.25 * dowResonance;
+    const quality = clamp(blendedResonance * harmonicCoupling * timeDecay * (0.5 + 0.5 * richness), 0.0, 1.0);
+
+    if (quality > 0.005) {
       const dayDistance = Math.abs(currentDate.getDate() - drawDate.getDate());
       candidates.push({
         draw,
         index: i,
-        yearsAgo: yearDiff,
+        monthsAgo,
+        yearsAgo,
         dayDistance,
+        monthlyResonance,
+        seasonalResonance,
+        synodicResonance,
+        dowResonance,
         quality,
+        scaleType
       });
     }
   }
 
-  // Sort candidates by descending quality
+  // Tri par qualité de résonance décroissante
   candidates.sort((a, b) => b.quality - a.quality);
-
   return candidates;
 };
 
 /**
- * Computes robust statistics (Median, IQR, and MAD) for score normalization.
+ * Calcule les statistiques robustes (Médiane, IQR, et MAD) pour une standardisation sans biais.
  */
 const computeRobustStats = (scores: Record<number, number>) => {
   const values = Object.values(scores).sort((a, b) => a - b);
@@ -280,9 +387,9 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
   category: 'advanced',
   stability: 'stable',
   mathematicalBasis:
-    'Rétro-ingénierie temporelle multi-annuelle et projection symétrique de résonance gaussienne',
+    'Analyse Spectrale Multi-Échelles des Périodicités Calendaires (Mensuelle, Trimestrielle, Lunaire/Synodique et Multi-Annuelle) avec Tamisage Génétique Différentiable',
   description:
-    "Détecte les tirages jumeaux des années passées (même période calendaire), analyse la dynamique de leurs sous-ensembles de numéros, puis projette la résonance inter-mensuelle sur l'historique récent.",
+    'Détecte les tirages jumeaux multi-échelles (mois récurrents M-k, mêmes quinzaines annuelles, et harmoniques synodiques), extrait les dynamiques de transition conjointes, puis les tamise à travers l’ADN algorithmique.',
   isStrictlyDeterministic: true,
 
   precompute(ctx: AlgorithmContext) {
@@ -292,19 +399,28 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const cacheKey = AlgoKey.INTER_MONTHLY_RESONANCE;
 
     const emptyScores: Record<number, number> = {};
+    const emptyMonthly: Record<number, number> = {};
+    const emptyAnnual: Record<number, number> = {};
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
       emptyScores[i] = 0;
+      emptyMonthly[i] = 0;
+      emptyAnnual[i] = 0;
     }
 
     const defaultCache: InterMonthlyResonanceCache = {
       ...DEFAULT_CACHE,
       scores: emptyScores,
+      monthlyComponents: emptyMonthly,
+      annualComponents: emptyAnnual
     };
 
-    if (history.length < 20) {
+    if (history.length < 15) {
       ctx.pluginCache[cacheKey] = defaultCache;
       return;
     }
+
+    const drawName = ctx.drawName || '';
+    const hasMachineData = drawHasMachineNumbers(drawName, history as any);
 
     const currentDraw = history[0];
     const currentDate = parseDateStrict(currentDraw?.date || '');
@@ -317,26 +433,28 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     if (!Number.isFinite(hurst)) hurst = 0.5;
     hurst = clamp(hurst, 0.1, 0.9);
 
-    // Dynamic scan depth based on total available history
-    const maxYearsToScan = Math.max(1, Math.min(10, Math.floor(history.length / 52)));
-    const twinCandidates = findTwinDrawCandidates(history, currentDate, maxYearsToScan, hurst);
-
+    // Extraction des candidats jumeaux multi-échelles (mensuels et annuels)
+    const twinCandidates = findMultiScaleTwinCandidates(history, currentDate, hurst, hasMachineData);
     if (twinCandidates.length === 0) {
       ctx.pluginCache[cacheKey] = defaultCache;
       return;
     }
 
-    // Select top multi-year twin draws adaptively derived from Hurst persistence
-    const maxActiveTwins = Math.max(2, Math.min(10, Math.round(5 * (1.0 + (hurst - 0.5)))));
+    // Nombre optimal de jumeaux actifs dérivé continûment de Hurst
+    const maxActiveTwins = Math.max(3, Math.min(12, Math.round(6 * (1.0 + (hurst - 0.5)))));
     const activeTwins = twinCandidates.slice(0, maxActiveTwins);
     const topTwin = activeTwins[0];
 
-    // Continuous damping gamma derived from Hurst persistence
+    // Décroissance exponentielle continue dérivée de Hurst
     const decayGamma = 0.05 / (hurst * 2.0);
 
     const rawScores: Record<number, number> = {};
+    const monthlyScores: Record<number, number> = {};
+    const annualScores: Record<number, number> = {};
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
       rawScores[i] = 0;
+      monthlyScores[i] = 0;
+      annualScores[i] = 0;
     }
 
     let periodsAnalyzed = 0;
@@ -345,12 +463,13 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     let totalSignalMass = 0;
     const distinctProjected = new Set<number>();
 
-    // Scan lookback window from twin indices
+    // Analyse de la fenêtre rétro-projective pour chaque jumeau temporel
     for (const twinRes of activeTwins) {
-      const twinNumbers = buildDrawNumberSet(twinRes.draw);
-      if (twinNumbers.size < 3) continue;
+      const twinNumbers = buildDrawNumberSet(twinRes.draw, hasMachineData);
+      if (twinNumbers.size < 2) continue;
 
-      const maxLookback = Math.min(150, history.length - twinRes.index - 1);
+      // Profondeur d'analyse rétro-projective liée à la taille d'échantillon
+      const maxLookback = Math.min(Math.floor(history.length / 2), Math.min(120, history.length - twinRes.index - 1));
 
       for (let k = 1; k <= maxLookback; k++) {
         const historicalSource = history[twinRes.index + k];
@@ -359,23 +478,25 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
 
         periodsAnalyzed++;
 
-        const sourceNumbers = [
-          ...uniqueValidNumbers(historicalSource.gagnants),
-          ...uniqueValidNumbers(historicalSource.machine),
-        ];
+        const sourceNumbers = uniqueValidNumbers(historicalSource.gagnants);
+        if (hasMachineData && Array.isArray(historicalSource.machine)) {
+          sourceNumbers.push(...uniqueValidNumbers(historicalSource.machine));
+        }
 
         const overlapCount = sourceNumbers.filter((n) => twinNumbers.has(n)).length;
 
-        // Continuous combination weight activation via logistic curve (centered at 2 overlaps)
-        const combinationActivation = 1.0 / (1.0 + Math.exp(-2.5 * (overlapCount - 1.5)));
-        if (combinationActivation < 0.1) continue;
+        // Espérance neutre de co-occurrence hypergéométrique
+        const expectedOverlap = (sourceNumbers.length * twinNumbers.size) / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
+        // Activation logistique continue centrée sur l'espérance neutre
+        const combinationActivation = 1.0 / (1.0 + Math.exp(-3.0 * (overlapCount - expectedOverlap)));
+        if (combinationActivation < 0.05) continue;
 
         matchedSourcePeriods++;
 
         const sourceStrength = overlapCount / Math.max(1, twinNumbers.size);
         const timeAmortization = Math.exp(-decayGamma * k);
 
-        // Period weight continuous product
+        // Poids continu de la période
         const periodWeight =
           combinationActivation *
           timeAmortization *
@@ -383,32 +504,55 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
           (0.5 + sourceStrength);
 
         const projectedWinners = uniqueValidNumbers(projectedCurrent.gagnants);
-        const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
 
         for (const num of projectedWinners) {
           rawScores[num] += periodWeight;
+          if (twinRes.scaleType === 'MONTHLY') {
+            monthlyScores[num] += periodWeight;
+          } else {
+            annualScores[num] += periodWeight;
+          }
           totalProjectedOccurrences++;
           totalSignalMass += periodWeight;
           distinctProjected.add(num);
         }
 
-        // Machine numbers weighted proportional to winning ratio (5 winners / 5 machine = 0.5)
-        const machineRatio = projectedWinners.length > 0 ? 0.5 : 0.0;
-        for (const num of projectedMachine) {
-          rawScores[num] += periodWeight * machineRatio;
-          totalProjectedOccurrences++;
-          totalSignalMass += periodWeight * machineRatio;
-          distinctProjected.add(num);
+        // Boules machine projetées UNIQUEMENT si le tirage supporte les numéros machine
+        if (hasMachineData && Array.isArray(projectedCurrent.machine)) {
+          const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
+          const machineRatio = projectedWinners.length > 0 ? 0.5 : 0.0;
+          for (const num of projectedMachine) {
+            const mWeight = periodWeight * machineRatio;
+            rawScores[num] += mWeight;
+            if (twinRes.scaleType === 'MONTHLY') {
+              monthlyScores[num] += mWeight;
+            } else {
+              annualScores[num] += mWeight;
+            }
+            totalProjectedOccurrences++;
+            totalSignalMass += mWeight;
+            distinctProjected.add(num);
+          }
         }
       }
     }
 
-    // --- COUPLAGE DÉTERMINISTE AVEC LES FLUX INTER-TIRAGES DE LA FAMILLE ---
-    if (ctx.drawName) {
-      const interVec = calculateInterDrawVector(history as any, ctx.drawName);
-      for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
-        // Modulation douce continue (gain [0.85, 1.25])
-        rawScores[i] = rawScores[i] * (0.85 + 0.30 * (interVec[i] || 0.0555));
+    // --- COUPLAGE DÉTERMINISTE AVEC LE FLUX INTER-TIRAGES DE LA FAMILLE ÉTANCHE ---
+    if (drawName && drawName !== 'all') {
+      const primaryFam = getPrimaryInterDrawFamily(drawName);
+      const interMonthly = calculateInterDrawMonthlyCoupling(
+        history as any,
+        drawName,
+        currentDate.getMonth(),
+        currentDate.getMonth(),
+        primaryFam?.id
+      );
+      if (interMonthly && interMonthly.vector) {
+        for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
+          // Modulation continue et douce (gain unitaire centré)
+          const p = interMonthly.vector[i] || 0.05555;
+          rawScores[i] = rawScores[i] * (0.85 + 0.30 * (p / 0.05555));
+        }
       }
     }
 
@@ -419,7 +563,6 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const dnaMultipliersRecord: Record<number, number> = {};
     const dnaAffinityRecord: Record<number, number> = {};
 
-    // Calcul continu de l'intensité du tamisage génomique basé sur le contraste d'affinité
     let sumMult = 0;
     let sumMultSq = 0;
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
@@ -429,7 +572,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     }
     const meanMult = sumMult / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
     const stdMult = Math.sqrt(Math.max(1e-6, sumMultSq / LOTTERY_CONSTANTS.TOTAL_NUMBERS - meanMult * meanMult));
-    const dynamicSieveIntensity = 1.0 / (1.0 + Math.exp(-2.0 * (stdMult / 0.15 - 1.0))); // Continuum [0.35, 0.85]
+    const dynamicSieveIntensity = 1.0 / (1.0 + Math.exp(-2.0 * (stdMult / 0.15 - 1.0)));
 
     for (let i = 1; i <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; i++) {
       const raw = rawScores[i] || 0;
@@ -439,7 +582,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       dnaMultipliersRecord[i] = mult;
       dnaAffinityRecord[i] = aff;
 
-      // Tamisage différentiable continu : combinaison de la projection temporelle et du multiplicateur génomique
+      // Tamisage différentiable continu
       sievedScores[i] = raw * ((1.0 - dynamicSieveIntensity) + dynamicSieveIntensity * mult);
     }
 
@@ -447,11 +590,13 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const concentrationTop5 = computeTop5Concentration(sievedScores);
     const signalDetected = matchedSourcePeriods > 0 && totalSignalMass > 0;
 
-    ctx.pluginCache[cacheKey] = {
+    const cacheResult: InterMonthlyResonanceCache = {
       scores: sievedScores,
       rawScores,
       dnaMultipliers: dnaMultipliersRecord,
       dnaAffinity: dnaAffinityRecord,
+      monthlyComponents: monthlyScores,
+      annualComponents: annualScores,
       median,
       mad,
       iqr,
@@ -468,6 +613,18 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       signalDetected,
       dnaSieveActive: true,
     };
+
+    ctx.pluginCache[cacheKey] = cacheResult;
+
+    // Cache sous convention canonique d'isolation
+    if (drawName) {
+      const primaryFam = getPrimaryInterDrawFamily(drawName);
+      const famId = primaryFam?.id || 'ISO';
+      const canonKey = `nexus_intermonthly_${famId}_${normalizeDrawName(drawName)}`;
+      try {
+        globalCache.set(canonKey, cacheResult, CACHE_TTL.LONG, drawName);
+      } catch (e) { /* Silenced */ }
+    }
   },
 
   evaluate(num: number, ctx: AlgorithmContext) {
@@ -480,11 +637,13 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache?.[cacheKey] as InterMonthlyResonanceCache | undefined;
     if (!cache) {
       return {
-        score: 50,
+        score: 50.0,
         confidence: 0.5,
         metadata: {
           rawVal: 0,
           sievedVal: 0,
+          monthlyScore: 50.0,
+          annualScore: 50.0,
           dnaMultiplier: 1.0,
           dnaAffinity: 50.0,
           topTwinDate: 'N/A',
@@ -499,31 +658,26 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
 
     const sievedVal = Number.isFinite(cache.scores[num]) ? cache.scores[num] : 0;
     const rawVal = Number.isFinite(cache.rawScores[num]) ? cache.rawScores[num] : sievedVal;
+    const monthlyVal = Number.isFinite(cache.monthlyComponents[num]) ? cache.monthlyComponents[num] : 0;
+    const annualVal = Number.isFinite(cache.annualComponents[num]) ? cache.annualComponents[num] : 0;
     const dnaMult = Number.isFinite(cache.dnaMultipliers[num]) ? cache.dnaMultipliers[num] : 1.0;
     const dnaAff = Number.isFinite(cache.dnaAffinity[num]) ? cache.dnaAffinity[num] : 50.0;
     const median = Number.isFinite(cache.median) ? cache.median : 0;
 
-    // Normalization scale using robust estimator: 1.4826 * MAD or IQR
     const robustScale = Math.max(1e-6, 1.4826 * cache.mad);
-
     let score = 50.0;
 
     if (cache.signalDetected) {
-      // Z-score relative to robust median and MAD of sieved distribution
       const zRobust = (sievedVal - median) / robustScale;
-
-      // Hurst-informed slope tuning
       let hurst = Number(ctx.statisticalBounds?.hurstExponent);
       if (!Number.isFinite(hurst)) hurst = 0.5;
       const slope = 1.0 + clamp(hurst, 0.1, 0.9) * 2.0;
-
-      // Continuous sigmoid transformation mapped to [0, 100]
       score = 100.0 / (1.0 + Math.exp(-slope * zRobust));
     }
 
-    score = clamp(score, 0.0, 100.0);
+    score = clamp(score, 0.5, 99.5);
 
-    // Continuous confidence derivation enriched by DNA compatibility
+    // Dérivation continue de la confiance
     const evidenceRatio =
       cache.periodsAnalyzed > 0
         ? cache.matchedSourcePeriods / (cache.matchedSourcePeriods + Math.sqrt(cache.periodsAnalyzed) + 1)
@@ -547,7 +701,7 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       0.10 * (dnaAff / 100.0) +
       dnaSieveConfidenceBonus;
 
-    const confidence = clamp(confidenceRaw, 0.2, 0.95);
+    const confidence = clamp(confidenceRaw, 0.2, 0.98);
 
     return {
       score: Number(score.toFixed(2)),
@@ -555,6 +709,8 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
       metadata: {
         rawVal: Number(rawVal.toFixed(3)),
         sievedVal: Number(sievedVal.toFixed(3)),
+        monthlyVal: Number(monthlyVal.toFixed(3)),
+        annualVal: Number(annualVal.toFixed(3)),
         dnaMultiplier: Number(dnaMult.toFixed(3)),
         dnaAffinity: Number(dnaAff.toFixed(1)),
         topTwinDate: cache.topTwinDate,
@@ -573,4 +729,3 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
     };
   },
 };
-

@@ -4,6 +4,7 @@ import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { AlgoWeights, AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 import { useNexusStore } from '../store/useNexusStore';
 import { calculateInterDrawVector, calculateInterDrawMonthlyCoupling } from './interDrawService';
+import { drawHasMachineNumbers } from '../constants';
 
 // --- HELPERS STATISTIQUES ---
 
@@ -530,7 +531,7 @@ export const calculateDnaSieveWeights = (
 
     // 9. Extraction et Normalisation continue des poids d'ADN
     const geneKeys = Object.values(AlgoKey);
-    const hasMachineDataInHistory = history.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+    const hasMachineDataInHistory = drawHasMachineNumbers(drawName, history);
     let totalWeight = 0;
     const activeWeightsMap: Record<string, number> = {};
 
@@ -577,6 +578,7 @@ export const calculateDnaSieveWeights = (
         const sSpatial = 1.0 / (1.0 + Math.exp(-Math.abs(n - 45.5) / 15.0));
         const sFractal = 0.5 + 0.5 * Math.tanh((sFreq - 0.5) * 2.0);
         const sInterDraw = interDrawVec[n] || 0.0555;
+        const sMonthly = (sSpectral * 0.5 + sHawkes * 0.5);
 
         let geneSum = 0;
         geneSum += (activeWeightsMap[AlgoKey.FREQUENCY] || 1.0) * sFreq;
@@ -595,6 +597,7 @@ export const calculateDnaSieveWeights = (
         geneSum += (activeWeightsMap[AlgoKey.GAP_TREND] || 1.0) * sMom;
         geneSum += (activeWeightsMap[AlgoKey.SHADOW_PROBABILITY] || 1.0) * (1.0 - sFreq);
         geneSum += (activeWeightsMap[AlgoKey.INTER_DRAW_RESONANCE] || 1.0) * sInterDraw;
+        geneSum += (activeWeightsMap[AlgoKey.INTER_MONTHLY_RESONANCE] || 1.0) * sMonthly;
 
         const val = geneSum / totalWeight;
         compositeDna[n] = val;

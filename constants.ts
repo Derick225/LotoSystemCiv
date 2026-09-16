@@ -79,6 +79,31 @@ export const isDrawWithoutMachine = (drawName?: string | null): boolean => {
   });
 };
 
+/**
+ * Détermine de manière stricte et déterministe si un tirage dispose de numéros machine.
+ * Les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine".
+ * 
+ * Règles :
+ * 1. Les tirages de DRAWS_WITHOUT_MACHINE (ex: 'Fortune Thursday') n'ont JAMAIS de machine.
+ * 2. Si un historique est fourni pour ce tirage, il doit contenir au moins un enregistrement
+ *    avec des numéros machine non vides.
+ */
+export const drawHasMachineNumbers = (
+  drawName?: string | null,
+  history?: Array<{ drawName?: string; machine?: number[] | string[] }> | null
+): boolean => {
+  if (!drawName && (!history || history.length === 0)) return true;
+  if (drawName && isDrawWithoutMachine(drawName)) return false;
+  if (history && history.length > 0) {
+    const isolated = drawName
+      ? history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase())
+      : history;
+    const sample = isolated.length > 0 ? isolated : history;
+    return sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  }
+  return !isDrawWithoutMachine(drawName);
+};
+
 // Liste plate pour les itérations rapides et les sélecteurs
 export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) => 
     Object.entries(times).map(([time, name]) => ({

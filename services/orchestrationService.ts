@@ -2,6 +2,7 @@ import { EmpiricalCalibration, FALLBACK_CALIBRATION, AlgoKey } from "../shared/p
 import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition, AlgoWeights, FeatureVector } from '../types';
 import { calculateACValue, calculateShannonEntropy, calculateFractalIndex } from './mathService';
 import { normalizeWeights, getDefaultWeights } from './prediction/weightsManager';
+import { drawHasMachineNumbers } from '../constants';
 
 
 export interface ThermoState {
@@ -240,15 +241,19 @@ export const analyzeImmediateTrend = (history: DrawResult[], config: Orchestrati
     });
   }
 
+  const drawName = history[0]?.drawName;
+  const hasMachineData = drawHasMachineNumbers(drawName, history);
   let machineImpact = 0;
   const transferredNumbers: number[] = [];
-  for (let i = 1; i < lookBack; i++) {
-    const decay = Math.pow(config.timeDecay, i);
-    if (history[i].machine) {
-      const transfers = history[0].gagnants.filter(n => history[i].machine?.includes(n));
-      if (transfers.length > 0) {
-        machineImpact += transfers.length * baseImpact * decay * config.machineWeight;
-        transferredNumbers.push(...transfers);
+  if (hasMachineData) {
+    for (let i = 1; i < lookBack; i++) {
+      const decay = Math.pow(config.timeDecay, i);
+      if (history[i].machine) {
+        const transfers = history[0].gagnants.filter(n => history[i].machine?.includes(n));
+        if (transfers.length > 0) {
+          machineImpact += transfers.length * baseImpact * decay * config.machineWeight;
+          transferredNumbers.push(...transfers);
+        }
       }
     }
   }
@@ -325,6 +330,8 @@ export const runOrchestrationPipeline = (
   const config = adaptConfigurationToPhase(history);
   const lookBack = Math.min(Math.floor(config.adaptiveHalfLife), history.length);
   const totalDraws = history.length;
+  const drawName = history[0]?.drawName;
+  const hasMachineData = drawHasMachineNumbers(drawName, history);
   
   // --- ÉTAGE 1 (SUITE) : FEATURE EXTRACTION ---
   const rawFeatures: Record<number, FeatureVector> = {} as any;
@@ -393,11 +400,13 @@ export const runOrchestrationPipeline = (
       }
     }
 
-    // 2. machineTransfer : machine carry-over
+    // 2. machineTransfer : machine carry-over (strictement nul si le tirage n'a pas de numéros machine)
     let machineRaw = 0;
-    for (let t = 0; t < lookBack; t++) {
-      if (history[t].machine?.includes(num)) {
-        machineRaw += Math.pow(config.timeDecay, t);
+    if (hasMachineData) {
+      for (let t = 0; t < lookBack; t++) {
+        if (history[t].machine?.includes(num)) {
+          machineRaw += Math.pow(config.timeDecay, t);
+        }
       }
     }
 
@@ -506,7 +515,9 @@ export const runOrchestrationPipeline = (
   // Source unique de vérité pour les poids des algorithmes normalisés
   const normalizedAlgoWeights = normalizeWeights(weights || getDefaultWeights());
   const rawW_repeat = config.neighborWeight * (1.0 + (normalizedAlgoWeights[AlgoKey.TEMPORAL] || 0.0) * 10);
-  const rawW_machine = config.machineWeight * (1.0 + (normalizedAlgoWeights[AlgoKey.MACHINE_TRANSFER] || 0.0) * 10);
+  const rawW_machine = hasMachineData
+    ? config.machineWeight * (1.0 + (normalizedAlgoWeights[AlgoKey.MACHINE_TRANSFER] || 0.0) * 10)
+    : 0.0;
   const rawW_neighbor = config.neighborWeight * (1.0 + (normalizedAlgoWeights[AlgoKey.DERIVED_NEIGHBOR] || 0.0) * 10);
   const rawW_mirror = config.mirrorWeight * (1.0 + (normalizedAlgoWeights[AlgoKey.DERIVED_NEIGHBOR] || 0.0) * 10);
   const rawW_markov = 1.0 + (normalizedAlgoWeights[AlgoKey.MARKOV] || 0.0) * 10;
@@ -521,7 +532,7 @@ export const runOrchestrationPipeline = (
   
   // Modulation par canal (Cryo favorise repeat, markov, trend; Volatile favorise neighbor, mirror)
   let modW_repeat = rawW_repeat * (1.0 + 0.5 * cryoMod - 0.5 * volatileMod);
-  let modW_machine = rawW_machine * (1.0 - 0.4 * cryoMod);
+  let modW_machine = hasMachineData ? rawW_machine * (1.0 - 0.4 * cryoMod) : 0.0;
   let modW_neighbor = rawW_neighbor * (1.0 - 0.4 * cryoMod + 0.5 * volatileMod);
   let modW_mirror = rawW_mirror * (1.0 + 0.4 * volatileMod);
   let modW_markov = rawW_markov * (1.0 + 0.4 * cryoMod);
@@ -531,9 +542,12 @@ export const runOrchestrationPipeline = (
 
   // Le chaos harmonise tous les poids vers la moyenne plate pour favoriser la diversité
   if (chaoticMod > 0.01) {
-    const avgW = (modW_repeat + modW_machine + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence) / 8.0;
+    const denom = hasMachineData ? 8.0 : 7.0;
+    const avgW = (modW_repeat + (hasMachineData ? modW_machine : 0) + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence) / denom;
     modW_repeat = modW_repeat * (1.0 - chaoticMod) + avgW * chaoticMod;
-    modW_machine = modW_machine * (1.0 - chaoticMod) + avgW * chaoticMod;
+    if (hasMachineData) {
+      modW_machine = modW_machine * (1.0 - chaoticMod) + avgW * chaoticMod;
+    }
     modW_neighbor = modW_neighbor * (1.0 - chaoticMod) + avgW * chaoticMod;
     modW_mirror = modW_mirror * (1.0 - chaoticMod) + avgW * chaoticMod;
     modW_markov = modW_markov * (1.0 - chaoticMod) + avgW * chaoticMod;
@@ -546,7 +560,7 @@ export const runOrchestrationPipeline = (
   
   const w: Record<keyof FeatureVector, number> = {
     repeatShort: modW_repeat / sumWeights,
-    machineTransfer: modW_machine / sumWeights,
+    machineTransfer: hasMachineData && sumWeights > 0 ? modW_machine / sumWeights : 0,
     neighbor: modW_neighbor / sumWeights,
     mirror: modW_mirror / sumWeights,
     markov: modW_markov / sumWeights,
@@ -562,7 +576,7 @@ export const runOrchestrationPipeline = (
     // Détermination de l'activité continue des familles
     const act_inertia = (f.repeatShort + f.trend) / 2.0;
     const act_structure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
-    const act_transition = (f.markov + f.machineTransfer) / 2.0;
+    const act_transition = hasMachineData ? (f.markov + f.machineTransfer) / 2.0 : f.markov;
     const act_seasonal = f.seasonal;
 
     const families = [act_inertia, act_structure, act_transition, act_seasonal];
@@ -573,7 +587,7 @@ export const runOrchestrationPipeline = (
     const hasStructureRedundancy = Math.max(0, Math.min(f.mirror, f.neighbor) - 0.4) + 
                                    Math.max(0, Math.min(f.neighbor, f.structuralCoherence) - 0.4) +
                                    Math.max(0, Math.min(f.mirror, f.structuralCoherence) - 0.4);
-    const hasTransitionRedundancy = Math.max(0, Math.min(f.markov, f.machineTransfer) - 0.4);
+    const hasTransitionRedundancy = hasMachineData ? Math.max(0, Math.min(f.markov, f.machineTransfer) - 0.4) : 0;
 
     const correlatedSignalsCount = (hasInertiaRedundancy ? 1 : 0) + 
                                    (hasStructureRedundancy > 0.2 ? 1 : 0) + 

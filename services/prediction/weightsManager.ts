@@ -4,6 +4,7 @@ import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
+import { drawHasMachineNumbers } from '../../constants';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
 
@@ -477,13 +478,34 @@ export const evaluateAlgoEmpiricalProof = (
     hits[AlgoKey.SEQUENCE_PATTERN] += topSeqPattern.filter(n => actualDraw.includes(n)).length;
     trials[AlgoKey.SEQUENCE_PATTERN] += 10;
 
-    // 21. Canal INTER_MONTHLY_RESONANCE (Périodicité mensuelle / jour de semaine)
-    const currentDay = sample[t].date ? new Date(sample[t].date).getDay() : 0;
+    // 21. Canal INTER_MONTHLY_RESONANCE (Périodicité mensuelle multi-échelles & harmoniques temporelles continues)
+    const targetDateObj = sample[t].date ? new Date(sample[t].date) : null;
+    const currentDay = targetDateObj ? targetDateObj.getDay() : 0;
+    const currentDom = targetDateObj ? targetDateObj.getDate() : 15;
     const interMonthlyScores = new Float32Array(91);
     for (let s = 0; s < subT; s++) {
-      const sDay = subHistory[s].date ? new Date(subHistory[s].date).getDay() : 0;
-      if (sDay === currentDay) {
-        subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) interMonthlyScores[n] += 1; });
+      const sDateObj = subHistory[s].date ? new Date(subHistory[s].date) : null;
+      if (sDateObj) {
+        const sDay = sDateObj.getDay();
+        const sDom = sDateObj.getDate();
+        // Distance angulaire intra-mensuelle continue sur 30.44 jours
+        const aDomTarget = (2.0 * Math.PI * (currentDom - 1)) / 30.43685;
+        const aDomSource = (2.0 * Math.PI * (sDom - 1)) / 30.43685;
+        const diffDom = Math.abs(aDomTarget - aDomSource) % (2.0 * Math.PI);
+        const distDom = Math.min(diffDom, 2.0 * Math.PI - diffDom);
+        const domHarmonic = Math.exp(-0.5 * Math.pow(distDom / ((2.0 * Math.PI * 3.5) / 30.43685), 2));
+
+        // Harmonique jour de la semaine continue
+        const dowDiff = Math.abs(currentDay - sDay);
+        const dowHarmonic = Math.pow(Math.cos((Math.PI * dowDiff) / 7.0), 2);
+
+        // Amortissement temporel continu sans coupure brusque
+        const timeDecay = Math.exp(-s / 25.0);
+        const weight = (0.6 * domHarmonic + 0.4 * dowHarmonic) * timeDecay;
+
+        if (weight > 0.05) {
+          subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) interMonthlyScores[n] += weight; });
+        }
       }
     }
     const topMonthly = [...numIndices].sort((a, b) => interMonthlyScores[b] - interMonthlyScores[a]).slice(0, 10);
@@ -525,15 +547,36 @@ export const evaluateAlgoEmpiricalProof = (
       // Aucun essai si le tirage ne contient aucune donnée machine
       trials[AlgoKey.MACHINE_TRANSFER] += 10;
     }
+
+    // 24. Canal INTER_DRAW_RESONANCE (Report direct, miroirs décimaux et compléments 91)
+    const interDrawScores = new Float32Array(91);
+    if (lastWinners.length > 0) {
+      lastWinners.forEach(n => {
+        if (n >= 1 && n <= 90) {
+          interDrawScores[n] += 1.8; // Carry-over direct continu
+          // Miroir décimal
+          const d1 = Math.floor(n / 10);
+          const d2 = n % 10;
+          const mir = d2 * 10 + d1;
+          if (mir >= 1 && mir <= 90 && mir !== n) interDrawScores[mir] += 1.1;
+          // Complément 91
+          const comp = 91 - n;
+          if (comp >= 1 && comp <= 90 && comp !== n) interDrawScores[comp] += 1.0;
+        }
+      });
+    }
+    const topInterDraw = [...numIndices].sort((a, b) => interDrawScores[b] - interDrawScores[a]).slice(0, 10);
+    hits[AlgoKey.INTER_DRAW_RESONANCE] += topInterDraw.filter(n => actualDraw.includes(n)).length;
+    trials[AlgoKey.INTER_DRAW_RESONANCE] += 10;
   }
 
-  // Vérification de la présence effective de données machine sur l'historique du tirage
-  const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  // Vérification stricte de la présence de numéros machine sur le tirage
+  const hasMachine = drawHasMachineNumbers(drawName, sample);
 
   // Calcul du score de preuve empirique objectif Z-score
   validKeys.forEach(k => {
     // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
-    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
       hits[k] = 0;
       trials[k] = Math.max(10, sample.length * 10);
     }
@@ -544,7 +587,7 @@ export const evaluateAlgoEmpiricalProof = (
     const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / t) || 0.01;
     const zScore = (rate - baselineRate) / stdErr;
     const proofScore = zScore * confidence;
-    const hasProof = proofScore > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachineDataInHistory);
+    const hasProof = proofScore > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
 
     result[k] = {
       hasProof,
@@ -591,11 +634,11 @@ export const computeChronologicalAlgoReinforcement = (
   const T = sample.length;
   const sampleConfidence = Math.tanh(T / 30.0);
 
-  // 2. Application de la règle : AUCUNE priorité sans preuve
-  const hasMachineDataInHistory = sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+  // 2. Application de la règle : AUCUNE priorité sans preuve & Zéro Transfert Machine si tirage sans machine
+  const hasMachine = drawHasMachineNumbers(drawName, sample);
   const reinforced: Record<string, number> = {};
   validKeys.forEach(k => {
-    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
       reinforced[k] = 0.0; // Poids nul si aucune donnée machine enregistrée sur ce tirage
       return;
     }
@@ -889,10 +932,26 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
 const weightsCache = new Map<string, { weights: AlgoWeights; timestamp: number }>();
 const CACHE_TTL_MS = 1000 * 30; // Cache weights for 30 seconds to deduplicate database queries
 
+/**
+ * Retourne la liste des clés d'algorithmes applicables pour un tirage.
+ * Les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine".
+ */
+export const getApplicableAlgoKeys = (
+  drawName?: string,
+  history?: DrawResult[]
+): AlgoKey[] => {
+  const hasMachine = drawHasMachineNumbers(drawName, history);
+  return Object.values(AlgoKey).filter(k => k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
+};
+
 export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => {
   const now = Date.now();
   const cached = weightsCache.get(drawName);
+  const hasMachine = drawHasMachineNumbers(drawName);
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    if (!hasMachine && cached.weights[AlgoKey.MACHINE_TRANSFER] !== 0) {
+      cached.weights = normalizeWeights({ ...cached.weights, [AlgoKey.MACHINE_TRANSFER]: 0 });
+    }
     return cached.weights;
   }
 
@@ -901,7 +960,7 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   let localUpdatedAt: Date | null = null;
 
   // 1. Lire les poids locaux depuis IndexedDB (Source de Vérité Locale)
-  if (typeof window !== 'undefined') {
+  if (typeof indexedDB !== 'undefined') {
     try {
       const parsed = await get<{ weights: Partial<AlgoWeights>; updatedAt?: string }>(`nexus_config_${drawName}`);
       if (parsed?.weights && Object.keys(parsed.weights).length > 0) {
@@ -919,17 +978,20 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     weightsCache.set(drawName, { weights: localMergedWeights, timestamp: now });
 
     // Revalidation asynchrone en arrière-plan pour ne pas bloquer le thread principal ni les transitions d'UI
-    if (isSupabaseConfigured() && navigator.onLine) {
+    if (typeof window !== 'undefined' && isSupabaseConfigured() && navigator.onLine) {
       (async () => {
         try {
           let remoteWeights: Partial<AlgoWeights> | null = null;
           let remoteUpdatedAt: Date | null = null;
 
-          const { data: adaptiveConfig } = await supabase
+          const fetchPromise = supabase
             .from('model_weights_config')
             .select('weights, updated_at')
             .eq('draw_name', drawName)
             .maybeSingle();
+
+          const timeoutPromise = new Promise<{ data: any }>((resolve) => setTimeout(() => resolve({ data: null }), 2000));
+          const { data: adaptiveConfig } = await Promise.race([fetchPromise, timeoutPromise]);
 
           if (adaptiveConfig?.weights) {
             remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
@@ -937,11 +999,12 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
               remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
             }
           } else {
-            const { data } = await supabase
+            const fetchLegacy = supabase
               .from('algo_weights')
               .select('weights, updated_at')
               .eq('draw_name', drawName)
               .maybeSingle();
+            const { data } = await Promise.race([fetchLegacy, timeoutPromise]);
 
             if (data?.weights) {
               remoteWeights = data.weights as Partial<AlgoWeights>;
@@ -964,10 +1027,12 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
               weightsCache.set(drawName, { weights: freshWeights, timestamp: Date.now() });
               
               // Mettre à jour le store si l'utilisateur est toujours sur ce tirage
-              const { useNexusStore } = await import('../../store/useNexusStore');
-              const activeDraw = useNexusStore.getState().drawName;
-              if (activeDraw === drawName) {
-                useNexusStore.getState().setGlobalWeights(freshWeights);
+              if (typeof window !== 'undefined') {
+                const { useNexusStore } = await import('../../store/useNexusStore');
+                const activeDraw = useNexusStore.getState().drawName;
+                if (activeDraw === drawName) {
+                  useNexusStore.getState().setGlobalWeights(freshWeights);
+                }
               }
             }
           }
@@ -980,17 +1045,19 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     return localMergedWeights;
   }
 
-  // Si aucun poids local n'est présent (premier démarrage ou cache vidé), on fait le fetch synchrone complet
+  // Si aucun poids local n'est présent (premier démarrage ou cache vidé), on fait le fetch synchrone complet avec timeout strict
   let remoteWeights: Partial<AlgoWeights> | null = null;
   let remoteUpdatedAt: Date | null = null;
 
-  if (isSupabaseConfigured() && navigator.onLine) {
+  if (isSupabaseConfigured() && typeof navigator !== 'undefined' && navigator.onLine) {
     try {
-      const { data: adaptiveConfig } = await supabase
+      const fetchAdaptive = supabase
         .from('model_weights_config')
         .select('weights, updated_at')
         .eq('draw_name', drawName)
         .maybeSingle();
+      const timeoutPromise = new Promise<{ data: any }>((resolve) => setTimeout(() => resolve({ data: null }), 2000));
+      const { data: adaptiveConfig } = await Promise.race([fetchAdaptive, timeoutPromise]);
 
       if (adaptiveConfig?.weights) {
         remoteWeights = adaptiveConfig.weights as Partial<AlgoWeights>;
@@ -998,11 +1065,12 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
           remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
         }
       } else {
-        const { data } = await supabase
+        const fetchLegacy = supabase
           .from('algo_weights')
           .select('weights, updated_at')
           .eq('draw_name', drawName)
           .maybeSingle();
+        const { data } = await Promise.race([fetchLegacy, timeoutPromise]);
 
         if (data?.weights) {
           remoteWeights = data.weights as Partial<AlgoWeights>;
@@ -1025,13 +1093,22 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
     } catch (e) { /* Silenced */ }
   }
 
+  if (!hasMachine) {
+    weights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+
   const finalWeights = normalizeWeights(weights);
   weightsCache.set(drawName, { weights: finalWeights, timestamp: now });
   return finalWeights;
 };
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
-  const normalized = normalizeWeights(weights);
+  const hasMachine = drawHasMachineNumbers(drawName);
+  const weightsToSave = { ...weights };
+  if (!hasMachine) {
+    weightsToSave[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const normalized = normalizeWeights(weightsToSave);
   // Update memory cache immediately
   weightsCache.set(drawName, { weights: normalized, timestamp: Date.now() });
 

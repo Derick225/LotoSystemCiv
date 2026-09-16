@@ -94,19 +94,22 @@ export const applyDeterministicMicroSgd = async (
 
   for (let t = K - 1; t >= 0; t--) {
     const targetDraw = history[t];
-    const subHistory = history.slice(t + 1);
-    if (subHistory.length < 5) continue;
+    const rawSubHistory = history.slice(t + 1);
+    if (rawSubHistory.length < 5) continue;
+
+    // Fenêtre temporelle locale dynamique pour l'estimation rapide et déterministe du gradient
+    const subHistory = rawSubHistory.slice(0, Math.min(60, rawSubHistory.length));
 
     const gagnants = targetDraw.gagnants;
     if (!gagnants || gagnants.length === 0) continue;
     attempted++;
 
     try {
-      // Bundle mémoïsé par hash du sous-historique
+      // Bundle mémoïsé par hash du sous-historique (mode allégé sans Hawkes spatio-temporel lourd pour le SGD intermédiaire)
       const subHash = `${subHistory.length}_${hashHistoryContent(subHistory)}`;
       let subMetrics = bundleCache.get(subHash);
       if (!subMetrics) {
-        subMetrics = await buildAlgoBundle(subHistory, drawName, useSpatioTemporalHawkes);
+        subMetrics = await buildAlgoBundle(subHistory, drawName, false);
         bundleCache.set(subHash, subMetrics);
       }
 

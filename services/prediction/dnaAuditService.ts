@@ -9,6 +9,7 @@ import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { computeAdvancedMetrics } from './advancedMetricsCalculator';
 import { extractFeatures } from './featureExtractor';
 import { logger } from '../../utils/logger';
+import { drawHasMachineNumbers } from '../../constants';
 
 export type AlgorithmDriftStatus = 'ALIGNED' | 'WEIGHT_DRIFT' | 'CACHE_STALE' | 'DESYNCHRONIZED';
 
@@ -111,9 +112,14 @@ export const runSystematicDnaAudit = async (
   currentWeights: AlgoWeights
 ): Promise<DnaAuditReport> => {
   const pureHistory = purifyHistoryForDraw(drawName, history);
-  const canonicalWeights = normalizeWeights(currentWeights || getDefaultWeights());
+  const hasMachine = drawHasMachineNumbers(drawName, pureHistory);
+  const baseWeightsToCanon = { ...(currentWeights || getDefaultWeights()) };
+  if (!hasMachine) {
+    baseWeightsToCanon[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const canonicalWeights = normalizeWeights(baseWeightsToCanon);
   const bounds = calculateStatisticalBounds(pureHistory);
-  const validKeys = Object.values(AlgoKey);
+  const validKeys = Object.values(AlgoKey).filter(k => k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
   const now = new Date().toISOString();
 
   // Signature globale de référence

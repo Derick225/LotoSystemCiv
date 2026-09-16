@@ -149,7 +149,16 @@ export const lotteryService = {
             
             query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
             
-            const { data, error } = await query;
+            // Timeout de protection réseau à 3500ms pour éviter tout blocage indéfini
+            const queryPromise = Promise.resolve(query);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Supabase request timeout after 3500ms')), 3500)
+            );
+
+            const { data, error } = (await Promise.race([queryPromise, timeoutPromise])) as {
+              data: any[] | null;
+              error: any;
+            };
             
             if (error) {
                 throw new AppError(getErrorMessage(error), 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });

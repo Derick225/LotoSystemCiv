@@ -1,6 +1,7 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { extractDrawNumbers } from '../featureExtractor';
+import { drawHasMachineNumbers } from '../../../constants';
 
 export const machineTransferPlugin: AlgorithmPlugin = {
   key: AlgoKey.MACHINE_TRANSFER,
@@ -10,7 +11,24 @@ export const machineTransferPlugin: AlgorithmPlugin = {
   description: 'Évalue la probabilité de transition conditionnelle et le carry-over cinématique entre le plateau Machine précédent et les numéros Gagnants.',
   isStrictlyDeterministic: true,
 
+  isApplicable(ctx) {
+    return drawHasMachineNumbers(ctx.drawName, ctx.history);
+  },
+
   precompute(ctx) {
+    if (!drawHasMachineNumbers(ctx.drawName, ctx.history)) {
+      ctx.pluginCache = ctx.pluginCache || {};
+      ctx.pluginCache[AlgoKey.MACHINE_TRANSFER] = {
+        median: 0,
+        iqr: 1,
+        directMachineSet: new Set(),
+        machineToWinnersWeights: new Float32Array(91),
+        sampleCount: 0,
+        hasMachineData: false,
+      };
+      return;
+    }
+
     const rawMap = ctx.features.machineTransferMap || new Float32Array(91);
     const domainMax = rawMap.length - 1;
     const values: number[] = [];
@@ -72,7 +90,7 @@ export const machineTransferPlugin: AlgorithmPlugin = {
     const cache = ctx.pluginCache?.[AlgoKey.MACHINE_TRANSFER];
     const rawVal = ctx.features.machineTransferMap?.[num] || 0;
 
-    if (!cache || !cache.hasMachineData) {
+    if (!cache || !cache.hasMachineData || !drawHasMachineNumbers(ctx.drawName, ctx.history)) {
       // Score nul et confiance nulle si le tirage ne possède pas de données machine
       return { score: 0.0, confidence: 0.0 };
     }

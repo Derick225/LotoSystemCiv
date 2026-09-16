@@ -4,13 +4,14 @@ import { sigmoid } from "./deterministicCore";
 import { ExtractedFeatures } from "./featureExtractor";
 import { denoiseFeaturesKernelPCA_wrapper } from "../mathService";
 import type { DrawResult } from "../../types";
-import { algorithmRegistry, AlgorithmContext } from "./algorithmRegistry";
+import { algorithmRegistry, AlgorithmContext, getAlgorithmsForContext } from "./algorithmRegistry";
 import './coreAlgorithms';
 import { EnhancedMetrics } from './metrics.types';
 import { normalizeWeights } from "./weightsManager";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { parseDateSafely } from "../../utils/dateUtils";
+import { drawHasMachineNumbers } from "../../constants";
 
 export interface ScoredNumber {
   num: number;
@@ -67,9 +68,13 @@ export const calculateScores = (
     maxMachineTransfer: Math.max(0.001, ...Array.from(features.machineTransferMap || []))
   };
 
-  // PRÉCALCUL DE RENDEMENT PHÉNOMÉNAL POUR TOUS LES PLUGINS UNIFIÉS (Séparation des responsabilités & Optimisation temporelle)
+  // Filtrage strict : les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine"
+  const hasMachine = drawHasMachineNumbers(context.drawName, history);
+  const activePlugins = getAlgorithmsForContext(context);
+
+  // PRÉCALCUL DE RENDEMENT PHÉNOMÉNAL POUR TOUS LES PLUGINS UNIFIÉS APPLICABLES (Séparation des responsabilités & Optimisation temporelle)
   context.pluginCache = {};
-  algorithmRegistry.forEach(plugin => {
+  activePlugins.forEach(plugin => {
     try {
       if (typeof plugin.precompute === 'function') {
         plugin.precompute(context);
@@ -81,6 +86,13 @@ export const calculateScores = (
 
   const failedAlgos = new Set<string>();
   let effectiveWeights = { ...weights };
+
+  // Exclusion absolue de MACHINE_TRANSFER si le tirage est sans machine
+  if (!hasMachine) {
+    effectiveWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+    effectiveWeights = normalizeWeights(effectiveWeights);
+  }
+
   const rawBreakdowns: Record<number, ScoreBreakdown> = {};
   const algoValues: Record<string, number[]> = {};
   Object.values(AlgoKey).forEach(k => { algoValues[k] = []; });
@@ -89,7 +101,10 @@ export const calculateScores = (
   for (let i = 1; i <= N; i++) {
     const num = i;
     rawBreakdowns[num] = {} as ScoreBreakdown;
-    algorithmRegistry.forEach(plugin => {
+    if (!hasMachine) {
+      rawBreakdowns[num][AlgoKey.MACHINE_TRANSFER] = 0;
+    }
+    activePlugins.forEach(plugin => {
       try {
         const res = plugin.evaluate(num, context);
         const val = res.score;
