@@ -1,6 +1,6 @@
 import { AlgoWeights } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
-import { getDefaultWeights, normalizeWeights } from './weightsManager';
+import { getDefaultWeights, normalizeWeights, saveAlgoWeights } from './weightsManager';
 import { getDeterministicUUID } from '../../utils/mathUtils';
 
 export type ModelDnaOrigin =
@@ -287,6 +287,9 @@ export const rollbackToModelDnaVersion = async (
   const history = await getModelDnaHistory(drawName, 60);
   const target = history.find(r => r.id === recordId);
   if (!target) return null;
+
+  // Persister les poids restaurés pour le tirage
+  await saveAlgoWeights(drawName, target.weights);
 
   // Créer un enregistrement de restauration
   const rollbackRecord = await recordModelDnaVersion({

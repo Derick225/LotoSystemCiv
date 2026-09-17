@@ -210,6 +210,154 @@ export class WasmMatrixEngine {
   }
 
   /**
+   * Calcul Vectorisé Rapide de l'Intensité du Processus Ponctuel de Hawkes Auto-Excitatif
+   * lambda(k, t) = mu_k + sum_{t_i < t} alpha_k * exp(-beta_k * (t - t_i))
+   */
+  public vectorizedHawkesIntensity(
+    drawsOccurrences: Int32Array, // Matrice aplatie: drawsCount x winningCols (numéros 1..90)
+    drawsCount: number,
+    winningCols: number = 5,
+    alpha: number = 0.65,
+    beta: number = 0.15,
+    numNumbers: number = 90
+  ): Float64Array {
+    const intensities = new Float64Array(numNumbers + 1);
+    const baseMu = 1.0 / numNumbers;
+
+    // Initialisation du niveau de base mu
+    for (let i = 1; i <= numNumbers; i++) {
+      intensities[i] = baseMu;
+    }
+
+    // Déroulement vectoriel optimisé avec décroissance exponentielle
+    for (let d = 0; d < drawsCount; d++) {
+      const dt = d + 1;
+      const decay = Math.exp(-beta * dt);
+      const rowOffset = d * winningCols;
+
+      for (let c = 0; c < winningCols; c++) {
+        const num = drawsOccurrences[rowOffset + c];
+        if (num >= 1 && num <= numNumbers) {
+          intensities[num] += alpha * decay;
+        }
+      }
+    }
+
+    return intensities;
+  }
+
+  /**
+   * Transformée de Fourier Rapide 1D/2D (Cooley-Tukey Radix-2 vectorisée sur Float64Array)
+   */
+  public vectorizedFFTPowerSpectrum(signal: Float64Array): Float64Array {
+    const len = signal.length;
+    let n = 1;
+    while (n < len) n <<= 1;
+
+    const real = new Float64Array(n);
+    const imag = new Float64Array(n);
+
+    // Copie avec fenêtrage de Hann vectorisé
+    for (let i = 0; i < len; i++) {
+      const w = 0.5 * (1.0 - Math.cos((2.0 * Math.PI * i) / Math.max(1, len - 1)));
+      real[i] = signal[i] * w;
+    }
+
+    // Bit-reversal
+    let j = 0;
+    for (let i = 0; i < n - 1; i++) {
+      if (i < j) {
+        const tr = real[i];
+        real[i] = real[j];
+        real[j] = tr;
+        const ti = imag[i];
+        imag[i] = imag[j];
+        imag[j] = ti;
+      }
+      let k = n >> 1;
+      while (k <= j) {
+        j -= k;
+        k >>= 1;
+      }
+      j += k;
+    }
+
+    // Radix-2 Butterfly
+    for (let lenStep = 2; lenStep <= n; lenStep <<= 1) {
+      const halfLen = lenStep >> 1;
+      const angle = (-2.0 * Math.PI) / lenStep;
+      const wStepR = Math.cos(angle);
+      const wStepI = Math.sin(angle);
+
+      for (let i = 0; i < n; i += lenStep) {
+        let wr = 1.0;
+        let wi = 0.0;
+        for (let k = 0; k < halfLen; k++) {
+          const uR = real[i + k];
+          const uI = imag[i + k];
+          const vR = real[i + k + halfLen] * wr - imag[i + k + halfLen] * wi;
+          const vI = real[i + k + halfLen] * wi + imag[i + k + halfLen] * wr;
+
+          real[i + k] = uR + vR;
+          imag[i + k] = uI + vI;
+          real[i + k + halfLen] = uR - vR;
+          imag[i + k + halfLen] = uI - vI;
+
+          const nextWr = wr * wStepR - wi * wStepI;
+          wi = wr * wStepI + wi * wStepR;
+          wr = nextWr;
+        }
+      }
+    }
+
+    // Calcul de la densité spectrale de puissance (PSD)
+    const halfN = (n >> 1) + 1;
+    const psd = new Float64Array(halfN);
+    for (let i = 0; i < halfN; i++) {
+      psd[i] = (real[i] * real[i] + imag[i] * imag[i]) / n;
+    }
+
+    return psd;
+  }
+
+  /**
+   * Descente de Gradient Vectorisée avec Momentum et Amortissement AdamW
+   */
+  public vectorizedAdamWStep(
+    weights: Float64Array,
+    gradients: Float64Array,
+    mState: Float64Array,
+    vState: Float64Array,
+    step: number,
+    lr: number = 0.01,
+    beta1: number = 0.9,
+    beta2: number = 0.999,
+    weightDecay: number = 0.01,
+    epsilon: number = 1e-8
+  ): void {
+    const len = weights.length;
+    const correction1 = 1.0 - Math.pow(beta1, step);
+    const correction2 = 1.0 - Math.pow(beta2, step);
+
+    for (let i = 0; i < len; i++) {
+      const g = gradients[i];
+      // Weight decay
+      weights[i] -= lr * weightDecay * weights[i];
+
+      // Moving averages of gradients
+      mState[i] = beta1 * mState[i] + (1.0 - beta1) * g;
+      vState[i] = beta2 * vState[i] + (1.0 - beta2) * g * g;
+
+      // Bias corrected estimates
+      const mHat = mState[i] / Math.max(1e-6, correction1);
+      const vHat = vState[i] / Math.max(1e-6, correction2);
+
+      // Gradient step
+      weights[i] += lr * (mHat / (Math.sqrt(vHat) + epsilon));
+    }
+  }
+
+  /**
    * Simulation Stochastique LCG Déterministe en mémoire rapide.
    */
   public stochasticLcgSimulate(count: number, seed: number): Float64Array {

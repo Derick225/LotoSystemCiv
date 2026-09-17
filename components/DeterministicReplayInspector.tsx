@@ -7,6 +7,8 @@ import {
   SkipBack,
   RefreshCw,
   Download,
+  Upload,
+  FileText,
   Trophy,
   Target,
   Activity,
@@ -19,6 +21,15 @@ import { generateMasterPrediction } from "../services/predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { audioEngine } from "../utils/audioEngine";
 import { useToast } from "./ui/Toast";
+import {
+  buildUnifiedForensicScenario,
+  exportUnifiedScenarioToJSON,
+  importUnifiedScenarioFromJSON,
+  reinjectScenarioIntoState,
+  extractMathProofMetadata,
+  MathematicalProofMetadata,
+} from "../services/forensic/forensicProofStandard";
+import { generateUnifiedForensicScenarioPDF } from "../services/exportService";
 
 export interface ReplayStepData {
   stepIndex: number;
@@ -30,6 +41,7 @@ export interface ReplayStepData {
   topologicalLoss: number;
   bankroll: number;
   confidence: number;
+  mathProofMetadata?: MathematicalProofMetadata;
 }
 
 export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
@@ -134,6 +146,14 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
         const pnl = unitBet * payoutMultiplier - unitBet;
         currentBankroll += pnl;
 
+        const mathProofMetadata = extractMathProofMetadata({
+          history: past,
+          weights: globalWeights,
+          suggestedNumbers: pred.suggestedNumbers,
+          actualWinners: target.gagnants,
+          topologicalLoss,
+        });
+
         generatedSteps.push({
           stepIndex: i + 1,
           drawDate: target.date,
@@ -144,6 +164,7 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
           topologicalLoss,
           bankroll: currentBankroll,
           confidence: pred.confidence,
+          mathProofMetadata,
         });
       }
 
@@ -200,21 +221,100 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
     return { totalHits, avgHits, successRate, finalPnl, avgTopoLoss };
   }, [steps, initialBankroll]);
 
-  const exportReplayJson = () => {
+  const handleExportUniversalJSON = () => {
     if (steps.length === 0) return;
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(steps, null, 2));
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute(
-      "download",
-      `Deterministic_Replay_${drawName}_${new Date().toISOString().slice(0, 10)}.json`,
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+    audioEngine.play("click");
+    const activeOrLastStep = activeStep || steps[steps.length - 1];
+    const mathMeta = activeOrLastStep.mathProofMetadata || extractMathProofMetadata({
+      history: cleanHistory,
+      weights: globalWeights,
+      suggestedNumbers: activeOrLastStep.predicted,
+      actualWinners: activeOrLastStep.actual,
+      topologicalLoss: activeOrLastStep.topologicalLoss,
+    });
+
+    const scenario = buildUnifiedForensicScenario({
+      scenarioType: 'DETERMINISTIC_REPLAY',
+      drawName,
+      appliedWeights: globalWeights,
+      mathMetadata: mathMeta,
+      summary: {
+        hitRate: Number(replaySummary?.successRate || 0),
+        accuracyScore: Number(replaySummary?.avgHits || 0) * 20,
+        sampleCount: steps.length,
+        regime: 'DETERMINISTIC_REPLAY',
+        causalAuditTrail: [
+          `Replay déterministe sur ${steps.length} tirages`,
+          `Moyenne hits : ${replaySummary?.avgHits} / 5`,
+          `PnL Final : ${replaySummary?.finalPnl} FCFA`,
+          `Perte topologique moyenne : ${replaySummary?.avgTopoLoss}`,
+        ],
+      },
+      payload: { steps, summary: replaySummary },
+    });
+
+    exportUnifiedScenarioToJSON(scenario);
+    showToast("Scénario de Replay exporté en JSON", "success");
   };
+
+  const handleExportUniversalPDF = async () => {
+    if (steps.length === 0) return;
+    try {
+      audioEngine.play("click");
+      const activeOrLastStep = activeStep || steps[steps.length - 1];
+      const mathMeta = activeOrLastStep.mathProofMetadata || extractMathProofMetadata({
+        history: cleanHistory,
+        weights: globalWeights,
+        suggestedNumbers: activeOrLastStep.predicted,
+        actualWinners: activeOrLastStep.actual,
+        topologicalLoss: activeOrLastStep.topologicalLoss,
+      });
+
+      const scenario = buildUnifiedForensicScenario({
+        scenarioType: 'DETERMINISTIC_REPLAY',
+        drawName,
+        appliedWeights: globalWeights,
+        mathMetadata: mathMeta,
+        summary: {
+          hitRate: Number(replaySummary?.successRate || 0),
+          accuracyScore: Number(replaySummary?.avgHits || 0) * 20,
+          sampleCount: steps.length,
+          regime: 'DETERMINISTIC_REPLAY',
+          causalAuditTrail: [
+            `Replay déterministe sur ${steps.length} tirages`,
+            `Moyenne hits : ${replaySummary?.avgHits} / 5`,
+            `PnL Final : ${replaySummary?.finalPnl} FCFA`,
+            `Perte topologique moyenne : ${replaySummary?.avgTopoLoss}`,
+          ],
+        },
+        payload: { steps, summary: replaySummary },
+      });
+
+      await generateUnifiedForensicScenarioPDF(scenario);
+      showToast("Rapport de Replay exporté en PDF", "success");
+    } catch (err: any) {
+      showToast("Erreur lors de l'exportation PDF : " + err.message, "error");
+    }
+  };
+
+  const handleImportUniversalJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      audioEngine.play("scan");
+      const scenario = await importUnifiedScenarioFromJSON(file);
+      const res = await reinjectScenarioIntoState(scenario, cleanHistory);
+      showToast(res.message, "success");
+      audioEngine.play("success");
+    } catch (err: any) {
+      showToast(err.message || "Échec de l'importation du scénario", "error");
+      audioEngine.play("error");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  const exportReplayJson = handleExportUniversalJSON;
 
   return (
     <div className="bg-slate-950 p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-2xl space-y-8">
@@ -346,12 +446,36 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
               ))}
 
               <button
-                onClick={exportReplayJson}
-                className="ml-2 p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
-                title="Exporter le Replay en JSON"
+                onClick={handleExportUniversalJSON}
+                className="ml-2 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                title="Exporter le Replay en JSON Universel"
               >
-                <Download size={14} />
+                <Download size={13} className="text-cyan-400" />
+                <span>JSON</span>
               </button>
+
+              <button
+                onClick={handleExportUniversalPDF}
+                className="px-2.5 py-1.5 bg-fuchsia-950/60 hover:bg-fuchsia-900/60 text-fuchsia-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 border border-fuchsia-800/40 cursor-pointer"
+                title="Exporter le Rapport de Replay en PDF Universel"
+              >
+                <FileText size={13} className="text-fuchsia-400" />
+                <span>PDF</span>
+              </button>
+
+              <label
+                className="px-2.5 py-1.5 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 border border-indigo-800/40 cursor-pointer"
+                title="Importer et Réinjecter un Scénario Forensique"
+              >
+                <Upload size={13} className="text-indigo-400" />
+                <span>Réinjecter</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportUniversalJSON}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 
@@ -413,6 +537,48 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
               </div>
             </div>
           </div>
+
+          {/* STANDARD MATHEMATICAL PROOF METADATA (ISO/IEC 12.0) */}
+          {activeStep.mathProofMetadata && (
+            <div className="bg-slate-900/80 p-5 rounded-2xl border border-indigo-500/20 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck size={13} className="text-cyan-400" />
+                  Preuves Mathématiques Standardisées de l'Étape (Shannon, Hurst, Hawkes, SHAP)
+                </span>
+                <span className="text-[9px] font-mono text-slate-500">
+                  Zéro Nombre Magique &bull; 100% Déterministe
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
+                  <span className="text-[8px] uppercase text-slate-500 block">Entropie Shannon</span>
+                  <span className="text-xs font-black text-indigo-300">
+                    {activeStep.mathProofMetadata.shannonEntropy.toFixed(4)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
+                  <span className="text-[8px] uppercase text-slate-500 block">Exposant Hurst</span>
+                  <span className="text-xs font-black text-emerald-300">
+                    {activeStep.mathProofMetadata.hurstExponent.toFixed(4)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
+                  <span className="text-[8px] uppercase text-slate-500 block">Intensité Hawkes λ</span>
+                  <span className="text-xs font-black text-cyan-300">
+                    {activeStep.mathProofMetadata.hawkesIntensity.toFixed(4)}
+                  </span>
+                </div>
+                <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
+                  <span className="text-[8px] uppercase text-slate-500 block">Discrépance Weyl</span>
+                  <span className="text-xs font-black text-amber-300">
+                    {activeStep.mathProofMetadata.weylDiscrepancy.toFixed(4)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* REPLAY SUMMARY CARDS */}
           {replaySummary && (

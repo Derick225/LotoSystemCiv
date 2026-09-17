@@ -86,7 +86,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       label: "Historique ADN des Numéros Gagnants",
       icon: <Dna size={16} />,
       group: "Navigation",
-      action: () => onNavigate("DnaHistory"),
+      action: () => {
+        window.dispatchEvent(
+          new CustomEvent("CROSS_MODULE_NAVIGATE", {
+            detail: { view: "home", mainTab: "Forensic", subTab: "history_dna" },
+          }),
+        );
+      },
     },
     {
       id: "sys-scan",

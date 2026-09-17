@@ -268,9 +268,11 @@ export const useNexusStore = create<NexusState>()(
         } else if (lower === "forensic" || lower === "audit" || lower === "autopsy") {
           targetMain = "Forensic";
         } else if (lower === "genomique" || lower === "genomic") {
-          targetMain = "Genomique";
+          targetMain = "Forensic";
+          if (!targetSub) targetSub = "dna";
         } else if (lower === "dnahistory" || lower === "dna" || lower === "dna_history") {
-          targetMain = "DnaHistory";
+          targetMain = "Forensic";
+          targetSub = "history_dna";
         } else if (lower === "admin") {
           targetMain = "admin";
         }

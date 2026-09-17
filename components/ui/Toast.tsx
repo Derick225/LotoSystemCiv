@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { X, CheckCircle, AlertCircle, Info } from "lucide-react";
+import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from "lucide-react";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = "success" | "error" | "info" | "warning";
 
 interface Toast {
   id: string;
@@ -47,6 +47,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
         return <CheckCircle size={18} className="text-emerald-500" />;
       case "error":
         return <AlertCircle size={18} className="text-rose-500" />;
+      case "warning":
+        return <AlertTriangle size={18} className="text-amber-500" />;
       default:
         return <Info size={18} className="text-indigo-500" />;
     }
@@ -58,6 +60,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
         return "border-emerald-500/50 bg-slate-900/90 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)] border";
       case "error":
         return "border-rose-500/50 bg-slate-900/90 text-white shadow-[0_0_15px_rgba(244,63,94,0.2)] border";
+      case "warning":
+        return "border-amber-500/50 bg-slate-900/90 text-white shadow-[0_0_15px_rgba(245,158,11,0.2)] border";
       default:
         return "border-indigo-500/50 bg-slate-900/90 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)] border";
     }

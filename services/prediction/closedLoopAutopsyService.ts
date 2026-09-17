@@ -7,10 +7,12 @@ import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
 import { calculateStatisticalBounds, calculateTemporalDriftLearningRate, TemporalDriftLearningRateResult } from '../mathService';
 import { normalizeWeights, evaluateAlgoEmpiricalProof, saveAlgoWeights } from './weightsManager';
 import { recordModelDnaVersion, ModelDnaRecord } from './modelDnaKnowledgeBase';
+import { applyOptimizedWeights } from './optimizationController';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
 import { parseDateSafely } from '../../utils/dateUtils';
 import { generateProbabilisticScenarioMatrix, SimulationScenarioItem } from './predictionScenarios';
+import { extractMathProofMetadata, MathematicalProofMetadata } from '../forensic/forensicProofStandard';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -70,6 +72,7 @@ export interface ClosedLoopAutopsyReport {
   temporalDriftMetrics?: TemporalDriftLearningRateResult;
   scenarioEvaluations?: ScenarioPostMortemEvaluation[];
   bestPerformingScenario?: ScenarioPostMortemEvaluation;
+  mathProofMetadata?: MathematicalProofMetadata;
 }
 
 /**
@@ -446,7 +449,7 @@ export const executeClosedLoopAutopsy = async (
   }
   const bestPerformingScenario = scenarioEvaluations[0];
 
-  // 9. Synthèse Narrative Enrichie
+  // 9. Synthèse Narrative Enrichie & Métadonnées Standardisées
   let summaryRemark = `Autopsie rétrospective du ${targetDraw.date} (${cyclicPhaseProfile.phaseLabel}) : `;
   if (directHitsTop5.length >= 2) {
     summaryRemark += `Excellente résonance prédictive avec ${directHitsTop5.length} gagnants capturés directement dans le Top 5 (${directHitsTop5.join(', ')}). `;
@@ -460,6 +463,15 @@ export const executeClosedLoopAutopsy = async (
   }
   summaryRemark += `Taux d'apprentissage η(t) = ${(learningRate * 100).toFixed(2)}% (Résistance dérive: ${(temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%). `;
   summaryRemark += `Gènes leaders sur ce tirage : ${algoGradients.slice(0, 3).map((g) => g.label).join(', ')}.`;
+
+  const mathProofMetadata = extractMathProofMetadata({
+    history: priorHistory,
+    weights: normalizedCurrent,
+    algoGradients,
+    suggestedNumbers: top5Predicted,
+    actualWinners,
+    brierScore,
+  });
 
   return {
     drawName,
@@ -486,6 +498,7 @@ export const executeClosedLoopAutopsy = async (
     temporalDriftMetrics,
     scenarioEvaluations,
     bestPerformingScenario,
+    mathProofMetadata,
   };
 };
 
@@ -610,47 +623,59 @@ export const executeClosedLoopAutoAdjustment = async (
     causalAuditTrail.push(`Contexte : ${options.auditContext}`);
   }
 
-  // 4. Enregistrement automatique de la nouvelle version dans la base de connaissances ADN
-  const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
-  const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
-  const versionId = `v_autopsy_${drawDateSafe}`;
-
-  const dnaRecord = await recordModelDnaVersion({
-    drawName,
-    version: versionId,
-    timestamp: options?.timestamp || deterministicTimestamp,
-    origin: 'FORENSIC_AUTOPSY',
-    weights: optimizedNormalized,
-    performance: {
-      score: autopsyReport.calibrationAccuracy,
-      brierScore: autopsyReport.brierScore,
-      hitRate: autopsyReport.directHitsTop5.length / 5.0,
-      topologicalLoss: autopsyReport.klDivergence,
-      relativeGain: ((autopsyReport.calibrationAccuracy - 50) / 50) * 100,
-    },
-    regimeContext: {
-      regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
-      hurst: autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 0.5,
-      entropy: autopsyReport.crossEntropy ?? 1.0,
-    },
-    causalAuditTrail,
-  });
-
-  // 5. Persistance et diffusion si non-dryRun
+  // 4. Enregistrement automatique et persistance via le Contrôleur d'Optimisation Centralisé
   const appliedDirectly = !options?.dryRun;
+  let finalAppliedWeights = optimizedNormalized;
+  let dnaRecord: ModelDnaRecord;
+
   if (appliedDirectly) {
-    await saveAlgoWeights(drawName, optimizedNormalized);
-    if (typeof window !== 'undefined') {
-      try {
-        const { useNexusStore } = await import('../../store/useNexusStore');
-        const activeDraw = useNexusStore.getState().drawName;
-        if (activeDraw === drawName) {
-          useNexusStore.getState().setGlobalWeights(optimizedNormalized);
-        }
-      } catch (err) {
-        // Safe fallback in test or headless env
-      }
-    }
+    const optResult = await applyOptimizedWeights({
+      drawName,
+      weights: optimizedNormalized,
+      origin: 'FORENSIC_AUTOPSY',
+      performance: {
+        score: autopsyReport.calibrationAccuracy,
+        brierScore: autopsyReport.brierScore,
+        hitRate: autopsyReport.directHitsTop5.length / 5.0,
+        topologicalLoss: autopsyReport.klDivergence,
+        relativeGain: ((autopsyReport.calibrationAccuracy - 50) / 50) * 100,
+      },
+      regimeContext: {
+        regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
+        hurst: autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 0.5,
+        entropy: autopsyReport.crossEntropy ?? 1.0,
+      },
+      causalAuditTrail,
+      reason: `Autopsie fermée tirage ${targetDraw.date}`,
+      allowCriticalDrift: false,
+    });
+    dnaRecord = optResult.dnaRecord;
+    finalAppliedWeights = optResult.appliedWeights;
+  } else {
+    const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
+    const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
+    const versionId = `v_autopsy_${drawDateSafe}`;
+
+    dnaRecord = await recordModelDnaVersion({
+      drawName,
+      version: versionId,
+      timestamp: options?.timestamp || deterministicTimestamp,
+      origin: 'FORENSIC_AUTOPSY',
+      weights: optimizedNormalized,
+      performance: {
+        score: autopsyReport.calibrationAccuracy,
+        brierScore: autopsyReport.brierScore,
+        hitRate: autopsyReport.directHitsTop5.length / 5.0,
+        topologicalLoss: autopsyReport.klDivergence,
+        relativeGain: ((autopsyReport.calibrationAccuracy - 50) / 50) * 100,
+      },
+      regimeContext: {
+        regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
+        hurst: autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 0.5,
+        entropy: autopsyReport.crossEntropy ?? 1.0,
+      },
+      causalAuditTrail,
+    });
   }
 
   const accuracyGainEstimated = parseFloat(
@@ -662,7 +687,7 @@ export const executeClosedLoopAutoAdjustment = async (
     targetDrawDate: targetDraw.date,
     autopsyReport,
     previousWeights: initialNormalized,
-    optimizedWeights: optimizedNormalized,
+    optimizedWeights: finalAppliedWeights,
     dnaRecord,
     causalAuditTrail,
     learningRate: effectiveLearningRate,

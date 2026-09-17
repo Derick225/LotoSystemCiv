@@ -121,6 +121,24 @@ export const calculateShannonEntropy = (probabilities: number[]): number => {
 };
 
 /**
+ * Calcul de la moyenne arithmétique empirique.
+ */
+export const calculateMean = (values: number[]): number => {
+    if (!values || values.length === 0) return 0;
+    return values.reduce((acc, v) => acc + v, 0) / values.length;
+};
+
+/**
+ * Calcul de la variance empirique d'un vecteur de valeurs numériques continues.
+ */
+export const calculateVariance = (values: number[]): number => {
+    if (!values || values.length < 2) return 0;
+    const mean = calculateMean(values);
+    const sumSquareDiff = values.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0);
+    return sumSquareDiff / values.length;
+};
+
+/**
  * Mapping d'étalement : Softmax sur un vecteur de tenseurs sans utiliser `Math.random()`.
  */
 export const softmax = (logits: number[]): number[] => {

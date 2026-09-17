@@ -4,6 +4,7 @@ import { generateMasterPrediction } from "./predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useNexusStore } from "../store/useNexusStore";
 import { getPayoutMultiplier } from "../constants";
+import { extractMathProofMetadata, MathematicalProofMetadata } from "./forensic/forensicProofStandard";
 
 export type BettingStrategy = "FLAT" | "MARTINGALE" | "KELLY" | "CONFIDENCE_SMART";
 
@@ -19,6 +20,7 @@ export interface BacktestReport {
   recoveryFactor: number; // NOUVEAU
   bankruptcyDraw: number | null;
   strategy: BettingStrategy;
+  mathProofMetadata?: MathematicalProofMetadata;
   history: {
     date: string;
     balance: number;
@@ -237,6 +239,14 @@ export async function runSimulationCore(config: SimulationConfig) {
   const maxDrawdownMonetary = INITIAL_BANKROLL * maxDrawdown; // approximation
   const recoveryFactor = maxDrawdownMonetary === 0 ? (netProfit > 0 ? 999 : 0) : netProfit / maxDrawdownMonetary;
 
+  const mathProofMetadata = extractMathProofMetadata({
+    history,
+    weights,
+    suggestedNumbers: [],
+    actualWinners: [],
+    topologicalLoss: maxDrawdown,
+  });
+
   return {
     totalDraws: depth,
     netProfit,
@@ -250,5 +260,6 @@ export async function runSimulationCore(config: SimulationConfig) {
     bankruptcyDraw: bankruptcyAt,
     strategy,
     history: simHistory,
+    mathProofMetadata,
   };
 }

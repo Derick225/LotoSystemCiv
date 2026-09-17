@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { useToast } from "./ui/Toast";
 import { getUserFriendlyError } from "../utils/errorHandler";
-import { logError } from "../utils/AppError";
+import { logError, AppError } from "../utils/AppError";
 
 export const GlobalErrorListener: React.FC = () => {
   const { showToast } = useToast();
@@ -16,13 +16,19 @@ export const GlobalErrorListener: React.FC = () => {
       if (event.message === "Script error.") return;
 
       const rawMsg = event.message || (event.error instanceof Error ? event.error.message : String(event.error || ""));
-      const isNetwork = rawMsg.toLowerCase().includes("fetch") || rawMsg.toLowerCase().includes("network") || rawMsg.toLowerCase().includes("failed to fetch");
+      const isNetwork =
+        rawMsg.toLowerCase().includes("fetch") ||
+        rawMsg.toLowerCase().includes("network") ||
+        rawMsg.toLowerCase().includes("failed to fetch") ||
+        rawMsg.toLowerCase().includes("timeout") ||
+        rawMsg.toLowerCase().includes("timed out") ||
+        rawMsg.toLowerCase().includes("abort");
 
       // Prévenir la propagation d'erreur non capturée au runtime global du conteneur
       event.preventDefault();
 
       const friendlyMsg = getUserFriendlyError(event.error || event.message);
-      logError(event.error || new Error(event.message), {
+      logError(event.error || new AppError(event.message, "GLOBAL_ERROR", isNetwork ? "low" : "medium"), {
         source: "GlobalErrorListener",
         severity: isNetwork ? "low" : "medium",
       });
@@ -40,7 +46,13 @@ export const GlobalErrorListener: React.FC = () => {
 
       const reason = event.reason;
       const rawMsg = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
-      const isNetwork = rawMsg.toLowerCase().includes("fetch") || rawMsg.toLowerCase().includes("network") || rawMsg.toLowerCase().includes("failed to fetch") || rawMsg.toLowerCase().includes("abort");
+      const isNetwork =
+        rawMsg.toLowerCase().includes("fetch") ||
+        rawMsg.toLowerCase().includes("network") ||
+        rawMsg.toLowerCase().includes("failed to fetch") ||
+        rawMsg.toLowerCase().includes("timeout") ||
+        rawMsg.toLowerCase().includes("timed out") ||
+        rawMsg.toLowerCase().includes("abort");
 
       if (isNetwork) {
         console.warn("[GlobalErrorListener] Rejet asynchrone réseau neutralisé :", rawMsg);

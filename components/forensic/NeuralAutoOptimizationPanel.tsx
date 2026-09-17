@@ -89,29 +89,28 @@ export const NeuralAutoOptimizationPanel: React.FC<NeuralAutoOptimizationPanelPr
     if (onApplyWeights) {
       onApplyWeights(result.optimizedWeights);
     } else {
-      await updateGlobalWeights(result.optimizedWeights, drawName);
-      await refreshData(drawName, true);
-    }
-
-    // Archivage dans la lignée ADN
-    try {
-      const { recordModelDnaVersion } = await import('../../services/prediction/modelDnaKnowledgeBase');
-      await recordModelDnaVersion({
-        drawName,
-        origin: 'SGD_CYBERNETIC',
-        weights: result.optimizedWeights,
-        performance: {
-          score: result.finalAccuracy,
-          relativeGain: result.accuracyGain,
-          rmse: result.finalLoss,
-        },
-        causalAuditTrail: [
-          `Rétropropagation neurale exécutée sur ${drawName} (${result.epochsCompleted} époques)`,
-          `Réduction de perte: ${result.lossReductionPct.toFixed(1)}%, Gain de précision: +${result.accuracyGain.toFixed(1)}%`,
-        ],
-      });
-    } catch (err) {
-      console.warn('[NeuralAutoOptimizationPanel] Erreur archivage ADN :', err);
+      try {
+        const { applyOptimizedWeights } = await import('../../services/prediction/optimizationController');
+        await applyOptimizedWeights({
+          drawName,
+          weights: result.optimizedWeights,
+          origin: 'SGD_CYBERNETIC',
+          performance: {
+            score: result.finalAccuracy,
+            relativeGain: result.accuracyGain,
+            rmse: result.finalLoss,
+          },
+          causalAuditTrail: [
+            `Rétropropagation neurale exécutée sur ${drawName} (${result.epochsCompleted} époques)`,
+            `Réduction de perte: ${result.lossReductionPct.toFixed(1)}%, Gain de précision: +${result.accuracyGain.toFixed(1)}%`,
+          ],
+          reason: `Auto-optimisation Cybernétique SGD (${result.epochsCompleted} époques)`,
+          history,
+        });
+        await refreshData(drawName, true);
+      } catch (err) {
+        console.warn('[NeuralAutoOptimizationPanel] Erreur application ADN :', err);
+      }
     }
 
     setApplied(true);

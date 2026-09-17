@@ -1,7 +1,8 @@
 import { PlatinumResult, DrawResult, SymbioticContext, PlatinumScenario, PlatinumAudit, Prediction, PlatinumUserOptions, ForensicReport } from '../types';
 import { get, set } from 'idb-keyval';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { getAlgoWeights, generateMasterPrediction } from './predictionEngine';
+import { getAlgoWeights } from './predictionEngine';
+import { generateMasterPredictionCore } from './prediction/predictionFacade';
 import { useNexusStore } from '../store/useNexusStore';
 import { extractFeatures } from './prediction/featureExtractor';
 import { getLocalForensicReports } from './postPredictionAnalysisService';
@@ -154,7 +155,7 @@ export async function generatePlatinumPredictionCore(
     _basePrediction?: Prediction,
     onProgress?: (progress: number, message: string) => void,
     temporalDepth?: number,
-    _useSpatioTemporalHawkes: boolean = true,
+    useSpatioTemporalHawkes: boolean = true,
     preloadedForensicReports?: ForensicReport[]
 ): Promise<PlatinumResult> {
     // 0. ISOLATION ABSOLUE DU TIRAGE
@@ -171,11 +172,11 @@ export async function generatePlatinumPredictionCore(
     };
 
     // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS
-    const storeWeights = useNexusStore.getState().globalWeights;
+    const storeWeights = typeof window !== 'undefined' ? (useNexusStore?.getState()?.globalWeights) : undefined;
     const weights = (storeWeights && Object.keys(storeWeights).length > 0) ? storeWeights : await getAlgoWeights(drawName);
-    const finalTemporalDepth = temporalDepth ?? useNexusStore.getState().temporalDepth ?? 100;
+    const finalTemporalDepth = temporalDepth ?? (typeof window !== 'undefined' ? useNexusStore?.getState()?.temporalDepth : 100) ?? 100;
     
-    const masterPred = await generateMasterPrediction(
+    const masterPred = _basePrediction || await generateMasterPredictionCore(
         drawName,
         history,
         finalTemporalDepth,
@@ -186,7 +187,9 @@ export async function generatePlatinumPredictionCore(
         false,
         undefined,
         false,
-        (p, msg) => { onProgress?.(Math.round(p * 0.65), msg); }
+        useSpatioTemporalHawkes ?? true,
+        (p, msg) => { onProgress?.(Math.round(p * 0.65), msg); },
+        preloadedForensicReports
     );
 
     const breakdowns = masterPred.breakdown || {};

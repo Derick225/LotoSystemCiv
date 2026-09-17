@@ -45,6 +45,7 @@ import {
   ModelDnaRecord,
   ModelEvolutionLineage,
 } from "../../services/prediction/modelDnaKnowledgeBase";
+import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import {
   runSystematicDnaAudit,
   DnaAuditReport,
@@ -53,11 +54,12 @@ import {
 import { calculateFusion } from "../../services/fusionService";
 import { DnaPerformanceDriftPanel } from "./DnaPerformanceDriftPanel";
 
+export type ActiveViewTab = "weights" | "dna_lineage" | "tripartite_fusion" | "dna_drift";
+
 interface ModelFusionPanelProps {
   selectedDrawName: string;
+  initialTab?: ActiveViewTab;
 }
-
-type ActiveViewTab = "weights" | "dna_lineage" | "tripartite_fusion" | "dna_drift";
 
 const CATEGORY_MAP: Record<string, { label: string; keys: AlgoKey[]; color: string }> = {
   core: {
@@ -112,6 +114,7 @@ const CATEGORY_MAP: Record<string, { label: string; keys: AlgoKey[]; color: stri
 
 export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   selectedDrawName,
+  initialTab,
 }) => {
   const { showToast } = useToast();
 
@@ -125,7 +128,13 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
 
   // Local State
-  const [activeTab, setActiveTab] = useState<ActiveViewTab>("weights");
+  const [activeTab, setActiveTab] = useState<ActiveViewTab>(initialTab || "weights");
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   const [weights, setWeights] = useState<AlgoWeights>({} as AlgoWeights);
   const [lockedKeys, setLockedKeys] = useState<Set<AlgoKey>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
@@ -300,15 +309,10 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     audioEngine.play("success");
     setIsSaving(true);
     try {
-      const normalized = normalizeWeights(weights);
-      await saveAlgoWeights(selectedDrawName, normalized);
-
-      // Auto-record evolution version
-      await recordModelDnaVersion({
+      const optResult = await applyOptimizedWeights({
         drawName: selectedDrawName,
+        weights,
         origin: "MANUAL_CALIBRATION",
-        weights: normalized,
-        version: `fusion_${Date.now()}`,
         performance: {
           score: auditReport?.coherenceScore || 85,
           relativeGain: 0,
@@ -316,17 +320,19 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         causalAuditTrail: [
           `Calibration manuelle depuis le panneau de Fusion de Modèles Admin.`,
         ],
+        reason: `Fusion de Modèles Admin (${selectedDrawName})`,
+        allowCriticalDrift: true,
+        history,
       });
 
       if (selectedDrawName === activeDrawName) {
-        await updateGlobalWeights(normalized);
         await refreshData(selectedDrawName, true);
       }
 
-      setWeights(normalized);
+      setWeights(optResult.appliedWeights);
       setIsDirty(false);
       showToast(
-        `Poids de fusion enregistrés pour [${selectedDrawName}]`,
+        `Poids de fusion enregistrés pour [${selectedDrawName}] (${optResult.fingerprint})`,
         "success"
       );
       // Reload history
@@ -379,13 +385,23 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const handleRollbackVersion = async (record: ModelDnaRecord) => {
     audioEngine.play("scan");
     try {
-      const targetWeights = normalizeWeights(record.weights);
-      setWeights(targetWeights);
-      setIsDirty(true);
-      await saveAlgoWeights(selectedDrawName, targetWeights);
+      const optResult = await applyOptimizedWeights({
+        drawName: selectedDrawName,
+        weights: record.weights,
+        origin: "MANUAL_CALIBRATION",
+        performance: record.performance,
+        causalAuditTrail: [
+          `Rollback vers la version ADN ${record.version} (${record.timestamp})`,
+        ],
+        reason: `Restauration ADN ${record.version}`,
+        allowCriticalDrift: true,
+        history,
+      });
+
+      setWeights(optResult.appliedWeights);
+      setIsDirty(false);
 
       if (selectedDrawName === activeDrawName) {
-        await updateGlobalWeights(targetWeights);
         await refreshData(selectedDrawName, true);
       }
 

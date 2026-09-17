@@ -83,12 +83,35 @@ export const DnaPerformanceDriftPanel: React.FC<DnaPerformanceDriftPanelProps> =
         }
       });
 
-      await saveAlgoWeights(drawName, updatedWeights);
-      updateGlobalWeights(updatedWeights);
+      const { applyOptimizedWeights } = await import("../../services/prediction/optimizationController");
+      const optResult = await applyOptimizedWeights({
+        drawName,
+        weights: updatedWeights,
+        origin: "HYPERPARAM_TUNER",
+        performance: {
+          score: Math.max(0, 100 - (report.overallDriftPercentage || 0)),
+          relativeGain: report.overallDriftPercentage || 0,
+          hitRate: report.hitRate,
+          brierScore: report.brierScore,
+        },
+        causalAuditTrail: [
+          `Compensation de dérive ADN appliquée sur ${drawName}`,
+          `Dérive globale: ${(report.overallDriftPercentage || 0).toFixed(1)}%`,
+          `Ajustements: ${report.recommendedDnaAdjustments.length} algorithmes recalibrés`,
+        ],
+        reason: `Régulation Dérive ADN (${(report.overallDriftPercentage || 0).toFixed(1)}%)`,
+        history,
+      });
+
       if (onWeightsUpdated) {
-        onWeightsUpdated(updatedWeights);
+        onWeightsUpdated(optResult.appliedWeights);
       }
-      showToast("Ajustements de calibration ADN appliqués avec succès !", "success");
+      showToast(
+        optResult.wasDamped
+          ? `Ajustements ADN appliqués avec amortissement continu de sécurité (Δ=${(optResult.driftDelta * 100).toFixed(1)}%).`
+          : "Ajustements de calibration ADN appliqués avec succès !",
+        optResult.wasDamped ? "warning" : "success"
+      );
       runDriftEvaluation();
     } catch (err) {
       console.error("[DnaDriftPanel] Erreur d'application:", err);

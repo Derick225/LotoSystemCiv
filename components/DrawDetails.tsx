@@ -162,12 +162,6 @@ export const DrawDetails: React.FC = () => {
       label: "Forensic & ADN",
       desc: "Audit Post-Mortem & ADN",
     },
-    {
-      id: "DnaHistory",
-      icon: Dna,
-      label: "Historique ADN",
-      desc: "ADN Numéros Gagnants",
-    },
   ];
 
   // Si on est en mode "ALL" (Archives globales), on restreint certaines vues trop spécifiques
@@ -418,11 +412,12 @@ export const DrawDetails: React.FC = () => {
             {activeMainTab === "Simulation" && (
               <SimulationTab drawName={drawName} />
             )}
-            {(activeMainTab === "Forensic" || activeMainTab === "Genomique") && (
-              <ForensicHub drawName={drawName} initialTab={activeMainTab === "Genomique" ? "dna_drift" : undefined} />
-            )}
-            {activeMainTab === "DnaHistory" && (
-              <DrawDnaHistoryViewer drawName={drawName} history={history} />
+            {(activeMainTab === "Forensic" || activeMainTab === "Genomique" || activeMainTab === "DnaHistory") && (
+              <ForensicHub
+                drawName={drawName}
+                initialTab={activeMainTab === "Genomique" || activeMainTab === "DnaHistory" ? "dna_drift" : undefined}
+                initialSubView={activeMainTab === "DnaHistory" ? "history_dna" : undefined}
+              />
             )}
           </Suspense>
         </LocalErrorBoundary>

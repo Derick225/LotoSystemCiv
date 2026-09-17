@@ -5,6 +5,7 @@ import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysis
 import { detectGameRegime, calculateTemporalDriftLearningRate } from './mathService';
 import { LCG } from '../utils/mathUtils';
 import { recordModelDnaVersion } from './prediction/modelDnaKnowledgeBase';
+import { applyOptimizedWeights } from './prediction/optimizationController';
 
 const generateDeterministicId = (prefix: string, index: number, seedStr: string): string => {
   let hash = 0;
@@ -136,31 +137,24 @@ export const applyForensicAdjustments = async (
   const finalNormalized = normalizeWeights(updatedWeights);
 
   if (!dryRun) {
-    // Sauvegarde isolée par drawName
-    await saveAlgoWeights(drawName, finalNormalized);
+    const auditTrail = learningSession.adjustments.map(
+      (a) => `${a.algo}: ${(a.oldWeight * 100).toFixed(1)}% ➔ ${(a.newWeight * 100).toFixed(1)}% (${a.reason})`
+    );
 
-    // Enregistrement automatique de la version dans la base de connaissances ADN
-    try {
-      const auditTrail = learningSession.adjustments.map(
-        (a) => `${a.algo}: ${(a.oldWeight * 100).toFixed(1)}% ➔ ${(a.newWeight * 100).toFixed(1)}% (${a.reason})`
-      );
-      await recordModelDnaVersion({
-        drawName,
-        version: `v_forensic_${Date.now().toString(36)}`,
-        origin: 'FORENSIC_AUTOPSY',
-        weights: finalNormalized,
-        performance: {
-          score: 75.0,
-          relativeGain: alpha * 10.0,
-        },
-        causalAuditTrail: [
-          `Session Forensic appliquée (Session ID: ${learningSession.id})`,
-          ...auditTrail.slice(0, 5),
-        ],
-      });
-    } catch (e) {
-      console.warn('[forensicTrainingBridge] Erreur lors de l’enregistrement ADN:', e);
-    }
+    const optResult = await applyOptimizedWeights({
+      drawName,
+      weights: finalNormalized,
+      origin: 'FORENSIC_AUTOPSY',
+      performance: {
+        score: 75.0,
+        relativeGain: alpha * 10.0,
+      },
+      causalAuditTrail: [
+        `Session Forensic appliquée (Session ID: ${learningSession.id})`,
+        ...auditTrail.slice(0, 5),
+      ],
+      reason: `Forensic Training Bridge - Session ${learningSession.id}`,
+    });
 
     // Ajustement continu des règles adaptatives
     const currentRules = getAdaptiveRules(drawName);
@@ -176,14 +170,13 @@ export const applyForensicAdjustments = async (
     if (typeof window !== 'undefined') {
       try {
         const { useNexusStore } = await import('../store/useNexusStore');
-        useNexusStore.getState().updateGlobalWeights(finalNormalized);
 
         // Génération et enregistrement des logs de feedback neuronal en temps réel
         const feedbackLogs: NeuralFeedbackLog[] = [];
         learningSession.adjustments?.forEach((adj, idx) => {
           const algo = adj.algo as AlgoKey;
           const oldW = currentWeights[algo] ?? 0;
-          const newW = finalNormalized[algo] ?? 0;
+          const newW = optResult.appliedWeights[algo] ?? 0;
           const diff = newW - oldW;
           if (Math.abs(diff) > 0.0001) {
             const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;

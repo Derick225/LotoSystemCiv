@@ -15,6 +15,8 @@ import { ExpertBiasAdjuster } from "../genomic/ExpertBiasAdjuster";
 import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPanel";
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
+import { DrawDnaHistoryViewer } from "../prediction/DrawDnaHistoryViewer";
+import { ModelFusionPanel } from "../admin/ModelFusionPanel";
 import {
   Target,
   Trash2,
@@ -46,7 +48,18 @@ import {
   Dna,
   Flame,
   BrainCircuit,
+  GitMerge,
+  GitBranch,
+  Upload,
 } from "lucide-react";
+import {
+  buildUnifiedForensicScenario,
+  exportUnifiedScenarioToJSON,
+  importUnifiedScenarioFromJSON,
+  reinjectScenarioIntoState,
+  extractMathProofMetadata,
+} from "../../services/forensic/forensicProofStandard";
+import { generateUnifiedForensicScenarioPDF } from "../../services/exportService";
 import { ForensicReport, ForensicEvidence } from "../../types";
 import { useForensicData } from "../../hooks/useForensicData";
 import { useToast } from "../ui/Toast";
@@ -59,8 +72,8 @@ import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 type ForensicTab = "audits" | "closedloop" | "dna_drift" | "matrices_entropy" | "timemachine";
 type SortOption = "date_desc" | "date_asc" | "hits_desc" | "hits_asc" | "drift_desc";
 
-export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = React.memo(
-  ({ drawName, initialTab }) => {
+export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; initialSubView?: string }> = React.memo(
+  ({ drawName, initialTab, initialSubView }) => {
     const { showToast } = useToast();
     const history = useNexusStore((state) => state.history);
     const globalWeights = useNexusStore((state) => state.globalWeights);
@@ -76,7 +89,13 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
     } = useForensicData(drawName);
 
     const [activeTab, setActiveTab] = useState<ForensicTab>(() => {
-      if (initialTab === "dna_drift" || initialTab === "DNA_AUDITOR" || initialTab === "DRIFT_HEATMAP") {
+      if (
+        initialTab === "dna_drift" ||
+        initialTab === "dna_history" ||
+        initialTab === "DNA_AUDITOR" ||
+        initialTab === "DRIFT_HEATMAP" ||
+        initialTab === "history_dna"
+      ) {
         return "dna_drift";
       }
       return "audits";
@@ -85,7 +104,20 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
     // Sous-vues internes pour une ergonomie optimale
     const [auditSubView, setAuditSubView] = useState<"table" | "logs">("table");
     const [closedLoopSubView, setClosedLoopSubView] = useState<"autopsy" | "neural_opt" | "expert_bias">("autopsy");
-    const [dnaSubView, setDnaSubView] = useState<"reference" | "drift_heatmap" | "sieve_radar">("reference");
+    const [dnaSubView, setDnaSubView] = useState<"reference" | "fusion" | "lineage" | "drift_heatmap" | "sieve_radar" | "history_dna">(() => {
+      if (initialSubView === "history_dna" || initialTab === "dna_history" || initialTab === "history_dna") {
+        return "history_dna";
+      }
+      if (initialSubView === "fusion" || initialTab === "fusion" || initialTab === "tripartite_fusion") {
+        return "fusion";
+      }
+      if (initialSubView === "lineage" || initialTab === "dna_lineage" || initialTab === "lineage") {
+        return "lineage";
+      }
+      if (initialTab === "DRIFT_HEATMAP") return "drift_heatmap";
+      if (initialTab === "SIEVE_RADAR") return "sieve_radar";
+      return "reference";
+    });
     const [matrixSubView, setMatrixSubView] = useState<"confusion" | "entropy" | "radar" | "timeline">("confusion");
 
     // Écoute des sous-onglets globaux ou navigation externe
@@ -95,12 +127,27 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
       if (sub === "DNA_AUDITOR" || sub === "DNA") {
         setActiveTab("dna_drift");
         setDnaSubView("reference");
+      } else if (sub === "FUSION" || sub === "MODEL_FUSION" || sub === "TRIPARTITE_FUSION" || sub === "DARWIN") {
+        setActiveTab("dna_drift");
+        setDnaSubView("fusion");
+      } else if (sub === "LINEAGE" || sub === "DNA_LINEAGE" || sub === "GENEALOGIE") {
+        setActiveTab("dna_drift");
+        setDnaSubView("lineage");
       } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP" || sub === "DRIFT" || sub === "DNA_DRIFT") {
         setActiveTab("dna_drift");
         setDnaSubView("drift_heatmap");
       } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
         setActiveTab("dna_drift");
         setDnaSubView("sieve_radar");
+      } else if (
+        sub === "HISTORY_DNA" ||
+        sub === "DNA_HISTORY" ||
+        sub === "DNAHISTORY" ||
+        sub === "WINNING_DNA" ||
+        sub === "DNA_TIRAGES"
+      ) {
+        setActiveTab("dna_drift");
+        setDnaSubView("history_dna");
       } else if (sub === "NEURAL_OPT" || sub === "NEURAL") {
         setActiveTab("closedloop");
         setClosedLoopSubView("neural_opt");
@@ -417,18 +464,56 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
     const handleExportReports = () => {
       if (reports.length === 0) return;
       audioEngine.play("click");
-      const blob = new Blob([JSON.stringify(reports, null, 2)], {
-        type: "application/json",
+      const cleanHistory = purifyHistoryForDraw(drawName, history);
+      const mathMeta = extractMathProofMetadata({
+        history: cleanHistory,
+        weights: globalWeights,
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `autopsies_${drawName.toLowerCase().replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast("Rapports d'autopsies exportés en JSON", "success");
+
+      const successRate = stats.totalAudits > 0
+        ? (((stats.totalAudits - stats.driftCount) / stats.totalAudits) * 100).toFixed(1)
+        : "0.0";
+
+      const scenario = buildUnifiedForensicScenario({
+        scenarioType: 'FORENSIC_HUB',
+        drawName,
+        appliedWeights: globalWeights,
+        mathMetadata: mathMeta,
+        summary: {
+          hitRate: stats.avgHits * 20,
+          accuracyScore: stats.avgHits * 20,
+          sampleCount: stats.totalAudits,
+          regime: 'FORENSIC_HUB',
+          causalAuditTrail: [
+            `Forensic Hub Export for ${drawName}`,
+            `Total autopsies : ${stats.totalAudits}`,
+            `Moyenne Concordance : ${stats.avgHits.toFixed(2)}/5`,
+            `Taux de Rentrée : ${successRate}%`,
+          ],
+        },
+        payload: { reports, stats },
+      });
+
+      exportUnifiedScenarioToJSON(scenario);
+      showToast("Scénario Forensique Universel exporté en JSON", "success");
+    };
+
+    const handleImportUniversalScenario = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        audioEngine.play("scan");
+        const scenario = await importUnifiedScenarioFromJSON(file);
+        const cleanHistory = purifyHistoryForDraw(drawName, history);
+        const res = await reinjectScenarioIntoState(scenario, cleanHistory);
+        showToast(res.message, "success");
+        audioEngine.play("success");
+      } catch (err: any) {
+        showToast(err.message || "Échec de l'importation du scénario", "error");
+        audioEngine.play("error");
+      } finally {
+        e.target.value = "";
+      }
     };
 
     // Helper to get hit count safely
@@ -580,6 +665,21 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
               <span>{isExportingPDF ? "PDF..." : "PDF"}</span>
             </button>
 
+            <label
+              id="btn-import-scenario"
+              className="px-3.5 py-2.5 bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 rounded-xl text-xs font-bold transition-all border border-indigo-800/40 flex items-center gap-1.5 cursor-pointer"
+              title="Importer et Réinjecter un Scénario Forensique Universel"
+            >
+              <Upload size={14} />
+              <span>Réinjecter</span>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportUniversalScenario}
+                className="hidden"
+              />
+            </label>
+
             <button
               id="btn-storage-opt"
               onClick={() => {
@@ -647,7 +747,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
           {[
             { id: "audits", label: "Autopsies & Rapports", icon: BookOpen, count: reports.length },
             { id: "closedloop", label: "Boucle Fermée & Optimisation", icon: Zap },
-            { id: "dna_drift", label: "Audit ADN & Dérive des Modèles", icon: Dna },
+            { id: "dna_drift", label: "ADN Algorithmique & Fusion", icon: Dna },
             { id: "matrices_entropy", label: "Matrices, Entropie & SHAP", icon: Compass },
             { id: "timemachine", label: "Time Machine & OOS", icon: Clock },
           ].map((tab) => {
@@ -1057,7 +1157,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
           </div>
         )}
 
-        {/* TAB 3: AUDIT ADN & DÉRIVE DES MODÈLES */}
+        {/* TAB 3: AUDIT ADN & FUSION ALGORITHMIQUE */}
         {activeTab === "dna_drift" && (
           <div className="space-y-6">
             <div className="flex items-center gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800 w-max max-w-full overflow-x-auto">
@@ -1074,6 +1174,34 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
               >
                 <ShieldCheck size={13} />
                 Audit ADN & Synchronisation
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("fusion");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "fusion"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <GitMerge size={13} />
+                Fusion Tripartite & Darwinisme
+              </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("lineage");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "lineage"
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <GitBranch size={13} />
+                Lignée & Généalogie ADN
               </button>
               <button
                 onClick={() => {
@@ -1103,11 +1231,28 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string }> = 
                 <Radar size={13} />
                 Radar Crible ADN
               </button>
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setDnaSubView("history_dna");
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                  dnaSubView === "history_dna"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Dna size={13} />
+                ADN Gagnants par Tirage
+              </button>
             </div>
 
             {dnaSubView === "reference" && <DnaReferenceAuditor drawName={drawName} />}
+            {dnaSubView === "fusion" && <ModelFusionPanel selectedDrawName={drawName} initialTab="tripartite_fusion" />}
+            {dnaSubView === "lineage" && <ModelFusionPanel selectedDrawName={drawName} initialTab="dna_lineage" />}
             {dnaSubView === "drift_heatmap" && <SubAlgorithmDriftHeatmap drawName={drawName} />}
             {dnaSubView === "sieve_radar" && <UnifiedDnaSieveRadar drawName={drawName} />}
+            {dnaSubView === "history_dna" && <DrawDnaHistoryViewer drawName={drawName} history={history} />}
           </div>
         )}
 

@@ -8,7 +8,6 @@ import { generateCombination } from "./combinationGenerator";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters, getTunedHyperparameters } from "./hyperParameterTuner";
 import { logger } from "../../utils/logger";
-import PredictionWorker from "../workers/prediction.worker?worker";
 import { EnhancedMetrics } from "./metrics.types";
 import { initializeLcgForDraw } from "../../utils/mathUtils";
 import { detectGameRegime, calculateThermodynamicRegime, calculateShannonEntropy, calculateStatisticalBounds } from "../mathService";
@@ -585,13 +584,16 @@ interface PendingWorkerTask {
   onProgress?: (progress: number, message: string) => void;
 }
 
-let activePredictionWorker: InstanceType<typeof PredictionWorker> | null = null;
+let activePredictionWorker: Worker | null = null;
 const pendingWorkerTasks = new Map<string, PendingWorkerTask>();
 
 let workerTaskSequence = 0;
-const getOrCreatePredictionWorker = (): InstanceType<typeof PredictionWorker> => {
+const getOrCreatePredictionWorker = (): Worker => {
   if (!activePredictionWorker) {
-    activePredictionWorker = new PredictionWorker();
+    activePredictionWorker = new Worker(
+      new URL("../workers/prediction.worker.ts", import.meta.url),
+      { type: "module" }
+    );
 
     activePredictionWorker.onmessage = (e: MessageEvent) => {
       const { taskId, success, result, error, isProgress, progress, message } = e.data;
@@ -613,11 +615,21 @@ const getOrCreatePredictionWorker = (): InstanceType<typeof PredictionWorker> =>
       }
     };
 
-    activePredictionWorker.onerror = (err) => {
-      logger.error({ err }, "[predictionOrchestrator] Web Worker error, réinitialisation de l'instance de worker");
+    activePredictionWorker.onerror = (err: ErrorEvent | Event) => {
+      const errorMsg = (err as ErrorEvent)?.message || "Web Worker de prédiction a rencontré une erreur fatale";
+      logger.error(
+        { 
+          message: (err as ErrorEvent)?.message,
+          filename: (err as ErrorEvent)?.filename,
+          lineno: (err as ErrorEvent)?.lineno,
+          colno: (err as ErrorEvent)?.colno,
+          type: err.type,
+        },
+        "[predictionOrchestrator] Web Worker error, réinitialisation de l'instance de worker"
+      );
       for (const [, pending] of pendingWorkerTasks.entries()) {
         clearTimeout(pending.timeoutId);
-        pending.reject(new Error("Web Worker de prédiction a rencontré une erreur fatale"));
+        pending.reject(new Error(errorMsg));
       }
       pendingWorkerTasks.clear();
       if (activePredictionWorker) {
@@ -662,7 +674,7 @@ const runLocalPredictionViaWorker = async (
         });
 
         const packed = packHistory(context.history as any);
-        worker.postMessage({
+        const payload = {
           taskId,
           type: "master",
           drawName: context.drawName,
@@ -683,7 +695,18 @@ const runLocalPredictionViaWorker = async (
           isForensicOptimized: context.isForensicOptimized,
           useSpatioTemporalHawkes: context.useSpatioTemporalHawkes ?? true,
           preloadedForensicReports: resolvedReports
-        }, [packed.historyBuffer]);
+        };
+
+        try {
+          worker.postMessage(payload, [packed.historyBuffer]);
+        } catch (cloneErr) {
+          // Fallback sans transfert direct d'ArrayBuffer si déjà détaché
+          worker.postMessage({
+            ...payload,
+            historyBuffer: undefined,
+            history: context.history,
+          });
+        }
       } catch (workerError) {
         reject(workerError);
       }

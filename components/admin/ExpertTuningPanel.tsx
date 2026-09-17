@@ -8,6 +8,7 @@ import {
   getAlgoWeights,
   getStrategyName,
 } from "../../services/predictionEngine";
+import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import { runBayesianOptimization } from "../../services/bayesianOptimizer";
 import { runSimulatedAnnealingOptimization } from "../../services/simulatedAnnealingOptimizer";
 import type { AlgoWeights, AdaptiveRules } from "../../types";
@@ -211,19 +212,36 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       );
 
       if (result.improvement > 0) {
-        setLocalWeights(result.bestWeights);
-        setDnaName(getStrategyName(result.bestWeights));
+        const optResult = await applyOptimizedWeights({
+          drawName: selectedDrawName,
+          weights: result.bestWeights,
+          origin: "HYPERPARAM_TUNER",
+          performance: {
+            score: Math.min(100, Math.max(0, 50 + result.improvement)),
+            relativeGain: result.improvement,
+          },
+          causalAuditTrail: [
+            `Tuning Expert - Optimisation Bayésienne (TPE)`,
+            `Amélioration mesurée: +${result.improvement.toFixed(1)} Pts`,
+            `Tirage cible: ${selectedDrawName}`,
+          ],
+          reason: `Optimisation Bayésienne TPE (+${result.improvement.toFixed(1)} pts)`,
+          history,
+        });
 
-        await saveAlgoWeights(selectedDrawName, result.bestWeights);
+        setLocalWeights(optResult.appliedWeights);
+        setDnaName(getStrategyName(optResult.appliedWeights));
+
         if (selectedDrawName === activeDrawName) {
-          await updateGlobalWeights(result.bestWeights);
           await refreshData(selectedDrawName, true);
         }
 
         audioEngine.play("success");
         showToast(
-          `✅ Optimisation Bayésienne validée (+${result.improvement.toFixed(1)} Pts).`,
-          "success",
+          optResult.wasDamped
+            ? `⚠️ Optimisation Bayésienne validée avec amortissement de sécurité (Δ=${(optResult.driftDelta * 100).toFixed(1)}%).`
+            : `✅ Optimisation Bayésienne validée (+${result.improvement.toFixed(1)} Pts).`,
+          optResult.wasDamped ? "warning" : "success",
         );
         setIsDirty(false);
       } else {
@@ -270,19 +288,36 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       );
 
       if (result.improvement > 0) {
-        setLocalWeights(result.bestWeights);
-        setDnaName(getStrategyName(result.bestWeights));
+        const optResult = await applyOptimizedWeights({
+          drawName: selectedDrawName,
+          weights: result.bestWeights,
+          origin: "HYPERPARAM_TUNER",
+          performance: {
+            score: Math.min(100, Math.max(0, 50 + result.improvement)),
+            relativeGain: result.improvement,
+          },
+          causalAuditTrail: [
+            `Tuning Expert - Recuit Simulé déterministe`,
+            `Amélioration mesurée: +${result.improvement.toFixed(1)} Pts`,
+            `Tirage cible: ${selectedDrawName}`,
+          ],
+          reason: `Recuit Simulé (+${result.improvement.toFixed(1)} pts)`,
+          history,
+        });
 
-        await saveAlgoWeights(selectedDrawName, result.bestWeights);
+        setLocalWeights(optResult.appliedWeights);
+        setDnaName(getStrategyName(optResult.appliedWeights));
+
         if (selectedDrawName === activeDrawName) {
-          await updateGlobalWeights(result.bestWeights);
           await refreshData(selectedDrawName, true);
         }
 
         audioEngine.play("success");
         showToast(
-          `✅ Recuit Simulé validé (+${result.improvement.toFixed(1)} Pts d'ajustement).`,
-          "success",
+          optResult.wasDamped
+            ? `⚠️ Recuit Simulé validé avec amortissement (Δ=${(optResult.driftDelta * 100).toFixed(1)}%).`
+            : `✅ Recuit Simulé validé (+${result.improvement.toFixed(1)} Pts d'ajustement).`,
+          optResult.wasDamped ? "warning" : "success",
         );
         setIsDirty(false);
       } else {
@@ -375,20 +410,32 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       JSON.stringify(audits.slice(0, 50)),
     ); // Garder les 50 derniers max
 
-    await saveAlgoWeights(selectedDrawName, weightsToSave);
+    const optResult = await applyOptimizedWeights({
+      drawName: selectedDrawName,
+      weights: weightsToSave,
+      origin: "MANUAL_CALIBRATION",
+      causalAuditTrail: [
+        `Tuning Expert Manuel - Ajustement par curseurs`,
+        `Dérive globale par rapport à l'état précédent: ${(totalShift * 100).toFixed(1)}%`,
+      ],
+      reason: `Calibrage Expert Manuel (${selectedDrawName})`,
+      allowCriticalDrift: totalShift > 0.25, // Dérive validée manuellement par l'opérateur
+      history,
+    });
+
     saveAdaptiveRules(selectedDrawName, rules);
-    setOriginalWeights(weightsToSave);
+    setOriginalWeights(optResult.appliedWeights);
+    setLocalWeights(optResult.appliedWeights);
 
     // Application immédiate si c'est le tirage en cours
     if (selectedDrawName === activeDrawName) {
-      await updateGlobalWeights(weightsToSave);
       await refreshData(selectedDrawName, true); // CRITIQUE : Force le recalcul des prédictions
     }
 
     setIsDirty(false);
     audioEngine.play("success");
     showToast(
-      `Configuration ADN cristallisée pour ${selectedDrawName}.`,
+      `Configuration ADN cristallisée pour ${selectedDrawName} (${optResult.fingerprint}).`,
       "success",
     );
   };

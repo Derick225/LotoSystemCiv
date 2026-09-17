@@ -152,7 +152,7 @@ const DrawRowCard: React.FC<DrawRowCardProps> = React.memo(
                   onClick={(e) => {
                     e.stopPropagation();
                     audioEngine.play("click");
-                    navigateToModule("DnaHistory");
+                    navigateToModule("Forensic", "history_dna");
                   }}
                   className="p-2 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl active:scale-95"
                   title="ADN Prédictif"
@@ -253,7 +253,7 @@ const DrawRowCard: React.FC<DrawRowCardProps> = React.memo(
                   onClick={(e) => {
                     e.stopPropagation();
                     audioEngine.play("click");
-                    navigateToModule("DnaHistory");
+                    navigateToModule("Forensic", "history_dna");
                   }}
                   className="p-2.5 bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-xl hover:scale-110 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-all shadow-sm"
                   title="Inspecter l'ADN Prédictif"

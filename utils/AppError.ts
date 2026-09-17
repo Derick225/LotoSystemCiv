@@ -31,8 +31,14 @@ export const logError = (error: unknown, context?: Record<string, unknown>) => {
       msg.includes('connection') ||
       msg.includes('contact’') ||
       msg.includes('contacter le serveur') ||
+      msg.includes('timeout') ||
+      msg.includes('timed out') ||
+      msg.includes('etimedout') ||
+      msg.includes('abort') ||
       code.includes('network') ||
-      code.includes('fetch')
+      code.includes('fetch') ||
+      code.includes('timeout') ||
+      code.includes('abort')
     );
   };
 

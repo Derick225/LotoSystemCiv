@@ -102,6 +102,7 @@ export const lotteryService = {
         // Rafraîchissement asynchrone discret en arrière-plan
         if (isSupabaseConfigured() && navigator.onLine) {
           (async () => {
+            let bgTimer: ReturnType<typeof setTimeout> | undefined;
             try {
               let query = supabase
                 .from('draw_results')
@@ -112,7 +113,13 @@ export const lotteryService = {
                 query = query.eq('draw_name', normalizeDrawName(drawName));
               }
               query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
-              const { data } = await query;
+              
+              const bgTimeoutPromise = new Promise<never>((_, reject) => {
+                bgTimer = setTimeout(() => reject(new AppError('Background refresh timeout', 'NETWORK_TIMEOUT', 'low')), 4000);
+              });
+
+              const res = (await Promise.race([query, bgTimeoutPromise])) as { data: any[] | null; error: any };
+              const { data } = res || {};
               if (data && data.length > 0) {
                 const fresh = data.map(row => ({
                   id: row.id,
@@ -124,8 +131,10 @@ export const lotteryService = {
                 }));
                 await globalCache.set(cacheKey, fresh, CACHE_TTL.HISTORY, drawName);
               }
-            } catch (e) {
+            } catch {
               // Silently ignore background revalidation failures
+            } finally {
+              if (bgTimer) clearTimeout(bgTimer);
             }
           })();
         }
@@ -137,6 +146,7 @@ export const lotteryService = {
     let fetchError: unknown = null;
 
     if (isSupabaseConfigured() && navigator.onLine) {
+        let queryTimer: ReturnType<typeof setTimeout> | undefined;
         try {
             let query = supabase
               .from('draw_results')
@@ -149,19 +159,27 @@ export const lotteryService = {
             
             query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
             
-            // Timeout de protection réseau à 3500ms pour éviter tout blocage indéfini
-            const queryPromise = Promise.resolve(query);
-            const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Supabase request timeout after 3500ms')), 3500)
-            );
+            // Timeout de protection réseau à 3500ms avec nettoyage garanti du timer
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              queryTimer = setTimeout(() => {
+                reject(new AppError('Supabase request timeout after 3500ms', 'NETWORK_TIMEOUT', 'low', { drawName }));
+              }, 3500);
+            });
 
-            const { data, error } = (await Promise.race([queryPromise, timeoutPromise])) as {
-              data: any[] | null;
-              error: any;
-            };
+            let res: { data: any[] | null; error: any };
+            try {
+              res = (await Promise.race([query, timeoutPromise])) as {
+                data: any[] | null;
+                error: any;
+              };
+            } finally {
+              if (queryTimer) clearTimeout(queryTimer);
+            }
+
+            const { data, error } = res;
             
             if (error) {
-                throw new AppError(getErrorMessage(error), 'SUPABASE_FETCH_ERROR', 'high', { drawName, error });
+                throw new AppError(getErrorMessage(error), 'SUPABASE_FETCH_ERROR', 'medium', { drawName, error });
             }
             
             if (data) {
@@ -183,8 +201,17 @@ export const lotteryService = {
                 return remoteData;
             }
         } catch (e) {
-            logError(e, { source: 'lotteryService.fetchHistory' });
+            const isTimeoutOrNetwork =
+              (e instanceof AppError && (e.code === 'NETWORK_TIMEOUT' || e.severity === 'low')) ||
+              (e instanceof Error && (e.message.toLowerCase().includes('timeout') || e.message.toLowerCase().includes('fetch')));
+            if (isTimeoutOrNetwork) {
+              console.warn(`[LotteryService] Requête distante Supabase non aboutie (${getErrorMessage(e)}). Bascule locale fluide.`);
+            } else {
+              logError(e, { source: 'lotteryService.fetchHistory' });
+            }
             fetchError = e;
+        } finally {
+            if (queryTimer) clearTimeout(queryTimer);
         }
     }
 
