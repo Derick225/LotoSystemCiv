@@ -592,7 +592,7 @@ export const runDecisionForest = async (
     };
   });
 
-  // 5. Délégation au Web Worker
+  // 5. Délégation au Web Worker avec protection d'environnement
   const votesAndDataset = await new Promise<{ 
     votes: ForestVote[], 
     dataset: { features: number[]; class: number; weight: number }[],
@@ -604,7 +604,20 @@ export const runDecisionForest = async (
       entropyBits?: number;
     }
   }>((resolve, reject) => {    
-    const worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
+    if (typeof Worker === 'undefined') {
+      console.warn("[DecisionTree] Web Worker non disponible dans cet environnement, mode dégradé actif.");
+      resolve({ votes: [], dataset: [] });
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
+    } catch (workerInitErr) {
+      console.warn("[DecisionTree] Échec d'instanciation du Worker:", workerInitErr);
+      resolve({ votes: [], dataset: [] });
+      return;
+    }
     
     const timeout = setTimeout(() => {
       console.warn("Decision Forest Worker timed out");

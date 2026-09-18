@@ -538,6 +538,53 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
             </div>
           </div>
 
+          {/* 3.5. NOYAU DE HAWKES CROISÉ VECTORISÉ (PROCESSUS PONCTUEL AUTO & MUTUELLEMENT EXCITATEUR) */}
+          {report.hawkesMetrics && (
+            <div className="bg-white/80 dark:bg-slate-900/80 p-5 rounded-3xl border border-rose-500/30 dark:border-rose-500/20 backdrop-blur-xl shadow-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Activity size={16} className="text-rose-500" />
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                    Noyau de Hawkes Croisé Vectorisé Multi-Lags
+                  </h4>
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                    SIMD WASM
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                  Décroissance : β = {report.hawkesMetrics.betaDecay.toFixed(4)} (t½ = 1.5 tirages)
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-500/20">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 block">
+                    Énergie Totale d'Excitation
+                  </span>
+                  <span className="text-base font-black font-mono text-slate-900 dark:text-white mt-0.5 block">
+                    {report.hawkesMetrics.totalEnergy.toFixed(3)}
+                  </span>
+                </div>
+
+                {report.hawkesMetrics.lagExcitations.slice(0, 3).map((exc, lIdx) => (
+                  <div key={`lag-exc-${lIdx}`} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-white/5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block">
+                      Lag {lIdx === 0 ? 't-1 (Direct)' : `t-${lIdx + 1}`}
+                    </span>
+                    <div className="flex items-baseline justify-between mt-0.5">
+                      <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
+                        {exc.toFixed(3)}
+                      </span>
+                      <span className="text-[9px] font-mono text-rose-500 font-bold">
+                        {report.hawkesMetrics!.totalEnergy > 0 ? `${Math.round((exc / report.hawkesMetrics!.totalEnergy) * 100)}%` : '0%'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 4. TOP NUMÉROS RECOMMANDÉS PAR FLUX INTER-TIRAGES */}
           <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
@@ -579,6 +626,10 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                                 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                                 : f === 'COMPLEMENT_90'
                                 ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20'
+                                : f === 'HAWKES_EXCITATION'
+                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                : f === 'HAWKES_REMANENCE'
+                                ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20'
                                 : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                               }
                             `}
@@ -587,12 +638,20 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                           </span>
                         ))}
                       </div>
-                      <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500 font-medium">
+                      <div className="flex items-center gap-2.5 mt-1 text-[10px] text-slate-500 font-medium flex-wrap">
                         <span>Trans: {c.transitionScore}%</span>
                         <span>•</span>
                         <span>Report: {c.repeatScore}%</span>
                         <span>•</span>
                         <span>Harm: {c.harmonicScore}%</span>
+                        {c.hawkesScore !== undefined && (
+                          <>
+                            <span>•</span>
+                            <span className="text-rose-600 dark:text-rose-400 font-bold">
+                              Hawkes: {c.hawkesScore}%
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -17,6 +17,7 @@ import {
   getDrawTimestamp
 } from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
+import { wasmMatrixEngine } from './wasm/wasmMatrixCore';
 
 export interface InterDrawCandidateScore {
   number: number;
@@ -24,6 +25,8 @@ export interface InterDrawCandidateScore {
   transitionScore: number; // 0 à 100 (Markov conditionnel bayésien continu)
   repeatScore: number; // 0 à 100 (Report direct carry-over)
   harmonicScore: number; // 0 à 100 (Miroir décimal / Complémentaire 91)
+  hawkesScore?: number; // 0 à 100 (Processus de Hawkes croisé vectorisé)
+  hawkesExcitation?: number;
   confidence: number; // 0 à 1 (Indice bayésien continu)
   flags: string[];
   rawTransitionProb: number;
@@ -98,6 +101,11 @@ export interface InterDrawReport {
   topTransitions: InterDrawTransitionCell[];
   sourceTransitions: SourceTransitions[];
   fullCandidateScores: number[];
+  hawkesMetrics?: {
+    totalEnergy: number;
+    betaDecay: number;
+    lagExcitations: number[];
+  };
   generationTimestamp: number;
 }
 
@@ -203,11 +211,15 @@ interface BayesianEngineResult {
   compPairOccurrences: Record<string, number>;
   scoredCandidates: InterDrawCandidateScore[];
   fullCandidateScores: number[];
+  hawkesTotalEnergy?: number;
+  hawkesBetaDecay?: number;
+  hawkesLagExcitations?: number[];
 }
 
 const runBayesianResonanceEngine = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
-  activePredNumbers: number[]
+  activePredNumbers: number[],
+  predLaggedHistory?: number[][]
 ): BayesianEngineResult => {
   const K = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW; // 5
   const N = LOTTERY_CONSTANTS.TOTAL_NUMBERS; // 90
@@ -314,6 +326,82 @@ const runBayesianResonanceEngine = (
   const activeMirrors = new Set(validPred.map(getMirrorNumber));
   const activeComplements = new Set(validPred.map(getComplement90));
 
+  // Noyau de Hawkes Croisé Vectorisé Multi-Lags
+  const lagHistory = (predLaggedHistory && predLaggedHistory.length > 0)
+    ? predLaggedHistory
+    : [activePredNumbers, ...(pairedPairs.slice(0, 4).map(p => p.predWinners))];
+  const lagCount = Math.max(1, Math.min(5, lagHistory.length));
+  const predLaggedOccurrences = new Int32Array(lagCount * K);
+  for (let l = 0; l < lagCount; l++) {
+    const g = (lagHistory[l] || []).filter(n => Number.isInteger(n) && n >= 1 && n <= N);
+    for (let col = 0; col < K; col++) {
+      predLaggedOccurrences[l * K + col] = g[col] ?? 0;
+    }
+  }
+
+  const targetBaseline = new Float64Array(N + 1);
+  for (let i = 1; i <= N; i++) {
+    targetBaseline[i] = (targetMarginalCounts[i] + laplaceAlpha * p0) / (sampleSize + laplaceAlpha);
+  }
+
+  const stride = N + 1;
+  const crossCouplingMatrix = new Float64Array(stride * stride);
+  const logCarryMax = Math.log(Math.max(1.05, carryOverLift));
+  const logHarmMax = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift)));
+  const totalCouplingWeight = 1.0 + logCarryMax + logHarmMax;
+  const wTrans = 0.45 / totalCouplingWeight;
+  const wCarry = (0.35 * logCarryMax) / totalCouplingWeight;
+  const wHarm = (0.20 * logHarmMax) / totalCouplingWeight;
+
+  for (let j = 1; j <= N; j++) {
+    const rowOffset = j * stride;
+    const transDenom = fromTotals[j] + laplaceAlpha;
+    const mirJ = getMirrorNumber(j);
+    const compJ = getComplement90(j);
+
+    for (let i = 1; i <= N; i++) {
+      const pTrans = transDenom > 0 ? (transitionsCount[j][i] + laplaceAlpha * p0) / transDenom : p0;
+      const liftTrans = Math.max(1e-4, pTrans / p0);
+
+      let liftCarry = 1.0;
+      if (i === j) {
+        const boostCarry = 1.0 + ((repeatCounts[j] || 0) / (laplaceAlpha * p0 + (fromTotals[j] || 0) * p0));
+        liftCarry = Math.max(1.05, carryOverLift) * boostCarry;
+      }
+
+      const dMir = Math.min(Math.abs(i - mirJ), 90 - Math.abs(i - mirJ));
+      const dComp = Math.min(Math.abs(i - compJ), 90 - Math.abs(i - compJ));
+      const kMir = Math.exp(-(dMir * dMir) / 2.0) * mirrorLift;
+      const kComp = Math.exp(-(dComp * dComp) / 2.0) * complementLift;
+      const liftHarm = 1.0 + kMir + kComp;
+
+      crossCouplingMatrix[rowOffset + i] =
+        wTrans * Math.log(Math.max(1.0, liftTrans)) +
+        wCarry * Math.log(Math.max(1.0, liftCarry)) +
+        wHarm * Math.log(Math.max(1.0, liftHarm));
+    }
+  }
+
+  const betaDecay = Math.LN2 / 1.5;
+  const hawkesRes = wasmMatrixEngine.vectorizedCrossHawkesKernel({
+    numStates: N,
+    lagCount,
+    winningCols: K,
+    predecessorLaggedOccurrences: predLaggedOccurrences,
+    targetBaseline,
+    crossCouplingMatrix,
+    betaDecay
+  });
+
+  const rawHawkes = new Float64Array(N + 1);
+  for (let c = 1; c <= N; c++) {
+    const mu = targetBaseline[c] > 0 ? targetBaseline[c] : p0;
+    rawHawkes[c] = Math.log(Math.max(1e-4, hawkesRes.intensities[c] / mu));
+  }
+
+  // Poids adaptatif continu du canal de Hawkes dérivé de l'énergie totale d'excitation et de la variance de l'échantillon
+  const hawkesWeight = Math.tanh(hawkesRes.totalEnergy / Math.max(1.0, Math.sqrt(sampleSize)));
+
   // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon (sans constante arbitraire)
   const gamma = sampleSize / (sampleSize + 10.0);
 
@@ -323,6 +411,7 @@ const runBayesianResonanceEngine = (
     probTrans: number;
     probRepeat: number;
     probHarmonic: number;
+    probHawkes: number;
     probComposite: number;
     evidenceTrans: number;
     evidenceRepeat: number;
@@ -400,8 +489,12 @@ const runBayesianResonanceEngine = (
     const logitHarmonic = logitP0 + gamma * evidenceHarmonic;
     const probHarmonic = 1.0 / (1.0 + Math.exp(-logitHarmonic));
 
-    // 4. Probabilité conjointe totale bayésienne (fusion différentiable continue)
-    const logitTotal = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic);
+    // 4. Évidence du Noyau de Hawkes Croisé Vectorisé
+    const logitHawkes = logitP0 + gamma * rawHawkes[c];
+    const probHawkes = 1.0 / (1.0 + Math.exp(-logitHawkes));
+
+    // 5. Probabilité conjointe totale bayésienne (fusion différentiable continue)
+    const logitTotal = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + hawkesWeight * rawHawkes[c]);
     const probComposite = 1.0 / (1.0 + Math.exp(-logitTotal));
 
     candidateMetrics.push({
@@ -409,6 +502,7 @@ const runBayesianResonanceEngine = (
       probTrans,
       probRepeat: isDirectCandidate ? probRepeat : 0,
       probHarmonic: evidenceHarmonic !== 0 ? probHarmonic : 0,
+      probHawkes,
       probComposite,
       evidenceTrans,
       evidenceRepeat,
@@ -427,6 +521,11 @@ const runBayesianResonanceEngine = (
   const meanTrans = transProbs.reduce((a, b) => a + b, 0) / transProbs.length;
   const varTrans = transProbs.reduce((a, b) => a + Math.pow(b - meanTrans, 2), 0) / transProbs.length;
   const stdTrans = Math.max(Math.sqrt(varTrans), 1e-6);
+
+  const hawkesProbs = candidateMetrics.map(m => m.probHawkes);
+  const meanHawkes = hawkesProbs.reduce((a, b) => a + b, 0) / hawkesProbs.length;
+  const varHawkes = hawkesProbs.reduce((a, b) => a + Math.pow(b - meanHawkes, 2), 0) / hawkesProbs.length;
+  const stdHawkes = Math.max(Math.sqrt(varHawkes), 1e-6);
 
   const scoredCandidates: InterDrawCandidateScore[] = candidateMetrics.map(item => {
     const zComp = (item.probComposite - meanComp) / stdComp;
@@ -447,6 +546,9 @@ const runBayesianResonanceEngine = (
       harmonicScore = Math.round(continuousSigmoid(zHarm) * 10) / 10;
     }
 
+    const zHawkes = (item.probHawkes - meanHawkes) / stdHawkes;
+    const hawkesScore = Math.round(continuousSigmoid(zHawkes) * 10) / 10;
+
     // Confiance bayésienne continue : fonction de la certitude empirique (sampleSize) et de la séparation de signal
     const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 20.0));
     const signalContrast = Math.tanh(Math.abs(zComp) / 2.0);
@@ -456,12 +558,24 @@ const runBayesianResonanceEngine = (
       item.flags.push('HAUTE_TRANSITION');
     }
 
+    if (zHawkes > 1.25 && !item.flags.includes('HAWKES_EXCITATION')) {
+      item.flags.push('HAWKES_EXCITATION');
+    }
+
+    if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a, b) => a + b, 0) > 0.20 * Math.max(1e-6, hawkesRes.totalEnergy)) {
+      if (zHawkes > 0.75 && !item.flags.includes('HAWKES_REMANENCE')) {
+        item.flags.push('HAWKES_REMANENCE');
+      }
+    }
+
     return {
       number: item.num,
       compositeScore,
       transitionScore,
       repeatScore,
       harmonicScore,
+      hawkesScore,
+      hawkesExcitation: Number(hawkesRes.netExcitations[item.num].toFixed(4)),
       confidence,
       flags: item.flags,
       rawTransitionProb: item.probTrans
@@ -496,7 +610,10 @@ const runBayesianResonanceEngine = (
     mirrorPairOccurrences,
     compPairOccurrences,
     scoredCandidates,
-    fullCandidateScores
+    fullCandidateScores,
+    hawkesTotalEnergy: Number(hawkesRes.totalEnergy.toFixed(4)),
+    hawkesBetaDecay: Number(betaDecay.toFixed(4)),
+    hawkesLagExcitations: Array.from(hawkesRes.lagExcitations).map(e => Number(e.toFixed(4)))
   };
 };
 
@@ -552,8 +669,11 @@ export const generateInterDrawReport = async (
   // Numéros actifs du prédécesseur qui polarisent le tirage cible
   const activePredNumbers = predLatestResult?.gagnants || [1, 2, 3, 4, 5];
 
+  // Historique multi-lags du prédécesseur pour le noyau de Hawkes
+  const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
+
   // 3. Exécution du moteur mathématique bayésien continu
-  const engine = runBayesianResonanceEngine(pairedPairs, activePredNumbers);
+  const engine = runBayesianResonanceEngine(pairedPairs, activePredNumbers, predLaggedHistory);
   const {
     sampleSize,
     laplaceAlpha,
@@ -720,6 +840,11 @@ export const generateInterDrawReport = async (
     topTransitions,
     sourceTransitions,
     fullCandidateScores,
+    hawkesMetrics: engine.hawkesTotalEnergy !== undefined ? {
+      totalEnergy: engine.hawkesTotalEnergy,
+      betaDecay: engine.hawkesBetaDecay || 0.4621,
+      lagExcitations: engine.hawkesLagExcitations || []
+    } : undefined,
     generationTimestamp: Date.now()
   };
 
@@ -764,7 +889,8 @@ export const simulateInterDrawTransmission = async (
   ]);
 
   const pairedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);
-  const engine = runBayesianResonanceEngine(pairedPairs, validNumbers);
+  const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
+  const engine = runBayesianResonanceEngine(pairedPairs, validNumbers, predLaggedHistory);
   const candidates = engine.scoredCandidates;
 
   const topNums = candidates.slice(0, 5).map(c => c.number);
@@ -878,7 +1004,8 @@ export const calculateInterDrawVector = (
   }
 
   // Exécution du modèle bayésien continu identique au rapport complet
-  const engine = runBayesianResonanceEngine(pairedPairs, lastWinners);
+  const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
+  const engine = runBayesianResonanceEngine(pairedPairs, lastWinners, predLaggedHistory);
   for (let n = 1; n <= 90; n++) {
     vec[n] = engine.fullCandidateScores[n] || 0.0555;
   }

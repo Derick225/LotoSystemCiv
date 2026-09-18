@@ -536,6 +536,14 @@ hawkes_intensities = fit_hawkes_mle(history)`
     ];
 
     const totalDraws = history.length || 1;
+    const numberCounts = new Int32Array(91);
+    for (let d = 0; d < history.length; d++) {
+        const g = history[d].gagnants || [];
+        for (let j = 0; j < g.length; j++) {
+            const n = g[j];
+            if (n >= 1 && n <= 90) numberCounts[n]++;
+        }
+    }
     const wTemporal = weights?.temporal ?? 0.4;
     const wBayes = weights?.bayes ?? 0.6;
     const wMomentum = weights?.momentum ?? 0.1;
@@ -662,7 +670,7 @@ for i in range(1, 91):
 
         for (let i = 1; i <= 90; i++) {
             const gaps = computeGapsForNumber(i, history);
-            const frequency = history.filter(d => d.gagnants.includes(i)).length / totalDraws;
+            const frequency = numberCounts[i] / totalDraws;
             const lambda = frequency * (90 / 5);
             const poisson = 1 - calculatePoissonProbability(0, lambda);
             
@@ -756,7 +764,7 @@ with pm.Model() as model:
         // 1. Extraction des représentations vectorielles dans l'espace des caractéristiques
         const featureMatrix: { num: number; x: number[]; hawkes: number; likelihood: number }[] = [];
         for (let num = 1; num <= 90; num++) {
-            const count = history.filter(d => d.gagnants.includes(num)).length;
+            const count = numberCounts[num];
             const freq = count / totalDraws;
             const gaps = computeGapsForNumber(num, history);
             const hurst = computeHurstForNumber(num, history);
@@ -962,14 +970,17 @@ Modélisation non-linéaire continue par combinaison convexe de noyaux de Mercer
     const miTensor = computeMutualInformationTensor(history);
     const stride = 91; // DOMAIN_SIZE + 1
 
-    for (let num = 1; num <= 90; num++) {
-        let count = 0;
-        for (let i = 0; i < history.length; i++) {
-            if (history[i].gagnants.includes(num)) {
-                count++;
-            }
+    const datasetCounts = new Int32Array(91);
+    for (let d = 0; d < history.length; d++) {
+        const g = history[d].gagnants || [];
+        for (let j = 0; j < g.length; j++) {
+            const n = g[j];
+            if (n >= 1 && n <= 90) datasetCounts[n]++;
         }
+    }
 
+    for (let num = 1; num <= 90; num++) {
+        const count = datasetCounts[num];
         const freq = count / totalDraws;
         const gaps = computeGapsForNumber(num, history);
         const hurst = computeHurstForNumber(num, history);

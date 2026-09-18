@@ -91,12 +91,19 @@ const normalizeDrawName = (name: string): string => {
     return name.trim().charAt(0).toUpperCase() + name.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
 };
 
+const inFlightHistoryFetches = new Map<string, Promise<DrawResult[]>>();
+
 export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
     const cacheKey = globalCache.generateKey('history', drawName);
 
     // Stale-While-Revalidate : Si un cache valide existe et force=false, retour instantané
     if (!force) {
+      const fastSync = globalCache.getSync<DrawResult[]>(cacheKey, drawName);
+      if (fastSync && fastSync.length > 0) {
+        return fastSync;
+      }
+
       const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
       if (cached && cached.length > 0) {
         // Rafraîchissement asynchrone discret en arrière-plan
@@ -142,10 +149,16 @@ export const lotteryService = {
       }
     }
 
-    let remoteData: DrawResult[] | null = null;
-    let fetchError: unknown = null;
+    const inFlightKey = `${drawName}_${force ? '1' : '0'}`;
+    if (inFlightHistoryFetches.has(inFlightKey)) {
+      return inFlightHistoryFetches.get(inFlightKey)!;
+    }
 
-    if (isSupabaseConfigured() && navigator.onLine) {
+    const fetchPromise = (async (): Promise<DrawResult[]> => {
+      let remoteData: DrawResult[] | null = null;
+      let fetchError: unknown = null;
+
+      if (isSupabaseConfigured() && navigator.onLine) {
         let queryTimer: ReturnType<typeof setTimeout> | undefined;
         try {
             let query = supabase
@@ -226,6 +239,14 @@ export const lotteryService = {
     const fallbackData = generateDeterministicFallbackHistory(drawName);
     await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
     return fallbackData;
+    })();
+
+    inFlightHistoryFetches.set(inFlightKey, fetchPromise);
+    try {
+      return await fetchPromise;
+    } finally {
+      inFlightHistoryFetches.delete(inFlightKey);
+    }
   },
 
   /**

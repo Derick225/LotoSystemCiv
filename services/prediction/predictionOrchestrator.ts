@@ -177,11 +177,13 @@ export const runLocalPredictionPipeline = async (context: PredictionRuntimeConte
  */
 export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
   context.onProgress?.(10, "Lancement du pipeline Local Simplifié...");
+  await yieldToUi();
   initializeLcgForDraw(context.drawName);
 
   const weights = normalizeWeights(context.weightsToUse || (await getAlgoWeights(context.drawName)));
 
   context.onProgress?.(30, "Calcul des métriques essentielles...");
+  await yieldToUi();
   const subHistory = context.history.slice(0, context.validTemporalDepth);
   const statisticalBounds = calculateStatisticalBounds(subHistory);
   
@@ -196,9 +198,11 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
   };
 
   context.onProgress?.(55, "Extraction des descripteurs de caractéristiques essentiels...");
+  await yieldToUi();
   const features = await extractPredictionFeatures(context);
 
   context.onProgress?.(75, "Évaluation essentielle des numéros...");
+  await yieldToUi();
   const baseScores = calculateScores(
     features,
     weights,
@@ -207,12 +211,15 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
   );
 
   context.onProgress?.(85, "Tamisage essentiel de l'ADN Algorithmique...");
+  await yieldToUi();
   const { sievedScores, dnaSieveMetrics } = applyPredictionDnaSieve(context, baseScores, weights);
 
   context.onProgress?.(90, "Formulation finale et sélection (Mode Secours)...");
+  await yieldToUi();
   const { selection, candidates, shrinkageApplied, shrinkageFactor } = await selectPredictionNumbers(context, sievedScores, features);
 
   context.onProgress?.(100, "Calcul de secours achevé avec succès !");
+  await yieldToUi();
   return await finalizePredictionPayload(
     context,
     sievedScores,

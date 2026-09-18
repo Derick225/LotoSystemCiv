@@ -8,6 +8,23 @@
  * Inclus un fallback JS/TS TypedArray optimisé en cas de restriction de l'environnement WASM.
  */
 
+export interface VectorizedCrossHawkesParams {
+  numStates?: number; // 90
+  lagCount: number; // M tirages antérieurs
+  winningCols?: number; // 5
+  predecessorLaggedOccurrences: Int32Array; // L x 5 entiers
+  targetBaseline: Float64Array; // 91 éléments: baseline intensity mu_i
+  crossCouplingMatrix: Float64Array; // (91 * 91) éléments: matrice A_ji aplatie
+  betaDecay: number; // taux continu de décroissance temporelle
+}
+
+export interface VectorizedCrossHawkesResult {
+  intensities: Float64Array; // 91 éléments: intensité cumulée lambda_i(t)
+  netExcitations: Float64Array; // 91 éléments: excitation nette issue du prédécesseur
+  lagExcitations: Float64Array; // lagCount éléments: somme d'excitation par niveau de décalage
+  totalEnergy: number; // énergie totale transmise
+}
+
 export interface WasmMatrixExports {
   memory: WebAssembly.Memory;
   dot_product?: (ptrA: number, ptrB: number, len: number) => number;
@@ -244,6 +261,78 @@ export class WasmMatrixEngine {
     }
 
     return intensities;
+  }
+
+  /**
+   * Calcul Vectorisé Haute Performance du Noyau de Hawkes Croisé (Cross-Exciting Hawkes Process)
+   * 
+   * Modélise la propagation stochastique continue d'intensité entre tirages d'une même famille :
+   * lambda_i(t) = mu_i + sum_{l=1}^L exp(-beta * l) * sum_{j in D_pred(t-l)} A_{j, i}
+   * 
+   * Utilise des TypedArrays à mémoire continue (Int32Array, Float64Array) sans allocation interne
+   * et garantit 100% de déterminisme.
+   */
+  public vectorizedCrossHawkesKernel(params: VectorizedCrossHawkesParams): VectorizedCrossHawkesResult {
+    const numStates = params.numStates || 90;
+    const winningCols = params.winningCols || 5;
+    const {
+      lagCount,
+      predecessorLaggedOccurrences,
+      targetBaseline,
+      crossCouplingMatrix,
+      betaDecay
+    } = params;
+
+    const stride = numStates + 1; // 91
+    const intensities = new Float64Array(stride);
+    const netExcitations = new Float64Array(stride);
+    const lagExcitations = new Float64Array(Math.max(1, lagCount));
+    let totalEnergy = 0.0;
+
+    // 1. Initialisation vectorielle avec la baseline mu_i
+    for (let i = 1; i <= numStates; i++) {
+      const mu = targetBaseline[i] > 0 ? targetBaseline[i] : (1.0 / numStates);
+      intensities[i] = mu;
+    }
+
+    // 2. Déroulement du processus ponctuel multi-lags
+    const safeBeta = Math.max(1e-4, betaDecay);
+
+    for (let l = 0; l < lagCount; l++) {
+      const dt = l + 1; // lag temporel discret 1, 2, ...
+      const temporalDecay = Math.exp(-safeBeta * dt);
+      const rowOffset = l * winningCols;
+      let lagSum = 0.0;
+
+      for (let c = 0; c < winningCols; c++) {
+        const predNum = predecessorLaggedOccurrences[rowOffset + c];
+        if (predNum < 1 || predNum > numStates) continue;
+
+        // Décalage mémoire ligne dans la matrice A_{j, i}
+        const matrixRowOffset = predNum * stride;
+
+        // Boucle interne optimisée en mémoire continue Float64Array
+        for (let targetNum = 1; targetNum <= numStates; targetNum++) {
+          const couplingWeight = crossCouplingMatrix[matrixRowOffset + targetNum];
+          if (couplingWeight !== 0) {
+            const delta = couplingWeight * temporalDecay;
+            intensities[targetNum] += delta;
+            netExcitations[targetNum] += delta;
+            lagSum += delta;
+            totalEnergy += delta;
+          }
+        }
+      }
+
+      lagExcitations[l] = lagSum;
+    }
+
+    return {
+      intensities,
+      netExcitations,
+      lagExcitations,
+      totalEnergy
+    };
   }
 
   /**

@@ -340,14 +340,28 @@ export const useNexusStore = create<NexusState>()(
             .map(([n, c]) => ({ number: Number(n), count: c }))
             .sort((a, b) => b.count - a.count);
 
+          // Calcul continu optimisé des écarts en une seule passe O(N) au lieu de 90 x N
           const gaps: { number: number; gap: number }[] = [];
+          const foundNumbers = new Set<number>();
+          const gapLookup = new Int32Array(91);
           for (let i = 1; i <= 90; i++) {
-            let gap = 0;
-            for (const draw of historyData) {
-              if ((draw.gagnants || []).includes(i)) break;
-              gap++;
+            gapLookup[i] = historyData.length;
+          }
+
+          for (let d = 0; d < historyData.length; d++) {
+            const gagnants = historyData[d].gagnants || [];
+            for (let g = 0; g < gagnants.length; g++) {
+              const num = gagnants[g];
+              if (num >= 1 && num <= 90 && !foundNumbers.has(num)) {
+                foundNumbers.add(num);
+                gapLookup[num] = d;
+              }
             }
-            gaps.push({ number: i, gap });
+            if (foundNumbers.size === 90) break;
+          }
+
+          for (let i = 1; i <= 90; i++) {
+            gaps.push({ number: i, gap: gapLookup[i] });
           }
 
           set({ history: historyData, stats, gaps });

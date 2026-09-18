@@ -78,6 +78,7 @@ export const CACHE_FLAGS = {
 class CacheService {
   private memoryCache: Map<string, CacheEntry<any>> = new Map();
   private recentDrawCounts: Map<string, number> = new Map();
+  private pendingComputes: Map<string, Promise<any>> = new Map();
 
   /**
    * Génère une clé de cache déterministe et structurée.
@@ -268,6 +269,7 @@ class CacheService {
 
   /**
    * Encapsule le calcul d'une fonction avec mise en cache transparente.
+   * Empêche tout effet de "Cache Stampede" grâce à la déduplication des promesses en vol.
    */
   public async getOrCompute<T>(
     key: string,
@@ -275,12 +277,31 @@ class CacheService {
     ttlMs: number = CACHE_TTL.MEDIUM,
     drawName?: string,
   ): Promise<T> {
+    // 1. Accès ultra-rapide synchrone en mémoire L1 (< 0.1ms)
+    const syncFast = this.getSync<T>(key, drawName);
+    if (syncFast !== null) return syncFast;
+
+    // 2. Accès asynchrone hiérarchisé (L1 / L2 IDB)
     const cached = await this.get<T>(key, drawName);
     if (cached !== null) return cached;
 
-    const freshData = await computeFn();
-    await this.set(key, freshData, ttlMs, drawName);
-    return freshData;
+    // 3. Déduplication des calculs lourds en cours d'exécution
+    if (this.pendingComputes.has(key)) {
+      return this.pendingComputes.get(key)! as Promise<T>;
+    }
+
+    const computePromise = (async () => {
+      try {
+        const freshData = await computeFn();
+        await this.set(key, freshData, ttlMs, drawName);
+        return freshData;
+      } finally {
+        this.pendingComputes.delete(key);
+      }
+    })();
+
+    this.pendingComputes.set(key, computePromise);
+    return computePromise;
   }
 
   /**
@@ -300,6 +321,7 @@ class CacheService {
 
   public async clearAll(): Promise<void> {
     this.memoryCache.clear();
+    this.pendingComputes.clear();
     if (CACHE_FLAGS.ENABLE_IDB) {
       await clear();
     }

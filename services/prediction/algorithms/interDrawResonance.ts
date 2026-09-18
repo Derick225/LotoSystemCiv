@@ -18,12 +18,15 @@ import {
   generateDeterministicFallbackHistory
 } from '../../lotteryService';
 import { globalCache, CACHE_TTL } from '../../cache/CacheService';
+import { wasmMatrixEngine } from '../../wasm/wasmMatrixCore';
 
 export interface InterDrawChannelDetail {
   transitionScore: number;
   carryOverScore: number;
   harmonicScore: number;
   cohortScore: number;
+  hawkesScore: number;
+  hawkesExcitation: number;
   flags: string[];
 }
 
@@ -42,6 +45,9 @@ export interface InterDrawPluginCache {
   complementLift: number;
   sampleSize: number;
   signalDetected: boolean;
+  hawkesTotalEnergy?: number;
+  hawkesBetaDecay?: number;
+  hawkesLagExcitations?: number[];
 }
 
 const clamp = (v: number, min: number, max: number): number =>
@@ -90,6 +96,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         carryOverScore: 50.0,
         harmonicScore: 50.0,
         cohortScore: 50.0,
+        hawkesScore: 50.0,
+        hawkesExcitation: 0.0,
         flags: []
       };
     }
@@ -108,7 +116,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       mirrorLift: 1.0,
       complementLift: 1.0,
       sampleSize: 0,
-      signalDetected: false
+      signalDetected: false,
+      hawkesTotalEnergy: 0,
+      hawkesBetaDecay: 0,
+      hawkesLagExcitations: []
     };
 
     ctx.pluginCache = ctx.pluginCache || {};
@@ -282,6 +293,92 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const carryHurstModulator = Math.exp(1.5 * (hurst - 0.5));
     const harmonicHurstModulator = Math.exp(-1.5 * (hurst - 0.5));
 
+    // 3b. Noyau de Hawkes Croisé Vectorisé (Multi-Lags Hermétique au sein de la Famille)
+    const lagCount = Math.max(1, Math.min(5, predHistory.length));
+    const predLaggedOccurrences = new Int32Array(lagCount * K);
+    for (let l = 0; l < lagCount; l++) {
+      const g = (predHistory[l]?.gagnants || []).filter((n: number) => Number.isInteger(n) && n >= 1 && n <= N);
+      for (let c = 0; c < K; c++) {
+        predLaggedOccurrences[l * K + c] = g[c] ?? 0;
+      }
+    }
+
+    const targetBaseline = new Float64Array(N + 1);
+    for (let i = 1; i <= N; i++) {
+      targetBaseline[i] = (targetTotals[i] + laplaceAlpha * p0) / (sampleSize + laplaceAlpha);
+    }
+
+    const stride = N + 1;
+    const crossCouplingMatrix = new Float64Array(stride * stride);
+
+    // Calcul des poids de couplage par canal basés sur les lifts empiriques réels
+    const logCarryMax = Math.log(Math.max(1.05, carryOverLift * carryHurstModulator));
+    const logHarmMax = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift) * harmonicHurstModulator));
+    const totalCouplingWeight = 1.0 + logCarryMax + logHarmMax;
+    const wTrans = 0.40 / totalCouplingWeight;
+    const wCarry = (0.30 * logCarryMax) / totalCouplingWeight;
+    const wHarm = (0.20 * logHarmMax) / totalCouplingWeight;
+    const wCohort = 0.10 / totalCouplingWeight;
+
+    for (let j = 1; j <= N; j++) {
+      const rowOffset = j * stride;
+      const transDenom = fromTotals[j] + laplaceAlpha;
+      const mirJ = getMirrorNumber(j);
+      const compJ = getComplement90(j);
+
+      for (let i = 1; i <= N; i++) {
+        // 1. Transition markovienne
+        const pTrans = transDenom > 0 ? (transCounts[j][i] + laplaceAlpha * p0) / transDenom : p0;
+        const liftTrans = Math.max(1e-4, pTrans / p0);
+
+        // 2. Report direct carry-over
+        let liftCarry = 1.0;
+        if (i === j) {
+          const structCarry = Math.max(1.0, carryOverLift * carryHurstModulator);
+          const boostCarry = 1.0 + ((repeatCounts[j] || 0) / (laplaceAlpha * p0 + (fromTotals[j] || 0) * p0));
+          liftCarry = structCarry * boostCarry;
+        }
+
+        // 3. Harmonique continu (distance modulaire sur le tore Z_90)
+        const dMir = Math.min(Math.abs(i - mirJ), 90 - Math.abs(i - mirJ));
+        const dComp = Math.min(Math.abs(i - compJ), 90 - Math.abs(i - compJ));
+        const kMir = Math.exp(-(dMir * dMir) / 2.0) * mirrorLift * harmonicHurstModulator;
+        const kComp = Math.exp(-(dComp * dComp) / 2.0) * complementLift * harmonicHurstModulator;
+        const liftHarm = 1.0 + kMir + kComp;
+
+        // 4. Cohorte conditionnelle
+        const pairKey = (Math.min(j, i) << 7) | Math.max(j, i);
+        const coOcc = cohortPairCounts.get(pairKey) || 0;
+        const expectedPairRate = (K / N) * (K / N);
+        const liftCohort = Math.max(1.0, (coOcc + laplaceAlpha * p0) / (sampleSize * expectedPairRate + laplaceAlpha));
+
+        crossCouplingMatrix[rowOffset + i] =
+          wTrans * Math.log(Math.max(1.0, liftTrans)) +
+          wCarry * Math.log(Math.max(1.0, liftCarry)) +
+          wHarm * Math.log(Math.max(1.0, liftHarm)) +
+          wCohort * Math.log(Math.max(1.0, liftCohort));
+      }
+    }
+
+    // Décroissance temporelle continue du noyau de Hawkes dérivée de l'exposant de Hurst
+    const betaDecay = Math.LN2 / (1.0 + 2.0 * (1.0 - hurst));
+
+    const hawkesRes = wasmMatrixEngine.vectorizedCrossHawkesKernel({
+      numStates: N,
+      lagCount,
+      winningCols: K,
+      predecessorLaggedOccurrences: predLaggedOccurrences,
+      targetBaseline,
+      crossCouplingMatrix,
+      betaDecay
+    });
+
+    const rawHawkes = new Float64Array(N + 1);
+    for (let c = 1; c <= N; c++) {
+      const mu = targetBaseline[c] > 0 ? targetBaseline[c] : p0;
+      rawHawkes[c] = Math.log(Math.max(1e-4, hawkesRes.intensities[c] / mu));
+    }
+
     // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon
     const sampleScale = Math.sqrt(N); // racine de l'espace d'état
     const gamma = sampleSize / (sampleSize + sampleScale);
@@ -368,8 +465,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
       rawCohort[c] = evidenceCohort;
 
-      // Fusion conjointe bayésienne des 4 canaux sans coupure brusque
-      const logitCombined = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceCohort);
+      // Fusion conjointe bayésienne des 4 canaux + Noyau de Hawkes Croisé sans coupure brusque
+      const logitCombined = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceCohort + 0.5 * rawHawkes[c]);
       rawLogOdds[c] = logitCombined;
 
       channelDetails[c] = {
@@ -377,6 +474,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         carryOverScore: 50.0,
         harmonicScore: 50.0,
         cohortScore: 50.0,
+        hawkesScore: 50.0,
+        hawkesExcitation: 0.0,
         flags
       };
     }
@@ -387,6 +486,7 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const { median: medCarry, mad: madCarry } = computeRobustDistribution(rawCarry);
     const { median: medHarm, mad: madHarm } = computeRobustDistribution(rawHarm);
     const { median: medCohort, mad: madCohort } = computeRobustDistribution(rawCohort);
+    const { median: medHawkes, mad: madHawkes } = computeRobustDistribution(rawHawkes);
 
     const robustScale = Math.max(1e-6, 1.4826 * madLog);
     const slope = 1.0 + 2.0 * hurst;
@@ -397,19 +497,32 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       const scoreVal = 100.0 / (1.0 + Math.exp(-slope * zScore));
       scores[c] = clamp(scoreVal, 0.5, 99.5);
 
-      // Décomposition des 4 canaux en scores continus [0, 100]
+      // Décomposition des canaux en scores continus [0, 100]
       const zTrans = (rawTrans[c] - medTrans) / Math.max(1e-6, 1.4826 * madTrans);
       const zCarry = (rawCarry[c] - medCarry) / Math.max(1e-6, 1.4826 * madCarry);
       const zHarm = (rawHarm[c] - medHarm) / Math.max(1e-6, 1.4826 * madHarm);
       const zCohort = (rawCohort[c] - medCohort) / Math.max(1e-6, 1.4826 * madCohort);
+      const zHawkes = (rawHawkes[c] - medHawkes) / Math.max(1e-6, 1.4826 * madHawkes);
 
       channelDetails[c].transitionScore = clamp(100.0 / (1.0 + Math.exp(-slope * zTrans)), 1.0, 99.0);
       channelDetails[c].carryOverScore = clamp(100.0 / (1.0 + Math.exp(-slope * zCarry)), 1.0, 99.0);
       channelDetails[c].harmonicScore = clamp(100.0 / (1.0 + Math.exp(-slope * zHarm)), 1.0, 99.0);
       channelDetails[c].cohortScore = clamp(100.0 / (1.0 + Math.exp(-slope * zCohort)), 1.0, 99.0);
+      channelDetails[c].hawkesScore = clamp(100.0 / (1.0 + Math.exp(-slope * zHawkes)), 1.0, 99.0);
+      channelDetails[c].hawkesExcitation = Number(hawkesRes.netExcitations[c].toFixed(4));
 
       if (zTrans > 1.25 && !channelDetails[c].flags.includes('HAUTE_TRANSITION')) {
         channelDetails[c].flags.push('HAUTE_TRANSITION');
+      }
+
+      if (zHawkes > 1.25 && !channelDetails[c].flags.includes('HAWKES_EXCITATION')) {
+        channelDetails[c].flags.push('HAWKES_EXCITATION');
+      }
+
+      if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a, b) => a + b, 0) > 0.20 * Math.max(1e-6, hawkesRes.totalEnergy)) {
+        if (zHawkes > 0.75 && !channelDetails[c].flags.includes('HAWKES_REMANENCE')) {
+          channelDetails[c].flags.push('HAWKES_REMANENCE');
+        }
       }
 
       // Confiance continue basée sur la taille d'échantillon et le contraste de signal
@@ -432,7 +545,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       mirrorLift,
       complementLift,
       sampleSize,
-      signalDetected: true
+      signalDetected: true,
+      hawkesTotalEnergy: Number(hawkesRes.totalEnergy.toFixed(4)),
+      hawkesBetaDecay: Number(betaDecay.toFixed(4)),
+      hawkesLagExcitations: Array.from(hawkesRes.lagExcitations).map(e => Number(e.toFixed(4)))
     };
 
     ctx.pluginCache[AlgoKey.INTER_DRAW_RESONANCE] = cachePayload;
@@ -455,6 +571,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         carryOverScore: 50.0,
         harmonicScore: 50.0,
         cohortScore: 50.0,
+        hawkesScore: 50.0,
+        hawkesExcitation: 0.0,
         flags: [],
         signalDetected: false
       }
@@ -476,6 +594,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       carryOverScore: 50.0,
       harmonicScore: 50.0,
       cohortScore: 50.0,
+      hawkesScore: 50.0,
+      hawkesExcitation: 0.0,
       flags: []
     };
 
@@ -490,6 +610,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         carryOverScore: Number(detail.carryOverScore.toFixed(1)),
         harmonicScore: Number(detail.harmonicScore.toFixed(1)),
         cohortScore: Number(detail.cohortScore.toFixed(1)),
+        hawkesScore: Number((detail.hawkesScore ?? 50.0).toFixed(1)),
+        hawkesExcitation: Number((detail.hawkesExcitation ?? 0.0).toFixed(4)),
         flags: detail.flags,
         carryOverLift: Number(cache.carryOverLift.toFixed(2)),
         mirrorLift: Number(cache.mirrorLift.toFixed(2)),
