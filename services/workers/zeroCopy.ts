@@ -5,7 +5,7 @@
  */
 
 export interface PackedHistory {
-  historyBuffer: ArrayBuffer;
+  historyBuffer: ArrayBuffer | SharedArrayBuffer;
   drawCount: number;
   winningCount: number;
   totalCols: number;
@@ -15,14 +15,28 @@ export interface PackedHistory {
 }
 
 export interface PackedMatrix {
-  matrixBuffer: ArrayBuffer;
+  matrixBuffer: ArrayBuffer | SharedArrayBuffer;
   rows: number;
   cols: number;
 }
 
 export interface PackedArray {
-  arrayBuffer: ArrayBuffer;
+  arrayBuffer: ArrayBuffer | SharedArrayBuffer;
   length: number;
+}
+
+/**
+ * Alloue dynamiquement un buffer partagé (SharedArrayBuffer) ou standard selon la sécurité et le support du navigateur.
+ */
+export function allocateBuffer(sizeInBytes: number): ArrayBuffer | SharedArrayBuffer {
+  if (typeof SharedArrayBuffer !== 'undefined') {
+    try {
+      return new SharedArrayBuffer(sizeInBytes);
+    } catch (e) {
+      // Fallback si bloqué par les en-têtes de sécurité
+    }
+  }
+  return new ArrayBuffer(sizeInBytes);
 }
 
 /**
@@ -46,7 +60,10 @@ export function packHistory(
   const drawNames: string[] = new Array(drawCount);
   const ids: string[] = new Array(drawCount);
 
-  const typedArr = new Int32Array(drawCount * totalCols);
+  const byteLength = drawCount * totalCols * 4; // 4 octets par Int32
+  const buffer = allocateBuffer(byteLength);
+  const typedArr = new Int32Array(buffer);
+  
   for (let i = 0; i < drawCount; i++) {
     const draw = history[i];
     dates[i] = draw.date || "";
@@ -65,7 +82,7 @@ export function packHistory(
   }
 
   return {
-    historyBuffer: typedArr.buffer,
+    historyBuffer: buffer,
     drawCount,
     winningCount,
     totalCols,
@@ -126,7 +143,7 @@ export function unpackHistory(
 }
 
 /**
- * Packs 2D number[][] matrix into Float64Array ArrayBuffer.
+ * Packs 2D number[][] matrix into Float64Array ArrayBuffer or SharedArrayBuffer.
  */
 export function packMatrix(matrix: number[][]): PackedMatrix {
   if (!matrix || matrix.length === 0) {
@@ -134,7 +151,9 @@ export function packMatrix(matrix: number[][]): PackedMatrix {
   }
   const rows = matrix.length;
   const cols = matrix[0]?.length || 0;
-  const typedArr = new Float64Array(rows * cols);
+  const byteLength = rows * cols * 8; // 8 octets par Float64
+  const buffer = allocateBuffer(byteLength);
+  const typedArr = new Float64Array(buffer);
   for (let r = 0; r < rows; r++) {
     const row = matrix[r];
     const offset = r * cols;
@@ -142,21 +161,21 @@ export function packMatrix(matrix: number[][]): PackedMatrix {
       typedArr[offset + c] = row[c] || 0;
     }
   }
-  return { matrixBuffer: typedArr.buffer, rows, cols };
+  return { matrixBuffer: buffer, rows, cols };
 }
 
 /**
  * Unpacks ArrayBuffer into 2D number[][] matrix.
  */
 export function unpackMatrix(
-  input: ArrayBuffer | Float64Array | number[][],
+  input: ArrayBuffer | SharedArrayBuffer | Float64Array | number[][],
   rows?: number,
   cols?: number
 ): number[][] {
   if (Array.isArray(input)) return input;
-  if (!input || (input instanceof ArrayBuffer && input.byteLength === 0)) return [];
+  if (!input || ((input instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && input instanceof SharedArrayBuffer)) && input.byteLength === 0)) return [];
 
-  const arr = input instanceof Float64Array ? input : new Float64Array(input);
+  const arr = input instanceof Float64Array ? input : new Float64Array(input as any);
   const rCount = rows ?? (cols ? Math.floor(arr.length / cols) : 0);
   const cCount = cols ?? (rows ? Math.floor(arr.length / rows) : 0);
 
@@ -173,29 +192,33 @@ export function unpackMatrix(
 }
 
 /**
- * Packs 1D number[] into Float64Array ArrayBuffer.
+ * Packs 1D number[] into Float64Array ArrayBuffer or SharedArrayBuffer.
  */
 export function packArray(arr: number[]): PackedArray {
   if (!arr || arr.length === 0) {
     return { arrayBuffer: new Float64Array(0).buffer, length: 0 };
   }
-  const typedArr = Float64Array.from(arr);
-  return { arrayBuffer: typedArr.buffer, length: arr.length };
+  const byteLength = arr.length * 8; // 8 octets par Float64
+  const buffer = allocateBuffer(byteLength);
+  const typedArr = new Float64Array(buffer);
+  typedArr.set(arr);
+  return { arrayBuffer: buffer, length: arr.length };
 }
 
 /**
  * Unpacks 1D ArrayBuffer to number[].
  */
-export function unpackArray(input: ArrayBuffer | Float64Array | number[]): number[] {
+export function unpackArray(input: ArrayBuffer | SharedArrayBuffer | Float64Array | number[]): number[] {
   if (Array.isArray(input)) return input;
   if (!input) return [];
-  const arr = input instanceof Float64Array ? input : new Float64Array(input);
+  const arr = input instanceof Float64Array ? input : new Float64Array(input as any);
   return Array.from(arr);
 }
 
 /**
  * Traverses an object or array to discover all ArrayBuffers / TypedArray buffers
  * and pushes them to the transferables array for 0-copy postMessage transfers.
+ * Automatically excludes SharedArrayBuffers to avoid cloning exceptions.
  */
 export function collectTransferables(
   obj: unknown,
@@ -206,6 +229,11 @@ export function collectTransferables(
   if (visited.has(obj as object)) return;
   visited.add(obj as object);
 
+  if (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) {
+    // SharedArrayBuffers CANNOT be transferred and should never be added to transferables list.
+    return;
+  }
+
   if (obj instanceof ArrayBuffer) {
     if (!transferables.includes(obj)) {
       transferables.push(obj);
@@ -214,7 +242,7 @@ export function collectTransferables(
   }
 
   if (ArrayBuffer.isView(obj)) {
-    if (obj.buffer && !transferables.includes(obj.buffer)) {
+    if (obj.buffer && !transferables.includes(obj.buffer) && !(typeof SharedArrayBuffer !== 'undefined' && obj.buffer instanceof SharedArrayBuffer)) {
       transferables.push(obj.buffer);
     }
     return;
@@ -233,42 +261,45 @@ export function collectTransferables(
 }
 
 export interface PackedFloat32Vector {
-  buffer: ArrayBuffer;
+  buffer: ArrayBuffer | SharedArrayBuffer;
   length: number;
 }
 
 /**
- * Packs a Float32Array or number array into a transferable Float32Array ArrayBuffer.
+ * Packs a Float32Array or number array into a transferable Float32Array ArrayBuffer or SharedArrayBuffer.
  */
 export function packFloat32Vector(arr: Float32Array | number[]): PackedFloat32Vector {
   if (!arr || arr.length === 0) {
     return { buffer: new Float32Array(0).buffer, length: 0 };
   }
-  const typed = arr instanceof Float32Array ? new Float32Array(arr) : Float32Array.from(arr);
-  return { buffer: typed.buffer, length: typed.length };
+  const byteLength = arr.length * 4; // 4 octets par Float32
+  const buffer = allocateBuffer(byteLength);
+  const typed = new Float32Array(buffer);
+  typed.set(arr);
+  return { buffer: buffer, length: typed.length };
 }
 
 /**
- * Unpacks an ArrayBuffer into a Float32Array view directly without memory duplication.
+ * Unpacks an ArrayBuffer or SharedArrayBuffer into a Float32Array view directly without memory duplication.
  */
-export function unpackFloat32Vector(input: ArrayBuffer | Float32Array | number[]): Float32Array {
+export function unpackFloat32Vector(input: ArrayBuffer | SharedArrayBuffer | Float32Array | number[]): Float32Array {
   if (input instanceof Float32Array) return input;
   if (Array.isArray(input)) return Float32Array.from(input);
-  if (!input || (input instanceof ArrayBuffer && input.byteLength === 0)) return new Float32Array(0);
-  return new Float32Array(input);
+  if (!input || ((input instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && input instanceof SharedArrayBuffer)) && input.byteLength === 0)) return new Float32Array(0);
+  return new Float32Array(input as any);
 }
 
 export interface PackedMonteCarloDenseBatch {
   iterations: number;
   drawCount: number;
   winningCols: number;
-  batchBuffer: ArrayBuffer;
+  batchBuffer: ArrayBuffer | SharedArrayBuffer;
   transferables: Transferable[];
 }
 
 /**
  * Packs high-density Monte-Carlo simulation state (N >= 10^5 runs) into a single contiguous
- * linear memory ArrayBuffer for instant zero-copy Transferable Objects transfer between threads.
+ * linear memory ArrayBuffer or SharedArrayBuffer for instant zero-copy Transferable Objects transfer between threads.
  */
 export function packDenseMonteCarloBatch(
   iterations: number,
@@ -284,7 +315,9 @@ export function packDenseMonteCarloBatch(
   // + weights (weightCount floats)
   // + history (drawCount * winningCols floats)
   const totalLength = 4 + weightCount + (drawCount * winningCols);
-  const floatArr = new Float32Array(totalLength);
+  const byteLength = totalLength * 4; // 4 octets par Float32
+  const buffer = allocateBuffer(byteLength);
+  const floatArr = new Float32Array(buffer);
 
   floatArr[0] = iterations;
   floatArr[1] = drawCount;
@@ -301,6 +334,11 @@ export function packDenseMonteCarloBatch(
     for (let c = 0; c < winningCols; c++) {
       floatArr[histOffset + (d * winningCols) + c] = winners[c] || 0;
     }
+  }
+
+  const transferables: Transferable[] = [];
+  if (typeof SharedArrayBuffer === 'undefined' || !(buffer instanceof SharedArrayBuffer)) {
+    transferables.push(buffer);
   }
 
   return {

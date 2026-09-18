@@ -248,7 +248,12 @@ ctx.onmessage = (e) => {
     let T_max = stdDevProbe * (1.0 + Entropy);
     const T_min = 1e-4 * T_max;
     
-    const alpha = Math.pow(T_min / T_max, 1.0 / MAX_ITERATIONS);
+    // Évolution de l'alpha de refroidissement gouverné continûment par l'exposant de Hurst (sans nombres magiques)
+    const HurstRef = Math.max(0.01, Math.min(0.99, Hurst));
+    // Si Hurst est persistant (> 0.5), la recherche converge rapidement (itérations virtuelles réduites)
+    // Si Hurst est anti-persistant (< 0.5), la recherche converge lentement (itérations virtuelles augmentées)
+    const adaptiveIterations = MAX_ITERATIONS * (1.0 / (2.0 * HurstRef));
+    const alpha = Math.pow(T_min / T_max, 1.0 / adaptiveIterations);
     let T = T_max;
 
     let acceptedCount = 0;

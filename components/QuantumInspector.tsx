@@ -100,7 +100,7 @@ export const QuantumInspector: React.FC = () => {
                 Vecteur {inspectingNumber}
               </h3>
               <p className="text-[10px] sm:text-xs text-slate-500 font-mono mt-1 sm:mt-2">
-                UUID: {crypto.randomUUID().split("-")[0]}
+                UUID: {((inspectingNumber * 0x1f3d) % 0xffff).toString(16).toUpperCase()}
               </p>
             </div>
           </div>

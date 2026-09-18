@@ -66,36 +66,52 @@ export const markovPlugin: AlgorithmPlugin = {
       return Math.abs(hash);
     };
     
-    // Générateur LCG déterministe
-    const createLcg = (seed: number) => {
-      let s = Math.abs(seed) % 2147483647;
+    // Initialisation déterministe des états de LCG pour chaque numéro
+    const baseSeed = getDeterministicSeed(drawName);
+    const lcgStates = new Uint32Array(domainSize + 1);
+    for (let n = 1; n <= domainSize; n++) {
+      let s = (baseSeed + n) % 2147483647;
       if (s === 0) s = 1;
-      return () => {
-        s = (s * 16807) % 2147483647;
-        return s / 2147483647;
-      };
-    };
+      lcgStates[n] = s;
+    }
     
-    // Box-Muller transform
-    const getGaussian = (lcg: () => number): number => {
-      const u1 = Math.max(1e-15, lcg());
-      const u2 = lcg();
+    // Box-Muller inliné à haute performance (zéro allocation de fermeture)
+    const getGaussianNext = (states: Uint32Array, idx: number): number => {
+      let s = states[idx];
+      s = (s * 16807) % 2147483647;
+      const u1 = Math.max(1e-15, s / 2147483647);
+      
+      s = (s * 16807) % 2147483647;
+      states[idx] = s;
+      const u2 = s / 2147483647;
+      
       return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
     };
+    
+    // Grille de présence plate à accès direct en O(1) pour éliminer l'instanciation de Set
+    const winnersGrid = new Uint8Array(depth * (domainSize + 1));
+    for (let step = 0; step < depth; step++) {
+      const draw = history[step];
+      const winners = draw?.gagnants || [];
+      const offset = step * (domainSize + 1);
+      for (let i = 0; i < winners.length; i++) {
+        const w = winners[i];
+        if (w >= 1 && w <= domainSize) {
+          winnersGrid[offset + w] = 1;
+        }
+      }
+    }
     
     // Résolution de l'EDS d'Ornstein-Uhlenbeck & Langevin par Euler-Maruyama
     // On avance dans le sens chronologique (du plus ancien au plus récent)
     for (let step = depth - 1; step >= 0; step--) {
-      const draw = history[step];
-      const winners = new Set(draw?.gagnants || []);
+      const offset = step * (domainSize + 1);
       
       for (let n = 1; n <= domainSize; n++) {
-        const y = winners.has(n) ? 1.0 : 0.0;
+        const y = winnersGrid[offset + n] ? 1.0 : 0.0;
         
-        // Wiener increment déterministe
-        const stepSeed = getDeterministicSeed(`${drawName}_sde_${n}_${step}`);
-        const lcg = createLcg(stepSeed);
-        const dW = getGaussian(lcg) * 1.0; // sqrt(dt) avec dt=1
+        // Wiener increment déterministe par notre générateur rapide
+        const dW = getGaussianNext(lcgStates, n);
         
         // Équation de Langevin-Bucy continue : dérive mean-reverting + attraction + perturbation stochastique
         X[n] = X[n] + theta * (mu - X[n]) + alpha * y + sigmaSde * dW;

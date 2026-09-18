@@ -915,13 +915,17 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
       }));
 
       const packed = packHistory(historyLite);
+      const transferList: Transferable[] = [];
+      if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+        transferList.push(packed.historyBuffer);
+      }
       worker.postMessage({ 
         dynamicWeights, 
         historyBuffer: packed.historyBuffer,
         drawCount: packed.drawCount,
         winningCount: packed.winningCount,
         totalCols: packed.totalCols 
-      }, [packed.historyBuffer]);
+      }, transferList);
     } catch (err) {
       logger.warn({ err }, "Failed to spawn meta-learning worker");
       resolve(normalizeWeights(dynamicWeights));

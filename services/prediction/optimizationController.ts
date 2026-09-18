@@ -18,6 +18,8 @@ export interface OptimizationRequest {
   drawName: string;
   weights: AlgoWeights;
   origin: ModelDnaOrigin;
+  version?: string;
+  timestamp?: string;
   history?: DrawResult[];
   useKalmanSmoothing?: boolean;
   performance?: {
@@ -203,11 +205,14 @@ export async function applyOptimizedWeights(
       : `[Application Directe] Delta=${(maxDelta * 100).toFixed(2)}% <= Seuil=${(criticalThreshold * 100).toFixed(2)}%`,
   ].filter(Boolean);
 
+  const finalTimestamp = request.timestamp || timestamp;
+
   const dnaRecord = await recordModelDnaVersion({
     drawName,
+    version: request.version,
     origin,
     weights: appliedWeights,
-    timestamp,
+    timestamp: finalTimestamp,
     performance: calculatedPerformance,
     regimeContext: regimeContext
       ? {

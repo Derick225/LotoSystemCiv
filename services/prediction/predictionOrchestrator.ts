@@ -546,7 +546,8 @@ export const selectPredictionNumbers = async (
     empiricalCalibration,
     outsiderCount,
     context.history[0]?.gagnants,
-    regimeStateNormalized
+    regimeStateNormalized,
+    thermoRegime.hurst
   );
 
   const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
@@ -705,7 +706,11 @@ const runLocalPredictionViaWorker = async (
         };
 
         try {
-          worker.postMessage(payload, [packed.historyBuffer]);
+          const transferList: Transferable[] = [];
+          if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+            transferList.push(packed.historyBuffer);
+          }
+          worker.postMessage(payload, transferList);
         } catch (cloneErr) {
           // Fallback sans transfert direct d'ArrayBuffer si déjà détaché
           worker.postMessage({

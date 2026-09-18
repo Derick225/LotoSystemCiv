@@ -628,9 +628,15 @@ export const executeClosedLoopAutoAdjustment = async (
   let finalAppliedWeights = optimizedNormalized;
   let dnaRecord: ModelDnaRecord;
 
+  const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
+  const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
+  const versionId = `v_autopsy_${drawDateSafe}`;
+
   if (appliedDirectly) {
     const optResult = await applyOptimizedWeights({
       drawName,
+      version: versionId,
+      timestamp: options?.timestamp || deterministicTimestamp,
       weights: optimizedNormalized,
       origin: 'FORENSIC_AUTOPSY',
       performance: {

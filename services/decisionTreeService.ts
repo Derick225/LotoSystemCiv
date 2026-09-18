@@ -5,6 +5,7 @@ import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packMatrix, packArray } from './workers/zeroCopy';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
 import type { AlgoWeights } from '../shared/prediction.types';
+import { LCG } from '../utils/mathUtils';
 
 export const FEATURES_LABELS = [
   'Critical Gap', 'Frequency', 'Shadow',
@@ -592,7 +593,11 @@ export const runDecisionForest = async (
     };
   });
 
-  // 5. Délégation au Web Worker avec protection d'environnement
+  // Configuration de la forêt dérivée continûment
+  const numTrees = Math.min(100, Math.max(50, Math.floor(dataset.length / Math.log2(dataset.length + 1))));
+  const maxDepth = Math.max(3, Math.floor(Math.log2(dataset.length / activeIndices.length)));
+
+  // 5. Délégation au Web Worker avec protection d'environnement et de secours synchrone
   const votesAndDataset = await new Promise<{ 
     votes: ForestVote[], 
     dataset: { features: number[]; class: number; weight: number }[],
@@ -603,33 +608,8 @@ export const runDecisionForest = async (
       sieveIntensityPercent?: number;
       entropyBits?: number;
     }
-  }>((resolve, reject) => {    
-    if (typeof Worker === 'undefined') {
-      console.warn("[DecisionTree] Web Worker non disponible dans cet environnement, mode dégradé actif.");
-      resolve({ votes: [], dataset: [] });
-      return;
-    }
-
-    let worker: Worker;
-    try {
-      worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
-    } catch (workerInitErr) {
-      console.warn("[DecisionTree] Échec d'instanciation du Worker:", workerInitErr);
-      resolve({ votes: [], dataset: [] });
-      return;
-    }
-    
-    const timeout = setTimeout(() => {
-      console.warn("Decision Forest Worker timed out");
-      worker.terminate();
-      resolve({ votes: [], dataset: [] });
-    }, 120000);
-
-    worker.onmessage = (e) => {
-      clearTimeout(timeout);
-      const { votes: workerVotes, primaryTree } = e.data;
-      worker.terminate();
-
+  }>((resolve) => {    
+    const processForestResult = (workerVotes: any[], primaryTree: any) => {
       if (!workerVotes) {
         resolve({ votes: [], dataset: [] });
         return;
@@ -763,17 +743,55 @@ export const runDecisionForest = async (
       });    
     };
 
+    const handleSyncFallback = (reason: string) => {
+      console.warn(`[DecisionTree] Exécution en mode de secours synchrone (${reason})...`);
+      try {
+        const syncRes = runDecisionForestSync(
+          dataset,
+          candidates,
+          { numTrees, maxDepth },
+          history.length
+        );
+        processForestResult(syncRes.votes, syncRes.primaryTree);
+      } catch (fallbackErr) {
+        console.error("[DecisionTree] Erreur fatale dans le mode de secours synchrone", fallbackErr);
+        resolve({ votes: [], dataset: [] });
+      }
+    };
+
+    if (typeof Worker === 'undefined') {
+      handleSyncFallback("Web Worker non disponible");
+      return;
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./workers/forest.worker.ts?worker', import.meta.url), { type: 'module' });
+    } catch (workerInitErr) {
+      handleSyncFallback("Échec d'instanciation du Worker");
+      return;
+    }
+    
+    const timeout = setTimeout(() => {
+      console.warn("Decision Forest Worker timed out");
+      worker.terminate();
+      handleSyncFallback("Worker Timeout");
+    }, 120000);
+
+    worker.onmessage = (e) => {
+      clearTimeout(timeout);
+      const { votes: workerVotes, primaryTree } = e.data;
+      worker.terminate();
+      processForestResult(workerVotes, primaryTree);
+    };
+
     worker.onerror = (err) => { 
       clearTimeout(timeout);
       worker.terminate(); 
-      console.error("Decision Forest Worker Error", err);
-      reject(new Error("Echec du calcul Forest Worker")); 
+      console.warn("Decision Forest Worker Error (loading blocked in sandbox):", err);
+      handleSyncFallback("Worker Error");
     };
 
-    // Configuration de la forêt dérivée continûment
-    const numTrees = Math.min(100, Math.max(50, Math.floor(dataset.length / Math.log2(dataset.length + 1))));
-    const maxDepth = Math.max(3, Math.floor(Math.log2(dataset.length / activeIndices.length)));
-    
     // Simplification pour le worker avec transfert zero-copy des matrices de caractéristiques
     const featureMatrix = dataset.map(d => d.features);
     const labelArray = dataset.map(d => d.label);
@@ -882,3 +900,317 @@ export const calculateFeatureImportance = (
 
   return importanceMap;
 };
+
+interface SyncTreeNode {
+  featureIdx?: number;
+  threshold?: number;
+  stdDev?: number;
+  left?: SyncTreeNode;
+  right?: SyncTreeNode;
+  value?: number;
+  alpha?: number;
+  depth?: number;
+  groups?: any[][];
+}
+
+function getFeatureStdDev(dataset: any[], featureIdx: number): number {
+  if (dataset.length === 0) return 0.0;
+  let sum = 0;
+  for (let i = 0; i < dataset.length; i++) {
+    sum += dataset[i].features[featureIdx] || 0;
+  }
+  const mean = sum / dataset.length;
+  let sumSq = 0;
+  for (let i = 0; i < dataset.length; i++) {
+    sumSq += Math.pow((dataset[i].features[featureIdx] || 0) - mean, 2);
+  }
+  return Math.sqrt(sumSq / dataset.length) || 1e-4;
+}
+
+function calculateWeightedGini(groups: any[][], classes: number[]): number {
+  let totalWeight = 0;
+  groups.forEach(g => g.forEach(ex => { totalWeight += ex.weight || 1.0; }));
+  if (totalWeight <= 0) return 0;
+
+  let weightedGini = 0.0;
+  for (const group of groups) {
+    let groupWeight = 0;
+    group.forEach(ex => { groupWeight += ex.weight || 1.0; });
+    if (groupWeight === 0) continue;
+
+    let score = 0.0;
+    for (const classVal of classes) {
+      let classWeight = 0;
+      for (let i = 0; i < group.length; i++) {
+        if (group[i].label === classVal) classWeight += group[i].weight || 1.0;
+      }
+      const p = classWeight / groupWeight;
+      score += p * p;
+    }
+    weightedGini += (1.0 - score) * (groupWeight / totalWeight);
+  }
+  return weightedGini;
+}
+
+function testSplit(index: number, value: number, dataset: any[]): any[][] {
+  const left: any[] = [];
+  const right: any[] = [];
+  for (let i = 0; i < dataset.length; i++) {
+    const row = dataset[i];
+    if (row.features[index] < value) left.push(row);
+    else right.push(row);
+  }
+  return [left, right];
+}
+
+function getSplit(prng: LCG, dataset: any[], nFeatures: number): { featureIdx: number, threshold: number, stdDev: number, groups: any[][] } | undefined {
+  const classValues = [0, 1];
+  let b_index = -1;
+  let b_value = -1;
+  let b_score = 999;
+  let b_groups: any[][] | undefined = undefined;
+
+  const totalFeatures = dataset[0].features.length;
+  const featuresToCheck: number[] = [];
+
+  while (featuresToCheck.length < nFeatures) {
+    const idx = Math.floor(prng.next() * totalFeatures);
+    if (!featuresToCheck.includes(idx)) featuresToCheck.push(idx);
+  }
+
+  for (const index of featuresToCheck) {
+    const valSet = new Set<number>();
+    for (let k = 0; k < dataset.length; k++) {
+      valSet.add(dataset[k].features[index]);
+    }
+    const uniqueValues = Array.from(valSet);
+
+    for (let i = 0; i < uniqueValues.length; i++) {
+      const val = uniqueValues[i];
+      const groups = testSplit(index, val, dataset);
+      const gini = calculateWeightedGini(groups, classValues);
+
+      if (gini <= b_score) {
+        b_index = index;
+        b_value = val;
+        b_score = gini;
+        b_groups = groups;
+      }
+    }
+  }
+
+  if (b_index === -1 || !b_groups) return undefined;
+
+  const stdDev = getFeatureStdDev(dataset, b_index);
+  return { featureIdx: b_index, threshold: b_value, stdDev, groups: b_groups };
+}
+
+function toTerminal(group: any[]): number {
+  if (group.length === 0) return 0.5;
+  let posW = 0;
+  let totalW = 0;
+  group.forEach(row => {
+    const w = row.weight || 1.0;
+    if (row.label === 1) posW += w;
+    totalW += w;
+  });
+  return totalW > 0 ? posW / totalW : 0.5;
+}
+
+function splitNode(prng: LCG, node: SyncTreeNode, maxDepth: number, minSize: number, nFeatures: number, depth: number) {
+  if (!node.groups) {
+    node.value = 0.5;
+    return;
+  }
+
+  node.depth = depth;
+  const [left, right] = node.groups;
+  delete node.groups;
+
+  if (!left.length || !right.length) {
+    node.left = node.right = { value: toTerminal(left.concat(right)), depth: depth + 1 };
+    return;
+  }
+
+  if (depth >= maxDepth) {
+    node.left = { value: toTerminal(left), depth: depth + 1 };
+    node.right = { value: toTerminal(right), depth: depth + 1 };
+    return;
+  }
+
+  if (left.length <= minSize) {
+    node.left = { value: toTerminal(left), depth: depth + 1 };
+  } else {
+    const res = getSplit(prng, left, nFeatures);
+    if (!res) {
+      node.left = { value: toTerminal(left), depth: depth + 1 };
+    } else {
+      node.left = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups, depth: depth + 1 };
+      splitNode(prng, node.left, maxDepth, minSize, nFeatures, depth + 1);
+    }
+  }
+
+  if (right.length <= minSize) {
+    node.right = { value: toTerminal(right), depth: depth + 1 };
+  } else {
+    const res = getSplit(prng, right, nFeatures);
+    if (!res) {
+      node.right = { value: toTerminal(right), depth: depth + 1 };
+    } else {
+      node.right = { featureIdx: res.featureIdx, threshold: res.threshold, stdDev: res.stdDev, groups: res.groups, depth: depth + 1 };
+      splitNode(prng, node.right, maxDepth, minSize, nFeatures, depth + 1);
+    }
+  }
+}
+
+function predict(node: SyncTreeNode, row: number[]): number {
+  if (node.value !== undefined) return node.value;
+  if (node.featureIdx === undefined || node.threshold === undefined || !node.left || !node.right) {
+    return 0.5;
+  }
+
+  const x = row[node.featureIdx] ?? 0;
+  const theta = node.threshold;
+  const sigma = Math.max(1e-4, node.stdDev || 1.0);
+
+  const z = (x - theta) / sigma;
+  const p = 1.0 / (1.0 + Math.exp(-2.0 * z));
+
+  return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
+}
+
+function pruneTreeWithOOB(tree: SyncTreeNode, oobSet: any[]): SyncTreeNode {
+  if (tree.value !== undefined || !tree.left || !tree.right || oobSet.length === 0) return tree;
+
+  tree.left = pruneTreeWithOOB(tree.left, oobSet);
+  tree.right = pruneTreeWithOOB(tree.right, oobSet);
+
+  let fullErr = 0;
+  let termValue = 0;
+
+  oobSet.forEach(ex => {
+    const pred = predict(tree, ex.features);
+    fullErr += Math.pow(pred - ex.label, 2);
+    termValue += ex.label;
+  });
+
+  termValue = oobSet.length > 0 ? termValue / oobSet.length : 0.5;
+
+  let collapsedErr = 0;
+  oobSet.forEach(ex => {
+    collapsedErr += Math.pow(termValue - ex.label, 2);
+  });
+
+  const alpha = 1.0 / Math.max(10, oobSet.length);
+  if (collapsedErr - fullErr <= alpha * oobSet.length) {
+    return { value: termValue, depth: tree.depth };
+  }
+
+  return tree;
+}
+
+export function runDecisionForestSync(
+  dataset: any[],
+  candidates: any[],
+  config: { numTrees: number; maxDepth: number },
+  timeSignature: number
+) {
+  const prng = new LCG(`forest_${timeSignature || dataset.length}`);
+  const N = dataset.length;
+
+  const numTrees = config?.numTrees || 40;
+  const maxDepth = config?.maxDepth || 6;
+  const minSize = 2;
+  const totalFeatures = dataset[0].features.length;
+  const nFeatures = Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
+
+  const forest: SyncTreeNode[] = [];
+
+  const bootstrapRatio = 1.0 - 1.0 / Math.E;
+  for (let i = 0; i < numTrees; i++) {
+    const inBag: any[] = [];
+    const oobSet: any[] = [];
+    const inBagMask = new Uint8Array(N);
+
+    for (let j = 0; j < Math.floor(N * bootstrapRatio); j++) {
+      const idx = Math.floor(prng.next() * N);
+      inBag.push(dataset[idx]);
+      inBagMask[idx] = 1;
+    }
+
+    for (let j = 0; j < N; j++) {
+      if (inBagMask[j] === 0) oobSet.push(dataset[j]);
+    }
+
+    const rootSplit = getSplit(prng, inBag, nFeatures);
+    if (rootSplit) {
+      let root: SyncTreeNode = {
+        featureIdx: rootSplit.featureIdx,
+        threshold: rootSplit.threshold,
+        stdDev: rootSplit.stdDev,
+        groups: rootSplit.groups
+      };
+      splitNode(prng, root, maxDepth, minSize, nFeatures, 1);
+      root = pruneTreeWithOOB(root, oobSet);
+      forest.push(root);
+    }
+  }
+
+  const level1Votes = candidates.map((cand: any) => {
+    let sumProb = 0;
+    forest.forEach(tree => {
+      sumProb += predict(tree, cand.features);
+    });
+
+    return {
+      number: cand.number,
+      score: (sumProb / Math.max(1, forest.length)) * 100,
+      features: cand.features
+    };
+  });
+
+  const rawScores = level1Votes.map(v => v.score);
+  const meanScore = rawScores.reduce((a, b) => a + b, 0) / (rawScores.length || 1);
+  const varianceScore = rawScores.reduce((acc, s) => acc + (s - meanScore) ** 2, 0) / (rawScores.length || 1);
+  const stdScore = Math.sqrt(varianceScore) || 1.0;
+
+  level1Votes.sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+    const sumA = a.features.reduce((s: number, f: number) => s + f, 0);
+    const sumB = b.features.reduce((s: number, f: number) => s + f, 0);
+    if (Math.abs(sumB - sumA) > 1e-6) return sumB - sumA;
+    const hashA = (a.number * 2654435761) % 4294967296;
+    const hashB = (b.number * 2654435761) % 4294967296;
+    return hashB - hashA;
+  });
+
+  const finalVotes = level1Votes.map((cand) => {
+    const z = (cand.score - meanScore) / stdScore;
+    const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z));
+
+    const neighborFeat = cand.features[4] || 0;
+    const machineFeat = cand.features[5] || 0;
+    const microModulation = (neighborFeat + machineFeat) * 0.2;
+
+    const continuousBoost = 1.0 + level2Weight * microModulation;
+    const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));
+
+    return {
+      number: cand.number,
+      score: refinedScore,
+      features: cand.features
+    };
+  });
+
+  finalVotes.sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+    const hashA = (a.number * 2654435761) % 4294967296;
+    const hashB = (b.number * 2654435761) % 4294967296;
+    return hashB - hashA;
+  });
+
+  return {
+    votes: finalVotes,
+    primaryTree: forest[0] || null
+  };
+}

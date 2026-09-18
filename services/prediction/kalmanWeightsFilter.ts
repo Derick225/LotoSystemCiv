@@ -12,6 +12,8 @@ export interface KalmanFilterState {
   lastUpdated: string;
   innovationVector?: Record<string, number>;
   kalmanGains?: Record<string, number>;
+  errorHistory?: number[]; // Historique glissant des erreurs de prédiction
+  innovationHistory?: number[]; // Historique glissant de la norme de l'innovation
 }
 
 export interface KalmanUpdateResult {
@@ -23,6 +25,21 @@ export interface KalmanUpdateResult {
 }
 
 const KALMAN_CACHE: Record<string, KalmanFilterState> = {};
+
+/**
+ * Calcule la moyenne et la variance d'une série historique
+ */
+function getRollingStats(values: number[], fallback: number): { mean: number; variance: number } {
+  if (values.length === 0) return { mean: fallback, variance: 1e-4 };
+  const sum = values.reduce((a, b) => a + b, 0);
+  const mean = sum / values.length;
+  let sumSq = 0;
+  for (let i = 0; i < values.length; i++) {
+    sumSq += Math.pow(values[i] - mean, 2);
+  }
+  const variance = sumSq / values.length;
+  return { mean, variance };
+}
 
 /**
  * Initialise un état de Kalman canonique
@@ -49,6 +66,8 @@ export function initializeKalmanState(drawName: string, initialWeights?: AlgoWei
     covarianceMatrix: cov,
     stepCount: 0,
     lastUpdated: new Date().toISOString(),
+    errorHistory: [],
+    innovationHistory: [],
   };
 
   KALMAN_CACHE[drawName] = state;
@@ -82,15 +101,39 @@ export function updateWeightsWithKalmanFilter(params: {
     state = initializeKalmanState(drawName, measuredWeights);
   }
 
+  // Initialisation des tableaux historiques s'ils proviennent d'un cache restauré
+  if (!state.errorHistory) state.errorHistory = [];
+  if (!state.innovationHistory) state.innovationHistory = [];
+
   const keys = Object.keys(measuredWeights) as AlgoKey[];
   const K = keys.length;
 
-  // Calcul du bruit de processus Q_t (dérive stochastique réelle)
-  const lyapunov = computeLocalLyapunovExponent(history, 5);
-  const qBase = (1.0 / (K * K)) * (1.0 + Math.max(0, lyapunov) * 0.5);
+  // Enregistrer l'erreur de prédiction actuelle (Closed-Loop Autopsy Feedback)
+  state.errorHistory.push(predictionError);
+  if (state.errorHistory.length > 15) {
+    state.errorHistory.shift();
+  }
 
-  // Calcul du bruit de mesure R_t (bruit d'échantillonnage de tirage)
-  const rBase = Math.max(0.001, (customVar ?? 0.01) * (1.0 + predictionError));
+  // 1. Autotuning continu du bruit de mesure R_t
+  const errorStats = getRollingStats(state.errorHistory, predictionError);
+  const baseVar = customVar ?? 0.01;
+  // rBase est calculé de manière continue par la variance de l'erreur historique cumulée
+  const rBase = Math.max(0.0001, errorStats.variance * (1.0 + errorStats.mean) + baseVar * 0.1);
+
+  // 2. Autotuning continu du bruit de processus Q_t (Sage-Husa + exposant de Lyapunov)
+  const lyapunov = computeLocalLyapunovExponent(history, 5);
+  const prevInnovationNorm = state.innovationVector
+    ? Math.sqrt(Object.values(state.innovationVector).reduce((sum, v) => sum + v * v, 0))
+    : 0.0;
+
+  state.innovationHistory.push(prevInnovationNorm);
+  if (state.innovationHistory.length > 15) {
+    state.innovationHistory.shift();
+  }
+
+  const innovationStats = getRollingStats(state.innovationHistory, prevInnovationNorm);
+  // qBase s'auto-ajuste à l'instabilité (Lyapunov) et à la dispersion des corrections optimales (innovation)
+  const qBase = (1.0 / (K * K)) * (1.0 + Math.max(0, lyapunov) * 0.5) * (1.0 + innovationStats.variance * 10.0);
 
   const currentCov = state.covarianceMatrix;
   const nextCov: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));

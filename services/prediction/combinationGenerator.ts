@@ -68,6 +68,124 @@ export const getProfileSimilarity = (n1: number, n2: number, breakdownsMap: Map<
   return dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
 };
 
+export interface PrecomputedEnergyContext {
+  lastDrawHas: Uint8Array;
+  lastDrawNeighbors: Uint8Array;
+  topPoolHas: Uint8Array;
+  outsiderPoolHas: Uint8Array;
+  profileSimMatrix: Float32Array;
+  dominantAlgoMap: (string | null)[];
+  numAlgos: number;
+}
+
+export const buildPrecomputedEnergyContext = (
+  breakdownsMap: Map<number, ScoreBreakdown> | undefined,
+  lastDraw: number[] | undefined,
+  topPool: number[] | undefined,
+  outsiderPool?: number[]
+): PrecomputedEnergyContext => {
+  const lastDrawHas = new Uint8Array(91);
+  const lastDrawNeighbors = new Uint8Array(91);
+  if (lastDraw && lastDraw.length > 0) {
+    for (let i = 0; i < lastDraw.length; i++) {
+      const num = lastDraw[i];
+      if (num >= 1 && num <= 90) {
+        lastDrawHas[num] = 1;
+        if (num > 1) lastDrawNeighbors[num - 1] = 1;
+        if (num < 90) lastDrawNeighbors[num + 1] = 1;
+      }
+    }
+  }
+
+  const topPoolHas = new Uint8Array(91);
+  if (topPool && topPool.length > 0) {
+    for (let i = 0; i < topPool.length; i++) {
+      const num = topPool[i];
+      if (num >= 1 && num <= 90) topPoolHas[num] = 1;
+    }
+  }
+
+  const outsiderPoolHas = new Uint8Array(91);
+  if (outsiderPool && outsiderPool.length > 0) {
+    for (let i = 0; i < outsiderPool.length; i++) {
+      const num = outsiderPool[i];
+      if (num >= 1 && num <= 90) outsiderPoolHas[num] = 1;
+    }
+  }
+
+  const profileSimMatrix = new Float32Array(91 * 91);
+  const dominantAlgoMap: (string | null)[] = new Array(91).fill(null);
+  let numAlgos = 0;
+
+  if (breakdownsMap && breakdownsMap.size > 0) {
+    let algoKeys: string[] = [];
+    for (const bd of breakdownsMap.values()) {
+      if (bd) {
+        algoKeys = Object.keys(bd).filter(k => typeof (bd as any)[k] === 'number');
+        if (algoKeys.length > 0) break;
+      }
+    }
+    numAlgos = algoKeys.length;
+
+    const normVectors: (Float32Array | null)[] = new Array(91).fill(null);
+    for (let num = 1; num <= 90; num++) {
+      const bd = breakdownsMap.get(num);
+      if (!bd) continue;
+
+      let maxVal = -Infinity;
+      let dominant: string | null = null;
+      const vec = new Float32Array(algoKeys.length);
+      let sumSq = 0;
+
+      for (let k = 0; k < algoKeys.length; k++) {
+        const val = Math.max(0, Number((bd as any)[algoKeys[k]]) || 0);
+        vec[k] = val;
+        sumSq += val * val;
+        if (val > maxVal) {
+          maxVal = val;
+          dominant = algoKeys[k];
+        }
+      }
+      dominantAlgoMap[num] = dominant;
+
+      const norm = Math.sqrt(sumSq);
+      if (norm > 1e-12) {
+        for (let k = 0; k < algoKeys.length; k++) {
+          vec[k] /= norm;
+        }
+        normVectors[num] = vec;
+      }
+    }
+
+    for (let n1 = 1; n1 <= 90; n1++) {
+      const v1 = normVectors[n1];
+      if (!v1) continue;
+      profileSimMatrix[n1 * 91 + n1] = 1.0;
+      for (let n2 = n1 + 1; n2 <= 90; n2++) {
+        const v2 = normVectors[n2];
+        if (!v2) continue;
+        let dot = 0;
+        for (let k = 0; k < algoKeys.length; k++) {
+          dot += v1[k] * v2[k];
+        }
+        const sim = Math.max(-1.0, Math.min(1.0, dot));
+        profileSimMatrix[n1 * 91 + n2] = sim;
+        profileSimMatrix[n2 * 91 + n1] = sim;
+      }
+    }
+  }
+
+  return {
+    lastDrawHas,
+    lastDrawNeighbors,
+    topPoolHas,
+    outsiderPoolHas,
+    profileSimMatrix,
+    dominantAlgoMap,
+    numAlgos,
+  };
+};
+
 /**
  * CALCUL DÉTAILLÉ DE L'ÉNERGIE ET DES PÉNALITÉS D'UNE COMBINAISON (PARTIELLE OU FINALE)
  * Harmonise toutes les contraintes de construction dans un paysage d'énergie continu,
@@ -82,65 +200,96 @@ export const calculateCombinationEnergyDetailed = (
   breakdownsMap?: Map<number, ScoreBreakdown>,
   topPool?: number[],
   targetOutsiders: number = 0,
+  precomputed?: PrecomputedEnergyContext,
 ): CombinationEnergyBreakdown => {
+  const len = combo.length;
   let baseScoreSum = 0.0;
   let affinitySum = 0.0;
   
-  for (let i = 0; i < combo.length; i++) {
+  for (let i = 0; i < len; i++) {
     const n1 = combo[i];
     baseScoreSum += scoresMap.get(n1) || 0.0;
-    for (let j = i + 1; j < combo.length; j++) {
+    for (let j = i + 1; j < len; j++) {
       const n2 = combo[j];
       affinitySum += affinityMap[n1]?.[n2] || 0.0;
     }
   }
 
   // Normalisation continue pour que l'évaluation reste cohérente même sur les combinaisons partielles (greedy)
-  const baseScoreScale = combo.length > 0 ? 5.0 / combo.length : 1.0;
-  const affinityScale = combo.length > 1 ? 10.0 / (combo.length * (combo.length - 1)) : 1.0;
+  const baseScoreScale = len > 0 ? 5.0 / len : 1.0;
+  const affinityScale = len > 1 ? 10.0 / (len * (len - 1)) : 1.0;
 
   const baseScoreTerm = -(baseScoreSum * baseScoreScale);
   const affinityTerm = -(affinitySum * affinityScale);
 
+  // Tri unique réutilisé pour toutes les métriques ordonnées
+  let sortedCombo: number[] | null = null;
+  if (len >= 2) {
+    sortedCombo = [...combo].sort((a, b) => a - b);
+  }
+
   // 1. Anti-Répétition : Loi Hypergéométrique exacte
   let repetitionPenalty = 0.0;
-  if (lastDraw && lastDraw.length > 0 && combo.length > 0) {
-    const intersectionCount = combo.filter((n) => lastDraw.includes(n)).length;
-    const expectedIntersection = (combo.length * DRAW_SIZE) / DOMAIN_SIZE;
-    const varIntersection = combo.length * (DRAW_SIZE / DOMAIN_SIZE) * (1.0 - DRAW_SIZE / DOMAIN_SIZE) * ((DOMAIN_SIZE - DRAW_SIZE) / (DOMAIN_SIZE - 1.0));
+  if (lastDraw && lastDraw.length > 0 && len > 0) {
+    let intersectionCount = 0;
+    if (precomputed?.lastDrawHas) {
+      for (let i = 0; i < len; i++) {
+        if (precomputed.lastDrawHas[combo[i]]) intersectionCount++;
+      }
+    } else {
+      intersectionCount = combo.filter((n) => lastDraw.includes(n)).length;
+    }
+    const expectedIntersection = (len * DRAW_SIZE) / DOMAIN_SIZE;
+    const varIntersection = len * (DRAW_SIZE / DOMAIN_SIZE) * (1.0 - DRAW_SIZE / DOMAIN_SIZE) * ((DOMAIN_SIZE - DRAW_SIZE) / (DOMAIN_SIZE - 1.0));
     const stdIntersection = Math.sqrt(Math.max(Number.EPSILON, varIntersection));
     const zIntersection = Math.max(0.0, intersectionCount - expectedIntersection) / stdIntersection;
     repetitionPenalty = Math.min(25.0, Math.pow(zIntersection, 2.0));
   }
 
-  // 2. Parité : Loi binomiale B(combo.length, 0.5)
+  // 2. Parité : Loi binomiale B(len, 0.5)
   let parityPenalty = 0.0;
-  if (combo.length > 0) {
-    const evens = combo.filter((n) => n % 2 === 0).length;
-    const expectedEvens = combo.length * 0.5;
-    const stdEvens = Math.sqrt(combo.length * 0.25);
+  if (len > 0) {
+    let evens = 0;
+    for (let i = 0; i < len; i++) {
+      if ((combo[i] & 1) === 0) evens++;
+    }
+    const expectedEvens = len * 0.5;
+    const stdEvens = Math.sqrt(len * 0.25);
     const zEvens = (evens - expectedEvens) / stdEvens;
     parityPenalty = Math.min(10.0, Math.pow(zEvens, 2.0));
   }
 
   // 3. Dizaines (Décades) : Loi Multinomiale
   let decadePenalty = 0.0;
-  if (combo.length > 0) {
-    const decades = new Array(10).fill(0);
-    for (const num of combo) decades[Math.floor(num / 10.0)]++;
-    const maxDecade = decades.reduce((a, b) => Math.max(a, b), 0);
-    const expectedDecade = combo.length / 10.0;
-    const stdDecades = Math.sqrt(combo.length * 0.1 * 0.9);
+  if (len > 0) {
+    let d0=0, d1=0, d2=0, d3=0, d4=0, d5=0, d6=0, d7=0, d8=0, d9=0;
+    for (let i = 0; i < len; i++) {
+      const d = Math.floor(combo[i] / 10.0);
+      switch(d) {
+        case 0: d0++; break;
+        case 1: d1++; break;
+        case 2: d2++; break;
+        case 3: d3++; break;
+        case 4: d4++; break;
+        case 5: d5++; break;
+        case 6: d6++; break;
+        case 7: d7++; break;
+        case 8: d8++; break;
+        default: d9++; break;
+      }
+    }
+    const maxDecade = Math.max(d0, d1, d2, d3, d4, d5, d6, d7, d8, d9);
+    const expectedDecade = len / 10.0;
+    const stdDecades = Math.sqrt(len * 0.1 * 0.9);
     const zDecades = Math.max(0.0, maxDecade - expectedDecade) / stdDecades;
     decadePenalty = Math.min(15.0, Math.pow(zDecades, 2.0));
   }
 
   // 4. Amplitude : Z-score Gaussien Empirique
   let amplitudePenalty = 0.0;
-  if (combo.length >= 2) {
-    const sortedCombo = [...combo].sort((a, b) => a - b);
-    const amplitude = sortedCombo[sortedCombo.length - 1] - sortedCombo[0];
-    const ampScale = (combo.length - 1) / 4.0;
+  if (sortedCombo && len >= 2) {
+    const amplitude = sortedCombo[len - 1] - sortedCombo[0];
+    const ampScale = (len - 1) / 4.0;
     const expectedAmp = calibration.meanAmplitude * ampScale;
     const expectedStd = calibration.stdAmplitude * Math.sqrt(ampScale);
     const zAmp = (amplitude - expectedAmp) / Math.max(Number.EPSILON, expectedStd);
@@ -149,11 +298,10 @@ export const calculateCombinationEnergyDetailed = (
 
   // 5. Séquences (Consécutives) : Pénalité dérivée de Poisson
   let consecutivePenalty = 0.0;
-  if (combo.length >= 2) {
-    const sortedCombo = [...combo].sort((a, b) => a - b);
+  if (sortedCombo && len >= 2) {
     let maxConsecutive = 1;
     let currentConsecutive = 1;
-    for (let i = 0; i < sortedCombo.length - 1; i++) {
+    for (let i = 0; i < len - 1; i++) {
       if (sortedCombo[i] + 1 === sortedCombo[i + 1]) {
         currentConsecutive++;
         if (currentConsecutive > maxConsecutive) maxConsecutive = currentConsecutive;
@@ -162,7 +310,7 @@ export const calculateCombinationEnergyDetailed = (
       }
     }
     const lambda = calibration.lambdaConsecutives;
-    const expectedConsecutive = 1.0 + lambda * ((combo.length - 1) / 4.0);
+    const expectedConsecutive = 1.0 + lambda * ((len - 1) / 4.0);
     const stdConsecutive = Math.max(0.1, Math.sqrt(lambda));
     const zConsecutive = Math.max(0.0, maxConsecutive - expectedConsecutive) / stdConsecutive;
     consecutivePenalty = Math.pow(zConsecutive, 2.0);
@@ -174,10 +322,9 @@ export const calculateCombinationEnergyDetailed = (
 
   // 6. AC (Complexité Arithmétique) : Z-score Gaussien Empirique
   let acPenalty = 0.0;
-  if (combo.length >= 4) {
-    const sortedCombo = [...combo].sort((a, b) => a - b);
+  if (sortedCombo && len >= 4) {
     const ac = calculateACValue(sortedCombo);
-    const acScale = (combo.length - 3) / 2.0;
+    const acScale = (len - 3) / 2.0;
     const expectedAC = calibration.meanAC * acScale;
     const stdAC = calibration.stdAC * Math.sqrt(acScale);
     const zAC = (ac - expectedAC) / Math.max(Number.EPSILON, stdAC);
@@ -186,52 +333,74 @@ export const calculateCombinationEnergyDetailed = (
 
   // 7. Pénalité de Diversité Génétique et Monoculture contrôlée (Saturation progressive)
   let diversityPenalty = 0.0;
-  if (breakdownsMap && combo.length >= 2) {
-    const smallBreakdowns: Record<number, ScoreBreakdown> = {};
-    for (const num of combo) {
-      const bd = breakdownsMap.get(num);
-      if (bd) smallBreakdowns[num] = bd;
-    }
-    const diversity = calculateGeneticDiversityIndex(combo, smallBreakdowns);
-    const numAlgos = Object.keys(smallBreakdowns[combo[0]] || {}).length;
-    const dynamicMonocultureThreshold = 1.0 - 1.0 / Math.sqrt(Math.max(1, numAlgos));
-    
-    if (diversity.isMonoculture || diversity.meanSimilarity > dynamicMonocultureThreshold) {
-      const excessSimilarity = diversity.meanSimilarity - dynamicMonocultureThreshold;
-      const maxExcess = 1.0 - dynamicMonocultureThreshold;
-      const normalizedExcess = excessSimilarity / Math.max(Number.EPSILON, maxExcess);
+  if (breakdownsMap && len >= 2) {
+    if (precomputed?.profileSimMatrix) {
+      let sumSim = 0;
+      let pairCount = 0;
+      for (let i = 0; i < len; i++) {
+        const n1 = combo[i];
+        for (let j = i + 1; j < len; j++) {
+          sumSim += precomputed.profileSimMatrix[n1 * 91 + combo[j]];
+          pairCount++;
+        }
+      }
+      const meanSim = pairCount > 0 ? sumSim / pairCount : 0;
+      const numAlgos = precomputed.numAlgos || 26;
+      const dynamicMonocultureThreshold = 1.0 - 1.0 / Math.sqrt(Math.max(1, numAlgos));
       
-      const maxPenalty = 25.0;
-      const curvature = 4.0;
-      // Saturation contrôlée : évite de polluer l'échelle totale d'énergie avec des infinis ou des 1000.0
-      const monoculturePenalty = maxPenalty * (Math.exp(curvature * normalizedExcess) - 1.0) / (Math.exp(curvature) - 1.0);
-      diversityPenalty = monoculturePenalty;
+      if (meanSim > dynamicMonocultureThreshold) {
+        const excessSimilarity = meanSim - dynamicMonocultureThreshold;
+        const maxExcess = 1.0 - dynamicMonocultureThreshold;
+        const normalizedExcess = excessSimilarity / Math.max(Number.EPSILON, maxExcess);
+        const maxPenalty = 25.0;
+        const curvature = 4.0;
+        diversityPenalty = maxPenalty * (Math.exp(curvature * normalizedExcess) - 1.0) / (Math.exp(curvature) - 1.0);
+      } else {
+        diversityPenalty = 0.0;
+      }
     } else {
-      diversityPenalty = diversity.penalty;
+      const smallBreakdowns: Record<number, ScoreBreakdown> = {};
+      for (const num of combo) {
+        const bd = breakdownsMap.get(num);
+        if (bd) smallBreakdowns[num] = bd;
+      }
+      const diversity = calculateGeneticDiversityIndex(combo, smallBreakdowns);
+      const numAlgos = Object.keys(smallBreakdowns[combo[0]] || {}).length;
+      const dynamicMonocultureThreshold = 1.0 - 1.0 / Math.sqrt(Math.max(1, numAlgos));
+      
+      if (diversity.isMonoculture || diversity.meanSimilarity > dynamicMonocultureThreshold) {
+        const excessSimilarity = diversity.meanSimilarity - dynamicMonocultureThreshold;
+        const maxExcess = 1.0 - dynamicMonocultureThreshold;
+        const normalizedExcess = excessSimilarity / Math.max(Number.EPSILON, maxExcess);
+        
+        const maxPenalty = 25.0;
+        const curvature = 4.0;
+        const monoculturePenalty = maxPenalty * (Math.exp(curvature * normalizedExcess) - 1.0) / (Math.exp(curvature) - 1.0);
+        diversityPenalty = monoculturePenalty;
+      } else {
+        diversityPenalty = diversity.penalty;
+      }
     }
   }
 
   // 8. Pénalité Spatiale de Proximité fine (densité et clusters locaux)
-  // Proximity threshold derived from domain geometry: sqrt(DOMAIN_SIZE/DRAW_SIZE) ≈ 4.24
-  // Window derived from expected gap between draws: DOMAIN_SIZE/DRAW_SIZE = 18
   let spatialClusteringPenalty = 0.0;
-  if (combo.length >= 2) {
-    const sortedCombo = [...combo].sort((a, b) => a - b);
+  if (sortedCombo && len >= 2) {
     const proximityThreshold = Math.round(Math.sqrt(DOMAIN_SIZE / DRAW_SIZE)); // ~4
     const windowSize = Math.round(DOMAIN_SIZE / DRAW_SIZE);                    // ~18
     const pairPenaltyUnit = 1.0 / DRAW_SIZE;   // 0.2 per close pair
     const clusterPenaltyUnit = 1.0 / DRAW_SIZE; // 0.2 per extra number in window
 
     let adjacentClosePairs = 0;
-    for (let i = 0; i < sortedCombo.length - 1; i++) {
+    for (let i = 0; i < len - 1; i++) {
       const diff = sortedCombo[i + 1] - sortedCombo[i];
       if (diff <= proximityThreshold) adjacentClosePairs++;
     }
     spatialClusteringPenalty += adjacentClosePairs * (pairPenaltyUnit * 12.5);
 
-    for (let i = 0; i < sortedCombo.length; i++) {
+    for (let i = 0; i < len; i++) {
       let countInWindow = 1;
-      for (let j = i + 1; j < sortedCombo.length; j++) {
+      for (let j = i + 1; j < len; j++) {
         if (sortedCombo[j] - sortedCombo[i] <= windowSize) countInWindow++;
       }
       if (countInWindow >= 3) {
@@ -242,13 +411,19 @@ export const calculateCombinationEnergyDetailed = (
   }
 
   // 9. Pénalité Recent-Bias (Adjacence de voisinage T-1)
-  // Unit penalty derived from draw size: 1/DRAW_SIZE ensures scale-invariance
   let recentBiasPenalty = 0.0;
-  if (lastDraw && lastDraw.length > 0 && combo.length > 0) {
+  if (lastDraw && lastDraw.length > 0 && len > 0) {
     let neighborsCount = 0;
-    for (const num of combo) {
-      for (const prev of lastDraw) {
-        if (Math.abs(num - prev) === 1) neighborsCount++;
+    if (precomputed?.lastDrawNeighbors) {
+      for (let i = 0; i < len; i++) {
+        if (precomputed.lastDrawNeighbors[combo[i]]) neighborsCount++;
+      }
+    } else {
+      for (let i = 0; i < len; i++) {
+        const num = combo[i];
+        for (let j = 0; j < lastDraw.length; j++) {
+          if (Math.abs(num - lastDraw[j]) === 1) neighborsCount++;
+        }
       }
     }
     const unitPenalty = 7.5 / DRAW_SIZE; // Scale-invariant: 1.5 for DRAW_SIZE=5
@@ -257,10 +432,14 @@ export const calculateCombinationEnergyDetailed = (
 
   // 10. Pénalité de Profil de similarité excessive (Mapping Sigmoïdal Continu)
   let profileSimilarityPenalty = 0.0;
-  if (breakdownsMap && combo.length >= 2) {
-    for (let i = 0; i < combo.length; i++) {
-      for (let j = i + 1; j < combo.length; j++) {
-        const sim = getProfileSimilarity(combo[i], combo[j], breakdownsMap);
+  if (breakdownsMap && len >= 2) {
+    for (let i = 0; i < len; i++) {
+      const n1 = combo[i];
+      for (let j = i + 1; j < len; j++) {
+        const n2 = combo[j];
+        const sim = precomputed?.profileSimMatrix
+          ? precomputed.profileSimMatrix[n1 * 91 + n2]
+          : getProfileSimilarity(n1, n2, breakdownsMap);
         // Sigmoïde logistique continue centrée à 0.65 pour un gradient doux et continu
         const simExcessWeight = 1.0 / (1.0 + Math.exp(-12.0 * (sim - 0.65)));
         profileSimilarityPenalty += 6.0 * sim * simExcessWeight;
@@ -271,10 +450,13 @@ export const calculateCombinationEnergyDetailed = (
 
   // 11. Pénalité d'Algorithme dominant répété (Anti-concentration de familles continue)
   let dominantFamilyPenalty = 0.0;
-  if (breakdownsMap && combo.length >= 2) {
+  if (breakdownsMap && len >= 2) {
     const familyCounts: Record<string, number> = {};
-    for (const num of combo) {
-      const dom = getDominantAlgo(num, breakdownsMap);
+    for (let i = 0; i < len; i++) {
+      const num = combo[i];
+      const dom = precomputed?.dominantAlgoMap
+        ? precomputed.dominantAlgoMap[num]
+        : getDominantAlgo(num, breakdownsMap);
       if (dom) {
         familyCounts[dom] = (familyCounts[dom] || 0) + 1;
       }
@@ -289,10 +471,10 @@ export const calculateCombinationEnergyDetailed = (
 
   // 12. Pénalité de Concentration par décennie continue
   let decadeConcentrationPenalty = 0.0;
-  if (combo.length >= 2) {
+  if (len >= 2) {
     const decCounts: Record<number, number> = {};
-    for (const num of combo) {
-      const d = Math.floor(num / 10.0);
+    for (let i = 0; i < len; i++) {
+      const d = Math.floor(combo[i] / 10.0);
       decCounts[d] = (decCounts[d] || 0) + 1;
     }
     for (const count of Object.values(decCounts)) {
@@ -304,8 +486,15 @@ export const calculateCombinationEnergyDetailed = (
 
   // 13. Pénalité de Quota souple d'outsiders (Loss pseudo-Huber continue)
   let outsiderQuotaPenalty = 0.0;
-  if (topPool && topPool.length > 0 && combo.length === DRAW_SIZE) {
-    const currentOutsiders = combo.filter(n => !topPool.includes(n)).length;
+  if (topPool && topPool.length > 0 && len === DRAW_SIZE) {
+    let currentOutsiders = 0;
+    if (precomputed?.topPoolHas) {
+      for (let i = 0; i < len; i++) {
+        if (!precomputed.topPoolHas[combo[i]]) currentOutsiders++;
+      }
+    } else {
+      currentOutsiders = combo.filter(n => !topPool.includes(n)).length;
+    }
     const deltaOut = currentOutsiders - targetOutsiders;
     // Pseudo-Huber loss : sqrt(1 + delta^2) - 1
     const huberLoss = Math.sqrt(1.0 + Math.pow(deltaOut, 2.0)) - 1.0;
@@ -361,6 +550,7 @@ export const calculateCombinationEnergy = (
   breakdownsMap?: Map<number, ScoreBreakdown>,
   topPool?: number[],
   targetOutsiders: number = 0,
+  precomputed?: PrecomputedEnergyContext,
 ): number => {
   return calculateCombinationEnergyDetailed(
     combo,
@@ -370,7 +560,8 @@ export const calculateCombinationEnergy = (
     lastDraw,
     breakdownsMap,
     topPool,
-    targetOutsiders
+    targetOutsiders,
+    precomputed
   ).totalEnergy;
 };
 
@@ -386,6 +577,7 @@ export const generateCombination = async (
   outsiderCount: number,
   lastDraw: number[] | undefined,
   regimeStateNormalized: number,
+  hurst: number = 0.5
 ): Promise<number[]> => {
   const outsiderRatio = outsiderCount / DRAW_SIZE;
   const scoresMap = new Map<number, number>();
@@ -403,6 +595,8 @@ export const generateCombination = async (
 
   const targetOutsiders = Math.round(DRAW_SIZE * outsiderRatio);
   const targetTop = Math.max(0, DRAW_SIZE - targetOutsiders);
+
+  const precomputedContext = buildPrecomputedEnergyContext(breakdownsMap, lastDraw, topPool, outsiderPool);
 
   // Seed purement déterministe via hachage FNV-1a pour ZÉRO HASARD
   let lcgSeed = 2166136261;
@@ -465,7 +659,8 @@ export const generateCombination = async (
           lastDraw,
           breakdownsMap,
           topPool,
-          targetOutsidersQuota
+          targetOutsidersQuota,
+          precomputedContext
         );
         
         if (energyVal < bestEnergyValue) {
@@ -528,7 +723,7 @@ export const generateCombination = async (
   let bestInitialEnergy = Infinity;
 
   for (const s of seedsList) {
-    const e = calculateCombinationEnergy(s, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders);
+    const e = calculateCombinationEnergy(s, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext);
     if (e < bestInitialEnergy) {
       bestInitialEnergy = e;
       bestInitialCombo = s;
@@ -551,7 +746,7 @@ export const generateCombination = async (
     if (!currentCombo.includes(rNum)) {
       const propose = [...currentCombo];
       propose[idx] = rNum;
-      const proposeEnergy = calculateCombinationEnergy(propose, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders);
+      const proposeEnergy = calculateCombinationEnergy(propose, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext);
       sumDelta += Math.abs(proposeEnergy - currentEnergy);
       samplesCount++;
     }
@@ -708,7 +903,8 @@ export const generateCombination = async (
         lastDraw,
         breakdownsMap,
         topPool,
-        targetOutsiders
+        targetOutsiders,
+        precomputedContext
       );
       
       energyVariances.push(Math.abs(proposedEnergy - currentEnergy));
@@ -743,10 +939,18 @@ export const generateCombination = async (
       ? energyVariances.reduce((a, b) => a + b, 0.0) / energyVariances.length 
       : 0.0;
 
-    // Taux de refroidissement adaptatif basé sur l'agitation relative
+    // Taux de refroidissement adaptatif basé sur l'agitation relative et l'exposant de Hurst
     const relativeAgitation = avgVariance / Math.max(Number.EPSILON, temperature);
     const coolingSignal = 1.0 / (1.0 + Math.exp(-relativeAgitation)); 
-    const adaptiveCoolingRate = 0.85 + (0.14 * coolingSignal);
+    
+    // Si Hurst est grand (persistant, ex: 0.8), la recherche converge rapidement (on accélère le refroidissement en abaissant le taux de refroidissement)
+    // Si Hurst est petit (anti-persistant, ex: 0.2), le refroidissement est ralenti pour prolonger l'exploration.
+    const HurstRef = Math.max(0.01, Math.min(0.99, hurst));
+    const hurstMultiplier = 1.0 / (2.0 * HurstRef); // HurstRef = 0.5 => 1.0, HurstRef = 0.8 => 0.625, HurstRef = 0.2 => 2.5
+    
+    // Le taux de refroidissement de base est ajusté de manière continue par Hurst (sans nombres magiques)
+    const baseCoolingRate = 0.85 * Math.pow(0.99, hurstMultiplier);
+    const adaptiveCoolingRate = Math.max(0.75, Math.min(0.995, baseCoolingRate + (0.14 * coolingSignal * hurstMultiplier)));
     
     temperature *= adaptiveCoolingRate;
   }

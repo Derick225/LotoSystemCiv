@@ -104,7 +104,7 @@ class WorkerService {
             
             const transferables: Transferable[] = [];
             let msgPayload: any = payload;
-            let historyBuffer: ArrayBuffer | undefined;
+            let historyBuffer: ArrayBuffer | SharedArrayBuffer | undefined;
             let drawCount: number | undefined;
             let winningCount: number | undefined;
             let totalCols: number | undefined;
@@ -115,7 +115,9 @@ class WorkerService {
                 drawCount = packed.drawCount;
                 winningCount = packed.winningCount;
                 totalCols = packed.totalCols;
-                transferables.push(historyBuffer);
+                if (historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(historyBuffer instanceof SharedArrayBuffer))) {
+                    transferables.push(historyBuffer as any);
+                }
             }
 
             if (payload && typeof payload === 'object') {

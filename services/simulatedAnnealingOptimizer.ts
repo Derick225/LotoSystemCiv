@@ -89,6 +89,10 @@ export const runSimulatedAnnealingOptimization = async (
     };
 
     const packed = packHistory(historyLite);
+    const transferList: Transferable[] = [];
+    if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+      transferList.push(packed.historyBuffer);
+    }
     worker.postMessage({ 
       type: 'start', 
       payload: { 
@@ -105,6 +109,6 @@ export const runSimulatedAnnealingOptimization = async (
         regimeMetrics: { hurst, entropy },
         timeSignature: `${drawName}_${fullHistory.length}`
       }
-    }, [packed.historyBuffer]);
+    }, transferList);
   });
 };
