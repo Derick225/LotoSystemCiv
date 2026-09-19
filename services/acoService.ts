@@ -180,9 +180,14 @@ const generateVariations = (
     const oracleTargets = vocalContext?.targets || [];
     const normalizedConfidence = Math.max(Number.EPSILON, Math.min(1 - Number.EPSILON, baseConfidence / 100.0));
     
-    // Seed déterministe basé sur le contexte de tirage et de l'historique
+    // Seed déterministe basé sur le contexte de tirage et de l'historique.
+    // ZÉRO HASARD (AGENTS.md) : aucun repli sur Date.now() qui rendrait le seed
+    // (et donc les variations ACO) non reproductible. À historique vide, le seed
+    // reste une fonction déterministe du chemin de base et du tirage actif.
     const activeDraw = useNexusStore.getState().drawName || "Reveil";
-    const timestamp = history.length > 0 ? getStringHash(history[0].date) : Date.now();
+    const timestamp = history.length > 0
+        ? getStringHash(history[0].date)
+        : getStringHash(`${base.join('-')}#${activeDraw}`);
     const seed = base.reduce((a, b) => a + b, 0) + history.length + getStringHash(activeDraw) + timestamp;
     const prng = new LCG(seed);
 

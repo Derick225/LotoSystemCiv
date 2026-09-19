@@ -68,13 +68,15 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
   const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
 
-  // Famille Inter-Tirages Déterministe
+  // Famille Inter-Tirages Déterministe.
+  // Un tirage qui n'appartient à aucune des 3 familles étanches doit être affiché comme
+  // isolé, et NON rattaché arbitrairement à la Famille Nationale (source de confusion).
   const interDrawFamily = useMemo(() => {
     return (
       getPrimaryInterDrawFamily(drawName) || {
-        id: "FAMILY_10H_16H_SUN19H55",
-        name: "Famille Nationale LONACI (10H, 16H & Dimanche 19H55)",
-        shortName: "10H/16H/Dim-19H55",
+        id: "ISOLATED",
+        name: "Hors-Famille (Tirage Isolé)",
+        shortName: "Isolé",
       }
     );
   }, [drawName]);

@@ -18,6 +18,7 @@ import {
 } from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 import { wasmMatrixEngine } from './wasm/wasmMatrixCore';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 
 export interface InterDrawCandidateScore {
   number: number;
@@ -946,6 +947,15 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
+  // ISOLATION PAR TIRAGE (AGENTS.md) : l'historique aligné sur le prédécesseur doit être
+  // l'historique PROPRE du tirage cible. On purifie pour neutraliser tout appelant qui
+  // passerait un historique mixte/actif (ex. fusionService), source de pollution inter-familles.
+  history = purifyHistoryForDraw(drawName, history);
+  if (history.length === 0) {
+    vec.fill(0.0555);
+    return vec;
+  }
+
   const families = getInterDrawFamiliesForDraw(drawName);
   const activeFamily = forcedFamilyId
     ? INTER_DRAW_FAMILIES[forcedFamilyId]
@@ -1041,6 +1051,11 @@ export const calculateHarmonicResonanceMap = (
   predecessorHistory?: DrawResult[]
 ): HarmonicResonanceMap | null => {
   if (!history || history.length === 0 || !drawName) return null;
+
+  // ISOLATION PAR TIRAGE (AGENTS.md) : purifie l'historique sur le tirage cible avant
+  // tout alignement avec le prédécesseur (zéro pollution inter-familles).
+  history = purifyHistoryForDraw(drawName, history);
+  if (history.length === 0) return null;
 
   const families = getInterDrawFamiliesForDraw(drawName);
   const activeFamily = forcedFamilyId
@@ -1181,6 +1196,13 @@ export const calculateInterDrawMonthlyCoupling = (
 } => {
   const defaultVector = new Float32Array(91).fill(0.0555);
   if (!history || history.length === 0 || !drawName) {
+    return { vector: defaultVector };
+  }
+
+  // ISOLATION PAR TIRAGE (AGENTS.md) : purifie l'historique sur le tirage cible avant
+  // tout alignement avec le prédécesseur (zéro pollution inter-familles).
+  history = purifyHistoryForDraw(drawName, history);
+  if (history.length === 0) {
     return { vector: defaultVector };
   }
 
